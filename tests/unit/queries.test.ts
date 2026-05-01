@@ -12,6 +12,7 @@ import {
   appendSessionEvent,
   updateSessionTreeState,
   getOpenSessionForTech,
+  listSessionsForShop,
 } from '@/lib/db/queries'
 import { sessionEvents } from '@/lib/db/schema'
 
@@ -263,5 +264,87 @@ describe('getOpenSessionForTech', () => {
     })
     const open = await getOpenSessionForTech(db, tech.id)
     expect(open).toBeNull()
+  })
+})
+
+describe('listSessionsForShop', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('returns an empty array when the shop has no sessions', async () => {
+    const shop = await createShop(db, { name: 'Empty Shop' })
+    const items = await listSessionsForShop(db, shop.id)
+    expect(items).toEqual([])
+  })
+
+  it('returns sessions belonging to the given shop only', async () => {
+    const shopA = await createShop(db, { name: 'Shop A' })
+    const shopB = await createShop(db, { name: 'Shop B' })
+    const techA = await createProfile(db, { userId: crypto.randomUUID(), shopId: shopA.id })
+    const techB = await createProfile(db, { userId: crypto.randomUUID(), shopId: shopB.id })
+    await createSession(db, {
+      shopId: shopA.id,
+      techId: techA.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'a problem',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    await createSession(db, {
+      shopId: shopB.id,
+      techId: techB.id,
+      intake: {
+        vehicleYear: 2020,
+        vehicleMake: 'Toyota',
+        vehicleModel: 'Camry',
+        customerComplaint: 'b problem',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const items = await listSessionsForShop(db, shopA.id)
+    expect(items).toHaveLength(1)
+    expect(items[0].intake.vehicleMake).toBe('Ford')
+  })
+
+  it('returns sessions in newest-first order', async () => {
+    const shop = await createShop(db, { name: 'Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const older = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'older',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    await new Promise((r) => setTimeout(r, 5))
+    const newer = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2020,
+        vehicleMake: 'Toyota',
+        vehicleModel: 'Camry',
+        customerComplaint: 'newer',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const items = await listSessionsForShop(db, shop.id)
+    expect(items[0].id).toBe(newer.id)
+    expect(items[1].id).toBe(older.id)
   })
 })
