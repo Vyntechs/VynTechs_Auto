@@ -9,6 +9,9 @@ node_modules/
 .next/
 next-env.d.ts
 
+# typescript incremental build cache
+tsconfig.tsbuildinfo
+
 # env (NEVER commit secrets)
 .env
 .env*.local
