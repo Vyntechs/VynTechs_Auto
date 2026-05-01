@@ -1,0 +1,82 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { createTestDb, type TestDb } from '../helpers/db'
+import { ensureProfileAndShop, createProfile } from '@/lib/db/queries'
+import { createSessionForUser } from '@/lib/sessions'
+
+describe('createSessionForUser', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('creates a session and returns its id given a valid intake body', async () => {
+    const userId = crypto.randomUUID()
+    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power going up hills',
+      },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.id).toBeTruthy()
+  })
+
+  it('returns a 400 "no profile" error when the userId has no profile', async () => {
+    const userId = crypto.randomUUID()
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power going up hills',
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(400)
+      expect(result.error).toBe('no profile')
+    }
+  })
+
+  it('returns a 400 "no shop" error when the user has a profile but no shop', async () => {
+    const userId = crypto.randomUUID()
+    await createProfile(db, { userId })
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power going up hills',
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toBe('no shop')
+  })
+
+  it('returns a 400 error when the intake body fails validation', async () => {
+    const userId = crypto.randomUUID()
+    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: { vehicleYear: 2018, vehicleMake: 'Ford' },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(400)
+  })
+})

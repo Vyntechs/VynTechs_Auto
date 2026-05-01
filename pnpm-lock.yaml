@@ -29,6 +29,9 @@ importers:
       react-dom:
         specifier: ^19.2.5
         version: 19.2.5(react@19.2.5)
+      zod:
+        specifier: ^4.4.1
+        version: 4.4.1
     devDependencies:
       '@electric-sql/pglite':
         specifier: ^0.4.5
@@ -1597,6 +1600,9 @@ packages:
       utf-8-validate:
         optional: true
 
+  zod@4.4.1:
+    resolution: {integrity: sha512-a6ENMBBGZBsnlSebQ/eKCguSBeGKSf4O7BPnqVPmYGtpBYI7VSqoVqw+QcB7kPRjbqPwhYTpFbVj/RqNz/CT0Q==}
+
 snapshots:
 
   '@adobe/css-tools@4.4.4': {}
@@ -2681,3 +2687,5 @@ snapshots:
       stackback: 0.0.2
 
   ws@8.20.0: {}
+
+  zod@4.4.1: {}

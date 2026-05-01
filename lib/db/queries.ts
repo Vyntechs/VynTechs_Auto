@@ -37,7 +37,7 @@ export async function getProfileByUserId(db: AppDb, userId: string): Promise<Pro
   const [profile] = await db
     .select()
     .from(profiles)
-    .where(eq(profiles.user_id, userId))
+    .where(eq(profiles.userId, userId))
     .limit(1)
   return profile ?? null
 }
@@ -45,6 +45,21 @@ export async function getProfileByUserId(db: AppDb, userId: string): Promise<Pro
 export async function createSession(db: AppDb, input: NewSession): Promise<Session> {
   const [session] = await db.insert(sessions).values(input).returning()
   return session
+}
+
+export async function ensureProfileAndShop(
+  db: AppDb,
+  userId: string,
+  email: string,
+): Promise<Profile> {
+  const existing = await getProfileByUserId(db, userId)
+  if (existing) return existing
+  const [shop] = await db.insert(shops).values({ name: `${email}'s Shop` }).returning()
+  const [profile] = await db
+    .insert(profiles)
+    .values({ userId, role: 'owner', shopId: shop.id })
+    .returning()
+  return profile
 }
 
 export async function getSessionById(db: AppDb, id: string) {
