@@ -1,2 +1,23 @@
+# worktrees + vercel
 .worktrees/
 .vercel
+
+# dependencies
+node_modules/
+
+# next
+.next/
+next-env.d.ts
+
+# env (NEVER commit secrets)
+.env
+.env*.local
+!.env.example
+
+# tests
+playwright-report/
+test-results/
+coverage/
+
+# OS
+.DS_Store
