@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
+const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }))
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mockPush }),
 }))
 
 import { NewSessionForm } from '@/components/intake/new-session-form'
@@ -22,6 +24,7 @@ describe('NewSessionForm', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.clearAllMocks()
+    mockPush.mockReset()
   })
 
   it('renders inputs for vehicle year, make, model, and customer complaint', () => {
@@ -50,5 +53,26 @@ describe('NewSessionForm', () => {
     const body = JSON.parse(init.body as string)
     expect(body.vehicleMake).toBe('Ford')
     expect(body.customerComplaint).toBe('loss of power going up hills')
+  })
+
+  it('redirects to the existing session when the API returns 409 open_session', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'open_session', openSessionId: 'sess-existing' }),
+        text: async () => '',
+      }),
+    )
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/sessions/sess-existing'))
   })
 })

@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { ensureProfileAndShop, createProfile, getSessionById } from '@/lib/db/queries'
+import {
+  ensureProfileAndShop,
+  createProfile,
+  createSession,
+  getSessionById,
+} from '@/lib/db/queries'
 import { createSessionForUser } from '@/lib/sessions'
 import type { TreeState } from '@/lib/ai/tree-engine'
 
@@ -102,5 +107,29 @@ describe('createSessionForUser', () => {
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(400)
+  })
+
+  it('returns a 409 "open_session" error with openSessionId when the tech already has an open session', async () => {
+    const userId = crypto.randomUUID()
+    const profile = await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const existing = await createSession(db, {
+      shopId: profile.shopId!,
+      techId: profile.id,
+      intake: validIntake,
+      treeState: stubTree,
+    })
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: validIntake,
+      treeState: stubTree,
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok && result.status === 409) {
+      expect(result.error).toBe('open_session')
+      expect(result.openSessionId).toBe(existing.id)
+    } else {
+      throw new Error('expected 409 open_session result')
+    }
   })
 })
