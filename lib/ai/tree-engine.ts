@@ -18,19 +18,36 @@ export type TreeState = {
   rootCauseSummary?: string
 }
 
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (e) {
+      lastErr = e
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 500 * (i + 1)))
+      }
+    }
+  }
+  throw lastErr
+}
+
 export async function generateInitialTree(intake: IntakePayload): Promise<TreeState> {
   const userMessage = buildIntakeUserMessage(intake)
 
-  const res = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: cachedSystem(TREE_ENGINE_SYSTEM),
-    messages: [{ role: 'user', content: userMessage }],
-  })
+  return withRetry(async () => {
+    const res = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: cachedSystem(TREE_ENGINE_SYSTEM),
+      messages: [{ role: 'user', content: userMessage }],
+    })
 
-  const block = res.content.find((b: { type: string }) => b.type === 'text')
-  if (!block || block.type !== 'text') throw new Error('no text block in response')
-  return parseTreeJson(block.text)
+    const block = res.content.find((b: { type: string }) => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('no text block in response')
+    return parseTreeJson(block.text)
+  })
 }
 
 function buildIntakeUserMessage(intake: IntakePayload): string {
@@ -60,16 +77,18 @@ Update the tree based on this observation. Resolve or prune branches as appropri
 
 Return JSON only — no prose, no fences.`
 
-  const res = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    system: cachedSystem(TREE_ENGINE_SYSTEM),
-    messages: [{ role: 'user', content: userMessage }],
-  })
+  return withRetry(async () => {
+    const res = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      system: cachedSystem(TREE_ENGINE_SYSTEM),
+      messages: [{ role: 'user', content: userMessage }],
+    })
 
-  const block = res.content.find((b: { type: string }) => b.type === 'text')
-  if (!block || block.type !== 'text') throw new Error('no text block in response')
-  return parseTreeJson(block.text)
+    const block = res.content.find((b: { type: string }) => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('no text block in response')
+    return parseTreeJson(block.text)
+  })
 }
 
 export function parseTreeJson(text: string): TreeState {
