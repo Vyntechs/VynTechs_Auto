@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import type * as schema from './schema'
@@ -71,6 +71,17 @@ export async function getSessionById(db: AppDb, id: string) {
     where: eq(sessions.id, id),
     with: { shop: true, tech: true },
   })
+}
+
+export async function listSessionsForShop(
+  db: AppDb,
+  shopId: string,
+): Promise<Session[]> {
+  return db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.shopId, shopId))
+    .orderBy(desc(sessions.createdAt))
 }
 
 export async function getOpenSessionForTech(
