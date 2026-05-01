@@ -109,10 +109,10 @@ describe('createSessionForUser', () => {
     if (!result.ok) expect(result.status).toBe(400)
   })
 
-  it('returns a 409 "open_session" error with openSessionId when the tech already has an open session', async () => {
+  it('creates a session even when the tech already has an open session (lock-out is the route layer concern)', async () => {
     const userId = crypto.randomUUID()
     const profile = await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
-    const existing = await createSession(db, {
+    await createSession(db, {
       shopId: profile.shopId!,
       techId: profile.id,
       intake: validIntake,
@@ -124,12 +124,6 @@ describe('createSessionForUser', () => {
       body: validIntake,
       treeState: stubTree,
     })
-    expect(result.ok).toBe(false)
-    if (!result.ok && result.status === 409) {
-      expect(result.error).toBe('open_session')
-      expect(result.openSessionId).toBe(existing.id)
-    } else {
-      throw new Error('expected 409 open_session result')
-    }
+    expect(result.ok).toBe(true)
   })
 })

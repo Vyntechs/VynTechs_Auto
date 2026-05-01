@@ -6,7 +6,6 @@ import {
   getSessionById,
   appendSessionEvent,
   updateSessionTreeState,
-  getOpenSessionForTech,
 } from './db/queries'
 import type { AppDb } from './db/queries'
 import type { TreeState } from './ai/tree-engine'
@@ -15,7 +14,6 @@ import type { IntakePayload } from './types'
 export type CreateSessionResult =
   | { ok: true; id: string }
   | { ok: false; status: 400 | 401 | 500; error: string }
-  | { ok: false; status: 409; error: 'open_session'; openSessionId: string }
 
 export async function createSessionForUser(opts: {
   db: AppDb
@@ -26,10 +24,6 @@ export async function createSessionForUser(opts: {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
   if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
-  const open = await getOpenSessionForTech(opts.db, profile.id)
-  if (open) {
-    return { ok: false, status: 409, error: 'open_session', openSessionId: open.id }
-  }
   const parsed = intakeSchema.safeParse(opts.body)
   if (!parsed.success) {
     return { ok: false, status: 400, error: parsed.error.message }
