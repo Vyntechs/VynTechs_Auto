@@ -2326,6 +2326,13 @@ The Phase D code blocks above contain a few errors and shortcuts that surfaced d
 
 ## Phase E — Phone Session UX (10 tasks)
 
+> ⛔ **STOP. READ THIS BEFORE TOUCHING ANY UI:**
+> [`docs/superpowers/ui-design-toolkit.md`](../ui-design-toolkit.md)
+>
+> That doc is the authoritative guide for which Claude Code skills, MCP servers, and agents to use for user-facing work, plus the UX decision checkpoints that require user input. **Do not start E1 without reading it.** This is a no-shortcuts phase — picking the right tool is part of the work.
+>
+> Same rule applies to Phases F, G, H, N, O, P, and any future UI task.
+
 ### Task E1: Active session page (server component shell)
 
 **Files:**
