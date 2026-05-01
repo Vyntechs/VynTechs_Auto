@@ -4,16 +4,16 @@ import { pgTable, uuid, text, timestamp, jsonb, integer } from 'drizzle-orm/pg-c
 export const shops = pgTable('shops', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
-  user_id: uuid('user_id').notNull().unique(),
-  shop_id: uuid('shop_id').references(() => shops.id),
-  full_name: text('full_name'),
+  userId: uuid('user_id').notNull().unique(),
+  shopId: uuid('shop_id').references(() => shops.id),
+  fullName: text('full_name'),
   role: text('role').default('tech').notNull(),
-  created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export type IntakePayload = {
@@ -92,7 +92,7 @@ export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
 }))
 
 export const profilesRelations = relations(profiles, ({ one, many }) => ({
-  shop: one(shops, { fields: [profiles.shop_id], references: [shops.id] }),
+  shop: one(shops, { fields: [profiles.shopId], references: [shops.id] }),
   sessions: many(sessions),
 }))
 
