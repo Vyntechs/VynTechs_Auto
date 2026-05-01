@@ -10,7 +10,7 @@ vi.mock('@/lib/ai/client', () => ({
   ],
 }))
 
-import { generateInitialTree, parseTreeJson } from '@/lib/ai/tree-engine'
+import { generateInitialTree, parseTreeJson, updateTree } from '@/lib/ai/tree-engine'
 
 describe('generateInitialTree', () => {
   beforeEach(() => {
@@ -85,5 +85,48 @@ describe('parseTreeJson', () => {
   it('throws when the parsed payload is missing message', () => {
     const bad = JSON.stringify({ nodes: [], currentNodeId: 'a' })
     expect(() => parseTreeJson(bad)).toThrow(/invalid tree response/)
+  })
+})
+
+describe('updateTree', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('returns the updated tree based on the tech observation', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [
+              { id: 'scan-codes', label: 'Pull DTCs', status: 'resolved' },
+              { id: 'inspect-cac', label: 'Inspect CAC pipe', status: 'active' },
+            ],
+            currentNodeId: 'inspect-cac',
+            message: 'Codes confirmed. Now inspect the cold-side intercooler pipe.',
+          }),
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 80 },
+    })
+
+    const result = await updateTree({
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      currentTree: {
+        nodes: [{ id: 'scan-codes', label: 'Pull DTCs', status: 'active' }],
+        currentNodeId: 'scan-codes',
+        message: 'Pull codes',
+      },
+      observation: 'Got P0299 with 3.6 psi underboost in the freeze frame',
+    })
+
+    expect(result.currentNodeId).toBe('inspect-cac')
+    expect(result.nodes.find((n) => n.id === 'scan-codes')?.status).toBe('resolved')
   })
 })
