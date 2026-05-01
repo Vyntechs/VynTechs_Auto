@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   createShop,
@@ -8,7 +9,10 @@ import {
   createSession,
   getSessionById,
   ensureProfileAndShop,
+  appendSessionEvent,
+  updateSessionTreeState,
 } from '@/lib/db/queries'
+import { sessionEvents } from '@/lib/db/schema'
 
 describe('shops queries', () => {
   let db: TestDb
@@ -87,7 +91,7 @@ describe('sessions queries', () => {
         vehicleModel: 'F-150',
         customerComplaint: 'loss of power on hills',
       },
-      treeState: { nodes: [], currentNodeId: 'root' },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
     })
     expect(session.intake.vehicleMake).toBe('Ford')
   })
@@ -124,10 +128,83 @@ describe('sessions queries', () => {
         vehicleModel: 'Camry',
         customerComplaint: 'noise on braking',
       },
-      treeState: { nodes: [], currentNodeId: 'root' },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
     })
     const fetched = await getSessionById(db, created.id)
     expect(fetched?.shop.name).toBe("Joe's Garage")
     expect(fetched?.tech.fullName).toBe('Mike Smith')
+  })
+})
+
+describe('session_events queries', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('appendSessionEvent persists an observation event for the given session', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'scan-codes', message: 'pull codes' },
+    })
+    const event = await appendSessionEvent(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      eventType: 'observation',
+      observationText: 'Got P0299 with 3.6 psi underboost',
+      aiResponse: { nextNodeId: 'inspect-cac' },
+    })
+    expect(event.sessionId).toBe(session.id)
+    expect(event.nodeId).toBe('scan-codes')
+    expect(event.observationText).toBe('Got P0299 with 3.6 psi underboost')
+    const rows = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, session.id))
+    expect(rows).toHaveLength(1)
+  })
+
+  it('updateSessionTreeState replaces the tree_state on the given session row', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: {
+        nodes: [{ id: 'scan-codes', label: 'Pull DTCs', status: 'active' }],
+        currentNodeId: 'scan-codes',
+        message: 'pull codes',
+      },
+    })
+    const newTree = {
+      nodes: [
+        { id: 'scan-codes', label: 'Pull DTCs', status: 'resolved' as const },
+        { id: 'inspect-cac', label: 'Inspect CAC pipe', status: 'active' as const },
+      ],
+      currentNodeId: 'inspect-cac',
+      message: 'inspect cac',
+    }
+    await updateSessionTreeState(db, session.id, newTree)
+    const fetched = await getSessionById(db, session.id)
+    expect(fetched?.treeState.currentNodeId).toBe('inspect-cac')
+    expect(fetched?.treeState.nodes).toHaveLength(2)
   })
 })

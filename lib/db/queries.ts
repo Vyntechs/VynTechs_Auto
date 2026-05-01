@@ -6,12 +6,16 @@ import {
   shops,
   profiles,
   sessions,
+  sessionEvents,
   type Shop,
   type NewShop,
   type Profile,
   type NewProfile,
   type Session,
   type NewSession,
+  type SessionEvent,
+  type NewSessionEvent,
+  type TreeState,
 } from './schema'
 
 export type AppDb =
@@ -67,4 +71,20 @@ export async function getSessionById(db: AppDb, id: string) {
     where: eq(sessions.id, id),
     with: { shop: true, tech: true },
   })
+}
+
+export async function appendSessionEvent(
+  db: AppDb,
+  input: NewSessionEvent,
+): Promise<SessionEvent> {
+  const [event] = await db.insert(sessionEvents).values(input).returning()
+  return event
+}
+
+export async function updateSessionTreeState(
+  db: AppDb,
+  sessionId: string,
+  treeState: TreeState,
+): Promise<void> {
+  await db.update(sessions).set({ treeState }).where(eq(sessions.id, sessionId))
 }

@@ -30,9 +30,13 @@ export type TreeState = {
     id: string
     label: string
     status: 'pending' | 'active' | 'resolved' | 'pruned'
+    rationale?: string
     children?: string[]
   }>
   currentNodeId: string
+  message: string
+  done?: boolean
+  rootCauseSummary?: string
 }
 
 export type OutcomePayload = {
