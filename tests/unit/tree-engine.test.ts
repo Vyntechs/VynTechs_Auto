@@ -88,6 +88,87 @@ describe('parseTreeJson', () => {
   })
 })
 
+describe('withRetry behavior in generateInitialTree', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('retries on transient error and returns the tree on subsequent success', async () => {
+    const validResponse = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'go',
+          }),
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }
+    mockCreate
+      .mockRejectedValueOnce(new Error('overloaded'))
+      .mockResolvedValueOnce(validResponse)
+
+    const tree = await generateInitialTree({
+      vehicleYear: 2018,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-150',
+      customerComplaint: 'loss of power',
+    })
+
+    expect(mockCreate).toHaveBeenCalledTimes(2)
+    expect(tree.currentNodeId).toBe('a')
+  })
+
+  it('retries when the LLM returns prose that fails JSON parsing', async () => {
+    const proseResponse = {
+      content: [{ type: 'text', text: 'sorry I cannot comply' }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }
+    const validResponse = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'go',
+          }),
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }
+    mockCreate
+      .mockResolvedValueOnce(proseResponse)
+      .mockResolvedValueOnce(validResponse)
+
+    const tree = await generateInitialTree({
+      vehicleYear: 2018,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-150',
+      customerComplaint: 'loss of power',
+    })
+
+    expect(mockCreate).toHaveBeenCalledTimes(2)
+    expect(tree.currentNodeId).toBe('a')
+  })
+
+  it('throws after exhausting all retries on persistent failure', async () => {
+    mockCreate.mockRejectedValue(new Error('overloaded'))
+    await expect(
+      generateInitialTree({
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      }),
+    ).rejects.toThrow('overloaded')
+    expect(mockCreate).toHaveBeenCalledTimes(3)
+  })
+})
+
 describe('updateTree', () => {
   beforeEach(() => {
     mockCreate.mockReset()
