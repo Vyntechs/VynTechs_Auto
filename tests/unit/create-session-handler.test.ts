@@ -1,7 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { ensureProfileAndShop, createProfile } from '@/lib/db/queries'
+import { ensureProfileAndShop, createProfile, getSessionById } from '@/lib/db/queries'
 import { createSessionForUser } from '@/lib/sessions'
+import type { TreeState } from '@/lib/ai/tree-engine'
+
+const stubTree: TreeState = {
+  nodes: [{ id: 'root', label: 'Initial scan', status: 'pending' }],
+  currentNodeId: 'root',
+  message: 'starting',
+}
+
+const validIntake = {
+  vehicleYear: 2018,
+  vehicleMake: 'Ford',
+  vehicleModel: 'F-150',
+  customerComplaint: 'loss of power going up hills',
+}
 
 describe('createSessionForUser', () => {
   let db: TestDb
@@ -21,15 +35,32 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: {
-        vehicleYear: 2018,
-        vehicleMake: 'Ford',
-        vehicleModel: 'F-150',
-        customerComplaint: 'loss of power going up hills',
-      },
+      body: validIntake,
+      treeState: stubTree,
     })
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.id).toBeTruthy()
+  })
+
+  it('persists the caller-provided treeState on the created session row', async () => {
+    const userId = crypto.randomUUID()
+    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const customTree: TreeState = {
+      nodes: [{ id: 'unique-node-xyz', label: 'foo', status: 'active' }],
+      currentNodeId: 'unique-node-xyz',
+      message: 'unique-marker',
+    }
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: validIntake,
+      treeState: customTree,
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const fetched = await getSessionById(db, result.id)
+      expect(fetched?.treeState).toEqual(customTree)
+    }
   })
 
   it('returns a 400 "no profile" error when the userId has no profile', async () => {
@@ -37,12 +68,8 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: {
-        vehicleYear: 2018,
-        vehicleMake: 'Ford',
-        vehicleModel: 'F-150',
-        customerComplaint: 'loss of power going up hills',
-      },
+      body: validIntake,
+      treeState: stubTree,
     })
     expect(result.ok).toBe(false)
     if (!result.ok) {
@@ -57,12 +84,8 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: {
-        vehicleYear: 2018,
-        vehicleMake: 'Ford',
-        vehicleModel: 'F-150',
-        customerComplaint: 'loss of power going up hills',
-      },
+      body: validIntake,
+      treeState: stubTree,
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toBe('no shop')
@@ -75,6 +98,7 @@ describe('createSessionForUser', () => {
       db,
       userId,
       body: { vehicleYear: 2018, vehicleMake: 'Ford' },
+      treeState: stubTree,
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(400)
