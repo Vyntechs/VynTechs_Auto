@@ -11,6 +11,7 @@ import {
   ensureProfileAndShop,
   appendSessionEvent,
   updateSessionTreeState,
+  getOpenSessionForTech,
 } from '@/lib/db/queries'
 import { sessionEvents } from '@/lib/db/schema'
 
@@ -206,5 +207,61 @@ describe('session_events queries', () => {
     const fetched = await getSessionById(db, session.id)
     expect(fetched?.treeState.currentNodeId).toBe('inspect-cac')
     expect(fetched?.treeState.nodes).toHaveLength(2)
+  })
+})
+
+describe('getOpenSessionForTech', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('returns null when the tech has no sessions at all', async () => {
+    const tech = await createProfile(db, { userId: crypto.randomUUID() })
+    const open = await getOpenSessionForTech(db, tech.id)
+    expect(open).toBeNull()
+  })
+
+  it('returns the open session when the tech has one', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const open = await getOpenSessionForTech(db, tech.id)
+    expect(open?.id).toBe(session.id)
+  })
+
+  it('returns null when all of the tech sessions are closed', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      status: 'closed',
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const open = await getOpenSessionForTech(db, tech.id)
+    expect(open).toBeNull()
   })
 })

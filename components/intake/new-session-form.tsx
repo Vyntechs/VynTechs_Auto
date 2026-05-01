@@ -1,6 +1,10 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
+
 export function NewSessionForm() {
+  const router = useRouter()
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
@@ -10,11 +14,19 @@ export function NewSessionForm() {
       vehicleModel: String(formData.get('vehicleModel') ?? ''),
       customerComplaint: String(formData.get('customerComplaint') ?? ''),
     }
-    await fetch('/api/sessions', {
+    const res = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     })
+    if (res.status === 409) {
+      const { openSessionId } = await res.json()
+      router.push(`/sessions/${openSessionId}`)
+      return
+    }
+    if (!res.ok) return
+    const { id } = await res.json()
+    router.push(`/sessions/${id}`)
   }
 
   return (
