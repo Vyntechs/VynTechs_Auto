@@ -2309,6 +2309,21 @@ git commit -m "feat(session): sessions history list page"
 
 ---
 
+## Phase D — Implementation corrections (applied after D10)
+
+The Phase D code blocks above contain a few errors and shortcuts that surfaced during implementation. Future readers should treat the points below as the authoritative pattern; the inline code blocks above remain as reference but are *not* drop-in correct.
+
+1. **Profile lookup** — Plan code uses `db.query.profiles.findFirst({ where: eq(profiles.id, user.id) })`. The `profiles` table keys on `userId` (not `id`); use the existing helper `getProfileByUserId(db, userId)` from `lib/db/queries.ts`.
+2. **`getSessionById` arity** — Plan code calls `getSessionById(id)`. Real signature is `getSessionById(db: AppDb, id: string)`. Always pass `db` first.
+3. **DI for new query helpers** — `appendSessionEvent`, `updateSessionTreeState`, `getOpenSessionForTech`, `listSessionsForShop` were added to `lib/db/queries.ts` with `db: AppDb` as the first parameter (matches existing convention).
+4. **Route handlers extract testable helpers** — `app/api/sessions/[id]/advance/route.ts` and `app/api/sessions/[id]/route.ts` are thin shims that delegate to `advanceSession` and `getSessionForUser` in `lib/sessions.ts`. The lib functions are pglite-unit-testable; the route handlers are not (they call `getServerSupabase` directly). Mirror this split for any new route.
+5. **Lock-out (D9) lives in the route only** — The check belongs in `app/api/sessions/route.ts` BEFORE `generateInitialTree` (saves LLM tokens). It was briefly also placed inside `createSessionForUser` and removed in commit `b95aef7` because it duplicated the profile + open-session DB calls. `createSessionForUser` is back to its single responsibility (persist a session given a `treeState`).
+6. **D10 has no shadcn or Tailwind yet** — Plan code imports `Button` from `@/components/ui/button` and uses Tailwind utility classes. Neither exists in the repo at this phase (per the handoff: "no shadcn or Tailwind yet — plain HTML forms"). The actual page uses a plain `<button>` and inline-styled `<Link>` anchors. Reintroduce shadcn/Tailwind before any task that depends on them.
+7. **`TreeState` unified** — `lib/db/schema.ts` and `lib/ai/tree-engine.ts` were defining `TreeState` with subtly different shapes. Unified to: required `message: string`, optional `done`, `rootCauseSummary`, optional per-node `rationale`. Test fixtures in `tests/unit/queries.test.ts` were updated to include `message`. There is no DB migration — `tree_state` is a JSONB column.
+8. **`withRetry` on LLM calls (D6)** — applied identically to `generateInitialTree` and `updateTree`: 3 attempts, linear backoff (500ms × n). The whole `messages.create` + JSON parse block is wrapped, so a malformed JSON response also retries.
+
+---
+
 ## Phase E — Phone Session UX (10 tasks)
 
 ### Task E1: Active session page (server component shell)
