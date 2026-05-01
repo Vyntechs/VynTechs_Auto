@@ -48,12 +48,6 @@ export async function POST(req: Request) {
   })
 
   if (!result.ok) {
-    if (result.status === 409) {
-      return NextResponse.json(
-        { error: result.error, openSessionId: result.openSessionId },
-        { status: 409 },
-      )
-    }
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
   return NextResponse.json({ id: result.id })
