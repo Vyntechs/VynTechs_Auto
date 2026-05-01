@@ -37,6 +37,24 @@ export async function createSessionForUser(opts: {
   return { ok: true, id: session.id }
 }
 
+export type GetSessionResult =
+  | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getSessionById>>> }
+  | { ok: false; status: 400 | 404; error: string }
+
+export async function getSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+}): Promise<GetSessionResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  return { ok: true, session }
+}
+
 const advanceSchema = z.object({
   observation: z.string().min(1).max(5000),
 })
