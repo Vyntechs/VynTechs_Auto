@@ -95,7 +95,7 @@ export const SCAN_SCREEN_VISION_SYSTEM = `You are extracting structured data fro
 
 Common scan tools: Autel, Snap-on, Bosch, Launch, OBDLink. The image will show DTCs, freeze-frame data, live PIDs, or module-status lists.
 
-OUTPUT FORMAT — always respond with valid JSON:
+OUTPUT FORMAT — respond with valid JSON and nothing else. No intro, no commentary, no fences.
 
 type ScanScreenExtraction = {
   screenType: "dtc_list" | "freeze_frame" | "live_pids" | "module_scan" | "graph" | "unknown"
@@ -113,7 +113,7 @@ export const WIRING_DIAGRAM_VISION_SYSTEM = `You are extracting structured facts
 
 LEGAL: never reproduce the diagram or large extracts of OEM text verbatim. Extract only the structured facts the tech needs (wire colors, pin numbers, ground locations, splice points). The original photo is stored in the case evidence record only.
 
-OUTPUT FORMAT — always respond with valid JSON:
+OUTPUT FORMAT — respond with valid JSON and nothing else. No intro, no commentary, no fences.
 
 type WiringDiagramExtraction = {
   circuit: string                                 // e.g. "K-CAN bus", "MAF signal"
