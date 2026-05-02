@@ -9,6 +9,7 @@ import {
 } from '@/lib/db/queries'
 import { advanceSession } from '@/lib/sessions'
 import type { TreeState } from '@/lib/ai/tree-engine'
+import type { Artifact } from '@/lib/db/schema'
 import { sessionEvents, techAssistRequests } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
@@ -320,5 +321,110 @@ describe('advanceSession', () => {
     const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
     expect(rows).toHaveLength(1)
     expect(rows[0].followUpCount).toBe(3)
+  })
+
+  it('fetches done artifacts for the current node and passes them to updateTree', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+
+    // Stub artifact for current node with extraction done
+    const fakeArtifact: Artifact = {
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'scan_screen',
+      storageKey: 'test/key',
+      mimeType: 'image/jpeg',
+      bytes: 1024,
+      durationMs: null,
+      extraction: { summary: 'P0299 active', text: 'P0299 underboost', structured: { dtcs: ['P0299'] } },
+      extractionStatus: 'done',
+      storageTier: 'hot',
+      createdAt: new Date(),
+    }
+
+    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'screen captured' },
+      updateTree,
+      listArtifacts: vi.fn().mockResolvedValue([fakeArtifact]),
+    })
+
+    expect(updateTree).toHaveBeenCalledTimes(1)
+    const callArgs = updateTree.mock.calls[0][0]
+    expect(callArgs.artifacts).toHaveLength(1)
+    expect(callArgs.artifacts[0].kind).toBe('scan_screen')
+    expect(callArgs.artifacts[0].summary).toBe('P0299 active')
+    expect(callArgs.artifacts[0].text).toBe('P0299 underboost')
+  })
+
+  it('passes undefined artifacts to updateTree when no done artifacts exist for the current node', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+
+    // Artifact for a different node — should be filtered out
+    const otherNodeArtifact: Artifact = {
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      nodeId: 'other-node',
+      kind: 'photo',
+      storageKey: 'test/key2',
+      mimeType: 'image/jpeg',
+      bytes: 512,
+      durationMs: null,
+      extraction: { summary: 'cracked pipe' },
+      extractionStatus: 'done',
+      storageTier: 'hot',
+      createdAt: new Date(),
+    }
+
+    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'x' },
+      updateTree,
+      listArtifacts: vi.fn().mockResolvedValue([otherNodeArtifact]),
+    })
+
+    const callArgs = updateTree.mock.calls[0][0]
+    expect(callArgs.artifacts).toBeUndefined()
+  })
+
+  it('ignores artifacts with extractionStatus !== done', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+
+    const pendingArtifact: Artifact = {
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'scan_screen',
+      storageKey: 'test/key3',
+      mimeType: 'image/jpeg',
+      bytes: 512,
+      durationMs: null,
+      extraction: null,
+      extractionStatus: 'pending',
+      storageTier: 'hot',
+      createdAt: new Date(),
+    }
+
+    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'x' },
+      updateTree,
+      listArtifacts: vi.fn().mockResolvedValue([pendingArtifact]),
+    })
+
+    const callArgs = updateTree.mock.calls[0][0]
+    expect(callArgs.artifacts).toBeUndefined()
   })
 })

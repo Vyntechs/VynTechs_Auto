@@ -210,4 +210,104 @@ describe('updateTree', () => {
     expect(result.currentNodeId).toBe('inspect-cac')
     expect(result.nodes.find((n) => n.id === 'scan-codes')?.status).toBe('resolved')
   })
+
+  it('includes artifact evidence in the user message when artifacts are provided', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'ok',
+          }),
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    })
+
+    await updateTree({
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      currentTree: {
+        nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+        currentNodeId: 'a',
+        message: 'go',
+      },
+      observation: 'codes pulled',
+      artifacts: [
+        { kind: 'scan_screen', summary: 'P0299 active', text: 'P0299 underboost' },
+      ],
+    })
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const call = mockCreate.mock.calls[0][0]
+    const userContent: string = call.messages[0].content
+    expect(userContent).toContain('Artifacts captured for this step')
+    expect(userContent).toContain('scan_screen')
+    expect(userContent).toContain('P0299 active')
+    expect(userContent).toContain('P0299 underboost')
+  })
+
+  it('does not include an artifact block when no artifacts are provided', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'ok',
+          }),
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    })
+
+    await updateTree({
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      currentTree: {
+        nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+        currentNodeId: 'a',
+        message: 'go',
+      },
+      observation: 'observed',
+    })
+
+    const call = mockCreate.mock.calls[0][0]
+    const userContent: string = call.messages[0].content
+    expect(userContent).not.toContain('Artifacts captured')
+  })
+})
+
+describe('parseTreeJson with requestedArtifact', () => {
+  it('accepts a response that includes requestedArtifact', () => {
+    const json = JSON.stringify({
+      nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+      currentNodeId: 'a',
+      message: 'go',
+      requestedArtifact: { kind: 'scan_screen', prompt: 'Capture the DTC screen' },
+    })
+    const tree = parseTreeJson(json)
+    expect(tree.requestedArtifact).toEqual({ kind: 'scan_screen', prompt: 'Capture the DTC screen' })
+  })
+
+  it('accepts a response without requestedArtifact (not required)', () => {
+    const json = JSON.stringify({
+      nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+      currentNodeId: 'a',
+      message: 'go',
+    })
+    const tree = parseTreeJson(json)
+    expect(tree.requestedArtifact).toBeUndefined()
+  })
 })

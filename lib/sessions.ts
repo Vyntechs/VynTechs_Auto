@@ -9,6 +9,7 @@ import {
   closeSession,
   setSessionTerminalStatus,
   recordTechAssistRequest,
+  listArtifactsForSession,
 } from './db/queries'
 import type { AppDb } from './db/queries'
 import type { TreeState } from './ai/tree-engine'
@@ -82,6 +83,8 @@ export type GateActionFn = (input: {
   symptomClass?: string
 }) => Promise<GateDecision>
 
+export type ListArtifactsFn = (db: AppDb, sessionId: string) => Promise<Artifact[]>
+
 export async function advanceSession(opts: {
   db: AppDb
   userId: string
@@ -91,8 +94,15 @@ export async function advanceSession(opts: {
     intake: IntakePayload
     currentTree: TreeState
     observation: string
+    artifacts?: Array<{
+      kind: string
+      summary?: string
+      structured?: Record<string, unknown>
+      text?: string
+    }>
   }) => Promise<TreeState>
   gateAction?: GateActionFn
+  listArtifacts?: ListArtifactsFn
 }): Promise<AdvanceSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -110,12 +120,26 @@ export async function advanceSession(opts: {
     return { ok: false, status: 400, error: parsed.error.message }
   }
 
+  // Fetch artifacts for the current node that have completed extraction
+  const currentNodeId = session.treeState.currentNodeId
+  const listFn = opts.listArtifacts ?? listArtifactsForSession
+  const allArtifacts = await listFn(opts.db, opts.sessionId)
+  const nodeArtifacts = allArtifacts
+    .filter((a) => a.nodeId === currentNodeId && a.extractionStatus === 'done')
+    .map((a) => ({
+      kind: a.kind,
+      summary: a.extraction?.summary,
+      structured: a.extraction?.structured,
+      text: a.extraction?.text,
+    }))
+
   let nextTree: TreeState
   try {
     nextTree = await opts.updateTree({
       intake: session.intake,
       currentTree: session.treeState,
       observation: parsed.data.observation,
+      artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : undefined,
     })
   } catch (err) {
     console.error('tree update failed:', err)

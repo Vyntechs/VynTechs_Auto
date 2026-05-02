@@ -81,14 +81,30 @@ export async function updateTree(input: {
   intake: IntakePayload
   currentTree: TreeState
   observation: string
+  artifacts?: Array<{
+    kind: string
+    summary?: string
+    structured?: Record<string, unknown>
+    text?: string
+  }>
 }): Promise<TreeState> {
+  const artifactBlock =
+    (input.artifacts ?? []).length > 0
+      ? `\n\nArtifacts captured for this step (extracted by the perception layer):\n${(input.artifacts ?? [])
+          .map(
+            (a, i) =>
+              `(${i + 1}) ${a.kind}: ${a.summary ?? '(no summary)'}\n${a.text ? `text: ${a.text}\n` : ''}${a.structured ? `structured: ${JSON.stringify(a.structured)}` : ''}`,
+          )
+          .join('\n\n')}`
+      : ''
+
   const userMessage = `Initial intake: ${JSON.stringify(input.intake)}
 
 Current tree state:
 ${JSON.stringify(input.currentTree, null, 2)}
 
 Tech's observation on current step (${input.currentTree.currentNodeId}):
-${input.observation}
+${input.observation}${artifactBlock}
 
 Update the tree based on this observation. Resolve or prune branches as appropriate. Set the next current step. If you have enough information to identify the root cause, set done=true and provide rootCauseSummary.
 

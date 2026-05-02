@@ -98,7 +98,11 @@ export function ActiveSession({ session }: { session: Session }) {
               {session.treeState.message}
             </p>
           )}
-          <ActiveStepForm sessionId={session.id} />
+          <ActiveStepForm
+            sessionId={session.id}
+            nodeId={session.treeState.currentNodeId}
+            requestedArtifact={session.treeState.requestedArtifact}
+          />
         </Module>
 
         <Module num="—" label="Confidence">
