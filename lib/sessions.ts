@@ -214,6 +214,73 @@ export async function closeSessionForUser(opts: {
   return { ok: true }
 }
 
+const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as const
+type CaptureKind = typeof ALLOWED_CAPTURE_KINDS[number]
+const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
+
+export type CaptureArtifactResult =
+  | { ok: true; artifactId: string; storageKey: string; kind: CaptureKind }
+  | { ok: false; status: 400 | 404; error: string }
+
+export async function captureArtifact(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  kind: string
+  nodeId?: string
+  file: { bytes: Uint8Array; mimeType: string; size: number }
+  durationMs?: number
+  uploadArtifact: (input: {
+    sessionId: string
+    kind: CaptureKind
+    bytes: Uint8Array
+    mimeType: string
+  }) => Promise<string>
+  createArtifact: typeof import('./db/queries').createArtifact
+}): Promise<CaptureArtifactResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session not open' }
+  }
+
+  if (!ALLOWED_CAPTURE_KINDS.includes(opts.kind as CaptureKind)) {
+    return { ok: false, status: 400, error: 'invalid kind' }
+  }
+  const kind = opts.kind as CaptureKind
+
+  if (opts.file.size === 0 || opts.file.size > MAX_CAPTURE_BYTES) {
+    return { ok: false, status: 400, error: 'invalid size' }
+  }
+
+  const nodeId = opts.nodeId ?? session.treeState.currentNodeId
+
+  const storageKey = await opts.uploadArtifact({
+    sessionId: opts.sessionId,
+    kind,
+    bytes: opts.file.bytes,
+    mimeType: opts.file.mimeType,
+  })
+
+  const artifactId = await opts.createArtifact(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId,
+    kind,
+    storageKey,
+    mimeType: opts.file.mimeType,
+    bytes: opts.file.size,
+    durationMs: opts.durationMs,
+    extractionStatus: 'pending',
+  })
+
+  return { ok: true, artifactId, storageKey, kind }
+}
+
 function vehicleFamilyKey(intake: IntakePayload): string {
   return `${intake.vehicleMake.toLowerCase()}-${intake.vehicleModel.toLowerCase()}`
 }
