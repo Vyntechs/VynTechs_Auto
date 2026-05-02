@@ -13,6 +13,7 @@ import {
   updateSessionTreeState,
   getOpenSessionForTech,
   listSessionsForShop,
+  closeSession,
 } from '@/lib/db/queries'
 import { sessionEvents } from '@/lib/db/schema'
 
@@ -264,6 +265,75 @@ describe('getOpenSessionForTech', () => {
     })
     const open = await getOpenSessionForTech(db, tech.id)
     expect(open).toBeNull()
+  })
+})
+
+describe('closeSession', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('writes the outcome, sets status=closed, and stamps closedAt', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const updated = await closeSession(db, session.id, {
+      rootCause: 'Wastegate vacuum line cracked at actuator-can end',
+      actionType: 'part_replacement',
+      partInfo: { name: 'Vacuum line, silicone 4mm', oemNumber: 'BL3Z-9C915-A', cost: 12.5 },
+      verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+      diagMinutes: 25,
+      repairMinutes: 18,
+      notes: 'Smoke test confirmed leak',
+    })
+    expect(updated.status).toBe('closed')
+    expect(updated.outcome?.rootCause).toMatch(/Wastegate/)
+    expect(updated.outcome?.partInfo?.oemNumber).toBe('BL3Z-9C915-A')
+    expect(updated.closedAt).toBeInstanceOf(Date)
+  })
+
+  it('throws when the session is already closed', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      status: 'closed',
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    await expect(
+      closeSession(db, session.id, {
+        rootCause: 'Replaced ignition coil pack on cylinder 3',
+        actionType: 'part_replacement',
+        partInfo: { name: 'Ignition coil' },
+        verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+        diagMinutes: 10,
+        repairMinutes: 15,
+      }),
+    ).rejects.toThrow(/not open/i)
   })
 })
 
