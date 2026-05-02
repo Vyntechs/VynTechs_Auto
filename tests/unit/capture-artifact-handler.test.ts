@@ -155,7 +155,10 @@ describe('captureArtifact', () => {
       createArtifact,
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(400)
+    if (!result.ok) {
+      expect(result.status).toBe(400)
+      expect(result.error).toBe('no profile')
+    }
   })
 
   it('returns 404 when the session does not belong to the caller', async () => {
@@ -171,7 +174,10 @@ describe('captureArtifact', () => {
       createArtifact,
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(404)
+    if (!result.ok) {
+      expect(result.status).toBe(404)
+      expect(result.error).toBe('not found')
+    }
   })
 
   it('returns 404 for an unknown session id', async () => {
@@ -186,7 +192,10 @@ describe('captureArtifact', () => {
       createArtifact,
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(404)
+    if (!result.ok) {
+      expect(result.status).toBe(404)
+      expect(result.error).toBe('not found')
+    }
   })
 
   it('returns 400 when the session is not open', async () => {

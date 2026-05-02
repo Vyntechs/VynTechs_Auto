@@ -18,6 +18,7 @@ import type {
   DeclineLanguage,
   DeclineLanguageInput,
 } from './gating/decline-language'
+import type { Artifact, NewArtifact } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import type { ProposedAction } from './ai/tree-engine'
 
@@ -214,8 +215,8 @@ export async function closeSessionForUser(opts: {
   return { ok: true }
 }
 
-const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as const
-type CaptureKind = typeof ALLOWED_CAPTURE_KINDS[number]
+type CaptureKind = Artifact['kind']
+const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as Array<CaptureKind>
 const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
 
 export type CaptureArtifactResult =
@@ -236,7 +237,7 @@ export async function captureArtifact(opts: {
     bytes: Uint8Array
     mimeType: string
   }) => Promise<string>
-  createArtifact: typeof import('./db/queries').createArtifact
+  createArtifact: (db: AppDb, input: NewArtifact) => Promise<string>
 }): Promise<CaptureArtifactResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
