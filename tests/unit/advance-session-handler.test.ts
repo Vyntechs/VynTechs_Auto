@@ -9,7 +9,7 @@ import {
 } from '@/lib/db/queries'
 import { advanceSession } from '@/lib/sessions'
 import type { TreeState } from '@/lib/ai/tree-engine'
-import { sessionEvents } from '@/lib/db/schema'
+import { sessionEvents, techAssistRequests } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 const initialTree: TreeState = {
@@ -198,5 +198,78 @@ describe('advanceSession', () => {
       expect(result.status).toBe(500)
       expect(result.error).toBe('tree update failed')
     }
+  })
+
+  it('records a tech-assist request when the tree asks for a wiring_diagram (Rung 2)', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    const treeWithRung2: TreeState = {
+      ...updatedTree,
+      requestedArtifact: { kind: 'wiring_diagram', prompt: 'Photograph the K-CAN bus diagram' },
+    }
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'No diagram in the corpus' },
+      updateTree: vi.fn().mockResolvedValue(treeWithRung2),
+    })
+    const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].requestedArtifactKind).toBe('wiring_diagram')
+    expect(rows[0].followUpCount).toBe(0)
+    expect(rows[0].nodeId).toBe('scan-codes')
+  })
+
+  it('does not record an audit row for Rung-1 artifacts (photo)', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    const treeWithRung1: TreeState = {
+      ...updatedTree,
+      requestedArtifact: { kind: 'photo', prompt: 'Photograph the cracked pipe' },
+    }
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'I see a crack' },
+      updateTree: vi.fn().mockResolvedValue(treeWithRung1),
+    })
+    const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
+    expect(rows).toHaveLength(0)
+  })
+
+  it('strips requestedArtifact and appends Rung-2 exhausted notice on the third follow-up', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    // Pre-seed an existing open Rung-2 request with 2 follow-ups
+    await db.insert(techAssistRequests).values({
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      gapDescription: 'previous gap',
+      requestedArtifactKind: 'wiring_diagram',
+      requestPrompt: 'previous request',
+      followUpCount: 2,
+    })
+    const treeWithRung2: TreeState = {
+      ...updatedTree,
+      message: 'Need the diagram once more',
+      requestedArtifact: { kind: 'wiring_diagram', prompt: 'Try again' },
+    }
+    const result = await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'tried but no luck' },
+      updateTree: vi.fn().mockResolvedValue(treeWithRung2),
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.tree.requestedArtifact).toBeUndefined()
+      expect(result.tree.message).toMatch(/Rung-2 budget exhausted/)
+    }
+    const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].followUpCount).toBe(3)
   })
 })
