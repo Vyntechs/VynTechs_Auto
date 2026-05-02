@@ -3199,6 +3199,21 @@ git commit -m "feat(outcome): redirect to sessions list after close"
 
 ---
 
+## Phase F — Implementation corrections (applied after F7)
+
+The Phase F code blocks above were drafted before Phase E shipped the Workshop Instrument design system. The points below are the authoritative pattern; the inline blocks remain reference but contain stale assumptions.
+
+1. **No shadcn / no `components/session/`** — F2 imports `@/components/ui/{button,textarea,input,label,card}` and writes a new `components/session/outcome-form.tsx`. None of that exists post-Phase-E. The actual flow wires the existing Phase E screen (`components/screens/outcome-capture.tsx`) — preserves the design system, no parallel form.
+2. **`closeSession` helper added** — F4 calls `closeSession(id, payload)` without defining it. Added to `lib/db/queries.ts` as a single `UPDATE … WHERE status='open' RETURNING *` that throws if the session was already closed (race-safe). Test in `tests/unit/queries.test.ts`.
+3. **Route uses thin-shim pattern** — Per Phase D correction #4, `app/api/sessions/[id]/close/route.ts` delegates to `closeSessionForUser` in `lib/sessions.ts`. The handler takes `validateSpecificity` as an injected dep so handler tests don't need to mock the LLM. Mirror this for any future close-flow extension.
+4. **422 surface for validator gate** — `closeSessionForUser` returns `{ ok:false, status:422, error:'specificity_required', feedback }`. The route maps that to `{ error, feedback }` JSON. The form reads the body on 422 and renders `feedback` inline in the existing `.ai-reject` region (replaces Phase E's word-count heuristic).
+5. **F5 subsumed by F4 handler test** — F5 prescribes a tiny stand-alone "validator gate kicks in" test, but `tests/unit/close-session-handler.test.ts` test #1 already exercises that path end-to-end against pglite with a mocked validator. The dedicated `close-route.test.ts` from the plan was skipped to avoid a near-duplicate; deleting it does not lose coverage.
+6. **`OutcomeCapture` props extended, not replaced** — Added optional `sessionId` (absent = preview mode, submit disabled, no fetch) and `successHref` (default `/sessions`). Keeps `app/design/page.tsx` working unchanged with fixture data.
+7. **Verification chips became real toggles** — Phase E rendered `DtcChip` decoratively. Wiring them required swapping to a `<button role="switch">` (`ToggleChip`) with `aria-checked` so keyboard users + tests can flip them. Same visual language (amber active, graphite inactive).
+8. **Time fields stay auto/read-only** — Plan F2 makes `diagMinutes`/`repairMinutes` editable. Phase E renders them as auto-computed display ("auto"). Kept the auto display and submit them from props. If editable timing is needed later, add inputs without removing the auto display.
+
+---
+
 ## Phase G — Stripe Billing Skeleton (3 tasks)
 
 ### Task G1: Stripe customer auto-creation on first sign-in
