@@ -1,0 +1,173 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { createTestDb, type TestDb } from '../helpers/db'
+import {
+  createShop,
+  createProfile,
+  createSession,
+} from '@/lib/db/queries'
+import { sessions, sessionEvents } from '@/lib/db/schema'
+import { closeSessionForUser } from '@/lib/sessions'
+
+function makeOutcome(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    rootCause:
+      'Wastegate vacuum line cracked at actuator-can end on driver-side turbo, F-150 3.5L EcoBoost',
+    actionType: 'part_replacement',
+    partInfo: { name: 'Vacuum line, silicone 4mm', oemNumber: 'BL3Z-9C915-A', cost: 12.5 },
+    verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+    diagMinutes: 25,
+    repairMinutes: 18,
+    notes: 'Confirmed with smoke test',
+    ...overrides,
+  }
+}
+
+async function seedOpenSession(db: TestDb) {
+  const shop = await createShop(db, { name: 'Test Shop' })
+  const tech = await createProfile(db, {
+    userId: crypto.randomUUID(),
+    shopId: shop.id,
+  })
+  const session = await createSession(db, {
+    shopId: shop.id,
+    techId: tech.id,
+    intake: {
+      vehicleYear: 2018,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-150',
+      customerComplaint: 'loss of power',
+    },
+    treeState: {
+      nodes: [{ id: 'root', label: 'pull DTCs', status: 'active' }],
+      currentNodeId: 'root',
+      message: 'go',
+    },
+  })
+  return { shop, tech, session }
+}
+
+describe('closeSessionForUser', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('returns 422 with feedback when validator rejects vague root cause', async () => {
+    const { tech, session } = await seedOpenSession(db)
+    const validate = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      feedback: 'Where exactly was the crack?',
+    })
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: makeOutcome({ rootCause: 'wire was bad and we fixed it' }),
+      validateSpecificity: validate,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok || result.status !== 422) throw new Error('expected 422')
+    expect(result.error).toBe('specificity_required')
+    expect(result.feedback).toMatch(/where/i)
+
+    // session must NOT be closed
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+    expect(row.status).toBe('open')
+    expect(row.outcome).toBeNull()
+  })
+
+  it('closes the session and writes a close event when validator accepts', async () => {
+    const { tech, session } = await seedOpenSession(db)
+    const validate = vi.fn().mockResolvedValueOnce({ ok: true })
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: makeOutcome(),
+      validateSpecificity: validate,
+    })
+    expect(result.ok).toBe(true)
+
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+    expect(row.status).toBe('closed')
+    expect(row.outcome?.partInfo?.oemNumber).toBe('BL3Z-9C915-A')
+    expect(row.closedAt).not.toBeNull()
+
+    const events = await db
+      .select()
+      .from(sessionEvents)
+      .where(eq(sessionEvents.sessionId, session.id))
+    expect(events).toHaveLength(1)
+    expect(events[0].eventType).toBe('close')
+    expect(events[0].nodeId).toBe('root')
+  })
+
+  it('returns 400 when payload fails zod parse', async () => {
+    const { tech, session } = await seedOpenSession(db)
+    const validate = vi.fn()
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: { rootCause: 'too short', actionType: 'unknown' },
+      validateSpecificity: validate,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.status).toBe(400)
+    expect(validate).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 when the session belongs to another tech', async () => {
+    const { session } = await seedOpenSession(db)
+    const otherProfile = await createProfile(db, { userId: crypto.randomUUID() })
+    const result = await closeSessionForUser({
+      db,
+      userId: otherProfile.userId,
+      sessionId: session.id,
+      body: makeOutcome(),
+      validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.status).toBe(404)
+  })
+
+  it('returns 400 when the session is already closed', async () => {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      status: 'closed',
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'loss of power',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: makeOutcome(),
+      validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.status).toBe(400)
+    expect(result.error).toMatch(/not open/i)
+  })
+})
