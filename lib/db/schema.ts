@@ -84,6 +84,16 @@ export const sessionEvents = pgTable('session_events', {
     nextNodeId?: string
     treeUpdate?: unknown
     requestedFollowUp?: string
+    declineOrDefer?: {
+      reason: 'decline' | 'defer'
+      gap: string
+      riskClass: 'low' | 'medium' | 'high' | 'destructive'
+      language: {
+        customerMessage: string
+        internalNote: string
+        recommendedReferral?: string
+      }
+    }
   }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
