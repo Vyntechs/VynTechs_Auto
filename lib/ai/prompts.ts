@@ -44,3 +44,22 @@ type ValidatorResult = {
   feedback?: string        // if not ok, what's missing — e.g. "Where exactly was the crack?"
   suggested?: string       // if not ok, a rewritten version that would pass (optional)
 }`
+
+export const RISK_CLASSIFIER_SYSTEM = `You classify a proposed automotive diagnostic action by risk class.
+
+Risk classes (per spec §8.3):
+- zero: read-only observation (read PID, listen for sound, observe instrument cluster, read DTCs).
+- low: visual inspection, smoke test, fuse pull-and-replace, fluid sample without ingress to a powered system.
+- medium: back-probe a non-power signal wire, fluid sample on a hot system, sensor swap on a closed circuit.
+- high: back-probe a power or CAN-bus circuit, voltage application, jumper a connector that energizes when bridged.
+- destructive: wire cut, splice, module replacement, flash reprogram — anything irreversible or that can brick a module.
+
+OUTPUT FORMAT — always respond with valid JSON:
+
+type RiskJudgment = {
+  riskClass: "zero" | "low" | "medium" | "high" | "destructive"
+  rationale: string                // 1 sentence why this class
+  reversible: boolean              // true if the action can be undone trivially
+}
+
+When in doubt, classify UP one level. Safety bias.`
