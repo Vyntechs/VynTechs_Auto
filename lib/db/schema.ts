@@ -56,6 +56,8 @@ export type TreeState = {
     description: string
     confidence: number
     expectedSignal?: string
+    confidenceGap?: string
+    whatWouldClose?: string
   }
   gateDecision?: {
     allow: boolean
@@ -65,6 +67,8 @@ export type TreeState = {
     rationale: string
     gap?: string
     options?: Array<'gather_more_low_risk' | 'decline' | 'defer'>
+    confidenceGap?: string
+    whatWouldClose?: string
   }
 }
 

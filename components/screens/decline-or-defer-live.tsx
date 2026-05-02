@@ -42,6 +42,8 @@ export function DeclineOrDeferLive(props: {
   vehicleVin: string
   timer: string
   gap: string
+  confidenceGap?: string
+  whatWouldClose?: string
   riskClass: RiskClass
   optionKeys: GateOption[]
 }) {
@@ -49,7 +51,13 @@ export function DeclineOrDeferLive(props: {
   const [pending, setPending] = useState<1 | 2 | 3 | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const options = props.optionKeys.map((k) => OPTIONS_BY_REASON[k])
+  const options = props.optionKeys.map((k) => {
+    const base = OPTIONS_BY_REASON[k]
+    if (k === 'gather_more_low_risk' && props.whatWouldClose) {
+      return { ...base, description: props.whatWouldClose }
+    }
+    return base
+  })
   const riskLabel = `Gating · ${props.riskClass} class`
 
   async function handleSelect(num: 1 | 2 | 3) {
@@ -91,6 +99,7 @@ export function DeclineOrDeferLive(props: {
       timer={props.timer}
       riskLabel={riskLabel}
       gap={props.gap}
+      confidenceGap={props.confidenceGap}
       options={options}
       onSelectOption={handleSelect}
       pending={pending}
