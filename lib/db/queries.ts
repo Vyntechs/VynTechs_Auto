@@ -9,6 +9,7 @@ import {
   sessionEvents,
   confidenceCalibration,
   techAssistRequests,
+  artifacts,
   type Shop,
   type NewShop,
   type Profile,
@@ -20,6 +21,8 @@ import {
   type TreeState,
   type OutcomePayload,
   type RiskClass,
+  type Artifact,
+  type NewArtifact,
 } from './schema'
 
 export const TECH_ASSIST_RUNG_2_BUDGET = 3
@@ -223,4 +226,33 @@ export async function setSessionTerminalStatus(
     .returning()
   if (!updated) throw new Error('session is not open or does not exist')
   return updated
+}
+
+export async function createArtifact(db: AppDb, input: NewArtifact): Promise<string> {
+  const [row] = await db.insert(artifacts).values(input).returning()
+  return row.id
+}
+
+export async function getArtifactById(db: AppDb, id: string): Promise<Artifact | null> {
+  const row = await db.query.artifacts.findFirst({ where: eq(artifacts.id, id) })
+  return row ?? null
+}
+
+export async function listArtifactsForSession(db: AppDb, sessionId: string): Promise<Artifact[]> {
+  return db.query.artifacts.findMany({
+    where: eq(artifacts.sessionId, sessionId),
+    orderBy: desc(artifacts.createdAt),
+  })
+}
+
+export async function setArtifactExtraction(
+  db: AppDb,
+  id: string,
+  extraction: Artifact['extraction'],
+  status: 'done' | 'failed' = 'done',
+): Promise<void> {
+  await db
+    .update(artifacts)
+    .set({ extraction, extractionStatus: status })
+    .where(eq(artifacts.id, id))
 }

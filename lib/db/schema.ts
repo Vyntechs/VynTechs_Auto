@@ -156,10 +156,40 @@ export const stripeCustomers = pgTable('stripe_customers', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const artifacts = pgTable('artifacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }).notNull(),
+  nodeId: text('node_id').notNull(),
+  kind: text('kind', {
+    enum: ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'],
+  }).notNull(),
+  storageKey: text('storage_key').notNull(),
+  mimeType: text('mime_type').notNull(),
+  bytes: integer('bytes').notNull(),
+  durationMs: integer('duration_ms'),
+  extraction: jsonb('extraction').$type<{
+    text?: string
+    structured?: Record<string, unknown>
+    summary?: string
+  }>(),
+  extractionStatus: text('extraction_status', {
+    enum: ['pending', 'done', 'failed'],
+  }).notNull().default('pending'),
+  storageTier: text('storage_tier', {
+    enum: ['hot', 'warm', 'cold'],
+  }).notNull().default('hot'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const artifactsRelations = relations(artifacts, ({ one }) => ({
+  session: one(sessions, { fields: [artifacts.sessionId], references: [sessions.id] }),
+}))
+
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   shop: one(shops, { fields: [sessions.shopId], references: [shops.id] }),
   tech: one(profiles, { fields: [sessions.techId], references: [profiles.id] }),
   events: many(sessionEvents),
+  artifacts: many(artifacts),
 }))
 
 export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
@@ -191,3 +221,5 @@ export type ConfidenceCalibration = typeof confidenceCalibration.$inferSelect
 export type NewConfidenceCalibration = typeof confidenceCalibration.$inferInsert
 export type TechAssistRequest = typeof techAssistRequests.$inferSelect
 export type NewTechAssistRequest = typeof techAssistRequests.$inferInsert
+export type Artifact = typeof artifacts.$inferSelect
+export type NewArtifact = typeof artifacts.$inferInsert
