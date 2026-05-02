@@ -217,7 +217,7 @@ export async function closeSessionForUser(opts: {
 
 type CaptureKind = Artifact['kind']
 const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as Array<CaptureKind>
-const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
+export const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
 
 export type CaptureArtifactResult =
   | { ok: true; artifactId: string; storageKey: string; kind: CaptureKind }
