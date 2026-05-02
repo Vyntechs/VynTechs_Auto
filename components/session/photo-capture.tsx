@@ -10,12 +10,19 @@ type Props = {
   onUploaded: (artifactId: string) => void
 }
 
+const DEFAULT_LABEL: Record<Props['kind'], string> = {
+  photo: 'Take photo',
+  scan_screen: 'Capture scan-tool screen',
+  wiring_diagram: 'Capture wiring diagram',
+}
+
 export function PhotoCapture({ sessionId, nodeId, kind, label, onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (busy) return
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -68,7 +75,7 @@ export function PhotoCapture({ sessionId, nodeId, kind, label, onUploaded }: Pro
         disabled={busy}
         onClick={() => inputRef.current?.click()}
       >
-        {busy ? 'Uploading…' : (label ?? 'Take photo')}
+        {busy ? 'Uploading…' : (label ?? DEFAULT_LABEL[kind])}
       </button>
       {error && (
         <p
