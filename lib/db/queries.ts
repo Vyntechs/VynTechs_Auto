@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, or, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import type * as schema from './schema'
@@ -7,6 +7,7 @@ import {
   profiles,
   sessions,
   sessionEvents,
+  confidenceCalibration,
   type Shop,
   type NewShop,
   type Profile,
@@ -17,7 +18,16 @@ import {
   type NewSessionEvent,
   type TreeState,
   type OutcomePayload,
+  type RiskClass,
 } from './schema'
+
+const SPEC_8_3_FALLBACK: Record<RiskClass, number> = {
+  zero: 0,
+  low: 0.7,
+  medium: 0.8,
+  high: 0.9,
+  destructive: 0.95,
+}
 
 export type AppDb =
   | PostgresJsDatabase<typeof schema>
@@ -111,6 +121,33 @@ export async function updateSessionTreeState(
   treeState: TreeState,
 ): Promise<void> {
   await db.update(sessions).set({ treeState }).where(eq(sessions.id, sessionId))
+}
+
+export async function getThreshold(
+  db: AppDb,
+  input: {
+    riskClass: RiskClass
+    vehicleFamily?: string
+    symptomClass?: string
+  },
+): Promise<number> {
+  const vf = input.vehicleFamily ?? '*'
+  const sc = input.symptomClass ?? '*'
+  const rows = await db
+    .select()
+    .from(confidenceCalibration)
+    .where(
+      and(
+        eq(confidenceCalibration.riskClass, input.riskClass),
+        or(eq(confidenceCalibration.vehicleFamily, vf), eq(confidenceCalibration.vehicleFamily, '*')),
+        or(eq(confidenceCalibration.symptomClass, sc), eq(confidenceCalibration.symptomClass, '*')),
+      ),
+    )
+  if (rows.length === 0) return SPEC_8_3_FALLBACK[input.riskClass]
+  const score = (r: (typeof rows)[number]) =>
+    (r.vehicleFamily !== '*' ? 2 : 0) + (r.symptomClass !== '*' ? 1 : 0)
+  rows.sort((a, b) => score(b) - score(a))
+  return Number(rows[0].thresholdPct)
 }
 
 export async function closeSession(

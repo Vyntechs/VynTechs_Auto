@@ -15,6 +15,13 @@
       "when": 1777642022657,
       "tag": "0001_good_captain_midlands",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777693602387,
+      "tag": "0002_wakeful_microchip",
+      "breakpoints": true
     }
   ]
 }
