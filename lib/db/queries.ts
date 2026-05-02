@@ -163,3 +163,17 @@ export async function closeSession(
   if (!updated) throw new Error('session is not open or does not exist')
   return updated
 }
+
+export async function setSessionTerminalStatus(
+  db: AppDb,
+  sessionId: string,
+  status: 'declined' | 'deferred',
+): Promise<Session> {
+  const [updated] = await db
+    .update(sessions)
+    .set({ status, closedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'open')))
+    .returning()
+  if (!updated) throw new Error('session is not open or does not exist')
+  return updated
+}
