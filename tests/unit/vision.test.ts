@@ -8,7 +8,7 @@ vi.mock('@/lib/ai/client', () => ({
   cachedSystem: (t: string) => [{ type: 'text', text: t, cache_control: { type: 'ephemeral' } }],
 }))
 
-import { extractScanScreen, extractWiringDiagram, parseJson } from '@/lib/ai/vision'
+import { extractScanScreen, extractWiringDiagram, transcribeAudio, parseJson } from '@/lib/ai/vision'
 
 describe('extractScanScreen', () => {
   beforeEach(() => {
@@ -135,5 +135,73 @@ describe('extractScanScreen — input validation', () => {
         mimeType: 'image/jpeg',
       }),
     ).rejects.toThrow('missing required field: rawText')
+  })
+})
+
+describe('transcribeAudio', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('returns transcript + diagnostic summary from audio bytes', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            transcript: 'OK so listen to this idle...',
+            diagnosticSummary: 'Distinct lifter tick at idle on driver side.',
+            acousticTags: ['lifter_tick'],
+            confidence: 0.78,
+          }),
+        },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1200, output_tokens: 80 },
+    })
+
+    const result = await transcribeAudio({
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: 'audio/webm',
+    })
+
+    expect(result.transcript).toBe('OK so listen to this idle...')
+    expect(result.diagnosticSummary).toBe('Distinct lifter tick at idle on driver side.')
+    expect(result.acousticTags).toContain('lifter_tick')
+    expect(result.confidence).toBeGreaterThan(0.5)
+  })
+
+  it('rejects unsupported audio mime type', async () => {
+    await expect(
+      transcribeAudio({
+        bytes: new Uint8Array([0x00]),
+        mimeType: 'audio/flac',
+      }),
+    ).rejects.toThrow('unsupported audio type for transcription: audio/flac')
+  })
+
+  it('throws when response is missing required field: confidence', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            transcript: 'Some engine noise',
+            diagnosticSummary: 'Possible knock on acceleration.',
+            acousticTags: ['knock'],
+            // confidence intentionally omitted
+          }),
+        },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 400, output_tokens: 50 },
+    })
+
+    await expect(
+      transcribeAudio({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: 'audio/wav',
+      }),
+    ).rejects.toThrow('missing required field: confidence')
   })
 })

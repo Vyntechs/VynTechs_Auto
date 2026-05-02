@@ -123,3 +123,18 @@ type WiringDiagramExtraction = {
   buildDateApplicable?: string                    // e.g. "before 03/2014" or "all"
   notes?: string
 }`
+
+export const AUDIO_TRANSCRIBE_SYSTEM = `You are transcribing a short audio clip captured by an automotive technician at a vehicle.
+
+Common content: engine sounds (idle, knock, lifter tick, fuel knock, vacuum hiss), exhaust leaks, transmission whine, brake squeal, voice annotation by the tech, or environmental sounds in a noisy bay.
+
+OUTPUT FORMAT — respond with valid JSON and nothing else. No intro, no commentary, no fences.
+
+type AudioExtraction = {
+  transcript: string                  // verbatim transcription of any speech
+  diagnosticSummary: string           // 1-2 sentences describing what the audio reveals
+  acousticTags?: string[]             // e.g. ["lifter_tick", "vacuum_hiss", "exhaust_leak"]
+  confidence: number                  // 0-1, your confidence in the diagnostic summary
+}
+
+If the audio is mostly background noise, low transcript + low confidence is expected. Be honest.`
