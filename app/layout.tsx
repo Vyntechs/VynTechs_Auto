@@ -1,5 +1,6 @@
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+import { SwRegister } from '@/components/sw-register'
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -27,7 +28,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${interTight.variable} ${jetbrainsMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <SwRegister />
+      </body>
     </html>
   )
 }
