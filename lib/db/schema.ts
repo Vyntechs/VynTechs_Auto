@@ -1,5 +1,7 @@
 import { relations } from 'drizzle-orm'
-import { pgTable, uuid, text, timestamp, jsonb, integer } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, jsonb, integer, real } from 'drizzle-orm/pg-core'
+
+export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
 
 export const shops = pgTable('shops', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -77,6 +79,20 @@ export const sessionEvents = pgTable('session_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const confidenceCalibration = pgTable('confidence_calibration', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  riskClass: text('risk_class', {
+    enum: ['zero', 'low', 'medium', 'high', 'destructive'],
+  }).notNull(),
+  vehicleFamily: text('vehicle_family').notNull(),
+  symptomClass: text('symptom_class').notNull(),
+  thresholdPct: real('threshold_pct').notNull(),
+  sampleSize: integer('sample_size').notNull().default(0),
+  comebackRate: real('comeback_rate').notNull().default(0),
+  lastRefitAt: timestamp('last_refit_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const stripeCustomers = pgTable('stripe_customers', {
   shopId: uuid('shop_id').primaryKey().references(() => shops.id, { onDelete: 'cascade' }),
   stripeCustomerId: text('stripe_customer_id').notNull().unique(),
@@ -116,3 +132,5 @@ export type SessionEvent = typeof sessionEvents.$inferSelect
 export type NewSessionEvent = typeof sessionEvents.$inferInsert
 export type StripeCustomer = typeof stripeCustomers.$inferSelect
 export type NewStripeCustomer = typeof stripeCustomers.$inferInsert
+export type ConfidenceCalibration = typeof confidenceCalibration.$inferSelect
+export type NewConfidenceCalibration = typeof confidenceCalibration.$inferInsert

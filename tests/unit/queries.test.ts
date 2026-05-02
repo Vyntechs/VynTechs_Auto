@@ -14,8 +14,9 @@ import {
   getOpenSessionForTech,
   listSessionsForShop,
   closeSession,
+  getThreshold,
 } from '@/lib/db/queries'
-import { sessionEvents } from '@/lib/db/schema'
+import { sessionEvents, confidenceCalibration } from '@/lib/db/schema'
 
 describe('shops queries', () => {
   let db: TestDb
@@ -416,5 +417,59 @@ describe('listSessionsForShop', () => {
     const items = await listSessionsForShop(db, shop.id)
     expect(items[0].id).toBe(newer.id)
     expect(items[1].id).toBe(older.id)
+  })
+})
+
+describe('getThreshold', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('falls back to spec §8.3 hardcoded values when calibration is empty', async () => {
+    expect(await getThreshold(db, { riskClass: 'zero' })).toBe(0)
+    expect(await getThreshold(db, { riskClass: 'low' })).toBeCloseTo(0.7)
+    expect(await getThreshold(db, { riskClass: 'medium' })).toBeCloseTo(0.8)
+    expect(await getThreshold(db, { riskClass: 'high' })).toBeCloseTo(0.9)
+    expect(await getThreshold(db, { riskClass: 'destructive' })).toBeCloseTo(0.95)
+  })
+
+  it('returns the catch-all row threshold when only catch-all is seeded', async () => {
+    await db.insert(confidenceCalibration).values({
+      riskClass: 'high',
+      vehicleFamily: '*',
+      symptomClass: '*',
+      thresholdPct: 0.85,
+    })
+    const t = await getThreshold(db, {
+      riskClass: 'high',
+      vehicleFamily: 'ford-f-truck',
+      symptomClass: 'power_loss',
+    })
+    expect(t).toBeCloseTo(0.85)
+  })
+
+  it('prefers a vehicle+symptom-specific row over the catch-all', async () => {
+    await db.insert(confidenceCalibration).values([
+      { riskClass: 'high', vehicleFamily: '*', symptomClass: '*', thresholdPct: 0.9 },
+      {
+        riskClass: 'high',
+        vehicleFamily: 'ford-f-truck',
+        symptomClass: 'power_loss',
+        thresholdPct: 0.97,
+      },
+    ])
+    const t = await getThreshold(db, {
+      riskClass: 'high',
+      vehicleFamily: 'ford-f-truck',
+      symptomClass: 'power_loss',
+    })
+    expect(t).toBeCloseTo(0.97)
   })
 })
