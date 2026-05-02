@@ -17,4 +17,16 @@ describe('HomePage', () => {
     render(<HomePage />)
     expect(screen.getByRole('main')).toBeInTheDocument()
   })
+
+  it('exposes a Sign up link pointing at /sign-up', () => {
+    render(<HomePage />)
+    const link = screen.getByRole('link', { name: /sign up/i })
+    expect(link).toHaveAttribute('href', '/sign-up')
+  })
+
+  it('exposes a Sign in link pointing at /sign-in', () => {
+    render(<HomePage />)
+    const link = screen.getByRole('link', { name: /sign in/i })
+    expect(link).toHaveAttribute('href', '/sign-in')
+  })
 })
