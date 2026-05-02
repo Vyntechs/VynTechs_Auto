@@ -2,6 +2,30 @@
 
 **For the next session: paste this file as the first message. It supersedes `2026-05-01-handoff-phase-fh-shipped.md`.**
 
+---
+
+## ⏵ START HERE — instructions for the next session
+
+You are resuming the Vyntechs MVP build. Phase M (risk gating + Decline-or-Defer) just shipped. **Do this in order, no detours:**
+
+1. **`cd` into the worktree:** `/Volumes/Creativity/dev/projects/vyntechs/.worktrees/mvp-implementation`. Branch is `feature/mvp-implementation`. Working tree is clean. **Do NOT switch branches; do NOT touch `main`; do NOT discard or reset anything.**
+2. **Read `AGENTS.md` first** (top-level, new this session). It is the load-bearing conventions doc — handler-in-`lib/` + thin route shim, queries-take-`db`, preview-mode-safe wired components, plan-vs-reality reconciliation pattern, gating model.
+3. **Verify the baseline before adding anything:** `pnpm test && pnpm exec tsc --noEmit && pnpm build`. Expected: 145/145 tests, exit 0, build succeeds. If anything is red, **stop and report — do not start new work on a broken baseline.**
+4. **First task is the one piece skipped this session: a11y verification on the wired DeclineOrDefer flow.** Spin up `pnpm dev`, audit `/design` (static fixture, works without env) with `chrome-devtools-mcp:a11y-debugging` against the DeclineOrDefer surface specifically. Fix anything web.dev flags. Commit as `chore(a11y): Phase M follow-up — verify DeclineOrDefer surfaces`. This closes the only loose end from Phase M.
+5. **Then ask the user which phase to ship next.** Do not pick unilaterally. Recommended priority is in the "Recommended next steps" section of this file (Phase G → I → N → J). If user picks anything else, follow them.
+6. **Workflow discipline (the user enforces this strictly):**
+   - `superpowers:executing-plans` once per phase
+   - `superpowers:test-driven-development` every TDD cycle
+   - `superpowers:systematic-debugging` the moment anything breaks
+   - `superpowers:verification-before-completion` before declaring any phase done
+   - `frontend-design` skill if any UI work
+   - End every phase: `pnpm test && pnpm exec tsc --noEmit && pnpm build`, then `chrome-devtools-mcp:a11y-debugging` if UI was touched, then write a new handoff doc that supersedes this one and update `MEMORY.md` to point at it.
+7. **Plan-vs-reality:** the inline plan code blocks are reference, not drop-in. Each phase has an "Implementation corrections" callout at the bottom that is authoritative. Mirror this style for any future phase that drifts.
+
+**Do not begin any other work, ask any other question, or skip any of the above steps until step 4 is committed and step 5 is answered.**
+
+---
+
 ## Where we are
 
 - **Worktree:** `/Volumes/Creativity/dev/projects/vyntechs/.worktrees/mvp-implementation`
