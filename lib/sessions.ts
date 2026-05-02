@@ -20,6 +20,7 @@ import type {
 } from './gating/decline-language'
 import type { Artifact, NewArtifact } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
+import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
 
 export type CreateSessionResult =
@@ -217,11 +218,10 @@ export async function closeSessionForUser(opts: {
 
 type CaptureKind = Artifact['kind']
 const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as Array<CaptureKind>
-const HIGH_SIGNAL_KINDS = new Set<CaptureKind>(['scan_screen', 'wiring_diagram', 'audio'])
 export const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
 
 export type CaptureArtifactResult =
-  | { ok: true; artifactId: string; storageKey: string; kind: CaptureKind }
+  | { ok: true; artifactId: string; storageKey: string; kind: CaptureKind; extractionStatus: 'pending' | 'done' | 'failed' }
   | { ok: false; status: 400 | 404; error: string }
 
 export async function captureArtifact(opts: {
@@ -290,15 +290,18 @@ export async function captureArtifact(opts: {
   // Auto-extract inline for high-signal kinds when a processor is injected.
   // On failure: log and continue — the artifact exists; the tech can retry
   // via POST /api/artifacts/:id/extract.
+  let extractionStatus: 'pending' | 'done' | 'failed' = 'pending'
   if (opts.processExtraction && HIGH_SIGNAL_KINDS.has(kind)) {
     try {
       await opts.processExtraction(opts.db, artifactId)
+      extractionStatus = 'done'
     } catch (err) {
       console.error(`[captureArtifact] inline extraction failed for ${artifactId}:`, err)
+      extractionStatus = 'failed'
     }
   }
 
-  return { ok: true, artifactId, storageKey, kind }
+  return { ok: true, artifactId, storageKey, kind, extractionStatus }
 }
 
 function vehicleFamilyKey(intake: IntakePayload): string {

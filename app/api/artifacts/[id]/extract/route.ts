@@ -27,10 +27,7 @@ export async function POST(
     await processArtifactExtraction(db, id)
     return NextResponse.json({ artifactId: id, status: 'done' })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json(
-      { error: 'extraction failed', detail: message },
-      { status: 500 },
-    )
+    console.error('[extract] processArtifactExtraction failed:', err)
+    return NextResponse.json({ error: 'extraction failed' }, { status: 500 })
   }
 }

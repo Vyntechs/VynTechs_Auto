@@ -51,5 +51,5 @@ export async function POST(
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json({ artifactId: result.artifactId, storageKey: result.storageKey, kind: result.kind })
+  return NextResponse.json({ artifactId: result.artifactId, storageKey: result.storageKey, kind: result.kind, extractionStatus: result.extractionStatus })
 }

@@ -7,11 +7,11 @@ import {
   transcribeAudio,
 } from './vision'
 import { downloadArtifact } from '../storage/client'
+import { HIGH_SIGNAL_KINDS } from './artifact-kinds'
 
 export type ExtractionResult = NonNullable<Artifact['extraction']>
 
-/** Kinds that receive full AI extraction inline after capture. */
-export const HIGH_SIGNAL_KINDS = new Set(['scan_screen', 'wiring_diagram', 'audio'] as const)
+export { HIGH_SIGNAL_KINDS }
 
 /**
  * Process extraction for a `scan_screen` artifact.
