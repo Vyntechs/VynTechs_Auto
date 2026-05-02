@@ -57,6 +57,15 @@ export type TreeState = {
     confidence: number
     expectedSignal?: string
   }
+  gateDecision?: {
+    allow: boolean
+    riskClass: RiskClass
+    threshold: number
+    confidence: number
+    rationale: string
+    gap?: string
+    options?: Array<'gather_more_low_risk' | 'decline' | 'defer'>
+  }
 }
 
 export type OutcomePayload = {

@@ -18,6 +18,8 @@ import type {
   DeclineLanguage,
   DeclineLanguageInput,
 } from './gating/decline-language'
+import { gateProposedAction, type GateDecision } from './gating/gap-handler'
+import type { ProposedAction } from './ai/tree-engine'
 
 export type CreateSessionResult =
   | { ok: true; id: string }
@@ -71,6 +73,13 @@ export type AdvanceSessionResult =
   | { ok: true; tree: TreeState }
   | { ok: false; status: 400 | 401 | 404 | 500; error: string }
 
+export type GateActionFn = (input: {
+  db: AppDb
+  action: ProposedAction
+  vehicleFamily?: string
+  symptomClass?: string
+}) => Promise<GateDecision>
+
 export async function advanceSession(opts: {
   db: AppDb
   userId: string
@@ -81,6 +90,7 @@ export async function advanceSession(opts: {
     currentTree: TreeState
     observation: string
   }) => Promise<TreeState>
+  gateAction?: GateActionFn
 }): Promise<AdvanceSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -108,6 +118,19 @@ export async function advanceSession(opts: {
   } catch (err) {
     console.error('tree update failed:', err)
     return { ok: false, status: 500, error: 'tree update failed' }
+  }
+
+  if (nextTree.proposedAction) {
+    const gateFn = opts.gateAction ?? gateProposedAction
+    nextTree = {
+      ...nextTree,
+      gateDecision: await gateFn({
+        db: opts.db,
+        action: nextTree.proposedAction,
+        vehicleFamily: vehicleFamilyKey(session.intake),
+        symptomClass: primarySymptomClass(session.intake.customerComplaint),
+      }),
+    }
   }
 
   if (
@@ -189,6 +212,19 @@ export async function closeSessionForUser(opts: {
   })
 
   return { ok: true }
+}
+
+function vehicleFamilyKey(intake: IntakePayload): string {
+  return `${intake.vehicleMake.toLowerCase()}-${intake.vehicleModel.toLowerCase()}`
+}
+
+function primarySymptomClass(complaint: string): string {
+  const text = complaint.toLowerCase()
+  if (/power|stall|hesit|sluggish|underboost|boost/.test(text)) return 'power_loss'
+  if (/start|crank|no.?start/.test(text)) return 'starting_issue'
+  if (/misfire|rough/.test(text)) return 'misfire'
+  if (/overheat|temp/.test(text)) return 'overheat'
+  return '*'
 }
 
 const declineOrDeferSchema = z.object({

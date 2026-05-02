@@ -31,5 +31,9 @@ export default async function SessionPage({
     )
   }
 
+  if (session.treeState.gateDecision && !session.treeState.gateDecision.allow) {
+    redirect(`/sessions/${session.id}/decline`)
+  }
+
   return <ActiveSession session={session} />
 }

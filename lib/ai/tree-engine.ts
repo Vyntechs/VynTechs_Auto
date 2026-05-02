@@ -1,6 +1,7 @@
 import { anthropic, MODEL, cachedSystem } from './client'
 import { TREE_ENGINE_SYSTEM } from './prompts'
 import type { IntakePayload } from '@/lib/types'
+import type { GateDecision } from '@/lib/gating/gap-handler'
 
 export type TreeNode = {
   id: string
@@ -29,6 +30,7 @@ export type TreeState = {
   rootCauseSummary?: string
   requestedArtifact?: RequestedArtifact
   proposedAction?: ProposedAction
+  gateDecision?: GateDecision
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
