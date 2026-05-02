@@ -10,12 +10,25 @@ export type TreeNode = {
   children?: string[]
 }
 
+export type ProposedAction = {
+  description: string
+  confidence: number
+  expectedSignal?: string
+}
+
+export type RequestedArtifact = {
+  kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+  prompt: string
+}
+
 export type TreeState = {
   nodes: TreeNode[]
   currentNodeId: string
   message: string
   done?: boolean
   rootCauseSummary?: string
+  requestedArtifact?: RequestedArtifact
+  proposedAction?: ProposedAction
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {

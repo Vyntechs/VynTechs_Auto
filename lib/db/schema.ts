@@ -39,6 +39,15 @@ export type TreeState = {
   message: string
   done?: boolean
   rootCauseSummary?: string
+  requestedArtifact?: {
+    kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+    prompt: string
+  }
+  proposedAction?: {
+    description: string
+    confidence: number
+    expectedSignal?: string
+  }
 }
 
 export type OutcomePayload = {
