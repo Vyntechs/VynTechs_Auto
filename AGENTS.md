@@ -29,6 +29,12 @@ This file holds load-bearing conventions for any agent working on the repo. The 
 - **Tech-Assisted Retrieval (Rung 2)** is bounded to 1 + 2 follow-ups per node. `recordTechAssistRequest` enforces the budget; on the third follow-up `advanceSession` strips `requestedArtifact` and appends a Rung-2 budget exhausted notice to `message`. Audit trail in `tech_assist_requests` table.
 - **Any change to a hardcoded risk rule must be reviewed by code review (not LLM-judged)** — these are the safety floor.
 
+## Handoff format
+
+Per-session handoffs in `docs/superpowers/sessions/` are **slim**. They carry only what can't live in this file or the plan: current branch + baseline numbers, what shipped, carryover findings (audit results, TODOs not on the plan), and the recommended next phase. Workflow rules, conventions, and verification commands stay here in `AGENTS.md` — do not duplicate them into the handoff.
+
+Target ~25-40 lines. The file `2026-05-02-handoff-phase-m-a11y-closed.md` is the canonical example. Older handoffs (Phase D/F/H/M) follow the verbose pre-2026-05-02 format and are kept as historical record; do not mirror their structure for new sessions.
+
 ## Verification before shipping
 
 End of every phase, before declaring done:
