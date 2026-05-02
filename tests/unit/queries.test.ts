@@ -15,6 +15,10 @@ import {
   listSessionsForShop,
   closeSession,
   getThreshold,
+  createArtifact,
+  getArtifactById,
+  listArtifactsForSession,
+  setArtifactExtraction,
 } from '@/lib/db/queries'
 import { sessionEvents, confidenceCalibration } from '@/lib/db/schema'
 
@@ -471,5 +475,143 @@ describe('getThreshold', () => {
       symptomClass: 'power_loss',
     })
     expect(t).toBeCloseTo(0.97)
+  })
+})
+
+describe('artifact queries', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  async function seedSession() {
+    const shop = await createShop(db, { name: 'Test Shop' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const session = await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'rough idle',
+      },
+      treeState: { nodes: [], currentNodeId: 'scan-codes', message: 'pull codes' },
+    })
+    return session
+  }
+
+  it('createArtifact returns a valid uuid that resolves to a row', async () => {
+    const session = await seedSession()
+    const artifactId = await createArtifact(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'photo',
+      storageKey: 'session-id/photo/test.jpg',
+      mimeType: 'image/jpeg',
+      bytes: 4096,
+      extractionStatus: 'pending',
+    })
+    // returned id is a valid uuid
+    expect(artifactId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
+    // row is retrievable
+    const row = await getArtifactById(db, artifactId)
+    expect(row?.id).toBe(artifactId)
+    expect(row?.kind).toBe('photo')
+    expect(row?.bytes).toBe(4096)
+  })
+
+  it('listArtifactsForSession is scoped to the session and ordered newest-first', async () => {
+    const session = await seedSession()
+    const otherSession = await seedSession()
+
+    // Insert two artifacts for the target session
+    await createArtifact(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'audio',
+      storageKey: 'key-audio',
+      mimeType: 'audio/webm',
+      bytes: 1024,
+      extractionStatus: 'pending',
+    })
+    await new Promise((r) => setTimeout(r, 5))
+    await createArtifact(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'photo',
+      storageKey: 'key-photo',
+      mimeType: 'image/jpeg',
+      bytes: 2048,
+      extractionStatus: 'pending',
+    })
+
+    // Insert one artifact for a different session — should not appear
+    await createArtifact(db, {
+      sessionId: otherSession.id,
+      nodeId: 'scan-codes',
+      kind: 'video',
+      storageKey: 'key-video',
+      mimeType: 'video/mp4',
+      bytes: 8192,
+      extractionStatus: 'pending',
+    })
+
+    const list = await listArtifactsForSession(db, session.id)
+    expect(list).toHaveLength(2)
+    // Newest first — photo inserted second
+    expect(list[0].kind).toBe('photo')
+    expect(list[1].kind).toBe('audio')
+  })
+
+  it('setArtifactExtraction updates extraction payload and extractionStatus', async () => {
+    const session = await seedSession()
+    const artifactId = await createArtifact(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'scan_screen',
+      storageKey: 'key-scan',
+      mimeType: 'image/png',
+      bytes: 512,
+      extractionStatus: 'pending',
+    })
+    await setArtifactExtraction(db, artifactId, {
+      text: 'P0299 UNDERBOOST',
+      structured: { dtcs: ['P0299'] },
+      summary: 'Single DTC: boost control underperformance',
+    })
+    const row = await getArtifactById(db, artifactId)
+    expect(row?.extractionStatus).toBe('done')
+    expect(row?.extraction?.text).toBe('P0299 UNDERBOOST')
+    expect((row?.extraction?.structured as Record<string, unknown>)?.dtcs).toEqual(['P0299'])
+  })
+
+  it('setArtifactExtraction can mark status as failed', async () => {
+    const session = await seedSession()
+    const artifactId = await createArtifact(db, {
+      sessionId: session.id,
+      nodeId: 'scan-codes',
+      kind: 'photo',
+      storageKey: 'key-fail',
+      mimeType: 'image/jpeg',
+      bytes: 100,
+      extractionStatus: 'pending',
+    })
+    await setArtifactExtraction(db, artifactId, null, 'failed')
+    const row = await getArtifactById(db, artifactId)
+    expect(row?.extractionStatus).toBe('failed')
+  })
+
+  it('getArtifactById returns null for an unknown id', async () => {
+    const result = await getArtifactById(db, crypto.randomUUID())
+    expect(result).toBeNull()
   })
 })
