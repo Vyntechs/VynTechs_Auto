@@ -90,3 +90,36 @@ type DeclineLanguage = {
   internalNote: string          // 1-2 sentences for the service writer's records
   recommendedReferral?: string  // e.g. "dealer", "transmission specialist", "diesel shop"
 }`
+
+export const SCAN_SCREEN_VISION_SYSTEM = `You are extracting structured data from a photographed scan-tool screen.
+
+Common scan tools: Autel, Snap-on, Bosch, Launch, OBDLink. The image will show DTCs, freeze-frame data, live PIDs, or module-status lists.
+
+OUTPUT FORMAT — always respond with valid JSON:
+
+type ScanScreenExtraction = {
+  screenType: "dtc_list" | "freeze_frame" | "live_pids" | "module_scan" | "graph" | "unknown"
+  dtcs?: Array<{ code: string; description?: string; status?: "active" | "pending" | "history" }>
+  freezeFrame?: Record<string, string | number>   // pid name -> value (units in value string)
+  pids?: Record<string, string | number>          // live PIDs at capture moment
+  modules?: Array<{ name: string; codes?: string[]; communication?: "ok" | "no_response" }>
+  rawText: string                                 // verbatim OCR of every visible field
+  notes?: string                                  // anything ambiguous you flag for human review
+}
+
+If the image is unreadable, blurry, or not a scan-tool screen, set screenType="unknown" and put your best-guess description in notes.`
+
+export const WIRING_DIAGRAM_VISION_SYSTEM = `You are extracting structured facts from a photographed OEM wiring diagram (ProDemand, AllData, Mitchell, factory service info).
+
+LEGAL: never reproduce the diagram or large extracts of OEM text verbatim. Extract only the structured facts the tech needs (wire colors, pin numbers, ground locations, splice points). The original photo is stored in the case evidence record only.
+
+OUTPUT FORMAT — always respond with valid JSON:
+
+type WiringDiagramExtraction = {
+  circuit: string                                 // e.g. "K-CAN bus", "MAF signal"
+  wireColors: Array<{ signal: string; color: string; pin?: string; connector?: string }>
+  groundPoints?: Array<{ id: string; location: string }>
+  splicePoints?: Array<{ id: string; description: string }>
+  buildDateApplicable?: string                    // e.g. "before 03/2014" or "all"
+  notes?: string
+}`
