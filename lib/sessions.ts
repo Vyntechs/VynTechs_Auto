@@ -8,6 +8,7 @@ import {
   updateSessionTreeState,
   closeSession,
   setSessionTerminalStatus,
+  recordTechAssistRequest,
 } from './db/queries'
 import type { AppDb } from './db/queries'
 import type { TreeState } from './ai/tree-engine'
@@ -107,6 +108,27 @@ export async function advanceSession(opts: {
   } catch (err) {
     console.error('tree update failed:', err)
     return { ok: false, status: 500, error: 'tree update failed' }
+  }
+
+  if (
+    nextTree.requestedArtifact &&
+    (nextTree.requestedArtifact.kind === 'wiring_diagram' ||
+      nextTree.requestedArtifact.kind === 'scan_screen')
+  ) {
+    const audit = await recordTechAssistRequest(opts.db, {
+      sessionId: opts.sessionId,
+      nodeId: session.treeState.currentNodeId,
+      artifactKind: nextTree.requestedArtifact.kind,
+      requestPrompt: nextTree.requestedArtifact.prompt,
+      gapDescription: nextTree.message.slice(0, 1000),
+    })
+    if (audit.exhausted) {
+      nextTree = {
+        ...nextTree,
+        requestedArtifact: undefined,
+        message: `${nextTree.message} (Rung-2 budget exhausted — consider Decline-or-Defer.)`,
+      }
+    }
   }
 
   await appendSessionEvent(opts.db, {

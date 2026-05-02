@@ -8,6 +8,7 @@ import {
   sessions,
   sessionEvents,
   confidenceCalibration,
+  techAssistRequests,
   type Shop,
   type NewShop,
   type Profile,
@@ -20,6 +21,8 @@ import {
   type OutcomePayload,
   type RiskClass,
 } from './schema'
+
+export const TECH_ASSIST_RUNG_2_BUDGET = 3
 
 const SPEC_8_3_FALLBACK: Record<RiskClass, number> = {
   zero: 0,
@@ -162,6 +165,50 @@ export async function closeSession(
     .returning()
   if (!updated) throw new Error('session is not open or does not exist')
   return updated
+}
+
+export async function recordTechAssistRequest(
+  db: AppDb,
+  input: {
+    sessionId: string
+    nodeId: string
+    artifactKind: string
+    requestPrompt: string
+    gapDescription: string
+  },
+): Promise<{ exhausted: boolean; followUpCount: number }> {
+  const [existing] = await db
+    .select()
+    .from(techAssistRequests)
+    .where(
+      and(
+        eq(techAssistRequests.sessionId, input.sessionId),
+        eq(techAssistRequests.nodeId, input.nodeId),
+        eq(techAssistRequests.resolved, false),
+      ),
+    )
+    .limit(1)
+
+  if (existing) {
+    const nextCount = existing.followUpCount + 1
+    await db
+      .update(techAssistRequests)
+      .set({ followUpCount: nextCount })
+      .where(eq(techAssistRequests.id, existing.id))
+    return {
+      exhausted: nextCount >= TECH_ASSIST_RUNG_2_BUDGET,
+      followUpCount: nextCount,
+    }
+  }
+
+  await db.insert(techAssistRequests).values({
+    sessionId: input.sessionId,
+    nodeId: input.nodeId,
+    gapDescription: input.gapDescription,
+    requestedArtifactKind: input.artifactKind,
+    requestPrompt: input.requestPrompt,
+  })
+  return { exhausted: false, followUpCount: 0 }
 }
 
 export async function setSessionTerminalStatus(
