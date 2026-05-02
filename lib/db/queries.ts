@@ -16,6 +16,7 @@ import {
   type SessionEvent,
   type NewSessionEvent,
   type TreeState,
+  type OutcomePayload,
 } from './schema'
 
 export type AppDb =
@@ -110,4 +111,18 @@ export async function updateSessionTreeState(
   treeState: TreeState,
 ): Promise<void> {
   await db.update(sessions).set({ treeState }).where(eq(sessions.id, sessionId))
+}
+
+export async function closeSession(
+  db: AppDb,
+  sessionId: string,
+  outcome: OutcomePayload,
+): Promise<Session> {
+  const [updated] = await db
+    .update(sessions)
+    .set({ outcome, status: 'closed', closedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'open')))
+    .returning()
+  if (!updated) throw new Error('session is not open or does not exist')
+  return updated
 }
