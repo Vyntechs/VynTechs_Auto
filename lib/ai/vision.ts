@@ -1,5 +1,10 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { anthropic, MODEL, cachedSystem } from './client'
 import { SCAN_SCREEN_VISION_SYSTEM, WIRING_DIAGRAM_VISION_SYSTEM } from './prompts'
+
+// --- Constants ---------------------------------------------------------------
+
+const VISION_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 // --- Types -------------------------------------------------------------------
 
@@ -34,14 +39,11 @@ export type WiringDiagramExtraction = {
 export function parseJson<T>(
   text: string,
   stopReason?: string,
-  len?: number,
 ): T {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\n?/, '')
     .replace(/\n?```$/, '')
-
-  const diagLen = len ?? cleaned.length
 
   let parsed: unknown
   try {
@@ -53,16 +55,19 @@ export function parseJson<T>(
     if (start !== -1 && end > start) {
       try {
         parsed = JSON.parse(cleaned.slice(start, end + 1))
+        console.warn(
+          `[vision] parseJson used brace-extraction recovery (stop_reason=${stopReason ?? 'unknown'}, len=${cleaned.length})`,
+        )
       } catch {
         throw new Error(
-          `vision response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${diagLen}): ${
+          `vision response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${cleaned.length}): ${
             (firstErr as Error).message
           }`,
         )
       }
     } else {
       throw new Error(
-        `vision response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${diagLen}): ${
+        `vision response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${cleaned.length}): ${
           (firstErr as Error).message
         }`,
       )
@@ -90,6 +95,13 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     try {
       return await fn()
     } catch (e) {
+      // Terminal errors — retrying will not help.
+      if (
+        e instanceof Anthropic.BadRequestError ||
+        e instanceof Anthropic.UnprocessableEntityError
+      ) {
+        throw e
+      }
       lastErr = e
       if (i < attempts - 1) {
         await new Promise((r) => setTimeout(r, 500 * (i + 1)))
@@ -111,6 +123,9 @@ export async function extractScanScreen(input: {
   bytes: Uint8Array
   mimeType: string
 }): Promise<ScanScreenExtraction> {
+  if (!VISION_MIME_TYPES.has(input.mimeType)) {
+    throw new Error(`unsupported image type for vision: ${input.mimeType}`)
+  }
   return withRetry(async () => {
     const res = await anthropic.messages.create({
       model: MODEL,
@@ -140,7 +155,14 @@ export async function extractScanScreen(input: {
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseJson<ScanScreenExtraction>(block.text, res.stop_reason ?? undefined)
+    if (res.stop_reason === 'max_tokens') {
+      throw new Error(`vision response truncated at max_tokens (len=${block.text.length})`)
+    }
+    const result = parseJson<ScanScreenExtraction>(block.text, res.stop_reason ?? undefined)
+    if (typeof (result as Record<string, unknown>).rawText !== 'string') {
+      throw new Error('vision response missing required field: rawText')
+    }
+    return result
   })
 }
 
@@ -155,6 +177,9 @@ export async function extractWiringDiagram(input: {
   mimeType: string
   circuitHint?: string
 }): Promise<WiringDiagramExtraction> {
+  if (!VISION_MIME_TYPES.has(input.mimeType)) {
+    throw new Error(`unsupported image type for vision: ${input.mimeType}`)
+  }
   return withRetry(async () => {
     const res = await anthropic.messages.create({
       model: MODEL,
@@ -189,6 +214,16 @@ export async function extractWiringDiagram(input: {
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseJson<WiringDiagramExtraction>(block.text, res.stop_reason ?? undefined)
+    if (res.stop_reason === 'max_tokens') {
+      throw new Error(`vision response truncated at max_tokens (len=${block.text.length})`)
+    }
+    const result = parseJson<WiringDiagramExtraction>(block.text, res.stop_reason ?? undefined)
+    if (!Array.isArray((result as Record<string, unknown>).wireColors)) {
+      throw new Error('vision response missing required field: wireColors')
+    }
+    if (typeof (result as Record<string, unknown>).circuit !== 'string') {
+      throw new Error('vision response missing required field: circuit')
+    }
+    return result
   })
 }

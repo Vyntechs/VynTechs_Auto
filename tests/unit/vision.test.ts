@@ -102,3 +102,38 @@ describe('parseJson recovery', () => {
     expect(result.rawText).toBe('')
   })
 })
+
+describe('extractScanScreen — input validation', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('rejects unsupported mime type', async () => {
+    await expect(
+      extractScanScreen({
+        bytes: new Uint8Array([0x00]),
+        mimeType: 'image/heic',
+      }),
+    ).rejects.toThrow('unsupported image type for vision')
+  })
+
+  it('throws on missing rawText in response', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ screenType: 'unknown' }),
+        },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 100, output_tokens: 20 },
+    })
+
+    await expect(
+      extractScanScreen({
+        bytes: new Uint8Array([0xff, 0xd8, 0xff]),
+        mimeType: 'image/jpeg',
+      }),
+    ).rejects.toThrow('missing required field: rawText')
+  })
+})
