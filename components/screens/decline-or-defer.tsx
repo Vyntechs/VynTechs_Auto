@@ -14,6 +14,7 @@ type Props = {
   timer: string
   riskLabel?: string
   gap: string
+  confidenceGap?: string
   options: Option[]
   onSelectOption?: (number: 1 | 2 | 3) => void
   pending?: 1 | 2 | 3 | null
@@ -26,6 +27,7 @@ export function DeclineOrDefer({
   timer,
   riskLabel = 'Gating · destructive class',
   gap,
+  confidenceGap,
   options,
   onSelectOption,
   pending = null,
@@ -45,7 +47,20 @@ export function DeclineOrDefer({
         <h2 className="dod-headline" style={{ marginTop: 10 }}>
           Confidence too low to commit to a destructive action.
         </h2>
-        <p className="dod-gap">{gap}</p>
+        {confidenceGap && (
+          <p
+            className="dod-gap"
+            style={{ color: 'var(--vt-fg)', fontWeight: 500 }}
+          >
+            {confidenceGap}
+          </p>
+        )}
+        <p
+          className="dod-gap"
+          style={confidenceGap ? { fontSize: 12, opacity: 0.7, marginTop: -4 } : undefined}
+        >
+          {gap}
+        </p>
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12 }}
         >

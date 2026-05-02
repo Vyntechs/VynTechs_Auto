@@ -13,6 +13,8 @@ export type GateDecision = {
   rationale: string
   gap?: string
   options?: GateOption[]
+  confidenceGap?: string
+  whatWouldClose?: string
 }
 
 export async function gateProposedAction(input: {
@@ -43,5 +45,7 @@ export async function gateProposedAction(input: {
     ...base,
     gap: `Required confidence ${(threshold * 100).toFixed(0)}% for risk class "${judgment.riskClass}"; current confidence ${(input.action.confidence * 100).toFixed(0)}%.`,
     options: ['gather_more_low_risk', 'decline', 'defer'],
+    confidenceGap: input.action.confidenceGap,
+    whatWouldClose: input.action.whatWouldClose,
   }
 }

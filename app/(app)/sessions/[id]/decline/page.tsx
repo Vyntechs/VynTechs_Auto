@@ -35,6 +35,8 @@ export default async function DeclinePage({
       vehicleVin={`Session · ${session.id.slice(0, 8)}`}
       timer={formatElapsed(new Date(session.createdAt))}
       gap={gate.gap ?? 'Confidence below threshold for proposed action.'}
+      confidenceGap={gate.confidenceGap}
+      whatWouldClose={gate.whatWouldClose}
       riskClass={riskClass}
       optionKeys={gate.options ?? ['gather_more_low_risk', 'decline', 'defer']}
     />

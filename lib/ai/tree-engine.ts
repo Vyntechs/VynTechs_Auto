@@ -15,6 +15,8 @@ export type ProposedAction = {
   description: string
   confidence: number
   expectedSignal?: string
+  confidenceGap?: string
+  whatWouldClose?: string
 }
 
 export type RequestedArtifact = {
@@ -54,14 +56,14 @@ export async function generateInitialTree(intake: IntakePayload): Promise<TreeSt
   return withRetry(async () => {
     const res = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: cachedSystem(TREE_ENGINE_SYSTEM),
       messages: [{ role: 'user', content: userMessage }],
     })
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseTreeJson(block.text)
+    return parseTreeJson(block.text, res.stop_reason ?? undefined)
   })
 }
 
@@ -95,27 +97,53 @@ Return JSON only — no prose, no fences.`
   return withRetry(async () => {
     const res = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 1500,
+      max_tokens: 4096,
       system: cachedSystem(TREE_ENGINE_SYSTEM),
       messages: [{ role: 'user', content: userMessage }],
     })
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseTreeJson(block.text)
+    return parseTreeJson(block.text, res.stop_reason ?? undefined)
   })
 }
 
-export function parseTreeJson(text: string): TreeState {
+export function parseTreeJson(text: string, stopReason?: string): TreeState {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\n?/, '')
     .replace(/\n?```$/, '')
-  const parsed = JSON.parse(cleaned)
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (firstErr) {
+    // Recovery: extract from first '{' to last '}' (handles stray prose around the JSON).
+    const start = cleaned.indexOf('{')
+    const end = cleaned.lastIndexOf('}')
+    if (start !== -1 && end > start) {
+      try {
+        parsed = JSON.parse(cleaned.slice(start, end + 1))
+      } catch {
+        throw new Error(
+          `tree response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${cleaned.length}): ${
+            (firstErr as Error).message
+          }`,
+        )
+      }
+    } else {
+      throw new Error(
+        `tree response not valid JSON (stop_reason=${stopReason ?? 'unknown'}, len=${cleaned.length}): ${
+          (firstErr as Error).message
+        }`,
+      )
+    }
+  }
+
   if (
-    !Array.isArray(parsed?.nodes) ||
-    typeof parsed?.currentNodeId !== 'string' ||
-    typeof parsed?.message !== 'string'
+    !Array.isArray((parsed as { nodes?: unknown })?.nodes) ||
+    typeof (parsed as { currentNodeId?: unknown })?.currentNodeId !== 'string' ||
+    typeof (parsed as { message?: unknown })?.message !== 'string'
   ) {
     throw new Error('invalid tree response shape')
   }
