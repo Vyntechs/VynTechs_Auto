@@ -93,6 +93,24 @@ describe('DeclineOrDefer (presentational)', () => {
     expect(screen.getByRole('button', { name: /2 · B/i })).toHaveAttribute('aria-busy', 'true')
   })
 
+  it('hides the decorative play-arrow glyph from screen readers', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+        riskLabel="Custom risk label"
+      />,
+    )
+    // ⏵ is decorative; SRs would announce it as a triangle/play character.
+    // Wrap it in aria-hidden so only the riskLabel is announced.
+    const arrowNode = screen.getByText('⏵', { exact: false })
+    expect(arrowNode).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByText('Custom risk label')).toBeInTheDocument()
+  })
+
   it('shows error text in an alert region when error is set', () => {
     render(
       <DeclineOrDefer
