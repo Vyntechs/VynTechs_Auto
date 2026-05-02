@@ -24,7 +24,8 @@ export async function uploadArtifact(input: {
   bytes: Uint8Array | Blob
   mimeType: string
 }): Promise<string> {
-  const ext = EXTENSION[input.mimeType] ?? 'bin'
+  const baseMime = input.mimeType.split(';')[0].trim()
+  const ext = EXTENSION[baseMime] ?? 'bin'
   const key = `${input.sessionId}/${input.kind}/${randomUUID()}.${ext}`
   const { error } = await supabase.storage
     .from(BUCKET)
