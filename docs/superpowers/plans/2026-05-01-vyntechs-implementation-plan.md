@@ -8490,6 +8490,26 @@ git commit -m "docs(gating): document risk gating + Decline-or-Defer in AGENTS.m
 
 ---
 
+## Phase M — Implementation corrections (applied after M9)
+
+The plan's Phase M is faithful in shape but several details drifted from Phase D/F/H reality. The points below are authoritative; the inline blocks remain reference.
+
+1. **Queries take `db: AppDb` as first arg** — plan's `getThreshold` and the M5 route used a globally-imported `db` in `lib/db/queries.ts`. The codebase convention (every other helper) is `(db, input)`. `getThreshold` and the new `setSessionTerminalStatus` and `recordTechAssistRequest` helpers all take db explicitly.
+2. **M2 rule regex fix: `\bb\+\b` doesn't match `B+ ` because `\b` after a non-word char (`+`) won't transition against a following space.** Replaced with `/(?:\b(?:power|battery|can|canbus|j1939)\b|b\+|\bcan\s+bus\b)/i`. Caught by the "Back-probe alternator B+ circuit" rule test.
+3. **M2 rule order: destructive-first** — plan ordered rules low-to-high. Returning on first match means a destructive cut/reflash could in theory be downgraded by an incidental softer match. Rules now iterate destructive → high → medium → low → zero.
+4. **M5 / M6 — handler in `lib/sessions.ts`, route stays a thin shim.** Phase D/F established this pattern; the plan's M5 stuffed all logic (auth, db lookup, AI call, updates, event append) directly in `app/api/.../route.ts`, and M6 added audit logic to the advance route. Both moved into `lib/sessions.ts` (`declineOrDeferSessionForUser`, audit logic inside `advanceSession`). Routes are 30 lines: read user, call handler with prod deps, map result.
+5. **M5 — `appendSessionEvent(db, payload)`, two args** — plan called it as `appendSessionEvent({...})`. Real signature is `(db, input)`. Same `closeSession`-style mistake.
+6. **M5 — schema's `aiResponse` JSONB type extended to include `declineOrDefer`** payload. The runtime is jsonb (accepts anything) but the TS type was restrictive; extending it makes close events from the decline path typed end-to-end.
+7. **M6 — `recordTechAssistRequest(db, input)` is the audit primitive.** Plan inlined three drizzle calls in the route (`findFirst` then `update` or `insert`). Wrapped in a single helper that returns `{ exhausted, followUpCount }` so the handler stays one branch deep. Threshold (3 follow-ups) extracted as `TECH_ASSIST_RUNG_2_BUDGET`.
+8. **M7 — wired the existing Phase E `components/screens/decline-or-defer.tsx`, did not build a new shadcn `DeclineOrDeferPanel`.** Plan assumed `components/session/`, shadcn `Button`/`Card`, and Tailwind classes. None exist. The Phase E screen became 'use client' with optional `onSelectOption` + `pending` + `error` props (preview-mode-safe: no callback ⇒ inert buttons, so `/design` still renders without env). New `DeclineOrDeferLive` client wrapper handles the fetch + redirect.
+9. **M7 — gate-blocked surfacing is a server-side redirect from the parent page**, not in-place rendering inside `ActiveSession`. `app/(app)/sessions/[id]/page.tsx` redirects to `/decline` when `treeState.gateDecision && !allow`. Cleaner than threading gate state into the active screen, and reuses the existing `/decline` route.
+10. **M7 — `advanceSession` takes `gateAction?` as a DI dep** for testability, defaults to real `gateProposedAction`. Same shape as the existing `updateTree` DI. Tests stub it; route doesn't pass it (gets the real one).
+11. **`TreeState` is duplicated in `lib/db/schema.ts` (JSONB column type) and `lib/ai/tree-engine.ts` (runtime contract).** Both updated for `proposedAction`, `requestedArtifact`, and `gateDecision`. **Future cleanup:** collapse to a single source of truth — pick `tree-engine.ts` as canonical, have schema import via `import type` (no circular runtime).
+12. **M9 — created AGENTS.md** — plan said "Modify: AGENTS.md" but the file didn't exist. Created it as a thin pointer to the latest handoff + the load-bearing conventions (handler-in-lib pattern, queries-take-db, 422+JSON pattern, tokens-as-truth, plan-vs-reality reconciliation) and the gating doc.
+13. **No `tsx` in deps for the seed runner** — plan's `pnpm tsx drizzle/seed/calibration-seed.ts` won't run as-is. The seed file is committed and is `if (require.main === module)` guarded so it can be run via any tsx-equivalent. Real seeding is deferred until `DATABASE_URL` is wired (per the open-env list in the latest handoff). Pre-seed, `getThreshold` falls back to spec §8.3 hardcoded values, so all current code works.
+
+---
+
 ## Phase N — Tablet Layout + Real-Time Sync (6 tasks)
 
 Per spec §6 row 6 and §15 (single Next.js responsive app, four layouts, real-time sync), §9.2 (tablet layout: tree-visualization-first, read-mostly), §9.5 (WebSocket/SSE sync ~200ms cross-device). Builds: viewport-driven layout switching on the existing `/sessions/[id]` route, a `TabletTreeView` showing the full visual tree (not collapsed), an artifact gallery sidebar, Supabase Realtime subscriptions on `sessions` and `session_events` for cross-device sync, and a branch-pruning animation when nodes change status.
