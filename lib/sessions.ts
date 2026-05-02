@@ -261,6 +261,7 @@ export async function captureArtifact(opts: {
 
   const nodeId = opts.nodeId ?? session.treeState.currentNodeId
 
+  // Upload receives the FULL mimeType (with codec) so storage object metadata is accurate.
   const storageKey = await opts.uploadArtifact({
     sessionId: opts.sessionId,
     kind,
@@ -268,12 +269,15 @@ export async function captureArtifact(opts: {
     mimeType: opts.file.mimeType,
   })
 
+  // DB column stores only the base MIME type — codec parameters (e.g. ;codecs=opus)
+  // are stripped so consumers (vision.ts MIME gate, etc.) see a clean value.
+  const baseMimeType = opts.file.mimeType.split(';')[0].trim()
   const artifactId = await opts.createArtifact(opts.db, {
     sessionId: opts.sessionId,
     nodeId,
     kind,
     storageKey,
-    mimeType: opts.file.mimeType,
+    mimeType: baseMimeType,
     bytes: opts.file.size,
     durationMs: opts.durationMs,
     extractionStatus: 'pending',

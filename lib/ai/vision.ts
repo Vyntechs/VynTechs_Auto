@@ -147,7 +147,8 @@ export async function extractScanScreen(input: {
   bytes: Uint8Array
   mimeType: string
 }): Promise<ScanScreenExtraction> {
-  if (!VISION_MIME_TYPES.has(input.mimeType)) {
+  const baseMime = input.mimeType.split(';')[0].trim()
+  if (!VISION_MIME_TYPES.has(baseMime)) {
     throw new Error(`unsupported image type for vision: ${input.mimeType}`)
   }
   return withRetry(async () => {
@@ -201,7 +202,8 @@ export async function extractWiringDiagram(input: {
   mimeType: string
   circuitHint?: string
 }): Promise<WiringDiagramExtraction> {
-  if (!VISION_MIME_TYPES.has(input.mimeType)) {
+  const baseMime = input.mimeType.split(';')[0].trim()
+  if (!VISION_MIME_TYPES.has(baseMime)) {
     throw new Error(`unsupported image type for vision: ${input.mimeType}`)
   }
   return withRetry(async () => {
@@ -285,19 +287,23 @@ export async function transcribeAudio(input: {
   bytes: Uint8Array
   mimeType: string
 }): Promise<AudioExtraction> {
-  if (!TRANSCRIBE_MIME_TYPES.has(input.mimeType)) {
+  const baseMime = input.mimeType.split(';')[0].trim()
+  if (!TRANSCRIBE_MIME_TYPES.has(baseMime)) {
     throw new Error(`unsupported audio type for transcription: ${input.mimeType}`)
   }
   return withRetry(async () => {
     const res = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 800,
+      max_tokens: 1600,
       system: cachedSystem(AUDIO_TRANSCRIBE_SYSTEM),
       messages: [
         {
           role: 'user',
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           content: [
+            // TODO(I8): replace this stub with a real audio path — Anthropic audio
+            // content block when SDK supports it, or OpenAI Whisper. Currently fails
+            // at runtime against the live API because document-block expects PDFs.
             {
               type: 'document',
               source: {
@@ -334,6 +340,10 @@ export async function transcribeAudio(input: {
     }
     if (typeof r.confidence !== 'number') {
       throw new Error('transcription response missing required field: confidence')
+    }
+    if (result.acousticTags !== undefined && !Array.isArray(result.acousticTags)) {
+      // Coerce to empty array — preserves the optional contract without failing the call
+      ;(result as Record<string, unknown>).acousticTags = []
     }
     return result
   })

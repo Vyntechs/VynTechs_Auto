@@ -296,4 +296,33 @@ describe('captureArtifact', () => {
       mimeType: 'image/png',
     })
   })
+
+  it('strips codec parameter from mimeType before storing in DB', async () => {
+    const { userId, session } = await seedSession()
+    const bytes = makeBytes(300)
+    const uploadArtifact = vi.fn().mockResolvedValue('session-id/audio/uuid.webm')
+
+    const result = await captureArtifact({
+      db,
+      userId,
+      sessionId: session.id,
+      kind: 'audio',
+      file: { bytes, mimeType: 'audio/webm;codecs=opus', size: 300 },
+      durationMs: 3000,
+      uploadArtifact,
+      createArtifact,
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // DB row must have the base MIME type only
+      const row = await getArtifactById(db, result.artifactId)
+      expect(row?.mimeType).toBe('audio/webm')
+
+      // Storage upload must receive the full type (with codec) for accurate object metadata
+      expect(uploadArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({ mimeType: 'audio/webm;codecs=opus' }),
+      )
+    }
+  })
 })

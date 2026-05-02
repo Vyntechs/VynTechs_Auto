@@ -204,4 +204,37 @@ describe('transcribeAudio', () => {
       }),
     ).rejects.toThrow('missing required field: confidence')
   })
+
+  it('throws when response is truncated at max_tokens', async () => {
+    mockCreate.mockResolvedValue({
+      content: [{ type: 'text', text: '{"transcript":"partial' }],
+      stop_reason: 'max_tokens',
+      usage: { input_tokens: 400, output_tokens: 1600 },
+    })
+    await expect(
+      transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'audio/webm' }),
+    ).rejects.toThrow(/truncated at max_tokens/)
+  })
+
+  it('accepts codec-suffixed mime type (audio/webm;codecs=opus)', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            transcript: 'tap tap tap',
+            diagnosticSummary: 'Mechanical tapping at idle.',
+            acousticTags: ['tap'],
+            confidence: 0.7,
+          }),
+        },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 400, output_tokens: 60 },
+    })
+
+    await expect(
+      transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'audio/webm;codecs=opus' }),
+    ).resolves.toMatchObject({ transcript: 'tap tap tap' })
+  })
 })
