@@ -24,6 +24,7 @@ export default async function OutcomePage({
 
   return (
     <OutcomeCapture
+      sessionId={session.id}
       vehicleName={formatVehicleName(session.intake)}
       vehicleMeta={`closing case · session ${session.id.slice(0, 8)}`}
       timer={elapsed}
