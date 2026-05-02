@@ -251,8 +251,10 @@ export async function setArtifactExtraction(
   extraction: Artifact['extraction'],
   status: 'done' | 'failed' = 'done',
 ): Promise<void> {
-  await db
+  const result = await db
     .update(artifacts)
     .set({ extraction, extractionStatus: status })
     .where(eq(artifacts.id, id))
+    .returning()
+  if (!result.length) throw new Error(`artifact ${id} not found`)
 }
