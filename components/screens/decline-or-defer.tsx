@@ -1,3 +1,4 @@
+'use client'
 import { VehicleStrip } from '@/components/vt'
 
 type Option = {
@@ -14,6 +15,9 @@ type Props = {
   riskLabel?: string
   gap: string
   options: Option[]
+  onSelectOption?: (number: 1 | 2 | 3) => void
+  pending?: 1 | 2 | 3 | null
+  error?: string | null
 }
 
 export function DeclineOrDefer({
@@ -23,6 +27,9 @@ export function DeclineOrDefer({
   riskLabel = 'Gating · destructive class',
   gap,
   options,
+  onSelectOption,
+  pending = null,
+  error = null,
 }: Props) {
   return (
     <div className="app">
@@ -41,41 +48,63 @@ export function DeclineOrDefer({
         <div
           style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12 }}
         >
-          {options.map((opt) => (
-            <button
-              key={opt.number}
-              type="button"
-              className="btn btn-secondary"
-              style={{
-                textAlign: 'left',
-                padding: '14px 16px',
-                ...(opt.emphasized ? { borderColor: 'var(--vt-amber-500)' } : null),
-              }}
-            >
-              <div
+          {options.map((opt) => {
+            const isPending = pending === opt.number
+            const isDisabled = pending !== null
+            return (
+              <button
+                key={opt.number}
+                type="button"
+                className="btn btn-secondary"
+                onClick={onSelectOption ? () => onSelectOption(opt.number) : undefined}
+                disabled={isDisabled}
+                aria-busy={isPending}
                 style={{
-                  fontWeight: 600,
-                  fontSize: 14,
-                  marginBottom: 4,
-                  ...(opt.emphasized ? { color: 'var(--vt-amber-500)' } : null),
+                  textAlign: 'left',
+                  padding: '14px 16px',
+                  cursor: onSelectOption && !isDisabled ? 'pointer' : 'default',
+                  opacity: isDisabled && !isPending ? 0.5 : 1,
+                  ...(opt.emphasized ? { borderColor: 'var(--vt-amber-500)' } : null),
                 }}
               >
-                {opt.number} · {opt.title}
-              </div>
-              <div
-                style={{
-                  fontFamily: 'var(--vt-font-sans)',
-                  fontSize: 12,
-                  color: 'var(--vt-fg-2)',
-                  fontWeight: 400,
-                  lineHeight: 1.4,
-                }}
-              >
-                {opt.description}
-              </div>
-            </button>
-          ))}
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 14,
+                    marginBottom: 4,
+                    ...(opt.emphasized ? { color: 'var(--vt-amber-500)' } : null),
+                  }}
+                >
+                  {opt.number} · {opt.title}
+                </div>
+                <div
+                  style={{
+                    fontFamily: 'var(--vt-font-sans)',
+                    fontSize: 12,
+                    color: 'var(--vt-fg-2)',
+                    fontWeight: 400,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {isPending ? 'Working…' : opt.description}
+                </div>
+              </button>
+            )
+          })}
         </div>
+        {error && (
+          <p
+            role="alert"
+            style={{
+              marginTop: 12,
+              fontFamily: 'var(--vt-font-sans)',
+              fontSize: 12,
+              color: 'var(--vt-risk-destructive)',
+            }}
+          >
+            {error}
+          </p>
+        )}
       </div>
     </div>
   )

@@ -239,6 +239,55 @@ describe('advanceSession', () => {
     expect(rows).toHaveLength(0)
   })
 
+  it('computes a gateDecision when the new tree carries a proposedAction', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    const treeWithAction: TreeState = {
+      ...updatedTree,
+      proposedAction: { description: 'back-probe CAN bus', confidence: 0.6 },
+    }
+    const gateAction = vi.fn().mockResolvedValue({
+      allow: false,
+      riskClass: 'high',
+      threshold: 0.9,
+      confidence: 0.6,
+      rationale: 'back-probe of CAN bus',
+      gap: 'Required confidence 90%; current 60%.',
+      options: ['gather_more_low_risk', 'decline', 'defer'],
+    })
+    const result = await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'corpus is thin' },
+      updateTree: vi.fn().mockResolvedValue(treeWithAction),
+      gateAction,
+    })
+    expect(gateAction).toHaveBeenCalledTimes(1)
+    expect(gateAction.mock.calls[0][0].vehicleFamily).toBe('ford-f-150')
+    expect(gateAction.mock.calls[0][0].symptomClass).toBe('power_loss')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.tree.gateDecision?.allow).toBe(false)
+      expect(result.tree.gateDecision?.options).toEqual(['gather_more_low_risk', 'decline', 'defer'])
+    }
+  })
+
+  it('does not compute gateDecision when no proposedAction is present', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    const gateAction = vi.fn()
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'x' },
+      updateTree: vi.fn().mockResolvedValue(updatedTree),
+      gateAction,
+    })
+    expect(gateAction).not.toHaveBeenCalled()
+  })
+
   it('strips requestedArtifact and appends Rung-2 exhausted notice on the third follow-up', async () => {
     const userId = crypto.randomUUID()
     const { session } = await seedSession({ userId })

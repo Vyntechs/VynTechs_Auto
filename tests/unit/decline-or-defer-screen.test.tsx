@@ -1,0 +1,169 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+
+const { pushSpy } = vi.hoisted(() => ({ pushSpy: vi.fn() }))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushSpy }),
+}))
+
+beforeEach(() => {
+  pushSpy.mockReset()
+  vi.stubGlobal('fetch', vi.fn())
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
+})
+
+import { DeclineOrDefer } from '@/components/screens/decline-or-defer'
+import { DeclineOrDeferLive } from '@/components/screens/decline-or-defer-live'
+
+const baseProps = {
+  sessionId: 'sess-abc',
+  vehicleName: '2018 Ford F-150 — 3.5L EcoBoost',
+  vehicleVin: 'Session · sess-abc',
+  timer: '0:58',
+  gap: 'Required confidence 95%; current 80%.',
+  riskClass: 'destructive' as const,
+  optionKeys: ['gather_more_low_risk', 'decline', 'defer'] as Array<
+    'gather_more_low_risk' | 'decline' | 'defer'
+  >,
+}
+
+describe('DeclineOrDefer (presentational)', () => {
+  it('renders inert buttons in preview mode (no callback)', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="Test Vehicle"
+        vehicleVin="vin"
+        timer="0:00"
+        gap="why blocked"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+      />,
+    )
+    const btn = screen.getByRole('button', { name: /1 · A/i })
+    expect(btn).not.toBeDisabled()
+    fireEvent.click(btn)
+    // No callback, no error — just nothing happens
+  })
+
+  it('invokes onSelectOption with the clicked option number', () => {
+    const onSelect = vi.fn()
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        onSelectOption={onSelect}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /2 · B/i }))
+    expect(onSelect).toHaveBeenCalledWith(2)
+  })
+
+  it('disables all buttons and marks the pending one busy when pending', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        onSelectOption={vi.fn()}
+        pending={2}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /1 · A/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /2 · B/i })).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('shows error text in an alert region when error is set', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+        onSelectOption={vi.fn()}
+        error="something went wrong"
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent(/something went wrong/i)
+  })
+})
+
+describe('DeclineOrDeferLive (wired)', () => {
+  it('routes back to the session when "Gather more low-risk data" is clicked', () => {
+    render(<DeclineOrDeferLive {...baseProps} />)
+    fireEvent.click(screen.getByRole('button', { name: /gather more low-risk data/i }))
+    expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc')
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('POSTs reason=decline with gap+riskClass when "Decline this job" is clicked', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'declined', language: { customerMessage: '', internalNote: '' } }),
+    })
+    render(<DeclineOrDeferLive {...baseProps} />)
+    fireEvent.click(screen.getByRole('button', { name: /decline this job/i }))
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions'))
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/sessions/sess-abc/decline-or-defer',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          reason: 'decline',
+          gap: baseProps.gap,
+          riskClass: 'destructive',
+        }),
+      }),
+    )
+  })
+
+  it('POSTs reason=defer when "Defer for curator review" is clicked', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'deferred', language: { customerMessage: '', internalNote: '' } }),
+    })
+    render(<DeclineOrDeferLive {...baseProps} />)
+    fireEvent.click(screen.getByRole('button', { name: /defer for curator review/i }))
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions'))
+    const callBody = JSON.parse(
+      (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
+    )
+    expect(callBody.reason).toBe('defer')
+  })
+
+  it('surfaces a server error and clears pending state', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'language generation failed' }),
+    })
+    render(<DeclineOrDeferLive {...baseProps} />)
+    fireEvent.click(screen.getByRole('button', { name: /decline this job/i }))
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/language generation failed/i),
+    )
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /decline this job/i })).not.toBeDisabled()
+  })
+})
