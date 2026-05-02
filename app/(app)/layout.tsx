@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
@@ -10,16 +9,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!ctx) redirect('/sign-in')
 
   return (
-    <div>
-      <header>
-        <Link href="/sessions">Vyntechs</Link>
-        <nav>
-          <Link href="/sessions">Sessions</Link>
-          <Link href="/sessions/new">New</Link>
-          <Link href="/billing">Billing</Link>
-        </nav>
-      </header>
-      <main>{children}</main>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {children}
     </div>
   )
 }

@@ -1,0 +1,420 @@
+/* Vyntechs phone-kit components — depends on tokens in app/globals.css */
+
+/* ====== App shell ====== */
+.app {
+  background: var(--vt-bg);
+  color: var(--vt-fg);
+  height: 100%;
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--vt-rule);
+  background: var(--vt-graphite-1000);
+}
+.app-header .title {
+  font-family: var(--vt-font-sans);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.app-header .meta {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-3);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ====== Eyebrow ====== */
+.eyebrow {
+  font-family: var(--vt-font-sans);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.eyebrow.amber { color: var(--vt-amber-500); }
+
+/* ====== Module ====== */
+.module {
+  border: 1px solid var(--vt-rule);
+  border-radius: 6px;
+  background: var(--vt-graphite-950);
+  overflow: hidden;
+}
+.module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--vt-rule);
+}
+.module-num {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-amber-500);
+  margin-right: 8px;
+}
+.module-body { padding: 14px; }
+
+/* ====== Buttons ====== */
+.btn {
+  border: 0;
+  border-radius: 4px;
+  padding: 11px 14px;
+  font-family: var(--vt-font-sans);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background var(--vt-dur-1) var(--vt-ease);
+}
+.btn:disabled { cursor: not-allowed; opacity: 0.5; }
+.btn-primary {
+  background: var(--vt-amber-500);
+  color: var(--vt-graphite-1000);
+}
+.btn-primary:hover:not(:disabled) { background: var(--vt-amber-400); }
+.btn-primary:active:not(:disabled) {
+  background: var(--vt-amber-600);
+  box-shadow: var(--vt-shadow-inset-press);
+}
+.btn-secondary {
+  background: var(--vt-graphite-900);
+  color: var(--vt-fg);
+  border: 1px solid var(--vt-rule-strong);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--vt-fg-2);
+  border: 1px solid var(--vt-rule);
+}
+
+/* ====== Pills ====== */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--vt-font-sans);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pill.active {
+  background: oklch(76% 0.18 72 / 0.16);
+  color: var(--vt-amber-500);
+}
+.pill.active .dot {
+  background: var(--vt-amber-500);
+  animation: heartbeat 1.6s ease-in-out infinite;
+}
+.pill.queued {
+  background: transparent;
+  border: 1px solid var(--vt-rule-strong);
+  color: var(--vt-fg-2);
+}
+.pill.queued .dot { background: var(--vt-status-queued); }
+.pill.deferred {
+  background: oklch(68% 0.13 300 / 0.18);
+  color: var(--vt-status-deferred);
+}
+.pill.deferred .dot { background: var(--vt-status-deferred); }
+
+@keyframes heartbeat {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.active .dot { animation: none; }
+  .tree-step.active .node-dot { animation: none; }
+  .hairline-progress::before { animation: none; transform: translateX(0); width: 100%; opacity: 0.5; }
+}
+
+/* ====== DTC chip ====== */
+.dtc-chip {
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 2px;
+  background: var(--vt-graphite-900);
+  border: 1px solid var(--vt-rule);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-2);
+}
+
+/* ====== Confidence ====== */
+.confidence-bar {
+  display: flex;
+  gap: 1px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.confidence-bar .filled { background: var(--vt-amber-500); }
+.confidence-bar .empty { background: var(--vt-graphite-800); }
+
+/* ====== Capture toolbar (phone bottom) ====== */
+.capture-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--vt-rule);
+  background: var(--vt-graphite-1000);
+}
+.capture-bar button {
+  background: transparent;
+  border: 0;
+  padding: 14px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--vt-fg-2);
+  cursor: pointer;
+  font-family: var(--vt-font-sans);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-right: 1px solid var(--vt-rule);
+  min-height: 44px;
+}
+.capture-bar button:last-child { border-right: 0; }
+.capture-bar button:hover { color: var(--vt-amber-500); background: var(--vt-graphite-950); }
+.capture-bar button.primary { color: var(--vt-amber-500); }
+
+/* ====== Tree rail ====== */
+.tree-rail {
+  display: flex;
+  flex-direction: column;
+  padding-left: 14px;
+  border-left: 2px solid var(--vt-rule);
+  position: relative;
+}
+.tree-step {
+  position: relative;
+  padding: 8px 0 8px 8px;
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  border-bottom: 1px dashed var(--vt-graphite-800);
+}
+.tree-step:last-child { border-bottom: 0; }
+.tree-step .node-dot {
+  position: absolute;
+  left: -21px;
+  top: 11px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--vt-graphite-700);
+  border: 2px solid var(--vt-graphite-1000);
+}
+.tree-step.done .node-dot { background: var(--vt-status-closed); }
+.tree-step.active { color: var(--vt-fg); }
+.tree-step.active .node-dot {
+  background: var(--vt-amber-500);
+  animation: heartbeat 1.6s ease-in-out infinite;
+}
+.tree-step.pending { color: var(--vt-fg-3); }
+.tree-step .num {
+  font-family: var(--vt-font-mono);
+  color: var(--vt-fg-3);
+  margin-right: 6px;
+  font-size: 10px;
+}
+
+/* ====== Risk glyph (inline) ====== */
+.risk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vt-font-sans);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.risk-zero { color: var(--vt-risk-zero); }
+.risk-low { color: var(--vt-risk-low); }
+.risk-medium { color: var(--vt-risk-medium); }
+.risk-high { color: var(--vt-risk-high); }
+.risk-destructive { color: var(--vt-risk-destructive); }
+.risk .glyph {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.risk.risk-low .glyph {
+  background: radial-gradient(circle at 50% 75%, currentColor 0 35%, transparent 36%);
+}
+.risk.risk-medium .glyph {
+  background: linear-gradient(180deg, transparent 50%, currentColor 50%);
+}
+.risk.risk-high .glyph {
+  background: conic-gradient(currentColor 0 75%, transparent 75% 100%);
+}
+.risk.risk-destructive .glyph { background: currentColor; }
+
+/* ====== Vehicle header strip ====== */
+.vehicle-strip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--vt-rule);
+  background: var(--vt-graphite-1000);
+}
+.vehicle-strip .vehicle-name {
+  font-family: var(--vt-font-sans);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+}
+.vehicle-strip .vin {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-3);
+}
+.vehicle-strip .timer {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-amber-500);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ====== Loading hairline ====== */
+.hairline-progress {
+  position: relative;
+  height: 2px;
+  background: var(--vt-graphite-850);
+  overflow: hidden;
+}
+.hairline-progress::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 36%;
+  background: var(--vt-amber-500);
+  animation: slide 1.6s var(--vt-ease-instrument) infinite;
+}
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(380%); }
+}
+
+/* ====== Decline-or-Defer surface ====== */
+.dod-surface { padding: 24px 18px; }
+.dod-headline {
+  font-family: var(--vt-font-serif);
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
+  margin: 0 0 10px;
+}
+.dod-gap {
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg-2);
+  line-height: 1.5;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--vt-rule);
+}
+
+/* ====== Queue rows ====== */
+.queue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--vt-rule);
+}
+.queue-row:last-child { border-bottom: 0; }
+.queue-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.queue-vehicle {
+  font-family: var(--vt-font-sans);
+  font-weight: 500;
+  font-size: 13px;
+}
+.queue-complaint {
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  line-height: 1.4;
+}
+.queue-time {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-3);
+}
+
+/* ====== Outcome capture fields ====== */
+.field {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--vt-rule);
+}
+.field:last-child { border-bottom: 0; }
+.field label {
+  display: block;
+  font-family: var(--vt-font-sans);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  margin-bottom: 6px;
+}
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  color: var(--vt-fg);
+  resize: none;
+  outline: 0;
+}
+.field input:focus,
+.field textarea:focus {
+  border-bottom: 1px solid var(--vt-amber-500);
+}
+
+.ai-reject {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: oklch(62% 0.22 25 / 0.10);
+  border-left: 2px solid var(--vt-risk-destructive);
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--vt-fg);
+  line-height: 1.4;
+}
