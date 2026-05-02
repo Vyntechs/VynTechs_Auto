@@ -39,7 +39,8 @@ export function DeclineOrDefer({
           className="eyebrow"
           style={{ color: 'var(--vt-risk-destructive)' }}
         >
-          ⏵ {riskLabel}
+          <span aria-hidden="true">⏵ </span>
+          {riskLabel}
         </span>
         <h2 className="dod-headline" style={{ marginTop: 10 }}>
           Confidence too low to commit to a destructive action.
