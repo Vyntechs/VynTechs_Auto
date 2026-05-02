@@ -46,7 +46,7 @@ describe('captureArtifact', () => {
     return { userId, profile, session }
   }
 
-  it('happy path: returns ok with artifactId, storageKey, and kind', async () => {
+  it('happy path: returns ok with artifactId, storageKey, kind, and extractionStatus', async () => {
     const { userId, session } = await seedSession()
     const bytes = makeBytes(512)
     const uploadArtifact = vi.fn().mockResolvedValue('session-id/photo/uuid.jpg')
@@ -68,6 +68,8 @@ describe('captureArtifact', () => {
       expect(result.artifactId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
       )
+      // photo does not auto-trigger extraction — status stays 'pending'
+      expect(result.extractionStatus).toBe('pending')
     }
   })
 
@@ -323,6 +325,55 @@ describe('captureArtifact', () => {
       expect(uploadArtifact).toHaveBeenCalledWith(
         expect.objectContaining({ mimeType: 'audio/webm;codecs=opus' }),
       )
+    }
+  })
+
+  it('returns extractionStatus "done" when processExtraction succeeds for a high-signal kind', async () => {
+    const { userId, session } = await seedSession()
+    const bytes = makeBytes(200)
+    const uploadArtifact = vi.fn().mockResolvedValue('session-id/scan_screen/uuid.png')
+    const processExtraction = vi.fn().mockResolvedValue(undefined)
+
+    const result = await captureArtifact({
+      db,
+      userId,
+      sessionId: session.id,
+      kind: 'scan_screen',
+      file: { bytes, mimeType: 'image/png', size: 200 },
+      uploadArtifact,
+      createArtifact,
+      processExtraction,
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.extractionStatus).toBe('done')
+      expect(processExtraction).toHaveBeenCalledWith(db, result.artifactId)
+    }
+  })
+
+  it('returns extractionStatus "failed" when processExtraction throws for a high-signal kind', async () => {
+    const { userId, session } = await seedSession()
+    const bytes = makeBytes(200)
+    const uploadArtifact = vi.fn().mockResolvedValue('session-id/wiring_diagram/uuid.png')
+    const processExtraction = vi.fn().mockRejectedValue(new Error('vision API timeout'))
+
+    const result = await captureArtifact({
+      db,
+      userId,
+      sessionId: session.id,
+      kind: 'wiring_diagram',
+      file: { bytes, mimeType: 'image/png', size: 200 },
+      uploadArtifact,
+      createArtifact,
+      processExtraction,
+    })
+
+    // Artifact is still created; extractionStatus reflects the failure
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.extractionStatus).toBe('failed')
+      expect(result.artifactId).toBeTruthy()
     }
   })
 })
