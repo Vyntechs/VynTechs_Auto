@@ -3524,6 +3524,19 @@ DevTools → Application → Manifest. Confirm the manifest is parsed without er
 
 ---
 
+## Phase H — Implementation corrections (applied after H3)
+
+The plan's Phase H is faithful in shape but a few details were tightened against the Phase E reality. The points below are authoritative; the inline blocks remain reference.
+
+1. **`start_url` is `/today`, not `/sessions`** — Phase E shipped `/today` as the tech home (T-PH-2). `/sessions` is the history list. The PWA install should land on the active surface, so `/today` is correct.
+2. **Theme/background color sourced from token** — plan uses `#0a0a0a`. The actual canvas token is `--vt-graphite-1000: oklch(14% 0.008 260)` whose sRGB equivalent is `#0d0d10`. Manifest spec wants hex, so the conversion lives in the manifest function but the value is documented as derived from the token.
+3. **Icons rendered from the Workshop Instrument sigil** — plan says "any tool, placeholder square." Used the actual sigil at `.design-from-claude/vyntechs-design-system/project/assets/brand/sigil.svg` (graphite verticals + amber horizontals), placed on a `#0d0d10` background tile, rasterized via macOS `qlmanage -t` at 192 + 512. SVG source committed at `public/icons/icon.svg` for future re-rendering. No new dependency added (`sharp`, etc. — sips/qlmanage handled it).
+4. **No "offline banner"** — the Phase E handoff prose mentioned an offline banner as part of H. The actual plan H1/H2/H3 doesn't include one. Sticking to plan-as-written; if the banner is wanted, add as a small new task that uses `navigator.onLine` + a `.field`-style amber strip in the existing app chrome.
+5. **Service worker test surface** — the `public/sw.js` file isn't import-testable, so coverage is split across two test types: behavioral tests on `<SwRegister />` (dev no-register, prod register-/sw.js, no DOM output) and structural tests on the file itself (exists in public/, contains `/api/` and `/_next/` skip patterns). This is the right shape — full SW lifecycle testing requires Playwright.
+6. **`vi.stubEnv('NODE_ENV', ...)` for env stubbing** — `Object.defineProperty(process.env, 'NODE_ENV', …)` throws on Node ≥20 (`process.env` is non-configurable for that key). Use `vi.stubEnv` + `vi.unstubAllEnvs` in `afterEach` instead. Mirror this for any future env-dependent test.
+
+---
+
 ## Phase I — Multi-Modal Capture Pipeline (10 tasks)
 
 Per spec §7.1 (Multi-Modal Capture Pipeline + Vision OCR) and §10 (Describe-First vision policy). Builds: an `artifacts` table, Supabase Storage bucket for raw uploads (swapped to S3 in Phase J), camera + audio + video capture components on the phone layout, a specialized scan-tool screen capture mode with vision OCR, audio transcription, and a multi-modal `advance` flow that the tree engine reasons over while honoring describe-first.
