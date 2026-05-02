@@ -9,6 +9,9 @@ import {
   real,
   boolean,
 } from 'drizzle-orm/pg-core'
+import type { TreeState } from '../ai/tree-engine'
+
+export type { TreeState }
 
 export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
 
@@ -36,41 +39,6 @@ export type IntakePayload = {
   customerComplaint: string
 }
 
-export type TreeState = {
-  nodes: Array<{
-    id: string
-    label: string
-    status: 'pending' | 'active' | 'resolved' | 'pruned'
-    rationale?: string
-    children?: string[]
-  }>
-  currentNodeId: string
-  message: string
-  done?: boolean
-  rootCauseSummary?: string
-  requestedArtifact?: {
-    kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
-    prompt: string
-  }
-  proposedAction?: {
-    description: string
-    confidence: number
-    expectedSignal?: string
-    confidenceGap?: string
-    whatWouldClose?: string
-  }
-  gateDecision?: {
-    allow: boolean
-    riskClass: RiskClass
-    threshold: number
-    confidence: number
-    rationale: string
-    gap?: string
-    options?: Array<'gather_more_low_risk' | 'decline' | 'defer'>
-    confidenceGap?: string
-    whatWouldClose?: string
-  }
-}
 
 export type OutcomePayload = {
   rootCause: string

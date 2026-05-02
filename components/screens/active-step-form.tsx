@@ -3,8 +3,22 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { DotsThree } from '@phosphor-icons/react/dist/ssr'
+import { PhotoCapture } from '@/components/session/photo-capture'
+import { AudioCapture } from '@/components/session/audio-capture'
+import { VideoCapture } from '@/components/session/video-capture'
 
-export function ActiveStepForm({ sessionId }: { sessionId: string }) {
+type RequestedArtifact = {
+  kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+  prompt: string
+}
+
+type Props = {
+  sessionId: string
+  nodeId: string
+  requestedArtifact?: RequestedArtifact
+}
+
+export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) {
   const [observation, setObservation] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -36,6 +50,37 @@ export function ActiveStepForm({ sessionId }: { sessionId: string }) {
 
   return (
     <form onSubmit={submit}>
+      {requestedArtifact && (
+        <div style={{ marginBottom: 12 }}>
+          {(requestedArtifact.kind === 'photo' ||
+            requestedArtifact.kind === 'scan_screen' ||
+            requestedArtifact.kind === 'wiring_diagram') && (
+            <PhotoCapture
+              sessionId={sessionId}
+              nodeId={nodeId}
+              kind={requestedArtifact.kind}
+              label={requestedArtifact.prompt}
+              onUploaded={() => router.refresh()}
+            />
+          )}
+          {requestedArtifact.kind === 'audio' && (
+            <AudioCapture
+              sessionId={sessionId}
+              nodeId={nodeId}
+              prompt={requestedArtifact.prompt}
+              onUploaded={() => router.refresh()}
+            />
+          )}
+          {requestedArtifact.kind === 'video' && (
+            <VideoCapture
+              sessionId={sessionId}
+              nodeId={nodeId}
+              label={requestedArtifact.prompt}
+              onUploaded={() => router.refresh()}
+            />
+          )}
+        </div>
+      )}
       <label htmlFor={`obs-${sessionId}`} className="vt-sr-only">
         Observation
       </label>
