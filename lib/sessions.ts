@@ -217,6 +217,7 @@ export async function closeSessionForUser(opts: {
 
 type CaptureKind = Artifact['kind']
 const ALLOWED_CAPTURE_KINDS = ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'] as Array<CaptureKind>
+const HIGH_SIGNAL_KINDS = new Set<CaptureKind>(['scan_screen', 'wiring_diagram', 'audio'])
 export const MAX_CAPTURE_BYTES = 25 * 1024 * 1024 // 25 MB
 
 export type CaptureArtifactResult =
@@ -238,6 +239,9 @@ export async function captureArtifact(opts: {
     mimeType: string
   }) => Promise<string>
   createArtifact: (db: AppDb, input: NewArtifact) => Promise<string>
+  /** Optional: auto-run extraction for high-signal kinds inline after capture.
+   *  Injected so existing tests remain unaffected (omit = no auto-extraction). */
+  processExtraction?: (db: AppDb, artifactId: string) => Promise<void>
 }): Promise<CaptureArtifactResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -282,6 +286,17 @@ export async function captureArtifact(opts: {
     durationMs: opts.durationMs,
     extractionStatus: 'pending',
   })
+
+  // Auto-extract inline for high-signal kinds when a processor is injected.
+  // On failure: log and continue — the artifact exists; the tech can retry
+  // via POST /api/artifacts/:id/extract.
+  if (opts.processExtraction && HIGH_SIGNAL_KINDS.has(kind)) {
+    try {
+      await opts.processExtraction(opts.db, artifactId)
+    } catch (err) {
+      console.error(`[captureArtifact] inline extraction failed for ${artifactId}:`, err)
+    }
+  }
 
   return { ok: true, artifactId, storageKey, kind }
 }

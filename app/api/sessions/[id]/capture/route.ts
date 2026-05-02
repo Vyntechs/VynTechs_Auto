@@ -4,6 +4,7 @@ import { captureArtifact } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { uploadArtifact } from '@/lib/storage/client'
 import { createArtifact } from '@/lib/db/queries'
+import { processArtifactExtraction } from '@/lib/ai/extraction-worker'
 
 export async function POST(
   req: Request,
@@ -44,6 +45,7 @@ export async function POST(
     durationMs,
     uploadArtifact,
     createArtifact,
+    processExtraction: processArtifactExtraction,
   })
 
   if (!result.ok) {
