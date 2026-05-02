@@ -1,8 +1,7 @@
 'use client'
 
 import { useId, useRef, useState } from 'react'
-
-const MAX_BYTES = 25 * 1024 * 1024
+import { MAX_CAPTURE_BYTES } from '@/lib/sessions'
 
 type Props = {
   sessionId: string
@@ -32,7 +31,7 @@ export function VideoCapture({
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (file.size > MAX_BYTES) {
+    if (file.size > MAX_CAPTURE_BYTES) {
       setError('Clip too large (max 25 MB). Re-record a shorter clip.')
       if (inputRef.current) inputRef.current.value = ''
       return
@@ -69,6 +68,7 @@ export function VideoCapture({
 
   return (
     <div>
+      {/* maxSeconds is advisory — the actual gate is the 25 MB size check */}
       {maxSeconds != null && (
         <p
           id={captionId}
