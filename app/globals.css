@@ -1,6 +1,10 @@
 /* ============================================================
    Vyntechs Design System — Foundations
-   Aesthetic: "Workshop Instrument"
+   Aesthetic: "Workshop Instrument" (bone canvas iteration, 2026-05-02)
+   - Bone (warm off-manilla) as canonical canvas
+   - Single signal-navy accent: blueprint ink on bond paper
+   - Instrument Serif as default body face; sans for chrome only
+   - Calibrated risk ramp + element palette
    ============================================================ */
 
 /* ---------- Webfonts ----------------------------------------
@@ -22,7 +26,7 @@
      COLOR — RAW PALETTE (OKLCH for perceptual evenness)
      =========================================================== */
 
-  /* Graphite — primary surface family (dark mode is canonical) */
+  /* Graphite — ink + chrome family. Used for primary fg on bone. */
   --vt-graphite-1000: oklch(14% 0.008 260);
   --vt-graphite-950:  oklch(17% 0.009 260);
   --vt-graphite-900:  oklch(20% 0.010 260);
@@ -37,7 +41,7 @@
   --vt-graphite-100:  oklch(95% 0.004 260);
   --vt-graphite-50:   oklch(98% 0.003 260);
 
-  /* Bone — light-mode paper family. Warm, slightly off-white. */
+  /* Bone — canonical surface family. Warm, slightly off-white paper. */
   --vt-bone-50:  oklch(98.5% 0.008 80);
   --vt-bone-100: oklch(96%   0.010 80);
   --vt-bone-200: oklch(92%   0.012 80);
@@ -49,26 +53,32 @@
   --vt-bone-800: oklch(26%   0.012 60);
   --vt-bone-900: oklch(18%   0.010 55);
 
-  /* Ignition — the ONE primary accent. Rich, saturated, premium gold-orange. */
-  --vt-amber-200: oklch(94% 0.08   90);
-  --vt-amber-300: oklch(89% 0.14   88);
-  --vt-amber-400: oklch(84% 0.19   82);
-  --vt-amber-500: oklch(80% 0.215  78);
-  --vt-amber-600: oklch(72% 0.215  62);
-  --vt-amber-700: oklch(60% 0.20   48);
-  --vt-amber-800: oklch(46% 0.16   42);
+  /* Signal — the ONE primary accent. A clear, confident navy.
+     Reads premium-instrument on warm manilla: blueprint ink, fountain
+     pen on bond paper, watch-dial indices. Bright enough to pop
+     against bone, dark enough to feel deliberate. */
+  --vt-signal-200: oklch(90% 0.04  240);
+  --vt-signal-300: oklch(78% 0.10  240);
+  --vt-signal-400: oklch(62% 0.15  245);
+  --vt-signal-500: oklch(50% 0.18  248);   /* canonical brand signal-navy */
+  --vt-signal-600: oklch(42% 0.17  250);
+  --vt-signal-700: oklch(34% 0.14  252);
+  --vt-signal-800: oklch(26% 0.10  254);
 
-  /* Element-coded secondary palette — high-contrast signal colors. */
-  --vt-elem-spark:   oklch(82% 0.20  62);
-  --vt-elem-fuel:    oklch(78% 0.19  140);
-  --vt-elem-coolant: oklch(78% 0.16  220);
-  --vt-elem-voltage: oklch(86% 0.20  108);
-  --vt-elem-oxygen:  oklch(80% 0.16  185);
-  --vt-elem-vacuum:  oklch(74% 0.20  300);
-  --vt-elem-brake:   oklch(72% 0.21  20);
-  --vt-elem-mech:    oklch(82% 0.14  85);
+  /* Element-coded secondary palette — high-contrast, vibrant but never
+     blinding. Each is a "signal color" for a diagnostic domain. Used
+     in tags, charts, branch labels, and confidence visualizations
+     alongside risk colors. */
+  --vt-elem-spark:   oklch(82% 0.20  62);   /* ignition / spark — burnt orange */
+  --vt-elem-fuel:    oklch(78% 0.19  140);  /* fuel / combustion — fresh green */
+  --vt-elem-coolant: oklch(78% 0.16  220);  /* coolant / thermal — cyan blue */
+  --vt-elem-voltage: oklch(86% 0.20  108);  /* voltage / electrical — chartreuse */
+  --vt-elem-oxygen:  oklch(80% 0.16  185);  /* oxygen / sensors — teal */
+  --vt-elem-vacuum:  oklch(74% 0.20  300);  /* vacuum / pneumatic — violet */
+  --vt-elem-brake:   oklch(72% 0.21  20);   /* brake / hydraulic — red-coral */
+  --vt-elem-mech:    oklch(82% 0.14  85);   /* mechanical / wear — warm sand */
 
-  /* Risk-class ramp — calibrated to be readable on graphite-950. */
+  /* Risk-class ramp — calibrated, readable on bone. Semantic only. */
   --vt-risk-zero:        oklch(72% 0.06  220);
   --vt-risk-low:         oklch(74% 0.13  170);
   --vt-risk-medium:      oklch(82% 0.16  92);
@@ -76,7 +86,7 @@
   --vt-risk-destructive: oklch(62% 0.22  25);
 
   /* Status — for session/queue states. Intentionally desaturated. */
-  --vt-status-active:    var(--vt-amber-500);
+  --vt-status-active:    var(--vt-signal-500);
   --vt-status-queued:    oklch(72% 0.04  240);
   --vt-status-deferred:  oklch(68% 0.13  300);
   --vt-status-declined:  oklch(60% 0.10  20);
@@ -84,37 +94,42 @@
   --vt-status-comeback:  oklch(70% 0.16  50);
 
   /* ===========================================================
-     COLOR — SEMANTIC TOKENS (DARK is the canonical default)
+     COLOR — SEMANTIC TOKENS (BONE is the canonical default)
+     Off-manilla paper. No pure white. Graphite ink only.
      =========================================================== */
 
-  --vt-bg:           var(--vt-graphite-1000);
-  --vt-surface:      var(--vt-graphite-950);
-  --vt-surface-2:    var(--vt-graphite-900);
-  --vt-surface-3:    var(--vt-graphite-850);
-  --vt-overlay:      oklch(8% 0.005 260 / 0.72);
+  --vt-bg:           var(--vt-bone-50);     /* page — warm off-manilla */
+  --vt-surface:      var(--vt-bone-100);    /* card surface */
+  --vt-surface-2:    var(--vt-bone-200);    /* raised / inset */
+  --vt-surface-3:    var(--vt-bone-300);    /* divider rail */
+  --vt-overlay:      oklch(20% 0.012 60 / 0.55);
 
-  --vt-fg:           var(--vt-graphite-100);
-  --vt-fg-2:         var(--vt-graphite-300);
-  --vt-fg-3:         var(--vt-graphite-500);
-  --vt-fg-disabled:  var(--vt-graphite-700);
-  --vt-fg-on-amber:  var(--vt-graphite-1000);
+  --vt-fg:           var(--vt-bone-900);    /* primary ink */
+  --vt-fg-2:         var(--vt-bone-800);    /* secondary text */
+  --vt-fg-3:         var(--vt-bone-700);    /* tertiary / labels */
+  --vt-fg-disabled:  var(--vt-bone-500);
+  --vt-fg-on-signal: var(--vt-bone-50);     /* light fg on signal-navy fills */
 
-  --vt-rule:         var(--vt-graphite-800);
-  --vt-rule-strong:  var(--vt-graphite-700);
-  --vt-border:       var(--vt-graphite-800);
+  --vt-rule:         var(--vt-bone-300);
+  --vt-rule-strong:  var(--vt-bone-400);
+  --vt-border:       var(--vt-bone-300);
 
-  --vt-accent:       var(--vt-amber-500);
-  --vt-accent-hover: var(--vt-amber-400);
-  --vt-accent-press: var(--vt-amber-600);
-  --vt-accent-bg:    oklch(76% 0.18 72 / 0.10);
+  --vt-accent:       var(--vt-signal-500);
+  --vt-accent-hover: var(--vt-signal-600);
+  --vt-accent-press: var(--vt-signal-700);
+  --vt-accent-bg:    oklch(50% 0.18 248 / 0.10);
 
-  --vt-focus-ring:   var(--vt-amber-400);
+  --vt-focus-ring:   var(--vt-signal-600);
 
   /* ===========================================================
      TYPOGRAPHY — FAMILIES
-     - Serif: Instrument Serif — editorial reading face (display, gravity)
-     - Sans:  Inter Tight — UI chrome, buttons, body, micro labels
-     - Mono:  JetBrains Mono — VINs, DTCs, measurements, IDs
+     - Serif: Instrument Serif — PRIMARY body face. Editorial
+       gravity throughout the system. The brand voice.
+     - Sans: Inter Tight — utility only. Tiny dense data, micro
+       labels, ALL-CAPS eyebrows, dashboard chrome where the
+       serif loses legibility under 12px.
+     - Mono: JetBrains Mono — VINs, DTCs, measurements,
+       confidence numerals, IDs, timestamps.
      The next/font variables (--font-inter-tight, --font-jetbrains-mono)
      are injected by app/layout.tsx and prepended to the family chain.
      =========================================================== */
@@ -123,7 +138,9 @@
   --vt-font-sans:  var(--font-inter-tight), "Inter Tight", -apple-system, "SF Pro Text", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --vt-font-mono:  var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --vt-font-body: var(--vt-font-sans);
+  /* The default body face. Everything inherits this unless it
+     explicitly opts into mono (data) or sans (micro / chrome). */
+  --vt-font-body: var(--vt-font-serif);
 
   /* Type scale — based on a 14px body, 1.2 modular ramp. */
   --vt-fs-12:  0.75rem;
@@ -179,17 +196,16 @@
      =========================================================== */
   --vt-stroke-hair:    1px solid var(--vt-rule);
   --vt-stroke-strong:  1px solid var(--vt-rule-strong);
-  --vt-stroke-amber:   1px solid var(--vt-accent);
+  --vt-stroke-signal:  1px solid var(--vt-accent);
 
   /* ===========================================================
-     SHADOWS — used surgically for elevated layers only.
+     SHADOWS — surgical, elevated layers only.
      =========================================================== */
-  --vt-shadow-pop: 0 1px 0 oklch(100% 0 0 / 0.04) inset,
-                   0 8px 24px -8px oklch(0% 0 0 / 0.6),
-                   0 2px 4px oklch(0% 0 0 / 0.4);
-  --vt-shadow-sheet: 0 1px 0 oklch(100% 0 0 / 0.04) inset,
-                     0 24px 60px -12px oklch(0% 0 0 / 0.7);
-  --vt-shadow-inset-press: inset 0 1px 0 oklch(0% 0 0 / 0.3);
+  --vt-shadow-pop:   0 1px 0 oklch(100% 0 0 / 0.6) inset,
+                     0 8px 24px -10px oklch(40% 0.04 70 / 0.25),
+                     0 1px 2px oklch(40% 0.04 70 / 0.10);
+  --vt-shadow-sheet: 0 24px 60px -16px oklch(40% 0.04 70 / 0.30);
+  --vt-shadow-inset-press: inset 0 1px 0 oklch(0% 0 0 / 0.18);
 
   /* ===========================================================
      MOTION — calm. No bounces. Quick, decisive.
@@ -212,36 +228,6 @@
 }
 
 /* ===========================================================
-   LIGHT MODE — opt-in via [data-theme="light"]
-   =========================================================== */
-:root[data-theme="light"] {
-  --vt-bg:           var(--vt-bone-50);
-  --vt-surface:      var(--vt-bone-100);
-  --vt-surface-2:    var(--vt-bone-50);
-  --vt-surface-3:    oklch(99% 0.006 80);
-  --vt-overlay:      oklch(20% 0.01 60 / 0.55);
-
-  --vt-fg:           var(--vt-bone-900);
-  --vt-fg-2:         var(--vt-bone-700);
-  --vt-fg-3:         var(--vt-bone-600);
-  --vt-fg-disabled:  var(--vt-bone-400);
-
-  --vt-rule:         var(--vt-bone-200);
-  --vt-rule-strong:  var(--vt-bone-300);
-  --vt-border:       var(--vt-bone-300);
-
-  --vt-accent:       var(--vt-amber-700);
-  --vt-accent-hover: var(--vt-amber-600);
-  --vt-accent-press: var(--vt-amber-800);
-  --vt-accent-bg:    oklch(76% 0.18 72 / 0.16);
-
-  --vt-shadow-pop:   0 1px 0 oklch(100% 0 0 / 0.6) inset,
-                     0 8px 24px -10px oklch(40% 0.04 70 / 0.25),
-                     0 1px 2px oklch(40% 0.04 70 / 0.10);
-  --vt-shadow-sheet: 0 24px 60px -16px oklch(40% 0.04 70 / 0.30);
-}
-
-/* ===========================================================
    BASE — global reset + defaults
    =========================================================== */
 *, *::before, *::after { box-sizing: border-box; }
@@ -251,14 +237,13 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--vt-bg);
   color: var(--vt-fg);
-  font-family: var(--vt-font-sans);
+  font-family: var(--vt-font-body);
   font-size: var(--vt-fs-14);
   line-height: var(--vt-lh-normal);
   letter-spacing: var(--vt-tr-normal);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
-  font-feature-settings: "ss01", "ss02", "cv11";
 }
 
 a { color: inherit; text-decoration: none; }
@@ -271,7 +256,7 @@ button { font: inherit; }
   border-radius: var(--vt-radius-2);
 }
 
-::selection { background: var(--vt-amber-500); color: var(--vt-graphite-1000); }
+::selection { background: var(--vt-signal-500); color: var(--vt-bone-50); }
 
 /* ===========================================================
    SEMANTIC TYPE — utility classes for consistent type

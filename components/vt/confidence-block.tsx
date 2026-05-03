@@ -10,7 +10,7 @@ export function ConfidenceBlock({
   blocked?: boolean
 }) {
   const filled = Math.min(1, Math.max(0, value))
-  const color = blocked ? 'var(--vt-risk-destructive)' : 'var(--vt-amber-500)'
+  const color = blocked ? 'var(--vt-risk-destructive)' : 'var(--vt-signal-500)'
   const percent = (value * 100).toFixed(1)
   const gatePercent = gate ? (gate * 100).toFixed(0) : null
 
