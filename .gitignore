@@ -26,6 +26,9 @@ coverage/
 .DS_Store
 .design-from-claude/
 
+# scratch + design-handoff bundles
+tmp/
+
 # Agent skills — managed by `npx skills` (see skills-lock.json).
 # Run `npx skills experimental_install` after clone to restore.
 .agents/
