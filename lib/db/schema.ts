@@ -203,3 +203,50 @@ export const retrievalCache = pgTable('retrieval_cache', {
 
 export type RetrievalCache = typeof retrievalCache.$inferSelect
 export type NewRetrievalCache = typeof retrievalCache.$inferInsert
+
+// Drizzle has no first-class vector type — `embedding` is declared jsonb here as
+// a bridge so Drizzle can generate a migration; Step 3 of K1 hand-edits the
+// generated SQL to swap the column for `vector(1536)` and adds an HNSW index.
+export const corpusEntries = pgTable('corpus_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  vehicleYear: integer('vehicle_year').notNull(),
+  vehicleMake: text('vehicle_make').notNull(),
+  vehicleModel: text('vehicle_model').notNull(),
+  vehicleEngine: text('vehicle_engine'),
+  buildDateStart: text('build_date_start'),
+  buildDateEnd: text('build_date_end'),
+  symptomTags: text('symptom_tags').array().notNull().default([]),
+  dtcs: text('dtcs').array().notNull().default([]),
+  freezeFramePattern: jsonb('freeze_frame_pattern').$type<Record<string, string | number>>(),
+  rootCause: text('root_cause').notNull(),
+  summary: text('summary').notNull(),
+  actionType: text('action_type', {
+    enum: ['part_replacement', 'repair', 'adjustment', 'cleaning', 'no_fix', 'referred'],
+  }).notNull(),
+  partInfo: jsonb('part_info').$type<{ name?: string; oemNumber?: string; cost?: number }>(),
+  verification: jsonb('verification').$type<{
+    codesCleared: boolean
+    testDrive: boolean
+    symptomsResolved: 'yes' | 'no' | 'partial'
+  }>().notNull(),
+  sourceShopId: uuid('source_shop_id').references(() => shops.id),
+  sourceSessionId: uuid('source_session_id').references(() => sessions.id),
+  curatedByUserId: uuid('curated_by_user_id').references(() => profiles.id),
+  successConfirmCount: integer('success_confirm_count').notNull().default(0),
+  comebackRecordedCount: integer('comeback_recorded_count').notNull().default(0),
+  confidenceScore: real('confidence_score').notNull().default(0.5),
+  isCuratorEntry: boolean('is_curator_entry').notNull().default(false),
+  isRetired: boolean('is_retired').notNull().default(false),
+  embedding: jsonb('embedding').$type<number[] | null>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const corpusEntriesRelations = relations(corpusEntries, ({ one }) => ({
+  shop: one(shops, { fields: [corpusEntries.sourceShopId], references: [shops.id] }),
+  session: one(sessions, { fields: [corpusEntries.sourceSessionId], references: [sessions.id] }),
+  curator: one(profiles, { fields: [corpusEntries.curatedByUserId], references: [profiles.id] }),
+}))
+
+export type CorpusEntry = typeof corpusEntries.$inferSelect
+export type NewCorpusEntry = typeof corpusEntries.$inferInsert
