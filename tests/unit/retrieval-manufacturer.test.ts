@@ -52,4 +52,40 @@ describe('ManufacturerRecallAdapter', () => {
     }, new AbortController().signal)
     expect(r).toEqual([])
   })
+
+  it('does not match on script/style/comment content (no false positives)', async () => {
+    const noisy = `
+<html><body>
+<!-- recall: ignore me -->
+<script>const note = "recall lookup table";</script>
+<style>.recall-summary { color: red; }</style>
+<h2>Owner Help Center</h2>
+<p>Welcome to the support page.</p>
+</body></html>
+`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => noisy }))
+    const { ManufacturerRecallAdapter } = await import('@/lib/retrieval/adapters/manufacturer-recall')
+    const a = new ManufacturerRecallAdapter()
+    const r = await a.query({
+      vehicleYear: 2018, vehicleMake: 'Ford', vehicleModel: 'F-150',
+      complaintText: 'x',
+    }, new AbortController().signal)
+    expect(r).toEqual([])
+  })
+
+  it('drops sections where a recall heading has no following paragraph', async () => {
+    const headingOnly = `
+<html><body>
+<h1>Recall: Loose nut behind the wheel</h1>
+</body></html>
+`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => headingOnly }))
+    const { ManufacturerRecallAdapter } = await import('@/lib/retrieval/adapters/manufacturer-recall')
+    const a = new ManufacturerRecallAdapter()
+    const r = await a.query({
+      vehicleYear: 2018, vehicleMake: 'Ford', vehicleModel: 'F-150',
+      complaintText: 'x',
+    }, new AbortController().signal)
+    expect(r).toEqual([])
+  })
 })

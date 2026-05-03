@@ -49,9 +49,14 @@ function parseRecallSummaries(html: string, baseUrl: string): RetrievalResult[] 
 
 function extractFollowingParagraph(s: string): string {
   const m = s.match(/<p[^>]*>([\s\S]*?)<\/p>/i)
-  return m ? stripTags(m[1]) : stripTags(s).slice(0, 600)
+  return m ? stripTags(m[1]) : ''
 }
 
 function stripTags(s: string): string {
-  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return s
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
