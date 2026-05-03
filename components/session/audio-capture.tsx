@@ -192,7 +192,7 @@ export function AudioCapture({
           style={{
             width: '100%',
             minHeight: 48,
-            background: 'var(--vt-amber-600)',
+            background: 'var(--vt-signal-600)',
           }}
           aria-describedby={promptId}
           onClick={stop}
