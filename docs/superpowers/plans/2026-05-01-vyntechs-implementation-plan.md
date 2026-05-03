@@ -3404,6 +3404,21 @@ git commit -m "feat(stripe): handle subscription lifecycle webhooks"
 
 ---
 
+## Phase G — Implementation corrections (applied 2026-05-03)
+
+The Phase G code blocks above were drafted assuming Phase A5 (Stripe SDK + scaffolding) had shipped during Phase A. It hadn't — `package.json` had no `stripe` dep, and neither `lib/stripe.ts` nor `app/api/stripe/webhook/route.ts` existed. The points below are the authoritative pattern; the inline blocks remain reference but contain stale assumptions.
+
+1. **A5 ran inside Phase G as a prereq.** `pnpm add stripe` (22.1.0). `lib/stripe.ts` mirrors `lib/ai/client.ts`'s lazy-Proxy pattern so module load doesn't require `STRIPE_SECRET_KEY` to be set.
+2. **`apiVersion` pin removed.** Plan's `2025-08-27.basil` is older than SDK 22's exported `LatestApiVersion` (`2026-04-22.dahlia`) and fails the type guard. Omitted to use the SDK default.
+3. **Webhook handler-in-lib refactor.** Plan put route logic inline in `app/api/stripe/webhook/route.ts`. Refactored to `handleStripeWebhook({ db, body, signature, secret, constructEvent? })` in `lib/stripe.ts`; route is a 12-line shim. Returns discriminated union `{ ok: true, eventType } | { ok: false, status, error }`. DI'd `constructEvent` makes signature-verification paths testable without real Stripe webhook signing.
+4. **G1 wiring point.** Plan said to wire `ensureStripeCustomer` "in `lib/auth.ts`, after creating the shop." The shop is actually created inside `ensureProfileAndShop` in `lib/db/queries.ts`, not in `lib/auth.ts`. Wired into `requireUserAndProfile` (in `lib/auth.ts`) as an optional `ensureCustomer` DI hook that runs after `ensureProfileAndShop` returns. Idempotent — runs on every auth check, but the SELECT-first-INSERT-second guard makes it cheap.
+5. **G3 read-period fallback.** Plan reads `sub.current_period_end` (top-level on `Stripe.Subscription`). Stripe moved that field to `subscription.items[].current_period_end` in newer API versions. `readSubscriptionPeriodEnd` reads top-level first, falls back to `items.data[0].current_period_end`.
+6. **G2 button class.** Plan imports `<Button>` from `@/components/ui/button` (shadcn). No shadcn in the repo (Phase E reconciliation: components/ui/ doesn't exist). Used `.btn-primary` class from `components/vt/vt.css` instead. Page = server component shell, `BillingClient` = client component for the fetch + redirect logic.
+7. **All handlers DI-friendly.** `ensureStripeCustomer`, `createBillingPortalSessionForUser`, and `handleStripeWebhook` accept optional `createCustomer` / `createPortalSession` / `constructEvent` fns so unit tests don't need real Stripe network access.
+8. **Tests added beyond plan.** Plan G1/G2/G3 had no test steps. Added 22 tests across 5 files: `stripe-webhook-handler` (4), `stripe-ensure-customer` (3), `auth-helper` (2 new), `stripe-portal-handler` (4), `billing-page` (3), `stripe-subscription-webhook` (6).
+
+---
+
 ## Phase H — PWA + Polish (3 tasks)
 
 ### Task H1: Add PWA manifest
