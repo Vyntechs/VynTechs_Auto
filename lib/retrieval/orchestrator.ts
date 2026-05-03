@@ -31,6 +31,8 @@ export async function runRetrieval(input: {
   let queriesUsed = 0
   let tokensUsed = 0
 
+  // Sequential by design — concurrent fan-out would re-introduce the abort race
+  // and break per-adapter budget accounting.
   for (const adapter of ordered) {
     if (queriesUsed >= budget.maxQueries) break
     if (Date.now() - start >= budget.maxWallClockMs) break
@@ -52,7 +54,17 @@ export async function runRetrieval(input: {
       tokensUsed += estimateTokens(r)
       await setCachedResults(input.db, key, adapter.id, r).catch(() => {})
     } catch (err) {
-      errors.push({ adapterId: adapter.id, message: err instanceof Error ? err.message : 'unknown' })
+      const aborted =
+        controller.signal.aborted ||
+        (err instanceof Error && err.name === 'AbortError')
+      errors.push({
+        adapterId: adapter.id,
+        message: aborted
+          ? 'wall-clock budget exceeded'
+          : err instanceof Error
+            ? err.message
+            : 'unknown',
+      })
     }
   }
 

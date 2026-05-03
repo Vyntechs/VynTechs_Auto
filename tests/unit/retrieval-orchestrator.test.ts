@@ -117,4 +117,58 @@ describe('runRetrieval', () => {
     expect(r.errors[0]).toStrictEqual({ adapterId: 'a1', message: 'boom' })
     expect(r.queriesUsed).toBe(2)
   })
+
+  it('stops when token budget reached', async () => {
+    const { runRetrieval } = await import('@/lib/retrieval/orchestrator')
+    const heavySnippet = 'x'.repeat(800)
+    const adapter1 = {
+      id: 'a1',
+      weight: 0.9,
+      query: vi
+        .fn()
+        .mockResolvedValue([{ source: 'a1', title: 'big', snippet: heavySnippet }]),
+    }
+    const adapter2 = {
+      id: 'a2',
+      weight: 0.5,
+      query: vi.fn().mockResolvedValue([{ source: 'a2', title: 't2', snippet: 's2' }]),
+    }
+    const r = await runRetrieval({
+      db,
+      adapters: [adapter1, adapter2],
+      ctx,
+      budget: { maxQueries: 5, maxWallClockMs: 5_000, maxTokens: 100 },
+    })
+    expect(adapter1.query).toHaveBeenCalled()
+    expect(adapter2.query).not.toHaveBeenCalled()
+    expect(r.tokensUsed).toBeGreaterThanOrEqual(100)
+  })
+
+  it('tags wall-clock-aborted adapter errors as budget exceeded', async () => {
+    const { runRetrieval } = await import('@/lib/retrieval/orchestrator')
+    const adapter1 = {
+      id: 'a1',
+      weight: 0.9,
+      query: vi.fn().mockImplementation(async (_ctx, signal: AbortSignal) => {
+        // Simulate the adapter being aborted by the wall-clock controller.
+        const abortErr = new Error('aborted')
+        abortErr.name = 'AbortError'
+        // Fire an abort event on the passed signal so controller.signal.aborted is true.
+        const ac = signal as AbortSignal & { dispatchEvent?: (ev: Event) => boolean }
+        Object.defineProperty(ac, 'aborted', { value: true, configurable: true })
+        throw abortErr
+      }),
+    }
+    const r = await runRetrieval({
+      db,
+      adapters: [adapter1],
+      ctx,
+      budget: { maxQueries: 5, maxWallClockMs: 5_000, maxTokens: 50_000 },
+    })
+    expect(r.errors).toHaveLength(1)
+    expect(r.errors[0]).toStrictEqual({
+      adapterId: 'a1',
+      message: 'wall-clock budget exceeded',
+    })
+  })
 })
