@@ -3,9 +3,11 @@ import { render, screen } from '@testing-library/react'
 import HomePage from '@/app/page'
 
 describe('HomePage', () => {
-  it('renders the Vyntechs brand heading', () => {
+  it('renders the gravity headline as the h1', () => {
     render(<HomePage />)
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Vyntechs')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      /AI master tech for the bay/i,
+    )
   })
 
   it('renders the tagline describing the product', () => {
@@ -18,9 +20,9 @@ describe('HomePage', () => {
     expect(screen.getByRole('main')).toBeInTheDocument()
   })
 
-  it('exposes a Sign up link pointing at /sign-up', () => {
+  it('exposes a Create-account link pointing at /sign-up', () => {
     render(<HomePage />)
-    const link = screen.getByRole('link', { name: /sign up/i })
+    const link = screen.getByRole('link', { name: /create account/i })
     expect(link).toHaveAttribute('href', '/sign-up')
   })
 
