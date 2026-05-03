@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { requireUserAndProfile } from '@/lib/auth'
+import { stripeCustomers } from '@/lib/db/schema'
 
 type FakeSupabase = {
   auth: { getUser: () => Promise<{ data: { user: { id: string; email: string } | null } }> }
@@ -52,5 +54,40 @@ describe('requireUserAndProfile', () => {
     const second = await requireUserAndProfile({ supabase, db })
     expect(second!.profile.id).toBe(first!.profile.id)
     expect(second!.profile.shopId).toBe(first!.profile.shopId)
+  })
+
+  it('auto-creates a Stripe customer for a brand-new shop on first sign-in', async () => {
+    const userId = crypto.randomUUID()
+    const ensureCustomer = vi.fn().mockResolvedValue('cus_first_signin')
+    const result = await requireUserAndProfile({
+      supabase: fakeSupabase({ id: userId, email: 'mike@joesgarage.com' }) as never,
+      db,
+      ensureCustomer,
+    })
+
+    expect(result).not.toBeNull()
+    expect(ensureCustomer).toHaveBeenCalledWith({
+      db,
+      shopId: result!.profile.shopId,
+      email: 'mike@joesgarage.com',
+    })
+  })
+
+  it('does not block sign-in when the Stripe customer hook fails', async () => {
+    const userId = crypto.randomUUID()
+    const ensureCustomer = vi.fn().mockRejectedValue(new Error('stripe is down'))
+    const result = await requireUserAndProfile({
+      supabase: fakeSupabase({ id: userId, email: 'mike@joesgarage.com' }) as never,
+      db,
+      ensureCustomer,
+    })
+
+    expect(result).not.toBeNull()
+    expect(result!.profile.userId).toBe(userId)
+    const rows = await db
+      .select()
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.shopId, result!.profile.shopId!))
+    expect(rows).toHaveLength(0)
   })
 })
