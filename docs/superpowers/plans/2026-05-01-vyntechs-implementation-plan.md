@@ -6461,6 +6461,51 @@ git commit -m "feat(corpus): surface corpus-vs-observation conflicts in updateTr
 
 ---
 
+### Phase K — Implementation corrections (2026-05-03)
+
+The K1–K8 tasks shipped, but reality drifted from the template in several places. These notes are authoritative when reading the plan in retrospect.
+
+**K1 (schema + migration):**
+- pgvector enabled in the `extensions` schema (Supabase convention; matches `pgcrypto`, `uuid-ossp`, etc.). The migration file uses unqualified `vector(1536)` and `vector_cosine_ops` so it works in both Supabase (extensions on the search_path) and PGlite (vector installs in the default schema).
+- Migration applied via Supabase MCP `apply_migration` (Vyntechs pattern — the drizzle SQL file is the version-controlled record; `drizzle-kit migrate` would attempt to re-apply earlier migrations because the project doesn't track them in `__drizzle_migrations`).
+- RLS auto-enabled by the project-wide `rls_auto_enable` trigger (Phase M). No corpus-specific policies were added — adding them is the same project-wide gap that already exists across all public tables, not K1-specific.
+
+**K3 (retrieveCorpus):**
+- Takes `db: AppDb` as the first arg, per AGENTS.md "queries take db: AppDb" convention. Plan template used a global `db` import.
+- WHERE prefilter logic restructured. Plan template's OR chain — `cardinality(dtcArray) = 0 OR overlap OR cardinality(tagArray) = 0 OR overlap` — would short-circuit on the empty-cardinality clauses even when DTCs were provided, defeating the prefilter. Replaced with explicit AND/OR pairs: `(both empty) OR (dtcArray > 0 AND overlap) OR (tagArray > 0 AND overlap)`.
+- Smoke-tested against real Supabase to confirm pgvector cosine + HNSW + structured filters all execute end-to-end.
+
+**K4 (inject corpus into tree engine):**
+- L10 had already pre-wired a `corpus?: CorpusMatch[]` parameter through `updateTree` using a *placeholder* `CorpusMatch` type defined in `lib/ai/tree-engine.ts`. K4 replaced that placeholder with `import type { CorpusMatch } from '@/lib/corpus/retrieval'` and a `export type { CorpusMatch }` re-export, so call sites continue to work and downstream code now sees real fields.
+- The corpus block builder *inside* `updateTree` (rendering `c.summary` + `c.structured` from the placeholder shape) was upgraded to render the real fields (rootCause, confidence, success, comebacks, similarity), matching `generateInitialTree`'s new corpus block.
+- `TREE_ENGINE_SYSTEM` now has a CORPUS-FIRST RETRIEVAL block describing strong vs. soft priors and the no-prior fallback. The L10 carryover note about Sonnet hallucinating the corpus shape no longer applies.
+
+**K5 (promote on close):**
+- Hooked into `closeSessionForUser` (`lib/sessions.ts`), NOT the route shim, per AGENTS.md "handler-in-lib + thin route shim" convention. `promoteToCorpus` is dependency-injected so PGlite-based handler tests can assert the call shape without touching OpenAI.
+- Optional injection: omitting `promoteToCorpus` skips promotion silently. Existing tests that don't care about corpus growth pass through unchanged. Failures are caught and `console.warn`ed — corpus growth is best-effort, the close MUST still succeed.
+- `inferSymptomTags` is exported (not inlined in the route as the plan suggested) so K8's advance route — and any future caller — can reuse the heuristic.
+
+**K6 (N-way confirmation):**
+- Plan template had `confirmSimilarCorpusEntries` use `${rootCause} ${dtcs}` as its embedding target while `promoteSessionToCorpus` used `summary + DTCs + Tags + complaint`. Two different targets → different vectors → the cosine 0.15 threshold rarely matches anything in practice. Fix: extracted `buildEmbeddingTarget(input)` so both promote and confirm hash the SAME fingerprint.
+- `promoteSessionToCorpus` now embeds once and reuses the vector for both confirm and the INSERT (one OpenAI call per close, not two).
+
+**K7 (comeback decay):**
+- Smaller fingerprint than promote/confirm (rootCause + DTCs only) is intentional and documented in the function's doc-comment. A comeback may surface with different complaint phrasing than the original repair, so the rootCause-and-DTC vector is what we want to penalize.
+- Tie cases (comebacks == successes) are NOT retired — comebacks must STRICTLY exceed successes. Documented in the test.
+- Building block only — no caller in Phase K. Wiring a `/api/sessions/[id]/comeback` endpoint or a nightly scan job is deferred.
+
+**K8 (conflict surfacing + advance wiring):**
+- Plan Step 1 ("extend updateTree to take corpus") was already done in L10. Skipped that step.
+- Plan Step 2 ("pass corpus into updateTree from advance route") is implemented as an extension of L10's `buildUpdateTreeWithRetrieval` wrapper (not a duplicate code path). The wrapper now takes an optional `retrieveCorpus` dep; corpus retrieval runs in parallel with internet retrieval via `Promise.all`. Failure falls through to `corpus: []` with a `console.warn`.
+- Stale comment "Phase K (corpus) not built yet; intentionally omitted from updateTree input" in `wire-into-tree.ts` and `app/api/sessions/[id]/advance/route.ts` removed.
+
+**Test infrastructure (NOT in the plan, but required):**
+- `tests/helpers/db.ts` now loads PGlite's `@electric-sql/pglite/vector` extension and runs `CREATE EXTENSION IF NOT EXISTS vector` BEFORE `drizzle.migrate`. Without this, migration 0006 fails with `type "vector" does not exist` and every PGlite-based handler test hangs on setup.
+
+**Test counts:** 231 baseline → 260 passing (29 net new tests across K1-K8). tsc clean. `pnpm build` succeeds.
+
+---
+
 ## Phase L — Bounded Internet Retrieval (Rung 1) (10 tasks)
 
 Per spec §6 row 5, §6 row 13, §7.1 (Retrieval Orchestrator), §8.2 (bounded ladder). Builds: a per-source `Adapter` pattern, six adapters (NHTSA, manufacturer recall, generic make-model forum, YouTube transcript, Reddit, OEM TSB index), a query-strategy planner, a budget enforcer (≤5 weighted queries OR ≤30s wall-clock OR ≤50K tokens), a per-(vehicle, DTC, symptom) cache, a validation pass that grades retrieved snippets against case context, and integration into the Gap Handler (Phase M).

@@ -1,5 +1,6 @@
 import type { AppDb } from '@/lib/db/queries'
-import type { TreeState, updateTree as updateTreeFn } from '@/lib/ai/tree-engine'
+import type { TreeState, CorpusMatch, updateTree as updateTreeFn } from '@/lib/ai/tree-engine'
+import type { retrieveCorpus as retrieveCorpusFn } from '@/lib/corpus/retrieval'
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from './types'
 import type { runRetrieval as runRetrievalFn } from './orchestrator'
 import type { validateRetrievalResults as validateResultsFn } from './validator'
@@ -12,16 +13,22 @@ export type BuildUpdateTreeWithRetrievalDeps = {
   updateTree: typeof updateTreeFn
   runRetrieval: typeof runRetrievalFn
   validateRetrievalResults: typeof validateResultsFn
+  /** Phase K (Cross-Shop Corpus). Optional — when omitted, no corpus
+   *  is passed to updateTree (back-compat). When provided, the wrapper
+   *  fetches corpus matches in parallel with internet retrieval, falls
+   *  through to [] on error, and forwards the result to updateTree. */
+  retrieveCorpus?: typeof retrieveCorpusFn
 }
 
 /**
- * Wraps `updateTree` so it runs Rung-1 internet retrieval + LLM grading before
- * delegating to the real `updateTree`. Failures fall through with `retrieval: []`
- * and a `console.warn` — the advance flow should never block on optional
- * supporting evidence.
+ * Wraps `updateTree` so it runs Rung-0 corpus retrieval AND Rung-1
+ * internet retrieval + LLM grading before delegating to the real
+ * `updateTree`. Both retrievals run in parallel; failures fall through
+ * with empty arrays and a `console.warn` — the advance flow should
+ * never block on optional supporting evidence.
  *
- * Dependencies (`runRetrieval`, `validateRetrievalResults`) are injected so unit
- * tests can mock them without `vi.mock` plumbing.
+ * Dependencies are injected so unit tests can mock them without
+ * `vi.mock` plumbing.
  */
 export function buildUpdateTreeWithRetrieval(
   deps: BuildUpdateTreeWithRetrievalDeps,
@@ -52,24 +59,45 @@ export function buildUpdateTreeWithRetrieval(
       observation: input.observation,
     }
 
-    let retrieval: RetrievalResult[] = []
-    try {
-      const run = await deps.runRetrieval({ db: deps.db, adapters: deps.adapters, ctx })
+    const retrievalPromise = (async (): Promise<RetrievalResult[]> => {
       try {
-        retrieval = await deps.validateRetrievalResults({ ctx, results: run.results })
-      } catch (graderErr) {
-        console.warn('retrieval validation failed:', graderErr)
-        retrieval = run.results
+        const run = await deps.runRetrieval({ db: deps.db, adapters: deps.adapters, ctx })
+        try {
+          return await deps.validateRetrievalResults({ ctx, results: run.results })
+        } catch (graderErr) {
+          console.warn('retrieval validation failed:', graderErr)
+          return run.results
+        }
+      } catch (err) {
+        console.warn('retrieval failed:', err)
+        return []
       }
-    } catch (err) {
-      console.warn('retrieval failed:', err)
-      retrieval = []
-    }
+    })()
 
-    // Phase K (corpus) not built yet; intentionally omitted from updateTree input.
+    const corpusPromise: Promise<CorpusMatch[] | undefined> = deps.retrieveCorpus
+      ? (async () => {
+          try {
+            return await deps.retrieveCorpus!(deps.db, {
+              vehicleYear: ctx.vehicleYear,
+              vehicleMake: ctx.vehicleMake,
+              vehicleModel: ctx.vehicleModel,
+              vehicleEngine: ctx.vehicleEngine,
+              dtcs: ctx.dtcs,
+              complaintText: ctx.complaintText,
+            })
+          } catch (err) {
+            console.warn('corpus retrieval failed:', err)
+            return []
+          }
+        })()
+      : Promise.resolve(undefined)
+
+    const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
+
     return deps.updateTree({
       ...input,
       retrieval,
+      ...(corpus !== undefined ? { corpus } : {}),
     })
   }
 }
