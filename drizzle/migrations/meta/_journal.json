@@ -43,6 +43,13 @@
       "when": 1777783699808,
       "tag": "0005_fair_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777788676042,
+      "tag": "0006_known_maximus",
+      "breakpoints": true
     }
   ]
 }
