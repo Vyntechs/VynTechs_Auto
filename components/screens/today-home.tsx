@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Bell } from '@phosphor-icons/react/dist/ssr'
 import {
   AppHeader,
   Module,
@@ -28,7 +29,18 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
 
   return (
     <div className="app">
-      <AppHeader title="Today" meta={meta} />
+      <AppHeader
+        title="Today"
+        meta={meta}
+        right={
+          <Bell
+            size={18}
+            weight="regular"
+            style={{ color: 'var(--vt-fg-2)' }}
+            aria-label="Notifications"
+          />
+        }
+      />
       <div
         style={{
           padding: '14px',
@@ -49,24 +61,42 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
               </Pill>
             }
           >
-            {inProgress.map((s) => (
-              <SessionRow key={s.id} session={s} />
+            {inProgress.map((s, i) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                kind="active"
+                isFirst={i === 0}
+                isLast={i === inProgress.length - 1}
+              />
             ))}
           </Module>
         )}
 
         {queued.length > 0 && (
           <Module num="02" label={`Queued · ${queued.length}`}>
-            {queued.map((s) => (
-              <SessionRow key={s.id} session={s} kind="queued" />
+            {queued.map((s, i) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                kind="queued"
+                isFirst={i === 0}
+                isLast={i === queued.length - 1}
+              />
             ))}
           </Module>
         )}
 
         {closedToday.length > 0 && (
           <Module num="03" label={`Closed today · ${closedToday.length}`}>
-            {closedToday.map((s) => (
-              <SessionRow key={s.id} session={s} kind="closed" />
+            {closedToday.map((s, i) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                kind="closed"
+                isFirst={i === 0}
+                isLast={i === closedToday.length - 1}
+              />
             ))}
           </Module>
         )}
@@ -91,9 +121,13 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
 function SessionRow({
   session,
   kind = 'active',
+  isFirst,
+  isLast,
 }: {
   session: Session
   kind?: 'active' | 'queued' | 'closed'
+  isFirst?: boolean
+  isLast?: boolean
 }) {
   const stepCount = session.treeState.nodes.length
   const stepIndex = session.treeState.nodes.findIndex(
@@ -102,12 +136,16 @@ function SessionRow({
   const stepLabel =
     stepIndex >= 0 && stepCount > 0 ? `step ${stepIndex + 1} / ${stepCount}` : `${stepCount} steps`
 
+  const rowStyle: React.CSSProperties = {
+    textDecoration: 'none',
+    color: 'inherit',
+    display: 'flex',
+  }
+  if (isFirst) rowStyle.paddingTop = 0
+  if (isLast) rowStyle.borderBottom = 0
+
   return (
-    <Link
-      href={`/sessions/${session.id}`}
-      className="queue-row"
-      style={{ paddingTop: 0, textDecoration: 'none', color: 'inherit', display: 'flex' }}
-    >
+    <Link href={`/sessions/${session.id}`} className="queue-row" style={rowStyle}>
       <div className="queue-meta">
         <div className="queue-vehicle">{formatVehicleName(session.intake)}</div>
         {kind === 'queued' && <Pill kind="queued">Queued</Pill>}
@@ -117,6 +155,8 @@ function SessionRow({
               fontFamily: 'var(--vt-font-mono)',
               fontSize: 10,
               color: 'var(--vt-status-closed)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
             }}
           >
             closed

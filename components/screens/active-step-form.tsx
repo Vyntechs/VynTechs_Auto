@@ -94,16 +94,17 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
         style={{
           width: '100%',
           boxSizing: 'border-box',
-          background: 'var(--vt-graphite-1000)',
-          border: '1px solid var(--vt-rule)',
+          background: 'var(--vt-bone-100)',
+          border: '0.5px solid var(--vt-rule-strong)',
           borderRadius: 'var(--vt-radius-2)',
           padding: '10px 12px',
-          fontFamily: 'var(--vt-font-sans)',
-          fontSize: 14,
+          fontFamily: 'var(--vt-font-serif)',
+          fontSize: 15,
           color: 'var(--vt-fg)',
           resize: 'none',
           outline: 0,
           marginBottom: 8,
+          letterSpacing: '-0.005em',
         }}
       />
       {error && (
