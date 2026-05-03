@@ -1,0 +1,171 @@
+import Stripe from 'stripe'
+import { eq } from 'drizzle-orm'
+import { stripeCustomers } from './db/schema'
+import { getProfileByUserId } from './db/queries'
+import type { AppDb } from './db/queries'
+
+let _client: Stripe | undefined
+
+function getClient(): Stripe {
+  if (!_client) {
+    _client = new Stripe(process.env.STRIPE_SECRET_KEY ?? '')
+  }
+  return _client
+}
+
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    const client = getClient()
+    const value = Reflect.get(client, prop, receiver)
+    return typeof value === 'function' ? value.bind(client) : value
+  },
+})
+
+export type CreateStripeCustomerFn = (params: {
+  email: string
+  metadata: { shopId: string }
+}) => Promise<{ id: string }>
+
+export async function ensureStripeCustomer(opts: {
+  db: AppDb
+  shopId: string
+  email: string
+  createCustomer?: CreateStripeCustomerFn
+}): Promise<string> {
+  const existing = await opts.db
+    .select()
+    .from(stripeCustomers)
+    .where(eq(stripeCustomers.shopId, opts.shopId))
+    .limit(1)
+  if (existing[0]) return existing[0].stripeCustomerId
+
+  const create =
+    opts.createCustomer ??
+    ((params) => stripe.customers.create(params))
+  const customer = await create({
+    email: opts.email,
+    metadata: { shopId: opts.shopId },
+  })
+  await opts.db.insert(stripeCustomers).values({
+    shopId: opts.shopId,
+    stripeCustomerId: customer.id,
+  })
+  return customer.id
+}
+
+export type CreateBillingPortalSessionFn = (params: {
+  customer: string
+  return_url: string
+}) => Promise<{ url: string }>
+
+export type CreateBillingPortalSessionResult =
+  | { ok: true; url: string }
+  | { ok: false; status: 400; error: string }
+
+export async function createBillingPortalSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  origin: string
+  createPortalSession?: CreateBillingPortalSessionFn
+}): Promise<CreateBillingPortalSessionResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
+
+  const [customer] = await opts.db
+    .select()
+    .from(stripeCustomers)
+    .where(eq(stripeCustomers.shopId, profile.shopId))
+    .limit(1)
+  if (!customer) {
+    return { ok: false, status: 400, error: 'no stripe customer' }
+  }
+
+  const create =
+    opts.createPortalSession ??
+    ((params) => stripe.billingPortal.sessions.create(params))
+  const session = await create({
+    customer: customer.stripeCustomerId,
+    return_url: `${opts.origin}/billing`,
+  })
+  return { ok: true, url: session.url }
+}
+
+export type ConstructStripeEventFn = (
+  body: string,
+  signature: string,
+  secret: string,
+) => Stripe.Event
+
+export type HandleStripeWebhookResult =
+  | { ok: true; eventType: Stripe.Event.Type }
+  | { ok: false; status: 400 | 500; error: string }
+
+const SUBSCRIPTION_EVENT_TYPES = new Set<Stripe.Event.Type>([
+  'customer.subscription.created',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+])
+
+function readSubscriptionPeriodEnd(
+  subscription: Stripe.Subscription,
+): Date | null {
+  const top = (subscription as unknown as { current_period_end?: number })
+    .current_period_end
+  if (typeof top === 'number') return new Date(top * 1000)
+  const itemEnd = (
+    subscription.items?.data?.[0] as
+      | { current_period_end?: number }
+      | undefined
+  )?.current_period_end
+  if (typeof itemEnd === 'number') return new Date(itemEnd * 1000)
+  return null
+}
+
+async function applySubscriptionEvent(
+  db: AppDb,
+  subscription: Stripe.Subscription,
+): Promise<void> {
+  const customerId =
+    typeof subscription.customer === 'string'
+      ? subscription.customer
+      : subscription.customer.id
+  await db
+    .update(stripeCustomers)
+    .set({
+      subscriptionStatus: subscription.status,
+      currentPeriodEnd: readSubscriptionPeriodEnd(subscription),
+    })
+    .where(eq(stripeCustomers.stripeCustomerId, customerId))
+}
+
+export async function handleStripeWebhook(opts: {
+  db: AppDb
+  body: string
+  signature: string | null
+  secret: string | undefined
+  constructEvent?: ConstructStripeEventFn
+}): Promise<HandleStripeWebhookResult> {
+  if (!opts.signature) {
+    return { ok: false, status: 400, error: 'missing stripe-signature header' }
+  }
+  if (!opts.secret) {
+    return { ok: false, status: 500, error: 'webhook secret not configured' }
+  }
+  const construct =
+    opts.constructEvent ??
+    ((b, s, sec) => stripe.webhooks.constructEvent(b, s, sec))
+  let event: Stripe.Event
+  try {
+    event = construct(opts.body, opts.signature, opts.secret)
+  } catch {
+    return { ok: false, status: 400, error: 'invalid signature' }
+  }
+  if (SUBSCRIPTION_EVENT_TYPES.has(event.type)) {
+    await applySubscriptionEvent(
+      opts.db,
+      event.data.object as Stripe.Subscription,
+    )
+  }
+  return { ok: true, eventType: event.type }
+}
