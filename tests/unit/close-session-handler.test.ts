@@ -6,7 +6,7 @@ import {
   createProfile,
   createSession,
 } from '@/lib/db/queries'
-import { sessions, sessionEvents } from '@/lib/db/schema'
+import { sessions, sessionEvents, artifacts } from '@/lib/db/schema'
 import { closeSessionForUser } from '@/lib/sessions'
 
 function makeOutcome(overrides: Partial<Record<string, unknown>> = {}) {
@@ -169,5 +169,86 @@ describe('closeSessionForUser', () => {
     if (result.ok) throw new Error('unreachable')
     expect(result.status).toBe(400)
     expect(result.error).toMatch(/not open/i)
+  })
+
+  describe('corpus promotion (Phase K5)', () => {
+    it('calls promoteToCorpus with sessionId, shopId, intake, outcome, and inferred symptom tags', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      const promote = vi.fn().mockResolvedValue('corpus-new')
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        promoteToCorpus: promote,
+      })
+      expect(result.ok).toBe(true)
+      expect(promote).toHaveBeenCalledTimes(1)
+      const args = promote.mock.calls[0]!
+      const input = args[1]
+      expect(input.sessionId).toBe(session.id)
+      expect(input.shopId).toBe(session.shopId)
+      expect(input.intake.vehicleMake).toBe('Ford')
+      expect(input.outcome.rootCause).toContain('Wastegate')
+      expect(input.extractedSymptomTags).toContain('power_loss')
+    })
+
+    it('extracts DTC codes from done scan_screen artifacts and passes them as extractedDtcs', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      await db.insert(artifacts).values({
+        sessionId: session.id,
+        nodeId: 'scan-codes',
+        kind: 'scan_screen',
+        storageKey: 'k1',
+        mimeType: 'image/png',
+        bytes: 1000,
+        extractionStatus: 'done',
+        extraction: {
+          structured: { dtcs: [{ code: 'P0299' }, { code: 'P0236' }] },
+        },
+      })
+      const promote = vi.fn().mockResolvedValue('c1')
+      await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        promoteToCorpus: promote,
+      })
+      const input = promote.mock.calls[0]![1]
+      expect(input.extractedDtcs).toContain('P0299')
+      expect(input.extractedDtcs).toContain('P0236')
+    })
+
+    it('treats promoteToCorpus failure as non-fatal — session still closes', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      const promote = vi.fn().mockRejectedValue(new Error('embed boom'))
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        promoteToCorpus: promote,
+      })
+      expect(result.ok).toBe(true)
+      expect(promote).toHaveBeenCalledTimes(1)
+      const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+      expect(row.status).toBe('closed')
+    })
+
+    it('does not call corpus promotion when promoteToCorpus is not provided (back-compat)', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+      })
+      expect(result.ok).toBe(true)
+    })
   })
 })

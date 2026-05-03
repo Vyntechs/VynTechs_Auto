@@ -23,6 +23,12 @@ import type { Artifact, NewArtifact } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
+import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
+
+export type PromoteToCorpusFn = (
+  db: AppDb,
+  input: CorpusPromotionInput,
+) => Promise<string | null>
 
 export type CreateSessionResult =
   | { ok: true; id: string }
@@ -220,6 +226,9 @@ export async function closeSessionForUser(opts: {
   sessionId: string
   body: unknown
   validateSpecificity: (text: string) => Promise<ValidatorResult>
+  /** Phase K corpus promotion. Optional — when omitted, no promotion runs.
+   *  Failures are non-fatal; the session still closes successfully. */
+  promoteToCorpus?: PromoteToCorpusFn
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -253,6 +262,30 @@ export async function closeSessionForUser(opts: {
     nodeId: session.treeState.currentNodeId,
     eventType: 'close',
   })
+
+  if (opts.promoteToCorpus) {
+    try {
+      const arts = await listArtifactsForSession(opts.db, opts.sessionId)
+      const extractedDtcs = arts.flatMap((a) => {
+        if (a.extractionStatus !== 'done') return []
+        const structured = a.extraction?.structured as
+          | { dtcs?: Array<{ code?: string }> }
+          | undefined
+        return structured?.dtcs?.map((d) => d.code).filter((c): c is string => Boolean(c)) ?? []
+      })
+      const extractedSymptomTags = inferSymptomTags(session.intake.customerComplaint)
+      await opts.promoteToCorpus(opts.db, {
+        sessionId: opts.sessionId,
+        shopId: session.shopId,
+        intake: session.intake,
+        outcome: parsed.data,
+        extractedDtcs,
+        extractedSymptomTags,
+      })
+    } catch (err) {
+      console.warn('corpus promotion failed (session still closed):', err)
+    }
+  }
 
   return { ok: true }
 }
