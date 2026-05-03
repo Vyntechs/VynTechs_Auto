@@ -99,6 +99,11 @@ export async function updateTree(input: {
   }>
   corpus?: CorpusMatch[]
   retrieval?: RetrievalResult[]
+  /** Session-scoped DTC codes from all done scan_screen extractions (not just the
+   *  current node). Carried through so the route wrapper can build a retrieval
+   *  context that keeps its DTC anchor after the tree advances past `scan-codes`.
+   *  Not consumed by `updateTree` itself — pass-through for the wrapper. */
+  sessionDtcs?: string[]
 }): Promise<TreeState> {
   const artifactBlock =
     (input.artifacts ?? []).length > 0
