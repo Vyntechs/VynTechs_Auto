@@ -100,6 +100,7 @@ export async function advanceSession(opts: {
       structured?: Record<string, unknown>
       text?: string
     }>
+    sessionDtcs?: string[]
   }) => Promise<TreeState>
   gateAction?: GateActionFn
   listArtifacts?: ListArtifactsFn
@@ -133,6 +134,21 @@ export async function advanceSession(opts: {
       text: a.extraction?.text,
     }))
 
+  // Compile DTCs across the whole session (not just the current node) so retrieval
+  // keeps its DTC anchor after the tree advances past `scan-codes`. Without this,
+  // every observation after scan-codes resolves loses its DTC token, halving cache
+  // reuse and degrading Reddit/YouTube/forum retrieval quality.
+  const sessionDtcs = allArtifacts
+    .filter((a) => a.kind === 'scan_screen' && a.extractionStatus === 'done')
+    .flatMap((a) => {
+      const codes = (
+        a.extraction?.structured as { dtcs?: Array<{ code?: string }> } | undefined
+      )?.dtcs
+      return Array.isArray(codes)
+        ? codes.map((d) => d?.code).filter((c): c is string => typeof c === 'string')
+        : []
+    })
+
   let nextTree: TreeState
   try {
     nextTree = await opts.updateTree({
@@ -140,6 +156,7 @@ export async function advanceSession(opts: {
       currentTree: session.treeState,
       observation: parsed.data.observation,
       artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : undefined,
+      sessionDtcs: sessionDtcs.length > 0 ? sessionDtcs : undefined,
     })
   } catch (err) {
     console.error('tree update failed:', err)
