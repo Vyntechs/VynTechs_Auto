@@ -36,6 +36,13 @@
       "when": 1777746425775,
       "tag": "0004_yielding_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777783699808,
+      "tag": "0005_fair_colossus",
+      "breakpoints": true
     }
   ]
 }

@@ -191,3 +191,15 @@ export type TechAssistRequest = typeof techAssistRequests.$inferSelect
 export type NewTechAssistRequest = typeof techAssistRequests.$inferInsert
 export type Artifact = typeof artifacts.$inferSelect
 export type NewArtifact = typeof artifacts.$inferInsert
+
+export const retrievalCache = pgTable('retrieval_cache', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cacheKey: text('cache_key').notNull().unique(),
+  source: text('source').notNull(),
+  results: jsonb('results').notNull().$type<unknown[]>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+})
+
+export type RetrievalCache = typeof retrievalCache.$inferSelect
+export type NewRetrievalCache = typeof retrievalCache.$inferInsert
