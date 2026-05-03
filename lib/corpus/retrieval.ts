@@ -69,7 +69,7 @@ export async function retrieveCorpus(db: AppDb, input: CorpusRetrievalInput): Pr
       confidence_score AS "confidenceScore",
       success_confirm_count AS "successConfirmCount",
       comeback_recorded_count AS "comebackRecordedCount",
-      embedding <=> ${vecLiteral}::extensions.vector AS distance
+      embedding <=> ${vecLiteral}::vector AS distance
     FROM corpus_entries
     WHERE
       is_retired = false
@@ -81,7 +81,7 @@ export async function retrieveCorpus(db: AppDb, input: CorpusRetrievalInput): Pr
         OR (cardinality(${dtcArray}::text[]) > 0 AND dtcs && ${dtcArray}::text[])
         OR (cardinality(${tagArray}::text[]) > 0 AND symptom_tags && ${tagArray}::text[])
       )
-    ORDER BY embedding <=> ${vecLiteral}::extensions.vector
+    ORDER BY embedding <=> ${vecLiteral}::vector
     LIMIT ${limit}
   `)) as unknown as Row[]
 

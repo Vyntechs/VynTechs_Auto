@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { createSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
+import { retrieveCorpus, type CorpusMatch } from '@/lib/corpus/retrieval'
 import { intakeSchema } from '@/lib/types'
 import { getOpenSessionForTech, getProfileByUserId } from '@/lib/db/queries'
 
@@ -32,9 +33,22 @@ export async function POST(req: Request) {
     }
   }
 
+  let corpus: CorpusMatch[] = []
+  try {
+    corpus = await retrieveCorpus(db, {
+      vehicleYear: parsed.data.vehicleYear,
+      vehicleMake: parsed.data.vehicleMake,
+      vehicleModel: parsed.data.vehicleModel,
+      vehicleEngine: parsed.data.vehicleEngine,
+      complaintText: parsed.data.customerComplaint,
+    })
+  } catch (err) {
+    console.warn('corpus retrieval failed (proceeding with empty):', err)
+  }
+
   let treeState
   try {
-    treeState = await generateInitialTree(parsed.data)
+    treeState = await generateInitialTree(parsed.data, corpus)
   } catch (err) {
     console.error('tree generation failed:', err)
     return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
