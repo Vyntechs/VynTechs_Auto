@@ -14,12 +14,27 @@ export type CorpusPromotionInput = {
   freezeFramePattern?: Record<string, string | number>
 }
 
-/** Insert a new corpus entry derived from a closed session. Returns the new id. */
-export async function promoteSessionToCorpus(
-  db: AppDb,
-  input: CorpusPromotionInput,
-): Promise<string | null> {
-  const summary = [
+/**
+ * Build the canonical embedding-target text. Used both at promote-time
+ * (when storing the new entry's vector) AND at confirm-time (so the
+ * cosine-distance comparison against the stored vector is meaningful).
+ * Without a shared fingerprint, K6's 0.15-cosine threshold compares
+ * different feature spaces and rarely matches anything.
+ */
+function buildEmbeddingTarget(input: CorpusPromotionInput): string {
+  const summary = makeSummary(input)
+  return [
+    summary,
+    `DTCs: ${(input.extractedDtcs ?? []).join(' ')}`,
+    `Tags: ${(input.extractedSymptomTags ?? []).join(' ')}`,
+    `Customer: ${input.intake.customerComplaint}`,
+  ]
+    .filter(Boolean)
+    .join('. ')
+}
+
+function makeSummary(input: CorpusPromotionInput): string {
+  const head = [
     input.intake.vehicleYear,
     input.intake.vehicleMake,
     input.intake.vehicleModel,
@@ -28,20 +43,33 @@ export async function promoteSessionToCorpus(
     .filter(Boolean)
     .join(' ')
     .trim()
-    + `: ${input.outcome.rootCause}`
+  return `${head}: ${input.outcome.rootCause}`
+}
 
-  const embeddingTarget = [
-    summary,
-    `DTCs: ${(input.extractedDtcs ?? []).join(' ')}`,
-    `Tags: ${(input.extractedSymptomTags ?? []).join(' ')}`,
-    `Customer: ${input.intake.customerComplaint}`,
-  ]
-    .filter(Boolean)
-    .join('. ')
-
-  const vector = await embed(embeddingTarget)
+/**
+ * Insert a new corpus entry derived from a closed session, OR — if a
+ * very similar entry already exists in the same vehicle window — bump
+ * its success_confirm_count instead and return null.
+ *
+ * Returns the inserted entry's id, or null when an existing entry was
+ * confirmed (no INSERT occurred).
+ */
+export async function promoteSessionToCorpus(
+  db: AppDb,
+  input: CorpusPromotionInput,
+): Promise<string | null> {
+  const target = buildEmbeddingTarget(input)
+  const vector = await embed(target)
   const vecLiteral = `[${vector.join(',')}]`
 
+  const { confirmed } = await confirmWithVec(db, vecLiteral, input)
+  if (confirmed > 0) {
+    // An existing entry covered this outcome; its confidence has been
+    // bumped. No new entry needed.
+    return null
+  }
+
+  const summary = makeSummary(input)
   const rows = (await db.execute(sql`
     INSERT INTO corpus_entries (
       vehicle_year, vehicle_make, vehicle_model, vehicle_engine,
@@ -74,6 +102,49 @@ export async function promoteSessionToCorpus(
   `)) as unknown as Array<{ id: string }>
 
   return rows[0]?.id ?? null
+}
+
+/**
+ * Bump success_confirm_count and recompute confidence_score on any
+ * non-retired corpus entry within the same vehicle window (year ±2)
+ * whose stored embedding is within cosine distance 0.15 of the new
+ * outcome's fingerprint. Returns the count of rows updated.
+ *
+ * The threshold is intentionally tight (0.15) so casual re-occurrences
+ * of vaguely-related outcomes don't inflate confidence. K7's decay
+ * uses the same threshold so confirms and comebacks operate on the
+ * same neighborhood.
+ */
+export async function confirmSimilarCorpusEntries(
+  db: AppDb,
+  input: CorpusPromotionInput,
+): Promise<{ confirmed: number }> {
+  const target = buildEmbeddingTarget(input)
+  const vector = await embed(target)
+  const vecLiteral = `[${vector.join(',')}]`
+  return confirmWithVec(db, vecLiteral, input)
+}
+
+async function confirmWithVec(
+  db: AppDb,
+  vecLiteral: string,
+  input: CorpusPromotionInput,
+): Promise<{ confirmed: number }> {
+  const updated = (await db.execute(sql`
+    UPDATE corpus_entries
+    SET
+      success_confirm_count = success_confirm_count + 1,
+      confidence_score = LEAST(0.99, (success_confirm_count + 1)::float / GREATEST(1, success_confirm_count + comeback_recorded_count + 1)),
+      updated_at = NOW()
+    WHERE
+      is_retired = false
+      AND vehicle_make = ${input.intake.vehicleMake}
+      AND vehicle_model = ${input.intake.vehicleModel}
+      AND ABS(vehicle_year - ${input.intake.vehicleYear}) <= 2
+      AND (embedding <=> ${vecLiteral}::vector) < 0.15
+    RETURNING id
+  `)) as unknown as Array<{ id: string }>
+  return { confirmed: updated.length }
 }
 
 /**
