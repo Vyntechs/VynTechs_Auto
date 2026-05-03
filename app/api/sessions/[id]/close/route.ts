@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { closeSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { validateSpecificity } from '@/lib/ai/outcome-validator'
+import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
 
 export async function POST(
   req: Request,
@@ -25,6 +26,7 @@ export async function POST(
     sessionId: id,
     body,
     validateSpecificity,
+    promoteToCorpus: promoteSessionToCorpus,
   })
 
   if (!result.ok) {
