@@ -3,15 +3,9 @@ import { TREE_ENGINE_SYSTEM } from './prompts'
 import type { IntakePayload } from '@/lib/types'
 import type { GateDecision } from '@/lib/gating/gap-handler'
 import type { RetrievalResult } from '@/lib/retrieval/types'
+import type { CorpusMatch } from '@/lib/corpus/retrieval'
 
-// Phase K (Cross-Shop Corpus) is not yet built. This is a placeholder shape so
-// Task L10 can wire the parameter through `updateTree`. When Phase K ships,
-// replace this with the real CorpusMatch type from the corpus module.
-export type CorpusMatch = {
-  /* placeholder for Phase K */
-  summary?: string
-  structured?: Record<string, unknown>
-}
+export type { CorpusMatch }
 
 export type TreeNode = {
   id: string
@@ -60,8 +54,11 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw lastErr
 }
 
-export async function generateInitialTree(intake: IntakePayload): Promise<TreeState> {
-  const userMessage = buildIntakeUserMessage(intake)
+export async function generateInitialTree(
+  intake: IntakePayload,
+  corpus?: CorpusMatch[],
+): Promise<TreeState> {
+  const userMessage = buildIntakeUserMessage(intake, corpus)
 
   return withRetry(async () => {
     const res = await anthropic.messages.create({
@@ -77,14 +74,28 @@ export async function generateInitialTree(intake: IntakePayload): Promise<TreeSt
   })
 }
 
-function buildIntakeUserMessage(intake: IntakePayload): string {
+function buildIntakeUserMessage(intake: IntakePayload, corpus?: CorpusMatch[]): string {
   const engine = intake.vehicleEngine ? ` (${intake.vehicleEngine})` : ''
   const mileage = intake.mileage ? `, ${intake.mileage} mi` : ''
   return `Vehicle: ${intake.vehicleYear} ${intake.vehicleMake} ${intake.vehicleModel}${engine}${mileage}.
 
-Customer complaint: ${intake.customerComplaint}
+Customer complaint: ${intake.customerComplaint}${corpusContextBlock(corpus)}
 
 Generate the initial decision tree. Return JSON only — no prose, no fences.`
+}
+
+function corpusContextBlock(corpus: CorpusMatch[] | undefined): string {
+  if (corpus === undefined) return ''
+  if (corpus.length === 0) {
+    return '\n\nCorpus context: no prior matches in the network. Reason from training knowledge alone.'
+  }
+  const lines = corpus
+    .map(
+      (c, i) =>
+        `(${i + 1}) confidence=${c.confidenceScore.toFixed(2)} success=${c.successConfirmCount} comebacks=${c.comebackRecordedCount} similarity=${c.similarityScore.toFixed(2)}\n    rootCause: ${c.rootCause}\n    summary: ${c.summary}`,
+    )
+    .join('\n\n')
+  return `\n\nCorpus context (top ${corpus.length} matches, vehicle + DTC + symptom matched, vector-ranked):\n${lines}`
 }
 
 export async function updateTree(input: {
@@ -117,10 +128,10 @@ export async function updateTree(input: {
 
   const corpusBlock =
     (input.corpus ?? []).length > 0
-      ? `\n\nCorpus matches (cross-shop prior cases):\n${(input.corpus ?? [])
+      ? `\n\nCorpus matches (cross-shop prior cases, vector-ranked):\n${(input.corpus ?? [])
           .map(
             (c, i) =>
-              `(${i + 1}) ${c.summary ?? '(no summary)'}${c.structured ? `\nstructured: ${JSON.stringify(c.structured)}` : ''}`,
+              `(${i + 1}) confidence=${c.confidenceScore.toFixed(2)} success=${c.successConfirmCount} comebacks=${c.comebackRecordedCount} similarity=${c.similarityScore.toFixed(2)}\n    rootCause: ${c.rootCause}\n    summary: ${c.summary}`,
           )
           .join('\n\n')}`
       : ''

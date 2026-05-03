@@ -351,3 +351,127 @@ describe('updateTree with retrieval', () => {
     expect(text).toContain('nhtsa')
   })
 })
+
+describe('generateInitialTree with corpus context', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'verify-corpus', label: 'Verify wastegate line', status: 'active' }],
+            currentNodeId: 'verify-corpus',
+            message: 'Prior cases point to wastegate vacuum line. Verify first.',
+          }),
+        },
+      ],
+      usage: { input_tokens: 200, output_tokens: 60 },
+    })
+  })
+
+  it('includes a Corpus context block with rootCause, confidence, success, comebacks, similarity', async () => {
+    const { generateInitialTree } = await import('@/lib/ai/tree-engine')
+    await generateInitialTree(
+      {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'power loss',
+      },
+      [
+        {
+          id: 'c1',
+          rootCause: 'wastegate vacuum line crack',
+          summary: '2018 F-150 EcoBoost: WG line',
+          confidenceScore: 0.85,
+          successConfirmCount: 5,
+          comebackRecordedCount: 0,
+          similarityScore: 0.91,
+        },
+      ],
+    )
+    const userMsg = mockCreate.mock.calls.at(-1)![0].messages[0].content as string
+    expect(userMsg).toContain('Corpus context')
+    expect(userMsg).toContain('wastegate vacuum line crack')
+    expect(userMsg).toContain('confidence=0.85')
+    expect(userMsg).toContain('success=5')
+    expect(userMsg).toContain('comebacks=0')
+    expect(userMsg).toContain('similarity=0.91')
+  })
+
+  it('emits a "no prior matches" line when corpus is empty', async () => {
+    const { generateInitialTree } = await import('@/lib/ai/tree-engine')
+    await generateInitialTree(
+      {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'power loss',
+      },
+      [],
+    )
+    const userMsg = mockCreate.mock.calls.at(-1)![0].messages[0].content as string
+    expect(userMsg).toMatch(/Corpus context: no prior matches/)
+  })
+
+  it('omits the corpus block entirely when corpus arg is not passed (back-compat)', async () => {
+    const { generateInitialTree } = await import('@/lib/ai/tree-engine')
+    await generateInitialTree({
+      vehicleYear: 2018,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-150',
+      customerComplaint: 'power loss',
+    })
+    const userMsg = mockCreate.mock.calls.at(-1)![0].messages[0].content as string
+    expect(userMsg).not.toContain('Corpus context')
+  })
+})
+
+describe('updateTree with corpus context', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'Step', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'ok',
+          }),
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    })
+  })
+
+  it('renders real CorpusMatch fields in the corpus block', async () => {
+    const { updateTree } = await import('@/lib/ai/tree-engine')
+    await updateTree({
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'power loss',
+      },
+      currentTree: { nodes: [], currentNodeId: 'a', message: '' },
+      observation: 'codes pulled',
+      corpus: [
+        {
+          id: 'c1',
+          rootCause: 'wastegate vacuum line crack',
+          summary: 'WG line',
+          confidenceScore: 0.85,
+          successConfirmCount: 5,
+          comebackRecordedCount: 0,
+          similarityScore: 0.91,
+        },
+      ],
+    })
+    const userMsg = mockCreate.mock.calls.at(-1)![0].messages[0].content as string
+    expect(userMsg).toContain('Corpus matches')
+    expect(userMsg).toContain('wastegate vacuum line crack')
+    expect(userMsg).toContain('confidence=0.85')
+  })
+})

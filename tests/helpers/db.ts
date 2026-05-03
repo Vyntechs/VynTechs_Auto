@@ -1,4 +1,5 @@
 import { PGlite } from '@electric-sql/pglite'
+import { vector } from '@electric-sql/pglite/vector'
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
 import path from 'node:path'
@@ -10,7 +11,11 @@ export async function createTestDb(): Promise<{
   db: TestDb
   close: () => Promise<void>
 }> {
-  const client = new PGlite()
+  // pgvector is required by Phase K's corpus_entries migration. PGlite ships
+  // it as an opt-in extension; without it, migrations fail to resolve the
+  // `vector(1536)` type and the test DB never finishes setup.
+  const client = new PGlite({ extensions: { vector } })
+  await client.query('CREATE EXTENSION IF NOT EXISTS vector;')
   const db = drizzle(client, { schema })
   await migrate(db, {
     migrationsFolder: path.join(process.cwd(), 'drizzle/migrations'),
