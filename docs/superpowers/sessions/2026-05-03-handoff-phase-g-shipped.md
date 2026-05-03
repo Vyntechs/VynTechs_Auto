@@ -41,10 +41,22 @@ All three still empty in `.env.local` — pre-Phase G they were placeholders, po
 
 ## Next session — likely focus
 
-Ask the user; don't pick. Recommended:
+Ask Brandon; don't pick. Recommended order through the remaining phases:
 
-1. **Phase I — Multi-Modal Capture (10 tasks).** Wires the visually-present-but-unwired Voice/Photo/Video/Scan buttons (Brandon flagged 2026-05-02 as the two-way evidence channel UX gap).
-2. **Phase J — Playwright e2e.** Outcome flow + billing portal + PWA install.
-3. **Phase N tablet, Phase O desktop** — still deferred per Brandon.
+1. **Phase I — Multi-Modal Capture** (10 tasks). Wires the visually-present-but-unwired Voice/Photo/Video/Scan buttons (the two-way evidence channel UX gap Brandon flagged 2026-05-02).
+2. **Phase O — Desktop Intake** (5 tasks). Front-counter screen for starting a session. *(Reactivated 2026-05-03 — was previously deferred.)*
+3. **Phase P — Curator Console** (7 tasks).
+4. **Phase Q — Calibration Engine** (5 tasks).
+5. **Phase R — Comeback Follow-Up Automation** (5 tasks).
+
+## STOP-AND-ASK phases (deferred, decided 2026-05-03)
+
+**Do not start Phases J, N, or S without explicit go-ahead from Brandon.** Brandon wants to be notified when those phases come up so he can decide whether to greenlight or keep deferred.
+
+- **Phase J — Photo Storage Tiering** (6 tasks). Deferred for AWS cost-surprise concerns (2026-05-02).
+- **Phase N — Tablet Layout + Real-Time Sync** (6 tasks). Deferred — phone-first, tablet later.
+- **Phase S — End-to-End + Production Deploy** (4 tasks). Deferred until Brandon greenlights real-world launch. Don't deploy production without him.
+
+If a future session reaches a natural point where one of these is the next step, **stop, surface it to Brandon, get explicit approval before touching it.**
 
 Recommend `/clear` before starting next phase.
