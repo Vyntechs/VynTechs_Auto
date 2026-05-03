@@ -8,6 +8,7 @@ import {
   integer,
   real,
   boolean,
+  index,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 
@@ -124,30 +125,34 @@ export const stripeCustomers = pgTable('stripe_customers', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
-export const artifacts = pgTable('artifacts', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }).notNull(),
-  nodeId: text('node_id').notNull(),
-  kind: text('kind', {
-    enum: ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'],
-  }).notNull(),
-  storageKey: text('storage_key').notNull(),
-  mimeType: text('mime_type').notNull(),
-  bytes: integer('bytes').notNull(),
-  durationMs: integer('duration_ms'),
-  extraction: jsonb('extraction').$type<{
-    text?: string
-    structured?: Record<string, unknown>
-    summary?: string
-  }>(),
-  extractionStatus: text('extraction_status', {
-    enum: ['pending', 'done', 'failed'],
-  }).notNull().default('pending'),
-  storageTier: text('storage_tier', {
-    enum: ['hot', 'warm', 'cold'],
-  }).notNull().default('hot'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+export const artifacts = pgTable(
+  'artifacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }).notNull(),
+    nodeId: text('node_id').notNull(),
+    kind: text('kind', {
+      enum: ['photo', 'video', 'audio', 'scan_screen', 'wiring_diagram'],
+    }).notNull(),
+    storageKey: text('storage_key').notNull(),
+    mimeType: text('mime_type').notNull(),
+    bytes: integer('bytes').notNull(),
+    durationMs: integer('duration_ms'),
+    extraction: jsonb('extraction').$type<{
+      text?: string
+      structured?: Record<string, unknown>
+      summary?: string
+    }>(),
+    extractionStatus: text('extraction_status', {
+      enum: ['pending', 'done', 'failed'],
+    }).notNull().default('pending'),
+    storageTier: text('storage_tier', {
+      enum: ['hot', 'warm', 'cold'],
+    }).notNull().default('hot'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('artifacts_session_id_idx').on(table.sessionId)],
+)
 
 export const artifactsRelations = relations(artifacts, ({ one }) => ({
   session: one(sessions, { fields: [artifacts.sessionId], references: [sessions.id] }),

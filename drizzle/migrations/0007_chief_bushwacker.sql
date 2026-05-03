@@ -1,0 +1,1 @@
+CREATE INDEX "artifacts_session_id_idx" ON "artifacts" USING btree ("session_id");

@@ -50,6 +50,13 @@
       "when": 1777788676042,
       "tag": "0006_known_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777821078571,
+      "tag": "0007_chief_bushwacker",
+      "breakpoints": true
     }
   ]
 }
