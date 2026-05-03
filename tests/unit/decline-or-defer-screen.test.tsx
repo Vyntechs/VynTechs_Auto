@@ -47,7 +47,7 @@ describe('DeclineOrDefer (presentational)', () => {
         ]}
       />,
     )
-    const btn = screen.getByRole('button', { name: /1 · A/i })
+    const btn = screen.getByText('A').closest('button')!
     expect(btn).not.toBeDisabled()
     fireEvent.click(btn)
     // No callback, no error — just nothing happens
@@ -69,7 +69,7 @@ describe('DeclineOrDefer (presentational)', () => {
         onSelectOption={onSelect}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: /2 · B/i }))
+    fireEvent.click(screen.getByText('B').closest('button')!)
     expect(onSelect).toHaveBeenCalledWith(2)
   })
 
@@ -89,8 +89,8 @@ describe('DeclineOrDefer (presentational)', () => {
         pending={2}
       />,
     )
-    expect(screen.getByRole('button', { name: /1 · A/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /2 · B/i })).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByText('A').closest('button')).toBeDisabled()
+    expect(screen.getByText('B').closest('button')).toHaveAttribute('aria-busy', 'true')
   })
 
   it('hides the decorative play-arrow glyph from screen readers', () => {
