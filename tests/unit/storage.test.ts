@@ -1,36 +1,144 @@
 import { describe, it, expect, vi } from 'vitest'
 
-const supabaseMock = {
-  storage: {
-    from: vi.fn().mockReturnValue({
-      upload: vi.fn().mockResolvedValue({ data: { path: 'sess/abc/photo.jpg' }, error: null }),
-      createSignedUrl: vi.fn().mockResolvedValue({
-        data: { signedUrl: 'https://signed.example/x' },
-        error: null,
-      }),
-    }),
-  },
-}
+import {
+  uploadArtifact,
+  signedUrl,
+  downloadArtifact,
+} from '@/lib/storage/client'
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => supabaseMock,
-}))
+// All tests inject mocks via DI. The lazy-Proxy real client is never reached,
+// so no NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY env is required.
 
-describe('storage', () => {
-  it('uploadArtifact returns the storage key', async () => {
-    const { uploadArtifact } = await import('@/lib/storage/client')
+describe('uploadArtifact', () => {
+  it('returns a key namespaced by sessionId and kind', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'ignored' }, error: null })
     const key = await uploadArtifact({
-      sessionId: 'abc',
+      sessionId: 'sess-abc',
       kind: 'photo',
       bytes: new Uint8Array([1, 2, 3]),
       mimeType: 'image/jpeg',
+      upload,
     })
-    expect(key).toContain('abc/')
+    expect(key).toMatch(/^sess-abc\/photo\/[0-9a-f-]+\.jpg$/)
+    expect(upload).toHaveBeenCalledTimes(1)
   })
 
-  it('signedUrl returns the URL string', async () => {
-    const { signedUrl } = await import('@/lib/storage/client')
-    const url = await signedUrl('sess/abc/photo.jpg')
+  it('passes the resolved key, bytes, and content-type to the storage client', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null })
+    const bytes = new Uint8Array([4, 5, 6])
+    await uploadArtifact({
+      sessionId: 'sess-1',
+      kind: 'audio',
+      bytes,
+      mimeType: 'audio/webm',
+      upload,
+    })
+    const [calledKey, calledBytes, opts] = upload.mock.calls[0]
+    expect(calledKey).toMatch(/^sess-1\/audio\/.+\.webm$/)
+    expect(calledBytes).toBe(bytes)
+    expect(opts).toEqual({ contentType: 'audio/webm', upsert: false })
+  })
+
+  it('strips mime codec parameters before extension lookup', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null })
+    const key = await uploadArtifact({
+      sessionId: 's',
+      kind: 'audio',
+      bytes: new Uint8Array([1]),
+      mimeType: 'audio/webm;codecs=opus',
+      upload,
+    })
+    expect(key).toMatch(/\.webm$/)
+  })
+
+  it('falls back to .bin extension for unknown mime types', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'ok' }, error: null })
+    const key = await uploadArtifact({
+      sessionId: 's',
+      kind: 'photo',
+      bytes: new Uint8Array([1]),
+      mimeType: 'application/octet-stream',
+      upload,
+    })
+    expect(key).toMatch(/\.bin$/)
+  })
+
+  it('throws when the storage client returns an error', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: null, error: { message: 'quota exceeded' } })
+    await expect(
+      uploadArtifact({
+        sessionId: 's',
+        kind: 'photo',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/jpeg',
+        upload,
+      }),
+    ).rejects.toThrow(/upload failed.*quota exceeded/)
+  })
+})
+
+describe('signedUrl', () => {
+  it('returns the URL string from the storage client', async () => {
+    const createSignedUrl = vi
+      .fn()
+      .mockResolvedValue({ data: { signedUrl: 'https://signed.example/x' }, error: null })
+    const url = await signedUrl('sess/abc/photo.jpg', undefined, { createSignedUrl })
     expect(url).toBe('https://signed.example/x')
+  })
+
+  it('forwards the storage key and default expiry of 3600s', async () => {
+    const createSignedUrl = vi
+      .fn()
+      .mockResolvedValue({ data: { signedUrl: 'https://x' }, error: null })
+    await signedUrl('sess/abc/photo.jpg', undefined, { createSignedUrl })
+    expect(createSignedUrl).toHaveBeenCalledWith('sess/abc/photo.jpg', 3600)
+  })
+
+  it('forwards a caller-supplied expiry', async () => {
+    const createSignedUrl = vi
+      .fn()
+      .mockResolvedValue({ data: { signedUrl: 'https://x' }, error: null })
+    await signedUrl('k', 60, { createSignedUrl })
+    expect(createSignedUrl).toHaveBeenCalledWith('k', 60)
+  })
+
+  it('throws when the storage client returns an error', async () => {
+    const createSignedUrl = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: 'not found' } })
+    await expect(
+      signedUrl('missing', undefined, { createSignedUrl }),
+    ).rejects.toThrow(/signed url failed.*not found/)
+  })
+
+  it('throws when the storage client returns no data and no error', async () => {
+    const createSignedUrl = vi.fn().mockResolvedValue({ data: null, error: null })
+    await expect(
+      signedUrl('k', undefined, { createSignedUrl }),
+    ).rejects.toThrow(/signed url failed.*no data/)
+  })
+})
+
+describe('downloadArtifact', () => {
+  it('returns the bytes from the storage client', async () => {
+    const blob = new Blob([new Uint8Array([7, 8, 9])])
+    const download = vi.fn().mockResolvedValue({ data: blob, error: null })
+    const out = await downloadArtifact('sess/abc/photo.jpg', { download })
+    expect(out).toEqual(new Uint8Array([7, 8, 9]))
+    expect(download).toHaveBeenCalledWith('sess/abc/photo.jpg')
+  })
+
+  it('throws when the storage client returns an error', async () => {
+    const download = vi.fn().mockResolvedValue({ data: null, error: { message: 'not found' } })
+    await expect(
+      downloadArtifact('missing', { download }),
+    ).rejects.toThrow(/download failed.*not found/)
+  })
+
+  it('throws when the storage client returns no data and no error', async () => {
+    const download = vi.fn().mockResolvedValue({ data: null, error: null })
+    await expect(
+      downloadArtifact('k', { download }),
+    ).rejects.toThrow(/download failed.*no data/)
   })
 })
