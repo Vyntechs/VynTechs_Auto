@@ -2,6 +2,16 @@ import { anthropic, MODEL, cachedSystem } from './client'
 import { TREE_ENGINE_SYSTEM } from './prompts'
 import type { IntakePayload } from '@/lib/types'
 import type { GateDecision } from '@/lib/gating/gap-handler'
+import type { RetrievalResult } from '@/lib/retrieval/types'
+
+// Phase K (Cross-Shop Corpus) is not yet built. This is a placeholder shape so
+// Task L10 can wire the parameter through `updateTree`. When Phase K ships,
+// replace this with the real CorpusMatch type from the corpus module.
+export type CorpusMatch = {
+  /* placeholder for Phase K */
+  summary?: string
+  structured?: Record<string, unknown>
+}
 
 export type TreeNode = {
   id: string
@@ -87,6 +97,8 @@ export async function updateTree(input: {
     structured?: Record<string, unknown>
     text?: string
   }>
+  corpus?: CorpusMatch[]
+  retrieval?: RetrievalResult[]
 }): Promise<TreeState> {
   const artifactBlock =
     (input.artifacts ?? []).length > 0
@@ -98,15 +110,36 @@ export async function updateTree(input: {
           .join('\n\n')}`
       : ''
 
+  const corpusBlock =
+    (input.corpus ?? []).length > 0
+      ? `\n\nCorpus matches (cross-shop prior cases):\n${(input.corpus ?? [])
+          .map(
+            (c, i) =>
+              `(${i + 1}) ${c.summary ?? '(no summary)'}${c.structured ? `\nstructured: ${JSON.stringify(c.structured)}` : ''}`,
+          )
+          .join('\n\n')}`
+      : ''
+
+  const retrievalBlock =
+    (input.retrieval ?? []).length > 0
+      ? `\n\nInternet retrieval (graded for relevance):\n${input.retrieval!
+          .slice(0, 5)
+          .map(
+            (r, i) =>
+              `(${i + 1}) [${r.source}] ${r.title}\n    ${r.snippet.slice(0, 400)}`,
+          )
+          .join('\n\n')}`
+      : ''
+
   const userMessage = `Initial intake: ${JSON.stringify(input.intake)}
 
 Current tree state:
 ${JSON.stringify(input.currentTree, null, 2)}
 
 Tech's observation on current step (${input.currentTree.currentNodeId}):
-${input.observation}${artifactBlock}
+${input.observation}${artifactBlock}${corpusBlock}${retrievalBlock}
 
-Update the tree based on this observation. Resolve or prune branches as appropriate. Set the next current step. If you have enough information to identify the root cause, set done=true and provide rootCauseSummary.
+Update the tree based on this observation, any artifact evidence, the corpus matches, and the retrieval results. If sources conflict, surface the conflict transparently in the message field. Resolve or prune branches as appropriate. Set the next current step. If you have enough information to identify the root cause, set done=true and provide rootCauseSummary.
 
 Return JSON only — no prose, no fences.`
 

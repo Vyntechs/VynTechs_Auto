@@ -311,3 +311,43 @@ describe('parseTreeJson with requestedArtifact', () => {
     expect(tree.requestedArtifact).toBeUndefined()
   })
 })
+
+describe('updateTree with retrieval', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('passes retrieval snippets into the prompt', async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'verify', label: 'Smoke test', status: 'active' }],
+            currentNodeId: 'verify',
+            message: 'NHTSA bulletin matches.',
+          }),
+        },
+      ],
+      usage: { input_tokens: 200, output_tokens: 60 },
+    })
+    await updateTree({
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'power loss',
+      },
+      currentTree: { nodes: [], currentNodeId: 'scan-codes', message: '' },
+      observation: 'codes pulled',
+      retrieval: [
+        { source: 'nhtsa', title: '17V123 wastegate', snippet: 'recall: wastegate vacuum line' },
+      ],
+    })
+    const lastCall = mockCreate.mock.calls.at(-1)![0]
+    const userMsgs = lastCall.messages.filter((m: { role: string }) => m.role === 'user')
+    const text = userMsgs[userMsgs.length - 1].content as string
+    expect(text).toContain('Internet retrieval')
+    expect(text).toContain('nhtsa')
+  })
+})

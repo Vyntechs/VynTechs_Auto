@@ -49,7 +49,10 @@ RISK GATING:
 - The platform will run a risk classifier and confidence gate. If your confidence is below the gate's threshold for the action's risk class, the platform will block the action and surface Decline-or-Defer options to the tech. You don't need to enforce thresholds yourself — but be honest about confidence.
 - WHEN your proposedAction.confidence is below 0.95, you MUST ALSO populate "confidenceGap" (one sentence naming the specific uncertainty) and "whatWouldClose" (the cheapest specific input from the tech that would close it). The tech is not a guesser — they have a service manual, a phone for photos, and the customer in the bay. Ask for a single concrete data point, not a multi-step diagnostic procedure. The whole platform falls apart if the tech is forced to guess what would help; you must tell them.
 
-This MVP iteration does not yet have access to a corpus or web retrieval. Reason from your training knowledge only. Future iterations will add retrieval; for now, do your best with what you know.`
+INTERNET RETRIEVAL (Rung 1):
+- The user message may include an "Internet retrieval" block — these are snippets the orchestrator pulled from authoritative sources (NHTSA, manufacturer recall, repair forums, YouTube transcripts, Reddit) and graded for relevance.
+- Treat retrieval results as supporting evidence, not authority. Cite implicitly in the message ("Forum reports point to ...") but do not name URLs to the tech.
+- If retrieval contradicts the corpus or your own reasoning, surface the conflict in the message field.`
 
 export const OUTCOME_VALIDATOR_SYSTEM = `You are Vyntechs' outcome-capture validator.
 

@@ -7602,6 +7602,14 @@ git add -A
 git commit -m "feat(retrieval): orchestrate Rung-1 retrieval + LLM grading inside advance flow"
 ```
 
+### Phase L — Implementation corrections
+
+Recorded 2026-05-03.
+
+- **`corpus` parameter is a placeholder.** Phase K (Cross-Shop Corpus) is not yet built, so Task L10 wires `corpus: undefined` in the advance route and defines `CorpusMatch` as a placeholder type in `lib/ai/tree-engine.ts`. When Phase K is built, replace the placeholder type and feed real corpus matches through.
+- **`runRetrieval` takes `db: AppDb`.** Task L7 was refactored to thread `db: AppDb` through cache helpers (per AGENTS.md convention). The orchestrator's signature was extended to match. The plan's L10 step 3 (calling the orchestrator with `{ adapters: ADAPTERS, ctx: retrievalCtx }`) must be updated to pass `{ db, adapters: ADAPTERS, ctx: retrievalCtx }`.
+- **Wall-clock-aborted adapter errors are tagged.** `errors[].message === 'wall-clock budget exceeded'` for AbortError-style failures, vs the underlying error message for genuine adapter failures. L10 didn't need to change to accommodate this; noting for future observability work.
+
 ---
 
 ## Phase M — Tech-Assisted Retrieval + Risk Gating + Decline-or-Defer (9 tasks)
