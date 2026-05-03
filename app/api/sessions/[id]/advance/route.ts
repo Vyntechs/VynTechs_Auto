@@ -11,6 +11,7 @@ import { ManufacturerRecallAdapter } from '@/lib/retrieval/adapters/manufacturer
 import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
 import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
+import { retrieveCorpus } from '@/lib/corpus/retrieval'
 
 const ADAPTERS = [
   new NHTSAAdapter(),
@@ -35,13 +36,13 @@ export async function POST(
 
   const body = await req.json().catch(() => null)
 
-  // Phase K (corpus) not built yet; intentionally omitted from updateTree input.
   const updateTreeWithRetrieval = buildUpdateTreeWithRetrieval({
     db,
     adapters: ADAPTERS,
     updateTree,
     runRetrieval,
     validateRetrievalResults,
+    retrieveCorpus,
   })
 
   const result = await advanceSession({

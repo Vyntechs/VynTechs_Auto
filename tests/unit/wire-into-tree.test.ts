@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { buildUpdateTreeWithRetrieval } from '@/lib/retrieval/wire-into-tree'
-import type { TreeState } from '@/lib/ai/tree-engine'
+import type { TreeState, CorpusMatch } from '@/lib/ai/tree-engine'
+import type { CorpusRetrievalInput } from '@/lib/corpus/retrieval'
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from '@/lib/retrieval/types'
 import type { AppDb } from '@/lib/db/queries'
 import type { RetrievalRun } from '@/lib/retrieval/orchestrator'
@@ -132,5 +133,102 @@ describe('buildUpdateTreeWithRetrieval', () => {
     expect(updateTree).toHaveBeenCalledTimes(1)
     expect(capturedUpdateTreeInput?.retrieval).toEqual(ungraded)
     expect(warnSpy).toHaveBeenCalledWith('retrieval validation failed:', expect.any(Error))
+  })
+})
+
+describe('buildUpdateTreeWithRetrieval — corpus retrieval (Phase K8)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  const okRetrieval = {
+    runRetrieval: vi.fn(async () =>
+      ({
+        results: [],
+        queriesUsed: 0,
+        wallClockMs: 0,
+        tokensUsed: 0,
+        cacheHits: [],
+        errors: [],
+      }) satisfies RetrievalRun,
+    ),
+    validateRetrievalResults: vi.fn(async () => [] as RetrievalResult[]),
+  }
+
+  const corpusMatch: CorpusMatch = {
+    id: 'c1',
+    rootCause: 'wastegate vacuum line crack',
+    summary: '2018 F-150 EcoBoost: WG line',
+    confidenceScore: 0.85,
+    successConfirmCount: 5,
+    comebackRecordedCount: 0,
+    similarityScore: 0.91,
+  }
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  it('passes corpus to updateTree when retrieveCorpus is provided', async () => {
+    let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
+    const updateTree = vi.fn(async (input) => {
+      capturedInput = input
+      return stubTree
+    })
+    const retrieveCorpus = vi.fn(async (_db: AppDb, _input: CorpusRetrievalInput) => [corpusMatch])
+
+    const wrapped = buildUpdateTreeWithRetrieval({
+      db: fakeDb,
+      adapters: fakeAdapters,
+      updateTree,
+      retrieveCorpus,
+      ...okRetrieval,
+    })
+
+    await wrapped({ ...baseInput, sessionDtcs: ['P0299'] })
+    expect(retrieveCorpus).toHaveBeenCalledTimes(1)
+    const corpusCallInput = retrieveCorpus.mock.calls[0]![1]
+    expect(corpusCallInput.vehicleMake).toBe('Ford')
+    expect(corpusCallInput.dtcs).toEqual(['P0299'])
+    expect(capturedInput?.corpus).toEqual([corpusMatch])
+  })
+
+  it('falls through to corpus: [] when retrieveCorpus throws', async () => {
+    let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
+    const updateTree = vi.fn(async (input) => {
+      capturedInput = input
+      return stubTree
+    })
+    const retrieveCorpus = vi.fn(async (_db: AppDb, _input: CorpusRetrievalInput) => {
+      throw new Error('corpus boom')
+    })
+
+    const wrapped = buildUpdateTreeWithRetrieval({
+      db: fakeDb,
+      adapters: fakeAdapters,
+      updateTree,
+      retrieveCorpus,
+      ...okRetrieval,
+    })
+
+    await wrapped({ ...baseInput, sessionDtcs: ['P0299'] })
+    expect(capturedInput?.corpus).toEqual([])
+    expect(warnSpy).toHaveBeenCalledWith('corpus retrieval failed:', expect.any(Error))
+  })
+
+  it('omits corpus from updateTree input when retrieveCorpus is not provided (back-compat)', async () => {
+    let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
+    const updateTree = vi.fn(async (input) => {
+      capturedInput = input
+      return stubTree
+    })
+
+    const wrapped = buildUpdateTreeWithRetrieval({
+      db: fakeDb,
+      adapters: fakeAdapters,
+      updateTree,
+      ...okRetrieval,
+    })
+
+    await wrapped({ ...baseInput, sessionDtcs: ['P0299'] })
+    expect(capturedInput?.corpus).toBeUndefined()
   })
 })
