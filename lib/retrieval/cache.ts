@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { db } from '@/lib/db/client'
 import { retrievalCache } from '@/lib/db/schema'
+import type { AppDb } from '@/lib/db/queries'
 import type { RetrievalContext, RetrievalResult } from './types'
 
 const TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -19,7 +19,7 @@ export function cacheKeyFor(ctx: RetrievalContext, source: string): string {
   return createHash('sha256').update(parts).digest('hex')
 }
 
-export async function getCachedResults(cacheKey: string): Promise<RetrievalResult[] | null> {
+export async function getCachedResults(db: AppDb, cacheKey: string): Promise<RetrievalResult[] | null> {
   const row = await db.query.retrievalCache.findFirst({
     where: eq(retrievalCache.cacheKey, cacheKey),
   })
@@ -29,6 +29,7 @@ export async function getCachedResults(cacheKey: string): Promise<RetrievalResul
 }
 
 export async function setCachedResults(
+  db: AppDb,
   cacheKey: string,
   source: string,
   results: RetrievalResult[],
@@ -45,5 +46,5 @@ export async function setCachedResults(
       target: retrievalCache.cacheKey,
       set: { results, expiresAt: new Date(Date.now() + TTL_MS) },
     })
-    .returning({ id: retrievalCache.id })
+    .returning()
 }
