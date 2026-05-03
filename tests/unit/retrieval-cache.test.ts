@@ -1,17 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { cacheKeyFor, getCachedResults, setCachedResults } from '@/lib/retrieval/cache'
+import type { AppDb } from '@/lib/db/queries'
+
+type FakeDb = {
+  query: { retrievalCache: { findFirst: ReturnType<typeof vi.fn> } }
+  insert: ReturnType<typeof vi.fn>
+}
 
 const findFirst = vi.fn()
 const valuesMock = vi.fn()
 const onConflictMock = vi.fn()
-const returningMock = vi.fn().mockResolvedValue([{ id: 'cache-1' }])
+const returningMock = vi.fn().mockResolvedValue([])
 const insertMock = vi.fn()
 
-vi.mock('@/lib/db/client', () => ({
-  db: {
-    query: { retrievalCache: { findFirst } },
-    insert: insertMock,
-  },
-}))
+const fakeDb: FakeDb = {
+  query: { retrievalCache: { findFirst } },
+  insert: insertMock,
+}
 
 describe('retrieval cache', () => {
   beforeEach(() => {
@@ -31,8 +36,7 @@ describe('retrieval cache', () => {
       results: [{ source: 'nhtsa', title: 't', snippet: 's' }],
       expiresAt: new Date(Date.now() + 60_000),
     })
-    const { getCachedResults } = await import('@/lib/retrieval/cache')
-    const r = await getCachedResults('key-1')
+    const r = await getCachedResults(fakeDb as unknown as AppDb, 'key-1')
     expect(r).toHaveLength(1)
   })
 
@@ -41,21 +45,18 @@ describe('retrieval cache', () => {
       results: [],
       expiresAt: new Date(Date.now() - 1000),
     })
-    const { getCachedResults } = await import('@/lib/retrieval/cache')
-    const r = await getCachedResults('key-2')
+    const r = await getCachedResults(fakeDb as unknown as AppDb, 'key-2')
     expect(r).toBeNull()
   })
 
   it('returns null when no row found', async () => {
     findFirst.mockResolvedValueOnce(undefined)
-    const { getCachedResults } = await import('@/lib/retrieval/cache')
-    const r = await getCachedResults('missing')
+    const r = await getCachedResults(fakeDb as unknown as AppDb, 'missing')
     expect(r).toBeNull()
   })
 
   it('setCachedResults invokes insert with onConflictDoUpdate', async () => {
-    const { setCachedResults } = await import('@/lib/retrieval/cache')
-    await setCachedResults('key-3', 'nhtsa', [
+    await setCachedResults(fakeDb as unknown as AppDb, 'key-3', 'nhtsa', [
       { source: 'nhtsa', title: 'a', snippet: 'b' },
     ])
     expect(insertMock).toHaveBeenCalledTimes(1)
@@ -69,8 +70,7 @@ describe('retrieval cache', () => {
     expect(returningMock).toHaveBeenCalledTimes(1)
   })
 
-  it('cacheKeyFor produces stable hash regardless of dtc/symptom order', async () => {
-    const { cacheKeyFor } = await import('@/lib/retrieval/cache')
+  it('cacheKeyFor produces stable hash regardless of dtc/symptom order', () => {
     const ctx1 = {
       vehicleYear: 2018,
       vehicleMake: 'Ford',
