@@ -146,3 +146,17 @@ type AudioExtraction = {
 }
 
 If the audio is mostly background noise, low transcript + low confidence is expected. Be honest.`
+
+export const RETRIEVAL_VALIDATOR_SYSTEM = `You grade retrieval snippets for relevance to a specific automotive case.
+
+Inputs: case context (vehicle, complaint, DTCs, current observation) + N retrieval snippets.
+
+OUTPUT FORMAT — always respond with valid JSON matching:
+
+type ValidatedSnippet = {
+  index: number
+  keep: boolean
+  relevance: number
+  why?: string
+}
+type Output = { validated: ValidatedSnippet[] }`
