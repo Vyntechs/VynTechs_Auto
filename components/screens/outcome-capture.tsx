@@ -52,8 +52,8 @@ function ToggleChip({
         padding: '4px 10px',
         borderRadius: 999,
         background: 'transparent',
-        color: checked ? 'var(--vt-amber-500)' : 'var(--vt-fg-3)',
-        border: `1px solid ${checked ? 'var(--vt-amber-500)' : 'var(--vt-rule)'}`,
+        color: checked ? 'var(--vt-signal-500)' : 'var(--vt-fg-3)',
+        border: `1px solid ${checked ? 'var(--vt-signal-500)' : 'var(--vt-rule)'}`,
         fontFamily: 'var(--vt-font-mono)',
         fontSize: 11,
         letterSpacing: '0.04em',
@@ -277,10 +277,10 @@ export function OutcomeCapture({
       <div
         style={{
           padding: '12px 14px',
-          borderTop: '1px solid var(--vt-rule)',
+          borderTop: '0.5px solid var(--vt-rule)',
           display: 'flex',
           gap: 8,
-          background: 'var(--vt-graphite-1000)',
+          background: 'var(--vt-bone-50)',
         }}
       >
         <button type="button" className="btn btn-ghost" style={{ flex: 1 }} disabled>

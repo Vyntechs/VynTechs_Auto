@@ -96,7 +96,8 @@ export default function DesignPreviewPage() {
     <main
       style={{
         minHeight: '100vh',
-        background: 'var(--vt-graphite-1000)',
+        background:
+          'radial-gradient(1200px 600px at 30% 0%, var(--vt-bone-100) 0%, transparent 70%), var(--vt-bone-200)',
         padding: '32px 16px 64px',
         display: 'flex',
         flexDirection: 'column',

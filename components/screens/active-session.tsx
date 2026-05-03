@@ -62,12 +62,12 @@ export function ActiveSession({ session }: { session: Session }) {
           </div>
           <h2
             style={{
-              fontFamily: 'var(--vt-font-sans)',
-              fontWeight: 600,
-              fontSize: 17,
-              lineHeight: 1.25,
-              letterSpacing: '-0.01em',
-              margin: '0 0 8px',
+              fontFamily: 'var(--vt-font-serif)',
+              fontWeight: 400,
+              fontSize: 22,
+              lineHeight: 1.2,
+              letterSpacing: '-0.02em',
+              margin: '0 0 10px',
             }}
           >
             {active?.label ?? 'No active step.'}
@@ -75,11 +75,12 @@ export function ActiveSession({ session }: { session: Session }) {
           {active?.rationale && (
             <p
               style={{
-                fontFamily: 'var(--vt-font-sans)',
-                fontSize: 13,
+                fontFamily: 'var(--vt-font-serif)',
+                fontStyle: 'italic',
+                fontSize: 14,
                 color: 'var(--vt-fg-2)',
-                lineHeight: 1.45,
-                margin: '0 0 12px',
+                lineHeight: 1.5,
+                margin: '0 0 14px',
               }}
             >
               {active.rationale}
@@ -88,11 +89,12 @@ export function ActiveSession({ session }: { session: Session }) {
           {!active?.rationale && session.treeState.message && (
             <p
               style={{
-                fontFamily: 'var(--vt-font-sans)',
-                fontSize: 13,
+                fontFamily: 'var(--vt-font-serif)',
+                fontStyle: 'italic',
+                fontSize: 14,
                 color: 'var(--vt-fg-2)',
-                lineHeight: 1.45,
-                margin: '0 0 12px',
+                lineHeight: 1.5,
+                margin: '0 0 14px',
               }}
             >
               {session.treeState.message}

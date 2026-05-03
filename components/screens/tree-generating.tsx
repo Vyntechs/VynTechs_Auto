@@ -24,7 +24,7 @@ export function TreeGenerating({
     >
       <div
         style={{
-          padding: '40px 20px',
+          padding: '40px 24px',
           textAlign: 'center',
           flex: 1,
           display: 'flex',
@@ -34,7 +34,7 @@ export function TreeGenerating({
       >
         <span
           className="eyebrow"
-          style={{ color: 'var(--vt-amber-500)', marginBottom: 16 }}
+          style={{ color: 'var(--vt-signal-500)', marginBottom: 18 }}
           aria-live="polite"
         >
           ● Generating
@@ -42,11 +42,12 @@ export function TreeGenerating({
         <p
           style={{
             fontFamily: 'var(--vt-font-serif)',
-            fontSize: 26,
-            lineHeight: 1.2,
+            fontSize: 30,
+            lineHeight: 1.15,
             color: 'var(--vt-fg)',
-            margin: '0 0 14px',
+            margin: '0 0 16px',
             fontStyle: 'italic',
+            letterSpacing: '-0.02em',
           }}
         >
           {headline}
@@ -55,9 +56,11 @@ export function TreeGenerating({
           <div
             style={{
               fontFamily: 'var(--vt-font-mono)',
-              fontSize: 11,
+              fontSize: 10,
               color: 'var(--vt-fg-3)',
-              marginBottom: 24,
+              marginBottom: 28,
+              letterSpacing: '0.06em',
+              lineHeight: 1.7,
             }}
           >
             {vehicle && (
@@ -70,7 +73,9 @@ export function TreeGenerating({
             {elapsed && ` · ${elapsed}`}
           </div>
         )}
-        <HairlineProgress />
+        <div style={{ margin: '0 auto', width: '70%' }}>
+          <HairlineProgress />
+        </div>
       </div>
     </div>
   )
