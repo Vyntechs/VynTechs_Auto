@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Bell } from '@phosphor-icons/react/dist/ssr'
+import { Plus } from '@phosphor-icons/react/dist/ssr'
 import {
   AppHeader,
   Module,
@@ -33,12 +33,22 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
         title="Today"
         meta={meta}
         right={
-          <Bell
-            size={18}
-            weight="regular"
-            style={{ color: 'var(--vt-fg-2)' }}
-            aria-label="Notifications"
-          />
+          <Link
+            href="/sessions/new"
+            aria-label="New diagnosis"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              fontSize: 13,
+              textDecoration: 'none',
+            }}
+          >
+            <Plus size={14} weight="bold" aria-hidden="true" />
+            New diagnosis
+          </Link>
         }
       />
       <div
