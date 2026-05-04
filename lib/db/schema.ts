@@ -209,9 +209,11 @@ export const retrievalCache = pgTable('retrieval_cache', {
 export type RetrievalCache = typeof retrievalCache.$inferSelect
 export type NewRetrievalCache = typeof retrievalCache.$inferInsert
 
-// Drizzle has no first-class vector type — `embedding` is declared jsonb here as
-// a bridge so Drizzle can generate a migration; Step 3 of K1 hand-edits the
-// generated SQL to swap the column for `vector(1536)` and adds an HNSW index.
+// Drizzle has no first-class vector type — `embedding` is declared jsonb here
+// as a bridge. The actual SQL column is `vector(1024)` (Voyage AI voyage-3
+// model dim), enforced in `drizzle/migrations/0006_known_maximus.sql`
+// (initial 1536) and resized in `0008_voyage_embedding_dims.sql`. HNSW
+// cosine index lives alongside.
 export const corpusEntries = pgTable('corpus_entries', {
   id: uuid('id').primaryKey().defaultRandom(),
   vehicleYear: integer('vehicle_year').notNull(),

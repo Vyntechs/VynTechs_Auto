@@ -7,7 +7,8 @@ import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
 import { corpusEntries } from '@/lib/db/schema'
 import type { TreeState } from '@/lib/ai/tree-engine'
 
-const embedMock = vi.fn().mockResolvedValue(Array(1536).fill(0.1))
+// Voyage voyage-3 emits 1024-dim vectors; corpus_entries.embedding is vector(1024).
+const embedMock = vi.fn().mockResolvedValue(Array(1024).fill(0.1))
 vi.mock('@/lib/ai/embeddings', () => ({
   embed: (...args: unknown[]) => embedMock(...args),
 }))

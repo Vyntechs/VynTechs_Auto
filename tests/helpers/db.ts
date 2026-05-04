@@ -13,7 +13,7 @@ export async function createTestDb(): Promise<{
 }> {
   // pgvector is required by Phase K's corpus_entries migration. PGlite ships
   // it as an opt-in extension; without it, migrations fail to resolve the
-  // `vector(1536)` type and the test DB never finishes setup.
+  // `vector(1024)` type and the test DB never finishes setup.
   const client = new PGlite({ extensions: { vector } })
   await client.query('CREATE EXTENSION IF NOT EXISTS vector;')
   const db = drizzle(client, { schema })
