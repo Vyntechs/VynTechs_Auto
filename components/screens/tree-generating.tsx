@@ -14,8 +14,8 @@ export function TreeGenerating({
   elapsed,
 }: Props) {
   const headline = matches
-    ? `Building tree from ${matches} corpus matches.`
-    : 'Building diagnostic tree.'
+    ? `Building your plan from ${matches} past case${matches === 1 ? '' : 's'}.`
+    : 'Building your diagnostic plan.'
 
   return (
     <div

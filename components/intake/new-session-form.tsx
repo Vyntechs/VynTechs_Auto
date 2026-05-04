@@ -158,7 +158,7 @@ export function NewSessionForm() {
             className="eyebrow"
             style={{ color: 'var(--vt-signal-500)' }}
           >
-            ● Generating tree from corpus
+            ● Building your diagnostic plan
           </span>
           <p
             style={{
@@ -170,7 +170,7 @@ export function NewSessionForm() {
               margin: 0,
             }}
           >
-            Building decision tree from prior cases. Usually 5–15 seconds.
+            Looking through past cases and pulling reference info. Usually 5–15 seconds.
           </p>
           <HairlineProgress />
         </div>

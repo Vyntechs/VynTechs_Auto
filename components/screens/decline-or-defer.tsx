@@ -37,12 +37,12 @@ type Props = {
 }
 
 const DEFAULT_TAPE_BODY = `  QUERIES   SOURCE              MATCH        STATUS
-─ 5         corpus.weighted    ─ 0/5         miss
-─ 3         forum.scraped      ─ 2 conflict  ambig
-─ 0         oem.servicebltn    ─ ∅           none
+─ 5         past_cases         ─ 0/5         miss
+─ 3         forums             ─ 2 conflict  ambig
+─ 0         service_bulletins  ─ ∅           none
 
-  CONCLUSION:  build-date-specific K-CAN wire colors
-               not retrievable at gate-required confidence`
+  CONCLUSION:  same model year & build K-CAN wire colors
+               not retrievable at required confidence`
 
 const SPOKE_META: Record<SpokeReason, { bearing: string; meta: string[] }> = {
   gather: {
@@ -295,7 +295,7 @@ export function DeclineOrDefer({
     new Date().toISOString().replace('T', ' · ').replace(/\.\d+Z$/, 'Z')
   const plate =
     engravedPlate ??
-    `SESSION ${timer} · BLOCK 7B-3 · TECHS QUEUED 3 · CORPUS GAIN +1`
+    `SESSION ${timer} · BLOCK 7B-3 · TECHS QUEUED 3 · SHOP HISTORY +1`
 
   return (
     <div className="app">

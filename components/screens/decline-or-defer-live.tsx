@@ -30,7 +30,7 @@ const OPTIONS_BY_REASON: Record<GateOption, Option> = {
   defer: {
     number: 3,
     title: 'Defer for curator review',
-    description: '24–72 hr turnaround. Customer keeps the vehicle. Answer enters the corpus.',
+    description: '24–72 hr turnaround. Customer keeps the vehicle. Answer goes into your shop history.',
     emphasized: true,
     reason: 'defer',
   },
