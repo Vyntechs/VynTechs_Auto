@@ -115,4 +115,52 @@ describe('CounterPlanQuote', () => {
     fireEvent.click(removeButtons[0])
     expect(screen.queryByText(/diagnostic — dtc pull/i)).not.toBeInTheDocument()
   })
+
+  it('disables Re-run AI with a "wires up in Counter 04" title (no-op stub)', () => {
+    render(<CounterPlanQuote {...baseProps} />)
+    const btn = screen.getByRole('button', { name: /re-run ai/i }) as HTMLButtonElement
+    expect(btn).toBeDisabled()
+    expect(btn.title).toMatch(/counter 04/i)
+  })
+
+  it('disables Print for customer with a "wires up in Counter 04" title (no-op stub)', () => {
+    render(<CounterPlanQuote {...baseProps} />)
+    const btn = screen.getByRole('button', { name: /print for customer/i }) as HTMLButtonElement
+    expect(btn).toBeDisabled()
+    expect(btn.title).toMatch(/counter 04/i)
+  })
+
+  it('auto-dismisses the network error when the user edits the writer note (gap #5)', async () => {
+    vi.unstubAllGlobals()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    render(<CounterPlanQuote {...baseProps} />)
+    fireEvent.click(screen.getAllByRole('button', { name: /authorize & queue/i })[0])
+
+    const errorBox = await screen.findByRole('alert')
+    expect(errorBox).toHaveTextContent(/network error/i)
+
+    const textarea = screen.getByLabelText(/writer's note/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'updated note' } })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  it('recomputes the total when a quote line is removed (gap #3)', () => {
+    render(<CounterPlanQuote {...baseProps} />)
+    const totalRowBefore = screen.getByText('Estimated labor').parentElement!
+    expect(totalRowBefore).toHaveTextContent('2.25 hr')
+    expect(totalRowBefore).toHaveTextContent('$247')
+
+    const removeBtns = screen.getAllByRole('button', { name: /remove/i })
+    fireEvent.click(removeBtns[0]) // remove the 1.5 hr / $165 diagnostic line
+
+    const totalRowAfter = screen.getByText('Estimated labor').parentElement!
+    expect(totalRowAfter).toHaveTextContent('0.75 hr')
+    expect(totalRowAfter).toHaveTextContent('$82')
+    expect(totalRowAfter).not.toHaveTextContent('2.25 hr')
+    expect(totalRowAfter).not.toHaveTextContent('$247')
+  })
 })

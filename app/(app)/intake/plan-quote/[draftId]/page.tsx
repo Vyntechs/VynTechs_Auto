@@ -1,5 +1,6 @@
 import { CounterPlanQuote } from '@/components/screens/counter-plan-quote'
 import type { CounterPlanQuoteProps } from '@/components/screens/counter-plan-quote'
+import { ViewportGate } from '@/components/vt/desktop/viewport-gate'
 
 // Stub data placeholder. Counter 04 replaces this with a draft fetched
 // from a real intake handler (lib/intake.ts) keyed by draftId.
@@ -82,5 +83,9 @@ export default async function PlanQuotePage({
   params: Promise<{ draftId: string }>
 }) {
   const { draftId } = await params
-  return <CounterPlanQuote {...stubDraft(draftId)} />
+  return (
+    <ViewportGate>
+      <CounterPlanQuote {...stubDraft(draftId)} />
+    </ViewportGate>
+  )
 }

@@ -55,7 +55,13 @@ export function CounterWorkOrderConfirm({
             sub="The customer has been notified by text. The AI plan is locked in. The next bay tech picks this up."
             actions={
               <>
-                <Btn kind="ghost" size="sm" type="button">
+                <Btn
+                  kind="ghost"
+                  size="sm"
+                  type="button"
+                  disabled
+                  title="Wires up in Counter 04"
+                >
                   Print receipt
                 </Btn>
                 <Btn

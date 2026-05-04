@@ -48,7 +48,26 @@ export function CounterPlanQuote({
 
   const removeLine = (index: number) => {
     setLines((prev) => prev.filter((_, i) => i !== index))
+    setError(null)
   }
+
+  const handleWriterNoteChange = (value: string) => {
+    setWriterNote(value)
+    setError(null)
+  }
+
+  const totals = lines.reduce(
+    (acc, line) => {
+      const h = Number.parseFloat(line.hours)
+      const usd = Number.parseFloat(line.laborUSD.replace(/[^\d.-]/g, ''))
+      if (Number.isFinite(h)) acc.hours += h
+      if (Number.isFinite(usd)) acc.usd += usd
+      return acc
+    },
+    { hours: 0, usd: 0 },
+  )
+  const totalHours = `${Number(totals.hours.toFixed(2))} hr`
+  const totalUSD = `$${Number(totals.usd.toFixed(2))}`
 
   const handleAuthorize = async () => {
     if (busy) return
@@ -92,10 +111,21 @@ export function CounterPlanQuote({
             sub="Walk the customer through this. Edit hours or remove steps before they authorize."
             actions={
               <>
-                <Btn kind="ghost" size="sm" type="button">
+                <Btn
+                  kind="ghost"
+                  size="sm"
+                  type="button"
+                  disabled
+                  title="Wires up in Counter 04"
+                >
                   Re-run AI
                 </Btn>
-                <Btn kind="secondary" type="button">
+                <Btn
+                  kind="secondary"
+                  type="button"
+                  disabled
+                  title="Wires up in Counter 04"
+                >
                   Print for customer
                 </Btn>
                 <Btn
@@ -169,10 +199,10 @@ export function CounterPlanQuote({
                       Estimated labor
                     </strong>
                     <span className="vt-quote__cell--num" style={{ fontWeight: 600 }}>
-                      {quote.totalHours}
+                      {totalHours}
                     </span>
                     <span className="vt-quote__cell--num" style={{ fontWeight: 600 }}>
-                      {quote.totalUSD}
+                      {totalUSD}
                     </span>
                     <span />
                   </div>
@@ -187,7 +217,7 @@ export function CounterPlanQuote({
                     id="writer-note"
                     className="vt-writer-note__textarea"
                     value={writerNote}
-                    onChange={(e) => setWriterNote(e.target.value)}
+                    onChange={(e) => handleWriterNoteChange(e.target.value)}
                   />
                 </div>
 
