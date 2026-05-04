@@ -9481,6 +9481,22 @@ git commit -m "feat(intake): comeback check API for returning-vehicle alerts"
 
 ---
 
+### Phase O — Implementation corrections (2026-05-04)
+
+The plan as written for Phase O assumed shadcn + Tailwind primitives (`@/components/ui/{button,input,label,textarea}`, Tailwind utility classes). Reality drifted before this phase started:
+
+- **No shadcn, no Tailwind.** The Workshop Instrument design system shipped in early May (bone canvas, Instrument Serif body, `--vt-signal-*` navy accent). The repo has no shadcn/Tailwind/CSS-modules deps. See `docs/superpowers/ui-design-toolkit.md` (the post-correction "Claude Design handoff workflow" section is canonical).
+- **Design path replaced.** Brandon designs all 12 outstanding screens (3 counter + 7 curator + 2 phone follow-ups) in a Claude Design session linked to the GitHub repo, then delivers a handoff bundle URL. Bundle is extracted to `tmp/design-handoff-<date>/` (gitignored). Implementation ports each screen from `claude_code_handoff/v2_designs/Screens-*.jsx` to native React/TSX in the codebase.
+- **Foundation token rename.** The handoff CSS still uses legacy `--vt-amber-*` names (from when the accent was actually amber); the codebase has the corrected `--vt-signal-*` names. Mechanical translation when porting — see ui-design-toolkit's "Token rename pattern".
+- **Auth wiring simpler than planned.** The plan calls `requireUser` from `@/lib/auth`; the actual export is `requireUserAndProfile`, and the parent `app/(app)/layout.tsx` already handles auth. So `app/(app)/intake/layout.tsx` only needs the `isDesktopIntakeEnabled()` flag check (and `notFound()` if disabled).
+- **Tests use `vi.stubEnv`.** The plan's O1 test snippet uses raw `delete (process.env as any).X` mutation; convention per `AGENTS.md` is `vi.stubEnv(name, value)` + `afterEach(vi.unstubAllEnvs)`. Counter 01 follows this.
+- **Two Submit-to-AI buttons.** Counter 01 has both a header and a footer Submit button per the handoff design — counter ergonomics for long forms. Tests use `getAllByRole`.
+- **Counter 01 submit handler is currently a stub.** `app/api/intake/submit/route.ts` validates name+VIN+complaint, returns a placeholder UUID. Counter 04 (AI plan generation) replaces this with the real `lib/intake.ts` handler that persists a `WorkOrderDraft` and kicks off the AI plan stream.
+
+Status: Counter 01 shipped (commit `bbe21e4`). Counter 02 (HERO plan tree) and Counter 03 (work order confirm) still pending.
+
+---
+
 ## Phase P — Curator Console (7 tasks)
 
 Per spec §6 row 10, §8.6 (curator workflow), §9.4 (curator console layout). Builds: a role-gated `/curator` route, three queues (deferred / drift / novel-pattern), a case detail view with full retrieval trace, a corpus authoring form for curator-contributed entries, and a calibration drift dashboard.

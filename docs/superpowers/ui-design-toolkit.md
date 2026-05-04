@@ -18,17 +18,38 @@ Before starting **any** task that creates or modifies a user-facing surface. At 
 ## High-level decision tree
 
 ```
-Have a Figma file with the design?
-├─ YES → use `figma:figma-implement-design` (1:1 fidelity translation)
-└─ NO
-   ├─ Need to explore layout options visually first?
-   │  └─ YES → `mcp__claude_ai_tldraw__exec` to wireframe → pick direction → code
-   └─ Generate from spec / description
-      └─ `frontend-design:frontend-design` skill + Chrome DevTools MCP for the
-         dev-server-screenshot-iterate loop
+Have a Claude Design handoff bundle (designed by Brandon)?
+├─ YES → port from tmp/design-handoff-*/.../claude_code_handoff/ to the repo.
+│        See "Claude Design handoff workflow" below.
+└─ NO — and this is rare. Brandon designs in his Claude Design session,
+        delivers a handoff bundle. If you somehow lack one:
+   ├─ Have a Figma file? → use `figma:figma-implement-design`
+   ├─ Explore layouts first? → `mcp__claude_ai_tldraw__exec` wireframes
+   └─ Generate from spec? → `frontend-design:frontend-design` skill +
+                            Chrome DevTools MCP for screenshot-iterate
 ```
 
-Never code UI without one of these three paths. "Just write the JSX" is a shortcut.
+Never code UI without one of these paths. "Just write the JSX" is a shortcut.
+
+## Claude Design handoff workflow (the canonical path)
+
+Brandon designs all screens in a persistent Claude Design session linked to the GitHub repo (`Vyntechs/VynTechs_Auto`). He delivers a bundle URL like `https://api.anthropic.com/v1/design/h/<hash>`.
+
+To port a bundle:
+1. **Fetch + extract.** WebFetch the URL — it returns gzipped tarball (saved to disk by the tool); `tar -xzf <path> -C tmp/design-handoff-<date>/`. The `tmp/` directory is gitignored.
+2. **Read in order:** the top-level `vyntechs-design-system/README.md`, then `project/claude_code_handoff/README.md` (the canonical implementation guide), then the screen's `v2_designs/<NN>-<screen>.html` + matching `Screens-*.jsx`.
+3. **Diff foundation tokens** — `claude_code_handoff/foundations/colors_and_type.css` vs `app/globals.css`. **Codebase wins.** Translate handoff names to codebase names (see "Token rename pattern" below).
+4. **Build** — recreate as native React/TSX in the codebase using existing primitives from `components/vt/` first, then add new ones to `components/vt/desktop/` (or similar) only when needed. Don't render the HTML in a browser unless ambiguous — the source spells out everything.
+
+## Token rename pattern (handoff CSS → codebase CSS)
+
+The handoff CSS uses legacy token names from when the accent was actually amber. The codebase has the corrected `--vt-signal-*` names. Mechanical translation when porting:
+
+| Handoff name (legacy) | Codebase name (canonical) |
+|---|---|
+| `--vt-amber-{200,300,400,500,600,700,800}` | `--vt-signal-{same}` |
+| `--vt-fg-on-amber: var(--vt-bone-900)` | `--vt-fg-on-signal: var(--vt-bone-50)` (light text on navy, not dark — fixes contrast) |
+| `--vt-stroke-amber` | `--vt-stroke-signal` |
 
 ## Capabilities by category
 
@@ -167,18 +188,11 @@ Before declaring a UI phase complete:
 
 These are good tools, just not for UI work where each component decision compounds and benefits from foreground judgment.
 
-## When to add shadcn / Tailwind
+## shadcn / Tailwind — decided NOT to adopt
 
-**Currently absent.** Handoff says "no shadcn or Tailwind yet — plain HTML forms."
+**Workshop Instrument is the design system.** All form primitives, buttons, pills, layout shells live in `components/vt/` (phone) and `components/vt/desktop/` (desktop ≥1280px), styled via `components/vt/vt.css` + `components/vt/v2.css` against the `--vt-*` OKLCH tokens in `app/globals.css`. No shadcn, no Tailwind, no CSS modules.
 
-Reconsider at:
-- **Phase G (Stripe billing)** — first form-heavy non-trivial surface; shadcn `Form` + `Input` + `Button` would pay off
-- **Phase E2 SessionView** — if plain HTML gets unwieldy for the multi-component layout, escalate before pushing through
-
-When adopting:
-1. Invoke `vercel:shadcn` skill
-2. Initialize via `npx shadcn@latest init`
-3. Add to plan as its own phase task (do not silently introduce)
+If a future phase produces a real reason to revisit, surface it explicitly to Brandon — don't silently introduce.
 
 ## Tools NOT relevant to UI work (for noise reduction)
 
