@@ -24,7 +24,10 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  # Releases write is needed to publish backup artifacts as release assets
+  # (instead of Actions artifacts, which share a 500 MB account-wide quota
+  # with other repos on GitHub Free). Releases have no equivalent quota.
+  contents: write
 
 jobs:
   backup:
@@ -74,11 +77,39 @@ jobs:
           fi
           echo "Dump size: ${SIZE} bytes"
 
-      - name: Upload backup artifact (90-day retention)
-        uses: actions/upload-artifact@v4
-        with:
-          name: vyntechs-db-backup-${{ env.RUN_ID }}
-          path: backups/*.sql.gz
-          retention-days: 90
-          if-no-files-found: error
-          compression-level: 0
+      - name: Publish backup as GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y-%m-%d-%H%M)
+          TAG="backup-$DATE"
+          NOTES="Automated daily Postgres dump. Restore steps in docs/RESTORE.md."
+          gh release create "$TAG" backups/*.sql.gz \
+            --repo "$REPO" \
+            --title "DB Backup $DATE UTC" \
+            --notes "$NOTES"
+
+      - name: Prune backup releases older than 90 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # ISO date for cutoff (90 days ago)
+          CUTOFF=$(date -u -d '90 days ago' +%s)
+          gh release list --repo "$REPO" --limit 200 --json tagName,createdAt,name | \
+            python3 -c "
+import sys, json, time
+cutoff = $CUTOFF
+data = json.load(sys.stdin)
+old = [r for r in data
+       if r['tagName'].startswith('backup-')
+       and time.mktime(time.strptime(r['createdAt'][:19], '%Y-%m-%dT%H:%M:%S')) < cutoff]
+for r in old:
+    print(r['tagName'])
+" | while read -r TAG; do
+            echo "Pruning old backup release: $TAG"
+            gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag
+          done
