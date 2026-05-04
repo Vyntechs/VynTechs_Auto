@@ -1,5 +1,7 @@
 # Manual Session Controls — Implementation Plan
 
+> **Status (2026-05-04):** Tasks 1–4 shipped to production at vyntechs.dev. **Task 5 (Brandon's phone smoke) outstanding** — until that ratifies, the loop is "shipped-pending-validation." See `docs/superpowers/sessions/2026-05-04-handoff-prod-deploy-shipped.md` for the full session record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the manual control surface for session lifecycle that the previous Phase F partial-implementation skipped — a persistent "New diagnosis" CTA on TodayHome and a "Close case" button on ActiveSession. Together these unblock the close-session loop end-to-end on real cars where the AI tree doesn't reach `done=true` on its own.
@@ -29,7 +31,7 @@ No backend, route, schema, prompt, or API changes.
 - Modify: `components/screens/today-home.tsx`
 - Create: `tests/unit/today-home.test.tsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/today-home.test.tsx`:
 
@@ -93,12 +95,12 @@ describe('TodayHome', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm exec vitest run tests/unit/today-home.test.tsx`
 Expected: FAIL — no `link` with name "new diagnosis" exists in the rendered header (today only the Bell icon is there).
 
-- [ ] **Step 3: Modify TodayHome to add persistent header CTA**
+- [x] **Step 3: Modify TodayHome to add persistent header CTA**
 
 In `components/screens/today-home.tsx`:
 
@@ -148,17 +150,17 @@ right={
 
 (`Link` is already imported from `next/link` at the top of the file.)
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm exec vitest run tests/unit/today-home.test.tsx`
 Expected: PASS — both tests green. Header CTA + empty-state CTA both reachable.
 
-- [ ] **Step 5: Run typecheck and build**
+- [x] **Step 5: Run typecheck and build**
 
 Run: `pnpm exec tsc --noEmit && pnpm build`
 Expected: clean. No type errors, build succeeds.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add components/screens/today-home.tsx tests/unit/today-home.test.tsx
@@ -175,7 +177,7 @@ git commit -m "feat(today-home): persistent New diagnosis CTA in header"
 - Modify: `components/screens/active-session.tsx`
 - Create: `tests/unit/active-session.test.tsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/active-session.test.tsx`:
 
@@ -233,12 +235,12 @@ describe('ActiveSession', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm exec vitest run tests/unit/active-session.test.tsx`
 Expected: FAIL — no link named "close case" exists in ActiveSession.
 
-- [ ] **Step 3: Modify ActiveSession to add Close case Module**
+- [x] **Step 3: Modify ActiveSession to add Close case Module**
 
 In `components/screens/active-session.tsx`:
 
@@ -280,17 +282,17 @@ import Link from 'next/link'
 
 The final layout of the inner flex container becomes (in order): Active step Module, optional Confidence Module, Plan Module, Close case Module — then `<CaptureBar />` outside the flex container as it is today.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm exec vitest run tests/unit/active-session.test.tsx`
 Expected: PASS — link exists with correct href.
 
-- [ ] **Step 5: Run typecheck and build**
+- [x] **Step 5: Run typecheck and build**
 
 Run: `pnpm exec tsc --noEmit && pnpm build`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add components/screens/active-session.tsx tests/unit/active-session.test.tsx
@@ -303,22 +305,22 @@ git commit -m "feat(active-session): manual Close case button to /outcome"
 
 **Why:** Before declaring done, run the full project verification per AGENTS.md. The pglite test-DB flake (4–20 failures per run, pre-existing) is NOT a regression — we run twice to distinguish flake from real breakage. Our new tests (`today-home.test.tsx`, `active-session.test.tsx`) must pass on every run.
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite**
 
 Run: `pnpm test`
 Expected: ~292 pass / ≤20 pglite-flake fails. **Both new test files must pass.** If anything else newly fails, that's a regression — return to Phase 1 of systematic-debugging.
 
-- [ ] **Step 2: Re-run the full test suite to confirm flake pattern**
+- [x] **Step 2: Re-run the full test suite to confirm flake pattern**
 
 Run: `pnpm test`
 Expected: similar pass count, different specific pglite tests fail (flake confirmed). New tests still pass.
 
-- [ ] **Step 3: Run typecheck**
+- [x] **Step 3: Run typecheck**
 
 Run: `pnpm exec tsc --noEmit`
 Expected: clean exit.
 
-- [ ] **Step 4: Run production build**
+- [x] **Step 4: Run production build**
 
 Run: `pnpm build`
 Expected: clean build, all routes listed.
@@ -336,12 +338,12 @@ Expected: clean build, all routes listed.
 **Files:**
 - Create: `tests/integration/manual-session-loop.test.ts`
 
-- [ ] **Step 1: Create integration test directory if missing**
+- [x] **Step 1: Create integration test directory if missing**
 
 Run: `mkdir -p tests/integration`
 Expected: silent success (already exists or created).
 
-- [ ] **Step 2: Write the integration test**
+- [x] **Step 2: Write the integration test**
 
 Create `tests/integration/manual-session-loop.test.ts`:
 
@@ -457,17 +459,17 @@ describe('manual session loop — what Brandon would do on a phone', () => {
 })
 ```
 
-- [ ] **Step 3: Run the integration test**
+- [x] **Step 3: Run the integration test**
 
 Run: `pnpm exec vitest run tests/integration/manual-session-loop.test.ts`
 Expected: PASS — the assertion `expect(rows).toHaveLength(1)` is the proof the corpus row was written. If this fails with `0` rows, the close-loop chain is broken and we return to systematic-debugging Phase 1 with real evidence about which stage dropped the ball.
 
-- [ ] **Step 4: Run typecheck**
+- [x] **Step 4: Run typecheck**
 
 Run: `pnpm exec tsc --noEmit`
 Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/integration/manual-session-loop.test.ts
@@ -482,15 +484,16 @@ git commit -m "test(integration): automated session-loop end-to-end walk"
 
 **This task is for Brandon. Not implemented by an agent.**
 
-- [ ] **Step 1: Start dev server**
+**Update (2026-05-04 prod deploy):** Walk this on **https://vyntechs.dev** instead of the local dev server — the production deploy of Voyage-backed code is live there. Steps below still apply; just use the deployed URL on Safari. Local dev server still works as a fallback if needed.
 
-Run: `pnpm exec next dev --webpack -H 0.0.0.0 -p 3000`
+- [ ] **Step 1: Open vyntechs.dev (or start local dev server as fallback)**
 
-(Webpack required — Turbopack hits the cross-origin Client-Manifest bug per AGENTS.md. `next.config.js` has `allowedDevOrigins: ['192.168.1.36']` for iPhone-on-LAN.)
+Production: `https://vyntechs.dev` on iPhone Safari. Sign in.
+Local fallback: `pnpm exec next dev --webpack -H 0.0.0.0 -p 3000` (Webpack required — Turbopack hits the cross-origin Client-Manifest bug. `next.config.js` has `allowedDevOrigins: ['192.168.1.36']` for iPhone-on-LAN.)
 
 - [ ] **Step 2: Smoke walk on the phone**
 
-Open the dev server on iPhone. Verify:
+Verify:
 
 1. `/today` — "New diagnosis" button is visible in the header (not just empty state)
 2. Tap it → `/sessions/new` intake form renders
