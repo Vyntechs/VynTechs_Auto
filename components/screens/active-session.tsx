@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import {
   VehicleStrip,
   Module,
@@ -126,6 +127,32 @@ export function ActiveSession({ session }: { session: Session }) {
           status={<span className="eyebrow">{steps.length} steps</span>}
         >
           <TreeRail steps={steps} />
+        </Module>
+
+        <Module num="—" label="Close case">
+          <p
+            style={{
+              fontFamily: 'var(--vt-font-serif)',
+              fontStyle: 'italic',
+              fontSize: 14,
+              color: 'var(--vt-fg-2)',
+              lineHeight: 1.5,
+              margin: '0 0 12px',
+            }}
+          >
+            Done diagnosing? Capture what fixed it and close the case.
+          </p>
+          <Link
+            href={`/sessions/${session.id}/outcome`}
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              textDecoration: 'none',
+            }}
+          >
+            Close case
+          </Link>
         </Module>
       </div>
       <CaptureBar />
