@@ -84,4 +84,11 @@ describe('CounterWorkOrderConfirm', () => {
     fireEvent.click(screen.getByRole('button', { name: /new intake/i }))
     expect(mockPush).toHaveBeenCalledWith('/intake')
   })
+
+  it('disables Print receipt with a "wires up in Counter 04" title (no-op stub)', () => {
+    render(<CounterWorkOrderConfirm {...baseProps} />)
+    const btn = screen.getByRole('button', { name: /print receipt/i }) as HTMLButtonElement
+    expect(btn).toBeDisabled()
+    expect(btn.title).toMatch(/counter 04/i)
+  })
 })

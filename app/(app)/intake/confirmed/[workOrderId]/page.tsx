@@ -1,5 +1,6 @@
 import { CounterWorkOrderConfirm } from '@/components/screens/counter-work-order-confirm'
 import type { CounterWorkOrderConfirmProps } from '@/components/screens/counter-work-order-confirm'
+import { ViewportGate } from '@/components/vt/desktop/viewport-gate'
 
 // Stub data placeholder. Counter 04 replaces this with a real work
 // order fetched by id from lib/intake.ts (or wherever the authorize
@@ -38,5 +39,9 @@ export default async function ConfirmedPage({
   params: Promise<{ workOrderId: string }>
 }) {
   const { workOrderId } = await params
-  return <CounterWorkOrderConfirm {...stubWorkOrder(workOrderId)} />
+  return (
+    <ViewportGate>
+      <CounterWorkOrderConfirm {...stubWorkOrder(workOrderId)} />
+    </ViewportGate>
+  )
 }
