@@ -4,6 +4,7 @@ import { closeSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { validateSpecificity } from '@/lib/ai/outcome-validator'
 import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
+import { scheduleFollowUps } from '@/lib/comeback/schedule'
 
 export async function POST(
   req: Request,
@@ -27,6 +28,7 @@ export async function POST(
     body,
     validateSpecificity,
     promoteToCorpus: promoteSessionToCorpus,
+    scheduleFollowUps,
   })
 
   if (!result.ok) {
