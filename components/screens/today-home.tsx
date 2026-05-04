@@ -7,8 +7,10 @@ import {
   Risk,
   DtcChip,
 } from '@/components/vt'
+import { FollowUpPanel } from '@/components/comeback/follow-up-panel'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
+import type { DueFollowUp } from '@/lib/comeback/list'
 
 type Props = {
   techName: string
@@ -16,9 +18,17 @@ type Props = {
   inProgress: Session[]
   queued: Session[]
   closedToday: Session[]
+  dueFollowUps?: DueFollowUp[]
 }
 
-export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Props) {
+export function TodayHome({
+  techName,
+  bay,
+  inProgress,
+  queued,
+  closedToday,
+  dueFollowUps = [],
+}: Props) {
   const meta = bay ? (
     <span>
       {techName} · {bay}
@@ -83,6 +93,8 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
           </Module>
         )}
 
+        <FollowUpPanel items={dueFollowUps} />
+
         {queued.length > 0 && (
           <Module num="02" label={`Queued · ${queued.length}`}>
             {queued.map((s, i) => (
@@ -111,18 +123,21 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
           </Module>
         )}
 
-        {inProgress.length === 0 && queued.length === 0 && closedToday.length === 0 && (
-          <Module num="—" label="Today">
-            <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
-              No sessions queued. Start a new diagnosis to begin.
-            </p>
-            <div style={{ marginTop: 14 }}>
-              <Link href="/sessions/new" className="btn btn-primary">
-                New diagnosis
-              </Link>
-            </div>
-          </Module>
-        )}
+        {inProgress.length === 0 &&
+          queued.length === 0 &&
+          closedToday.length === 0 &&
+          dueFollowUps.length === 0 && (
+            <Module num="—" label="Today">
+              <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+                No sessions queued. Start a new diagnosis to begin.
+              </p>
+              <div style={{ marginTop: 14 }}>
+                <Link href="/sessions/new" className="btn btn-primary">
+                  New diagnosis
+                </Link>
+              </div>
+            </Module>
+          )}
       </div>
     </div>
   )
