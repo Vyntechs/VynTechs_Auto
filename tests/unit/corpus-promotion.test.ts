@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { AppDb } from '@/lib/db/queries'
 
-const embedMock = vi.fn().mockResolvedValue(Array(1536).fill(0.1))
+const embedMock = vi.fn().mockResolvedValue(Array(1024).fill(0.1))
 vi.mock('@/lib/ai/embeddings', () => ({
   embed: embedMock,
 }))
