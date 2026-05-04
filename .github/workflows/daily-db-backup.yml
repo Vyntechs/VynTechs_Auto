@@ -97,19 +97,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # ISO date for cutoff (90 days ago)
           CUTOFF=$(date -u -d '90 days ago' +%s)
-          gh release list --repo "$REPO" --limit 200 --json tagName,createdAt,name | \
-            python3 -c "
-import sys, json, time
-cutoff = $CUTOFF
-data = json.load(sys.stdin)
-old = [r for r in data
-       if r['tagName'].startswith('backup-')
-       and time.mktime(time.strptime(r['createdAt'][:19], '%Y-%m-%dT%H:%M:%S')) < cutoff]
-for r in old:
-    print(r['tagName'])
-" | while read -r TAG; do
-            echo "Pruning old backup release: $TAG"
-            gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag
-          done
+          gh release list --repo "$REPO" --limit 200 --json tagName,createdAt \
+            | jq -r --argjson cutoff "$CUTOFF" '
+                .[]
+                | select(.tagName | startswith("backup-"))
+                | select((.createdAt | sub("\\..*Z"; "Z") | fromdateiso8601) < $cutoff)
+                | .tagName
+              ' \
+            | while read -r TAG; do
+                echo "Pruning old backup release: $TAG"
+                gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag
+              done
