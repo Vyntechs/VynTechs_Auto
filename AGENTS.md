@@ -19,6 +19,12 @@ This file holds load-bearing conventions for any agent working on the repo. The 
 - **`vi.stubEnv` not `Object.defineProperty`** for `NODE_ENV`.
 - **Calm/technical/imperative voice; no emoji in product UI.**
 
+## Database migrations
+
+- **Apply migrations to live Supabase via the MCP `apply_migration` tool, not `pnpm drizzle-kit migrate`.** Drizzle's `__drizzle_migrations` table on the live DB is empty — Drizzle filenames (`0006_known_maximus.sql`, `0007_chief_bushwacker.sql`, …) are decorative. The source of truth on prod is Supabase's own migration history (list via MCP `list_migrations`).
+- Workflow when adding a migration: (1) write the SQL in `drizzle/migrations/NNNN_<random>.sql` so the schema change survives in source control, (2) call MCP `apply_migration` with a descriptive snake_case name (e.g. `index_artifacts_session_id`) and the same SQL, (3) run MCP `get_advisors` after to catch new lints (unindexed FKs, etc.).
+- For new tables, also run `pnpm drizzle-kit generate` to update `lib/db/schema.ts` snapshots in `drizzle/migrations/meta/` — these are read by the local pglite tests.
+
 ## Risk gating + Decline-or-Defer (Phase M)
 
 - Every action the AI proposes that the tech will physically perform must include a `proposedAction` block with `confidence` (0-1) on the `TreeState`.
