@@ -46,6 +46,35 @@ function makeSummary(input: CorpusPromotionInput): string {
   return `${head}: ${input.outcome.rootCause}`
 }
 
+// Postgres text[] literal. drizzle's sql template renders a JS empty array
+// as `()` and a populated array as `($1, $2, ...)` — neither is a valid
+// text[] literal. We pass the canonical `{a,b}` form as a single string
+// parameter and cast it to text[] in the SQL.
+function toPgTextArrayLiteral(items: string[]): string {
+  if (items.length === 0) return '{}'
+  const escaped = items.map(
+    (s) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
+  )
+  return `{${escaped.join(',')}}`
+}
+
+// db.execute returns shape varies: real pglite/postgres returns
+// `{ rows: Row[], ... }`, while existing unit tests mock it to return
+// `Row[]` directly. Normalize both into a Row[] so callers don't have
+// to care which shape they're holding.
+function unwrapRows<R>(result: unknown): R[] {
+  if (Array.isArray(result)) return result as R[]
+  if (
+    result !== null &&
+    typeof result === 'object' &&
+    'rows' in result &&
+    Array.isArray((result as { rows: unknown }).rows)
+  ) {
+    return (result as { rows: R[] }).rows
+  }
+  return []
+}
+
 /**
  * Insert a new corpus entry derived from a closed session, OR — if a
  * very similar entry already exists in the same vehicle window — bump
@@ -70,7 +99,9 @@ export async function promoteSessionToCorpus(
   }
 
   const summary = makeSummary(input)
-  const rows = (await db.execute(sql`
+  const symptomTagsLit = toPgTextArrayLiteral(input.extractedSymptomTags ?? [])
+  const dtcsLit = toPgTextArrayLiteral(input.extractedDtcs ?? [])
+  const result = await db.execute(sql`
     INSERT INTO corpus_entries (
       vehicle_year, vehicle_make, vehicle_model, vehicle_engine,
       symptom_tags, dtcs, freeze_frame_pattern,
@@ -83,8 +114,8 @@ export async function promoteSessionToCorpus(
       ${input.intake.vehicleMake},
       ${input.intake.vehicleModel},
       ${input.intake.vehicleEngine ?? null},
-      ${input.extractedSymptomTags ?? []}::text[],
-      ${input.extractedDtcs ?? []}::text[],
+      ${symptomTagsLit}::text[],
+      ${dtcsLit}::text[],
       ${JSON.stringify(input.freezeFramePattern ?? null)}::jsonb,
       ${input.outcome.rootCause},
       ${summary},
@@ -99,7 +130,8 @@ export async function promoteSessionToCorpus(
       ${vecLiteral}::vector
     )
     RETURNING id
-  `)) as unknown as Array<{ id: string }>
+  `)
+  const rows = unwrapRows<{ id: string }>(result)
 
   return rows[0]?.id ?? null
 }
@@ -130,7 +162,7 @@ async function confirmWithVec(
   vecLiteral: string,
   input: CorpusPromotionInput,
 ): Promise<{ confirmed: number }> {
-  const updated = (await db.execute(sql`
+  const result = await db.execute(sql`
     UPDATE corpus_entries
     SET
       success_confirm_count = success_confirm_count + 1,
@@ -143,7 +175,8 @@ async function confirmWithVec(
       AND ABS(vehicle_year - ${input.intake.vehicleYear}) <= 2
       AND (embedding <=> ${vecLiteral}::vector) < 0.15
     RETURNING id
-  `)) as unknown as Array<{ id: string }>
+  `)
+  const updated = unwrapRows<{ id: string }>(result)
   return { confirmed: updated.length }
 }
 
