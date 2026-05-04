@@ -1,6 +1,8 @@
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 import '@/components/vt/vt.css'
+import '@/components/vt/v2.css'
+import '@/components/vt/v2-instruments.css'
 import { SwRegister } from '@/components/sw-register'
 
 const interTight = Inter_Tight({
