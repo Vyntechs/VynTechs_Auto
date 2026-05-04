@@ -43,6 +43,7 @@ Bonus a11y fix: Lighthouse a11y dropped from 100 → 98 after the Queued cleanup
 - Regression: `/sessions`, `/sessions/new`, `/billing`, `/intake` — clean console (0 errors, 0 warnings) ✓
 - Mobile (390×844 emulated, deviceScaleFactor 3): /today renders cleanly, primary CTA reachable ✓
 - **Lighthouse desktop on /today:** **100/100/100** (a11y / best-practices / SEO). 43 audits passed / 0 failed.
+- **Brandon eyeball check on staging-vyntechs from his iPhone (mobile Safari):** /today renders 2 modules — `01 · IN PROGRESS` (2015 Ford F250, P228F, step 1/13, low risk) + `02 · CLOSED TODAY · 1` (2013 Ford F-150, P0299). No Queued module, no empty-state slot. Header shows "TECH" because his profile.full_name is null in DB — separate cleanup, not a regression. ✓
 
 ## Carryovers (still apply)
 
