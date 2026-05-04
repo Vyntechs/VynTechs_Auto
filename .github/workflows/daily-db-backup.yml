@@ -41,7 +41,9 @@ jobs:
           wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
-          pg_dump --version
+          # Ubuntu 24.04 ships pg_dump v16 in /usr/bin which wins on PATH;
+          # call v17 explicitly to match the Supabase 17 server version.
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump database
         env:
@@ -59,7 +61,7 @@ jobs:
           mkdir -p backups
           DATE=$(date -u +%Y-%m-%d-%H%M)
           OUT="backups/vyntechs-${DATE}.sql.gz"
-          pg_dump \
+          /usr/lib/postgresql/17/bin/pg_dump \
             --no-owner --no-acl \
             --clean --if-exists \
             --quote-all-identifiers \
