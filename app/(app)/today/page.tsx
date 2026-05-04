@@ -30,7 +30,6 @@ export default async function TodayPage() {
     <TodayHome
       techName={ctx.profile.fullName ?? 'Tech'}
       inProgress={inProgress}
-      queued={[]}
       closedToday={closedToday}
       dueFollowUps={dueFollowUps}
     />
