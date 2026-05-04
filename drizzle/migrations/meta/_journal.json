@@ -57,6 +57,13 @@
       "when": 1777821078571,
       "tag": "0007_chief_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777901500000,
+      "tag": "0008_voyage_embedding_dims",
+      "breakpoints": true
     }
   ]
 }

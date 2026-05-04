@@ -24,6 +24,7 @@ coverage/
 
 # OS
 .DS_Store
+._*
 .design-from-claude/
 
 # scratch + design-handoff bundles
