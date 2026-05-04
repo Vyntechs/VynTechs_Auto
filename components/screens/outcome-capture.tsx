@@ -157,7 +157,7 @@ export function OutcomeCapture({
           flexDirection: 'column',
         }}
       >
-        <span className="eyebrow">Outcome capture · all fields required</span>
+        <span className="eyebrow">Closing the case · all fields required</span>
 
         <div className="field" style={{ marginTop: 10 }}>
           <label htmlFor="root-cause">Root cause</label>
@@ -250,7 +250,7 @@ export function OutcomeCapture({
         </div>
 
         <div className="field">
-          <label htmlFor="notes">Notes for the corpus (optional)</label>
+          <label htmlFor="notes">Notes for next time (optional)</label>
           <textarea
             id="notes"
             value={notes}

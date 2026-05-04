@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { getSessionForUser } from '@/lib/sessions'
+import { routeForSession } from '@/lib/session-routing'
 import { ActiveSession } from '@/components/screens/active-session'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
@@ -21,8 +22,9 @@ export default async function SessionPage({
   if (!result.ok) notFound()
 
   const { session } = result
+  const route = routeForSession(session)
 
-  if (!session.treeState || session.treeState.nodes.length === 0) {
+  if (route.kind === 'tree-generating') {
     return (
       <TreeGenerating
         vehicle={formatVehicleName(session.intake)}
@@ -31,8 +33,8 @@ export default async function SessionPage({
     )
   }
 
-  if (session.treeState.gateDecision && !session.treeState.gateDecision.allow) {
-    redirect(`/sessions/${session.id}/decline`)
+  if (route.kind === 'redirect') {
+    redirect(route.to)
   }
 
   return <ActiveSession session={session} />

@@ -47,7 +47,7 @@ export default function SignUpPage() {
           margin: '0 0 24px',
         }}
       >
-        Start a session, capture an outcome, contribute to the corpus. Your shop joins after the first sign-in.
+        Start a session, close it out with what fixed it, and build your shop's history. Your shop joins after the first sign-in.
       </p>
 
       <form onSubmit={handleSubmit} noValidate>

@@ -107,13 +107,22 @@ export function ActiveSession({ session }: { session: Session }) {
           />
         </Module>
 
-        <Module num="—" label="Confidence">
-          <ConfidenceBlock value={0.87} basis="47 corpus matches · build-date specific" />
-        </Module>
+        {session.treeState.proposedAction?.confidence !== undefined && (
+          <Module num="—" label="Confidence">
+            <ConfidenceBlock
+              value={session.treeState.proposedAction.confidence}
+              basis={
+                session.treeState.proposedAction.confidenceGap
+                  ? `gap: ${session.treeState.proposedAction.confidenceGap}`
+                  : 'based on AI reasoning + retrieval'
+              }
+            />
+          </Module>
+        )}
 
         <Module
           num="—"
-          label="Tree"
+          label="Plan"
           status={<span className="eyebrow">{steps.length} steps</span>}
         >
           <TreeRail steps={steps} />

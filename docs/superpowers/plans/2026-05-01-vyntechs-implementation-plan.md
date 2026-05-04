@@ -3220,6 +3220,19 @@ The Phase F code blocks above were drafted before Phase E shipped the Workshop I
 7. **Verification chips became real toggles** — Phase E rendered `DtcChip` decoratively. Wiring them required swapping to a `<button role="switch">` (`ToggleChip`) with `aria-checked` so keyboard users + tests can flip them. Same visual language (amber active, graphite inactive).
 8. **Time fields stay auto/read-only** — Plan F2 makes `diagMinutes`/`repairMinutes` editable. Phase E renders them as auto-computed display ("auto"). Kept the auto display and submit them from props. If editable timing is needed later, add inputs without removing the auto display.
 
+### Phase F — Implementation corrections (2026-05-04, post-dogfood)
+
+Recorded after the first real-car dogfood test on 2026-05-04 (2013 F-150 3.5 EcoBoost, P0299, 159k mi — root cause: torn BPV diaphragm — session `365CE29F`). The diagnostic loop reasoned correctly end-to-end, but Phase F's outcome-capture flow had structural and copywriting gaps that left every win stuck in `status='open'` and never promoted to the corpus.
+
+1. **Auto-redirect to outcome capture when tree is done.** `app/(app)/sessions/[id]/page.tsx` previously rendered `<ActiveSession>` whenever the tree existed — including after `treeState.done = true`. User landed on a page showing "No active step" with no path forward (the dead-end Brandon hit on the F-150). Fix: extracted routing into a pure function in `lib/session-routing.ts` (`routeForSession`), tested in `tests/unit/session-routing.test.ts` (8 cases including the specific "tree done + open → outcome" branch). The page now redirects to `/sessions/[id]/outcome` when `treeState.done === true && status === 'open'`. Status-aware: closed/declined/deferred sessions don't redirect (avoids loops).
+2. **Hardcoded UI confidence numbers ripped out.** `components/screens/active-session.tsx` rendered `<ConfidenceBlock value={0.87} basis="47 corpus matches · build-date specific" />` — both values literal-strung. The `corpus_entries` table has 0 rows in production; that "47" never came from anywhere. Fix: render the Confidence module ONLY when `treeState.proposedAction?.confidence !== undefined`, and pass the real value through. Basis text derives from `confidenceGap` if present, else "based on AI reasoning + retrieval".
+3. **User-facing terminology pass.** All "corpus", "tree", "node" copywriting in user-facing strings translated to plain shop English per `feedback_no_academic_terms_in_ui.md` (user memory). Files touched: `components/intake/new-session-form.tsx` ("Generating tree from corpus" → "Building your diagnostic plan"), `components/screens/tree-generating.tsx` (similar), `components/screens/active-session.tsx` (Module label "Tree" → "Plan"), `components/screens/outcome-capture.tsx` (header "Outcome capture" → "Closing the case", label "Notes for the corpus" → "Notes for next time"), `components/screens/decline-or-defer-live.tsx` (defer description), `components/screens/decline-or-defer.tsx` (`DEFAULT_TAPE_BODY` lines, engraved-plate footer "CORPUS GAIN" → "SHOP HISTORY"), `app/(auth)/sign-up/page.tsx` (intro tagline). Internal type/file/variable names left alone (they're not user-facing).
+4. **AI prompt requires part-location guidance.** During the F-150 dogfood, the AI's "Inspect the BPV" step had no location hint. Brandon (a working master diagnostician) had to ask "Where is the BPV?" — proving an unskilled tech would be completely blocked. Fix: added a PRINCIPLES bullet to `TREE_ENGINE_SYSTEM` in `lib/ai/prompts.ts` requiring a brief location hint when proposing actions on specific named components (BPV, wastegate actuator, knock sensor, ECT sensor, etc.). Regression guard: `tests/unit/prompts.test.ts` asserts the directive stays present.
+5. **Dev-server config: cross-origin allowed + webpack fallback.** Created `next.config.js` with `allowedDevOrigins: ['192.168.1.36']` so iPhone-on-LAN access via `http://192.168.1.36:3000` doesn't get blocked by Next 16's dev origin guard. Switched dev script to `--webpack` because Turbopack hit a "Could not find the module ... in the React Client Manifest" error on cross-origin requests (known Turbopack 16.2.4 bug). Both changes affect dev only; production unaffected.
+6. **Force-close action on the F-150 dogfood session.** `365ce29f-a1f5-4a31-b423-a87ffb35ede8` was force-closed via Supabase MCP `execute_sql` to unblock starting a second diagnosis (the 1-open-session-at-a-time rule was blocking new sessions while routing was broken). Outcome jsonb populated with `forceClosedByDev: true` and a `forceClosedReason` audit trail.
+
+Status: all of #1–#5 shipped 2026-05-04 with passing tests. Next real-car dogfood should close end-to-end without DB intervention and write the first real corpus entry.
+
 ---
 
 ## Phase G — Stripe Billing Skeleton (3 tasks)
@@ -7671,6 +7684,35 @@ Recorded 2026-05-03.
 - **Wall-clock-aborted adapter errors are tagged.** `errors[].message === 'wall-clock budget exceeded'` for AbortError-style failures, vs the underlying error message for genuine adapter failures. L10 didn't need to change to accommodate this; noting for future observability work.
 - **DTCs are session-scoped, not node-scoped.** L10's first cut extracted DTCs from `input.artifacts` (current-node-scoped), which silently lost the DTC token for every observation after `scan-codes` resolved. Fix: `advanceSession` now compiles `sessionDtcs` from all done `scan_screen` extractions across the session and threads it through `updateTree`'s input. The route wrapper prefers `sessionDtcs` over the in-flight artifact-derived DTCs.
 - **Retrieval wrapper extracted to `lib/retrieval/wire-into-tree.ts`.** Plan's L10 step 3 sketched inline-in-route composition; the current code already follows the AGENTS.md handler-in-lib pattern, so retrieval is a closure built by `buildUpdateTreeWithRetrieval(...)` in `lib/retrieval/`. The closure is dependency-injected (orchestrator, validator) so it can be unit-tested. The route file constructs the prod closure and passes it as `updateTree` to `advanceSession`.
+
+### Phase L — Implementation corrections needed (2026-05-04, deferred)
+
+Recorded 2026-05-04 after the first real-car dogfood (session `365CE29F`).
+
+**Symptom:** On a 2013 F-150 3.5 EcoBoost / P0299 case — one of the most-discussed engine codes on EcoBoost forums, YouTube, and Reddit — internet retrieval returned **zero** hits from the forum / YouTube / Reddit / NHTSA adapters. Only 3 manufacturer-recall hits. The `retrieval_cache` table shows the lookups ran (5 cache rows at session start, all properly keyed and timestamped within the session window), so the orchestrator fired correctly — adapters just came back empty.
+
+**Suspected causes (un-triaged):**
+- Search-query construction in `lib/retrieval/*` adapters may be too literal — strings like exact DTC + full vehicle string don't match how forum posts are titled.
+- API key configuration may be missing or wrong for one or more adapters (YouTube key, Reddit client credentials, etc. — see `lib/retrieval/{forum,reddit,youtube,nhtsa}.ts`).
+- Result-grader filtering (`lib/retrieval/validator.ts`) may be too strict, dropping all results before they land.
+
+**Reproduction:**
+- Vehicle: 2013 Ford F-150, 3.5 EcoBoost, 159,000 mi.
+- Complaint: `"check engine light, and lack of power, p0299"`.
+- Expected: forum / YouTube / Reddit hits in the dozens (this is one of the most-googled F-150 codes ever).
+- Observed in `retrieval_cache` for session `365ce29f-a1f5-4a31-b423-a87ffb35ede8` (created 2026-05-04 09:36 UTC): 0 forum, 0 YouTube, 0 Reddit, 0 NHTSA, 3 manufacturer-recall.
+
+**Scope estimate:**
+- Read `lib/retrieval/*` adapter code + orchestrator (~30 min).
+- Manually run a known-good query against each adapter from a test script (~30 min) — find which adapter is returning empty for a query that should match.
+- If query construction → rewrite query builder + test with shop-relevant patterns (~1–2 hr).
+- If API key/config → fix config + verify (~15 min).
+- If grader → tune relevance threshold or fix logic (~1 hr).
+- Worst case: deeper architectural issue, multi-day.
+
+**Why deferred 2026-05-04:** the F-150 dogfood proved the AI can diagnose correctly without retrieval (training knowledge alone got the right answer). Retrieval-empty is "AI is leaving extra info on the table," not "AI is broken." Phase F corrections above unblock the dogfood loop; Phase L investigation gets its own focused work later.
+
+**Not a band-aid:** findings, reproduction, suspected causes, and scope are all logged here. Not buried, not pretending it works.
 
 ---
 
