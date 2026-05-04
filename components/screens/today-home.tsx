@@ -36,7 +36,7 @@ export function TodayHome({
   )
 
   return (
-    <div className="app">
+    <main className="app">
       <AppHeader
         title="Today"
         meta={meta}
@@ -122,7 +122,7 @@ export function TodayHome({
             </Module>
           )}
       </div>
-    </div>
+    </main>
   )
 }
 
