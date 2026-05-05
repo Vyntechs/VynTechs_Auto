@@ -2279,52 +2279,185 @@ than delete (audit trail).
 Refs docs/superpowers/plans/2026-05-05-platform-split-migration.md"
 ```
 
-### Task 3.4: Wire `hasEntitlement` into apps/diagnostic middleware
+### Task 3.4: Extract a testable guardRoute helper, then wire it into the diagnostic middleware
 
 **Files:**
+- Create: `packages/auth/src/route-guard.ts`
+- Create: `packages/auth/src/route-guard.test.ts`
+- Modify: `packages/auth/src/index.ts` (re-export)
 - Modify: `apps/diagnostic/middleware.ts`
-- Possibly modify: `apps/diagnostic/app/(app)/layout.tsx` (server-component-side check)
+- Create: `apps/diagnostic/app/(app)/upgrade/page.tsx`
 
-- [ ] **Step 1: Update `apps/diagnostic/middleware.ts`**
+This task uses the handler-in-lib pattern (per AGENTS.md): the entitlement+auth decision logic lives in a pure function in `@repo/auth`, fully testable with pglite. The middleware in each app is a thin shim that calls it. Both the diagnostic and shop apps will share `guardRoute` (with different feature keys); writing it as a tested helper here pays off twice.
 
-Add the entitlement check after auth but before allowing the request through. The exact diff depends on existing middleware shape; the conceptual structure:
+- [ ] **Step 1: Write the failing tests for guardRoute**
+
+Create `packages/auth/src/route-guard.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach } from 'vitest'
+import { guardRoute } from './route-guard'
+import { createDb } from '@repo/db/client'
+import { shops, profiles, shopEntitlements } from '@repo/db/schema'
+import { setupPgliteForTests } from '../test-utils/pglite'  // pglite harness per AGENTS.md
+
+const SHOP_A = '00000000-0000-0000-0000-000000000001'
+const PROFILE_A = '00000000-0000-0000-0000-000000000010'
+const USER_A = 'auth-user-1'
+const PUBLIC = ['/sign-in', '/sign-up', '/', '/upgrade', '/api/health']
+
+describe('guardRoute', () => {
+  let db: ReturnType<typeof createDb>
+
+  beforeEach(async () => {
+    db = await setupPgliteForTests()
+    await db.insert(shops).values({ id: SHOP_A, name: 'Test Shop', ownerProfileId: PROFILE_A })
+    await db.insert(profiles).values({ id: PROFILE_A, userId: USER_A, shopId: SHOP_A, role: 'tech' })
+  })
+
+  it('allows public paths without auth', async () => {
+    const result = await guardRoute(db, null, '/sign-in', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'allow' })
+  })
+
+  it('allows /api/health without auth', async () => {
+    const result = await guardRoute(db, null, '/api/health', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'allow' })
+  })
+
+  it('redirects unauthenticated user on protected path to /sign-in', async () => {
+    const result = await guardRoute(db, null, '/today', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'redirect', to: '/sign-in' })
+  })
+
+  it('redirects user without profile to /onboarding', async () => {
+    const result = await guardRoute(db, 'user-without-profile', '/today', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'redirect', to: '/onboarding' })
+  })
+
+  it('redirects authed user without shop entitlement to /upgrade', async () => {
+    // No shop_entitlements row inserted
+    const result = await guardRoute(db, USER_A, '/today', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'redirect', to: '/upgrade' })
+  })
+
+  it('allows authed user with active shop entitlement', async () => {
+    await db.insert(shopEntitlements).values({
+      shopId: SHOP_A, featureKey: 'diagnostic_access', status: 'active',
+    })
+    const result = await guardRoute(db, USER_A, '/today', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'allow' })
+  })
+
+  it('allows /upgrade path regardless of entitlement (always public)', async () => {
+    const result = await guardRoute(db, USER_A, '/upgrade', 'diagnostic_access', PUBLIC)
+    expect(result).toEqual({ kind: 'allow' })
+  })
+})
+```
+
+- [ ] **Step 2: Run the tests to confirm they fail**
+
+```bash
+pnpm --filter @repo/auth test route-guard
+```
+
+Expected: FAIL with "guardRoute is not exported".
+
+- [ ] **Step 3: Implement guardRoute**
+
+Create `packages/auth/src/route-guard.ts`:
+
+```ts
+import { eq } from 'drizzle-orm'
+import type { AppDb } from '@repo/db/client'
+import { profiles } from '@repo/db/schema'
+import { hasEntitlement } from './entitlements'
+import type { FeatureKey } from '@repo/types'
+
+export type GuardResult =
+  | { kind: 'allow' }
+  | { kind: 'redirect'; to: string }
+
+/**
+ * Pure decision function for route authorization. Used by both apps' middlewares
+ * via a thin shim that resolves NextRequest into (userId, path) and converts
+ * GuardResult into a NextResponse.
+ *
+ * Public paths are always allowed (no auth check).
+ * Unauthenticated users on protected paths → /sign-in.
+ * Authenticated users with no profile → /onboarding.
+ * Authenticated users without entitlement → /upgrade.
+ * Authenticated users with entitlement → allow.
+ */
+export async function guardRoute(
+  db: AppDb,
+  userId: string | null,
+  path: string,
+  featureKey: FeatureKey,
+  publicPaths: string[],
+): Promise<GuardResult> {
+  const isPublic = publicPaths.some(p => path === p || path.startsWith(p + '/'))
+  if (isPublic) return { kind: 'allow' }
+
+  if (!userId) return { kind: 'redirect', to: '/sign-in' }
+
+  const [profile] = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.userId, userId))
+    .limit(1)
+  if (!profile?.shopId) return { kind: 'redirect', to: '/onboarding' }
+
+  const allowed = await hasEntitlement(db, profile.shopId, profile.id, featureKey)
+  if (!allowed) return { kind: 'redirect', to: '/upgrade' }
+
+  return { kind: 'allow' }
+}
+```
+
+- [ ] **Step 4: Run tests, confirm pass**
+
+```bash
+pnpm --filter @repo/auth test route-guard
+```
+
+Expected: 7 tests passing.
+
+- [ ] **Step 5: Re-export from package index**
+
+Edit `packages/auth/src/index.ts`:
+
+```ts
+export * from './route-guard'
+```
+
+- [ ] **Step 6: Wire guardRoute into apps/diagnostic/middleware.ts**
+
+Replace `apps/diagnostic/middleware.ts` contents with:
 
 ```ts
 import { type NextRequest, NextResponse } from 'next/server'
-import { refreshSession } from '@repo/auth/middleware'
-import { hasEntitlement } from '@repo/auth'
+import { refreshSession, guardRoute } from '@repo/auth'
 import { getDb } from '@repo/db/client'
+
+const PUBLIC = ['/sign-in', '/sign-up', '/', '/upgrade', '/api/health']
 
 export async function middleware(req: NextRequest) {
   const { res, supabase } = await refreshSession(req)
   const { data: { user } } = await supabase.auth.getUser()
 
-  const path = req.nextUrl.pathname
+  const result = await guardRoute(
+    getDb(),
+    user?.id ?? null,
+    req.nextUrl.pathname,
+    'diagnostic_access',
+    PUBLIC,
+  )
 
-  // Public routes — sign-in, sign-up, public assets
-  const isPublic = path.startsWith('/sign-in') || path.startsWith('/sign-up') ||
-    path === '/' || path.startsWith('/api/health')
-  if (isPublic) return res
-
-  // Authed routes need a user
-  if (!user) return NextResponse.redirect(new URL('/sign-in', req.url))
-
-  // Entitlement check — only on app routes (not /upgrade or /api/stripe/*)
-  const needsEntitlement = !path.startsWith('/upgrade') && !path.startsWith('/api/stripe')
-  if (needsEntitlement) {
-    const db = getDb()
-    const profile = await db.query.profiles.findFirst({
-      where: eq(profiles.userId, user.id),
-    })
-    if (!profile || !profile.shopId) {
-      return NextResponse.redirect(new URL('/onboarding', req.url))
-    }
-    const allowed = await hasEntitlement(db, profile.shopId, profile.id, 'diagnostic_access')
-    if (!allowed) {
-      return NextResponse.redirect(new URL('/upgrade', req.url))
-    }
+  if (result.kind === 'redirect') {
+    return NextResponse.redirect(new URL(result.to, req.url))
   }
-
   return res
 }
 
@@ -2333,9 +2466,9 @@ export const config = {
 }
 ```
 
-(Adapt to the existing middleware structure; preserve any phase-D session-state logic that's already there.)
+(Preserve any phase-D session-state logic from the existing middleware that needs to stay — guardRoute handles auth + entitlement only; other concerns are passed-through.)
 
-- [ ] **Step 2: Create the `/upgrade` page placeholder**
+- [ ] **Step 7: Create the `/upgrade` page placeholder**
 
 Create `apps/diagnostic/app/(app)/upgrade/page.tsx`:
 
@@ -2353,14 +2486,11 @@ export default function UpgradePage() {
 }
 ```
 
-- [ ] **Step 3: Pre-grant entitlements to existing test shops**
+- [ ] **Step 8: Pre-grant entitlements to existing test shops**
 
-This step prevents prod traffic from being redirected to /upgrade once Stage 3 ships.
-
-Use Supabase MCP `execute_sql`:
+Use Supabase MCP `execute_sql` to prevent prod traffic from being redirected to /upgrade once Stage 3 ships:
 
 ```sql
--- Grant diagnostic_access to Brandon's shop and any other existing shops with active users.
 INSERT INTO shop_entitlements (shop_id, feature_key, status, granted_at)
 SELECT DISTINCT shop_id, 'diagnostic_access', 'active', now()
 FROM profiles
@@ -2368,11 +2498,12 @@ WHERE shop_id IS NOT NULL
 ON CONFLICT (shop_id, feature_key) DO NOTHING;
 ```
 
-- [ ] **Step 4: Run all checks and verify locally**
+- [ ] **Step 9: Run all checks and verify locally**
 
 ```bash
 pnpm install
 pnpm --filter diagnostic typecheck
+pnpm --filter @repo/auth test
 pnpm --filter diagnostic test
 pnpm --filter diagnostic build
 
@@ -2380,19 +2511,26 @@ pnpm --filter diagnostic build
 pnpm --filter diagnostic dev &
 sleep 8
 # Sign in with brandon@vyntechs.com password Benny0812 (per session memory)
-# Verify /today still works (entitlement granted via step 3)
+# Verify /today still works (entitlement granted via Step 8)
+# Verify /upgrade renders without redirect loop
 ```
 
-- [ ] **Step 5: Commit and verify on staging-rc**
+- [ ] **Step 10: Commit and verify on staging-rc**
 
 ```bash
 git add -A
-git commit -m "feat(monorepo): wire hasEntitlement into diagnostic middleware
+git commit -m "feat(auth): guardRoute helper + wire entitlement check into diagnostic middleware
 
-Stage 3.4 of the platform split migration. The diagnostic app now
-requires diagnostic_access entitlement on all (app)/* routes. Existing
-test shops have been pre-granted via direct SQL so prod traffic is
-unaffected. Missing entitlement → redirect to /upgrade.
+Stage 3.4 of the platform split migration. Extracted the auth+entitlement
+decision into guardRoute, a pure function in @repo/auth/route-guard, with
+7 TDD test cases covering public paths / unauth / missing profile /
+missing entitlement / allowed paths. Diagnostic middleware now a thin
+shim calling guardRoute('diagnostic_access'). /upgrade placeholder created.
+Existing test shops pre-granted via direct SQL so prod traffic is unaffected.
+
+The same guardRoute helper is consumed by the apps/shop middleware in
+Stage 4 with featureKey='shop_mgmt_access' — one tested implementation,
+two product surfaces.
 
 Refs docs/superpowers/plans/2026-05-05-platform-split-migration.md"
 
@@ -2568,34 +2706,85 @@ export default function UpgradePage() {
 }
 ```
 
-- [ ] **Step 4: Add middleware**
+- [ ] **Step 4: Extract middleware config so it's testable**
 
-`apps/shop/middleware.ts`:
+Create `apps/shop/middleware-config.ts`:
+
+```ts
+import type { FeatureKey } from '@repo/types'
+
+export const FEATURE_KEY: FeatureKey = 'shop_mgmt_access'
+
+export const PUBLIC_PATHS = [
+  '/sign-in',
+  '/sign-up',
+  '/',
+  '/upgrade',
+] as const
+```
+
+- [ ] **Step 5: Write failing tests for the middleware config**
+
+Create `apps/shop/tests/middleware-config.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { FEATURE_KEY, PUBLIC_PATHS } from '@/middleware-config'
+
+describe('shop middleware config', () => {
+  it('uses shop_mgmt_access feature key (not diagnostic_access)', () => {
+    expect(FEATURE_KEY).toBe('shop_mgmt_access')
+  })
+
+  it('treats /upgrade as public so unauthorized users can land there', () => {
+    expect(PUBLIC_PATHS).toContain('/upgrade')
+  })
+
+  it('treats / as public for the placeholder home page', () => {
+    expect(PUBLIC_PATHS).toContain('/')
+  })
+
+  it('treats /sign-in as public for unauth flow', () => {
+    expect(PUBLIC_PATHS).toContain('/sign-in')
+  })
+})
+```
+
+- [ ] **Step 6: Run tests, confirm pass (config exists, tests just verify the values)**
+
+```bash
+pnpm --filter shop test middleware-config
+```
+
+Expected: 4 tests passing.
+
+(This is a "doc test" — it pins the contract that the shop middleware uses the right feature key. If a future refactor accidentally changes 'shop_mgmt_access' to anything else, this test fails immediately and obviously.)
+
+- [ ] **Step 7: Add middleware as a thin shim that uses guardRoute + the config**
+
+Create `apps/shop/middleware.ts`:
 
 ```ts
 import { type NextRequest, NextResponse } from 'next/server'
-import { refreshSession, hasEntitlement } from '@repo/auth'
+import { refreshSession, guardRoute } from '@repo/auth'
 import { getDb } from '@repo/db/client'
-import { profiles } from '@repo/db/schema'
-import { eq } from 'drizzle-orm'
+import { FEATURE_KEY, PUBLIC_PATHS } from './middleware-config'
 
 export async function middleware(req: NextRequest) {
   const { res, supabase } = await refreshSession(req)
   const { data: { user } } = await supabase.auth.getUser()
 
-  const path = req.nextUrl.pathname
-  const isPublic = path.startsWith('/sign-in') || path === '/upgrade' || path === '/'
-  if (isPublic) return res
+  const result = await guardRoute(
+    getDb(),
+    user?.id ?? null,
+    req.nextUrl.pathname,
+    FEATURE_KEY,
+    [...PUBLIC_PATHS],
+  )
 
-  if (!user) return NextResponse.redirect(new URL('/sign-in', req.url))
-
-  const db = getDb()
-  const [profile] = await db.select().from(profiles).where(eq(profiles.userId, user.id)).limit(1)
-  if (!profile?.shopId) return NextResponse.redirect(new URL('/onboarding', req.url))
-
-  const allowed = await hasEntitlement(db, profile.shopId, profile.id, 'shop_mgmt_access')
-  if (!allowed) return NextResponse.redirect(new URL('/upgrade', req.url))
-
+  if (result.kind === 'redirect') {
+    return NextResponse.redirect(new URL(result.to, req.url))
+  }
   return res
 }
 
@@ -2604,27 +2793,33 @@ export const config = {
 }
 ```
 
-- [ ] **Step 5: Install and verify**
+(The behavior is fully tested via the existing `guardRoute` test suite from Stage 3.4 plus the config tests above. No new integration test is needed because the shim is trivial — it converts NextRequest→inputs and GuardResult→NextResponse.)
+
+- [ ] **Step 8: Install and verify**
 
 ```bash
 cd /Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/monorepo-stage-1
 pnpm install
 pnpm --filter shop typecheck
+pnpm --filter shop test
 pnpm --filter shop build 2>&1 | tail -20
 ```
 
-Expected: shop app builds. Routes: `/`, `/upgrade`. No tests yet (none exist).
+Expected: shop app builds clean. 4 middleware-config tests pass. Routes: `/`, `/upgrade`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A
-git commit -m "feat(monorepo): scaffold apps/shop placeholder
+git commit -m "feat(monorepo): scaffold apps/shop placeholder + middleware-config tests
 
 Stage 4.1 of the platform split migration. Empty Next.js 16 app at
 apps/shop with auth, /upgrade page, and shop_mgmt_access entitlement
-gating. No features built — this is the deployable shell that
-proves the architecture supports the second product.
+gating via the shared guardRoute helper from @repo/auth. Middleware
+config (FEATURE_KEY + PUBLIC_PATHS) extracted to a separate module
+with 4 doc tests pinning the contract. No shop management features
+built — this is the deployable shell that proves the architecture
+supports the second product.
 
 Refs docs/superpowers/plans/2026-05-05-platform-split-migration.md"
 
@@ -2736,39 +2931,251 @@ Via Vercel dashboard → Project → Domains: add `shop.vyntechs.dev`. Configure
 
 Vercel dashboard → Each project → Settings → Git → Ignored Build Step → "Automatic" (uses Turborepo dependency graph).
 
-### Task 5.4: Configure cross-app no-imports lint rule (already added in Stage 2a)
+### Task 5.4: Configure cross-app no-imports lint rule with TDD
 
 **Files:**
-- Modify: `apps/diagnostic/eslint.config.js` (or equivalent) to consume `@repo/config/eslint`
+- Create: `packages/config/tests/eslint-no-cross-app.test.ts`
+- Modify: `packages/config/eslint.preset.js` (the rule itself was added in Stage 2a; this task tests it and wires it to each app)
+- Modify: `apps/diagnostic/eslint.config.js`
 - Create: `apps/shop/eslint.config.js`
+- Modify: `packages/config/package.json` (add `eslint` and `vitest` to devDependencies)
 
-- [ ] **Step 1: Wire each app to consume the shared eslint preset**
+- [ ] **Step 1: Write failing tests for the lint rule**
 
-`apps/diagnostic/eslint.config.js`:
+Create `packages/config/tests/eslint-no-cross-app.test.ts`:
 
-```js
-import shared from '@repo/config/eslint'
-export default shared
+```ts
+import { describe, it, expect } from 'vitest'
+import { ESLint } from 'eslint'
+import preset from '../eslint.preset.js'
+
+describe('shared eslint preset — no cross-app imports', () => {
+  it('flags relative imports from another app', async () => {
+    const eslint = new ESLint({
+      overrideConfigFile: true,
+      baseConfig: preset,
+    })
+    const results = await eslint.lintText(
+      `import x from '../../shop/app/page'\nexport const a = x`,
+      { filePath: 'apps/diagnostic/lib/test-violation.ts' },
+    )
+    const messages = results[0]?.messages ?? []
+    expect(messages.some(m => m.ruleId === 'no-restricted-imports')).toBe(true)
+  })
+
+  it('flags relative imports from another app at deeper paths', async () => {
+    const eslint = new ESLint({
+      overrideConfigFile: true,
+      baseConfig: preset,
+    })
+    const results = await eslint.lintText(
+      `import x from '../../diagnostic/lib/intake'\nexport const a = x`,
+      { filePath: 'apps/shop/components/foo.ts' },
+    )
+    const messages = results[0]?.messages ?? []
+    expect(messages.some(m => m.ruleId === 'no-restricted-imports')).toBe(true)
+  })
+
+  it('allows imports from @repo/* packages', async () => {
+    const eslint = new ESLint({
+      overrideConfigFile: true,
+      baseConfig: preset,
+    })
+    const results = await eslint.lintText(
+      `import { hasEntitlement } from '@repo/auth'\nexport const a = hasEntitlement`,
+      { filePath: 'apps/diagnostic/middleware.ts' },
+    )
+    const messages = results[0]?.messages ?? []
+    expect(messages.every(m => m.ruleId !== 'no-restricted-imports')).toBe(true)
+  })
+
+  it('allows relative imports within the same app', async () => {
+    const eslint = new ESLint({
+      overrideConfigFile: true,
+      baseConfig: preset,
+    })
+    const results = await eslint.lintText(
+      `import { foo } from './foo'\nexport const a = foo`,
+      { filePath: 'apps/diagnostic/lib/bar.ts' },
+    )
+    const messages = results[0]?.messages ?? []
+    expect(messages.every(m => m.ruleId !== 'no-restricted-imports')).toBe(true)
+  })
+})
 ```
 
-`apps/shop/eslint.config.js`:
+- [ ] **Step 2: Add eslint + vitest to packages/config**
 
-```js
-import shared from '@repo/config/eslint'
-export default shared
+Update `packages/config/package.json`:
+
+```json
+{
+  "name": "@repo/config",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./index.js",
+  "exports": {
+    "./tsconfig.json": "./tsconfig.json",
+    "./eslint": "./eslint.preset.js",
+    "./tailwind": "./tailwind.preset.ts",
+    "./prettier": "./prettier.config.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "vitest": "^4.1.5"
+  }
+}
 ```
 
-- [ ] **Step 2: Verify the lint rule fires**
+- [ ] **Step 3: Run the tests; if they fail, fix the eslint rule until they pass**
 
 ```bash
-echo "import x from '../../apps/shop/app/page'" >> apps/diagnostic/lib/test-violation.ts
-pnpm --filter diagnostic lint 2>&1 | grep "no-restricted-imports"
-rm apps/diagnostic/lib/test-violation.ts
+pnpm install
+pnpm --filter @repo/config test
 ```
 
-Expected: ESLint reports `no-restricted-imports` error.
+Expected (initial run): the first two tests (the violation cases) PASS — the rule from Stage 2a should already fire. The "allowed" tests should also PASS. If any test fails, fix `packages/config/eslint.preset.js`'s `no-restricted-imports` rule until all 4 pass.
 
-### Task 5.5: Update AGENTS.md with the dual-product model
+If the rule from Stage 2a wasn't strict enough (e.g., it only matched one specific pattern), update it. The rule should match any relative import path that resolves into a sibling `apps/*` directory. The `patterns` array in `no-restricted-imports`:
+
+```js
+'no-restricted-imports': ['error', {
+  patterns: [
+    {
+      group: ['../../apps/*', '../*/apps/*'],
+      message: 'Apps may not import from other apps. Move shared code to a package under packages/.'
+    },
+    {
+      // Catch sibling-app paths from inside any apps/X/* file
+      group: ['../*/app/*', '../*/components/*', '../*/lib/*'],
+      message: 'Apps may not import from other apps. Move shared code to a package under packages/.'
+    }
+  ]
+}]
+```
+
+- [ ] **Step 4: Wire each app to consume the shared eslint preset**
+
+Create `apps/diagnostic/eslint.config.js`:
+
+```js
+import shared from '@repo/config/eslint'
+export default shared
+```
+
+Create `apps/shop/eslint.config.js`:
+
+```js
+import shared from '@repo/config/eslint'
+export default shared
+```
+
+- [ ] **Step 5: Verify lint runs clean across both apps**
+
+```bash
+pnpm --filter diagnostic lint 2>&1 | tail -5
+pnpm --filter shop lint 2>&1 | tail -5
+```
+
+Expected: clean (no violations) since neither app imports from the other.
+
+### Task 5.5: Add smoke-test script for staging-rc + production validation
+
+**Files:**
+- Create: `apps/diagnostic/tests/smoke/prod-routes.test.ts`
+
+This task adds an automated regression check runnable against any deployed URL via `SMOKE_TEST_URL`. Used in Stage 6 to validate staging-rc before merging and prod immediately after. Replaces the manual curl-and-eyeball pattern from prior sessions with a versioned, repeatable test.
+
+- [ ] **Step 1: Write the smoke tests**
+
+Create `apps/diagnostic/tests/smoke/prod-routes.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+
+const BASE = process.env.SMOKE_TEST_URL ?? 'https://staging-rc.vercel.app'
+
+describe(`diagnostic smoke (${BASE})`, () => {
+  it('GET /sign-in returns 200 with sign-in form HTML', async () => {
+    const res = await fetch(`${BASE}/sign-in`)
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).toContain('Sign in')
+  })
+
+  it('GET / returns 200', async () => {
+    const res = await fetch(`${BASE}/`)
+    expect(res.status).toBe(200)
+  })
+
+  it('GET /favicon.ico returns 200 image', async () => {
+    const res = await fetch(`${BASE}/favicon.ico`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toMatch(/^image\//)
+  })
+
+  it('GET /icon.svg returns 200 svg', async () => {
+    const res = await fetch(`${BASE}/icon.svg`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/svg+xml')
+  })
+
+  it('GET /api/health returns 200 JSON with pingOk=true', async () => {
+    const res = await fetch(`${BASE}/api/health`)
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json).toHaveProperty('pingOk')
+    expect(json.pingOk).toBe(true)
+  })
+
+  it('GET /today redirects to /sign-in for anon (307)', async () => {
+    const res = await fetch(`${BASE}/today`, { redirect: 'manual' })
+    expect(res.status).toBe(307)
+    expect(res.headers.get('location')).toMatch(/\/sign-in/)
+  })
+
+  it('GET /intake/* returns 307 to /sign-in or 404 (route disabled in production)', async () => {
+    const res = await fetch(`${BASE}/intake/plan-quote/test-smoke`, { redirect: 'manual' })
+    // After Stage 6.1 sets the flag false, /intake/* either returns 307 (auth middleware
+    // redirects anon to /sign-in) or 404 (if flag check fires first). Both are acceptable.
+    expect([307, 404]).toContain(res.status)
+  })
+
+  it('GET /sessions/new redirects to /sign-in for anon', async () => {
+    const res = await fetch(`${BASE}/sessions/new`, { redirect: 'manual' })
+    expect(res.status).toBe(307)
+    expect(res.headers.get('location')).toMatch(/\/sign-in/)
+  })
+})
+```
+
+- [ ] **Step 2: Run against staging-rc to confirm tests pass on the current preview**
+
+```bash
+SMOKE_TEST_URL=https://staging-rc.vercel.app pnpm --filter diagnostic test smoke 2>&1 | tail -10
+```
+
+Expected: 8 tests passing.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/diagnostic/tests/smoke/prod-routes.test.ts
+git commit -m "test(smoke): automated regression check for diagnostic anonymous routes
+
+Stage 5.5 of the platform split migration. Versioned smoke test
+runnable against any URL via SMOKE_TEST_URL env. Used in Stage 6
+to validate staging-rc before merging and vyntechs.dev after merging.
+Replaces the prior manual curl-and-eyeball pattern with a repeatable
+gate.
+
+Refs docs/superpowers/plans/2026-05-05-platform-split-migration.md"
+```
+
+### Task 5.6: Update AGENTS.md with the dual-product model
 
 **Files:**
 - Modify: `AGENTS.md`
@@ -2876,7 +3283,15 @@ vercel ls | head -3
 vercel alias set <new-deploy-url> staging-rc.vercel.app
 ```
 
-- [ ] **Step 3: Anonymous header diff against baseline**
+- [ ] **Step 3: Run the smoke test suite against staging-rc**
+
+```bash
+SMOKE_TEST_URL=https://staging-rc.vercel.app pnpm --filter diagnostic test smoke 2>&1 | tail -10
+```
+
+Expected: 8 tests passing (per Task 5.5).
+
+- [ ] **Step 3b: Anonymous header diff against baseline (manual sanity)**
 
 ```bash
 diff <(curl -sI https://staging-rc.vercel.app/sign-in | head -3) /tmp/vyntechs-baseline/sign-in.headers
@@ -2884,7 +3299,7 @@ diff <(curl -sI https://staging-rc.vercel.app/today | head -3) /tmp/vyntechs-bas
 diff <(curl -sI https://staging-rc.vercel.app/api/health | head -3) /tmp/vyntechs-baseline/api-health.headers
 ```
 
-Expected: matches baseline (excluding cache/x-vercel-id headers).
+Expected: matches baseline (excluding cache/x-vercel-id headers). Reinforces what the smoke test already verifies.
 
 - [ ] **Step 4: Authed full gap audit on staging-rc**
 
@@ -2947,12 +3362,20 @@ Expected:
 - `vyntechs-dev` project deployed Ready, aliased to `vyntechs.dev`
 - `vyntechs-shop-dev` project deployed Ready, aliased to `shop.vyntechs.dev`
 
-- [ ] **Step 3: Final prod gap audit per Session 5 pattern**
+- [ ] **Step 3: Run the smoke test suite against vyntechs.dev (post-merge)**
+
+```bash
+SMOKE_TEST_URL=https://vyntechs.dev pnpm --filter diagnostic test smoke 2>&1 | tail -10
+```
+
+Expected: 8 tests passing on production. **If any fail, immediately roll back per the Stage 6 rollback procedure.**
+
+- [ ] **Step 3b: Final prod gap audit per Session 5 pattern**
 
 Run the same audit Brandon validated for Session 5:
-- Anonymous header diff vs baseline
+- Anonymous header diff vs baseline (already covered by smoke test, but eyeball cache headers)
 - Authed `/today` + `/sessions/new` + `/sessions/<id>` flows on `vyntechs.dev`
-- `/intake/*` returns 404 on `vyntechs.dev` (flag false; intentional)
+- `/intake/*` returns 307 (auth) or 404 (flag) on `vyntechs.dev`
 - `shop.vyntechs.dev/` returns the placeholder for shop_mgmt_access holders, redirects to `/upgrade` for non-holders
 
 ### Task 6.5: Tag and document the post-migration baseline
@@ -3076,17 +3499,31 @@ Spec coverage check (per writing-plans skill):
 | Decision 4: two Vercel projects, one repo | Stage 5.3 |
 | Decision 5: schema in packages/db, migrations from CI | Stage 2c, Stage 5.1 |
 | Decision 6: entitlements model (4-layer) | Stage 3.1, 3.2, 3.3, 3.4 |
-| Decision 7: no cross-app imports | Stage 2a (Step 5) + Stage 5.4 |
+| Decision 7: no cross-app imports | Stage 2a (Step 5) + Stage 5.4 (with TDD test of the rule itself) |
 | Data shape: shop_entitlements + profile_entitlements | Stage 3.1 |
 | Per-tech entitlements (v1) | Stage 3.1 (table), 3.2 (helper) |
 | `shop.vyntechs.dev` domain | Stage 5.3 |
 | `/intake/*` flag off | Stage 6.1 |
 | `/sessions/new` remains the diagnostic intake | No code change required (already there) |
-| AGENTS.md updated | Stage 5.5 |
+| AGENTS.md updated | Stage 5.6 (renumbered after Task 5.5 became smoke test) |
 
 All spec sections have at least one task. No gaps identified.
 
-Type consistency check: `hasEntitlement(db, shopId, profileId, featureKey)` signature is consistent across the helper definition (Stage 3.2 Step 3), test usage (Stage 3.2 Step 1), middleware usage (Stage 3.4 Step 1), and the `apps/shop` middleware (Stage 4.1 Step 4). The `FeatureKey` type is `'diagnostic_access' | 'shop_mgmt_access'` consistently. `KNOWN_FEATURE_KEYS` in the webhook handler (Stage 3.3) matches. Helper name and signature consistent throughout.
+**TDD coverage check (added per Brandon's review):**
+
+| New code introduced | TDD coverage |
+|---|---|
+| `hasEntitlement` helper | Stage 3.2 — 7 test cases written first |
+| Stripe subscription webhook handler | Stage 3.3 — 4 test cases written first |
+| `guardRoute` helper (auth + entitlement decision) | Stage 3.4 — 7 test cases written first |
+| Diagnostic middleware | Thin shim over `guardRoute`; behavior covered by Stage 3.4 tests |
+| `apps/shop` middleware | Thin shim over `guardRoute`; config tested in Stage 4.1 (4 tests) |
+| Cross-app no-imports lint rule | Stage 5.4 — 4 test cases written first against the preset directly |
+| Production smoke routes | Stage 5.5 — 8 anonymous-route tests runnable against any URL |
+
+Mechanical migration tasks (Stages 0, 1, 2a-f, 4 scaffolding, 5.1-5.3, 5.6, 6) do NOT introduce new behavior — they relocate existing code. The pre-existing 378-test suite is the regression safety net for those stages, asserted at every verification gate.
+
+Type consistency check: `hasEntitlement(db, shopId, profileId, featureKey)` signature is consistent across the helper definition (Stage 3.2 Step 3), test usage (Stage 3.2 Step 1), `guardRoute` consumption (Stage 3.4 Step 3). `guardRoute(db, userId, path, featureKey, publicPaths)` signature is consistent across definition (Stage 3.4 Step 3), tests (Stage 3.4 Step 1), and both apps' middlewares (Stage 3.4 Step 6, Stage 4.1 Step 7). The `FeatureKey` type is `'diagnostic_access' | 'shop_mgmt_access'` consistently. `KNOWN_FEATURE_KEYS` in the webhook handler (Stage 3.3) matches. Helper names and signatures consistent throughout.
 
 No placeholders found in the plan body. All code blocks contain runnable code or explicit "copy from <source>" notes for version-pinned values that need to come from the existing repo at execution time.
 
