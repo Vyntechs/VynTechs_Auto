@@ -24,6 +24,7 @@ import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
+import type { ScheduleFollowUpsFn } from './comeback/schedule'
 
 export type PromoteToCorpusFn = (
   db: AppDb,
@@ -229,6 +230,10 @@ export async function closeSessionForUser(opts: {
   /** Phase K corpus promotion. Optional — when omitted, no promotion runs.
    *  Failures are non-fatal; the session still closes successfully. */
   promoteToCorpus?: PromoteToCorpusFn
+  /** Phase R comeback follow-up scheduling. Optional — when omitted, no
+   *  follow-ups are written. Failures are non-fatal; the session still
+   *  closes (and corpus promotion still runs) regardless. */
+  scheduleFollowUps?: ScheduleFollowUpsFn
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -284,6 +289,18 @@ export async function closeSessionForUser(opts: {
       })
     } catch (err) {
       console.warn('corpus promotion failed (session still closed):', err)
+    }
+  }
+
+  if (opts.scheduleFollowUps) {
+    try {
+      await opts.scheduleFollowUps(opts.db, {
+        sessionId: opts.sessionId,
+        shopId: session.shopId,
+        techId: session.techId,
+      })
+    } catch (err) {
+      console.warn('follow-up scheduling failed (session still closed):', err)
     }
   }
 

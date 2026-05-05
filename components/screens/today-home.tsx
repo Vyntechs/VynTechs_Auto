@@ -7,18 +7,26 @@ import {
   Risk,
   DtcChip,
 } from '@/components/vt'
+import { FollowUpPanel } from '@/components/comeback/follow-up-panel'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
+import type { DueFollowUp } from '@/lib/comeback/list'
 
 type Props = {
   techName: string
   bay?: string
   inProgress: Session[]
-  queued: Session[]
   closedToday: Session[]
+  dueFollowUps?: DueFollowUp[]
 }
 
-export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Props) {
+export function TodayHome({
+  techName,
+  bay,
+  inProgress,
+  closedToday,
+  dueFollowUps = [],
+}: Props) {
   const meta = bay ? (
     <span>
       {techName} · {bay}
@@ -28,7 +36,7 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
   )
 
   return (
-    <div className="app">
+    <main className="app">
       <AppHeader
         title="Today"
         meta={meta}
@@ -83,22 +91,10 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
           </Module>
         )}
 
-        {queued.length > 0 && (
-          <Module num="02" label={`Queued · ${queued.length}`}>
-            {queued.map((s, i) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                kind="queued"
-                isFirst={i === 0}
-                isLast={i === queued.length - 1}
-              />
-            ))}
-          </Module>
-        )}
+        <FollowUpPanel items={dueFollowUps} />
 
         {closedToday.length > 0 && (
-          <Module num="03" label={`Closed today · ${closedToday.length}`}>
+          <Module num="02" label={`Closed today · ${closedToday.length}`}>
             {closedToday.map((s, i) => (
               <SessionRow
                 key={s.id}
@@ -111,20 +107,22 @@ export function TodayHome({ techName, bay, inProgress, queued, closedToday }: Pr
           </Module>
         )}
 
-        {inProgress.length === 0 && queued.length === 0 && closedToday.length === 0 && (
-          <Module num="—" label="Today">
-            <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
-              No sessions queued. Start a new diagnosis to begin.
-            </p>
-            <div style={{ marginTop: 14 }}>
-              <Link href="/sessions/new" className="btn btn-primary">
-                New diagnosis
-              </Link>
-            </div>
-          </Module>
-        )}
+        {inProgress.length === 0 &&
+          closedToday.length === 0 &&
+          dueFollowUps.length === 0 && (
+            <Module num="—" label="Today">
+              <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+                No sessions yet. Start a new diagnosis to begin.
+              </p>
+              <div style={{ marginTop: 14 }}>
+                <Link href="/sessions/new" className="btn btn-primary">
+                  New diagnosis
+                </Link>
+              </div>
+            </Module>
+          )}
       </div>
-    </div>
+    </main>
   )
 }
 
@@ -135,7 +133,7 @@ function SessionRow({
   isLast,
 }: {
   session: Session
-  kind?: 'active' | 'queued' | 'closed'
+  kind?: 'active' | 'closed'
   isFirst?: boolean
   isLast?: boolean
 }) {
@@ -158,7 +156,6 @@ function SessionRow({
     <Link href={`/sessions/${session.id}`} className="queue-row" style={rowStyle}>
       <div className="queue-meta">
         <div className="queue-vehicle">{formatVehicleName(session.intake)}</div>
-        {kind === 'queued' && <Pill kind="queued">Queued</Pill>}
         {kind === 'closed' && (
           <span
             style={{
@@ -185,12 +182,8 @@ function SessionRow({
           </span>
         </div>
       )}
-      {kind !== 'active' && (
-        <div className="queue-time">
-          {kind === 'queued'
-            ? `created ${formatElapsed(new Date(session.createdAt))} ago`
-            : `closed`}
-        </div>
+      {kind === 'closed' && (
+        <div className="queue-time">closed</div>
       )}
     </Link>
   )

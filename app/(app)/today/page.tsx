@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { listSessionsForShop } from '@/lib/db/queries'
+import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { TodayHome } from '@/components/screens/today-home'
 
 export default async function TodayPage() {
@@ -10,9 +11,12 @@ export default async function TodayPage() {
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const all = ctx.profile.shopId
-    ? await listSessionsForShop(db, ctx.profile.shopId)
-    : []
+  const [all, dueFollowUps] = await Promise.all([
+    ctx.profile.shopId
+      ? listSessionsForShop(db, ctx.profile.shopId)
+      : Promise.resolve([]),
+    listDueFollowUpsForTech(db, ctx.profile.id),
+  ])
   const mine = all.filter((s) => s.techId === ctx.profile.id)
 
   const inProgress = mine.filter((s) => s.status === 'open')
@@ -26,8 +30,8 @@ export default async function TodayPage() {
     <TodayHome
       techName={ctx.profile.fullName ?? 'Tech'}
       inProgress={inProgress}
-      queued={[]}
       closedToday={closedToday}
+      dueFollowUps={dueFollowUps}
     />
   )
 }

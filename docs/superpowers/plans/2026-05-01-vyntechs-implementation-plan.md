@@ -10945,6 +10945,26 @@ Click "Comeback recorded". Confirm in Supabase that `follow_ups.resolved_at` is 
 
 ---
 
+## Phase R — Implementation corrections (applied 2026-05-04)
+
+The 2026-05-01 plan drifted from current conventions in several places. Reality on the `feature/phase-r-comeback` branch:
+
+- **R1 — schema + migration.** Table created as planned. Hand-written migration `0009_follow_ups.sql` mirrors the `0008_voyage_embedding_dims.sql` pattern (no meta snapshot — `drizzle-kit generate` will produce phantom diffs on next run; same trade-off accepted at 0008). Per AGENTS.md, NOT applied to live Supabase by the agent — Brandon applies via MCP `apply_migration` at merge time. Indexes added on all three FKs (`session_id`, `shop_id`, `tech_id`) plus `due_at` for cron + tech-list query support.
+
+- **R2 — DI pattern, not global db.** Plan's `scheduleFollowUps({ sessionId, shopId, techId })` with global `db` import contradicts the project convention (queries take `db: AppDb` first arg). Implemented as `scheduleFollowUps(db: AppDb, input)`. Plan's "hook into route shim" approach also abandoned: instead, `closeSessionForUser` accepts an optional `scheduleFollowUps?: ScheduleFollowUpsFn` injection and calls it after corpus promotion (parallel to the K5 `promoteToCorpus` DI pattern). Route shim wires the prod impl. Failures are non-fatal — session still closes.
+
+- **R3 — extracted handler for testability.** Plan's cron route imports `db` directly and runs the UPDATE inline. Refactored: business logic in `lib/comeback/surface.ts:surfaceDueFollowUps(db)` (pglite-testable, idempotent), route is a thin shim handling auth + dispatch. `vercel.json` created (was absent) with the daily cron at `0 14 * * *` UTC = 8am Central. `CRON_SECRET` added to `.env.example` with generation instructions.
+
+- **R4 — TodayHome (not /sessions), Workshop Instrument (not shadcn).** Per the Counter 01 design resolution ("Follow-ups: section on Today/Home, not peer screen"), the panel mounts on `/today` between the In-progress and Queued modules. The plan's shadcn `Card`/`Button`/`Textarea` imports were replaced with the project's `Module` primitive + `btn btn-primary` / `btn btn-secondary` classes. The decay integration call was corrected to `recordCorpusComeback(db, input)` (plan omitted the `db` arg). Also restructured: `listDueFollowUpsForTech` extracted into `lib/comeback/list.ts` and `resolveFollowUp` into `lib/comeback/resolve.ts` (with DI'd `recordCorpusComeback`) so both are pglite-testable. Route shim at `/api/follow-ups/[id]/resolve` is thin.
+
+- **R4 — UX language (Brandon's standing rule).** Plain shop-floor English: "How did it hold?", "Held"/"Came back" buttons, "What happened? (optional)" notes placeholder. No "comeback recorded"/"resolution"/etc. — those are engineering terms. "Comeback" alone is fine (auto-shop standard).
+
+- **R5 — Brandon's job.** Steps 1-4 of the plan's R5 (DB seed → cron trigger → panel verify → resolve+decay) are an automated equivalent of what's already covered by the test suite (`comeback-schedule.test.ts`, `comeback-surface.test.ts`, `comeback-list.test.ts`, `comeback-resolve.test.ts`, `follow-up-panel.test.tsx`). Brandon's actual R5 is the human smoke walk on the deployed branch.
+
+Ship order (one branch, four commits): R1 → R2 → R3 → R4. Brandon merges the whole phase to main when he's verified the smoke.
+
+---
+
 ## Phase S — End-to-End + Production Deploy (4 tasks)
 
 Final phase: a single Playwright happy-path that exercises every prior phase end-to-end (intake → multi-modal capture → corpus retrieval → bounded internet retrieval → Tech-Assisted Retrieval → risk gating → outcome capture → comeback follow-up surfacing), production environment configuration, Vercel production cutover, and milestone tagging.

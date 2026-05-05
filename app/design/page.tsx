@@ -46,19 +46,6 @@ const fixtureSession: Session = {
   },
 }
 
-const queuedSession: Session = {
-  ...fixtureSession,
-  id: 'fixt-bmw-no-start-bbbb2222',
-  status: 'open',
-  createdAt: MIN_AGO(11),
-  intake: {
-    vehicleYear: 2014,
-    vehicleMake: 'BMW',
-    vehicleModel: '335i',
-    customerComplaint: 'Intermittent crank-no-start with dash flicker.',
-  },
-}
-
 const closedSession: Session = {
   ...fixtureSession,
   id: 'fixt-tacoma-cccc3333',
@@ -153,7 +140,6 @@ function ShowcaseToday() {
       techName="Marcus"
       bay="Bay 3"
       inProgress={[fixtureSession]}
-      queued={[queuedSession]}
       closedToday={[closedSession]}
     />
   )

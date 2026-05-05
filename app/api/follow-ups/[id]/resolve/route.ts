@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
-import { closeSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { validateSpecificity } from '@/lib/ai/outcome-validator'
-import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
-import { scheduleFollowUps } from '@/lib/comeback/schedule'
+import { resolveFollowUp } from '@/lib/comeback/resolve'
+import { recordCorpusComeback } from '@/lib/corpus/decay'
 
 export async function POST(
   req: Request,
@@ -21,24 +19,16 @@ export async function POST(
 
   const body = await req.json().catch(() => null)
 
-  const result = await closeSessionForUser({
+  const result = await resolveFollowUp({
     db,
     userId: user.id,
-    sessionId: id,
+    followUpId: id,
     body,
-    validateSpecificity,
-    promoteToCorpus: promoteSessionToCorpus,
-    scheduleFollowUps,
+    recordCorpusComeback,
   })
 
   if (!result.ok) {
-    if (result.status === 422) {
-      return NextResponse.json(
-        { error: result.error, feedback: result.feedback },
-        { status: 422 },
-      )
-    }
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, comebackRecorded: result.comebackRecorded })
 }
