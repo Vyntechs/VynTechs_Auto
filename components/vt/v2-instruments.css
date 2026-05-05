@@ -1,0 +1,549 @@
+/* =====================================================================
+   Vyntechs Workshop Instrument — v2 instruments
+
+   Hero instruments for the desktop counter and curator screens:
+   plan tree, quote, writer's note, stat strip, timeline, confidence
+   trace, calibration drift, follow-up rows.
+
+   Translated from claude_code_handoff/v2_designs/v2-instruments.css with
+   --vt-amber-* renamed to --vt-signal-* to match the codebase tokens.
+   ===================================================================== */
+
+/* ---------- INSTRUMENT: AI PRE-BAY PLAN TREE ----------
+   A confidence-weighted plan tree for the counter, like a vertical
+   railway diagram with a confidence wash beside each branch. */
+
+.vt-plan-tree { display: flex; flex-direction: column; }
+.vt-plan-tree__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+.vt-plan-tree__head-title {
+  font-family: var(--vt-font-serif);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin: 0;
+  font-weight: 400;
+}
+.vt-plan-tree__head-meta {
+  font-family: var(--vt-font-mono);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+
+.vt-plan-step {
+  display: grid;
+  grid-template-columns: 24px 1fr 96px;
+  column-gap: 14px;
+  padding: 12px 0;
+  border-bottom: 0.5px dashed var(--vt-bone-300);
+  position: relative;
+}
+.vt-plan-step:last-child { border-bottom: 0; }
+.vt-plan-step__num {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--vt-fg-3);
+  padding-top: 5px;
+}
+.vt-plan-step__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vt-plan-step__title {
+  font-family: var(--vt-font-serif);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  line-height: 1.25;
+}
+.vt-plan-step__detail {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13.5px;
+  color: var(--vt-fg-2);
+  line-height: 1.4;
+}
+.vt-plan-step__meta {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.vt-plan-step__conf {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding-top: 4px;
+}
+.vt-plan-step__conf-num {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vt-fg);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.vt-plan-step__conf-bar {
+  width: 88px; height: 3px;
+  background: var(--vt-bone-200);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.vt-plan-step__conf-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--vt-signal-500);
+  border-radius: 2px;
+}
+.vt-plan-step--gating .vt-plan-step__conf-bar > span { background: var(--vt-risk-high); }
+.vt-plan-step--low    .vt-plan-step__conf-bar > span { background: var(--vt-risk-medium); }
+
+/* Read-only authorize/pending status (Counter 03). */
+.vt-plan-step__status {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.vt-plan-step__status--authorized { color: var(--vt-signal-500); }
+
+/* ---------- QUOTE — line items, with a clearly distinct
+              "writer note" surface alongside ---------- */
+
+.vt-quote { display: flex; flex-direction: column; gap: 0; }
+.vt-quote__row {
+  display: grid;
+  grid-template-columns: 1fr 80px 80px 32px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+.vt-quote__row--head {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  border-bottom: 0.5px solid var(--vt-rule-strong);
+}
+.vt-quote__row--total {
+  border-bottom: 0;
+  border-top: 0.5px solid var(--vt-rule-strong);
+  padding-top: 14px;
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+}
+.vt-quote__cell { color: var(--vt-fg); }
+.vt-quote__cell--num {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 14px;
+  text-align: right;
+  color: var(--vt-fg);
+}
+.vt-quote__cell--head { text-align: right; }
+.vt-quote__cell--head:first-child { text-align: left; }
+.vt-quote__title {
+  font-family: var(--vt-font-serif);
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--vt-fg);
+}
+.vt-quote__sub {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--vt-fg-3);
+  line-height: 1.35;
+}
+.vt-quote__remove {
+  background: transparent;
+  border: 0;
+  color: var(--vt-fg-3);
+  cursor: pointer;
+  font-family: var(--vt-font-mono);
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 3px;
+}
+.vt-quote__remove:hover { color: var(--vt-risk-destructive); background: var(--vt-bone-100); }
+.vt-quote__rate-note {
+  font-family: var(--vt-font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+/* The writer's note SITS ON A DIFFERENT SURFACE so the eye reads it
+   as separate from the AI's quote — kraft-paper, not bone. */
+.vt-writer-note {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 13px,
+      oklch(40% 0.012 70 / 0.04) 13px 14px
+    ),
+    oklch(94% 0.018 75);
+  border: 0;
+  border-left: 2px solid var(--vt-bone-700);
+  position: relative;
+}
+.vt-writer-note__label {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-bone-700);
+  margin-bottom: 6px;
+}
+.vt-writer-note__textarea {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  resize: vertical;
+  min-height: 48px;
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--vt-bone-900);
+  outline: 0;
+}
+.vt-writer-note__textarea::placeholder { color: var(--vt-bone-600); }
+
+/* ---------- ENGRAVED PLATE (Counter 03 confirm header) ---------- */
+
+.vt-plate {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 0.5px solid var(--vt-rule-strong);
+  background: var(--vt-bone-50);
+}
+.vt-plate__cell {
+  padding: 20px 22px;
+  border-right: 0.5px solid var(--vt-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vt-plate__cell:last-child { border-right: 0; }
+.vt-plate__label {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.vt-plate__value {
+  font-family: var(--vt-font-serif);
+  font-size: 22px;
+  letter-spacing: -0.018em;
+  color: var(--vt-fg);
+  line-height: 1.15;
+}
+.vt-plate__sub {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-3);
+  letter-spacing: 0.04em;
+}
+
+/* ---------- CUSTOMER MESSAGE PREVIEW (Counter 03 footer) ---------- */
+
+.vt-msg-preview {
+  padding: 14px 18px;
+  border-top: 0.5px solid var(--vt-rule);
+  border-bottom: 0.5px solid var(--vt-rule);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.vt-msg-preview__time {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  flex-shrink: 0;
+}
+.vt-msg-preview__body {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--vt-fg-2);
+  letter-spacing: -0.005em;
+}
+
+/* ---------- STAT STRIP — for curator overview (later phase) ---------- */
+
+.vt-statstrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+.vt-stat {
+  padding: 22px 24px;
+  border-right: 0.5px solid var(--vt-rule);
+  display: flex; flex-direction: column; gap: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vt-stat:last-child { border-right: 0; }
+.vt-stat:hover { background: var(--vt-bone-100); }
+.vt-stat__label {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.vt-stat__num {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 38px;
+  font-weight: 600;
+  color: var(--vt-fg);
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+.vt-stat__delta {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-3);
+  display: flex; gap: 6px; align-items: baseline;
+}
+.vt-stat__delta--up { color: var(--vt-risk-high); }
+.vt-stat__delta--down { color: var(--vt-risk-low); }
+.vt-stat--alert { background: color-mix(in oklch, var(--vt-risk-high) 5%, transparent); }
+.vt-stat--alert .vt-stat__num { color: var(--vt-risk-high); }
+
+/* ---------- INSTRUMENT: CASE DETAIL TIMELINE (later phase) ---------- */
+
+.vt-timeline { display: flex; flex-direction: column; padding: 0 4px; }
+.vt-timeline__step {
+  display: grid;
+  grid-template-columns: 64px 14px 1fr;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 0.5px dashed var(--vt-bone-300);
+  position: relative;
+}
+.vt-timeline__step:last-child { border-bottom: 0; }
+.vt-timeline__time {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--vt-fg-3);
+  letter-spacing: 0;
+  padding-top: 4px;
+  text-align: right;
+}
+.vt-timeline__rail {
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding-top: 7px;
+}
+.vt-timeline__rail::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: -11px;
+  left: 50%;
+  width: 0.5px;
+  background: var(--vt-rule-strong);
+}
+.vt-timeline__step:last-child .vt-timeline__rail::before { bottom: 50%; }
+.vt-timeline__node {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--vt-bone-50);
+  border: 1.5px solid var(--vt-fg-3);
+  z-index: 1;
+}
+.vt-timeline__step--gate .vt-timeline__node { border-color: var(--vt-risk-high); background: var(--vt-risk-high); }
+.vt-timeline__step--decision .vt-timeline__node { border-color: var(--vt-signal-500); background: var(--vt-signal-500); }
+.vt-timeline__step--outcome .vt-timeline__node { border-color: var(--vt-bone-900); background: var(--vt-bone-900); }
+.vt-timeline__body { display: flex; flex-direction: column; gap: 3px; }
+.vt-timeline__title {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--vt-fg);
+}
+.vt-timeline__detail {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--vt-fg-2);
+  line-height: 1.4;
+}
+.vt-timeline__conf {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--vt-fg-2);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+/* Confidence trace — the hero chart on case detail (later phase) */
+.vt-trace {
+  width: 100%;
+  height: 160px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 31px, oklch(40% 0.012 70 / 0.04) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, oklch(40% 0.012 70 / 0.04) 31px 32px),
+    var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 0;
+  margin-bottom: 16px;
+  position: relative;
+}
+.vt-trace svg { width: 100%; height: 100%; display: block; }
+
+/* Retrieval trace items (center pane, later phase) */
+.vt-retrieval-item {
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--vt-rule);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.vt-retrieval-item:last-child { border-bottom: 0; }
+.vt-retrieval-item__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.vt-retrieval-item__title {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  letter-spacing: -0.008em;
+  color: var(--vt-fg);
+  line-height: 1.3;
+}
+.vt-retrieval-item__source {
+  font-family: var(--vt-font-mono);
+  font-size: 10.5px;
+  color: var(--vt-fg-3);
+  letter-spacing: 0.06em;
+}
+.vt-retrieval-item__weight {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vt-fg-2);
+}
+
+/* ---------- CALIBRATION DRIFT INSTRUMENT (later phase) ---------- */
+
+.vt-calibration {
+  width: 100%;
+  height: 280px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 27px, oklch(40% 0.012 70 / 0.04) 27px 28px),
+    repeating-linear-gradient(90deg, transparent 0 47px, oklch(40% 0.012 70 / 0.04) 47px 48px),
+    var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule);
+  position: relative;
+}
+.vt-calibration svg { width: 100%; height: 100%; display: block; }
+.vt-calibration__legend {
+  display: flex; gap: 18px;
+  padding: 10px 16px;
+  border-top: 0.5px solid var(--vt-rule);
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  align-items: center;
+}
+.vt-calibration__legend-swatch {
+  width: 14px; height: 2px;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ---------- FOLLOW-UP SECTION (added to phone Today/Home) ---------- */
+
+.vt-followup-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 0.5px dashed var(--vt-bone-300);
+  align-items: start;
+}
+.vt-followup-row:last-child { border-bottom: 0; }
+.vt-followup-row__title {
+  font-family: var(--vt-font-serif);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--vt-fg);
+}
+.vt-followup-row__detail {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13.5px;
+  color: var(--vt-fg-2);
+  line-height: 1.4;
+  margin-top: 3px;
+}
+.vt-followup-row__meta {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+.vt-followup-row__age {
+  font-family: var(--vt-font-mono);
+  font-feature-settings: "tnum";
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vt-fg-2);
+  text-align: right;
+  white-space: nowrap;
+}
+.vt-followup-row__age--due {
+  color: var(--vt-risk-high);
+}
