@@ -104,7 +104,7 @@ vyntechs/
 
 **Chosen:**
 - The existing `vyntechs-dev` Vercel project is retargeted to deploy from `apps/diagnostic`. Domain (`vyntechs.dev`), aliases (`staging-rc.vercel.app`), env vars, Stripe webhook URLs, and Cron job registrations are preserved. Production deployment continuity is the highest constraint.
-- A second Vercel project (working name: `vyntechs-shop-dev`) is created, pointing at the same repo, root directory `apps/shop`. It deploys an auth-gated placeholder page until shop management features begin.
+- A second Vercel project (working name: `vyntechs-shop-dev`) is created, pointing at the same repo, root directory `apps/shop`. It deploys an auth-gated placeholder page on `shop.vyntechs.dev` until shop management features begin.
 
 **Alternatives considered:**
 - One Vercel project with multiple deploys: documented as unsupported by Vercel for separate apps from one repo.
@@ -130,17 +130,29 @@ vyntechs/
 
 ### Decision 6: Entitlements model
 
-**Chosen:** A three-layer model:
+**Chosen:** A four-layer model with both shop-level (paid-for) and per-profile (admin-granted) access:
 
-1. **Stripe Entitlements API as source of truth.** Define two `Feature`s in Stripe (`diagnostic_access`, `shop_mgmt_access`); attach them to Stripe Products; customer subscriptions automatically grant entitlements.
-2. **Cached projection in our database.** A new `shop_entitlements` table — columns `(shop_id, feature_key, status, stripe_subscription_id, granted_at, expires_at)` — updated by Stripe webhooks on `customer.subscription.*` events. RLS policy: a row is visible only to members of that shop.
-3. **Enforcement at each app's middleware.** Each app checks for its own feature key on every request: `apps/diagnostic` requires `diagnostic_access`; `apps/shop` requires `shop_mgmt_access`. Missing entitlement redirects to the upgrade page. Neither app references the other's feature key.
+1. **Stripe Entitlements API as source of truth for what the shop has paid for.** Define two `Feature`s in Stripe (`diagnostic_access`, `shop_mgmt_access`); attach them to Stripe Products; customer subscriptions automatically grant entitlements at the shop level.
+
+2. **Cached shop-level projection in our database.** A new `shop_entitlements` table — `(shop_id, feature_key, status, stripe_subscription_id, granted_at, expires_at)` — updated by Stripe webhooks on `customer.subscription.*` events. RLS policy: a row is visible only to members of that shop.
+
+3. **Per-profile overrides administered by the shop owner.** A second new `profile_entitlements` table — `(profile_id, feature_key, status, granted_at, revoked_at, granted_by_profile_id)`. This is set by the shop owner via an admin UI (not built in this spec; lives in the future shop settings surface). Lets a shop owner say "Marcus has access to diagnostic; Diana doesn't" within a shop that pays for diagnostic_access.
+
+4. **Enforcement at each app's middleware via a single helper.** A `hasEntitlement(shopId, profileId, featureKey)` helper in `packages/auth` evaluates:
+   - If the shop does not have the feature → **deny**.
+   - If the profile has an explicit `'revoked'` row for the feature → **deny**.
+   - Otherwise → **allow**. (Shop entitlement is the floor; per-profile rows opt OUT, not opt IN.)
+
+   Each app calls this helper in middleware: `apps/diagnostic` checks `'diagnostic_access'`; `apps/shop` checks `'shop_mgmt_access'`. Missing entitlement redirects to the upgrade page. Neither app references the other's feature key.
+
+**Why "default-allow with opt-out" instead of "default-deny with opt-in":** Brandon's expected v1 use case is shops with 5-10 techs where most techs use the AI tool. Default-allow means a shop owner doesn't have to manually grant every new hire — they're auto-included when the shop pays for the feature. Revocations are the exception, not the rule. Modeling exceptions as the rule (default-deny) creates ongoing admin overhead for every shop.
 
 **Alternatives considered:**
-- A `shops.products` JSONB column: simpler shape, but loses the per-feature `expires_at` and Stripe subscription linkage. Rejected.
-- Per-tech entitlements (mentioned in earlier brainstorm): deferred. Modeling per-tech access requires additional tables and UX that isn't needed for v1. Add when first customer asks for it. The shape allows additive extension (a `profile_entitlements` table can land later without breaking the shop layer).
+- A `shops.products` JSONB column: simpler shape, but loses per-feature `expires_at` and Stripe subscription linkage. Rejected.
+- Per-tech entitlements deferred to v2: rejected based on Brandon's explicit input — beta-tester techs are ready and need the per-tech granularity from day one.
+- Default-deny per-tech (techs must be explicitly granted access): rejected as creating admin overhead without offsetting benefit for v1.
 
-**Note:** This deliberately does not use feature flags. Feature flags are for gradual rollout of code; entitlements are for who paid for what. Conflating them is a common architectural mistake and creates a mess in both surfaces.
+**Note:** This deliberately does not use feature flags. Feature flags are for gradual rollout of code; entitlements are for who paid for what and who has been granted access. Conflating them is a common architectural mistake and creates a mess in both surfaces.
 
 ### Decision 7: App-to-app boundary rule (no cross-imports)
 
@@ -152,9 +164,9 @@ vyntechs/
 
 ---
 
-## Data shape — the only schema addition
+## Data shape — schema additions
 
-A new table:
+Two new tables:
 
 ```
 shop_entitlements
@@ -172,7 +184,25 @@ shop_entitlements
   index on (shop_id, feature_key)  -- middleware lookup pattern
 ```
 
-Plus an RLS policy: members of `shop_id` may select; service role only may write (the Stripe webhook).
+```
+profile_entitlements
+  id                       uuid (pk)
+  profile_id               uuid (fk → profiles.id, ON DELETE CASCADE)
+  feature_key              text (e.g., 'diagnostic_access', 'shop_mgmt_access')
+  status                   text ('active' | 'revoked')  -- 'revoked' overrides shop access
+  granted_at               timestamptz
+  revoked_at               timestamptz (nullable)
+  granted_by_profile_id    uuid (fk → profiles.id; the shop owner / admin who set this)
+  created_at               timestamptz default now()
+  updated_at               timestamptz default now()
+
+  unique (profile_id, feature_key)
+  index on (profile_id, feature_key)  -- middleware lookup pattern
+```
+
+RLS policies:
+- `shop_entitlements`: members of `shop_id` may select; service role only may write (Stripe webhook).
+- `profile_entitlements`: members of the same shop as `profile_id` may select; only profiles with `role = 'owner'` in that shop may insert/update (admin-only writes).
 
 No other schema changes. No data migrations.
 
@@ -200,7 +230,7 @@ Each package extraction is a separate commit:
 After each extraction: run tests, deploy to staging-rc, verify the diagnostic product behaves identically, then proceed.
 
 **Stage 3 — Add the entitlements layer.**
-Create `shop_entitlements` table via Drizzle migration. Add Stripe webhook handler for `customer.subscription.*` events that maintains the table. Add `requireEntitlement(featureKey)` helper in `packages/auth` and wire it into the diagnostic app's middleware. **At this stage, the diagnostic app starts requiring `diagnostic_access` entitlement to use.** Pre-grant entitlement to existing test shops so prod traffic is not affected.
+Create `shop_entitlements` and `profile_entitlements` tables via Drizzle migrations. Add Stripe webhook handler for `customer.subscription.*` events that maintains `shop_entitlements`. Add `hasEntitlement(shopId, profileId, featureKey)` helper in `packages/auth` (default-allow with per-profile opt-out semantics from Decision 6) and wire it into the diagnostic app's middleware. **At this stage, the diagnostic app starts requiring `diagnostic_access` entitlement to use.** Pre-grant the shop-level entitlement to existing test shops (Brandon's shop and Angel's shop) so prod traffic is not affected. Per-profile rows are not pre-populated; default-allow means existing techs continue to work without per-row admin action.
 
 **Stage 4 — Create the shop placeholder app.**
 Scaffold `apps/shop` with Next.js 16, auth via `@repo/auth`, a single placeholder page. Add the `requireEntitlement('shop_mgmt_access')` check. Create the second Vercel project pointing at `apps/shop`. Confirm both apps deploy independently from the same PR.
@@ -221,11 +251,12 @@ Final staging-rc validation. Brandon's eyeball. Merge to `main`. Vercel auto-dep
 
 These are deliberately punted to keep the spec focused:
 
-- **Per-tech entitlements model.** Modeled additively when first needed.
+- **The admin UI for managing per-profile entitlements.** The `profile_entitlements` table is in v1, but the screen the shop owner uses to grant/revoke access lives in a future shop settings surface. Until that screen exists, per-profile entitlements can be administered via direct database write (`apply_migration` or service-role insert). Default-allow semantics mean this is rare in practice.
 - **The shape of the shop management product.** Separate spec, separate brainstorm, separate research (already partially captured in the Session 6 conversation transcript covering Tekmetric, category competitors, and parts integration ecosystem).
 - **The bridge contract** (how the AI tool's `/api/intake/plan` endpoint gets called from the shop management app when both products are enabled). This becomes relevant when shop management features begin; designing it now without a real consumer is premature.
 - **Customer-facing pricing.** Strategic / product question.
 - **Multi-shop / chain support.** The current schema already supports `shop_id` per row, but the explicit modeling of "an organization owning multiple shops" is deferred.
+- **What happens at `/intake/*` after stage 1.** The route is gated to 404 by the existing feature flag (set to `false` in production). The diagnostic product's tech intake form remains at `/sessions/new` — unchanged from today. The `/intake/*` route returns when the shop management product begins shipping; it then lives on `shop.vyntechs.dev` instead of `vyntechs.dev`.
 
 ---
 
