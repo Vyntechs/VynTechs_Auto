@@ -1,5 +1,6 @@
 import './vt.css'
 import './v2.css'
+import './v2-instruments.css'
 
 export { Pill } from './pill'
 export { Risk } from './risk'
