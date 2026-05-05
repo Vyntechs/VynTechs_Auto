@@ -6,9 +6,10 @@ Slim format per AGENTS.md. **Parallel session** — runs alongside the Stage 2 m
 
 1. `cd /Volumes/Creativity/dev/projects/vyntechs` (the main repo, **not** `.claude/worktrees/monorepo-stage-1` — that's the migration session's worktree, do not touch).
 2. Read `AGENTS.md`. Read `docs/superpowers/ui-design-toolkit.md` if the chosen phase has UI (N, P do; J, Q don't).
-3. Verify baseline: `pnpm test && pnpm exec tsc --noEmit && pnpm build`. Expect **378/378**, tsc + build clean. If red, stop and report.
-4. Ask the user which pending phase to ship. Do not pick unilaterally.
-5. Branch off `main`: `git checkout -b feature/phase-<X>-<slug>` (matches the established phase-feature-branch pattern).
+3. Verify baseline: `pnpm test && pnpm exec tsc --noEmit && pnpm build`. Expect **378/378**, tsc + build clean. (Verified clean at 2026-05-05 14:55 PT, main HEAD `82a422f`.) If red, stop and report.
+4. **Default to Phase Q (Calibration Engine).** Confirm the choice with the user in one sentence ("Starting Phase Q — calibration engine, ~5 tasks per plan §10124, branch `feature/phase-q-calibration`. Proceed?") and proceed on a positive ack — including "go", "yes", "your call", "I don't know". Only switch phases if the user explicitly names J, N, or P.
+5. **Skip brainstorming.** The implementation plan (`docs/superpowers/plans/2026-05-01-vyntechs-implementation-plan.md`) is the brainstorm output; phases are already scoped, task-by-task. Invoke `superpowers:using-superpowers` then `superpowers:executing-plans` and work the phase's task list directly. Use TDD per the plan's task structure.
+6. Branch off `main`: `git checkout -b feature/phase-<X>-<slug>` (matches the established phase-feature-branch pattern; e.g. `feature/phase-q-calibration`).
 
 ## State
 
