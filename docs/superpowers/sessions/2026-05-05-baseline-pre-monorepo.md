@@ -19,12 +19,13 @@ Captured before Stage 1 of the platform split migration. Reference for regressio
 
 ## Production
 - Branch: main
-- HEAD commit: `b7509268b64e4b83c380a130a8d1cab7dfa05fb9`
+- HEAD commit at moment of capture (pre-baseline-doc): `b7509268b64e4b83c380a130a8d1cab7dfa05fb9`
+- Rollback-line commit (tag target, includes this doc): `3e8412e9400ce0174b6ad1f34825da4f1ec31f68`
 - Production URL: https://vyntechs.dev
 - Production deployment (most recent Ready, 2026-05-05 ~11 minutes pre-baseline): https://vyntechs-1keci19cs-brandon-nichols-projects-f7e6d2a9.vercel.app
 
 ## Tag
-- `pre-monorepo-baseline` tagged at HEAD (`b7509268`)
+- `pre-monorepo-baseline` tagged at `3e8412e` (this commit) on main
 
 ## Notes
 This is the rollback line. If any stage of the migration fails irrecoverably,
