@@ -33,6 +33,24 @@ Recommended order if user has no preference: **Q** (small, no UI, unblocked, clo
 - **`TreeState` duplication** — `lib/db/schema.ts` (JSONB column type) and `lib/ai/tree-engine.ts` (runtime contract) both define it. Collapse to one source (canonical = `tree-engine.ts`, schema does `import type`). Ride along with any phase touching `TreeState`.
 - **Phase F a11y** — Chrome a11y audit at `/design#outcome` reports 2 unlabeled form fields in OutcomeCapture (likely missing `<label htmlFor>`). Fix when next touching Phase F.
 
-## Migration coordination
+## Migration coordination (verified against `2026-05-05-platform-split-migration.md`)
 
-If you touch a file the Stage 2 migration also touches, you'll get a real merge conflict at Stage 6 cutover. Stage 2 extracts shared packages (`packages/config`, `packages/types`, `packages/db`) — **mostly cross-cutting `import` paths and config files**. To minimize collisions: avoid restructuring shared types in `lib/types.ts` or schema in `lib/db/schema.ts` mid-flight. New files and new directories (likely for J/N/P/Q) won't collide. If a phase requires editing `lib/db/schema.ts` (Q probably will, for calibration history), ship it fast and small so the migration can rebase cleanly.
+**Live database:** Stages 2a/2b/2c are pure `git mv` operations — **no `apply_migration`, no `execute_sql`, no SQL changes** (plan line 1296 explicitly: "migrations directory moves intact, no SQL changes"). The migration plan does NOT address parallel work, so these rules are not in the plan; they exist only here. Stage 3 (entitlements) DOES touch live DB (`apply_migration` at plan line 1797) — by then the migration session must own DB writes. **During the 2a-c parallel window, diagnostic session owns the live DB. Migration session must not call `apply_migration` or `execute_sql` against prod Supabase.**
+
+**Drizzle migration filenames:** diagnostic owns the next numbers (`0008_*.sql`, `0009_*.sql`, …). Stage 2c moves the directory but adds nothing.
+
+**Files to avoid editing if at all possible** (Stage 2 will move and/or restructure them — concurrent edits become merge conflicts when rename detection fails):
+- `lib/db/schema.ts` → moves to `packages/db/src/schema/index.ts` at Stage 2c (plan line 1142)
+- `lib/db/client.ts` → moves to `packages/db/src/client.ts` (plan line 1152)
+- `lib/db/queries.ts` (and `lib/db/queries/*`) → moves to `packages/db/src/queries/*` (plan line 1185)
+- `lib/types.ts` → moves to `packages/types` at Stage 2b
+- `tsconfig.json`, ESLint/Tailwind/Prettier configs → restructured at Stage 2a
+- `package.json` (root + diagnostic) → both modified at every Stage 2 sub-stage
+
+**If a phase MUST touch one of those** (Phase Q almost certainly adds tables to `schema.ts`; Phase P likely adds queue tables): ship the schema change in a small, focused commit on its own, before the rest of the phase work. Small, self-contained edits cross git's rename-detection threshold cleanly. A 500-line phase commit that also reshapes schema.ts will not.
+
+**Safe edits** (no overlap, no merge risk): new files in new directories. Phase Q → `lib/calibration/*`. Phase J → `lib/storage/s3-backend.ts`, `lib/storage/lifecycle.ts`. Phase N → `app/(tablet)/*`. Phase P → `app/(curator)/*`.
+
+**Rebase cadence:** after each diagnostic phase ships to main, the migration session should rebase `stage-1-reshape` (and stacked branches) onto main before continuing. This keeps the conflict surface incremental — small, visible, resolvable — rather than a 6-stage avalanche at Stage 6.
+
+**Vercel projects:** diagnostic ships through `vyntechs-dev` (production project) on the established `feature/phase-X` → staging-rc → main → prod path. Migration uses the disposable `vyntechs-monorepo-stage1` test project. They don't share runtime.
