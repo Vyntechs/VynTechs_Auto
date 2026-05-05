@@ -257,3 +257,45 @@ export const corpusEntriesRelations = relations(corpusEntries, ({ one }) => ({
 
 export type CorpusEntry = typeof corpusEntries.$inferSelect
 export type NewCorpusEntry = typeof corpusEntries.$inferInsert
+
+// Phase R — Comeback follow-up automation. A close-session writes 7d + 30d
+// rows; a daily cron flips surfaced_at when due_at passes; a tech resolution
+// flips resolved_at + comeback_recorded. comeback_recorded = true triggers
+// recordCorpusComeback() which decays matching corpus entries.
+export const followUps = pgTable(
+  'follow_ups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .references(() => sessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    shopId: uuid('shop_id')
+      .references(() => shops.id, { onDelete: 'cascade' })
+      .notNull(),
+    techId: uuid('tech_id')
+      .references(() => profiles.id)
+      .notNull(),
+    kind: text('kind', { enum: ['7d', '30d'] }).notNull(),
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+    surfacedAt: timestamp('surfaced_at', { withTimezone: true }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    comebackRecorded: boolean('comeback_recorded'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('follow_ups_session_id_idx').on(table.sessionId),
+    index('follow_ups_shop_id_idx').on(table.shopId),
+    index('follow_ups_tech_id_idx').on(table.techId),
+    index('follow_ups_due_at_idx').on(table.dueAt),
+  ],
+)
+
+export const followUpsRelations = relations(followUps, ({ one }) => ({
+  session: one(sessions, { fields: [followUps.sessionId], references: [sessions.id] }),
+  shop: one(shops, { fields: [followUps.shopId], references: [shops.id] }),
+  tech: one(profiles, { fields: [followUps.techId], references: [profiles.id] }),
+}))
+
+export type FollowUp = typeof followUps.$inferSelect
+export type NewFollowUp = typeof followUps.$inferInsert

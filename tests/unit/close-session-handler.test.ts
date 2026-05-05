@@ -251,4 +251,57 @@ describe('closeSessionForUser', () => {
       expect(result.ok).toBe(true)
     })
   })
+
+  describe('comeback follow-up scheduling (Phase R2)', () => {
+    it('calls scheduleFollowUps with sessionId, shopId, techId after close', async () => {
+      const { shop, tech, session } = await seedOpenSession(db)
+      const schedule = vi.fn().mockResolvedValue(['fu-7d', 'fu-30d'])
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        scheduleFollowUps: schedule,
+      })
+      expect(result.ok).toBe(true)
+      expect(schedule).toHaveBeenCalledTimes(1)
+      const [dbArg, input] = schedule.mock.calls[0]!
+      expect(dbArg).toBe(db)
+      expect(input).toEqual({
+        sessionId: session.id,
+        shopId: shop.id,
+        techId: tech.id,
+      })
+    })
+
+    it('treats scheduleFollowUps failure as non-fatal — session still closes', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      const schedule = vi.fn().mockRejectedValue(new Error('insert boom'))
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        scheduleFollowUps: schedule,
+      })
+      expect(result.ok).toBe(true)
+      expect(schedule).toHaveBeenCalledTimes(1)
+      const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+      expect(row.status).toBe('closed')
+    })
+
+    it('does not call scheduleFollowUps when not provided (back-compat)', async () => {
+      const { tech, session } = await seedOpenSession(db)
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+      })
+      expect(result.ok).toBe(true)
+    })
+  })
 })
