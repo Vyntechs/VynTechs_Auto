@@ -832,3 +832,19 @@
 .vt-drill-cases th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-drill-cases td a { color: var(--vt-accent); text-decoration: none; }
 .vt-drill-cases td a:hover { text-decoration: underline; }
+
+/* Phase P — calibration thresholds dashboard (Screen 4) */
+.vt-calibration-page { max-width: 1100px; }
+.vt-calibration-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+.vt-calibration-header h1 { margin: 0; font-size: 22px; }
+.vt-calibration-pending-link { font-size: 14px; color: var(--vt-risk-medium); text-decoration: none; white-space: nowrap; }
+.vt-calibration-pending-link:hover { text-decoration: underline; }
+.vt-calibration-empty { color: var(--vt-fg-3); padding: 40px 0; text-align: center; }
+.vt-calibration-table { width: 100%; border-collapse: collapse; }
+.vt-calibration-table th, .vt-calibration-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: middle; }
+.vt-calibration-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-calibration-slice-link { color: var(--vt-accent); text-decoration: none; font-size: 14px; }
+.vt-calibration-slice-link:hover { text-decoration: underline; }
+.vt-calibration-risk { font-family: var(--vt-font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.vt-calibration-threshold { font-family: var(--vt-font-mono); font-variant-numeric: tabular-nums; font-size: 14px; }
+.vt-calibration-refit { color: var(--vt-fg-3); font-size: 13px; }

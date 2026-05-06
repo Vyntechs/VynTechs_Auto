@@ -1,6 +1,6 @@
-import { sql, isNull, and, eq, asc, desc, getTableColumns } from 'drizzle-orm'
+import { sql, isNull, and, eq, asc, desc, getTableColumns, count } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts, sessions, type RiskClass, type Session, type DriftAlert } from '@/lib/db/schema'
+import { driftAlerts, sessions, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration } from '@/lib/db/schema'
 import { unwrapRows } from '@/lib/db/unwrap-rows'
 import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
@@ -125,4 +125,63 @@ export async function listCasesForDriftAlert(
   const cases = unwrapRows<CasesForAlertRow>(result)
 
   return { alert, cases }
+}
+
+// ---------------------------------------------------------------------------
+// listCalibrationCells
+// ---------------------------------------------------------------------------
+//
+// Returns all confidence_calibration rows ordered by risk rank → vehicle
+// family → symptom class. Supports optional filter by riskClass, vehicleFamily,
+// and symptomClass. Used by the calibration thresholds dashboard (Screen 4).
+
+const CALIBRATION_RISK_RANK_SQL = sql`CASE ${confidenceCalibration.riskClass}
+  WHEN 'destructive' THEN 5
+  WHEN 'high' THEN 4
+  WHEN 'medium' THEN 3
+  WHEN 'low' THEN 2
+  WHEN 'zero' THEN 1
+  ELSE 0
+END`
+
+export type CalibrationCellRow = ConfidenceCalibration
+
+export async function listCalibrationCells(
+  db: AppDb,
+  filters: {
+    riskClass?: RiskClass
+    vehicleFamily?: string
+    symptomClass?: string
+  } = {},
+): Promise<CalibrationCellRow[]> {
+  const wheres = []
+  if (filters.riskClass)     wheres.push(eq(confidenceCalibration.riskClass, filters.riskClass))
+  if (filters.vehicleFamily) wheres.push(eq(confidenceCalibration.vehicleFamily, filters.vehicleFamily))
+  if (filters.symptomClass)  wheres.push(eq(confidenceCalibration.symptomClass, filters.symptomClass))
+
+  return db
+    .select()
+    .from(confidenceCalibration)
+    .where(wheres.length > 0 ? and(...wheres) : undefined)
+    .orderBy(
+      desc(CALIBRATION_RISK_RANK_SQL),
+      asc(confidenceCalibration.vehicleFamily),
+      asc(confidenceCalibration.symptomClass),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// countPendingDriftAlerts
+// ---------------------------------------------------------------------------
+//
+// Returns the count of drift_alerts rows where decision IS NULL.  Used by
+// the calibration dashboard header to render a "🔔 N pending" link.
+
+export async function countPendingDriftAlerts(db: AppDb): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(driftAlerts)
+    .where(isNull(driftAlerts.decision))
+
+  return row?.n ?? 0
 }
