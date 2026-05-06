@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { db } from '@/lib/db/client'
 import { fetchCuratorCaseDetail } from '@/lib/curator/case-detail-query'
+import { DeferredActions } from '@/components/curator/deferred-actions'
 
 export default async function CuratorCasePage({
   params,
@@ -177,6 +178,10 @@ export default async function CuratorCasePage({
           </ul>
         </section>
       ) : null}
+
+      {from === 'deferred' && (
+        <DeferredActions sessionId={session.id} />
+      )}
     </article>
   )
 }
