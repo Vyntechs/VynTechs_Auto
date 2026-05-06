@@ -1,6 +1,8 @@
 import { sql, isNull, and, eq, asc, desc, getTableColumns } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { driftAlerts, sessions, type RiskClass, type Session, type DriftAlert } from '@/lib/db/schema'
+import { unwrapRows } from '@/lib/db/unwrap-rows'
+import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,19 +84,6 @@ export async function listPendingDriftAlerts(
 
 const FOUR_WEEKS_MS = 28 * 24 * 60 * 60 * 1000
 
-function unwrapRows<R>(result: unknown): R[] {
-  if (Array.isArray(result)) return result as R[]
-  if (
-    result !== null &&
-    typeof result === 'object' &&
-    'rows' in result &&
-    Array.isArray((result as { rows: unknown }).rows)
-  ) {
-    return (result as { rows: R[] }).rows
-  }
-  return []
-}
-
 export async function listCasesForDriftAlert(
   db: AppDb,
   alertId: string,
@@ -127,14 +116,9 @@ export async function listCasesForDriftAlert(
     FROM sessions s
     WHERE s.status = 'closed'
       AND s.closed_at >= ${cutoff}
-      AND s.tree_state -> 'gateDecision' ->> 'riskClass' = ${alert.riskClass}
-      AND LOWER(s.intake ->> 'vehicleMake') || '-' || LOWER(s.intake ->> 'vehicleModel') = ${alert.vehicleFamily}
-      AND CASE
-            WHEN s.intake ->> 'customerComplaint' ~* '(power|stall|hesit|sluggish)' THEN 'power_loss'
-            WHEN s.intake ->> 'customerComplaint' ~* '(start|crank|no.?start)' THEN 'no_start'
-            WHEN s.intake ->> 'customerComplaint' ~* '(misfire|rough)' THEN 'misfire'
-            ELSE '*'
-          END = ${alert.symptomClass}
+      AND ${CELL_RISK_CLASS_SQL} = ${alert.riskClass}
+      AND ${CELL_VEHICLE_FAMILY_SQL} = ${alert.vehicleFamily}
+      AND ${CELL_SYMPTOM_CLASS_SQL} = ${alert.symptomClass}
     ORDER BY s.closed_at DESC
   `)
 
