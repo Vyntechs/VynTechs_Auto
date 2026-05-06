@@ -10558,7 +10558,7 @@ Phase Q was originally scoped as an *active* calibration engine that auto-refits
 
 3. **Phase P follow-up (not Phase Q scope).** When Phase P builds the drift dashboard, each row should have an "apply this recommendation" action that updates `confidence_calibration.threshold_pct` to the row's `newThreshold` and stamps `last_refit_at = now()`. That closes the loop: cron observes, curator approves, threshold changes. Until Phase P ships, threshold updates happen via Supabase MCP `execute_sql` (curator manual edit). Add this note to the Phase P task list when that phase is scoped.
 
-Status: plan revised 2026-05-06; code not yet shipped. Working state on branch `feature/phase-q-calibration` (uncommitted): `lib/db/schema.ts` has `driftAlerts` appended; `drizzle/migrations/0010_drift_alerts.sql` written (not yet applied to live Supabase — Supabase MCP authentication still pending); `lib/calibration/refit.ts` + `tests/unit/calibration-refit.test.ts` carry fix #1 (7/7 green). Q3, Q4, Q5 not yet implemented — will follow this redirected design when work resumes.
+Status: shipped on `feature/phase-q-calibration` 2026-05-06. Q1 (refit math), Q2 (`lib/calibration/aggregate.ts`), Q3 (`app/api/cron/calibration-weekly/route.ts` + `lib/calibration/run-weekly.ts`), Q4 (`app/api/curator/calibration/refit/route.ts` + `lib/calibration/manual-trigger.ts`), Q5 (synthetic-data verification on prod Supabase, cleaned up). 13 new pglite tests, 398/398 total green. `0010_drift_alerts` migration applied to live Supabase. Cron registered in `vercel.json` (`0 6 * * 1`). Phase P is now unblocked — drift dashboard can read `drift_alerts` rows; "apply recommendation" action per (3) above remains scoped to Phase P.
 
 ---
 
