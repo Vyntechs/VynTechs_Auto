@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/comeback-prompts-daily",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/calibration-weekly",
+      "schedule": "0 6 * * 1"
     }
   ]
 }

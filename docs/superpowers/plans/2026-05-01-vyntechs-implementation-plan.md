@@ -10539,6 +10539,29 @@ Cells with ≥5-point threshold movement should have a row in `drift_alerts`. Vi
 
 ---
 
+## Phase Q — Implementation corrections (2026-05-06, plan redirect; not yet implemented)
+
+Phase Q was originally scoped as an *active* calibration engine that auto-refits per-cell thresholds weekly. During Q1's TDD two issues surfaced that motivated a design pivot — discussed with Brandon and approved 2026-05-06 — from active refit to passive recommendation. The corrections below are authoritative; the original Q1–Q5 task code blocks above are reference only and contain stale assumptions.
+
+1. **Plan math (Q1) contradicted plan tests + stated intent.** Plan §10166 maps `posteriorMean = α_post / (α_post + β_post)` (posterior P(success)) directly to `newThreshold`. Under that math, low-comeback cells receive *higher* thresholds (more cautious) and high-comeback cells receive *lower* thresholds (less cautious) — the opposite of the inline comment's intent ("low comeback → ease; high comeback → tighten") and the opposite of plan tests #2 and #3. Root cause: the math computes posterior of *success rate*, but calibration must adjust against the *comeback rate* relative to the risk-class baseline.
+
+   **Fix (in `lib/calibration/refit.ts`):** place the Beta prior on the comeback rate, with `E[Beta(α₀, β₀)] = 1 - priorThreshold` (the risk-class baseline comeback rate per spec §8.3 — destructive 0.05, high 0.10, medium 0.20, low 0.30, zero 1.0). Posterior comeback rate then drives the adjustment: `newThreshold = priorThreshold + (posteriorComebackRate − (1 − priorThreshold))`. Above target → tighten; below → ease. Safety clamps [0.5, 0.99] preserved. Plan §10134 tests pass under this fix; clamp-test inputs were also adjusted (priorThreshold 0.55 + 1000 successes for the MIN-clamp case; the original 0.7 + 1000 successes only lands at 0.6, no clamp triggered).
+
+2. **Design pivot — passive recommendations, not active refits.** Brandon is the sole curator at MVP and explicitly asked for human approval on every threshold change. Both directions of automated drift carry product risk: auto-tightening can slowly erode the AI's usefulness ("nag mode"); auto-easing can silently exceed the data's true signal. Solution: the engine *observes* and *recommends*; Brandon *acts*. The `confidence_calibration` table is read-only by the cron going forward.
+
+   **Affected tasks:**
+   - **Q1** — math kept (per fix #1). Output is now a *recommendation*, not an applied change. Tests authoritative; `lib/calibration/refit.ts` correct as-is.
+   - **Q2** — unchanged in scope (read outcomes per cell). Plan §10287 SQL must be revised separately: `e.ai_response -> 'riskClass'` does not exist on the actual `session_events.aiResponse` shape (`riskClass` only appears nested under `declineOrDefer`). Q2 should derive risk class from `sessions.tree_state.gateDecision.riskClass` instead — the field that drives the gate is the authoritative one.
+   - **Q3** — the weekly cron no longer writes to `confidence_calibration`. For each cell it computes `refit` and writes a `drift_alerts` row when `refit.drift >= 0.05 && refit.sampleSize >= 10` (noise filter retained — prevents dashboard clutter from rounding-error movements; Brandon can re-tune in Phase P). The `priorThreshold` is read from `confidence_calibration` (or the spec §8.3 fallback if no row); the new threshold lives only in `drift_alerts.newThreshold`. Response shape: `{ cellsAnalyzed, alertsRaised, windowDays }` (replaces `cellsRefit`).
+   - **Q4** — endpoint stays at `app/api/curator/calibration/refit/route.ts` and reuses the cron handler via the same trick. Semantic is now "run analysis now," not "re-fit now." Consider renaming the endpoint path to `.../analyze` in Phase P if the verb starts to mislead.
+   - **Q5** — verification inverted: assert `confidence_calibration.threshold_pct` is *unchanged* after the cron run; assert `drift_alerts` filled with rows whose `oldThreshold === confidence_calibration.threshold_pct` and `newThreshold === refit.newThreshold`. The plan's "Cell A should have a *lower* threshold... Cell B should have a *higher* threshold" expectation no longer applies; thresholds move only when the curator approves a recommendation.
+
+3. **Phase P follow-up (not Phase Q scope).** When Phase P builds the drift dashboard, each row should have an "apply this recommendation" action that updates `confidence_calibration.threshold_pct` to the row's `newThreshold` and stamps `last_refit_at = now()`. That closes the loop: cron observes, curator approves, threshold changes. Until Phase P ships, threshold updates happen via Supabase MCP `execute_sql` (curator manual edit). Add this note to the Phase P task list when that phase is scoped.
+
+Status: shipped on `feature/phase-q-calibration` 2026-05-06. Q1 (refit math), Q2 (`lib/calibration/aggregate.ts`), Q3 (`app/api/cron/calibration-weekly/route.ts` + `lib/calibration/run-weekly.ts`), Q4 (`app/api/curator/calibration/refit/route.ts` + `lib/calibration/manual-trigger.ts`), Q5 (synthetic-data verification on prod Supabase, cleaned up). 13 new pglite tests, 398/398 total green. `0010_drift_alerts` migration applied to live Supabase. Cron registered in `vercel.json` (`0 6 * * 1`). Phase P is now unblocked — drift dashboard can read `drift_alerts` rows; "apply recommendation" action per (3) above remains scoped to Phase P.
+
+---
+
 ## Phase R — Comeback Follow-Up Automation (5 tasks)
 
 Per spec §8.5 ("Follow-up consent: 7-day and 30-day comeback prompts auto-scheduled"), §11.2 (contribution pipeline: 7d/30d follow-ups feed corpus confidence), §15 row "Comeback follow-up tracking (in-app)" (IN, in-app at MVP). Builds: a `follow_ups` table, scheduling on session close, a daily Vercel Cron that surfaces due prompts in-app, the in-app dashboard panel a tech sees, and the outcome → corpus update path that runs after a follow-up resolves.
