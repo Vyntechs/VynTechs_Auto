@@ -801,3 +801,21 @@
 .vt-case-detail dd { margin: 0; }
 .vt-artifact-row { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--vt-border); flex-wrap: wrap; }
 .vt-artifact-kind { font-weight: 600; font-size: 13px; min-width: 100px; }
+
+/* Phase P — drift queue (Screen 1) */
+.vt-drift-page-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+.vt-drift-list { list-style: none; padding: 0; margin: 0; }
+.vt-drift-row { display: flex; padding: 12px 16px; border-bottom: 1px solid var(--vt-border); align-items: center; gap: 16px; flex-wrap: wrap; }
+.vt-drift-cell { flex: 1; display: grid; grid-template-columns: 1.5fr 1fr 1.5fr 0.5fr 1fr; gap: 12px; align-items: center; }
+.vt-drift-slice { color: var(--vt-accent); text-decoration: none; }
+.vt-drift-slice:hover { text-decoration: underline; }
+.vt-drift-change { font-variant-numeric: tabular-nums; }
+.vt-drift-evidence { color: var(--vt-fg-3); font-size: 14px; }
+.vt-drift-age { color: var(--vt-fg-3); font-size: 12px; }
+.vt-drift-tag-prev-dismissed { font-size: 11px; padding: 2px 6px; background: var(--vt-surface-3); color: var(--vt-fg-3); border-radius: 4px; }
+.vt-drift-actions { display: flex; gap: 8px; }
+.vt-drift-confirm { width: 100%; padding: 12px; background: var(--vt-surface-2); margin-top: 8px; border-radius: 6px; }
+.vt-drift-confirm textarea { width: 100%; min-height: 60px; box-sizing: border-box; }
+.vt-drift-empty { padding: 64px; text-align: center; color: var(--vt-fg-3); }
+.vt-drift-filters { display: flex; gap: 8px; }
+.vt-drift-filters select, .vt-drift-filters input { padding: 4px 8px; border: 1px solid var(--vt-border); border-radius: 4px; background: var(--vt-bg); color: var(--vt-fg); }
