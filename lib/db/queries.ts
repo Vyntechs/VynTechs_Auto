@@ -27,7 +27,7 @@ import {
 
 export const TECH_ASSIST_RUNG_2_BUDGET = 3
 
-const SPEC_8_3_FALLBACK: Record<RiskClass, number> = {
+export const SPEC_8_3_FALLBACK: Record<RiskClass, number> = {
   zero: 0,
   low: 0.7,
   medium: 0.8,
