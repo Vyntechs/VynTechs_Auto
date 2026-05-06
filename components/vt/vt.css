@@ -837,7 +837,7 @@
 .vt-calibration-page { max-width: 1100px; }
 .vt-calibration-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
 .vt-calibration-header h1 { margin: 0; font-size: 22px; }
-.vt-calibration-pending-link { font-size: 14px; color: var(--vt-risk-medium); text-decoration: none; white-space: nowrap; }
+.vt-calibration-pending-link { font-size: 14px; color: var(--vt-accent); text-decoration: none; white-space: nowrap; }
 .vt-calibration-pending-link:hover { text-decoration: underline; }
 .vt-calibration-empty { color: var(--vt-fg-3); padding: 40px 0; text-align: center; }
 .vt-calibration-table { width: 100%; border-collapse: collapse; }
