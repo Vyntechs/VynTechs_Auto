@@ -1,6 +1,6 @@
 import { sql, isNull, and, eq, asc, desc, getTableColumns } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts } from '@/lib/db/schema'
+import { driftAlerts, type RiskClass } from '@/lib/db/schema'
 
 const RISK_RANK_SQL = sql`CASE ${driftAlerts.riskClass}
   WHEN 'destructive' THEN 5
@@ -17,13 +17,13 @@ export type PendingDriftAlertRow =
 export async function listPendingDriftAlerts(
   db: AppDb,
   filters: {
-    riskClass?: string
+    riskClass?: RiskClass
     vehicleFamily?: string
     symptomClass?: string
   } = {},
 ): Promise<PendingDriftAlertRow[]> {
   const wheres = [isNull(driftAlerts.decision)]
-  if (filters.riskClass)     wheres.push(eq(driftAlerts.riskClass, filters.riskClass as any))
+  if (filters.riskClass)     wheres.push(eq(driftAlerts.riskClass, filters.riskClass))
   if (filters.vehicleFamily) wheres.push(eq(driftAlerts.vehicleFamily, filters.vehicleFamily))
   if (filters.symptomClass)  wheres.push(eq(driftAlerts.symptomClass, filters.symptomClass))
 
