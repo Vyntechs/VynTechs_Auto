@@ -219,18 +219,13 @@ export async function listHistoryForCell(
 // listDeferredSessions
 // ---------------------------------------------------------------------------
 //
-// Returns sessions where status='deferred' AND closed_at IS NULL, ordered
-// newest-first by createdAt.
-//
-// SCHEMA NOTE: There is no dedicated `deferred_at` column on sessions. The
-// status transitions to 'deferred' when the tech calls the decline-or-defer
-// handler, but the deferral timestamp is not recorded in a top-level column
-// (closed_at stays NULL for deferred sessions). We therefore sort by
-// createdAt DESC (session start time) as the best available proxy.
+// Lists sessions in deferred status, newest deferral first. Note: closedAt
+// is populated when the tech defers (set by setSessionTerminalStatus in
+// lib/db/queries.ts), so it doubles as the deferral timestamp.
 
 export type DeferredSessionRow = Pick<
   Session,
-  'id' | 'intake' | 'createdAt'
+  'id' | 'intake' | 'closedAt' | 'createdAt'
 >
 
 export async function listDeferredSessions(db: AppDb): Promise<DeferredSessionRow[]> {
@@ -238,14 +233,10 @@ export async function listDeferredSessions(db: AppDb): Promise<DeferredSessionRo
     .select({
       id: sessions.id,
       intake: sessions.intake,
+      closedAt: sessions.closedAt,
       createdAt: sessions.createdAt,
     })
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.status, 'deferred'),
-        isNull(sessions.closedAt),
-      ),
-    )
-    .orderBy(desc(sessions.createdAt))
+    .where(eq(sessions.status, 'deferred'))
+    .orderBy(desc(sessions.closedAt))
 }
