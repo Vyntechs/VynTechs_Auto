@@ -17,6 +17,11 @@ async function refreshSession(req: NextRequest) {
         getAll: () => req.cookies.getAll(),
         setAll: (toSet) => {
           toSet.forEach(({ name, value, options }) => {
+            // Both writes are load-bearing. The req mutation keeps the
+            // in-flight request in sync so the route handler sees the
+            // refreshed token; res sets the Set-Cookie header back to
+            // the browser. Removing either causes random-logout bugs
+            // on token refresh that are difficult to trace.
             req.cookies.set(name, value)
             res.cookies.set(name, value, options)
           })
