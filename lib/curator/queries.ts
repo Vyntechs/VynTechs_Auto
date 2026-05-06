@@ -185,3 +185,32 @@ export async function countPendingDriftAlerts(db: AppDb): Promise<number> {
 
   return row?.n ?? 0
 }
+
+// ---------------------------------------------------------------------------
+// listHistoryForCell
+// ---------------------------------------------------------------------------
+//
+// Returns the last `limit` drift alerts for a specific (riskClass, vehicleFamily,
+// symptomClass) cell, ordered newest-first. Used by the per-category history
+// page (Screen 5) to show the audit trail of threshold recommendations.
+
+export async function listHistoryForCell(
+  db: AppDb,
+  riskClass: RiskClass,
+  vehicleFamily: string,
+  symptomClass: string,
+  limit = 6,
+): Promise<DriftAlert[]> {
+  return db
+    .select()
+    .from(driftAlerts)
+    .where(
+      and(
+        eq(driftAlerts.riskClass, riskClass),
+        eq(driftAlerts.vehicleFamily, vehicleFamily),
+        eq(driftAlerts.symptomClass, symptomClass),
+      ),
+    )
+    .orderBy(desc(driftAlerts.createdAt))
+    .limit(limit)
+}

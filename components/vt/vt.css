@@ -848,3 +848,21 @@
 .vt-calibration-risk { font-family: var(--vt-font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 .vt-calibration-threshold { font-family: var(--vt-font-mono); font-variant-numeric: tabular-nums; font-size: 14px; }
 .vt-calibration-refit { color: var(--vt-fg-3); font-size: 13px; }
+
+/* Phase P — per-category drift history (Screen 5) */
+.vt-history-page { max-width: 1100px; }
+.vt-history-header { margin-bottom: 20px; }
+.vt-history-back { color: var(--vt-accent); text-decoration: none; font-size: 13px; }
+.vt-history-back:hover { text-decoration: underline; }
+.vt-history-header h1 { margin: 8px 0 0; font-size: 22px; }
+.vt-history-empty { color: var(--vt-fg-3); padding: 40px 0; text-align: center; }
+.vt-history-table { width: 100%; border-collapse: collapse; }
+.vt-history-table th, .vt-history-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: middle; }
+.vt-history-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-history-date { font-family: var(--vt-font-mono); font-size: 13px; color: var(--vt-fg-3); white-space: nowrap; }
+.vt-history-recommended { font-family: var(--vt-font-mono); font-variant-numeric: tabular-nums; font-size: 14px; }
+.vt-history-decision { font-size: 13px; }
+.vt-history-decision--applied { color: var(--vt-risk-low); }
+.vt-history-decision--dismissed { color: var(--vt-fg-3); }
+.vt-history-decision--pending { color: var(--vt-risk-medium); }
+.vt-history-note { font-size: 13px; color: var(--vt-fg-3); }
