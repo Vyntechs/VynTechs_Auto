@@ -71,7 +71,7 @@ export default async function CuratorCasePage({
                       {' '}
                       AI:{' '}
                       {ev.eventType === 'close' && ev.aiResponse.declineOrDefer
-                        ? ev.aiResponse.declineOrDefer.language.internalNote
+                        ? (ev.aiResponse.declineOrDefer.language?.internalNote ?? '(close)')
                         : ev.aiResponse.requestedFollowUp
                           ? `Follow-up: ${ev.aiResponse.requestedFollowUp}`
                           : ev.aiResponse.nextNodeId
