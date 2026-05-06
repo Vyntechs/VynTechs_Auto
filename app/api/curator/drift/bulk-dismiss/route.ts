@@ -26,8 +26,8 @@ export async function POST(request: Request) {
     )
   }
 
-  const note =
-    typeof body.note === 'string' && body.note.length > 0 ? body.note : null
+  const trimmed = typeof body.note === 'string' ? body.note.trim() : ''
+  const note = trimmed.length > 0 ? trimmed : null
 
   const result = await bulkDismissDriftAlerts(db, ids, auth.profileId, note)
 
