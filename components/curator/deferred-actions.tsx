@@ -11,6 +11,7 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
   const [note, setNote] = useState('')
   const [overrideAction, setOverrideAction] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   function reset() {
     setOpen(null)
@@ -21,6 +22,8 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
     setError(null)
 
     const endpoint = `/api/curator/sessions/${sessionId}/${open}`
@@ -29,6 +32,7 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
       const action = overrideAction.trim()
       if (!action) {
         setError('Override action is required.')
+        setSubmitting(false)
         return
       }
       body.overrideAction = action
@@ -39,6 +43,8 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+
+    setSubmitting(false)
 
     if (!res.ok) {
       const label = open === 'approve' ? 'approve' : open === 'override' ? 'override' : 'close'
@@ -76,7 +82,7 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
 
           <div>
             <label htmlFor="vt-deferred-note">
-              Note {open === 'approve' || open === 'close' ? '(optional)' : '(optional)'}
+              Note (optional)
             </label>
             <textarea
               id="vt-deferred-note"
@@ -93,7 +99,7 @@ export function DeferredActions({ sessionId }: { sessionId: string }) {
           )}
 
           <div className="vt-deferred-actions-confirm-buttons">
-            <button type="submit">
+            <button type="submit" disabled={submitting}>
               Confirm{' '}
               {open === 'approve'
                 ? 'Approve'

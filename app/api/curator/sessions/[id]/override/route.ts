@@ -29,7 +29,7 @@ export async function POST(
   const trimmed = typeof body.note === 'string' ? body.note.trim() : ''
   const note = trimmed.length > 0 ? trimmed : null
 
-  const result = await overrideDeferredSession(db, id, auth.profileId, overrideAction, note)
+  const result = await overrideDeferredSession(db, id, overrideAction, note)
 
   if (result.kind === 'not-found') {
     return NextResponse.json({ error: 'not-found' }, { status: 404 })

@@ -62,7 +62,7 @@ describe('curator deferred-actions handlers', () => {
   // ── Case 1: approveDeferredSession ───────────────────────────────────────
 
   it('approveDeferredSession: status→open, closedAt→null, curatorNote stamped, curatorOverrideAction→null', async () => {
-    const result = await approveDeferredSession(db, SESSION_ID, CURATOR_PROFILE, 'tech has info now')
+    const result = await approveDeferredSession(db, SESSION_ID, 'tech has info now')
 
     expect(result.kind).toBe('ok')
 
@@ -83,7 +83,6 @@ describe('curator deferred-actions handlers', () => {
     const result = await overrideDeferredSession(
       db,
       SESSION_ID,
-      CURATOR_PROFILE,
       'proceed-with-replacement',
       'curator reviewed wiring diagrams',
     )
@@ -104,7 +103,7 @@ describe('curator deferred-actions handlers', () => {
   // ── Case 3: closeDeferredSession ─────────────────────────────────────────
 
   it('closeDeferredSession: status→closed, closedAt→non-null Date, curatorNote stamped', async () => {
-    const result = await closeDeferredSession(db, SESSION_ID, CURATOR_PROFILE, 'no action needed')
+    const result = await closeDeferredSession(db, SESSION_ID, 'no action needed')
 
     expect(result.kind).toBe('ok')
 
@@ -122,13 +121,13 @@ describe('curator deferred-actions handlers', () => {
   // ── Case 4: not-found guard (shared pattern) ─────────────────────────────
 
   it('returns not-found for an unknown session id', async () => {
-    const approveResult = await approveDeferredSession(db, UNKNOWN_ID, CURATOR_PROFILE, null)
+    const approveResult = await approveDeferredSession(db, UNKNOWN_ID, null)
     expect(approveResult.kind).toBe('not-found')
 
-    const overrideResult = await overrideDeferredSession(db, UNKNOWN_ID, CURATOR_PROFILE, 'action', null)
+    const overrideResult = await overrideDeferredSession(db, UNKNOWN_ID, 'action', null)
     expect(overrideResult.kind).toBe('not-found')
 
-    const closeResult = await closeDeferredSession(db, UNKNOWN_ID, CURATOR_PROFILE, null)
+    const closeResult = await closeDeferredSession(db, UNKNOWN_ID, null)
     expect(closeResult.kind).toBe('not-found')
   })
 })
