@@ -782,3 +782,22 @@
     min-height: 100vh; padding: 24px; text-align: center;
   }
 }
+
+/* Phase P — case detail (Screen 3) */
+.vt-case-detail { max-width: 960px; }
+.vt-case-detail-header { margin-bottom: 24px; }
+.vt-case-detail-header a { color: var(--vt-accent); text-decoration: none; font-size: 14px; }
+.vt-case-detail-header a:hover { text-decoration: underline; }
+.vt-case-detail-complaint { color: var(--vt-fg-3); margin-top: 8px; }
+.vt-case-detail section { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--vt-border); }
+.vt-event-list { display: flex; flex-direction: column; gap: 4px; }
+.vt-event { display: flex; gap: 12px; padding: 8px 0; align-items: flex-start; }
+.vt-event time { color: var(--vt-fg-3); font-size: 12px; min-width: 160px; flex-shrink: 0; }
+.vt-event-type { font-size: 12px; color: var(--vt-fg-3); font-weight: 600; }
+.vt-event-tech { color: var(--vt-fg); }
+.vt-event-ai { color: var(--vt-accent); }
+.vt-case-detail dl { display: grid; grid-template-columns: 200px 1fr; gap: 8px 16px; align-items: start; }
+.vt-case-detail dt { color: var(--vt-fg-3); font-size: 13px; }
+.vt-case-detail dd { margin: 0; }
+.vt-artifact-row { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--vt-border); flex-wrap: wrap; }
+.vt-artifact-kind { font-weight: 600; font-size: 13px; min-width: 100px; }
