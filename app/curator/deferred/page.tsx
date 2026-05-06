@@ -24,7 +24,7 @@ export default async function DeferredQueuePage() {
           <tr>
             <th>Vehicle</th>
             <th>Complaint</th>
-            <th>Session started</th>
+            <th>Deferred at</th>
           </tr>
         </thead>
         <tbody>
@@ -46,10 +46,10 @@ export default async function DeferredQueuePage() {
                 </td>
                 <td>
                   <time
-                    dateTime={row.createdAt.toISOString()}
+                    dateTime={row.closedAt?.toISOString() ?? ''}
                     className="vt-deferred-date"
                   >
-                    {row.createdAt.toLocaleString()}
+                    {row.closedAt?.toLocaleString() ?? '—'}
                   </time>
                 </td>
               </tr>

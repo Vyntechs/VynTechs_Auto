@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { driftAlerts, profiles, shops } from '@/lib/db/schema'
+import { driftAlerts, profiles, shops, sessions } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '../helpers/db'
-import { listPendingDriftAlerts, listHistoryForCell } from '@/lib/curator/queries'
+import { listPendingDriftAlerts, listHistoryForCell, listDeferredSessions } from '@/lib/curator/queries'
 
 const SHOP = '00000000-0000-0000-0000-000000000001'
 const CURATOR_USER = '00000000-0000-0000-0000-000000000020'
@@ -118,5 +118,70 @@ describe('listHistoryForCell', () => {
 
     const rows = await listHistoryForCell(db, 'high', 'van', 'overheating')
     expect(rows).toEqual([])
+  })
+})
+
+describe('listDeferredSessions', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  const MINIMAL_INTAKE = {
+    vehicleYear: 2020,
+    vehicleMake: 'Ford',
+    vehicleModel: 'F-150',
+    customerComplaint: 'test',
+  }
+  const MINIMAL_TREE_STATE = {
+    nodes: [{ id: 'root', label: 'start', status: 'active' as const }],
+    currentNodeId: 'root',
+    message: 'go',
+  }
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+    await db.insert(shops).values({ id: SHOP, name: 'Test Shop' })
+    await db.insert(profiles).values({ id: CURATOR_PROFILE, userId: CURATOR_USER, shopId: SHOP, role: 'curator' })
+  })
+  afterEach(async () => { await close() })
+
+  it('returns only deferred sessions, not open/closed/declined', async () => {
+    const now = new Date()
+    await db.insert(sessions).values([
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'open',     intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'closed',   intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: now },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'declined', intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: now },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'deferred', intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: now },
+    ])
+
+    const rows = await listDeferredSessions(db)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].closedAt).toBeInstanceOf(Date)
+  })
+
+  it('returns deferred sessions ordered newest-first by closedAt', async () => {
+    const t1 = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+    const t2 = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+    const t3 = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) // 1 day ago
+
+    await db.insert(sessions).values([
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'deferred', intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: t1 },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'deferred', intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: t2 },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'deferred', intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: t3 },
+    ])
+
+    const rows = await listDeferredSessions(db)
+    expect(rows).toHaveLength(3)
+    expect(rows[0].closedAt!.getTime()).toBeGreaterThan(rows[1].closedAt!.getTime())
+    expect(rows[1].closedAt!.getTime()).toBeGreaterThan(rows[2].closedAt!.getTime())
+  })
+
+  it('returns empty array when no deferred sessions exist', async () => {
+    await db.insert(sessions).values([
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'open',    intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE },
+      { shopId: SHOP, techId: CURATOR_PROFILE, status: 'closed',  intake: MINIMAL_INTAKE, treeState: MINIMAL_TREE_STATE, closedAt: new Date() },
+    ])
+
+    const rows = await listDeferredSessions(db)
+    expect(rows).toHaveLength(0)
   })
 })
