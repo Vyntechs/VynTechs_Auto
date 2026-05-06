@@ -864,5 +864,5 @@
 .vt-history-decision { font-size: 13px; }
 .vt-history-decision--applied { color: var(--vt-risk-low); }
 .vt-history-decision--dismissed { color: var(--vt-fg-3); }
-.vt-history-decision--pending { color: var(--vt-risk-medium); }
+.vt-history-decision--pending { color: var(--vt-accent); }
 .vt-history-note { font-size: 13px; color: var(--vt-fg-3); }
