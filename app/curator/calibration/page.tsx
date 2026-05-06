@@ -1,12 +1,7 @@
 import Link from 'next/link'
 import { db } from '@/lib/db/client'
 import { listCalibrationCells, countPendingDriftAlerts } from '@/lib/curator/queries'
-import type { RiskClass } from '@/lib/db/schema'
-
-const VALID_RISKS: RiskClass[] = ['zero', 'low', 'medium', 'high', 'destructive']
-function parseRisk(s: string | undefined): RiskClass | undefined {
-  return s && (VALID_RISKS as readonly string[]).includes(s) ? (s as RiskClass) : undefined
-}
+import { parseRisk } from '@/lib/curator/parse-risk'
 
 function formatThreshold(pct: number): string {
   return `${Math.round(pct * 100)}%`
@@ -39,7 +34,7 @@ export default async function CalibrationPage({
         <h1>Calibration thresholds</h1>
         {pending > 0 && (
           <Link href="/curator/drift" className="vt-calibration-pending-link">
-            🔔 {pending} pending
+            {pending} pending recommendation{pending > 1 ? 's' : ''} →
           </Link>
         )}
       </header>

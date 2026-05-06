@@ -3,12 +3,7 @@ import { db } from '@/lib/db/client'
 import { listPendingDriftAlerts } from '@/lib/curator/queries'
 import { DriftRow } from '@/components/curator/drift-row'
 import { DriftFilters } from '@/components/curator/drift-filters'
-import type { RiskClass } from '@/lib/db/schema'
-
-const VALID_RISKS: RiskClass[] = ['zero', 'low', 'medium', 'high', 'destructive']
-function parseRisk(s: string | undefined): RiskClass | undefined {
-  return s && (VALID_RISKS as readonly string[]).includes(s) ? (s as RiskClass) : undefined
-}
+import { parseRisk } from '@/lib/curator/parse-risk'
 
 export default async function DriftQueuePage({
   searchParams,
