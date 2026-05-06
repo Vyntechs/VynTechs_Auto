@@ -71,7 +71,7 @@ export default async function DriftDrillDownPage({
                   <td>{intake.customerComplaint}</td>
                   <td>{treeState?.proposedAction?.description ?? '—'}</td>
                   <td>{outcome?.notes ?? '—'}</td>
-                  <td>{c.status}</td>
+                  <td>{outcome?.actionType ?? outcome?.rootCause ?? '—'}</td>
                   <td>
                     {c.closedAt
                       ? new Date(c.closedAt).toLocaleDateString()
