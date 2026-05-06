@@ -1,0 +1,35 @@
+import { NextResponse } from 'next/server'
+import { db } from '@/lib/db/client'
+import { requireCurator } from '@/lib/curator/route-helpers'
+import { dismissDriftAlert } from '@/lib/curator/drift-resolution'
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireCurator()
+  if (auth.kind === 'forbidden') return auth.response
+
+  const { id } = await params
+
+  let body: Record<string, unknown> = {}
+  try {
+    body = await request.json()
+  } catch {
+    // missing or malformed body — treat as empty
+  }
+
+  const note =
+    typeof body.note === 'string' && body.note.length > 0 ? body.note : null
+
+  const result = await dismissDriftAlert(db, id, auth.profileId, note)
+
+  if (result.kind === 'not-found') {
+    return NextResponse.json({ error: 'not-found' }, { status: 404 })
+  }
+  if (result.kind === 'already-decided') {
+    return NextResponse.json({ error: 'already-decided' }, { status: 409 })
+  }
+
+  return NextResponse.json({ ok: true })
+}
