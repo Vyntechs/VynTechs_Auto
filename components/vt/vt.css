@@ -767,11 +767,11 @@
 .vt-curator-shell { min-height: 100vh; background: var(--vt-bg); }
 .vt-curator-grid { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .vt-curator-sidebar { background: var(--vt-surface-2); padding: 24px 16px; border-right: 1px solid var(--vt-border); }
-.vt-curator-brand { font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vt-fg-3); margin-bottom: 32px; }
+.vt-curator-brand { font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vt-fg-3); margin: 0 0 32px; font-weight: 600; }
 .vt-curator-sidebar ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .vt-curator-sidebar a { display: block; padding: 8px 12px; color: var(--vt-fg); text-decoration: none; border-radius: 6px; }
 .vt-curator-sidebar a:hover { background: var(--vt-surface-3); }
-.vt-curator-nav-active { background: var(--vt-surface-3) !important; font-weight: 600; }
+.vt-curator-sidebar a.vt-curator-nav-active { background: var(--vt-surface-3); font-weight: 600; }
 .vt-curator-main { padding: 32px; }
 
 .vt-curator-desktop-only { display: none; }
