@@ -866,3 +866,17 @@
 .vt-history-decision--dismissed { color: var(--vt-fg-3); }
 .vt-history-decision--pending { color: var(--vt-accent); }
 .vt-history-note { font-size: 13px; color: var(--vt-fg-3); }
+
+/* Phase P — deferred cases queue (Screen 6) */
+.vt-deferred-page { max-width: 1100px; }
+.vt-deferred-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+.vt-deferred-header h1 { margin: 0; font-size: 22px; }
+.vt-deferred-count { font-size: 14px; color: var(--vt-fg-3); }
+.vt-deferred-empty { color: var(--vt-fg-3); padding: 64px; text-align: center; }
+.vt-deferred-table { width: 100%; border-collapse: collapse; }
+.vt-deferred-table th, .vt-deferred-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; }
+.vt-deferred-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-deferred-link { color: var(--vt-accent); text-decoration: none; }
+.vt-deferred-link:hover { text-decoration: underline; }
+.vt-deferred-complaint { color: var(--vt-fg-3); font-size: 14px; }
+.vt-deferred-date { font-family: var(--vt-font-mono); font-size: 13px; color: var(--vt-fg-3); white-space: nowrap; }

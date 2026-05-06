@@ -1,6 +1,6 @@
 import { sql, isNull, and, eq, asc, desc, getTableColumns, count } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts, sessions, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration } from '@/lib/db/schema'
+import { driftAlerts, sessions, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
 import { unwrapRows } from '@/lib/db/unwrap-rows'
 import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
@@ -213,4 +213,39 @@ export async function listHistoryForCell(
     )
     .orderBy(desc(driftAlerts.createdAt))
     .limit(limit)
+}
+
+// ---------------------------------------------------------------------------
+// listDeferredSessions
+// ---------------------------------------------------------------------------
+//
+// Returns sessions where status='deferred' AND closed_at IS NULL, ordered
+// newest-first by createdAt.
+//
+// SCHEMA NOTE: There is no dedicated `deferred_at` column on sessions. The
+// status transitions to 'deferred' when the tech calls the decline-or-defer
+// handler, but the deferral timestamp is not recorded in a top-level column
+// (closed_at stays NULL for deferred sessions). We therefore sort by
+// createdAt DESC (session start time) as the best available proxy.
+
+export type DeferredSessionRow = Pick<
+  Session,
+  'id' | 'intake' | 'createdAt'
+>
+
+export async function listDeferredSessions(db: AppDb): Promise<DeferredSessionRow[]> {
+  return db
+    .select({
+      id: sessions.id,
+      intake: sessions.intake,
+      createdAt: sessions.createdAt,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.status, 'deferred'),
+        isNull(sessions.closedAt),
+      ),
+    )
+    .orderBy(desc(sessions.createdAt))
 }
