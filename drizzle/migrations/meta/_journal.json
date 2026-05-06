@@ -71,6 +71,13 @@
       "when": 1778256000000,
       "tag": "0009_follow_ups",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778342400000,
+      "tag": "0010_drift_alerts",
+      "breakpoints": true
     }
   ]
 }
