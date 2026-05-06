@@ -299,3 +299,24 @@ export const followUpsRelations = relations(followUps, ({ one }) => ({
 
 export type FollowUp = typeof followUps.$inferSelect
 export type NewFollowUp = typeof followUps.$inferInsert
+
+// Phase Q — Calibration drift alerts. The weekly calibration cron writes a
+// row whenever a per-cell threshold moves by ≥5 points and the sample size is
+// adequate. The curator drift dashboard reads this table to surface cells
+// where the AI's calibration has shifted (corpus quality signal). Append-only.
+export const driftAlerts = pgTable('drift_alerts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  riskClass: text('risk_class', {
+    enum: ['zero', 'low', 'medium', 'high', 'destructive'],
+  }).notNull(),
+  vehicleFamily: text('vehicle_family').notNull(),
+  symptomClass: text('symptom_class').notNull(),
+  oldThreshold: real('old_threshold').notNull(),
+  newThreshold: real('new_threshold').notNull(),
+  comebackRate: real('comeback_rate').notNull(),
+  sampleSize: integer('sample_size').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export type DriftAlert = typeof driftAlerts.$inferSelect
+export type NewDriftAlert = typeof driftAlerts.$inferInsert
