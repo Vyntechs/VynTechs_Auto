@@ -22,7 +22,7 @@ export async function POST(
   const trimmed = typeof body.note === 'string' ? body.note.trim() : ''
   const note = trimmed.length > 0 ? trimmed : null
 
-  const result = await closeDeferredSession(db, id, auth.profileId, note)
+  const result = await closeDeferredSession(db, id, note)
 
   if (result.kind === 'not-found') {
     return NextResponse.json({ error: 'not-found' }, { status: 404 })

@@ -4,6 +4,10 @@ import { sessions } from '@/lib/db/schema'
 
 export type DeferredActionResult = { kind: 'ok' } | { kind: 'not-found' }
 
+// Curator attribution (e.g., a curator_id column on sessions) was not
+// included in the Phase P spec. If audit attribution becomes a requirement,
+// add the column + parameter then.
+
 /**
  * Approve a deferred session: resumes it as active by clearing closedAt and
  * setting status back to 'open'. Records the curator's note.
@@ -11,7 +15,6 @@ export type DeferredActionResult = { kind: 'ok' } | { kind: 'not-found' }
 export async function approveDeferredSession(
   db: AppDb,
   sessionId: string,
-  curatorProfileId: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
   const [session] = await db
@@ -42,7 +45,6 @@ export async function approveDeferredSession(
 export async function overrideDeferredSession(
   db: AppDb,
   sessionId: string,
-  curatorProfileId: string,
   overrideAction: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
@@ -74,7 +76,6 @@ export async function overrideDeferredSession(
 export async function closeDeferredSession(
   db: AppDb,
   sessionId: string,
-  curatorProfileId: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
   const [session] = await db
