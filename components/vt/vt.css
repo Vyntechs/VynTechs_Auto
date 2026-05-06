@@ -820,3 +820,15 @@
 .vt-drift-empty { padding: 64px; text-align: center; color: var(--vt-fg-3); }
 .vt-drift-filters { display: flex; gap: 8px; }
 .vt-drift-filters select, .vt-drift-filters input { padding: 4px 8px; border: 1px solid var(--vt-border); border-radius: 4px; background: var(--vt-bg); color: var(--vt-fg); }
+
+/* Phase P — drift drill-down (Screen 2) */
+.vt-drift-drill { max-width: 1100px; }
+.vt-drift-drill > header { margin-bottom: 24px; }
+.vt-drift-drill > header a { color: var(--vt-accent); }
+.vt-drift-drill > header h1 { margin: 8px 0 4px; font-size: 22px; }
+.vt-drift-drill > header p { color: var(--vt-fg-3); margin: 0; }
+.vt-drill-cases { width: 100%; border-collapse: collapse; margin-top: 24px; }
+.vt-drill-cases th, .vt-drill-cases td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; }
+.vt-drill-cases th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-drill-cases td a { color: var(--vt-accent); text-decoration: none; }
+.vt-drill-cases td a:hover { text-decoration: underline; }
