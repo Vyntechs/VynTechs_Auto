@@ -816,6 +816,7 @@
 .vt-drift-actions { display: flex; gap: 8px; }
 .vt-drift-confirm { width: 100%; padding: 12px; background: var(--vt-surface-2); margin-top: 8px; border-radius: 6px; }
 .vt-drift-confirm textarea { width: 100%; min-height: 60px; box-sizing: border-box; }
+.vt-drift-confirm-error { color: var(--vt-risk-high); font-size: 13px; margin: 8px 0 0; }
 .vt-drift-empty { padding: 64px; text-align: center; color: var(--vt-fg-3); }
 .vt-drift-filters { display: flex; gap: 8px; }
 .vt-drift-filters select, .vt-drift-filters input { padding: 4px 8px; border: 1px solid var(--vt-border); border-radius: 4px; background: var(--vt-bg); color: var(--vt-fg); }
