@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { driftAlerts, confidenceCalibration, profiles, shops } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
@@ -196,5 +196,39 @@ describe('drift-resolution handlers', () => {
     // Already-decided row must stay as-is
     const [updC] = await db.select().from(driftAlerts).where(eq(driftAlerts.id, alreadyDecided.id))
     expect(updC.decision).toBe('applied')
+  })
+
+  // ── Case 6: applyDriftAlert — unknown alert id returns not-found ─────────
+
+  it('applyDriftAlert returns not-found for unknown alert id', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000099999'
+    const res = await applyDriftAlert(db, fakeId, CURATOR_PROFILE, null)
+    expect(res.kind).toBe('not-found')
+    // Confirm calibration was NOT touched
+    const [cal] = await db.select().from(confidenceCalibration)
+    expect(cal.thresholdPct).toBeCloseTo(0.72, 4)
+    expect(cal.lastRefitAt).toBeNull()
+  })
+
+  // ── Case 7: applyDriftAlert — already-decided alert returns already-decided
+
+  it('applyDriftAlert returns already-decided when alert was previously dismissed', async () => {
+    const [alert] = await db.insert(driftAlerts).values({
+      riskClass: 'medium', vehicleFamily: 'pickup', symptomClass: 'power_loss',
+      oldThreshold: 0.72, newThreshold: 0.78, comebackRate: 0.21, sampleSize: 14,
+      decision: 'dismissed',
+      decidedAt: new Date(),
+      decidedByUserId: CURATOR_PROFILE,
+    }).returning()
+
+    const res = await applyDriftAlert(db, alert.id, CURATOR_PROFILE, null)
+    expect(res.kind).toBe('already-decided')
+    // Confirm decision wasn't overwritten
+    const [updated] = await db.select().from(driftAlerts).where(eq(driftAlerts.id, alert.id))
+    expect(updated.decision).toBe('dismissed')
+    // Calibration still untouched
+    const [cal] = await db.select().from(confidenceCalibration)
+    expect(cal.thresholdPct).toBeCloseTo(0.72, 4)
+    expect(cal.lastRefitAt).toBeNull()
   })
 })

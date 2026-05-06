@@ -19,8 +19,8 @@ export async function POST(
     // missing or malformed body — treat as empty
   }
 
-  const note =
-    typeof body.note === 'string' && body.note.length > 0 ? body.note : null
+  const trimmed = typeof body.note === 'string' ? body.note.trim() : ''
+  const note = trimmed.length > 0 ? trimmed : null
 
   const result = await dismissDriftAlert(db, id, auth.profileId, note)
 
