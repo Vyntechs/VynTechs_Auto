@@ -85,6 +85,13 @@
       "when": 1778087829169,
       "tag": "0011_drift_alerts_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1746489600000,
+      "tag": "0011a_session_curator_columns",
+      "breakpoints": true
     }
   ]
 }
