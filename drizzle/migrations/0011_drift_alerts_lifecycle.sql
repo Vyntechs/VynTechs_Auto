@@ -28,12 +28,6 @@ CREATE TABLE novel_pattern_queue (
 CREATE INDEX novel_pattern_queue_pending_idx ON novel_pattern_queue (created_at DESC)
   WHERE reviewed_at IS NULL;
 --> statement-breakpoint
--- Stub auth schema/function so this migration runs cleanly in PGlite tests.
--- In production Supabase, auth.uid() already exists; CREATE OR REPLACE is a no-op.
-CREATE SCHEMA IF NOT EXISTS auth;
---> statement-breakpoint
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT '00000000-0000-0000-0000-000000000000'::uuid $$;
---> statement-breakpoint
 ALTER TABLE novel_pattern_queue ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 CREATE POLICY "novel_pattern_queue_curator_only" ON novel_pattern_queue
