@@ -39,7 +39,7 @@ export const outcomeSchema = z.object({
   notes: z.string().max(2000).optional(),
   override: z
     .object({
-      at: z.string(),
+      at: z.string().datetime({ offset: true }),
       lastFeedback: z.string(),
     })
     .optional(),

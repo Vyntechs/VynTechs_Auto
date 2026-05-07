@@ -89,4 +89,16 @@ describe('outcomeSchema', () => {
     })
     expect(r.success).toBe(false)
   })
+
+  it('rejects an override.at value that is not a valid ISO-8601 datetime', () => {
+    const r = outcomeSchema.safeParse({
+      rootCause: 'Wastegate vacuum line cracked at actuator-can end',
+      actionType: 'no_fix',
+      verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+      diagMinutes: 10,
+      repairMinutes: 0,
+      override: { at: 'not-a-date', lastFeedback: 'x' },
+    })
+    expect(r.success).toBe(false)
+  })
 })
