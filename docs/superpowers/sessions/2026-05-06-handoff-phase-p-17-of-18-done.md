@@ -6,7 +6,7 @@ This handoff is written specifically so you can `/clear` and pick up Tasks 18-19
 
 ## Resume
 
-1. `cd /Volumes/Creativity/dev/projects/vyntechs && git checkout feature/phase-p-curator && git pull origin feature/phase-p-curator`. HEAD should be `ac0ca32`.
+1. `cd /Volumes/Creativity/dev/projects/vyntechs && git checkout feature/phase-p-curator && git pull origin feature/phase-p-curator`. HEAD should be `a6b029c` — that's this handoff commit on top of Task 17 (`ac0ca32`).
 2. Verify baseline: `pnpm test && pnpm exec tsc --noEmit && pnpm build`. Expect **426/426**, tsc clean, build clean. (Cold-cache vitest fork-pool flake is a known false negative — rerun once if you see PGlite-closed errors on first run.)
 3. Read this handoff, plus the relevant Task 18 + 19 sections of the plan: `docs/superpowers/plans/2026-05-06-phase-p-curator-implementation.md` (Task 18 starts at line 2531, Task 19 is the closeout). Spec at `docs/superpowers/specs/2026-05-06-phase-p-curator-design.md`.
 4. Pick up at **Task 18** (Pre-deploy verification). It has two distinct chunks — see "Task 18 has two chunks" below. Decide whether to do them in series or parallel before starting.
@@ -14,7 +14,7 @@ This handoff is written specifically so you can `/clear` and pick up Tasks 18-19
 
 ## State
 
-**Branch:** `feature/phase-p-curator` at `ac0ca32` (34 commits ahead of `main` head `5d7065b`).
+**Branch:** `feature/phase-p-curator` at `a6b029c` (35 commits ahead of `main` head `5d7065b`; handoff commit sits on top of Task 17's `ac0ca32`).
 
 **Tests:** 426/426 passing. Test count progression this session: 423 → 424 (Task 15: +1 dismiss test) → 426 (Task 16: +2 corpus tests) → 426 (Task 17: no tests, read-only list).
 
