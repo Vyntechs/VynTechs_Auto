@@ -17,7 +17,7 @@ export default defineConfig({
     {
       name: 'anonymous',
       use: { ...devices['Desktop Chrome'] },
-      testMatch: /landing\.spec\.ts/,
+      testMatch: /(landing|auth)\.spec\.ts/,
     },
     {
       name: 'curator',
@@ -25,7 +25,7 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         storageState: STORAGE_STATE_PATH,
       },
-      testMatch: /curator\.spec\.ts/,
+      testMatch: /(curator|sessions)\.spec\.ts/,
     },
   ],
   webServer: {
