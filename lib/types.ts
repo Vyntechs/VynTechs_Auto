@@ -37,6 +37,12 @@ export const outcomeSchema = z.object({
   diagMinutes: z.number().nonnegative(),
   repairMinutes: z.number().nonnegative(),
   notes: z.string().max(2000).optional(),
+  override: z
+    .object({
+      at: z.string(),
+      lastFeedback: z.string(),
+    })
+    .optional(),
 })
 
 export type OutcomePayload = z.infer<typeof outcomeSchema>
