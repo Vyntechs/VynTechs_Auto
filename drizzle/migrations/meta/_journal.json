@@ -92,6 +92,13 @@
       "when": 1746489600000,
       "tag": "0011a_session_curator_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1746576000000,
+      "tag": "0011b_session_max_corpus_similarity",
+      "breakpoints": true
     }
   ]
 }

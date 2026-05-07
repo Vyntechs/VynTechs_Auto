@@ -43,6 +43,7 @@ export async function POST(
     runRetrieval,
     validateRetrievalResults,
     retrieveCorpus,
+    sessionId: id,
   })
 
   const result = await advanceSession({

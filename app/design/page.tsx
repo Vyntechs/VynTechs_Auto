@@ -46,6 +46,7 @@ const fixtureSession: Session = {
   },
   curatorNote: null,
   curatorOverrideAction: null,
+  maxCorpusSimilarity: null,
 }
 
 const closedSession: Session = {

@@ -63,6 +63,7 @@ export const sessions = pgTable('sessions', {
   closedAt: timestamp('closed_at', { withTimezone: true }),
   curatorNote: text('curator_note'),
   curatorOverrideAction: text('curator_override_action'),
+  maxCorpusSimilarity: real('max_corpus_similarity'),
 })
 
 export const sessionEvents = pgTable('session_events', {
