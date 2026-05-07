@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { eq } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
 import {
   createSession,
@@ -20,11 +21,13 @@ import type {
   DeclineLanguageInput,
 } from './gating/decline-language'
 import type { Artifact, NewArtifact } from './db/schema'
+import { sessionEvents } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
 import type { ScheduleFollowUpsFn } from './comeback/schedule'
+import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repair-guidance'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
@@ -497,4 +500,205 @@ export async function declineOrDeferSessionForUser(opts: {
   })
 
   return { ok: true, status: terminalStatus, language }
+}
+
+const abandonSchema = z.object({
+  reason: z.enum(['mistake', 'test', 'wrong_vehicle', 'customer_left', 'other']).optional(),
+  note: z.string().max(500).optional(),
+})
+
+export type AbandonSessionResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+/**
+ * User-initiated abandonment: closes an open session as 'deferred' without
+ * the outcome form / AI specificity validation / corpus promotion. Use when
+ * the tech started by mistake, it was a test, or the customer left without
+ * finishing. The session lands in the curator's "Incomplete" bucket.
+ *
+ * Distinct from declineOrDeferSessionForUser, which closes a session that
+ * the AI itself is gating (low confidence) and generates customer-facing
+ * language. This path generates no language and runs no AI.
+ */
+export async function abandonSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  body: unknown
+}): Promise<AbandonSessionResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const parsed = abandonSchema.safeParse(opts.body ?? {})
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  await setSessionTerminalStatus(opts.db, opts.sessionId, 'deferred')
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'close',
+    aiResponse: {
+      abandon: {
+        reason: parsed.data.reason ?? 'mistake',
+        ...(parsed.data.note ? { note: parsed.data.note } : {}),
+      },
+    },
+  })
+
+  return { ok: true }
+}
+
+export type LockDiagnosisResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+/**
+ * Tech-initiated diagnostic-phase lock-in. Transitions session from
+ * phase=diagnosing (with done=true) to phase=repairing. After this:
+ * - rootCauseSummary is frozen (the repair-guidance prompt explicitly
+ *   instructs the AI not to revise it; server-side parser drops any
+ *   attempt to set rootCauseSummary in the response)
+ * - subsequent tech inputs go through /api/sessions/[id]/repair-observation
+ * - the repair phase ends when the tech closes the case via /outcome OR
+ *   marks it incomplete via abandon
+ */
+export async function lockDiagnosisForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+}): Promise<LockDiagnosisResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+  if (session.treeState.phase === 'repairing') {
+    return { ok: false, status: 400, error: 'diagnosis already locked' }
+  }
+  if (!session.treeState.done) {
+    return { ok: false, status: 400, error: 'diagnosis not done — cannot lock' }
+  }
+
+  const lockedAt = new Date().toISOString()
+  const nextTree = {
+    ...session.treeState,
+    phase: 'repairing' as const,
+    diagnosisLockedAt: lockedAt,
+  }
+
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'tree_update',
+  })
+
+  return { ok: true }
+}
+
+const repairObservationSchema = z.object({
+  observation: z.string().min(1).max(2000),
+})
+
+export type SubmitRepairObservationResult =
+  | { ok: true; guidance: RepairGuidanceResult }
+  | { ok: false; status: 400 | 404 | 502; error: string }
+
+export type GetRepairGuidanceFn = (
+  input: RepairGuidancePromptInput,
+) => Promise<RepairGuidanceResult>
+
+/**
+ * Tech-submitted observation during the repair phase. Persists the
+ * observation as a session_event, then calls the repair-guidance AI
+ * prompt for a reply, and persists the AI's reply as a separate
+ * session_event. Both events are queryable via session_events for the
+ * chat-thread render.
+ *
+ * On AI failure: observation is persisted, guidance is NOT persisted,
+ * caller receives 502. UI surfaces this as "AI unavailable, retry?"
+ * without losing the tech's input.
+ */
+export async function submitRepairObservationForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  body: unknown
+  /** Injected for testability. Production wires this to lib/ai/repair-guidance#getRepairGuidance. */
+  getGuidance: GetRepairGuidanceFn
+}): Promise<SubmitRepairObservationResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+  if (session.treeState.phase !== 'repairing') {
+    return { ok: false, status: 400, error: 'session is not in repair phase' }
+  }
+
+  const parsed = repairObservationSchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  // Persist the tech's observation FIRST so it's not lost if the AI call fails.
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'repair_observation',
+    observationText: parsed.data.observation,
+  })
+
+  // Fetch prior repair events for AI context (the just-inserted observation is excluded).
+  const allEvents = await opts.db
+    .select()
+    .from(sessionEvents)
+    .where(eq(sessionEvents.sessionId, opts.sessionId))
+    .orderBy(sessionEvents.createdAt)
+  const priorEvents = allEvents.slice(0, -1)
+
+  let guidance: RepairGuidanceResult
+  try {
+    guidance = await opts.getGuidance({
+      tree: session.treeState,
+      recentEvents: priorEvents,
+      observation: parsed.data.observation,
+    })
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      error: `repair-guidance failed: ${(err as Error).message}`,
+    }
+  }
+
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'repair_guidance',
+    aiResponse: { repairGuidance: guidance },
+  })
+
+  return { ok: true, guidance }
 }

@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
@@ -8,6 +9,7 @@ import { ActiveSession } from '@/components/screens/active-session'
 import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
+import { sessionEvents } from '@/lib/db/schema'
 
 export default async function SessionPage({
   params,
@@ -42,5 +44,15 @@ export default async function SessionPage({
     return <ClosedCaseSummary session={session} />
   }
 
-  return <ActiveSession session={session} />
+  // Fetch session_events for the chat-thread render in RepairPhaseView.
+  // Cheap query (indexed by session_id) and idempotent for non-repairing
+  // sessions — the renderer filters to repair_observation +
+  // repair_guidance only.
+  const events = await db
+    .select()
+    .from(sessionEvents)
+    .where(eq(sessionEvents.sessionId, session.id))
+    .orderBy(sessionEvents.createdAt)
+
+  return <ActiveSession session={session} events={events} />
 }

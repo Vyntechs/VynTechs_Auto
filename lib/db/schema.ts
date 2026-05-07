@@ -72,12 +72,29 @@ export const sessionEvents = pgTable('session_events', {
     .references(() => sessions.id, { onDelete: 'cascade' })
     .notNull(),
   nodeId: text('node_id').notNull(),
-  eventType: text('event_type', { enum: ['advance', 'observation', 'tree_update', 'close'] }).notNull(),
+  eventType: text('event_type', {
+    enum: [
+      'advance',
+      'observation',
+      'tree_update',
+      'close',
+      'repair_observation',
+      'repair_guidance',
+    ],
+  }).notNull(),
   observationText: text('observation_text'),
   aiResponse: jsonb('ai_response').$type<{
     nextNodeId?: string
     treeUpdate?: unknown
     requestedFollowUp?: string
+    abandon?: {
+      reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
+      note?: string
+    }
+    repairGuidance?: {
+      text: string
+      tangentialConcerns?: string[]
+    }
     declineOrDefer?: {
       reason: 'decline' | 'defer'
       gap: string
