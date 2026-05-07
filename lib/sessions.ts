@@ -533,3 +533,56 @@ export async function abandonSessionForUser(opts: {
 
   return { ok: true }
 }
+
+export type LockDiagnosisResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+/**
+ * Tech-initiated diagnostic-phase lock-in. Transitions session from
+ * phase=diagnosing (with done=true) to phase=repairing. After this:
+ * - rootCauseSummary is frozen (the repair-guidance prompt explicitly
+ *   instructs the AI not to revise it; server-side parser drops any
+ *   attempt to set rootCauseSummary in the response)
+ * - subsequent tech inputs go through /api/sessions/[id]/repair-observation
+ * - the repair phase ends when the tech closes the case via /outcome OR
+ *   marks it incomplete via abandon
+ */
+export async function lockDiagnosisForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+}): Promise<LockDiagnosisResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+  if (session.treeState.phase === 'repairing') {
+    return { ok: false, status: 400, error: 'diagnosis already locked' }
+  }
+  if (!session.treeState.done) {
+    return { ok: false, status: 400, error: 'diagnosis not done — cannot lock' }
+  }
+
+  const lockedAt = new Date().toISOString()
+  const nextTree = {
+    ...session.treeState,
+    phase: 'repairing' as const,
+    diagnosisLockedAt: lockedAt,
+  }
+
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'tree_update',
+  })
+
+  return { ok: true }
+}
