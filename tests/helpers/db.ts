@@ -16,6 +16,12 @@ export async function createTestDb(): Promise<{
   // `vector(1024)` type and the test DB never finishes setup.
   const client = new PGlite({ extensions: { vector } })
   await client.query('CREATE EXTENSION IF NOT EXISTS vector;')
+  // PGlite has no `auth` schema. Supabase's RLS policies reference auth.uid();
+  // stub it here so migrations that include policies don't error during pglite
+  // setup. Tests run as superuser, so RLS is bypassed and the stub's value is
+  // never actually used.
+  await client.query('CREATE SCHEMA IF NOT EXISTS auth;')
+  await client.query(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT '00000000-0000-0000-0000-000000000000'::uuid $$;`)
   const db = drizzle(client, { schema })
   await migrate(db, {
     migrationsFolder: path.join(process.cwd(), 'drizzle/migrations'),

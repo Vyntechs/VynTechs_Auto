@@ -72,7 +72,7 @@ describe('routeForSession', () => {
     ).toEqual({ kind: 'active-session' })
   })
 
-  it('renders active-session when tree is done but session is already closed (avoids redirect loop)', () => {
+  it('renders a read-only closed-summary view when session is closed (no more active-session UI loop)', () => {
     expect(
       routeForSession(
         buildSession({
@@ -80,7 +80,18 @@ describe('routeForSession', () => {
           treeState: { ...activeTree, done: true },
         }),
       ),
-    ).toEqual({ kind: 'active-session' })
+    ).toEqual({ kind: 'closed-summary' })
+  })
+
+  it('renders closed-summary even if treeState.done is false (closed is closed)', () => {
+    expect(
+      routeForSession(
+        buildSession({
+          status: 'closed',
+          treeState: { ...activeTree, done: false },
+        }),
+      ),
+    ).toEqual({ kind: 'closed-summary' })
   })
 
   it('does NOT redirect to outcome when session is declined', () => {

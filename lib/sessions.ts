@@ -28,6 +28,7 @@ import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
 import type { ScheduleFollowUpsFn } from './comeback/schedule'
 import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repair-guidance'
+type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
   db: AppDb,
@@ -237,6 +238,15 @@ export async function closeSessionForUser(opts: {
    *  follow-ups are written. Failures are non-fatal; the session still
    *  closes (and corpus promotion still runs) regardless. */
   scheduleFollowUps?: ScheduleFollowUpsFn
+  /** Phase P novel-pattern trigger. Optional — when omitted, no queue entry
+   *  is written. The caller pre-binds the max corpus similarity score for this
+   *  session so the trigger can decide whether to enqueue. Failures are
+   *  non-fatal; the session still closes regardless. */
+  enqueueNovelPattern?: EnqueueIfNovelPatternFn
+  /** Max corpus retrieval similarity score for this session (0–1). Required
+   *  when enqueueNovelPattern is provided; ignored otherwise. Defaults to 0
+   *  when not supplied (treats as no corpus hits). */
+  maxCorpusSimilarity?: number
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -304,6 +314,18 @@ export async function closeSessionForUser(opts: {
       })
     } catch (err) {
       console.warn('follow-up scheduling failed (session still closed):', err)
+    }
+  }
+
+  if (opts.enqueueNovelPattern) {
+    try {
+      await opts.enqueueNovelPattern(
+        opts.db,
+        opts.sessionId,
+        opts.maxCorpusSimilarity ?? 0,
+      )
+    } catch (err) {
+      console.warn('novel-pattern queue enqueue failed (session still closed):', err)
     }
   }
 

@@ -1,4 +1,5 @@
 import type { AppDb } from '@/lib/db/queries'
+import { updateSessionMaxCorpusSimilarity } from '@/lib/db/queries'
 import type { TreeState, CorpusMatch, updateTree as updateTreeFn } from '@/lib/ai/tree-engine'
 import type { retrieveCorpus as retrieveCorpusFn } from '@/lib/corpus/retrieval'
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from './types'
@@ -18,6 +19,10 @@ export type BuildUpdateTreeWithRetrievalDeps = {
    *  fetches corpus matches in parallel with internet retrieval, falls
    *  through to [] on error, and forwards the result to updateTree. */
   retrieveCorpus?: typeof retrieveCorpusFn
+  /** Phase P (novel-pattern fix). The session ID is needed to persist the max
+   *  corpus similarity score after each retrieval call. Optional for
+   *  back-compat — when omitted, the score is not persisted. */
+  sessionId?: string
 }
 
 /**
@@ -77,7 +82,7 @@ export function buildUpdateTreeWithRetrieval(
     const corpusPromise: Promise<CorpusMatch[] | undefined> = deps.retrieveCorpus
       ? (async () => {
           try {
-            return await deps.retrieveCorpus!(deps.db, {
+            const matches = await deps.retrieveCorpus!(deps.db, {
               vehicleYear: ctx.vehicleYear,
               vehicleMake: ctx.vehicleMake,
               vehicleModel: ctx.vehicleModel,
@@ -85,6 +90,16 @@ export function buildUpdateTreeWithRetrieval(
               dtcs: ctx.dtcs,
               complaintText: ctx.complaintText,
             })
+            // Phase P: persist max similarity score so close route can read it.
+            if (matches.length > 0 && deps.sessionId) {
+              const newMax = Math.max(...matches.map((m) => m.similarityScore))
+              try {
+                await updateSessionMaxCorpusSimilarity(deps.db, deps.sessionId, newMax)
+              } catch (persistErr) {
+                console.warn('failed to persist max corpus similarity:', persistErr)
+              }
+            }
+            return matches
           } catch (err) {
             console.warn('corpus retrieval failed:', err)
             return []

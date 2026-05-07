@@ -55,7 +55,11 @@ describe('NewSessionForm', () => {
     expect(body.customerComplaint).toBe('loss of power going up hills')
   })
 
-  it('redirects to the existing session when the API returns 409 open_session', async () => {
+  it('surfaces the open-session conflict with a resume link and does NOT auto-redirect', async () => {
+    // The server enforces one open session per tech (HTTP 409 with the
+    // existing session's id). Auto-redirecting silently makes the user
+    // think their freshly-submitted intake was hijacked — instead the form
+    // must explain the conflict and let the user choose what to do.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -73,6 +77,17 @@ describe('NewSessionForm', () => {
       target: { value: 'loss of power going up hills' },
     })
     fireEvent.click(screen.getByRole('button', { name: /start/i }))
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/sessions/sess-existing'))
+
+    // Form shows an explanatory alert that mentions the open session.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/open (diagnosis|session)/i)
+    })
+
+    // It also offers a way to resume the existing session.
+    const resumeLink = screen.getByRole('link', { name: /resume/i })
+    expect(resumeLink).toHaveAttribute('href', '/sessions/sess-existing')
+
+    // And it must NOT silently navigate the user away from the intake form.
+    expect(mockPush).not.toHaveBeenCalled()
   })
 })

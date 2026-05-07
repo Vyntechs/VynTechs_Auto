@@ -18,6 +18,8 @@
 // table's wildcard rows are designed to absorb those.
 import { sql } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
+import { unwrapRows } from '@/lib/db/unwrap-rows'
+import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
 export type CellOutcome = {
   riskClass: 'zero' | 'low' | 'medium' | 'high' | 'destructive'
@@ -25,19 +27,6 @@ export type CellOutcome = {
   symptomClass: string
   successes: number
   comebacks: number
-}
-
-function unwrapRows<R>(result: unknown): R[] {
-  if (Array.isArray(result)) return result as R[]
-  if (
-    result !== null &&
-    typeof result === 'object' &&
-    'rows' in result &&
-    Array.isArray((result as { rows: unknown }).rows)
-  ) {
-    return (result as { rows: R[] }).rows
-  }
-  return []
 }
 
 export async function aggregateOutcomesByCell(
@@ -48,10 +37,10 @@ export async function aggregateOutcomesByCell(
     WITH closed_sessions AS (
       SELECT
         s.id,
-        s.intake,
         s.closed_at,
-        LOWER(s.intake ->> 'vehicleMake') || '-' || LOWER(s.intake ->> 'vehicleModel') AS vehicle_family,
-        s.tree_state -> 'gateDecision' ->> 'riskClass' AS risk_class
+        ${CELL_RISK_CLASS_SQL} AS risk_class,
+        ${CELL_VEHICLE_FAMILY_SQL} AS vehicle_family,
+        ${CELL_SYMPTOM_CLASS_SQL} AS symptom_class
       FROM sessions s
       WHERE s.status = 'closed'
         AND s.closed_at >= ${sinceCutoff}
@@ -62,12 +51,7 @@ export async function aggregateOutcomesByCell(
         cs.id,
         cs.risk_class,
         cs.vehicle_family,
-        CASE
-          WHEN cs.intake ->> 'customerComplaint' ~* '(power|stall|hesit|sluggish)' THEN 'power_loss'
-          WHEN cs.intake ->> 'customerComplaint' ~* '(start|crank|no.?start)' THEN 'no_start'
-          WHEN cs.intake ->> 'customerComplaint' ~* '(misfire|rough)' THEN 'misfire'
-          ELSE '*'
-        END AS symptom_class,
+        cs.symptom_class,
         EXISTS (
           SELECT 1 FROM follow_ups f
           WHERE f.session_id = cs.id AND f.comeback_recorded = true

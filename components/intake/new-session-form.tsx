@@ -1,17 +1,20 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { HairlineProgress } from '@/components/vt'
 
 export function NewSessionForm() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
+    setOpenSessionId(null)
     setGenerating(true)
     const formData = new FormData(e.currentTarget)
     const yearRaw = formData.get('vehicleYear')
@@ -35,8 +38,12 @@ export function NewSessionForm() {
     })
 
     if (res.status === 409) {
-      const { openSessionId } = await res.json()
-      router.push(`/sessions/${openSessionId}`)
+      const { openSessionId: existingId } = await res.json()
+      setOpenSessionId(existingId)
+      setError(
+        "You already have an open diagnosis. Resume it or close it before starting a new one.",
+      )
+      setGenerating(false)
       return
     }
     if (!res.ok) {
@@ -140,6 +147,16 @@ export function NewSessionForm() {
       {error && (
         <div className="ai-reject" role="alert">
           {error}
+          {openSessionId && (
+            <div style={{ marginTop: 8 }}>
+              <Link
+                href={`/sessions/${openSessionId}`}
+                style={{ fontWeight: 600 }}
+              >
+                Resume open diagnosis →
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
