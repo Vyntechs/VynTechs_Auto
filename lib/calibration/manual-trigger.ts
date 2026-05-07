@@ -5,6 +5,7 @@
 import { eq } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { profiles } from '@/lib/db/schema'
+import { canCurate } from '@/lib/curator/can-curate'
 import {
   runCalibrationAnalysis,
   type CalibrationAnalysisResult,
@@ -26,7 +27,7 @@ export async function triggerCalibrationAnalysis(input: {
     .from(profiles)
     .where(eq(profiles.userId, input.userId))
     .limit(1)
-  if (profile?.role !== 'curator') {
+  if (!canCurate(profile?.role)) {
     return { ok: false, status: 403, error: 'forbidden' }
   }
   const result = await runCalibrationAnalysis(input.db)

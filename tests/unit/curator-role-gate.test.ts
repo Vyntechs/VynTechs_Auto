@@ -9,6 +9,8 @@ const CURATOR_USER = '00000000-0000-0000-0000-000000000002'
 const CURATOR_PROFILE = '00000000-0000-0000-0000-000000000010'
 const TECH_USER = '00000000-0000-0000-0000-000000000003'
 const TECH_PROFILE = '00000000-0000-0000-0000-000000000011'
+const OWNER_USER = '00000000-0000-0000-0000-000000000004'
+const OWNER_PROFILE = '00000000-0000-0000-0000-000000000012'
 
 describe('guardCuratorRoute', () => {
   let db: TestDb
@@ -20,6 +22,7 @@ describe('guardCuratorRoute', () => {
     await db.insert(profiles).values([
       { id: CURATOR_PROFILE, userId: CURATOR_USER, shopId: SHOP, role: 'curator' },
       { id: TECH_PROFILE, userId: TECH_USER, shopId: SHOP, role: 'tech' },
+      { id: OWNER_PROFILE, userId: OWNER_USER, shopId: SHOP, role: 'owner' },
     ])
   })
   afterEach(async () => { await close() })
@@ -41,6 +44,11 @@ describe('guardCuratorRoute', () => {
 
   it('allows authed curator on /curator path', async () => {
     const result = await guardCuratorRoute(db, CURATOR_USER, '/curator/drift')
+    expect(result).toEqual({ kind: 'allow' })
+  })
+
+  it('allows authed owner on /curator path (founder is both)', async () => {
+    const result = await guardCuratorRoute(db, OWNER_USER, '/curator/drift')
     expect(result).toEqual({ kind: 'allow' })
   })
 })

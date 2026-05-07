@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { profiles } from '@/lib/db/schema'
+import { canCurate } from './can-curate'
 
 export type GuardResult =
   | { kind: 'allow' }
@@ -9,7 +10,8 @@ export type GuardResult =
 /**
  * Checks whether a user is allowed to access a path.
  * Non-/curator paths always pass through. /curator/* requires a
- * profile with role='curator'; unauthenticated users go to /sign-in.
+ * profile with curator access (role='curator' or 'owner');
+ * unauthenticated users go to /sign-in.
  */
 export async function guardCuratorRoute(
   db: AppDb,
@@ -25,6 +27,6 @@ export async function guardCuratorRoute(
     .where(eq(profiles.userId, userId))
     .limit(1)
 
-  if (profile?.role !== 'curator') return { kind: 'redirect', to: '/' }
+  if (!canCurate(profile?.role)) return { kind: 'redirect', to: '/' }
   return { kind: 'allow' }
 }
