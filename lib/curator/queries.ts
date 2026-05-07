@@ -1,6 +1,6 @@
 import { sql, isNull, and, eq, asc, desc, getTableColumns, count } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts, sessions, novelPatternQueue, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
+import { driftAlerts, sessions, novelPatternQueue, confidenceCalibration, corpusEntries, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
 import { unwrapRows } from '@/lib/db/unwrap-rows'
 import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
@@ -257,4 +257,23 @@ export async function listPendingNovelPatterns(db: AppDb) {
   .innerJoin(sessions, eq(novelPatternQueue.sessionId, sessions.id))
   .where(isNull(novelPatternQueue.reviewedAt))
   .orderBy(desc(novelPatternQueue.createdAt))
+}
+
+// ---------------------------------------------------------------------------
+// listCorpusEntries
+// ---------------------------------------------------------------------------
+//
+// Returns corpus_entries rows ordered newest-first. Optional curatorOnly flag
+// filters to rows where is_curator_entry = true. Drizzle's .where(undefined)
+// is a no-op so no separate query path is needed.
+
+export async function listCorpusEntries(
+  db: AppDb,
+  opts: { curatorOnly?: boolean } = {},
+) {
+  return db
+    .select()
+    .from(corpusEntries)
+    .where(opts.curatorOnly ? eq(corpusEntries.isCuratorEntry, true) : undefined)
+    .orderBy(desc(corpusEntries.createdAt))
 }
