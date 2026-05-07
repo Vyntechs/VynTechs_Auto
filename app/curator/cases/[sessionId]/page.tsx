@@ -1,8 +1,11 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { and, isNull, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { fetchCuratorCaseDetail } from '@/lib/curator/case-detail-query'
+import { novelPatternQueue } from '@/lib/db/schema'
 import { DeferredActions } from '@/components/curator/deferred-actions'
+import { NovelActions } from '@/components/curator/novel-actions'
 
 export default async function CuratorCasePage({
   params,
@@ -17,6 +20,16 @@ export default async function CuratorCasePage({
   if (!detail) notFound()
 
   const { session, events, artifacts } = detail
+
+  let novelQueueEntry: { id: string } | null = null
+  if (from === 'novel') {
+    const [entry] = await db
+      .select({ id: novelPatternQueue.id })
+      .from(novelPatternQueue)
+      .where(and(eq(novelPatternQueue.sessionId, sessionId), isNull(novelPatternQueue.reviewedAt)))
+      .limit(1)
+    novelQueueEntry = entry ?? null
+  }
 
   // Back link depends on which queue linked here
   const backHref =
@@ -181,6 +194,9 @@ export default async function CuratorCasePage({
 
       {from === 'deferred' && (
         <DeferredActions sessionId={session.id} />
+      )}
+      {from === 'novel' && novelQueueEntry && (
+        <NovelActions queueEntryId={novelQueueEntry.id} />
       )}
     </article>
   )

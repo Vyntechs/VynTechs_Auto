@@ -904,3 +904,10 @@
 .vt-novel-link:hover { text-decoration: underline; }
 .vt-novel-complaint { color: var(--vt-fg-3); font-size: 14px; }
 .vt-novel-similarity { font-variant-numeric: tabular-nums; }
+.vt-novel-actions { margin-top: 24px; }
+.vt-novel-actions-buttons { display: flex; gap: 8px; }
+.vt-novel-actions-form { margin-top: 16px; padding: 16px; background: var(--vt-surface-2); border-radius: 6px; display: flex; flex-direction: column; gap: 12px; }
+.vt-novel-actions-form textarea { width: 100%; padding: 8px; border: 1px solid var(--vt-border); border-radius: 4px; background: var(--vt-bg); color: var(--vt-fg); box-sizing: border-box; font: inherit; min-height: 60px; }
+.vt-novel-actions-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--vt-fg-3); }
+.vt-novel-actions-confirm-buttons { display: flex; gap: 8px; }
+.vt-novel-actions-error { color: var(--vt-risk-high); font-size: 13px; margin: 0; }
