@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
+import { canCurate } from '@/lib/curator/can-curate'
 import { CuratorSidebar } from '@/components/curator/sidebar'
 import { DesktopOnlyFallback } from '@/components/curator/desktop-only-fallback'
 
@@ -21,7 +22,7 @@ export default async function CuratorLayout({
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
-  if (profile?.role !== 'curator') redirect('/')
+  if (!canCurate(profile?.role)) redirect('/')
 
   return (
     <div className="vt-curator-shell">

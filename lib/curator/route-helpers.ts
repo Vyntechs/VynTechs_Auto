@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
+import { canCurate } from './can-curate'
 
 export async function requireCurator(): Promise<
   | { kind: 'ok'; profileId: string }
@@ -26,7 +27,7 @@ export async function requireCurator(): Promise<
     .where(eq(profiles.userId, user.id))
     .limit(1)
 
-  if (profile?.role !== 'curator') {
+  if (!profile || !canCurate(profile.role)) {
     return {
       kind: 'forbidden',
       response: NextResponse.json({ error: 'forbidden' }, { status: 403 }),
