@@ -10,6 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:smoke": "node scripts/smoke-prod.mjs",
+    "test:perf": "node scripts/lighthouse-check.mjs",
+    "test:audit": "scripts/test-audit.sh",
+    "test:all": "scripts/test-all.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
