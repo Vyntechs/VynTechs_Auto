@@ -127,14 +127,17 @@ describe('ActiveSession — phase routing', () => {
     ).toBeInTheDocument()
   })
 
-  it('does NOT route to DiagnosisProposedReview when phase=repairing (M3 will route to RepairPhaseView; M2 falls through)', () => {
-    render(<ActiveSession session={repairingSession} />)
-    // Lock-in button is NOT shown — past the review phase.
+  it('routes to RepairPhaseView when phase=repairing', () => {
+    render(<ActiveSession session={repairingSession} events={[]} />)
+    // Hallmark of RepairPhaseView: "Diagnosis locked" Module header +
+    // "Repair done & verified — close case" link.
+    expect(screen.getByText(/diagnosis locked/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /repair done & verified/i }),
+    ).toBeInTheDocument()
+    // Lock-in button NOT shown — past the review phase.
     expect(
       screen.queryByRole('button', { name: /lock in diagnosis/i }),
     ).not.toBeInTheDocument()
-    // M2 fallthrough: the diagnosing-active UI's Active step Module is shown.
-    // (M3 Task 14 will replace this assertion to look for RepairPhaseView's hallmark.)
-    expect(screen.getByText(/active step/i)).toBeInTheDocument()
   })
 })

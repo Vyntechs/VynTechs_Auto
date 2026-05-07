@@ -9,17 +9,24 @@ import {
   CaptureBar,
 } from '@/components/vt'
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
-import type { Session } from '@/lib/db/schema'
+import type { Session, SessionEvent } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
 import { AbandonButton } from './abandon-button'
 import { DiagnosisProposedReview } from './diagnosis-proposed-review'
+import { RepairPhaseView } from './repair-phase-view'
 
-export function ActiveSession({ session }: { session: Session }) {
+type Props = {
+  session: Session
+  events?: SessionEvent[]
+}
+
+export function ActiveSession({ session, events = [] }: Props) {
   const phase = session.treeState.phase ?? 'diagnosing'
   const done = session.treeState.done === true
 
-  // M2: when done && phase=diagnosing, route to the review screen.
-  // (M3 will add: when phase=repairing, route to RepairPhaseView.)
+  if (phase === 'repairing') {
+    return <RepairPhaseView session={session} events={events} />
+  }
   if (phase === 'diagnosing' && done) {
     return <DiagnosisProposedReview session={session} />
   }
