@@ -50,7 +50,14 @@ describe('routeForSession', () => {
     ).toEqual({ kind: 'redirect', to: '/sessions/sess-1/decline' })
   })
 
-  it('redirects to /outcome when tree is done and session is still open — the dead-end fix from 2026-05-04 dogfood', () => {
+  it('renders active-session when tree is done — view shows AI repair plan, tech closes manually after verifying', () => {
+    // Was: redirect to /outcome. Removed 2026-05-07 (Brandon's 2009 Ram
+    // 1500 P0171/P0174 case) because the redirect skipped the AI's safety
+    // message, recommended-repair description, and expected-signal block
+    // entirely — the active-session view is where that content renders,
+    // and the redirect fired in the same page-render that the AI's done
+    // response landed. Tech now reads the diagnosis on /sessions/[id],
+    // does the repair + verification, then clicks Close case manually.
     expect(
       routeForSession(
         buildSession({
@@ -62,7 +69,7 @@ describe('routeForSession', () => {
           },
         }),
       ),
-    ).toEqual({ kind: 'redirect', to: '/sessions/sess-1/outcome' })
+    ).toEqual({ kind: 'active-session' })
   })
 
   it('renders active-session when tree is done but session is already closed (avoids redirect loop)', () => {
@@ -102,7 +109,7 @@ describe('routeForSession', () => {
     expect(routeForSession(buildSession({}))).toEqual({ kind: 'active-session' })
   })
 
-  it('gate redirect takes precedence over done redirect when both fire', () => {
+  it('gate-blocked still redirects to /decline even when tree is done', () => {
     expect(
       routeForSession(
         buildSession({

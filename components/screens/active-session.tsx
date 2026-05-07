@@ -20,6 +20,8 @@ export function ActiveSession({ session }: { session: Session }) {
   const stepNumber = active
     ? String(session.treeState.nodes.indexOf(active) + 1).padStart(2, '0')
     : '—'
+  const done = session.treeState.done === true
+  const proposedAction = session.treeState.proposedAction
 
   return (
     <div className="app">
@@ -38,84 +40,151 @@ export function ActiveSession({ session }: { session: Session }) {
           overflow: 'auto',
         }}
       >
-        <Module
-          num={stepNumber}
-          label="Active step"
-          status={<Pill kind="active">In progress</Pill>}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 8,
-            }}
+        {done ? (
+          <Module
+            num="✓"
+            label="Diagnosis complete"
+            status={<Pill kind="active">Ready to repair</Pill>}
           >
-            <Risk level="low" />
-            <span
+            {session.treeState.rootCauseSummary && (
+              <h2
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontWeight: 400,
+                  fontSize: 22,
+                  lineHeight: 1.25,
+                  letterSpacing: '-0.02em',
+                  margin: '0 0 12px',
+                }}
+              >
+                {session.treeState.rootCauseSummary}
+              </h2>
+            )}
+            {session.treeState.message && (
+              <p
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontStyle: 'italic',
+                  fontSize: 14,
+                  color: 'var(--vt-fg-2)',
+                  lineHeight: 1.55,
+                  margin: '0 0 14px',
+                }}
+              >
+                {session.treeState.message}
+              </p>
+            )}
+            {(proposedAction?.description || active?.label) && (
+              <div style={{ marginTop: 12 }}>
+                <span className="eyebrow">Recommended repair</span>
+                <p
+                  style={{
+                    fontFamily: 'var(--vt-font-serif)',
+                    fontSize: 14,
+                    lineHeight: 1.55,
+                    margin: '6px 0 0',
+                  }}
+                >
+                  {proposedAction?.description ?? active?.label}
+                </p>
+              </div>
+            )}
+            {proposedAction?.expectedSignal && (
+              <div style={{ marginTop: 14 }}>
+                <span className="eyebrow">Expected signal post-repair</span>
+                <p
+                  style={{
+                    fontFamily: 'var(--vt-font-serif)',
+                    fontSize: 14,
+                    lineHeight: 1.55,
+                    margin: '6px 0 0',
+                  }}
+                >
+                  {proposedAction.expectedSignal}
+                </p>
+              </div>
+            )}
+          </Module>
+        ) : (
+          <Module
+            num={stepNumber}
+            label="Active step"
+            status={<Pill kind="active">In progress</Pill>}
+          >
+            <div
               style={{
-                fontFamily: 'var(--vt-font-mono)',
-                fontSize: 10,
-                color: 'var(--vt-fg-3)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8,
               }}
             >
-              req. ≥ 70 %
-            </span>
-          </div>
-          <h2
-            style={{
-              fontFamily: 'var(--vt-font-serif)',
-              fontWeight: 400,
-              fontSize: 22,
-              lineHeight: 1.2,
-              letterSpacing: '-0.02em',
-              margin: '0 0 10px',
-            }}
-          >
-            {active?.label ?? 'No active step.'}
-          </h2>
-          {active?.rationale && (
-            <p
+              <Risk level="low" />
+              <span
+                style={{
+                  fontFamily: 'var(--vt-font-mono)',
+                  fontSize: 10,
+                  color: 'var(--vt-fg-3)',
+                }}
+              >
+                req. ≥ 70 %
+              </span>
+            </div>
+            <h2
               style={{
                 fontFamily: 'var(--vt-font-serif)',
-                fontStyle: 'italic',
-                fontSize: 14,
-                color: 'var(--vt-fg-2)',
-                lineHeight: 1.5,
-                margin: '0 0 14px',
+                fontWeight: 400,
+                fontSize: 22,
+                lineHeight: 1.2,
+                letterSpacing: '-0.02em',
+                margin: '0 0 10px',
               }}
             >
-              {active.rationale}
-            </p>
-          )}
-          {!active?.rationale && session.treeState.message && (
-            <p
-              style={{
-                fontFamily: 'var(--vt-font-serif)',
-                fontStyle: 'italic',
-                fontSize: 14,
-                color: 'var(--vt-fg-2)',
-                lineHeight: 1.5,
-                margin: '0 0 14px',
-              }}
-            >
-              {session.treeState.message}
-            </p>
-          )}
-          <ActiveStepForm
-            sessionId={session.id}
-            nodeId={session.treeState.currentNodeId}
-            requestedArtifact={session.treeState.requestedArtifact}
-          />
-        </Module>
+              {active?.label ?? 'No active step.'}
+            </h2>
+            {active?.rationale && (
+              <p
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontStyle: 'italic',
+                  fontSize: 14,
+                  color: 'var(--vt-fg-2)',
+                  lineHeight: 1.5,
+                  margin: '0 0 14px',
+                }}
+              >
+                {active.rationale}
+              </p>
+            )}
+            {!active?.rationale && session.treeState.message && (
+              <p
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontStyle: 'italic',
+                  fontSize: 14,
+                  color: 'var(--vt-fg-2)',
+                  lineHeight: 1.5,
+                  margin: '0 0 14px',
+                }}
+              >
+                {session.treeState.message}
+              </p>
+            )}
+            <ActiveStepForm
+              sessionId={session.id}
+              nodeId={session.treeState.currentNodeId}
+              requestedArtifact={session.treeState.requestedArtifact}
+            />
+          </Module>
+        )}
 
-        {session.treeState.proposedAction?.confidence !== undefined && (
+        {proposedAction?.confidence !== undefined && (
           <Module num="—" label="Confidence">
             <ConfidenceBlock
-              value={session.treeState.proposedAction.confidence}
+              value={proposedAction.confidence}
               basis={
-                session.treeState.proposedAction.confidenceGap
-                  ? `gap: ${session.treeState.proposedAction.confidenceGap}`
+                proposedAction.confidenceGap
+                  ? `gap: ${proposedAction.confidenceGap}`
                   : 'based on AI reasoning + retrieval'
               }
             />
@@ -141,7 +210,9 @@ export function ActiveSession({ session }: { session: Session }) {
               margin: '0 0 12px',
             }}
           >
-            Done diagnosing? Capture what fixed it and close the case.
+            {done
+              ? 'Repair done? Verified the fix? Close the case to record the outcome.'
+              : 'Done diagnosing? Capture what fixed it and close the case.'}
           </p>
           <Link
             href={`/sessions/${session.id}/outcome`}

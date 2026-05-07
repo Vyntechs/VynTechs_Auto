@@ -8,8 +8,12 @@ import type { Session } from './db/schema'
  * Order matters:
  *   1. No tree yet → loading screen
  *   2. Gate blocked → decline page
- *   3. Tree done + session still open → outcome capture (the dead-end fix)
- *   4. Otherwise → active session
+ *   3. Otherwise → active-session view (handles in-progress AND
+ *      diagnosis-complete states; when treeState.done is true the
+ *      active-session view renders the AI's root-cause summary, safety
+ *      message, recommended repair, and expected post-repair signal — and
+ *      the tech clicks Close case manually after the repair + verification
+ *      rather than being auto-redirected mid-render).
  */
 export type SessionRoute =
   | { kind: 'tree-generating' }
@@ -27,9 +31,6 @@ export function routeForSession(
     !session.treeState.gateDecision.allow
   ) {
     return { kind: 'redirect', to: `/sessions/${session.id}/decline` }
-  }
-  if (session.treeState.done && session.status === 'open') {
-    return { kind: 'redirect', to: `/sessions/${session.id}/outcome` }
   }
   return { kind: 'active-session' }
 }
