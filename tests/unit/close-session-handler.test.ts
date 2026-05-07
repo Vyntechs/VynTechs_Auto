@@ -171,6 +171,53 @@ describe('closeSessionForUser', () => {
     expect(result.error).toMatch(/not open/i)
   })
 
+  it('skips the validator entirely when body has an override block', async () => {
+    const { tech, session } = await seedOpenSession(db)
+    const validate = vi.fn() // never called
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: makeOutcome({
+        override: {
+          at: '2026-05-07T18:00:00Z',
+          lastFeedback: 'Add the bolt location to Root cause.',
+        },
+      }),
+      validateSpecificity: validate,
+    })
+    expect(result.ok).toBe(true)
+    expect(validate).not.toHaveBeenCalled()
+
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+    expect(row.status).toBe('closed')
+    expect(row.outcome?.override?.at).toBe('2026-05-07T18:00:00Z')
+    expect(row.outcome?.override?.lastFeedback).toMatch(/bolt location/)
+  })
+
+  it('persists override metadata even if validator would have rejected', async () => {
+    const { tech, session } = await seedOpenSession(db)
+    const validate = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      feedback: 'this would have been rejected',
+    })
+    const result = await closeSessionForUser({
+      db,
+      userId: tech.userId,
+      sessionId: session.id,
+      body: makeOutcome({
+        rootCause: 'short root cause that AI would reject',
+        override: {
+          at: '2026-05-07T18:05:00Z',
+          lastFeedback: 'Be more specific please.',
+        },
+      }),
+      validateSpecificity: validate,
+    })
+    expect(result.ok).toBe(true)
+    expect(validate).not.toHaveBeenCalled() // still skipped — override beats validator
+  })
+
   describe('corpus promotion (Phase K5)', () => {
     it('calls promoteToCorpus with sessionId, shopId, intake, outcome, and inferred symptom tags', async () => {
       const { tech, session } = await seedOpenSession(db)

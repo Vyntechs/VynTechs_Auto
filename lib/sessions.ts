@@ -251,16 +251,20 @@ export async function closeSessionForUser(opts: {
     return { ok: false, status: 400, error: parsed.error.message }
   }
 
-  const validation = await opts.validateSpecificity({
-    rootCause: parsed.data.rootCause,
-    notes: parsed.data.notes,
-  })
-  if (!validation.ok) {
-    return {
-      ok: false,
-      status: 422,
-      error: 'specificity_required',
-      feedback: validation.feedback ?? 'Be more specific.',
+  // Override path: tech retried after one rejection. Skip the validator entirely;
+  // the override metadata is persisted on the outcome row for admin review.
+  if (!parsed.data.override) {
+    const validation = await opts.validateSpecificity({
+      rootCause: parsed.data.rootCause,
+      notes: parsed.data.notes,
+    })
+    if (!validation.ok) {
+      return {
+        ok: false,
+        status: 422,
+        error: 'specificity_required',
+        feedback: validation.feedback ?? 'Be more specific.',
+      }
     }
   }
 
