@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { VehicleStrip } from '@/components/vt'
+import { AbandonButton } from './abandon-button'
 
 const ACTION_TYPES = [
   ['part_replacement', 'Part replacement'],
@@ -158,6 +159,20 @@ export function OutcomeCapture({
         }}
       >
         <span className="eyebrow">Closing the case · all fields required</span>
+        {!previewMode && sessionId && (
+          <div
+            style={{
+              marginTop: 6,
+              marginBottom: 10,
+              fontSize: 13,
+              color: 'var(--vt-fg-3)',
+              fontFamily: 'var(--vt-font-serif)',
+            }}
+          >
+            Started by mistake or testing?{' '}
+            <AbandonButton sessionId={sessionId} variant="inline" redirectTo="/today" />
+          </div>
+        )}
 
         <div className="field" style={{ marginTop: 10 }}>
           <label htmlFor="root-cause">Root cause</label>

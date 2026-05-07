@@ -9,16 +9,36 @@ import {
   CaptureBar,
 } from '@/components/vt'
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
-import type { Session } from '@/lib/db/schema'
+import type { Session, SessionEvent } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
+import { AbandonButton } from './abandon-button'
+import { DiagnosisProposedReview } from './diagnosis-proposed-review'
+import { RepairPhaseView } from './repair-phase-view'
 
-export function ActiveSession({ session }: { session: Session }) {
+type Props = {
+  session: Session
+  events?: SessionEvent[]
+}
+
+export function ActiveSession({ session, events = [] }: Props) {
+  const phase = session.treeState.phase ?? 'diagnosing'
+  const done = session.treeState.done === true
+
+  if (phase === 'repairing') {
+    return <RepairPhaseView session={session} events={events} />
+  }
+  if (phase === 'diagnosing' && done) {
+    return <DiagnosisProposedReview session={session} />
+  }
+
+  // Diagnosing-active UI (the !done path) — unchanged from d70a357 / 964c377.
   const active = getActiveNode(session.treeState.nodes)
   const steps = nodesToSteps(session.treeState.nodes)
   const elapsed = formatElapsed(new Date(session.createdAt))
   const stepNumber = active
     ? String(session.treeState.nodes.indexOf(active) + 1).padStart(2, '0')
     : '—'
+  const proposedAction = session.treeState.proposedAction
 
   return (
     <div className="app">
@@ -108,13 +128,13 @@ export function ActiveSession({ session }: { session: Session }) {
           />
         </Module>
 
-        {session.treeState.proposedAction?.confidence !== undefined && (
+        {proposedAction?.confidence !== undefined && (
           <Module num="—" label="Confidence">
             <ConfidenceBlock
-              value={session.treeState.proposedAction.confidence}
+              value={proposedAction.confidence}
               basis={
-                session.treeState.proposedAction.confidenceGap
-                  ? `gap: ${session.treeState.proposedAction.confidenceGap}`
+                proposedAction.confidenceGap
+                  ? `gap: ${proposedAction.confidenceGap}`
                   : 'based on AI reasoning + retrieval'
               }
             />
@@ -153,6 +173,17 @@ export function ActiveSession({ session }: { session: Session }) {
           >
             Close case
           </Link>
+          <p
+            style={{
+              fontFamily: 'var(--vt-font-serif)',
+              fontSize: 13,
+              color: 'var(--vt-fg-3)',
+              margin: '14px 0 8px',
+            }}
+          >
+            Started by mistake or testing? Mark it incomplete instead — no diagnosis required.
+          </p>
+          <AbandonButton sessionId={session.id} />
         </Module>
       </div>
       <CaptureBar />

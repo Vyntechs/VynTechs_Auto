@@ -37,6 +37,10 @@ export type TreeState = {
   requestedArtifact?: RequestedArtifact
   proposedAction?: ProposedAction
   gateDecision?: GateDecision
+  // Phase 1 → 3 transition (added 2026-05-07; see spec
+  // docs/superpowers/specs/2026-05-07-two-phase-diagnose-repair-design.md)
+  phase?: 'diagnosing' | 'repairing'
+  diagnosisLockedAt?: string
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
