@@ -2,10 +2,10 @@ export function DesktopOnlyFallback() {
   return (
     <div className="vt-curator-desktop-only">
       <div>
-        <h2>Curator tools require a desktop browser</h2>
+        <h2>Curator tools need a wider window</h2>
         <p>
-          Please open this in Chrome or Safari at a window width of at least
-          1280 pixels.
+          Resize this window to at least 960 pixels wide, or open it on a
+          larger screen. The data tables here don&apos;t fit on phones.
         </p>
       </div>
     </div>
