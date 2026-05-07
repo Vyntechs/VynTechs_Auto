@@ -8,7 +8,7 @@ export default async function NovelPatternQueuePage() {
   if (rows.length === 0) {
     return (
       <div className="vt-novel-empty">
-        No novel patterns to review.
+        No new problems to review.
       </div>
     )
   }
@@ -16,7 +16,7 @@ export default async function NovelPatternQueuePage() {
   return (
     <div className="vt-novel-page">
       <header className="vt-novel-header">
-        <h1>Novel patterns</h1>
+        <h1>New problems</h1>
         <span className="vt-novel-count">{rows.length} pending</span>
       </header>
       <table className="vt-novel-table">

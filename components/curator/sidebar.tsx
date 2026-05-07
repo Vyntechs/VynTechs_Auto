@@ -4,11 +4,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 export const CURATOR_NAV = [
-  { href: '/curator/drift',        label: "Today's recommendations" },
-  { href: '/curator/deferred',     label: 'Deferred cases' },
-  { href: '/curator/novel',        label: 'Novel patterns' },
-  { href: '/curator/corpus',       label: 'Corpus' },
-  { href: '/curator/calibration',  label: 'Calibration thresholds' },
+  { href: '/curator/drift',        label: 'Needs review' },
+  { href: '/curator/deferred',     label: 'Incomplete' },
+  { href: '/curator/novel',        label: 'New problems' },
+  { href: '/curator/corpus',       label: 'Solved cases' },
+  { href: '/curator/calibration',  label: 'Calibrator' },
 ]
 
 export function CuratorSidebar() {

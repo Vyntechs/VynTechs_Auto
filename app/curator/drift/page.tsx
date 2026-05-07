@@ -20,9 +20,9 @@ export default async function DriftQueuePage({
   if (rows.length === 0) {
     return (
       <div className="vt-drift-empty">
-        <p>Queue empty.</p>
+        <p>Nothing to review.</p>
         <p>
-          <Link href="/curator/calibration">View all thresholds →</Link>
+          <Link href="/curator/calibration">Open calibrator →</Link>
         </p>
       </div>
     )
@@ -31,7 +31,7 @@ export default async function DriftQueuePage({
   return (
     <div className="vt-drift-page">
       <header className="vt-drift-page-header">
-        <h1>Today&apos;s recommendations</h1>
+        <h1>Needs review</h1>
         <DriftFilters current={sp} />
       </header>
       <ul className="vt-drift-list">

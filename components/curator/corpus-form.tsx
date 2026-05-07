@@ -168,7 +168,7 @@ export function CorpusForm({
       {error && <p role="alert" className="vt-corpus-form-error">{error}</p>}
 
       <div className="vt-corpus-form-buttons">
-        <button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Save corpus entry'}</button>
+        <button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Save solved case'}</button>
       </div>
     </form>
   )

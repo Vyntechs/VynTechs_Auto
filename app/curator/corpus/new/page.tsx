@@ -30,7 +30,7 @@ export default async function NewCorpusEntryPage({
 
   return (
     <div className="vt-corpus-form-page">
-      <h1>New corpus entry</h1>
+      <h1>New solved case</h1>
       <CorpusForm prefill={prefill} fromQueueEntryId={sp.fromQueueEntry ?? null} />
     </div>
   )

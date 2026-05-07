@@ -8,7 +8,7 @@ export default async function DeferredQueuePage() {
   if (rows.length === 0) {
     return (
       <div className="vt-deferred-empty">
-        <p>No deferred cases.</p>
+        <p>No incomplete cases.</p>
       </div>
     )
   }
@@ -16,7 +16,7 @@ export default async function DeferredQueuePage() {
   return (
     <div className="vt-deferred-page">
       <header className="vt-deferred-header">
-        <h1>Deferred cases</h1>
+        <h1>Incomplete</h1>
         <span className="vt-deferred-count">{rows.length} open</span>
       </header>
       <table className="vt-deferred-table">
@@ -24,7 +24,7 @@ export default async function DeferredQueuePage() {
           <tr>
             <th>Vehicle</th>
             <th>Complaint</th>
-            <th>Deferred at</th>
+            <th>Closed at</th>
           </tr>
         </thead>
         <tbody>
