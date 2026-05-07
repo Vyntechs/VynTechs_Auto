@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
+import { STORAGE_STATE_PATH } from './tests/e2e/global-setup'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -12,7 +14,19 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'anonymous',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /landing\.spec\.ts/,
+    },
+    {
+      name: 'curator',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: STORAGE_STATE_PATH,
+      },
+      testMatch: /curator\.spec\.ts/,
+    },
   ],
   webServer: {
     command: 'pnpm dev',

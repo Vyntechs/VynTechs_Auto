@@ -21,6 +21,7 @@ tsconfig.tsbuildinfo
 playwright-report/
 test-results/
 coverage/
+tests/e2e/.auth/
 
 # OS
 .DS_Store
