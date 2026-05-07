@@ -5,6 +5,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { getSessionForUser } from '@/lib/sessions'
 import { routeForSession } from '@/lib/session-routing'
 import { ActiveSession } from '@/components/screens/active-session'
+import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
 
@@ -35,6 +36,10 @@ export default async function SessionPage({
 
   if (route.kind === 'redirect') {
     redirect(route.to)
+  }
+
+  if (route.kind === 'closed-summary') {
+    return <ClosedCaseSummary session={session} />
   }
 
   return <ActiveSession session={session} />
