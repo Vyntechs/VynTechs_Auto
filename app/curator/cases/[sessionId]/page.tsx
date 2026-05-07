@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { and, isNull, eq } from 'drizzle-orm'
+import { and, isNull, eq, desc } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { fetchCuratorCaseDetail } from '@/lib/curator/case-detail-query'
 import { novelPatternQueue } from '@/lib/db/schema'
@@ -27,6 +27,7 @@ export default async function CuratorCasePage({
       .select({ id: novelPatternQueue.id })
       .from(novelPatternQueue)
       .where(and(eq(novelPatternQueue.sessionId, sessionId), isNull(novelPatternQueue.reviewedAt)))
+      .orderBy(desc(novelPatternQueue.createdAt))
       .limit(1)
     novelQueueEntry = entry ?? null
   }
