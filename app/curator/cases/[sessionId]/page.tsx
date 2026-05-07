@@ -197,7 +197,17 @@ export default async function CuratorCasePage({
         <DeferredActions sessionId={session.id} />
       )}
       {from === 'novel' && novelQueueEntry && (
-        <NovelActions queueEntryId={novelQueueEntry.id} />
+        <>
+          <div className="vt-novel-add-corpus">
+            <Link
+              href={`/curator/corpus/new?fromCase=${session.id}&fromQueueEntry=${novelQueueEntry.id}`}
+              className="vt-novel-add-corpus-link"
+            >
+              Add to corpus →
+            </Link>
+          </div>
+          <NovelActions queueEntryId={novelQueueEntry.id} />
+        </>
       )}
     </article>
   )

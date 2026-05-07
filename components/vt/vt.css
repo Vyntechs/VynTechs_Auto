@@ -911,3 +911,16 @@
 .vt-novel-actions-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--vt-fg-3); }
 .vt-novel-actions-confirm-buttons { display: flex; gap: 8px; }
 .vt-novel-actions-error { color: var(--vt-risk-high); font-size: 13px; margin: 0; }
+.vt-novel-add-corpus { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--vt-border); }
+.vt-novel-add-corpus-link { color: var(--vt-accent); text-decoration: none; font-size: 14px; }
+.vt-novel-add-corpus-link:hover { text-decoration: underline; }
+.vt-corpus-form-page { max-width: 800px; }
+.vt-corpus-form-page h1 { font-size: 22px; margin: 0 0 24px; }
+.vt-corpus-form fieldset { border: 1px solid var(--vt-border); border-radius: 4px; padding: 16px; margin: 0 0 16px; }
+.vt-corpus-form legend { padding: 0 8px; color: var(--vt-fg-3); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-corpus-form label { display: block; font-size: 13px; margin: 0 0 12px; }
+.vt-corpus-form label input[type="text"], .vt-corpus-form label input[type="number"], .vt-corpus-form label textarea, .vt-corpus-form label select { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; }
+.vt-corpus-form label textarea { min-height: 60px; resize: vertical; }
+.vt-corpus-form-error { color: var(--vt-risk-high); }
+.vt-corpus-form-buttons { margin-top: 24px; }
+.vt-corpus-form-buttons button { padding: 8px 16px; }
