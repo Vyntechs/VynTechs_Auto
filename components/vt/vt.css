@@ -924,3 +924,15 @@
 .vt-corpus-form-error { color: var(--vt-risk-high); }
 .vt-corpus-form-buttons { margin-top: 24px; }
 .vt-corpus-form-buttons button { padding: 8px 16px; }
+.vt-corpus-list-page { max-width: 1200px; }
+.vt-corpus-list-header { display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline; margin-bottom: 20px; }
+.vt-corpus-list-header h1 { margin: 0; font-size: 22px; }
+.vt-corpus-list-count { font-size: 14px; color: var(--vt-fg-3); }
+.vt-corpus-list-actions { display: flex; gap: 12px; margin-left: auto; }
+.vt-corpus-list-new, .vt-corpus-list-filter { font-size: 14px; color: var(--vt-accent); text-decoration: none; }
+.vt-corpus-list-new:hover, .vt-corpus-list-filter:hover { text-decoration: underline; }
+.vt-corpus-list-empty { color: var(--vt-fg-3); padding: 64px; text-align: center; }
+.vt-corpus-list-table { width: 100%; border-collapse: collapse; }
+.vt-corpus-list-table th, .vt-corpus-list-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; }
+.vt-corpus-list-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-corpus-list-tags { color: var(--vt-fg-3); font-size: 13px; }
