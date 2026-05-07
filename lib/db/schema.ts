@@ -49,6 +49,7 @@ export type OutcomePayload = {
   diagMinutes: number
   repairMinutes: number
   notes?: string
+  override?: { at: string; lastFeedback: string }
 }
 
 export const sessions = pgTable('sessions', {

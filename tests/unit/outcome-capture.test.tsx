@@ -136,6 +136,73 @@ describe('OutcomeCapture (wired)', () => {
     expect(body.partInfo).toBeUndefined()
   })
 
+  it('after a 422, the button label changes to indicate override and second submit sends override', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: async () => ({
+          error: 'specificity_required',
+          feedback: 'Add the bolt location to Root cause.',
+        }),
+        text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => '',
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    fillSpecificRootCause()
+    fireEvent.change(screen.getByLabelText(/part name/i), {
+      target: { value: 'Vacuum line' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/Add the bolt location/i)).toBeInTheDocument(),
+    )
+
+    const overrideBtn = await screen.findByRole('button', { name: /override/i })
+    expect(overrideBtn).toBeInTheDocument()
+
+    fireEvent.click(overrideBtn)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const secondCallBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(secondCallBody.override).toBeDefined()
+    expect(secondCallBody.override.lastFeedback).toMatch(/bolt location/i)
+    expect(secondCallBody.override.at).toMatch(/\d{4}-\d{2}-\d{2}T/)
+
+    await waitFor(() => expect(hrefSetter).toHaveBeenCalledWith('/sessions'))
+  })
+
+  it('does NOT include override on the very first submit', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+        text: async () => '',
+      }),
+    )
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    fillSpecificRootCause()
+    fireEvent.change(screen.getByLabelText(/part name/i), {
+      target: { value: 'Vacuum line' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string)
+    expect(body.override).toBeUndefined()
+  })
+
   it('reflects toggling a verification chip in the submitted payload', async () => {
     vi.stubGlobal(
       'fetch',
