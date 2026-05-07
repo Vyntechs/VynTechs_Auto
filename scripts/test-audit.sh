@@ -26,17 +26,17 @@ echo "[2/3] secret-pattern scan in tracked files..."
 # Patterns that indicate a real secret if found in source.
 # Excludes .env.example, AGENTS.md, and the audit script itself
 # (which mentions the pattern names by definition).
+# NUL-delimited (-z, -0) end-to-end so xargs can't silently drop matches
+# when the file list outgrows argv limits.
 patterns='(SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|ANTHROPIC_API_KEY|VOYAGE_API_KEY)=[A-Za-z0-9_+/=-]{16,}'
-if matches=$(git ls-files \
-    | grep -vE '^(\.env\.example|AGENTS\.md|scripts/test-audit\.sh|docs/superpowers/specs/2026-05-07-testing-pipeline-design\.md|docs/superpowers/plans/2026-05-07-testing-pipeline-implementation\.md)$' \
-    | xargs grep -lE "$patterns" 2>/dev/null); then
-  if [ -n "$matches" ]; then
-    printf "  ${red}✗${reset} secret-shaped values found in tracked files:\n"
-    echo "$matches" | sed 's/^/      /'
-    fail=1
-  else
-    printf "  ${green}✓${reset} no secret-shaped values in tracked files\n"
-  fi
+exclude='^(\.env\.example|AGENTS\.md|scripts/test-audit\.sh|docs/superpowers/specs/2026-05-07-testing-pipeline-design\.md|docs/superpowers/plans/2026-05-07-testing-pipeline-implementation\.md)$'
+matches=$(git ls-files -z \
+  | grep -zvE "$exclude" \
+  | xargs -0 grep -lE "$patterns" 2>/dev/null || true)
+if [ -n "$matches" ]; then
+  printf "  ${red}✗${reset} secret-shaped values found in tracked files:\n"
+  echo "$matches" | sed 's/^/      /'
+  fail=1
 else
   printf "  ${green}✓${reset} no secret-shaped values in tracked files\n"
 fi

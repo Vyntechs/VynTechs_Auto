@@ -76,21 +76,26 @@ async function main() {
     check('GET /sign-in reachable', false, String(e))
   }
 
-  // 4) Curator gate (anon → /sign-in). On a deploy that doesn't include
-  //    the Phase P curator console yet, this route 404s — that's also
-  //    acceptable, since "no route" is just as safe as "route gated".
+  // 4) Curator gate (anon → /sign-in). Once Phase P merges to main, the
+  //    only acceptable response is the 307/302 redirect — set
+  //    CURATOR_DEPLOYED=1 to drop the 404-tolerant branch and treat 404 as
+  //    a hard failure (catches misconfigured auth gates that return
+  //    notFound() where they should redirect).
   try {
     const { status, headers } = await fetchText('/curator/drift')
     const loc = headers.get('location') || ''
     const redirected = (status === 307 || status === 302) && loc.includes('/sign-in')
-    const notDeployed = status === 404
+    const allow404 = process.env.CURATOR_DEPLOYED !== '1' && status === 404
     if (redirected) {
       check('GET /curator/drift as anon redirects to /sign-in', true, `HTTP ${status} → ${loc}`)
-    } else if (notDeployed) {
-      check('GET /curator/drift not deployed yet (404 — curator not on this branch)', true)
+    } else if (allow404) {
+      check(
+        'GET /curator/drift not deployed yet (404 — set CURATOR_DEPLOYED=1 once Phase P ships to main)',
+        true,
+      )
     } else {
       check(
-        'GET /curator/drift as anon should 404 or redirect to /sign-in',
+        'GET /curator/drift as anon should redirect to /sign-in',
         false,
         `HTTP ${status} → ${loc || '(no location header)'}`,
       )

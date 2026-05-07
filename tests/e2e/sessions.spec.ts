@@ -13,11 +13,10 @@ import { test, expect, type Page } from '@playwright/test'
 // below tries both patterns so this suite stays passing if AppHeader is
 // upgraded to <h1> later. See the morning summary's a11y follow-ups.
 async function expectPageTitle(page: Page, expected: string | RegExp) {
-  const matcher = typeof expected === 'string' ? expected : expected
-  const heading = page.getByRole('heading', { level: 1, name: matcher })
+  const heading = page.getByRole('heading', { level: 1, name: expected })
   const appHeaderTitle = page
     .locator('header.app-header .title')
-    .filter({ hasText: matcher })
+    .filter({ hasText: expected })
   // Whichever pattern the page uses, one of these should resolve.
   const count = await heading
     .or(appHeaderTitle)
@@ -25,7 +24,7 @@ async function expectPageTitle(page: Page, expected: string | RegExp) {
     .waitFor({ state: 'visible', timeout: 10_000 })
     .then(() => 1)
     .catch(() => 0)
-  expect(count, `page title "${matcher}" not visible`).toBe(1)
+  expect(count, `page title "${expected}" not visible`).toBe(1)
 }
 
 test.describe('authed user surfaces (signed in as owner/curator)', () => {
