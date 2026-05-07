@@ -1,6 +1,6 @@
 import { sql, isNull, and, eq, asc, desc, getTableColumns, count } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts, sessions, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
+import { driftAlerts, sessions, novelPatternQueue, confidenceCalibration, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
 import { unwrapRows } from '@/lib/db/unwrap-rows'
 import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
@@ -239,4 +239,22 @@ export async function listDeferredSessions(db: AppDb): Promise<DeferredSessionRo
     .from(sessions)
     .where(eq(sessions.status, 'deferred'))
     .orderBy(desc(sessions.closedAt))
+}
+
+// ---------------------------------------------------------------------------
+// listPendingNovelPatterns
+// ---------------------------------------------------------------------------
+//
+// Returns novel_pattern_queue rows where reviewed_at IS NULL, joined with their
+// parent session for intake data. Ordered newest-first. Used by Screen 7.
+
+export async function listPendingNovelPatterns(db: AppDb) {
+  return db.select({
+    queue: novelPatternQueue,
+    session: sessions,
+  })
+  .from(novelPatternQueue)
+  .innerJoin(sessions, eq(novelPatternQueue.sessionId, sessions.id))
+  .where(isNull(novelPatternQueue.reviewedAt))
+  .orderBy(desc(novelPatternQueue.createdAt))
 }
