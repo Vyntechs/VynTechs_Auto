@@ -890,3 +890,17 @@
 .vt-deferred-actions-confirm-buttons { display: flex; gap: 8px; }
 .vt-deferred-actions-error { color: var(--vt-risk-high); font-size: 13px; margin: 0; }
 .vt-deferred-date { font-family: var(--vt-font-mono); font-size: 13px; color: var(--vt-fg-3); white-space: nowrap; }
+
+/* Phase P — novel-pattern queue (Screen 7) */
+.vt-novel-page { max-width: 1100px; }
+.vt-novel-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+.vt-novel-header h1 { margin: 0; font-size: 22px; }
+.vt-novel-count { font-size: 14px; color: var(--vt-fg-3); }
+.vt-novel-empty { color: var(--vt-fg-3); padding: 64px; text-align: center; }
+.vt-novel-table { width: 100%; border-collapse: collapse; }
+.vt-novel-table th, .vt-novel-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; }
+.vt-novel-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-novel-link { color: var(--vt-accent); text-decoration: none; }
+.vt-novel-link:hover { text-decoration: underline; }
+.vt-novel-complaint { color: var(--vt-fg-3); font-size: 14px; }
+.vt-novel-similarity { font-variant-numeric: tabular-nums; }
