@@ -476,3 +476,60 @@ export async function declineOrDeferSessionForUser(opts: {
 
   return { ok: true, status: terminalStatus, language }
 }
+
+const abandonSchema = z.object({
+  reason: z.enum(['mistake', 'test', 'wrong_vehicle', 'customer_left', 'other']).optional(),
+  note: z.string().max(500).optional(),
+})
+
+export type AbandonSessionResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+/**
+ * User-initiated abandonment: closes an open session as 'deferred' without
+ * the outcome form / AI specificity validation / corpus promotion. Use when
+ * the tech started by mistake, it was a test, or the customer left without
+ * finishing. The session lands in the curator's "Incomplete" bucket.
+ *
+ * Distinct from declineOrDeferSessionForUser, which closes a session that
+ * the AI itself is gating (low confidence) and generates customer-facing
+ * language. This path generates no language and runs no AI.
+ */
+export async function abandonSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  body: unknown
+}): Promise<AbandonSessionResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const parsed = abandonSchema.safeParse(opts.body ?? {})
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  await setSessionTerminalStatus(opts.db, opts.sessionId, 'deferred')
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'close',
+    aiResponse: {
+      abandon: {
+        reason: parsed.data.reason ?? 'mistake',
+        ...(parsed.data.note ? { note: parsed.data.note } : {}),
+      },
+    },
+  })
+
+  return { ok: true }
+}

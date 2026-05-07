@@ -75,6 +75,10 @@ export const sessionEvents = pgTable('session_events', {
     nextNodeId?: string
     treeUpdate?: unknown
     requestedFollowUp?: string
+    abandon?: {
+      reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
+      note?: string
+    }
     declineOrDefer?: {
       reason: 'decline' | 'defer'
       gap: string

@@ -11,6 +11,7 @@ import {
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
+import { AbandonButton } from './abandon-button'
 
 export function ActiveSession({ session }: { session: Session }) {
   const active = getActiveNode(session.treeState.nodes)
@@ -153,6 +154,17 @@ export function ActiveSession({ session }: { session: Session }) {
           >
             Close case
           </Link>
+          <p
+            style={{
+              fontFamily: 'var(--vt-font-serif)',
+              fontSize: 13,
+              color: 'var(--vt-fg-3)',
+              margin: '14px 0 8px',
+            }}
+          >
+            Started by mistake or testing? Mark it incomplete instead — no diagnosis required.
+          </p>
+          <AbandonButton sessionId={session.id} />
         </Module>
       </div>
       <CaptureBar />
