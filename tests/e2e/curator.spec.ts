@@ -20,16 +20,16 @@ test.describe('curator console (signed in as owner/curator)', () => {
     await page.goto('/curator/')
     await expect(page).toHaveURL(/\/curator\/drift$/)
     // Either the populated h1 or the empty-state marker. Scoped to <main> so
-    // the sidebar's "Today's recommendations" link doesn't satisfy the match.
+    // the sidebar's "Needs review" link doesn't satisfy the match.
     await expect(
-      page.locator('main').getByText(/Today's recommendations|Queue empty\./),
+      page.locator('main').getByText(/Needs review|Nothing to review\./),
     ).toBeVisible()
   })
 
   test('drift queue (Screen 1) renders', async ({ page }) => {
     await page.goto('/curator/drift')
     await expect(
-      page.locator('main').getByText(/Today's recommendations|Queue empty\./),
+      page.locator('main').getByText(/Needs review|Nothing to review\./),
     ).toBeVisible()
   })
 
@@ -46,7 +46,7 @@ test.describe('curator console (signed in as owner/curator)', () => {
   test('calibration dashboard (Screen 4) renders', async ({ page }) => {
     await page.goto('/curator/calibration')
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-      'Calibration thresholds',
+      'Calibrator',
     )
   })
 
@@ -61,20 +61,20 @@ test.describe('curator console (signed in as owner/curator)', () => {
   test('deferred queue (Screen 6) renders', async ({ page }) => {
     await page.goto('/curator/deferred')
     await expect(
-      page.locator('main').getByText(/Deferred cases|No deferred cases\./),
+      page.locator('main').getByText(/Incomplete|No incomplete cases\./),
     ).toBeVisible()
   })
 
   test('novel-pattern queue (Screen 7) renders', async ({ page }) => {
     await page.goto('/curator/novel')
     await expect(
-      page.locator('main').getByText(/Novel patterns|No novel patterns to review\./),
+      page.locator('main').getByText(/New problems|No new problems to review\./),
     ).toBeVisible()
   })
 
   test('corpus list (Screen 9) renders', async ({ page }) => {
     await page.goto('/curator/corpus')
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Corpus entries')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Solved cases')
   })
 
   test('renders at a typical laptop viewport (1024x768) without the desktop-only gate', async ({ page }) => {
@@ -90,5 +90,18 @@ test.describe('curator console (signed in as owner/curator)', () => {
     await expect(
       page.getByRole('heading', { name: /curator tools need a wider window/i }),
     ).toBeHidden()
+  })
+
+  test('sidebar shows shop-floor labels (not engineer-speak)', async ({ page }) => {
+    // Regression: prior labels were jargon ("Today's recommendations",
+    // "Deferred cases", "Novel patterns", "Corpus", "Calibration thresholds").
+    // The 5 labels below are the master-tech-readable replacements.
+    await page.goto('/curator/drift')
+    const sidebar = page.getByRole('navigation', { name: /curator console/i })
+    await expect(sidebar.getByRole('link', { name: 'Needs review' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Incomplete' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'New problems' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Solved cases' })).toBeVisible()
+    await expect(sidebar.getByRole('link', { name: 'Calibrator' })).toBeVisible()
   })
 })

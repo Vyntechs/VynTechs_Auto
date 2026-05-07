@@ -12,7 +12,7 @@ export default async function CorpusListPage({
   return (
     <div className="vt-corpus-list-page">
       <header className="vt-corpus-list-header">
-        <h1>Corpus entries</h1>
+        <h1>Solved cases</h1>
         <span className="vt-corpus-list-count">{rows.length}{curatorOnly ? ' curator-authored' : ' total'}</span>
         <div className="vt-corpus-list-actions">
           <Link href="/curator/corpus/new" className="vt-corpus-list-new">+ New entry</Link>

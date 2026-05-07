@@ -31,10 +31,10 @@ export default async function CalibrationPage({
   return (
     <div className="vt-calibration-page">
       <header className="vt-calibration-header">
-        <h1>Calibration thresholds</h1>
+        <h1>Calibrator</h1>
         {pending > 0 && (
           <Link href="/curator/drift" className="vt-calibration-pending-link">
-            {pending} pending recommendation{pending > 1 ? 's' : ''} →
+            {pending} needing review →
           </Link>
         )}
       </header>
