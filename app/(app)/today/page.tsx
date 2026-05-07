@@ -4,6 +4,7 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { listSessionsForShop } from '@/lib/db/queries'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
+import { canCurate } from '@/lib/curator/can-curate'
 import { TodayHome } from '@/components/screens/today-home'
 
 export default async function TodayPage() {
@@ -32,6 +33,7 @@ export default async function TodayPage() {
       inProgress={inProgress}
       closedToday={closedToday}
       dueFollowUps={dueFollowUps}
+      canCurate={canCurate(ctx.profile.role)}
     />
   )
 }
