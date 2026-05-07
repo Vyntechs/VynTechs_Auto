@@ -226,7 +226,7 @@ export async function closeSessionForUser(opts: {
   userId: string
   sessionId: string
   body: unknown
-  validateSpecificity: (text: string) => Promise<ValidatorResult>
+  validateSpecificity: (input: { rootCause: string; notes?: string }) => Promise<ValidatorResult>
   /** Phase K corpus promotion. Optional — when omitted, no promotion runs.
    *  Failures are non-fatal; the session still closes successfully. */
   promoteToCorpus?: PromoteToCorpusFn
@@ -251,7 +251,10 @@ export async function closeSessionForUser(opts: {
     return { ok: false, status: 400, error: parsed.error.message }
   }
 
-  const validation = await opts.validateSpecificity(parsed.data.rootCause)
+  const validation = await opts.validateSpecificity({
+    rootCause: parsed.data.rootCause,
+    notes: parsed.data.notes,
+  })
   if (!validation.ok) {
     return {
       ok: false,

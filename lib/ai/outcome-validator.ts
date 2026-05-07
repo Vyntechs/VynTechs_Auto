@@ -7,14 +7,27 @@ export type ValidatorResult = {
   suggested?: string
 }
 
-export async function validateSpecificity(text: string): Promise<ValidatorResult> {
+export type ValidatorInput = {
+  rootCause: string
+  notes?: string
+}
+
+export async function validateSpecificity(
+  input: ValidatorInput,
+): Promise<ValidatorResult> {
+  const userMessage = `Root cause:
+${input.rootCause}
+
+Notes for next time:
+${input.notes && input.notes.trim() ? input.notes.trim() : '(none)'}
+
+Return JSON only.`
+
   const res = await anthropic.messages.create({
     model: MODEL,
     max_tokens: 256,
     system: cachedSystem(OUTCOME_VALIDATOR_SYSTEM),
-    messages: [
-      { role: 'user', content: `Root cause text:\n${text}\n\nReturn JSON only.` },
-    ],
+    messages: [{ role: 'user', content: userMessage }],
   })
   const block = res.content.find((b) => b.type === 'text')
   if (!block || block.type !== 'text') throw new Error('no text block')
