@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
   pgTable,
   uuid,
@@ -61,6 +61,9 @@ export const sessions = pgTable('sessions', {
   outcome: jsonb('outcome').$type<OutcomePayload>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  curatorNote: text('curator_note'),
+  curatorOverrideAction: text('curator_override_action'),
+  maxCorpusSimilarity: real('max_corpus_similarity'),
 })
 
 export const sessionEvents = pgTable('session_events', {
@@ -316,7 +319,30 @@ export const driftAlerts = pgTable('drift_alerts', {
   comebackRate: real('comeback_rate').notNull(),
   sampleSize: integer('sample_size').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+  // Phase P lifecycle fields:
+  decision: text('decision', { enum: ['applied', 'dismissed'] }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedByUserId: uuid('decided_by_user_id').references(() => profiles.id),
+  decisionNote: text('decision_note'),
+}, (t) => ({
+  pendingIdx: index('drift_alerts_pending_idx').on(t.createdAt.desc()).where(sql`decision IS NULL`),
+}))
 
 export type DriftAlert = typeof driftAlerts.$inferSelect
 export type NewDriftAlert = typeof driftAlerts.$inferInsert
+
+export const novelPatternQueue = pgTable('novel_pattern_queue', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  maxRetrievalSimilarity: real('max_retrieval_similarity').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewedDecision: text('reviewed_decision', { enum: ['corpus', 'dismissed'] }),
+  reviewedByUserId: uuid('reviewed_by_user_id').references(() => profiles.id),
+  reviewedNote: text('reviewed_note'),
+}, (t) => ({
+  pendingIdx: index('novel_pattern_queue_pending_idx').on(t.createdAt.desc()).where(sql`reviewed_at IS NULL`),
+}))
+
+export type NovelPatternQueueRow = typeof novelPatternQueue.$inferSelect
+export type NewNovelPatternQueueRow = typeof novelPatternQueue.$inferInsert

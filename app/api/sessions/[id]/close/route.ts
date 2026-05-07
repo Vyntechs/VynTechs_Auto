@@ -5,6 +5,8 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { validateSpecificity } from '@/lib/ai/outcome-validator'
 import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
 import { scheduleFollowUps } from '@/lib/comeback/schedule'
+import { enqueueIfNovelPattern } from '@/lib/curator/novel-trigger'
+import { getSessionById } from '@/lib/db/queries'
 
 export async function POST(
   req: Request,
@@ -21,6 +23,9 @@ export async function POST(
 
   const body = await req.json().catch(() => null)
 
+  const session = await getSessionById(db, id)
+  const maxCorpusSimilarity = session?.maxCorpusSimilarity ?? 0
+
   const result = await closeSessionForUser({
     db,
     userId: user.id,
@@ -29,6 +34,8 @@ export async function POST(
     validateSpecificity,
     promoteToCorpus: promoteSessionToCorpus,
     scheduleFollowUps,
+    enqueueNovelPattern: enqueueIfNovelPattern,
+    maxCorpusSimilarity,
   })
 
   if (!result.ok) {

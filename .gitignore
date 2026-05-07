@@ -9,6 +9,9 @@ node_modules/
 .next/
 next-env.d.ts
 
+# turbo build cache
+.turbo/
+
 # typescript incremental build cache
 tsconfig.tsbuildinfo
 
@@ -21,6 +24,7 @@ tsconfig.tsbuildinfo
 playwright-report/
 test-results/
 coverage/
+tests/e2e/.auth/
 
 # OS
 .DS_Store
