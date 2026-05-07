@@ -6,19 +6,24 @@ import type { Session } from './db/schema'
  * Next.js or mocking `redirect()`.
  *
  * Order matters:
- *   1. No tree yet → loading screen
- *   2. Gate blocked → decline page
- *   3. Tree done + session still open → outcome capture (the dead-end fix)
- *   4. Otherwise → active session
+ *   1. Closed session → read-only summary (no more form-loop)
+ *   2. No tree yet → loading screen
+ *   3. Gate blocked → decline page
+ *   4. Tree done + session still open → outcome capture (the dead-end fix)
+ *   5. Otherwise → active session
  */
 export type SessionRoute =
   | { kind: 'tree-generating' }
   | { kind: 'redirect'; to: string }
   | { kind: 'active-session' }
+  | { kind: 'closed-summary' }
 
 export function routeForSession(
   session: Pick<Session, 'id' | 'status' | 'treeState'>,
 ): SessionRoute {
+  if (session.status === 'closed') {
+    return { kind: 'closed-summary' }
+  }
   if (!session.treeState || session.treeState.nodes.length === 0) {
     return { kind: 'tree-generating' }
   }

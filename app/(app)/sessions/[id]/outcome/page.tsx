@@ -20,6 +20,15 @@ export default async function OutcomePage({
   if (!result.ok) notFound()
 
   const { session } = result
+
+  // Closed sessions: bounce back to the read-only summary on the detail page.
+  // Prevents techs from re-submitting the close-case form after the case is
+  // already closed (server returns 400 'session is not open' but the form
+  // looks alive).
+  if (session.status === 'closed') {
+    redirect(`/sessions/${session.id}`)
+  }
+
   const elapsed = formatElapsed(new Date(session.createdAt))
 
   return (
