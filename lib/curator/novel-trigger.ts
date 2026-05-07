@@ -20,9 +20,9 @@ function getThreshold(): number {
  * Enqueues a session in novel_pattern_queue when its max corpus retrieval
  * similarity score is below the configured threshold.
  *
- * Idempotent: if a row for the session already exists, the INSERT is skipped
- * (do nothing on conflict). This prevents duplicate queue entries if the
- * trigger fires more than once for the same session.
+ * Idempotent for sequential calls (SELECT-then-INSERT). Concurrent
+ * same-session closes could double-insert; in practice impossible since
+ * sessions close once.
  *
  * @param db - App database connection
  * @param sessionId - The session to evaluate
