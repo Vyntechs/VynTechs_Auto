@@ -18,6 +18,7 @@ type Props = {
   inProgress: Session[]
   closedToday: Session[]
   dueFollowUps?: DueFollowUp[]
+  canCurate?: boolean
 }
 
 export function TodayHome({
@@ -26,6 +27,7 @@ export function TodayHome({
   inProgress,
   closedToday,
   dueFollowUps = [],
+  canCurate = false,
 }: Props) {
   const meta = bay ? (
     <span>
@@ -41,22 +43,44 @@ export function TodayHome({
         title="Today"
         meta={meta}
         right={
-          <Link
-            href="/sessions/new"
-            aria-label="New diagnosis"
-            className="btn btn-primary"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              fontSize: 13,
-              textDecoration: 'none',
-            }}
-          >
-            <Plus size={14} weight="bold" aria-hidden="true" />
-            New diagnosis
-          </Link>
+          <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+            {canCurate && (
+              <Link
+                href="/curator"
+                aria-label="Curator console"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  textDecoration: 'none',
+                  color: 'var(--vt-fg-2)',
+                  fontFamily: 'var(--vt-font-mono)',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Curator console →
+              </Link>
+            )}
+            <Link
+              href="/sessions/new"
+              aria-label="New diagnosis"
+              className="btn btn-primary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                fontSize: 13,
+                textDecoration: 'none',
+              }}
+            >
+              <Plus size={14} weight="bold" aria-hidden="true" />
+              New diagnosis
+            </Link>
+          </div>
         }
       />
       <div

@@ -65,4 +65,10 @@ describe('triggerCalibrationAnalysis', () => {
       })
     }
   })
+
+  it('runs the analysis when the user is an owner (founder is both)', async () => {
+    const owner = await seedProfile(db, 'owner')
+    const result = await triggerCalibrationAnalysis({ db, userId: owner.userId })
+    expect(result.ok).toBe(true)
+  })
 })

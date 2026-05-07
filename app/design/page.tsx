@@ -44,6 +44,9 @@ const fixtureSession: Session = {
     currentNodeId: 'n4',
     message: 'Smoke test the cold-side intercooler.',
   },
+  curatorNote: null,
+  curatorOverrideAction: null,
+  maxCorpusSimilarity: null,
 }
 
 const closedSession: Session = {

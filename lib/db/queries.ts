@@ -129,6 +129,23 @@ export async function updateSessionTreeState(
   await db.update(sessions).set({ treeState }).where(eq(sessions.id, sessionId))
 }
 
+/**
+ * Persists the max corpus similarity score for a session using a GREATEST
+ * pattern so concurrent writes (unlikely but possible) are safe. Only updates
+ * when the new value exceeds the currently stored value (NULL treated as 0).
+ */
+export async function updateSessionMaxCorpusSimilarity(
+  db: AppDb,
+  sessionId: string,
+  newMax: number,
+): Promise<void> {
+  await db.execute(
+    sql`UPDATE sessions
+        SET max_corpus_similarity = GREATEST(COALESCE(max_corpus_similarity, 0), ${newMax})
+        WHERE id = ${sessionId}`,
+  )
+}
+
 export async function getThreshold(
   db: AppDb,
   input: {

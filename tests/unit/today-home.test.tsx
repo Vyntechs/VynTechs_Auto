@@ -121,4 +121,29 @@ describe('TodayHome', () => {
     expect(screen.getByText(/In progress/i)).toBeInTheDocument()
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
   })
+
+  it('renders a Curator console link in the header when canCurate is true', () => {
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        canCurate
+      />,
+    )
+    const link = screen.getByRole('link', { name: /curator/i })
+    expect(link).toHaveAttribute('href', '/curator')
+  })
+
+  it('does NOT render a Curator console link when canCurate is false', () => {
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        canCurate={false}
+      />,
+    )
+    expect(screen.queryByRole('link', { name: /curator/i })).toBeNull()
+  })
 })
