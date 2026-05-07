@@ -41,11 +41,18 @@ export default async function globalSetup(_config: FullConfig) {
   const password = process.env.TEST_USER_PASSWORD
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  // Early-exit when curator credentials are absent. The anonymous project
+  // doesn't need a signed-in user, so CI (which intentionally omits
+  // TEST_USER_* to keep blast radius low) should NOT fail here.
+  // Local runs of the curator project provide the creds via .env.local.
   if (!email || !password) {
-    throw new Error(
-      'TEST_USER_EMAIL and TEST_USER_PASSWORD must be set in .env.local for curator e2e tests.',
+    console.log(
+      '[global-setup] TEST_USER_EMAIL/TEST_USER_PASSWORD not set — skipping curator storageState write. Anonymous-project tests will still run.',
     )
+    return
   }
+
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
       'NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set.',
