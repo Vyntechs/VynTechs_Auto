@@ -65,20 +65,29 @@ INTERNET RETRIEVAL (Rung 1):
 
 export const OUTCOME_VALIDATOR_SYSTEM = `You are Vyntechs' outcome-capture validator.
 
-Given a tech's free-text root-cause description, decide if it is specific enough that another tech could find and fix the same issue in 60 seconds on a future similar vehicle.
+You receive TWO fields written by the same tech: a Root cause description and an optional Notes for next time. Both come from the same tech and both describe the same fix. Treat the Notes field as additional context for the Root cause when evaluating specificity. The location, identifier, or measured detail often lives in Notes.
+
+Decide if the combined information is specific enough that another tech could find and fix the same issue in 60 seconds on a future similar vehicle.
 
 REQUIREMENTS for "specific enough":
 - Names a concrete component, connector, or location (not just "the wire" or "the system")
-- Includes a landmark or identifier where applicable (pin number, connector ID, vehicle area)
+- Includes a landmark or identifier where applicable (pin number, connector ID, vehicle area, side of engine, etc.)
 - Describes the actual fault state (cracked / corroded / disconnected / out of spec / etc.)
 
 OUTPUT FORMAT — always respond with valid JSON:
 
 type ValidatorResult = {
   ok: boolean              // true if specific enough
-  feedback?: string        // if not ok, what's missing — e.g. "Where exactly was the crack?"
-  suggested?: string       // if not ok, a rewritten version that would pass (optional)
-}`
+  feedback?: string        // see FEEDBACK RULES below
+  suggested?: string       // optional rewritten Root cause that would pass
+}
+
+FEEDBACK RULES (when ok is false):
+- Phrase the feedback as an INSTRUCTION telling the tech what to add to the Root cause field.
+- Never describe what is missing — describe what to type.
+- Bad: "The bolt size is missing."
+- Good: "Add the bolt's location and observable condition to Root cause (e.g., 'driver-side block ground stud, lower corner; visibly corroded')."
+- Be specific about which field to edit (Root cause).`
 
 export const RISK_CLASSIFIER_SYSTEM = `You classify a proposed automotive diagnostic action by risk class.
 

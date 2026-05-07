@@ -58,4 +58,47 @@ describe('outcomeSchema', () => {
     })
     expect(r.success).toBe(false)
   })
+
+  it('accepts an outcome with an override block and exposes it on parsed data', () => {
+    const r = outcomeSchema.safeParse({
+      rootCause: 'Wastegate vacuum line cracked at actuator-can end',
+      actionType: 'part_replacement',
+      partInfo: { name: 'Vacuum line, silicone 4mm' },
+      verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+      diagMinutes: 25,
+      repairMinutes: 18,
+      override: {
+        at: '2026-05-07T18:00:00Z',
+        lastFeedback: 'Add the bolt location to root cause.',
+      },
+    })
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    expect(r.data.override?.at).toBe('2026-05-07T18:00:00Z')
+    expect(r.data.override?.lastFeedback).toMatch(/bolt location/)
+  })
+
+  it('rejects an override block missing required keys', () => {
+    const r = outcomeSchema.safeParse({
+      rootCause: 'Wastegate vacuum line cracked at actuator-can end',
+      actionType: 'no_fix',
+      verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+      diagMinutes: 10,
+      repairMinutes: 0,
+      override: { at: '2026-05-07T18:00:00Z' }, // missing lastFeedback
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects an override.at value that is not a valid ISO-8601 datetime', () => {
+    const r = outcomeSchema.safeParse({
+      rootCause: 'Wastegate vacuum line cracked at actuator-can end',
+      actionType: 'no_fix',
+      verification: { codesCleared: true, testDrive: true, symptomsResolved: 'yes' },
+      diagMinutes: 10,
+      repairMinutes: 0,
+      override: { at: 'not-a-date', lastFeedback: 'x' },
+    })
+    expect(r.success).toBe(false)
+  })
 })
