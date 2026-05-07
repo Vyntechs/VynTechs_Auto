@@ -1,9 +1,7 @@
-import Link from 'next/link'
 import {
   VehicleStrip,
   Module,
   Pill,
-  Risk,
   ConfidenceBlock,
   TreeRail,
   CaptureBar,
@@ -12,25 +10,12 @@ import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@
 import type { Session } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
 import { AbandonButton } from './abandon-button'
-import { DiagnosisProposedReview } from './diagnosis-proposed-review'
+import { LockDiagnosisButton } from './lock-diagnosis-button'
 
-export function ActiveSession({ session }: { session: Session }) {
-  const phase = session.treeState.phase ?? 'diagnosing'
-  const done = session.treeState.done === true
-
-  // M2: when done && phase=diagnosing, route to the review screen.
-  // (M3 will add: when phase=repairing, route to RepairPhaseView.)
-  if (phase === 'diagnosing' && done) {
-    return <DiagnosisProposedReview session={session} />
-  }
-
-  // Diagnosing-active UI (the !done path) — unchanged from d70a357 / 964c377.
+export function DiagnosisProposedReview({ session }: { session: Session }) {
   const active = getActiveNode(session.treeState.nodes)
   const steps = nodesToSteps(session.treeState.nodes)
   const elapsed = formatElapsed(new Date(session.createdAt))
-  const stepNumber = active
-    ? String(session.treeState.nodes.indexOf(active) + 1).padStart(2, '0')
-    : '—'
   const proposedAction = session.treeState.proposedAction
 
   return (
@@ -51,74 +36,68 @@ export function ActiveSession({ session }: { session: Session }) {
         }}
       >
         <Module
-          num={stepNumber}
-          label="Active step"
-          status={<Pill kind="active">In progress</Pill>}
+          num="✓"
+          label="Diagnosis proposed"
+          status={<Pill kind="active">Review & lock</Pill>}
         >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 8,
-            }}
-          >
-            <Risk level="low" />
-            <span
-              style={{
-                fontFamily: 'var(--vt-font-mono)',
-                fontSize: 10,
-                color: 'var(--vt-fg-3)',
-              }}
-            >
-              req. ≥ 70 %
-            </span>
-          </div>
-          <h2
-            style={{
-              fontFamily: 'var(--vt-font-serif)',
-              fontWeight: 400,
-              fontSize: 22,
-              lineHeight: 1.2,
-              letterSpacing: '-0.02em',
-              margin: '0 0 10px',
-            }}
-          >
-            {active?.label ?? 'No active step.'}
-          </h2>
-          {active?.rationale && (
-            <p
+          {session.treeState.rootCauseSummary && (
+            <h2
               style={{
                 fontFamily: 'var(--vt-font-serif)',
-                fontStyle: 'italic',
-                fontSize: 14,
-                color: 'var(--vt-fg-2)',
-                lineHeight: 1.5,
-                margin: '0 0 14px',
+                fontWeight: 400,
+                fontSize: 22,
+                lineHeight: 1.25,
+                letterSpacing: '-0.02em',
+                margin: '0 0 12px',
               }}
             >
-              {active.rationale}
-            </p>
+              {session.treeState.rootCauseSummary}
+            </h2>
           )}
-          {!active?.rationale && session.treeState.message && (
+          {session.treeState.message && (
             <p
               style={{
                 fontFamily: 'var(--vt-font-serif)',
                 fontStyle: 'italic',
                 fontSize: 14,
                 color: 'var(--vt-fg-2)',
-                lineHeight: 1.5,
+                lineHeight: 1.55,
                 margin: '0 0 14px',
               }}
             >
               {session.treeState.message}
             </p>
           )}
-          <ActiveStepForm
-            sessionId={session.id}
-            nodeId={session.treeState.currentNodeId}
-            requestedArtifact={session.treeState.requestedArtifact}
-          />
+          {(proposedAction?.description || active?.label) && (
+            <div style={{ marginTop: 12 }}>
+              <span className="eyebrow">Recommended repair</span>
+              <p
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  margin: '6px 0 0',
+                }}
+              >
+                {proposedAction?.description ?? active?.label}
+              </p>
+            </div>
+          )}
+          {proposedAction?.expectedSignal && (
+            <div style={{ marginTop: 14 }}>
+              <span className="eyebrow">Expected signal post-repair</span>
+              <p
+                style={{
+                  fontFamily: 'var(--vt-font-serif)',
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  margin: '6px 0 0',
+                }}
+              >
+                {proposedAction.expectedSignal}
+              </p>
+            </div>
+          )}
         </Module>
 
         {proposedAction?.confidence !== undefined && (
@@ -134,15 +113,7 @@ export function ActiveSession({ session }: { session: Session }) {
           </Module>
         )}
 
-        <Module
-          num="—"
-          label="Plan"
-          status={<span className="eyebrow">{steps.length} steps</span>}
-        >
-          <TreeRail steps={steps} />
-        </Module>
-
-        <Module num="—" label="Close case">
+        <Module num="—" label="Push back?">
           <p
             style={{
               fontFamily: 'var(--vt-font-serif)',
@@ -153,19 +124,37 @@ export function ActiveSession({ session }: { session: Session }) {
               margin: '0 0 12px',
             }}
           >
-            Done diagnosing? Capture what fixed it and close the case.
+            Disagree with the diagnosis? Submit another observation and the AI will revise.
           </p>
-          <Link
-            href={`/sessions/${session.id}/outcome`}
-            className="btn btn-primary"
+          <ActiveStepForm
+            sessionId={session.id}
+            nodeId={session.treeState.currentNodeId}
+            requestedArtifact={session.treeState.requestedArtifact}
+          />
+        </Module>
+
+        <Module
+          num="—"
+          label="Plan"
+          status={<span className="eyebrow">{steps.length} steps</span>}
+        >
+          <TreeRail steps={steps} />
+        </Module>
+
+        <Module num="—" label="Lock in & start repair">
+          <p
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              textDecoration: 'none',
+              fontFamily: 'var(--vt-font-serif)',
+              fontStyle: 'italic',
+              fontSize: 14,
+              color: 'var(--vt-fg-2)',
+              lineHeight: 1.5,
+              margin: '0 0 12px',
             }}
           >
-            Close case
-          </Link>
+            When you've reviewed the diagnosis and you're ready to do the repair, lock it in. The AI will switch to repair-coach mode — it can answer questions during the repair but won't revise the diagnosis.
+          </p>
+          <LockDiagnosisButton sessionId={session.id} />
           <p
             style={{
               fontFamily: 'var(--vt-font-serif)',
