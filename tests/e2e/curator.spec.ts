@@ -76,4 +76,19 @@ test.describe('curator console (signed in as owner/curator)', () => {
     await page.goto('/curator/corpus')
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Corpus entries')
   })
+
+  test('renders at a typical laptop viewport (1024x768) without the desktop-only gate', async ({ page }) => {
+    // Regression: the original threshold was 1280px which incorrectly hid
+    // the curator UI on a normal MacBook Safari window that wasn't fully
+    // maximized. Threshold lowered to 960px so reasonable desktop windows
+    // show the real UI.
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.goto('/curator/drift')
+    await expect(
+      page.getByRole('navigation', { name: /curator console/i }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('heading', { name: /curator tools need a wider window/i }),
+    ).toBeHidden()
+  })
 })
