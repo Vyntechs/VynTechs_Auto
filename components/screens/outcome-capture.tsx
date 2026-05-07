@@ -87,6 +87,8 @@ export function OutcomeCapture({
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [attemptCount, setAttemptCount] = useState(0)
+  const [lastFeedback, setLastFeedback] = useState<string | null>(null)
 
   const requiresPart = actionType === 'part_replacement'
   const previewMode = !sessionId
@@ -100,7 +102,8 @@ export function OutcomeCapture({
     if (!sessionId) return
     setBusy(true)
     setError(null)
-    setFeedback(null)
+
+    const isOverride = attemptCount >= 1 && lastFeedback !== null
 
     const payload: Record<string, unknown> = {
       rootCause: rootCause.trim(),
@@ -121,6 +124,14 @@ export function OutcomeCapture({
       }
     }
     if (notes.trim()) payload.notes = notes.trim()
+    if (isOverride) {
+      payload.override = {
+        at: new Date().toISOString(),
+        lastFeedback: lastFeedback ?? '',
+      }
+    } else {
+      setFeedback(null)
+    }
 
     const res = await fetch(`/api/sessions/${sessionId}/close`, {
       method: 'POST',
@@ -131,7 +142,10 @@ export function OutcomeCapture({
 
     if (res.status === 422) {
       const data = await res.json().catch(() => ({}))
-      setFeedback(data.feedback ?? 'Be more specific.')
+      const fb = data.feedback ?? 'Be more specific.'
+      setFeedback(fb)
+      setLastFeedback(fb)
+      setAttemptCount((n) => n + 1)
       return
     }
     if (!res.ok) {
@@ -293,7 +307,11 @@ export function OutcomeCapture({
           disabled={!canSubmit}
           onClick={handleSubmit}
         >
-          {busy ? 'Validating…' : 'Submit & close case'}
+          {busy
+            ? 'Validating…'
+            : attemptCount >= 1
+              ? 'Submit & close case (override AI)'
+              : 'Submit & close case'}
         </button>
       </div>
     </div>
