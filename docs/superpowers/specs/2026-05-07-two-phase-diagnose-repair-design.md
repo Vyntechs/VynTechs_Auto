@@ -235,7 +235,7 @@ Three rendered components:
 
 #### Component 1: existing diagnosing-active UI
 
-No change from `d70a357`. Active step Module, ActiveStepForm, etc.
+The `!done` branch from `d70a357` is unchanged: Active step Module, ActiveStepForm, Confidence (if set), Plan tree, Close case Module. The `done=true` branch added in `d70a357` is REMOVED — its content moves into Component 2 (DiagnosisProposedReview) and Component 3 (RepairPhaseView).
 
 #### Component 2: `DiagnosisProposedReview` (new)
 
@@ -243,7 +243,7 @@ Replaces the current done-state UI in `active-session.tsx` (the diagnosis-comple
 
 Layout:
 - **Diagnosis Module** — rootCauseSummary headline, treeState.message paragraph, recommended repair, expected signal (same content as today's done-state Module).
-- **Push back? Module** — the existing ActiveStepForm with copy: "Disagree with the diagnosis? Submit another observation and the AI will revise."
+- **Push back? Module** — the existing ActiveStepForm (submits to `POST /api/sessions/[id]/advance`, which re-runs the tree-engine prompt; if the new observation invalidates the diagnosis, the AI may unset `done` and the page re-renders back to Component 1). Copy: "Disagree with the diagnosis? Submit another observation and the AI will revise."
 - **Confidence Module** — existing, if proposedAction.confidence is set.
 - **Plan Module** — existing tree rail.
 - **Lock in & repair Module** — copy: "When you've reviewed the diagnosis and you're ready to do the repair, lock it in. AI will switch to repair-coach mode." Primary button: "Lock in diagnosis & start repair →" (calls `/lock-diagnosis`). Sub-text: "Started by mistake or testing?" → AbandonButton (existing).
@@ -251,14 +251,14 @@ Layout:
 #### Component 3: `RepairPhaseView` (new)
 
 Layout:
-- **Locked diagnosis Module** — sticky/pinned visual treatment. Shows rootCauseSummary, proposedAction.description, proposedAction.expectedSignal, plus a small "Diagnosis locked at HH:MM" timestamp from `diagnosisLockedAt`.
+- **Locked diagnosis Module** — visually distinguished (border treatment, background tint, or eyebrow label like "DIAGNOSIS LOCKED"); does NOT use CSS `position: sticky` for v1. Shows rootCauseSummary, proposedAction.description, proposedAction.expectedSignal, plus a small "Diagnosis locked at HH:MM" timestamp from `diagnosisLockedAt`.
 - **Conversation Module (`RepairConversation`)** — renders session_events filtered to types `['repair_observation', 'repair_guidance']` in chronological order. Chat-bubble layout with role labels (Tech / AI).
 - **Ask Module** — textarea for the next observation. Submit button calls `/repair-observation`. While in flight: spinner state. On success: append the new pair (observation + guidance) to the thread. On AI failure: show inline error with retry, observation already persisted.
 - **Close case Module** — copy: "Repair done? Verified the fix? Close the case to record the outcome." Primary button → link to `/sessions/[id]/outcome` (existing OutcomeCapture). AbandonButton (existing) as fallback.
 
 ## Migration / legacy handling
 
-Sessions created before this ships have `treeState.phase === undefined`. Routing treats undefined as `'diagnosing'`. They can still:
+Sessions created before this ships have `treeState.phase === undefined`. The `active-session.tsx` mode selector treats `undefined` as `'diagnosing'` via `?? 'diagnosing'` (session-routing.ts itself is unchanged). They can still:
 - Continue diagnosing (existing flow)
 - Reach `done=true` (existing behavior)
 - Lock in to repair phase (new button on the review screen)
@@ -370,4 +370,18 @@ Add to `docs/testing/manual-checklist.md`:
 | `tests/e2e/sessions.spec.ts` | Add repair-phase smoke + observation-submit smoke | ~40 added |
 | `docs/testing/manual-checklist.md` | Add the lock-in + repair-phase steps | ~10 added |
 
-Approximate total: **~1300-1400 net lines added** across 14 files (mostly new files; existing-file edits are small).
+Approximate total: **~1300-1400 net lines added** across ~18 files (mostly new). Existing-file edits are small.
+
+## Milestone breakdown
+
+The 1300-line scope ships in four sequential milestones, each independently testable on `preview-curator`:
+
+- **M1 — Backend.** Schema extensions on `treeState` (`phase`, `diagnosisLockedAt`) + new `eventType` values (`repair_observation`, `repair_guidance`) + `aiResponse` extension (`repairGuidance`). Add `lockDiagnosisForUser` and `submitRepairObservationForUser` in `lib/sessions.ts`. New `lib/ai/repair-guidance.ts` with prompt + parser. Both new route handlers (`/lock-diagnosis`, `/repair-observation`). Unit tests for all new functions. **No user-visible changes** at this milestone — legacy flow still works because no UI references the new fields yet.
+
+- **M2 — Diagnosis-proposed review screen.** Extract `DiagnosisProposedReview` from current `active-session.tsx` done-state. Add `LockDiagnosisButton` client component wired to `/lock-diagnosis`. Update `active-session.tsx` mode selector to render the new component when `phase=undefined && done=true`. Component test for phase-mode rendering. After M2: tech can review + lock in. The `repairing` phase still routes through fallthrough (Component 1) since RepairPhaseView doesn't exist yet — temporary placeholder OK.
+
+- **M3 — Repair phase chat.** Build `RepairPhaseView`, `RepairConversation` (chat thread renderer), `RepairAskForm` (textarea + submit + retry on AI failure). Wire `active-session.tsx` to render `RepairPhaseView` when `phase='repairing'`. After M3: full end-to-end flow works.
+
+- **M4 — Validation + docs.** Verify Brandon's stuck Ram session `4be8e39b` on preview (refresh → review → lock → ask follow-up → close OR mark incomplete). Add the lock-in + repair-phase steps to `docs/testing/manual-checklist.md`. Add E2E smoke tests for the repair-phase to `tests/e2e/sessions.spec.ts`.
+
+Each milestone is its own commit (or stack) on `preview-curator` for incremental review. M1 is the highest risk (schema + AI prompt); M2/M3 are pure UI work once M1 lands.
