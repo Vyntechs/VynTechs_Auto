@@ -1,6 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
 import { STORAGE_STATE_PATH } from './tests/e2e/global-setup'
 
+// PREVIEW_URL=https://<deploy>.vercel.app pnpm test:e2e
+// runs the suite against a remote preview deploy instead of local dev.
+// When set, the config skips spinning up `pnpm dev`.
+const previewUrl = process.env.PREVIEW_URL?.replace(/\/$/, '')
+const baseURL = previewUrl || 'http://localhost:3000'
+
 export default defineConfig({
   testDir: './tests/e2e',
   globalSetup: './tests/e2e/global-setup.ts',
@@ -10,7 +16,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL,
     trace: 'on-first-retry',
   },
   projects: [
@@ -28,10 +34,12 @@ export default defineConfig({
       testMatch: /(curator|sessions)\.spec\.ts/,
     },
   ],
-  webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: previewUrl
+    ? undefined
+    : {
+        command: 'pnpm dev',
+        url: 'http://localhost:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
 })

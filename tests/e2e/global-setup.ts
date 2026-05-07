@@ -63,16 +63,24 @@ export default async function globalSetup(_config: FullConfig) {
   const cookieValue =
     'base64-' + Buffer.from(JSON.stringify(data.session)).toString('base64')
 
+  // Cookie domain + secure flag follow the target the suite will hit:
+  // localhost for local dev, the preview hostname over HTTPS otherwise.
+  const previewUrl = process.env.PREVIEW_URL?.replace(/\/$/, '')
+  const targetUrl = previewUrl || 'http://localhost:3000'
+  const targetParsed = new URL(targetUrl)
+  const cookieDomain = targetParsed.hostname
+  const cookieSecure = targetParsed.protocol === 'https:'
+
   const storageState = {
     cookies: [
       {
         name: `sb-${projectRef}-auth-token`,
         value: cookieValue,
-        domain: 'localhost',
+        domain: cookieDomain,
         path: '/',
         expires: data.session.expires_at ?? -1,
         httpOnly: false,
-        secure: false,
+        secure: cookieSecure,
         sameSite: 'Lax' as const,
       },
     ],
