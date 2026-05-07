@@ -52,8 +52,5 @@ export async function POST(req: Request) {
     parsed.data.input,
     parsed.data.fromQueueEntryId ? { fromQueueEntryId: parsed.data.fromQueueEntryId } : {},
   )
-  if (result.kind !== 'ok') {
-    return NextResponse.json({ error: result.reason }, { status: 400 })
-  }
   return NextResponse.json({ ok: true, id: result.id })
 }

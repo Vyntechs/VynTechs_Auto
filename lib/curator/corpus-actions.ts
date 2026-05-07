@@ -6,7 +6,10 @@ export type CuratorCorpusInput = {
   vehicleYear: number
   vehicleMake: string
   vehicleModel: string
-  vehicleEngine: string  // schema is nullable but the form requires it
+  // schema column is nullable, but new curator-authored entries are stricter:
+  // engine info is required for retrieval quality. Don't propagate this into the
+  // corpus_entries schema column itself — historical entries may legitimately lack it.
+  vehicleEngine: string
   symptomTags: string[]
   dtcs: string[]
   summary: string  // notNull text — the case narrative
@@ -22,7 +25,7 @@ export async function createCuratorCorpusEntry(
   curatorProfileId: string,
   input: CuratorCorpusInput,
   options: { fromQueueEntryId?: string } = {},
-): Promise<{ kind: 'ok'; id: string } | { kind: 'error'; reason: string }> {
+): Promise<{ kind: 'ok'; id: string }> {
   return db.transaction(async (tx) => {
     const [entry] = await tx.insert(corpusEntries).values({
       vehicleYear: input.vehicleYear,
