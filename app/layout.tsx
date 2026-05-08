@@ -25,6 +25,11 @@ export const metadata = {
   description: 'AI-led diagnostic assistant for automotive repair shops.',
 }
 
+export const viewport = {
+  themeColor: '#fdfaf4',
+  colorScheme: 'light',
+}
+
 export default function RootLayout({
   children,
 }: {
