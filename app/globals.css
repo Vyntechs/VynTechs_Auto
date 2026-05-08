@@ -22,6 +22,10 @@
 }
 
 :root {
+  /* Safari: opt out of dark-mode auto-tinting on the page chrome.
+     The bone canvas IS the design — never let the OS invert it. */
+  color-scheme: light;
+
   /* ===========================================================
      COLOR — RAW PALETTE (OKLCH for perceptual evenness)
      =========================================================== */
@@ -233,6 +237,10 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body { margin: 0; padding: 0; }
+
+html {
+  background: var(--vt-bg);
+}
 
 body {
   background: var(--vt-bg);
