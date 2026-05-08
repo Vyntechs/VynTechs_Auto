@@ -99,6 +99,13 @@
       "when": 1746576000000,
       "tag": "0011b_session_max_corpus_similarity",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778457600000,
+      "tag": "0012_customers_vehicles",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import {
   appendSessionEvent,
   updateSessionTreeState,
   getOpenSessionForTech,
+  countOpenSessionsForTech,
   listSessionsForShop,
   closeSession,
   getThreshold,
@@ -270,6 +271,98 @@ describe('getOpenSessionForTech', () => {
     })
     const open = await getOpenSessionForTech(db, tech.id)
     expect(open).toBeNull()
+  })
+})
+
+describe('countOpenSessionsForTech', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  // Helper for this block — creates N open sessions for a given tech with
+  // throwaway intake/tree fields. Mileage gets bumped per session so the
+  // intake objects stay distinct.
+  async function seedOpen(techId: string, shopId: string, n: number) {
+    for (let i = 0; i < n; i++) {
+      await createSession(db, {
+        shopId,
+        techId,
+        status: 'open',
+        intake: {
+          vehicleYear: 2018,
+          vehicleMake: 'Ford',
+          vehicleModel: 'F-150',
+          mileage: 80_000 + i,
+          customerComplaint: `complaint #${i}`,
+        },
+        treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+      })
+    }
+  }
+
+  it('returns 0 when the tech has no sessions', async () => {
+    const tech = await createProfile(db, { userId: crypto.randomUUID() })
+    expect(await countOpenSessionsForTech(db, tech.id)).toBe(0)
+  })
+
+  it('counts only open sessions, ignoring closed/deferred/declined', async () => {
+    const shop = await createShop(db, { name: 'S' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    await seedOpen(tech.id, shop.id, 3)
+    // One closed, one deferred — neither should be counted.
+    await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      status: 'closed',
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'closed one',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    await createSession(db, {
+      shopId: shop.id,
+      techId: tech.id,
+      status: 'deferred',
+      intake: {
+        vehicleYear: 2018,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'deferred one',
+      },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+    })
+    expect(await countOpenSessionsForTech(db, tech.id)).toBe(3)
+  })
+
+  it('does not count another tech\'s open sessions', async () => {
+    const shop = await createShop(db, { name: 'S' })
+    const techA = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    const techB = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    await seedOpen(techA.id, shop.id, 2)
+    await seedOpen(techB.id, shop.id, 4)
+    expect(await countOpenSessionsForTech(db, techA.id)).toBe(2)
+    expect(await countOpenSessionsForTech(db, techB.id)).toBe(4)
+  })
+
+  it('handles the cap-boundary cases (4 below, 5 at, 6 over)', async () => {
+    const shop = await createShop(db, { name: 'S' })
+    const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+    await seedOpen(tech.id, shop.id, 4)
+    expect(await countOpenSessionsForTech(db, tech.id)).toBe(4)
+    await seedOpen(tech.id, shop.id, 1)
+    expect(await countOpenSessionsForTech(db, tech.id)).toBe(5)
+    await seedOpen(tech.id, shop.id, 1)
+    expect(await countOpenSessionsForTech(db, tech.id)).toBe(6)
   })
 })
 

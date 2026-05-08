@@ -38,10 +38,11 @@ export function NewSessionForm() {
     })
 
     if (res.status === 409) {
-      const { openSessionId: existingId } = await res.json()
+      const { openSessionId: existingId, limit } = await res.json()
       setOpenSessionId(existingId)
+      const cap = typeof limit === 'number' ? limit : 5
       setError(
-        "You already have an open diagnosis. Resume it or close it before starting a new one.",
+        `You already have ${cap} open diagnoses. Resume or close one before starting a new one.`,
       )
       setGenerating(false)
       return
@@ -175,7 +176,7 @@ export function NewSessionForm() {
             className="eyebrow"
             style={{ color: 'var(--vt-signal-500)' }}
           >
-            ● Building your diagnostic plan
+            ● Putting together your steps
           </span>
           <p
             style={{

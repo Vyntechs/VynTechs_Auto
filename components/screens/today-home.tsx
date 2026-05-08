@@ -19,6 +19,7 @@ type Props = {
   closedToday: Session[]
   dueFollowUps?: DueFollowUp[]
   canCurate?: boolean
+  canWriteCounterOrder?: boolean
 }
 
 export function TodayHome({
@@ -28,6 +29,7 @@ export function TodayHome({
   closedToday,
   dueFollowUps = [],
   canCurate = false,
+  canWriteCounterOrder = false,
 }: Props) {
   const meta = bay ? (
     <span>
@@ -40,14 +42,14 @@ export function TodayHome({
   return (
     <main className="app">
       <AppHeader
-        title="Today"
+        title="My Jobs"
         meta={meta}
         right={
           <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
             {canCurate && (
               <Link
                 href="/curator"
-                aria-label="Curator console"
+                aria-label="Reviewer"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -61,7 +63,25 @@ export function TodayHome({
                   textTransform: 'uppercase',
                 }}
               >
-                Curator console →
+                Reviewer →
+              </Link>
+            )}
+            {canWriteCounterOrder && (
+              <Link
+                href="/intake"
+                aria-label="New work order"
+                className="btn btn-primary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  textDecoration: 'none',
+                }}
+              >
+                <Plus size={14} weight="bold" aria-hidden="true" />
+                New work order
               </Link>
             )}
             <Link
@@ -134,9 +154,9 @@ export function TodayHome({
         {inProgress.length === 0 &&
           closedToday.length === 0 &&
           dueFollowUps.length === 0 && (
-            <Module num="—" label="Today">
+            <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
-                No sessions yet. Start a new diagnosis to begin.
+                No work orders yet. Start a new diagnosis to begin.
               </p>
               <div style={{ marginTop: 14 }}>
                 <Link href="/sessions/new" className="btn btn-primary">

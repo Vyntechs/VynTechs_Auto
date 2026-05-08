@@ -83,7 +83,7 @@ function FollowUpRow({ item }: { item: DueFollowUp }) {
           marginBottom: 10,
         }}
       >
-        How did it hold? "{truncate(item.intake.customerComplaint, 80)}"
+        Did the fix hold up? "{truncate(item.intake.customerComplaint, 80)}"
       </div>
       <textarea
         rows={2}

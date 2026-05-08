@@ -34,6 +34,7 @@ export default async function TodayPage() {
       closedToday={closedToday}
       dueFollowUps={dueFollowUps}
       canCurate={canCurate(ctx.profile.role)}
+      canWriteCounterOrder={ctx.profile.role === 'owner'}
     />
   )
 }

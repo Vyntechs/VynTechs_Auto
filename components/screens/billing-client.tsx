@@ -31,7 +31,11 @@ export function BillingClient() {
 
   return (
     <div className="app">
-      <AppHeader title="Billing" meta={<span>Subscription management</span>} />
+      <AppHeader
+        title="Billing"
+        back={{ href: '/today', label: 'My Jobs' }}
+        meta={<span>Subscription management</span>}
+      />
       <div
         style={{
           padding: 14,
