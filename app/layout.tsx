@@ -4,6 +4,7 @@ import '@/components/vt/vt.css'
 import '@/components/vt/v2.css'
 import '@/components/vt/v2-instruments.css'
 import { SwRegister } from '@/components/sw-register'
+import { Analytics } from '@vercel/analytics/next'
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -34,6 +35,7 @@ export default function RootLayout({
       <body>
         {children}
         <SwRegister />
+        <Analytics />
       </body>
     </html>
   )
