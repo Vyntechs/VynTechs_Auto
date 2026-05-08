@@ -122,7 +122,7 @@ describe('TodayHome', () => {
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
   })
 
-  it('renders a Curator console link in the header when canCurate is true', () => {
+  it('renders a Reviewer link in the header when canCurate is true', () => {
     render(
       <TodayHome
         techName="Brandon"
@@ -131,11 +131,11 @@ describe('TodayHome', () => {
         canCurate
       />,
     )
-    const link = screen.getByRole('link', { name: /curator/i })
+    const link = screen.getByRole('link', { name: /reviewer/i })
     expect(link).toHaveAttribute('href', '/curator')
   })
 
-  it('does NOT render a Curator console link when canCurate is false', () => {
+  it('does NOT render a Reviewer link when canCurate is false', () => {
     render(
       <TodayHome
         techName="Brandon"
@@ -144,6 +144,6 @@ describe('TodayHome', () => {
         canCurate={false}
       />,
     )
-    expect(screen.queryByRole('link', { name: /curator/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /reviewer/i })).toBeNull()
   })
 })

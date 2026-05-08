@@ -112,8 +112,8 @@ describe('CaptureBar', () => {
 
 describe('AppHeader', () => {
   it('renders title and meta', () => {
-    render(<AppHeader title="Today" meta={<span>Marcus · Bay 3</span>} />)
-    expect(screen.getByText('Today')).toBeInTheDocument()
+    render(<AppHeader title="My Jobs" meta={<span>Marcus · Bay 3</span>} />)
+    expect(screen.getByText('My Jobs')).toBeInTheDocument()
     expect(screen.getByText('Marcus · Bay 3')).toBeInTheDocument()
   })
 })

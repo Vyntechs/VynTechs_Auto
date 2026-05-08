@@ -14,6 +14,7 @@ const fixtureSession: Session = {
   id: 'fixt-f150-p0299-aaaa1111',
   shopId: 'shop-1',
   techId: 'tech-1',
+  vehicleId: null,
   status: 'open',
   createdAt: MIN_AGO(14),
   closedAt: null,

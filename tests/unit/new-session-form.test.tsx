@@ -55,17 +55,43 @@ describe('NewSessionForm', () => {
     expect(body.customerComplaint).toBe('loss of power going up hills')
   })
 
-  it('surfaces the open-session conflict with a resume link and does NOT auto-redirect', async () => {
-    // The server enforces one open session per tech (HTTP 409 with the
-    // existing session's id). Auto-redirecting silently makes the user
-    // think their freshly-submitted intake was hijacked — instead the form
-    // must explain the conflict and let the user choose what to do.
+  // 2026-05-08 plain-English audit pass: shop-talk "Building your diagnostic
+  // plan" → "Putting together your steps". Hold the fetch promise so the
+  // generating state stays true while we observe the eyebrow.
+  it('shows "Putting together your steps" eyebrow during submit (was: "Building your diagnostic plan")', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/putting together your steps/i)).toBeInTheDocument()
+    })
+    // The old shop-talk phrasing should NOT be visible.
+    expect(screen.queryByText(/building your diagnostic plan/i)).not.toBeInTheDocument()
+  })
+
+  it('surfaces the open-session-limit conflict with a resume link and does NOT auto-redirect', async () => {
+    // The server enforces a soft cap on concurrent open sessions per tech
+    // (currently 5). HTTP 409 includes the existing-session id and the cap.
+    // Auto-redirecting silently makes the user think their freshly-submitted
+    // intake was hijacked — instead the form must explain the conflict and
+    // let the user choose what to do.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: false,
         status: 409,
-        json: async () => ({ error: 'open_session', openSessionId: 'sess-existing' }),
+        json: async () => ({
+          error: 'open_session_limit',
+          openSessionId: 'sess-existing',
+          limit: 5,
+        }),
         text: async () => '',
       }),
     )
@@ -78,9 +104,9 @@ describe('NewSessionForm', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /start/i }))
 
-    // Form shows an explanatory alert that mentions the open session.
+    // Form shows an explanatory alert that mentions the cap and the open count.
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/open (diagnosis|session)/i)
+      expect(screen.getByRole('alert')).toHaveTextContent(/5 open diagnos/i)
     })
 
     // It also offers a way to resume the existing session.

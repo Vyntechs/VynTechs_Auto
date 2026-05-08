@@ -14,9 +14,14 @@ export const CURATOR_NAV = [
 export function CuratorSidebar() {
   const pathname = usePathname()
   return (
-    <nav className="vt-curator-sidebar" aria-label="Curator console">
-      <p className="vt-curator-brand">Vyntechs Curator</p>
+    <nav className="vt-curator-sidebar" aria-label="Reviewer">
+      <p className="vt-curator-brand">Vyntechs Reviewer</p>
       <ul>
+        <li>
+          <Link href="/today" className="vt-curator-nav-back">
+            ← My Jobs
+          </Link>
+        </li>
         {CURATOR_NAV.map(({ href, label }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (

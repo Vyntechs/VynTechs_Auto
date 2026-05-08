@@ -84,13 +84,13 @@ export function CounterIntake() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const payload = (await res.json()) as { draftId?: string; error?: string }
-      if (!res.ok || !payload.draftId) {
+      const payload = (await res.json()) as { sessionId?: string; error?: string }
+      if (!res.ok || !payload.sessionId) {
         setError(payload.error ?? 'Could not submit. Try again.')
         setBusy(false)
         return
       }
-      router.push(`/intake/plan-quote/${payload.draftId}`)
+      router.push(`/sessions/${payload.sessionId}`)
     } catch {
       setError('Network error. Try again.')
       setBusy(false)
@@ -109,7 +109,7 @@ export function CounterIntake() {
           <MainHeader
             eyebrow="New work order"
             title="Who's at the counter?"
-            sub="Type or paste. Tab moves through fields. The AI starts drafting a plan and quote when you submit."
+            sub="Type or paste. Tab moves through fields. When you submit, the job lands in a tech's queue."
             actions={
               <>
                 <Btn kind="ghost" size="sm" type="button" onClick={() => router.push('/today')}>
@@ -122,7 +122,7 @@ export function CounterIntake() {
                   kbd="⌘ ↵"
                   disabled={!canSubmit}
                 >
-                  Submit to AI
+                  Send to Techs
                 </Btn>
               </>
             }
@@ -316,7 +316,7 @@ export function CounterIntake() {
                       Cancel
                     </Btn>
                     <Btn kind="primary" type="submit" disabled={!canSubmit} kbd="⌘ ↵">
-                      Submit to AI
+                      Send to Techs
                     </Btn>
                   </>
                 }

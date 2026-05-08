@@ -1,32 +1,136 @@
 import { NextResponse } from 'next/server'
-import { randomUUID } from 'node:crypto'
+import { db } from '@/lib/db/client'
+import { getServerSupabase } from '@/lib/supabase-server'
+import { requireUserAndProfile } from '@/lib/auth'
+import { createSessionFromIntake } from '@/lib/intake/session'
+import { generateInitialTree } from '@/lib/ai/tree-engine'
+import { retrieveCorpus, type CorpusMatch } from '@/lib/corpus/retrieval'
 
-type SubmitBody = {
-  customer?: { name?: string }
-  vehicle?: { vin?: string }
-  complaint?: { description?: string }
+type IntakeBody = {
+  customer?: { name?: string; phone?: string; email?: string }
+  vehicle?: {
+    vin?: string
+    year?: string
+    make?: string
+    model?: string
+    engine?: string
+    mileage?: string
+    plate?: string
+  }
+  complaint?: {
+    description?: string
+    whenStarted?: string
+    howOften?: string
+    authorized?: string
+  }
 }
 
-// Placeholder. Counter 04 (AI plan & quote) replaces this with a real
-// handler in lib/intake.ts that persists a WorkOrderDraft and kicks
-// off the AI plan stream.
+function nonEmpty(v: string | undefined): string | null {
+  if (!v) return null
+  const trimmed = v.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+function toIntOrNull(v: string | undefined): number | null {
+  const trimmed = nonEmpty(v)
+  if (trimmed === null) return null
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export async function POST(req: Request) {
-  let body: SubmitBody
+  let body: IntakeBody
   try {
-    body = (await req.json()) as SubmitBody
+    body = (await req.json()) as IntakeBody
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
 
-  const name = body.customer?.name?.trim()
-  const vin = body.vehicle?.vin?.trim()
-  const description = body.complaint?.description?.trim()
-  if (!name || !vin || !description) {
-    return NextResponse.json(
-      { error: 'name, vin, and complaint description are required' },
-      { status: 422 },
-    )
+  const supabase = await getServerSupabase()
+  const ctx = await requireUserAndProfile({ supabase, db })
+  if (!ctx) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+  if (!ctx.profile.shopId) {
+    return NextResponse.json({ error: 'no_shop' }, { status: 403 })
   }
 
-  return NextResponse.json({ draftId: randomUUID() }, { status: 201 })
+  const name = nonEmpty(body.customer?.name)
+  const phone = nonEmpty(body.customer?.phone)
+  const email = nonEmpty(body.customer?.email)
+  const vin = nonEmpty(body.vehicle?.vin)
+  const year = toIntOrNull(body.vehicle?.year)
+  const make = nonEmpty(body.vehicle?.make)
+  const model = nonEmpty(body.vehicle?.model)
+  const engine = nonEmpty(body.vehicle?.engine)
+  const mileage = toIntOrNull(body.vehicle?.mileage)
+  const description = nonEmpty(body.complaint?.description)
+
+  if (!name || !phone) {
+    return NextResponse.json({ error: 'customer name and phone are required' }, { status: 422 })
+  }
+  if (!year || !make || !model) {
+    return NextResponse.json({ error: 'vehicle year, make, and model are required' }, { status: 422 })
+  }
+  if (!description) {
+    return NextResponse.json({ error: 'complaint description is required' }, { status: 422 })
+  }
+
+  // Mirror /api/sessions: best-effort corpus retrieval, then mandatory AI
+  // tree generation. Without this, the new session lands with an empty tree
+  // and the diagnostic page hangs on "Building your diagnostic plan..."
+  // forever. (Bug discovered during PR 1 manual validation.)
+  const intakePayload = {
+    vehicleYear: year,
+    vehicleMake: make,
+    vehicleModel: model,
+    vehicleEngine: engine ?? undefined,
+    mileage: mileage ?? undefined,
+    customerComplaint: description,
+  }
+
+  let corpus: CorpusMatch[] = []
+  try {
+    corpus = await retrieveCorpus(db, {
+      vehicleYear: year,
+      vehicleMake: make,
+      vehicleModel: model,
+      vehicleEngine: engine ?? undefined,
+      complaintText: description,
+    })
+  } catch (err) {
+    console.warn('corpus retrieval failed (proceeding with empty):', err)
+  }
+
+  let treeState
+  try {
+    treeState = await generateInitialTree(intakePayload, corpus)
+  } catch (err) {
+    console.error('tree generation failed:', err)
+    return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
+  }
+
+  const { sessionId } = await createSessionFromIntake(db, {
+    shopId: ctx.profile.shopId,
+    advisorProfileId: ctx.profile.id,
+    customer: { name, phone, email },
+    vehicle: {
+      year,
+      make,
+      model,
+      engine,
+      vin,
+      mileage,
+      plate: nonEmpty(body.vehicle?.plate),
+    },
+    complaint: {
+      description,
+      whenStarted: body.complaint?.whenStarted?.trim() ?? '',
+      howOften: body.complaint?.howOften?.trim() ?? '',
+      authorized: body.complaint?.authorized?.trim() ?? '',
+    },
+    treeState,
+  })
+
+  return NextResponse.json({ sessionId }, { status: 201 })
 }
