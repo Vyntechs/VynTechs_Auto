@@ -104,6 +104,7 @@ export function DeclineOrDeferLive(props: {
       onSelectOption={handleSelect}
       pending={pending}
       error={error}
+      back={{ href: `/sessions/${props.sessionId}`, label: 'Diagnosis' }}
     />
   )
 }

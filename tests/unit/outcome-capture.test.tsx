@@ -203,6 +203,21 @@ describe('OutcomeCapture (wired)', () => {
     expect(body.override).toBeUndefined()
   })
 
+  // 2026-05-08 nav audit: back arrow used to always go to /today (My Jobs).
+  // Now it points at the diagnosis the tech was just on, so "back" means
+  // "back to where I came from" instead of "all the way home."
+  it('back link points to the diagnosis page when sessionId is provided (was: /today)', () => {
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    const back = screen.getByRole('link', { name: /diagnosis/i })
+    expect(back).toHaveAttribute('href', '/sessions/sess-abc')
+  })
+
+  it('back link falls back to /today (My Jobs) when no sessionId is in scope (design/preview mode)', () => {
+    render(<OutcomeCapture {...baseProps} />)
+    const back = screen.getByRole('link', { name: /my jobs/i })
+    expect(back).toHaveAttribute('href', '/today')
+  })
+
   it('reflects toggling a verification chip in the submitted payload', async () => {
     vi.stubGlobal(
       'fetch',

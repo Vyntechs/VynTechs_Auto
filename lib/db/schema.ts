@@ -31,6 +31,41 @@ export const profiles = pgTable('profiles', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+export const customers = pgTable(
+  'customers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'cascade' }).notNull(),
+    name: text('name').notNull(),
+    phone: text('phone').notNull(),
+    email: text('email'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('customers_shop_id_phone_idx').on(table.shopId, table.phone)],
+)
+
+export const vehicles = pgTable(
+  'vehicles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'cascade' }).notNull(),
+    year: integer('year').notNull(),
+    make: text('make').notNull(),
+    model: text('model').notNull(),
+    engine: text('engine'),
+    vin: text('vin'),
+    mileage: integer('mileage'),
+    plate: text('plate'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('vehicles_customer_id_idx').on(table.customerId),
+    index('vehicles_customer_id_vin_idx').on(table.customerId, table.vin),
+  ],
+)
+
 export type IntakePayload = {
   vehicleYear: number
   vehicleMake: string
@@ -56,6 +91,7 @@ export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   shopId: uuid('shop_id').references(() => shops.id).notNull(),
   techId: uuid('tech_id').references(() => profiles.id).notNull(),
+  vehicleId: uuid('vehicle_id').references(() => vehicles.id),
   status: text('status', { enum: ['open', 'closed', 'declined', 'deferred'] }).notNull().default('open'),
   intake: jsonb('intake').notNull().$type<IntakePayload>(),
   treeState: jsonb('tree_state').notNull().$type<TreeState>(),
@@ -182,8 +218,19 @@ export const artifactsRelations = relations(artifacts, ({ one }) => ({
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   shop: one(shops, { fields: [sessions.shopId], references: [shops.id] }),
   tech: one(profiles, { fields: [sessions.techId], references: [profiles.id] }),
+  vehicle: one(vehicles, { fields: [sessions.vehicleId], references: [vehicles.id] }),
   events: many(sessionEvents),
   artifacts: many(artifacts),
+}))
+
+export const customersRelations = relations(customers, ({ one, many }) => ({
+  shop: one(shops, { fields: [customers.shopId], references: [shops.id] }),
+  vehicles: many(vehicles),
+}))
+
+export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
+  customer: one(customers, { fields: [vehicles.customerId], references: [customers.id] }),
+  sessions: many(sessions),
 }))
 
 export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
@@ -217,6 +264,10 @@ export type TechAssistRequest = typeof techAssistRequests.$inferSelect
 export type NewTechAssistRequest = typeof techAssistRequests.$inferInsert
 export type Artifact = typeof artifacts.$inferSelect
 export type NewArtifact = typeof artifacts.$inferInsert
+export type Customer = typeof customers.$inferSelect
+export type NewCustomer = typeof customers.$inferInsert
+export type Vehicle = typeof vehicles.$inferSelect
+export type NewVehicle = typeof vehicles.$inferInsert
 
 export const retrievalCache = pgTable('retrieval_cache', {
   id: uuid('id').primaryKey().defaultRandom(),

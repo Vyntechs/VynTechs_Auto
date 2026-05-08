@@ -158,7 +158,16 @@ export function OutcomeCapture({
 
   return (
     <div className="app">
-      <VehicleStrip name={vehicleName} vin={vehicleMeta} timer={timer} />
+      <VehicleStrip
+        name={vehicleName}
+        vin={vehicleMeta}
+        timer={timer}
+        back={
+          sessionId
+            ? { href: `/sessions/${sessionId}`, label: 'Diagnosis' }
+            : { href: '/today', label: 'My Jobs' }
+        }
+      />
       <form
         onSubmit={(e) => {
           e.preventDefault()

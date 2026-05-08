@@ -34,6 +34,9 @@ type Props = {
   onSelectOption?: (number: 1 | 2 | 3) => void
   pending?: 1 | 2 | 3 | null
   error?: string | null
+  /** Back-link target for the VehicleStrip header. Defaults to /today (My Jobs).
+   *  Live callers pass a per-session target so back means "back to the diagnosis." */
+  back?: { href: string; label: string }
 }
 
 const DEFAULT_TAPE_BODY = `  QUERIES   SOURCE              MATCH        STATUS
@@ -287,9 +290,10 @@ export function DeclineOrDefer({
   onSelectOption,
   pending = null,
   error = null,
+  back,
 }: Props) {
   const deficit = Math.round(gate - confidence)
-  const headline = confidenceGap ?? 'Confidence too low to commit to a destructive action.'
+  const headline = confidenceGap ?? 'Confidence too low to commit to a high-risk repair.'
   const ts =
     tapeTimestamp ??
     new Date().toISOString().replace('T', ' · ').replace(/\.\d+Z$/, 'Z')
@@ -299,7 +303,12 @@ export function DeclineOrDefer({
 
   return (
     <div className="app">
-      <VehicleStrip name={vehicleName} vin={vehicleVin} timer={timer} />
+      <VehicleStrip
+        name={vehicleName}
+        vin={vehicleVin}
+        timer={timer}
+        back={back ?? { href: '/today', label: 'My Jobs' }}
+      />
       <div className="dod-surface" style={{ flex: 1, overflow: 'auto' }}>
         {/* HERO INSTRUMENT */}
         <div className="dod-instrument">
@@ -316,7 +325,7 @@ export function DeclineOrDefer({
             <div className="dod-cluster__label">CONFIDENCE</div>
             {deficit > 0 && (
               <div className="dod-cluster__deficit">
-                <span>−{deficit}</span> BELOW GATE
+                <span>−{deficit}</span> BELOW THRESHOLD
               </div>
             )}
           </div>
@@ -346,7 +355,7 @@ export function DeclineOrDefer({
         {/* TAPE — diagnostic printout, dyno-tape feel */}
         <div className="dod-tape">
           <div className="dod-tape__header">
-            <span>RETRIEVAL LEDGER</span>
+            <span>WHERE I LOOKED</span>
             <span>{ts}</span>
           </div>
           <pre className="dod-tape__body">{tapeBody ?? DEFAULT_TAPE_BODY}</pre>

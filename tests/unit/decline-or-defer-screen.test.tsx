@@ -125,6 +125,39 @@ describe('DeclineOrDefer (presentational)', () => {
     )
     expect(screen.getByRole('alert')).toHaveTextContent(/something went wrong/i)
   })
+
+  // 2026-05-08 nav audit: live decline page was sending "back" to /today
+  // instead of to the diagnosis the tech was just on. DeclineOrDefer gained
+  // an optional `back` prop with a /today fallback so the design gallery
+  // still works without a session id.
+  it('honors a custom back-link target when one is provided (live caller)', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+        back={{ href: '/sessions/sess-xyz', label: 'Diagnosis' }}
+      />,
+    )
+    const back = screen.getByRole('link', { name: /diagnosis/i })
+    expect(back).toHaveAttribute('href', '/sessions/sess-xyz')
+  })
+
+  it('falls back to /today (My Jobs) when no back prop is provided (design gallery)', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+      />,
+    )
+    const back = screen.getByRole('link', { name: /my jobs/i })
+    expect(back).toHaveAttribute('href', '/today')
+  })
 })
 
 describe('DeclineOrDeferLive (wired)', () => {

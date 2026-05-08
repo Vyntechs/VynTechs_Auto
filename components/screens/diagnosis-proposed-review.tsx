@@ -24,6 +24,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
         name={formatVehicleName(session.intake)}
         vin={`Session · ${session.id.slice(0, 8)}`}
         timer={elapsed}
+        back={{ href: '/today', label: 'My Jobs' }}
       />
       <div
         style={{
@@ -38,7 +39,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
         <Module
           num="✓"
           label="Diagnosis proposed"
-          status={<Pill kind="active">Review & lock</Pill>}
+          status={<Pill kind="active">Confirm & start repair</Pill>}
         >
           {session.treeState.rootCauseSummary && (
             <h2
@@ -85,7 +86,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
           )}
           {proposedAction?.expectedSignal && (
             <div style={{ marginTop: 14 }}>
-              <span className="eyebrow">Expected signal post-repair</span>
+              <span className="eyebrow">What to look for after the repair</span>
               <p
                 style={{
                   fontFamily: 'var(--vt-font-serif)',
