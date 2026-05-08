@@ -29,6 +29,7 @@ export function RepairPhaseView({ session, events }: Props) {
         name={formatVehicleName(session.intake)}
         vin={`Session · ${session.id.slice(0, 8)}`}
         timer={elapsed}
+        back={{ href: '/today', label: 'My Jobs' }}
       />
       <div
         style={{
@@ -43,7 +44,7 @@ export function RepairPhaseView({ session, events }: Props) {
         <Module
           num="🔒"
           label="Diagnosis locked"
-          status={<Pill kind="active">Repair phase</Pill>}
+          status={<Pill kind="active">In repair</Pill>}
         >
           <span className="eyebrow" style={{ fontSize: 10, color: 'var(--vt-fg-3)' }}>
             Locked at {lockedAtDisplay}
@@ -78,7 +79,7 @@ export function RepairPhaseView({ session, events }: Props) {
           )}
           {proposedAction?.expectedSignal && (
             <div style={{ marginTop: 12 }}>
-              <span className="eyebrow">Expected signal post-repair</span>
+              <span className="eyebrow">What to look for after the repair</span>
               <p
                 style={{
                   fontFamily: 'var(--vt-font-serif)',

@@ -19,6 +19,7 @@ export function ClosedCaseSummary({ session }: Props) {
         name={vehicle}
         vin={`Case closed · session ${session.id.slice(0, 8)}`}
         timer={closedAgo}
+        back={{ href: '/today', label: 'My Jobs' }}
       />
       <div
         style={{

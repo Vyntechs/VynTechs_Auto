@@ -113,6 +113,23 @@ export async function getOpenSessionForTech(
   return session ?? null
 }
 
+/**
+ * Count open sessions for a tech. Used by /api/sessions to enforce the
+ * MAX_OPEN_SESSIONS_PER_TECH cap so a tech can have multiple in-flight
+ * jobs (parts wait, customer phone tag, lunch between bays — real shop
+ * reality) but not unlimited (avoids accidental queue-explosion).
+ */
+export async function countOpenSessionsForTech(
+  db: AppDb,
+  techId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.techId, techId), eq(sessions.status, 'open')))
+  return rows.length
+}
+
 export async function appendSessionEvent(
   db: AppDb,
   input: NewSessionEvent,

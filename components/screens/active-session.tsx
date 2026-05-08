@@ -46,6 +46,7 @@ export function ActiveSession({ session, events = [] }: Props) {
         name={formatVehicleName(session.intake)}
         vin={`Session · ${session.id.slice(0, 8)}`}
         timer={elapsed}
+        back={{ href: '/today', label: 'My Jobs' }}
       />
       <div
         style={{

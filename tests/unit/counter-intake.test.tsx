@@ -15,7 +15,7 @@ describe('CounterIntake', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ draftId: 'draft-abc' }),
+        json: async () => ({ sessionId: 'session-abc' }),
       }),
     )
   })
@@ -58,22 +58,22 @@ describe('CounterIntake', () => {
     expect(scanBtn).toHaveTextContent(/scanned/i)
   })
 
-  it('disables Submit to AI when required fields (name, VIN, complaint) are empty', () => {
+  it('disables Send to Techs when required fields (name, VIN, complaint) are empty', () => {
     render(<CounterIntake />)
-    // The screen has two Submit-to-AI buttons (header + form footer); both must be disabled.
-    const submits = screen.getAllByRole('button', { name: /submit to ai/i })
+    // The screen has two Send-to-Techs buttons (header + form footer); both must be disabled.
+    const submits = screen.getAllByRole('button', { name: /send to techs/i })
     expect(submits.length).toBeGreaterThan(0)
     submits.forEach((btn) => expect(btn).toBeDisabled())
   })
 
-  it('enables Submit to AI once name, VIN, and complaint are filled', () => {
+  it('enables Send to Techs once name, VIN, and complaint are filled', () => {
     render(<CounterIntake />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/vin/i), { target: { value: 'WBA3A5C50EJF12345' } })
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'Crank-no-start' },
     })
-    const submits = screen.getAllByRole('button', { name: /submit to ai/i })
+    const submits = screen.getAllByRole('button', { name: /send to techs/i })
     submits.forEach((btn) => expect(btn).toBeEnabled())
   })
 
@@ -86,8 +86,8 @@ describe('CounterIntake', () => {
       target: { value: 'Crank-no-start' },
     })
 
-    // Click either Submit-to-AI button (both submit the same form).
-    fireEvent.click(screen.getAllByRole('button', { name: /submit to ai/i })[0])
+    // Click either Send-to-Techs button (both submit the same form).
+    fireEvent.click(screen.getAllByRole('button', { name: /send to techs/i })[0])
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe('CounterIntake', () => {
     })
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/intake/plan-quote/draft-abc')
+      expect(mockPush).toHaveBeenCalledWith('/sessions/session-abc')
     })
   })
 })

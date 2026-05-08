@@ -24,7 +24,8 @@ export default async function SessionsPage() {
   return (
     <div className="app">
       <AppHeader
-        title="Sessions"
+        title="Work Orders"
+        back={{ href: '/today', label: 'My Jobs' }}
         meta={
           <span>
             {ctx.profile.fullName ?? 'Technician'}

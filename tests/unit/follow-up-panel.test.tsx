@@ -60,4 +60,14 @@ describe('FollowUpPanel', () => {
     render(<FollowUpPanel items={[sampleItem, { ...sampleItem, id: 'abc', kind: '30d' }]} />)
     expect(screen.getByLabelText(/check-ins/i)).toBeTruthy()
   })
+
+  // 2026-05-08 plain-English audit pass: shop-slang "How did it hold?" → "Did
+  // the fix hold up?". Lock the new wording so a future copy edit doesn't
+  // silently regress to jargon.
+  it('renders the plain-English check-in prompt "Did the fix hold up?"', () => {
+    render(<FollowUpPanel items={[sampleItem]} />)
+    expect(screen.getByText(/did the fix hold up\?/i)).toBeInTheDocument()
+    // And: the old shop-slang phrasing should NOT be present.
+    expect(screen.queryByText(/how did it hold\?/i)).not.toBeInTheDocument()
+  })
 })

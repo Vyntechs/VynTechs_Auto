@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { HairlineProgress } from '@/components/vt'
 
 type Props = {
@@ -14,14 +15,33 @@ export function TreeGenerating({
   elapsed,
 }: Props) {
   const headline = matches
-    ? `Building your plan from ${matches} past case${matches === 1 ? '' : 's'}.`
-    : 'Building your diagnostic plan.'
+    ? `Putting together your steps from ${matches} past case${matches === 1 ? '' : 's'}.`
+    : 'Putting together your steps.'
 
   return (
     <div
       className="app"
       style={{ justifyContent: 'center', alignItems: 'stretch' }}
     >
+      <div
+        style={{
+          padding: '14px 16px 0',
+        }}
+      >
+        <Link
+          href="/today"
+          style={{
+            fontFamily: 'var(--vt-font-mono)',
+            fontSize: 11,
+            color: 'var(--vt-fg-2)',
+            textDecoration: 'none',
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}
+        >
+          ← My Jobs
+        </Link>
+      </div>
       <div
         style={{
           padding: '40px 24px',

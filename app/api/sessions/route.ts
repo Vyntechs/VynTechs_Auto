@@ -5,7 +5,17 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
 import { retrieveCorpus, type CorpusMatch } from '@/lib/corpus/retrieval'
 import { intakeSchema } from '@/lib/types'
-import { getOpenSessionForTech, getProfileByUserId } from '@/lib/db/queries'
+import {
+  countOpenSessionsForTech,
+  getOpenSessionForTech,
+  getProfileByUserId,
+} from '@/lib/db/queries'
+
+// Soft cap on concurrent open jobs per tech. Real shops run 2–4 in flight
+// constantly (parts wait, customer phone tag, mid-bay interruptions). The
+// cap keeps the queue manageable without forcing a one-at-a-time workflow
+// that doesn't match shop reality. Bumped from 1 → 5 on 2026-05-08.
+const MAX_OPEN_SESSIONS_PER_TECH = 5
 
 export async function POST(req: Request) {
   const supabase = await getServerSupabase()
@@ -24,10 +34,15 @@ export async function POST(req: Request) {
 
   const profile = await getProfileByUserId(db, user.id)
   if (profile) {
-    const openSession = await getOpenSessionForTech(db, profile.id)
-    if (openSession) {
+    const openCount = await countOpenSessionsForTech(db, profile.id)
+    if (openCount >= MAX_OPEN_SESSIONS_PER_TECH) {
+      const openSession = await getOpenSessionForTech(db, profile.id)
       return NextResponse.json(
-        { error: 'open_session', openSessionId: openSession.id },
+        {
+          error: 'open_session_limit',
+          openSessionId: openSession?.id,
+          limit: MAX_OPEN_SESSIONS_PER_TECH,
+        },
         { status: 409 },
       )
     }
