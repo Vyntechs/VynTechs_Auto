@@ -103,7 +103,7 @@ describe('WebSearchAdapter', () => {
     expect(r[2].weightHint).toBe(0.5)
   })
 
-  it('builds query string from vehicle + DTCs + complaint + observation', async () => {
+  it('builds query via buildSearchQuery: vehicle metadata + DTCs + symptom-stripped complaint + observation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(TAVILY_RESPONSE)
     vi.stubGlobal('fetch', fetchMock)
     const { WebSearchAdapter } = await import('@/lib/retrieval/adapters/web-search')
@@ -122,15 +122,27 @@ describe('WebSearchAdapter', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.tavily.com/search',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('2020 Ford F-250 6.7L'),
-      }),
+      expect.objectContaining({ method: 'POST' }),
     )
     const sentBody = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body)
+    // Vehicle metadata up front
+    expect(sentBody.query).toContain('2020')
+    expect(sentBody.query).toContain('Ford')
+    expect(sentBody.query).toContain('F-250')
+    expect(sentBody.query).toContain('6.7L')
+    // DTCs
     expect(sentBody.query).toContain('P0087')
-    expect(sentBody.query).toContain('low fuel pressure')
-    expect(sentBody.query).toContain('rail pressure crashes')
+    expect(sentBody.query).toContain('P0088')
+    // Symptom terms (deduped, so "pressure" appears once even though it's
+    // in both complaint and observation)
+    expect(sentBody.query.toLowerCase()).toContain('low')
+    expect(sentBody.query.toLowerCase()).toContain('fuel')
+    expect(sentBody.query.toLowerCase()).toContain('pressure')
+    expect(sentBody.query.toLowerCase()).toContain('rail')
+    expect(sentBody.query.toLowerCase()).toContain('crashes')
+    expect(sentBody.query.toLowerCase()).toContain('rpm')
+    // Stripped: pure-digit "3000", short stopword "at"
+    expect(sentBody.query).not.toMatch(/\b3000\b/)
     expect(sentBody.api_key).toBe('test-key')
   })
 })
