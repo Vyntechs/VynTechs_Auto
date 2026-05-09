@@ -1,6 +1,12 @@
 import type { AppDb } from '@/lib/db/queries'
 import { updateSessionMaxCorpusSimilarity } from '@/lib/db/queries'
-import type { TreeState, CorpusMatch, updateTree as updateTreeFn } from '@/lib/ai/tree-engine'
+import type {
+  TreeState,
+  CorpusMatch,
+  updateTree as updateTreeFn,
+  generateInitialTree as generateInitialTreeFn,
+} from '@/lib/ai/tree-engine'
+import type { IntakePayload } from '@/lib/types'
 import type { retrieveCorpus as retrieveCorpusFn } from '@/lib/corpus/retrieval'
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from './types'
 import type { runRetrieval as runRetrievalFn } from './orchestrator'
@@ -114,5 +120,74 @@ export function buildUpdateTreeWithRetrieval(
       retrieval,
       ...(corpus !== undefined ? { corpus } : {}),
     })
+  }
+}
+
+export type BuildGenerateInitialTreeWithRetrievalDeps = {
+  db: AppDb
+  adapters: RetrievalAdapter[]
+  generateInitialTree: typeof generateInitialTreeFn
+  runRetrieval: typeof runRetrievalFn
+  validateRetrievalResults: typeof validateResultsFn
+  /** Optional. When provided, corpus matches are fetched in parallel with
+   *  retrieval and forwarded to generateInitialTree. */
+  retrieveCorpus?: typeof retrieveCorpusFn
+}
+
+/**
+ * Wraps `generateInitialTree` so it runs Rung-0 corpus retrieval AND Rung-1
+ * internet retrieval + LLM grading before delegating to the real
+ * `generateInitialTree`. Mirrors `buildUpdateTreeWithRetrieval` for the intake
+ * (case-creation) path. Both retrievals run in parallel; failures fall through
+ * with empty arrays — initial tree generation must never block on optional
+ * supporting evidence.
+ */
+export function buildGenerateInitialTreeWithRetrieval(
+  deps: BuildGenerateInitialTreeWithRetrievalDeps,
+): (intake: IntakePayload) => Promise<TreeState> {
+  return async (intake) => {
+    const ctx: RetrievalContext = {
+      vehicleYear: intake.vehicleYear,
+      vehicleMake: intake.vehicleMake,
+      vehicleModel: intake.vehicleModel,
+      vehicleEngine: intake.vehicleEngine,
+      complaintText: intake.customerComplaint,
+    }
+
+    const retrievalPromise = (async (): Promise<RetrievalResult[]> => {
+      try {
+        const run = await deps.runRetrieval({ db: deps.db, adapters: deps.adapters, ctx })
+        try {
+          return await deps.validateRetrievalResults({ ctx, results: run.results })
+        } catch (graderErr) {
+          console.warn('intake retrieval validation failed:', graderErr)
+          return run.results
+        }
+      } catch (err) {
+        console.warn('intake retrieval failed:', err)
+        return []
+      }
+    })()
+
+    const corpusPromise: Promise<CorpusMatch[] | undefined> = deps.retrieveCorpus
+      ? (async () => {
+          try {
+            return await deps.retrieveCorpus!(deps.db, {
+              vehicleYear: ctx.vehicleYear,
+              vehicleMake: ctx.vehicleMake,
+              vehicleModel: ctx.vehicleModel,
+              vehicleEngine: ctx.vehicleEngine,
+              complaintText: ctx.complaintText,
+            })
+          } catch (err) {
+            console.warn('intake corpus retrieval failed:', err)
+            return []
+          }
+        })()
+      : Promise.resolve(undefined)
+
+    const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
+
+    return deps.generateInitialTree(intake, corpus, retrieval)
   }
 }
