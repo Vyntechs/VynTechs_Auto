@@ -66,6 +66,17 @@ export const vehicles = pgTable(
   ],
 )
 
+export type AmbientConditions = {
+  temperatureF: number
+  humidityPct?: number
+  windKph?: number
+  conditions?: string
+  source: 'geolocation' | 'manual'
+  capturedAt: string
+  approxLat?: number
+  approxLon?: number
+}
+
 export type IntakePayload = {
   vehicleYear: number
   vehicleMake: string
@@ -73,6 +84,7 @@ export type IntakePayload = {
   vehicleEngine?: string
   mileage?: number
   customerComplaint: string
+  ambientConditions?: AmbientConditions
 }
 
 

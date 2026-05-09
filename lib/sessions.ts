@@ -1,12 +1,14 @@
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
+import type { AmbientConditions } from './types'
 import {
   createSession,
   getProfileByUserId,
   getSessionById,
   appendSessionEvent,
   updateSessionTreeState,
+  updateSessionIntake,
   closeSession,
   setSessionTerminalStatus,
   recordTechAssistRequest,
@@ -425,6 +427,155 @@ export async function captureArtifact(opts: {
   }
 
   return { ok: true, artifactId, storageKey, kind, extractionStatus }
+}
+
+const ambientGeoSchema = z.object({
+  source: z.literal('geolocation'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+})
+
+const ambientManualSchema = z.object({
+  source: z.literal('manual'),
+  temperatureF: z.number().finite().min(-80).max(160),
+  humidityPct: z.number().min(0).max(100).optional(),
+})
+
+const ambientBodySchema = z.discriminatedUnion('source', [
+  ambientGeoSchema,
+  ambientManualSchema,
+])
+
+export type AmbientLookupFn = (input: {
+  latitude: number
+  longitude: number
+}) => Promise<{
+  temperatureC: number
+  temperatureF: number
+  humidityPct?: number
+  windKph?: number
+  conditions?: string
+}>
+
+export type RecordAmbientConditionsResult =
+  | { ok: true; conditions: AmbientConditions; tree: TreeState }
+  | { ok: false; status: 400 | 404 | 500 | 502; error: string }
+
+/**
+ * Capture ambient conditions for a session. Two paths:
+ *   - source=geolocation: server-side weather lookup from the tech's lat/lon
+ *     (Open-Meteo). Lat/lon are rounded to ~11km before persistence so the
+ *     stored intake can't pinpoint the tech.
+ *   - source=manual: tech-entered temperature override (used when the
+ *     geolocation lookup looks wrong, e.g. VPN or data-center IP).
+ *
+ * In both cases the conditions are written to session.intake.ambientConditions
+ * and the tree is advanced with a synthetic observation describing the
+ * captured value, so the AI can incorporate it on the next turn instead of
+ * generating a "look up the temp" step.
+ */
+export async function recordAmbientConditions(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  body: unknown
+  lookupAmbient: AmbientLookupFn
+  updateTree: (input: {
+    intake: IntakePayload
+    currentTree: TreeState
+    observation: string
+  }) => Promise<TreeState>
+}): Promise<RecordAmbientConditionsResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const parsed = ambientBodySchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  let conditions: AmbientConditions
+  if (parsed.data.source === 'geolocation') {
+    try {
+      const weather = await opts.lookupAmbient({
+        latitude: parsed.data.latitude,
+        longitude: parsed.data.longitude,
+      })
+      conditions = {
+        temperatureF: round1(weather.temperatureF),
+        humidityPct:
+          weather.humidityPct !== undefined ? Math.round(weather.humidityPct) : undefined,
+        windKph: weather.windKph !== undefined ? round1(weather.windKph) : undefined,
+        conditions: weather.conditions,
+        source: 'geolocation',
+        capturedAt: new Date().toISOString(),
+        approxLat: round1(parsed.data.latitude),
+        approxLon: round1(parsed.data.longitude),
+      }
+    } catch (err) {
+      console.error('ambient lookup failed:', err)
+      return { ok: false, status: 502, error: 'ambient lookup failed' }
+    }
+  } else {
+    conditions = {
+      temperatureF: round1(parsed.data.temperatureF),
+      humidityPct:
+        parsed.data.humidityPct !== undefined
+          ? Math.round(parsed.data.humidityPct)
+          : undefined,
+      source: 'manual',
+      capturedAt: new Date().toISOString(),
+    }
+  }
+
+  const nextIntake: IntakePayload = { ...session.intake, ambientConditions: conditions }
+  await updateSessionIntake(opts.db, opts.sessionId, nextIntake)
+
+  const observation = formatAmbientObservation(conditions)
+
+  let nextTree: TreeState
+  try {
+    nextTree = await opts.updateTree({
+      intake: nextIntake,
+      currentTree: session.treeState,
+      observation,
+    })
+  } catch (err) {
+    console.error('tree update after ambient capture failed:', err)
+    return { ok: false, status: 500, error: 'tree update failed' }
+  }
+
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'observation',
+    observationText: observation,
+    aiResponse: { nextNodeId: nextTree.currentNodeId },
+  })
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
+
+  return { ok: true, conditions, tree: nextTree }
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+function formatAmbientObservation(c: AmbientConditions): string {
+  const parts = [`Ambient ${c.temperatureF.toFixed(0)}°F`]
+  if (typeof c.humidityPct === 'number') parts.push(`${c.humidityPct}% RH`)
+  if (typeof c.windKph === 'number') parts.push(`wind ${c.windKph.toFixed(0)} kph`)
+  if (c.conditions) parts.push(c.conditions)
+  const tag = c.source === 'geolocation' ? 'geolocation lookup' : 'tech-entered'
+  return `${parts.join(', ')} (${tag}).`
 }
 
 function vehicleFamilyKey(intake: IntakePayload): string {

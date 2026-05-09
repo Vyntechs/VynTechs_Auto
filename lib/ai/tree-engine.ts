@@ -28,7 +28,13 @@ export type ProposedAction = {
 }
 
 export type RequestedArtifact = {
-  kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+  kind:
+    | 'photo'
+    | 'scan_screen'
+    | 'wiring_diagram'
+    | 'audio'
+    | 'video'
+    | 'ambient_conditions'
   prompt: string
 }
 
@@ -92,9 +98,28 @@ function buildIntakeUserMessage(
   const mileage = intake.mileage ? `, ${intake.mileage} mi` : ''
   return `Vehicle: ${intake.vehicleYear} ${intake.vehicleMake} ${intake.vehicleModel}${engine}${mileage}.
 
-Customer complaint: ${intake.customerComplaint}${corpusContextBlock(corpus)}${retrievalContextBlock(retrieval)}
+Customer complaint: ${intake.customerComplaint}${ambientConditionsBlock(intake.ambientConditions)}${corpusContextBlock(corpus)}${retrievalContextBlock(retrieval)}
 
 Generate the initial decision tree. Return JSON only — no prose, no fences.`
+}
+
+export function ambientConditionsBlock(
+  conditions: IntakePayload['ambientConditions'],
+): string {
+  if (!conditions) return ''
+  const parts: string[] = [`${conditions.temperatureF.toFixed(0)}°F`]
+  if (typeof conditions.humidityPct === 'number') {
+    parts.push(`${conditions.humidityPct.toFixed(0)}% humidity`)
+  }
+  if (typeof conditions.windKph === 'number') {
+    parts.push(`wind ${conditions.windKph.toFixed(0)} kph`)
+  }
+  if (conditions.conditions) parts.push(conditions.conditions)
+  const tag =
+    conditions.source === 'geolocation'
+      ? 'geolocation lookup, tech-confirmed'
+      : 'tech-entered'
+  return `\n\nAmbient conditions at the bay: ${parts.join(', ')} (${tag}).`
 }
 
 function retrievalContextBlock(retrieval: RetrievalResult[] | undefined): string {
@@ -171,7 +196,7 @@ export async function updateTree(input: {
           .join('\n\n')}`
       : ''
 
-  const userMessage = `Initial intake: ${JSON.stringify(input.intake)}
+  const userMessage = `Initial intake: ${JSON.stringify(input.intake)}${ambientConditionsBlock(input.intake.ambientConditions)}
 
 Current tree state:
 ${JSON.stringify(input.currentTree, null, 2)}

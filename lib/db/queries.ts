@@ -20,6 +20,7 @@ import {
   type NewSessionEvent,
   type TreeState,
   type OutcomePayload,
+  type IntakePayload,
   type RiskClass,
   type Artifact,
   type NewArtifact,
@@ -144,6 +145,14 @@ export async function updateSessionTreeState(
   treeState: TreeState,
 ): Promise<void> {
   await db.update(sessions).set({ treeState }).where(eq(sessions.id, sessionId))
+}
+
+export async function updateSessionIntake(
+  db: AppDb,
+  sessionId: string,
+  intake: IntakePayload,
+): Promise<void> {
+  await db.update(sessions).set({ intake }).where(eq(sessions.id, sessionId))
 }
 
 /**

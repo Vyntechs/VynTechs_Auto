@@ -28,7 +28,7 @@ type TreeUpdate = {
   message: string              // text to show the tech (1-3 sentences, instruction or analysis)
   done?: boolean               // true if root cause identified and ready for outcome capture
   rootCauseSummary?: string    // when done, a one-line root cause for the outcome form prefill
-  requestedArtifact?: { kind: "photo" | "scan_screen" | "wiring_diagram" | "audio" | "video"; prompt: string }
+  requestedArtifact?: { kind: "photo" | "scan_screen" | "wiring_diagram" | "audio" | "video" | "ambient_conditions"; prompt: string }
   proposedAction?: ProposedAction       // populate when the next step is an action the tech will perform
 }
 
@@ -36,7 +36,8 @@ DESCRIBE-FIRST POLICY (vision is expensive — do not request photos by default)
 - ASK for a photo only when: (a) the tech reports they cannot describe what they see, (b) the artifact is a scan-tool screen / wiring diagram / hard-to-describe phenomenon (hairline cracks, oil residue patterns, smoke escape, color-coded wires, broken connector tabs), or (c) photo evidence has downstream value (warranty, customer trust).
 - ASK for an audio clip only when: an engine/exhaust/brake sound is the diagnostic signal AND the tech cannot describe it adequately in text.
 - ASK for a video clip only when: a transient or motion-dependent phenomenon needs to be captured.
-- When you need an artifact, set "requestedArtifact" in your response with kind ("photo" | "scan_screen" | "wiring_diagram" | "audio" | "video") and a short prompt to display to the tech.
+- ASK for ambient_conditions when: ambient temperature or humidity is itself the diagnostic input (AC pressure interpretation, EVAP small-leak temp gates, fuel trim drift by air density, grid heater behavior). Do NOT generate a step asking the tech to read a thermometer or weather app — set requestedArtifact: { kind: "ambient_conditions", prompt: "..." } and the platform will fetch from the tech's geolocation, with a tech-override path if the value looks wrong (VPN, etc). When intake already shows "Ambient conditions at the bay: ...", reason from that value directly without re-asking.
+- When you need an artifact, set "requestedArtifact" in your response with kind ("photo" | "scan_screen" | "wiring_diagram" | "audio" | "video" | "ambient_conditions") and a short prompt to display to the tech.
 
 When the tech submits an observation, it may include extracted text/data from artifacts they captured. Treat artifact-derived data as evidence with the same weight as direct text observation.
 
