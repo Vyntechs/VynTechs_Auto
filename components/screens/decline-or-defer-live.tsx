@@ -1,6 +1,6 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { DeclineOrDefer } from './decline-or-defer'
 import type { WhatWouldClose } from '@/lib/ai/tree-engine'
 
@@ -51,15 +51,72 @@ export function DeclineOrDeferLive(props: {
   const router = useRouter()
   const [pending, setPending] = useState<1 | 2 | 3 | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [heroBusy, setHeroBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const wwc = props.whatWouldClose
+  const wwcObj = wwc && typeof wwc === 'object' ? wwc : null
+
+  async function handleConfirm(answer: 'Yes' | 'No') {
+    if (!wwcObj || wwcObj.kind !== 'confirm') return
+    setHeroBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/sessions/${props.sessionId}/advance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          observation: `${answer} — ${wwcObj.prompt}`,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `${res.status}`)
+      }
+      router.push(`/sessions/${props.sessionId}`)
+    } catch (err) {
+      setHeroBusy(false)
+      setError(err instanceof Error ? err.message : 'Request failed')
+    }
+  }
+
+  function handleSnap() {
+    fileInputRef.current?.click()
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setHeroBusy(true)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('kind', 'photo')
+      const res = await fetch(`/api/sessions/${props.sessionId}/capture`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `${res.status}`)
+      }
+      router.push(`/sessions/${props.sessionId}`)
+    } catch (err) {
+      setHeroBusy(false)
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const options = props.optionKeys.map((k) => {
     const base = OPTIONS_BY_REASON[k]
-    if (k === 'gather_more_low_risk' && props.whatWouldClose) {
-      const wwcText =
-        typeof props.whatWouldClose === 'string'
-          ? props.whatWouldClose
-          : props.whatWouldClose.prompt
-      return { ...base, description: wwcText }
+    // For legacy string whatWouldClose, surface the prompt as the gather spoke
+    // description. For structured shapes the hero card handles the prompt, so
+    // the spoke keeps its default copy to avoid on-screen duplication.
+    if (k === 'gather_more_low_risk' && typeof props.whatWouldClose === 'string') {
+      return { ...base, description: props.whatWouldClose }
     }
     return base
   })
@@ -98,18 +155,51 @@ export function DeclineOrDeferLive(props: {
   }
 
   return (
-    <DeclineOrDefer
-      vehicleName={props.vehicleName}
-      vehicleVin={props.vehicleVin}
-      timer={props.timer}
-      riskLabel={riskLabel}
-      gap={props.gap}
-      confidenceGap={props.confidenceGap}
-      options={options}
-      onSelectOption={handleSelect}
-      pending={pending}
-      error={error}
-      back={{ href: `/sessions/${props.sessionId}`, label: 'Diagnosis' }}
-    />
+    <>
+      {wwcObj?.kind === 'photo' && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFile}
+          style={{ display: 'none' }}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+      )}
+      <DeclineOrDefer
+        vehicleName={props.vehicleName}
+        vehicleVin={props.vehicleVin}
+        timer={props.timer}
+        riskLabel={riskLabel}
+        gap={props.gap}
+        confidenceGap={props.confidenceGap}
+        options={options}
+        onSelectOption={handleSelect}
+        pending={pending}
+        error={error}
+        back={{ href: `/sessions/${props.sessionId}`, label: 'Diagnosis' }}
+        confirmAsk={
+          wwcObj?.kind === 'confirm'
+            ? {
+                prompt: wwcObj.prompt,
+                onYes: () => handleConfirm('Yes'),
+                onNo: () => handleConfirm('No'),
+                busy: heroBusy,
+              }
+            : undefined
+        }
+        photoAsk={
+          wwcObj?.kind === 'photo'
+            ? {
+                prompt: wwcObj.prompt,
+                onSnap: handleSnap,
+                busy: heroBusy,
+              }
+            : undefined
+        }
+      />
+    </>
   )
 }

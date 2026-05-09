@@ -283,4 +283,65 @@ describe('DeclineOrDeferLive (wired)', () => {
     expect(pushSpy).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: /decline this job/i })).not.toBeDisabled()
   })
+
+  it('renders a confirm hero and POSTs the choice as observation to /advance', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({}),
+    })
+    render(
+      <DeclineOrDeferLive
+        {...baseProps}
+        whatWouldClose={{ kind: 'confirm', prompt: 'Did C171 reseat cleanly?' }}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^yes$/i }))
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/sessions/sess-abc/advance',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('Yes'),
+      }),
+    )
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
+  })
+
+  it('renders a photo hero with a hidden file input that uploads to /capture', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ artifactId: 'art-xyz' }),
+    })
+    const { container } = render(
+      <DeclineOrDeferLive
+        {...baseProps}
+        whatWouldClose={{
+          kind: 'photo',
+          prompt: 'Snap the C171 pinout page',
+          extractFor: 'full pinout for C171',
+        }}
+      />,
+    )
+    expect(screen.getByText(/Snap the C171 pinout page/i)).toBeInTheDocument()
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    expect(fileInput).toBeTruthy()
+    expect(fileInput.getAttribute('accept')).toMatch(/image/)
+    expect(fileInput.getAttribute('capture')).toBe('environment')
+
+    const file = new File(['x'], 'pinout.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(fileInput, 'files', { value: [file] })
+    fireEvent.change(fileInput)
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/sessions/sess-abc/capture',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
+  })
+
+  it('does not render the hero when whatWouldClose is a legacy string', () => {
+    render(<DeclineOrDeferLive {...baseProps} whatWouldClose="quote the FSM page" />)
+    expect(screen.queryByRole('button', { name: /^yes$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /snap it/i })).not.toBeInTheDocument()
+  })
 })
