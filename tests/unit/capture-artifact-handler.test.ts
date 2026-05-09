@@ -68,7 +68,7 @@ describe('captureArtifact', () => {
       expect(result.artifactId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
       )
-      // photo does not auto-trigger extraction — status stays 'pending'
+      // No processExtraction injected — auto-extract path skipped, status stays 'pending'
       expect(result.extractionStatus).toBe('pending')
     }
   })

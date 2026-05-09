@@ -292,3 +292,40 @@ export async function setArtifactExtraction(
     .returning()
   if (!result.length) throw new Error(`artifact ${id} not found`)
 }
+
+/**
+ * Resolve the `whatWouldClose` (structured shape) the AI emitted for a given
+ * session+node, used by the extraction worker to steer `extractGenericPhoto`
+ * for the `photo` artifact kind.
+ *
+ * Returns null when:
+ *   - the session has no tree state
+ *   - the node id doesn't match the session's currentNodeId (tree advanced past)
+ *   - whatWouldClose is undefined or a legacy string (no extractFor available)
+ */
+export async function getWhatWouldCloseForNode(
+  db: AppDb,
+  input: { sessionId: string; nodeId: string },
+): Promise<import('@/lib/ai/tree-engine').WhatWouldClose | null> {
+  const rows = await db
+    .select({ treeState: sessions.treeState })
+    .from(sessions)
+    .where(eq(sessions.id, input.sessionId))
+    .limit(1)
+  if (rows.length === 0) return null
+  const treeState = rows[0]?.treeState as
+    | { currentNodeId?: string; proposedAction?: { whatWouldClose?: unknown } }
+    | null
+  if (!treeState) return null
+  if (treeState.currentNodeId !== input.nodeId) return null
+  const wwc = treeState.proposedAction?.whatWouldClose
+  if (
+    wwc &&
+    typeof wwc === 'object' &&
+    'kind' in wwc &&
+    (wwc.kind === 'confirm' || wwc.kind === 'photo')
+  ) {
+    return wwc as import('@/lib/ai/tree-engine').WhatWouldClose
+  }
+  return null
+}
