@@ -4,7 +4,25 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { createSessionFromIntake } from '@/lib/intake/session'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
-import { retrieveCorpus, type CorpusMatch } from '@/lib/corpus/retrieval'
+import { retrieveCorpus } from '@/lib/corpus/retrieval'
+import { runRetrieval } from '@/lib/retrieval/orchestrator'
+import { validateRetrievalResults } from '@/lib/retrieval/validator'
+import { buildGenerateInitialTreeWithRetrieval } from '@/lib/retrieval/wire-into-tree'
+import { NHTSAAdapter } from '@/lib/retrieval/adapters/nhtsa'
+import { ManufacturerRecallAdapter } from '@/lib/retrieval/adapters/manufacturer-recall'
+import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
+import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
+import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
+import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
+
+const ADAPTERS = [
+  new NHTSAAdapter(),
+  new ManufacturerRecallAdapter(),
+  new ForumAdapter(),
+  new YouTubeAdapter(),
+  new RedditAdapter(),
+  new WebSearchAdapter(),
+]
 
 type IntakeBody = {
   customer?: { name?: string; phone?: string; email?: string }
@@ -76,10 +94,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'complaint description is required' }, { status: 422 })
   }
 
-  // Mirror /api/sessions: best-effort corpus retrieval, then mandatory AI
-  // tree generation. Without this, the new session lands with an empty tree
-  // and the diagnostic page hangs on "Building your diagnostic plan..."
-  // forever. (Bug discovered during PR 1 manual validation.)
+  // Mirror /api/sessions: best-effort corpus + retrieval, then mandatory AI
+  // tree generation. Without a populated tree, the diagnostic page hangs on
+  // "Building your diagnostic plan..." forever.
   const intakePayload = {
     vehicleYear: year,
     vehicleMake: make,
@@ -89,22 +106,18 @@ export async function POST(req: Request) {
     customerComplaint: description,
   }
 
-  let corpus: CorpusMatch[] = []
-  try {
-    corpus = await retrieveCorpus(db, {
-      vehicleYear: year,
-      vehicleMake: make,
-      vehicleModel: model,
-      vehicleEngine: engine ?? undefined,
-      complaintText: description,
-    })
-  } catch (err) {
-    console.warn('corpus retrieval failed (proceeding with empty):', err)
-  }
+  const generateInitialTreeWithRetrieval = buildGenerateInitialTreeWithRetrieval({
+    db,
+    adapters: ADAPTERS,
+    generateInitialTree,
+    runRetrieval,
+    validateRetrievalResults,
+    retrieveCorpus,
+  })
 
   let treeState
   try {
-    treeState = await generateInitialTree(intakePayload, corpus)
+    treeState = await generateInitialTreeWithRetrieval(intakePayload)
   } catch (err) {
     console.error('tree generation failed:', err)
     return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })

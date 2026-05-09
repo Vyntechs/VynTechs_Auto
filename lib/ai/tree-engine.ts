@@ -61,8 +61,9 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
 export async function generateInitialTree(
   intake: IntakePayload,
   corpus?: CorpusMatch[],
+  retrieval?: RetrievalResult[],
 ): Promise<TreeState> {
-  const userMessage = buildIntakeUserMessage(intake, corpus)
+  const userMessage = buildIntakeUserMessage(intake, corpus, retrieval)
 
   return withRetry(async () => {
     const res = await anthropic.messages.create({
@@ -78,14 +79,29 @@ export async function generateInitialTree(
   })
 }
 
-function buildIntakeUserMessage(intake: IntakePayload, corpus?: CorpusMatch[]): string {
+function buildIntakeUserMessage(
+  intake: IntakePayload,
+  corpus?: CorpusMatch[],
+  retrieval?: RetrievalResult[],
+): string {
   const engine = intake.vehicleEngine ? ` (${intake.vehicleEngine})` : ''
   const mileage = intake.mileage ? `, ${intake.mileage} mi` : ''
   return `Vehicle: ${intake.vehicleYear} ${intake.vehicleMake} ${intake.vehicleModel}${engine}${mileage}.
 
-Customer complaint: ${intake.customerComplaint}${corpusContextBlock(corpus)}
+Customer complaint: ${intake.customerComplaint}${corpusContextBlock(corpus)}${retrievalContextBlock(retrieval)}
 
 Generate the initial decision tree. Return JSON only — no prose, no fences.`
+}
+
+function retrievalContextBlock(retrieval: RetrievalResult[] | undefined): string {
+  if (!retrieval || retrieval.length === 0) return ''
+  const lines = retrieval
+    .slice(0, 5)
+    .map(
+      (r, i) => `(${i + 1}) [${r.source}] ${r.title}\n    ${r.snippet.slice(0, 400)}`,
+    )
+    .join('\n\n')
+  return `\n\nInternet retrieval (graded for relevance):\n${lines}`
 }
 
 function corpusContextBlock(corpus: CorpusMatch[] | undefined): string {
