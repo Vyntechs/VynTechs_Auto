@@ -1,6 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { anthropic, MODEL, cachedSystem } from './client'
-import { SCAN_SCREEN_VISION_SYSTEM, WIRING_DIAGRAM_VISION_SYSTEM, AUDIO_TRANSCRIBE_SYSTEM } from './prompts'
+import {
+  SCAN_SCREEN_VISION_SYSTEM,
+  WIRING_DIAGRAM_VISION_SYSTEM,
+  AUDIO_TRANSCRIBE_SYSTEM,
+  GENERIC_PHOTO_VISION_SYSTEM,
+} from './prompts'
 
 // --- Constants ---------------------------------------------------------------
 
@@ -249,6 +254,81 @@ export async function extractWiringDiagram(input: {
     }
     if (typeof (result as Record<string, unknown>).circuit !== 'string') {
       throw new Error('vision response missing required field: circuit')
+    }
+    return result
+  })
+}
+
+// --- Generic photo extraction ------------------------------------------------
+
+export type GenericPhotoExtraction = {
+  text?: string
+  structured?: Record<string, unknown>
+  summary: string
+  confidence: number
+}
+
+/**
+ * Extract structured facts from a freeform technician's photo, steered by an
+ * `extractFor` instruction emitted by the tree-engine when it asked the tech
+ * for the photo (see lib/ai/tree-engine.ts → WhatWouldClose `photo` shape).
+ *
+ * Used by the extraction worker for the `photo` artifact kind. Tuned named
+ * extractors (scan_screen, wiring_diagram) still run for their kinds; this
+ * one handles everything else (build stickers, capacity placards, fuse-box
+ * layouts, part-condition close-ups) via a single steerable prompt.
+ */
+export async function extractGenericPhoto(input: {
+  bytes: Uint8Array
+  mimeType: string
+  extractFor: string
+}): Promise<GenericPhotoExtraction> {
+  const baseMime = input.mimeType.split(';')[0].trim()
+  if (!VISION_MIME_TYPES.has(baseMime)) {
+    throw new Error(`unsupported image type for vision: ${input.mimeType}`)
+  }
+  return withRetry(async () => {
+    const res = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      system: cachedSystem(GENERIC_PHOTO_VISION_SYSTEM),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: input.mimeType as
+                  | 'image/jpeg'
+                  | 'image/png'
+                  | 'image/gif'
+                  | 'image/webp',
+                data: toBase64(input.bytes),
+              },
+            },
+            {
+              type: 'text',
+              text: `Extract per this instruction: ${input.extractFor}\n\nReturn JSON only.`,
+            },
+          ],
+        },
+      ],
+    })
+
+    const block = res.content.find((b: { type: string }) => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('no text block in response')
+    if (res.stop_reason === 'max_tokens') {
+      throw new Error(`generic-photo response truncated at max_tokens (len=${block.text.length})`)
+    }
+    const result = parseJson<GenericPhotoExtraction>(block.text, res.stop_reason ?? undefined)
+    const r = result as Record<string, unknown>
+    if (typeof r.summary !== 'string') {
+      throw new Error('generic-photo response missing required field: summary')
+    }
+    if (typeof r.confidence !== 'number') {
+      throw new Error('generic-photo response missing required field: confidence')
     }
     return result
   })
