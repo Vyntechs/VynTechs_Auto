@@ -15,12 +15,16 @@ export type TreeNode = {
   children?: string[]
 }
 
+export type WhatWouldClose =
+  | { kind: 'confirm'; prompt: string }
+  | { kind: 'photo'; prompt: string; extractFor: string }
+
 export type ProposedAction = {
   description: string
   confidence: number
   expectedSignal?: string
   confidenceGap?: string
-  whatWouldClose?: string
+  whatWouldClose?: string | WhatWouldClose
 }
 
 export type RequestedArtifact = {
@@ -232,5 +236,25 @@ export function parseTreeJson(text: string, stopReason?: string): TreeState {
   ) {
     throw new Error('invalid tree response shape')
   }
+
+  const proposedAction = (parsed as { proposedAction?: { whatWouldClose?: unknown } })
+    .proposedAction
+  const wwc = proposedAction?.whatWouldClose
+  if (wwc !== undefined && typeof wwc !== 'string') {
+    if (typeof wwc !== 'object' || wwc === null) {
+      throw new Error('invalid whatWouldClose: must be string or object')
+    }
+    const obj = wwc as { kind?: unknown; prompt?: unknown; extractFor?: unknown }
+    if (typeof obj.prompt !== 'string') {
+      throw new Error('invalid whatWouldClose: prompt must be a string')
+    }
+    if (obj.kind !== 'confirm' && obj.kind !== 'photo') {
+      throw new Error(`invalid whatWouldClose: unknown kind "${String(obj.kind)}"`)
+    }
+    if (obj.kind === 'photo' && typeof obj.extractFor !== 'string') {
+      throw new Error('invalid whatWouldClose: photo kind requires extractFor')
+    }
+  }
+
   return parsed as TreeState
 }
