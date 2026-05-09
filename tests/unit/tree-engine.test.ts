@@ -51,6 +51,74 @@ describe('generateInitialTree', () => {
     expect(tree.currentNodeId).toBe('scan-codes')
     expect(tree.message).toContain('codes')
   })
+
+  it('embeds the retrieval block in the user message when retrieval is provided', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'go', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'starting',
+          }),
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 80 },
+    })
+
+    await generateInitialTree(
+      {
+        vehicleYear: 2020,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-250',
+        vehicleEngine: '6.7L Powerstroke',
+        customerComplaint: 'P0087, loss of power',
+      },
+      undefined,
+      [
+        {
+          source: 'web-search',
+          url: 'https://x.test',
+          title: 'CP4 failure on 6.7 Powerstroke',
+          snippet: 'Metal contamination from CP4 pump wear is the dominant pattern.',
+        },
+      ],
+    )
+
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+    const call = mockCreate.mock.calls[0]![0]
+    const userMessage = call.messages[0].content as string
+    expect(userMessage).toContain('Internet retrieval')
+    expect(userMessage).toContain('CP4 failure on 6.7 Powerstroke')
+    expect(userMessage).toContain('Metal contamination')
+  })
+
+  it('omits the retrieval block when retrieval is empty or undefined', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            nodes: [{ id: 'a', label: 'go', status: 'active' }],
+            currentNodeId: 'a',
+            message: 'starting',
+          }),
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 80 },
+    })
+
+    await generateInitialTree({
+      vehicleYear: 2020,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-250',
+      customerComplaint: 'x',
+    })
+
+    const userMessage = mockCreate.mock.calls[0]![0].messages[0].content as string
+    expect(userMessage).not.toContain('Internet retrieval')
+  })
 })
 
 describe('parseTreeJson', () => {

@@ -11,6 +11,7 @@ import { ManufacturerRecallAdapter } from '@/lib/retrieval/adapters/manufacturer
 import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
 import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
+import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 
 const ADAPTERS = [
@@ -19,6 +20,7 @@ const ADAPTERS = [
   new ForumAdapter(),
   new YouTubeAdapter(),
   new RedditAdapter(),
+  new WebSearchAdapter(),
 ]
 
 export async function POST(
