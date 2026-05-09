@@ -1,4 +1,5 @@
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from '../types'
+import { buildSearchQuery } from '../query-builder'
 
 /**
  * General-web search adapter via Tavily (https://tavily.com).
@@ -10,6 +11,11 @@ import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from '../typ
  *
  * Weight 0.5 — lower than NHTSA (0.9, official) and the manufacturer recall
  * adapter, similar to forum (0.6). Authoritative sources still win when present.
+ *
+ * The query passed to Tavily is built via buildSearchQuery — vehicle metadata
+ * + DTCs + stopword-stripped symptom terms — instead of the raw complaint
+ * sentence. This is what makes "TCC shudder" articles surface against a
+ * complaint like "the truck shakes and vibrates at tip in."
  */
 export class WebSearchAdapter implements RetrievalAdapter {
   id = 'web-search'
@@ -19,13 +25,7 @@ export class WebSearchAdapter implements RetrievalAdapter {
     const apiKey = process.env.TAVILY_API_KEY
     if (!apiKey) return []
 
-    const q = `${ctx.vehicleYear} ${ctx.vehicleMake} ${ctx.vehicleModel}${
-      ctx.vehicleEngine ? ` ${ctx.vehicleEngine}` : ''
-    } ${ctx.dtcs?.join(' ') ?? ''} ${ctx.complaintText}${
-      ctx.observation ? ` ${ctx.observation}` : ''
-    }`
-      .replace(/\s+/g, ' ')
-      .trim()
+    const q = buildSearchQuery(ctx)
 
     const res = await fetch('https://api.tavily.com/search', {
       signal,
