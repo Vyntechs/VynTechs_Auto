@@ -37,6 +37,10 @@ type Props = {
   /** Back-link target for the VehicleStrip header. Defaults to /today (My Jobs).
    *  Live callers pass a per-session target so back means "back to the diagnosis." */
   back?: { href: string; label: string }
+  /** Hero interactive ask — yes/no for tech-attestable confirms. Renders above the compass. */
+  confirmAsk?: { prompt: string; onYes: () => void; onNo: () => void; busy?: boolean }
+  /** Hero interactive ask — single-tap camera button. Renders above the compass. */
+  photoAsk?: { prompt: string; onSnap: () => void; busy?: boolean }
 }
 
 const DEFAULT_TAPE_BODY = `  QUERIES   SOURCE              MATCH        STATUS
@@ -291,6 +295,8 @@ export function DeclineOrDefer({
   pending = null,
   error = null,
   back,
+  confirmAsk,
+  photoAsk,
 }: Props) {
   const deficit = Math.round(gate - confidence)
   const headline = confidenceGap ?? 'Confidence too low to commit to a high-risk repair.'
@@ -332,6 +338,91 @@ export function DeclineOrDefer({
         </div>
 
         <h2 className="dod-headline">{headline}</h2>
+
+        {confirmAsk && (
+          <div
+            role="group"
+            aria-label="Confirm to close gap"
+            style={{
+              margin: '8px auto 16px',
+              padding: '14px 16px',
+              maxWidth: '36ch',
+              border: '0.5px solid var(--vt-rule-strong)',
+              borderRadius: 'var(--vt-radius-2)',
+              background: 'var(--vt-bone-100)',
+            }}
+          >
+            <p
+              style={{
+                fontFamily: 'var(--vt-font-serif)',
+                fontSize: 14,
+                color: 'var(--vt-fg)',
+                lineHeight: 1.4,
+                margin: '0 0 10px',
+                textAlign: 'center',
+              }}
+            >
+              {confirmAsk.prompt}
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={confirmAsk.onYes}
+                disabled={confirmAsk.busy}
+                style={{ minHeight: 48, flex: 1 }}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={confirmAsk.onNo}
+                disabled={confirmAsk.busy}
+                style={{ minHeight: 48, flex: 1 }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        )}
+
+        {photoAsk && (
+          <div
+            role="group"
+            aria-label="Snap to close gap"
+            style={{
+              margin: '8px auto 16px',
+              padding: '14px 16px',
+              maxWidth: '36ch',
+              border: '0.5px solid var(--vt-rule-strong)',
+              borderRadius: 'var(--vt-radius-2)',
+              background: 'var(--vt-bone-100)',
+            }}
+          >
+            <p
+              style={{
+                fontFamily: 'var(--vt-font-serif)',
+                fontSize: 14,
+                color: 'var(--vt-fg)',
+                lineHeight: 1.4,
+                margin: '0 0 10px',
+                textAlign: 'center',
+              }}
+            >
+              {photoAsk.prompt}
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={photoAsk.onSnap}
+              disabled={photoAsk.busy}
+              style={{ minHeight: 48, width: '100%' }}
+            >
+              {photoAsk.busy ? 'Uploading…' : 'Snap it'}
+            </button>
+          </div>
+        )}
 
         {/* Caller-supplied gap statement, rendered as the sub-paragraph */}
         {gap && (

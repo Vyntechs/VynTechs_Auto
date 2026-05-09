@@ -158,6 +158,72 @@ describe('DeclineOrDefer (presentational)', () => {
     const back = screen.getByRole('link', { name: /my jobs/i })
     expect(back).toHaveAttribute('href', '/today')
   })
+
+  it('renders a confirm hero with Yes/No when confirmAsk is provided', () => {
+    const onYes = vi.fn()
+    const onNo = vi.fn()
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        confirmAsk={{
+          prompt: 'Did C171 positively re-latch?',
+          onYes,
+          onNo,
+        }}
+      />,
+    )
+    expect(screen.getByText(/Did C171 positively re-latch/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^yes$/i }))
+    expect(onYes).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: /^no$/i }))
+    expect(onNo).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a photo hero with Snap-it when photoAsk is provided', () => {
+    const onSnap = vi.fn()
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        photoAsk={{
+          prompt: 'Snap the C171 pinout page',
+          onSnap,
+        }}
+      />,
+    )
+    expect(screen.getByText(/Snap the C171 pinout page/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /snap it/i }))
+    expect(onSnap).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders no hero when neither confirmAsk nor photoAsk is provided', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /^yes$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /snap it/i })).not.toBeInTheDocument()
+  })
 })
 
 describe('DeclineOrDeferLive (wired)', () => {
