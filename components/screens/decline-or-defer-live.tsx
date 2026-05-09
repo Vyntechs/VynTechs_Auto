@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { DeclineOrDefer } from './decline-or-defer'
+import type { WhatWouldClose } from '@/lib/ai/tree-engine'
 
 type GateOption = 'gather_more_low_risk' | 'decline' | 'defer'
 type RiskClass = 'low' | 'medium' | 'high' | 'destructive'
@@ -43,7 +44,7 @@ export function DeclineOrDeferLive(props: {
   timer: string
   gap: string
   confidenceGap?: string
-  whatWouldClose?: string
+  whatWouldClose?: string | WhatWouldClose
   riskClass: RiskClass
   optionKeys: GateOption[]
 }) {
@@ -54,7 +55,11 @@ export function DeclineOrDeferLive(props: {
   const options = props.optionKeys.map((k) => {
     const base = OPTIONS_BY_REASON[k]
     if (k === 'gather_more_low_risk' && props.whatWouldClose) {
-      return { ...base, description: props.whatWouldClose }
+      const wwcText =
+        typeof props.whatWouldClose === 'string'
+          ? props.whatWouldClose
+          : props.whatWouldClose.prompt
+      return { ...base, description: wwcText }
     }
     return base
   })

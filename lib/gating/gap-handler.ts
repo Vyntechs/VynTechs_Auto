@@ -1,7 +1,7 @@
 import { classifyAction, type RiskJudgment } from './risk-classifier'
 import { getThreshold } from '@/lib/db/queries'
 import type { AppDb } from '@/lib/db/queries'
-import type { ProposedAction } from '@/lib/ai/tree-engine'
+import type { ProposedAction, WhatWouldClose } from '@/lib/ai/tree-engine'
 
 export type GateOption = 'gather_more_low_risk' | 'decline' | 'defer'
 
@@ -14,7 +14,7 @@ export type GateDecision = {
   gap?: string
   options?: GateOption[]
   confidenceGap?: string
-  whatWouldClose?: string
+  whatWouldClose?: string | WhatWouldClose
 }
 
 export async function gateProposedAction(input: {
