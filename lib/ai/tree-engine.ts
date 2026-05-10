@@ -16,7 +16,7 @@ export type TreeNode = {
 }
 
 export type WhatWouldClose =
-  | { kind: 'confirm'; prompt: string }
+  | { kind: 'confirm'; prompt: string; yesLabel?: string; noLabel?: string }
   | { kind: 'photo'; prompt: string; extractFor: string }
 
 export type ProposedAction = {
@@ -269,7 +269,13 @@ export function parseTreeJson(text: string, stopReason?: string): TreeState {
     if (typeof wwc !== 'object' || wwc === null) {
       throw new Error('invalid whatWouldClose: must be string or object')
     }
-    const obj = wwc as { kind?: unknown; prompt?: unknown; extractFor?: unknown }
+    const obj = wwc as {
+      kind?: unknown
+      prompt?: unknown
+      extractFor?: unknown
+      yesLabel?: unknown
+      noLabel?: unknown
+    }
     if (typeof obj.prompt !== 'string') {
       throw new Error('invalid whatWouldClose: prompt must be a string')
     }
@@ -278,6 +284,14 @@ export function parseTreeJson(text: string, stopReason?: string): TreeState {
     }
     if (obj.kind === 'photo' && typeof obj.extractFor !== 'string') {
       throw new Error('invalid whatWouldClose: photo kind requires extractFor')
+    }
+    if (obj.kind === 'confirm') {
+      if (obj.yesLabel !== undefined && typeof obj.yesLabel !== 'string') {
+        throw new Error('invalid whatWouldClose: yesLabel must be a string when present')
+      }
+      if (obj.noLabel !== undefined && typeof obj.noLabel !== 'string') {
+        throw new Error('invalid whatWouldClose: noLabel must be a string when present')
+      }
     }
   }
 

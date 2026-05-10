@@ -24,7 +24,7 @@ describe('gating flow contract — risk_class × confidence', () => {
     })
     expect(r.allow).toBe(false)
     expect(r.riskClass).toBe('destructive')
-    expect(r.options).toEqual(['gather_more_low_risk', 'decline', 'defer'])
+    expect(r.options).toEqual(['gather_more_low_risk', 'defer'])
     expect(r.gap).toMatch(/95%/)
   })
 

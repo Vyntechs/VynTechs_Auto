@@ -3,7 +3,10 @@ import { getThreshold } from '@/lib/db/queries'
 import type { AppDb } from '@/lib/db/queries'
 import type { ProposedAction, WhatWouldClose } from '@/lib/ai/tree-engine'
 
-export type GateOption = 'gather_more_low_risk' | 'decline' | 'defer'
+// "decline" was removed 2026-05-09 — defer-for-curator is the only escalation
+// path. The session.status enum still carries 'declined' for back-compat with
+// rows that closed before the change.
+export type GateOption = 'gather_more_low_risk' | 'defer'
 
 export type GateDecision = {
   allow: boolean
@@ -44,7 +47,7 @@ export async function gateProposedAction(input: {
     allow: false,
     ...base,
     gap: `Required confidence ${(threshold * 100).toFixed(0)}% for risk class "${judgment.riskClass}"; current confidence ${(input.action.confidence * 100).toFixed(0)}%.`,
-    options: ['gather_more_low_risk', 'decline', 'defer'],
+    options: ['gather_more_low_risk', 'defer'],
     confidenceGap: input.action.confidenceGap,
     whatWouldClose: input.action.whatWouldClose,
   }

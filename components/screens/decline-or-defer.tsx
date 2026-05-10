@@ -37,8 +37,17 @@ type Props = {
   /** Back-link target for the VehicleStrip header. Defaults to /today (My Jobs).
    *  Live callers pass a per-session target so back means "back to the diagnosis." */
   back?: { href: string; label: string }
-  /** Hero interactive ask — yes/no for tech-attestable confirms. Renders above the compass. */
-  confirmAsk?: { prompt: string; onYes: () => void; onNo: () => void; busy?: boolean }
+  /** Hero interactive ask — yes/no for tech-attestable confirms. Renders above the compass.
+   *  yesLabel/noLabel are AI-generated short echoes of the answer state (e.g.
+   *  "Yes — I have 12V" / "No — no voltage"). Optional; falls back to plain Yes/No. */
+  confirmAsk?: {
+    prompt: string
+    onYes: () => void
+    onNo: () => void
+    busy?: boolean
+    yesLabel?: string
+    noLabel?: string
+  }
   /** Hero interactive ask — single-tap camera button. Renders above the compass. */
   photoAsk?: { prompt: string; onSnap: () => void; busy?: boolean }
 }
@@ -339,6 +348,23 @@ export function DeclineOrDefer({
 
         <h2 className="dod-headline">{headline}</h2>
 
+        {(confirmAsk || photoAsk) && (
+          <div
+            style={{
+              margin: '0 auto 4px',
+              maxWidth: '36ch',
+              fontFamily: 'var(--vt-font-mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--vt-fg-3)',
+              textAlign: 'center',
+            }}
+          >
+            Fastest path forward
+          </div>
+        )}
+
         {confirmAsk && (
           <div
             role="group"
@@ -358,11 +384,24 @@ export function DeclineOrDefer({
                 fontSize: 14,
                 color: 'var(--vt-fg)',
                 lineHeight: 1.4,
-                margin: '0 0 10px',
+                margin: '0 0 4px',
                 textAlign: 'center',
               }}
             >
               {confirmAsk.prompt}
+            </p>
+            <p
+              style={{
+                fontFamily: 'var(--vt-font-serif)',
+                fontStyle: 'italic',
+                fontSize: 12,
+                color: 'var(--vt-fg-3)',
+                lineHeight: 1.4,
+                margin: '0 0 10px',
+                textAlign: 'center',
+              }}
+            >
+              Answering this lets the AI commit to the next step. ~10 sec.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
@@ -372,7 +411,7 @@ export function DeclineOrDefer({
                 disabled={confirmAsk.busy}
                 style={{ minHeight: 48, flex: 1 }}
               >
-                Yes
+                {confirmAsk.busy ? 'Working…' : (confirmAsk.yesLabel ?? 'Yes')}
               </button>
               <button
                 type="button"
@@ -381,7 +420,7 @@ export function DeclineOrDefer({
                 disabled={confirmAsk.busy}
                 style={{ minHeight: 48, flex: 1 }}
               >
-                No
+                {confirmAsk.busy ? 'Working…' : (confirmAsk.noLabel ?? 'No')}
               </button>
             </div>
           </div>
@@ -454,7 +493,9 @@ export function DeclineOrDefer({
 
         {/* COMPASS — three forward paths as spokes */}
         <div className="dod-compass">
-          <span className="dod-compass__lead">Three ways forward</span>
+          <span className="dod-compass__lead">
+            {options.length <= 2 ? "Or, if you can't answer yet" : 'Three ways forward'}
+          </span>
           {options.map((opt) => {
             const reason = inferReason(opt)
             const cfg = SPOKE_META[reason]

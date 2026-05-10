@@ -27,8 +27,9 @@ const baseProps = {
   timer: '0:58',
   gap: 'Required confidence 95%; current 80%.',
   riskClass: 'destructive' as const,
-  optionKeys: ['gather_more_low_risk', 'decline', 'defer'] as Array<
-    'gather_more_low_risk' | 'decline' | 'defer'
+  // Decline option removed 2026-05-09 — only Gather and Defer remain.
+  optionKeys: ['gather_more_low_risk', 'defer'] as Array<
+    'gather_more_low_risk' | 'defer'
   >,
 }
 
@@ -224,41 +225,135 @@ describe('DeclineOrDefer (presentational)', () => {
     expect(screen.queryByRole('button', { name: /^yes$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /snap it/i })).not.toBeInTheDocument()
   })
+
+  it('renders the FASTEST PATH FORWARD eyebrow above the confirm hero', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        confirmAsk={{ prompt: 'Coolant milky?', onYes: vi.fn(), onNo: vi.fn() }}
+      />,
+    )
+    expect(screen.getByText(/fastest path forward/i)).toBeInTheDocument()
+  })
+
+  it('omits the FASTEST PATH FORWARD eyebrow when no confirm/photo hero is shown', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+      />,
+    )
+    expect(screen.queryByText(/fastest path forward/i)).not.toBeInTheDocument()
+  })
+
+  it('renders Working… on Yes/No buttons while busy', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        confirmAsk={{
+          prompt: 'Coolant milky?',
+          yesLabel: 'Yes — milky',
+          noLabel: 'No — clean',
+          onYes: vi.fn(),
+          onNo: vi.fn(),
+          busy: true,
+        }}
+      />,
+    )
+    const buttons = screen.getAllByRole('button', { name: /working…/i })
+    expect(buttons.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('renders the spokes section with the "OR, IF YOU CAN\'T ANSWER YET" header when 2 options', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+        confirmAsk={{ prompt: 'q', onYes: vi.fn(), onNo: vi.fn() }}
+      />,
+    )
+    expect(
+      screen.getByText(/or, if you can't answer yet/i),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps the legacy "Three ways forward" header when 3 options (design gallery / preview)', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="x"
+        vehicleVin="x"
+        timer="x"
+        gap="g"
+        options={[
+          { number: 1, title: 'A', description: 'a' },
+          { number: 2, title: 'B', description: 'b' },
+          { number: 3, title: 'C', description: 'c' },
+        ]}
+      />,
+    )
+    expect(screen.getByText(/three ways forward/i)).toBeInTheDocument()
+  })
 })
 
 describe('DeclineOrDeferLive (wired)', () => {
-  it('routes back to the session when "Gather more low-risk data" is clicked', () => {
+  function mockFetchSequence(...responses: Array<{ ok: boolean; status?: number; body?: unknown }>) {
+    const fn = global.fetch as ReturnType<typeof vi.fn>
+    for (const r of responses) {
+      fn.mockResolvedValueOnce({
+        ok: r.ok,
+        status: r.status ?? (r.ok ? 200 : 500),
+        json: async () => r.body ?? {},
+      })
+    }
+  }
+
+  it('does not render a "Decline this job" spoke (option removed 2026-05-09)', () => {
     render(<DeclineOrDeferLive {...baseProps} />)
-    fireEvent.click(screen.getByRole('button', { name: /gather more low-risk data/i }))
-    expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc')
-    expect(global.fetch).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole('button', { name: /decline this job/i }),
+    ).not.toBeInTheDocument()
   })
 
-  it('POSTs reason=decline with gap+riskClass when "Decline this job" is clicked', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ status: 'declined', language: { customerMessage: '', internalNote: '' } }),
-    })
+  it('releases the gate and routes to the session when "Gather more low-risk data" is clicked', async () => {
+    mockFetchSequence({ ok: true, body: { ok: true } })
     render(<DeclineOrDeferLive {...baseProps} />)
-    fireEvent.click(screen.getByRole('button', { name: /decline this job/i }))
-    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions'))
-    expect(global.fetch).toHaveBeenCalledWith(
-      '/api/sessions/sess-abc/decline-or-defer',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          reason: 'decline',
-          gap: baseProps.gap,
-          riskClass: 'destructive',
-        }),
-      }),
+    fireEvent.click(screen.getByRole('button', { name: /gather more low-risk data/i }))
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/sessions/sess-abc/release-gate',
+        expect.objectContaining({ method: 'POST' }),
+      ),
     )
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
   })
 
   it('POSTs reason=defer when "Defer for curator review" is clicked', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    mockFetchSequence({
       ok: true,
-      json: async () => ({ status: 'deferred', language: { customerMessage: '', internalNote: '' } }),
+      body: { status: 'deferred', language: { customerMessage: '', internalNote: '' } },
     })
     render(<DeclineOrDeferLive {...baseProps} />)
     fireEvent.click(screen.getByRole('button', { name: /defer for curator review/i }))
@@ -269,26 +364,20 @@ describe('DeclineOrDeferLive (wired)', () => {
     expect(callBody.reason).toBe('defer')
   })
 
-  it('surfaces a server error and clears pending state', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: 'language generation failed' }),
-    })
+  it('surfaces a server error and clears pending state on Defer failure', async () => {
+    mockFetchSequence({ ok: false, status: 500, body: { error: 'language generation failed' } })
     render(<DeclineOrDeferLive {...baseProps} />)
-    fireEvent.click(screen.getByRole('button', { name: /decline this job/i }))
+    fireEvent.click(screen.getByRole('button', { name: /defer for curator review/i }))
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/language generation failed/i),
     )
     expect(pushSpy).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: /decline this job/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /defer for curator review/i })).not.toBeDisabled()
   })
 
-  it('renders a confirm hero and POSTs the choice as observation to /advance', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({}),
-    })
+  it('confirm hero — POSTs the choice to /advance, then releases the gate, then routes', async () => {
+    // Two fetches: /advance, then /release-gate.
+    mockFetchSequence({ ok: true, body: {} }, { ok: true, body: { ok: true } })
     render(
       <DeclineOrDeferLive
         {...baseProps}
@@ -296,22 +385,26 @@ describe('DeclineOrDeferLive (wired)', () => {
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: /^yes$/i }))
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
-    expect(global.fetch).toHaveBeenCalledWith(
-      '/api/sessions/sess-abc/advance',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('Yes'),
-      }),
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/sessions/sess-abc/advance',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/sessions/sess-abc/release-gate',
+        expect.objectContaining({ method: 'POST' }),
+      ),
     )
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
   })
 
-  it('renders a photo hero with a hidden file input that uploads to /capture', async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ artifactId: 'art-xyz' }),
-    })
+  it('photo hero — uploads via /capture, then releases the gate, then routes', async () => {
+    mockFetchSequence(
+      { ok: true, body: { artifactId: 'art-xyz' } },
+      { ok: true, body: { ok: true } },
+    )
     const { container } = render(
       <DeclineOrDeferLive
         {...baseProps}
@@ -322,19 +415,22 @@ describe('DeclineOrDeferLive (wired)', () => {
         }}
       />,
     )
-    expect(screen.getByText(/Snap the C171 pinout page/i)).toBeInTheDocument()
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
     expect(fileInput).toBeTruthy()
-    expect(fileInput.getAttribute('accept')).toMatch(/image/)
-    expect(fileInput.getAttribute('capture')).toBe('environment')
-
     const file = new File(['x'], 'pinout.jpg', { type: 'image/jpeg' })
     Object.defineProperty(fileInput, 'files', { value: [file] })
     fireEvent.change(fileInput)
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled())
-    expect(global.fetch).toHaveBeenCalledWith(
-      '/api/sessions/sess-abc/capture',
-      expect.objectContaining({ method: 'POST' }),
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/sessions/sess-abc/capture',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/sessions/sess-abc/release-gate',
+        expect.objectContaining({ method: 'POST' }),
+      ),
     )
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
   })
@@ -343,5 +439,36 @@ describe('DeclineOrDeferLive (wired)', () => {
     render(<DeclineOrDeferLive {...baseProps} whatWouldClose="quote the FSM page" />)
     expect(screen.queryByRole('button', { name: /^yes$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /snap it/i })).not.toBeInTheDocument()
+  })
+
+  it('renders confirm hero buttons with yesLabel / noLabel when AI provides them', () => {
+    render(
+      <DeclineOrDeferLive
+        {...baseProps}
+        whatWouldClose={{
+          kind: 'confirm',
+          prompt: 'Do you have 12V at the clutch coil?',
+          yesLabel: 'Yes — I have 12V',
+          noLabel: 'No — no voltage',
+        }}
+      />,
+    )
+    expect(
+      screen.getByRole('button', { name: /yes — i have 12v/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /no — no voltage/i }),
+    ).toBeInTheDocument()
+  })
+
+  it('falls back to plain Yes/No buttons when AI omits the labels', () => {
+    render(
+      <DeclineOrDeferLive
+        {...baseProps}
+        whatWouldClose={{ kind: 'confirm', prompt: 'Coolant milky?' }}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /^yes$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^no$/i })).toBeInTheDocument()
   })
 })

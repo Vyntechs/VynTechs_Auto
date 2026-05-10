@@ -626,4 +626,65 @@ describe('parseTreeJson — structured whatWouldClose', () => {
       ),
     ).toThrow(/kind/)
   })
+
+  it('accepts yesLabel and noLabel on a confirm whatWouldClose', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'verify 12V at coil',
+        confidence: 0.85,
+        confidenceGap: 'no electrical confirmation yet',
+        whatWouldClose: {
+          kind: 'confirm',
+          prompt: 'Do you have 12V at the clutch coil?',
+          yesLabel: 'Yes — I have 12V',
+          noLabel: 'No — no voltage',
+        },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'confirm',
+      prompt: 'Do you have 12V at the clutch coil?',
+      yesLabel: 'Yes — I have 12V',
+      noLabel: 'No — no voltage',
+    })
+  })
+
+  it('accepts a confirm whatWouldClose without yesLabel/noLabel (back-compat)', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'check coolant',
+        confidence: 0.85,
+        confidenceGap: 'visual not yet attested',
+        whatWouldClose: { kind: 'confirm', prompt: 'Coolant milky?' },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'confirm',
+      prompt: 'Coolant milky?',
+    })
+  })
+
+  it('rejects non-string yesLabel on a confirm whatWouldClose', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.5,
+          whatWouldClose: { kind: 'confirm', prompt: 'q', yesLabel: 42 },
+        }),
+      ),
+    ).toThrow(/yesLabel/)
+  })
+
+  it('rejects non-string noLabel on a confirm whatWouldClose', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.5,
+          whatWouldClose: { kind: 'confirm', prompt: 'q', noLabel: false },
+        }),
+      ),
+    ).toThrow(/noLabel/)
+  })
 })

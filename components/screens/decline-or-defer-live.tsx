@@ -4,7 +4,8 @@ import { useRef, useState } from 'react'
 import { DeclineOrDefer } from './decline-or-defer'
 import type { WhatWouldClose } from '@/lib/ai/tree-engine'
 
-type GateOption = 'gather_more_low_risk' | 'decline' | 'defer'
+// "decline" was removed 2026-05-09 — only Gather and Defer remain.
+type GateOption = 'gather_more_low_risk' | 'defer'
 type RiskClass = 'low' | 'medium' | 'high' | 'destructive'
 
 type Option = {
@@ -12,7 +13,7 @@ type Option = {
   title: string
   description: string
   emphasized?: boolean
-  reason: 'gather' | 'decline' | 'defer'
+  reason: 'gather' | 'defer'
 }
 
 const OPTIONS_BY_REASON: Record<GateOption, Option> = {
@@ -21,12 +22,6 @@ const OPTIONS_BY_REASON: Record<GateOption, Option> = {
     title: 'Gather more low-risk data',
     description: 'Try a non-destructive observation that could close the gap.',
     reason: 'gather',
-  },
-  decline: {
-    number: 2,
-    title: 'Decline this job',
-    description: 'Customer-facing language: refer to dealer or marque specialist.',
-    reason: 'decline',
   },
   defer: {
     number: 3,
@@ -57,6 +52,28 @@ export function DeclineOrDeferLive(props: {
   const wwc = props.whatWouldClose
   const wwcObj = wwc && typeof wwc === 'object' ? wwc : null
 
+  // Best-effort gate release — the user just took an action on the Decline
+  // screen, so the *currently displayed* gate should not bounce them right
+  // back here on the next /sessions/:id load. Fire-and-forget: even if this
+  // 4xx's the navigation still proceeds; the next observation re-runs gating
+  // naturally. Non-2xx responses log to the console so a stale-gate redirect
+  // loop isn't completely silent in dev tools.
+  async function releaseGate(): Promise<void> {
+    try {
+      const res = await fetch(`/api/sessions/${props.sessionId}/release-gate`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `release-gate returned ${res.status}; navigation will continue but the gate may persist on the next page load`,
+        )
+      }
+    } catch {
+      // Network glitch on release shouldn't block navigation.
+    }
+  }
+
   async function handleConfirm(answer: 'Yes' | 'No') {
     if (!wwcObj || wwcObj.kind !== 'confirm') return
     setHeroBusy(true)
@@ -73,6 +90,7 @@ export function DeclineOrDeferLive(props: {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error ?? `${res.status}`)
       }
+      await releaseGate()
       router.push(`/sessions/${props.sessionId}`)
     } catch (err) {
       setHeroBusy(false)
@@ -101,6 +119,7 @@ export function DeclineOrDeferLive(props: {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error ?? `${res.status}`)
       }
+      await releaseGate()
       router.push(`/sessions/${props.sessionId}`)
     } catch (err) {
       setHeroBusy(false)
@@ -129,6 +148,10 @@ export function DeclineOrDeferLive(props: {
     setError(null)
 
     if (opt.reason === 'gather') {
+      // Release the stale gate so the session-routing layer doesn't bounce
+      // us right back here. The active-step view will show the AI's question
+      // inline; the tech can log a new observation and gating re-runs.
+      await releaseGate()
       router.push(`/sessions/${props.sessionId}`)
       return
     }
@@ -184,6 +207,8 @@ export function DeclineOrDeferLive(props: {
           wwcObj?.kind === 'confirm'
             ? {
                 prompt: wwcObj.prompt,
+                yesLabel: wwcObj.yesLabel,
+                noLabel: wwcObj.noLabel,
                 onYes: () => handleConfirm('Yes'),
                 onNo: () => handleConfirm('No'),
                 busy: heroBusy,

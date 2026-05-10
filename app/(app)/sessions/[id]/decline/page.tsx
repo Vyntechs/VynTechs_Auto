@@ -38,7 +38,7 @@ export default async function DeclinePage({
       confidenceGap={gate.confidenceGap}
       whatWouldClose={gate.whatWouldClose}
       riskClass={riskClass}
-      optionKeys={gate.options ?? ['gather_more_low_risk', 'decline', 'defer']}
+      optionKeys={gate.options ?? ['gather_more_low_risk', 'defer']}
     />
   )
 }
