@@ -2,6 +2,17 @@
 
 import { useState } from 'react'
 
+// iOS Safari surfaces a fetch failure (timeout / dropped connection /
+// CORS) as `TypeError: Load failed`. Map fetch-level failures to copy
+// the tech can act on. HTTP error bodies (thrown above as `new Error(...)`)
+// keep their original message — those usually carry useful detail.
+function describeFetchError(err: unknown, fallback: string): string {
+  if (err instanceof TypeError) {
+    return 'AI took too long or your connection dropped — tap again to retry.'
+  }
+  return err instanceof Error ? err.message : fallback
+}
+
 type Props = {
   sessionId: string
   prompt: string
@@ -56,7 +67,7 @@ export function AmbientConditionsCapture({ sessionId, prompt, onCaptured }: Prop
           setFetched(conditions)
           setPhase('review')
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Lookup failed')
+          setError(describeFetchError(err, 'Lookup failed'))
           setPhase('manual')
         }
       },
@@ -90,7 +101,7 @@ export function AmbientConditionsCapture({ sessionId, prompt, onCaptured }: Prop
       setPhase('done')
       onCaptured()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed')
+      setError(describeFetchError(err, 'Save failed'))
       setPhase('manual')
     }
   }

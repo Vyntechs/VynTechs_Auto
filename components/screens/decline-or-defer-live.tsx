@@ -32,6 +32,17 @@ const OPTIONS_BY_REASON: Record<GateOption, Option> = {
   },
 }
 
+// iOS Safari surfaces a fetch failure (timeout / dropped connection /
+// CORS) as `TypeError: Load failed`. Map fetch-level failures to copy
+// the tech can act on. HTTP error bodies (thrown above as `new Error(...)`)
+// keep their original message — those usually carry useful detail.
+function describeFetchError(err: unknown): string {
+  if (err instanceof TypeError) {
+    return 'AI took too long or your connection dropped — tap again to retry.'
+  }
+  return err instanceof Error ? err.message : 'Request failed'
+}
+
 export function DeclineOrDeferLive(props: {
   sessionId: string
   vehicleName: string
@@ -94,7 +105,7 @@ export function DeclineOrDeferLive(props: {
       router.push(`/sessions/${props.sessionId}`)
     } catch (err) {
       setHeroBusy(false)
-      setError(err instanceof Error ? err.message : 'Request failed')
+      setError(describeFetchError(err))
     }
   }
 
@@ -123,7 +134,7 @@ export function DeclineOrDeferLive(props: {
       router.push(`/sessions/${props.sessionId}`)
     } catch (err) {
       setHeroBusy(false)
-      setError(err instanceof Error ? err.message : 'Upload failed')
+      setError(describeFetchError(err))
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
@@ -173,7 +184,7 @@ export function DeclineOrDeferLive(props: {
       router.push('/sessions')
     } catch (err) {
       setPending(null)
-      setError(err instanceof Error ? err.message : 'Request failed')
+      setError(describeFetchError(err))
     }
   }
 

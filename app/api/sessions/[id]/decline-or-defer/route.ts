@@ -4,6 +4,9 @@ import { declineOrDeferSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { generateDeclineLanguage } from '@/lib/gating/decline-language'
 
+// Defer language-generation AI call. Cap at 60s for safety on cold starts.
+export const maxDuration = 60
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
