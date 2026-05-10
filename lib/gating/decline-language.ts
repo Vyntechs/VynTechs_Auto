@@ -7,12 +7,17 @@ export type DeclineLanguage = {
   recommendedReferral?: string
 }
 
+// Decline-this-job was removed from the product 2026-05-09. The shared
+// system prompt still describes both decline and defer flavors; we just
+// stop sending the decline reason from the user message side. The prompt
+// body is left untouched because it's also referenced by older language-
+// generation tests; touching it risks regressing the defer output.
 export type DeclineLanguageInput = {
   vehicleSummary: string
   complaint: string
   gap: string
   riskClass: string
-  reason: 'decline' | 'defer'
+  reason: 'defer'
 }
 
 export async function generateDeclineLanguage(
@@ -22,7 +27,7 @@ export async function generateDeclineLanguage(
 Customer complaint: ${input.complaint}
 Diagnostic gap: ${input.gap}
 Risk class blocking commit: ${input.riskClass}
-Reason: ${input.reason === 'decline' ? 'shop is declining the job' : 'shop is holding the job for asynchronous expert review (24-72h turnaround)'}
+Reason: shop is holding the job for asynchronous expert review (24-72h turnaround)
 
 Return JSON only.`
 

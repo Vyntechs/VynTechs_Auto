@@ -215,7 +215,10 @@ export async function advanceSession(opts: {
     nodeId: session.treeState.currentNodeId,
     eventType: 'observation',
     observationText: parsed.data.observation,
-    aiResponse: { nextNodeId: nextTree.currentNodeId },
+    aiResponse: {
+      nextNodeId: nextTree.currentNodeId,
+      messageText: nextTree.message,
+    },
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
 
@@ -591,14 +594,56 @@ function primarySymptomClass(complaint: string): string {
   return '*'
 }
 
+// Tech-initiated gate release. The Decline screen calls this from every
+// non-defer exit (Yes/No on the hero confirm card, Snap-it on the photo
+// card, Gather more low-risk data) so that after the user takes an action,
+// the session-routing layer doesn't redirect them right back to the same
+// Decline screen on the next page load. The next observation re-runs gating
+// naturally — this isn't a bypass, just a release of the *current displayed*
+// gate so the tech can act on the AI's updated context.
+export type ReleaseGateResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+export async function releaseGateForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+}): Promise<ReleaseGateResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const { gateDecision: _drop, ...nextTree } = session.treeState
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree as TreeState)
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'tree_update',
+  })
+  return { ok: true }
+}
+
+// Decline-this-job was removed from the product 2026-05-09 — defer-for-curator
+// is the only escalation path. Stale clients posting reason='decline' get a
+// 400 from zod's literal('defer') here. The session.status enum still carries
+// 'declined' for back-compat with existing closed rows; the curator case page
+// reads them fine.
 const declineOrDeferSchema = z.object({
-  reason: z.enum(['decline', 'defer']),
+  reason: z.literal('defer'),
   gap: z.string().min(5).max(2000),
   riskClass: z.enum(['low', 'medium', 'high', 'destructive']),
 })
 
 export type DeclineOrDeferSessionResult =
-  | { ok: true; status: 'declined' | 'deferred'; language: DeclineLanguage }
+  | { ok: true; status: 'deferred'; language: DeclineLanguage }
   | { ok: false; status: 400 | 404 | 500; error: string }
 
 export async function declineOrDeferSessionForUser(opts: {
@@ -634,22 +679,21 @@ export async function declineOrDeferSessionForUser(opts: {
       complaint: session.intake.customerComplaint,
       gap: parsed.data.gap,
       riskClass: parsed.data.riskClass,
-      reason: parsed.data.reason,
+      reason: 'defer',
     })
   } catch (err) {
     console.error('decline language generation failed:', err)
     return { ok: false, status: 500, error: 'language generation failed' }
   }
 
-  const terminalStatus = parsed.data.reason === 'decline' ? 'declined' : 'deferred'
-  await setSessionTerminalStatus(opts.db, opts.sessionId, terminalStatus)
+  await setSessionTerminalStatus(opts.db, opts.sessionId, 'deferred')
   await appendSessionEvent(opts.db, {
     sessionId: opts.sessionId,
     nodeId: session.treeState.currentNodeId,
     eventType: 'close',
     aiResponse: {
       declineOrDefer: {
-        reason: parsed.data.reason,
+        reason: 'defer',
         gap: parsed.data.gap,
         riskClass: parsed.data.riskClass,
         language,
@@ -657,7 +701,7 @@ export async function declineOrDeferSessionForUser(opts: {
     },
   })
 
-  return { ok: true, status: terminalStatus, language }
+  return { ok: true, status: 'deferred', language }
 }
 
 const abandonSchema = z.object({

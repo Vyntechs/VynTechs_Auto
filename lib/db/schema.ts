@@ -134,6 +134,12 @@ export const sessionEvents = pgTable('session_events', {
   observationText: text('observation_text'),
   aiResponse: jsonb('ai_response').$type<{
     nextNodeId?: string
+    /** Full text of the AI's `message` field at this turn. Persisted from
+     *  `advanceSession` so the curator timeline can reconstruct the
+     *  back-and-forth turn-by-turn — `treeState.message` only carries the
+     *  latest reply. Optional for back-compat with rows written before
+     *  2026-05-09. */
+    messageText?: string
     treeUpdate?: unknown
     requestedFollowUp?: string
     abandon?: {

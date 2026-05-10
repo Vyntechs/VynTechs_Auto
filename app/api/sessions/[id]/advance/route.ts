@@ -14,6 +14,13 @@ import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 
+// AI tree-update + risk classifier + 6 web-retrieval adapters in parallel
+// can stack past Vercel's default 10s hobby-tier limit, especially when
+// retries fire. 60s caps at the Pro tier ceiling — harmless on hobby
+// (still 10s) but avoids the killed-mid-request "Load failed" the tech
+// otherwise sees on long /advance round-trips.
+export const maxDuration = 60
+
 const ADAPTERS = [
   new NHTSAAdapter(),
   new ManufacturerRecallAdapter(),

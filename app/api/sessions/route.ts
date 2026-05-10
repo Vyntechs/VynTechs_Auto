@@ -20,6 +20,10 @@ import {
   getProfileByUserId,
 } from '@/lib/db/queries'
 
+// Initial tree generation + corpus + 6 web-retrieval adapters + grader.
+// Cap at 60s — same envelope as /api/intake/submit.
+export const maxDuration = 60
+
 const ADAPTERS = [
   new NHTSAAdapter(),
   new ManufacturerRecallAdapter(),

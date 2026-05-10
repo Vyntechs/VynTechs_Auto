@@ -1,14 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
-import { declineOrDeferSessionForUser } from '@/lib/sessions'
+import { releaseGateForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { generateDeclineLanguage } from '@/lib/gating/decline-language'
-
-// Defer language-generation AI call. Cap at 60s for safety on cold starts.
-export const maxDuration = 60
 
 export async function POST(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
@@ -20,18 +16,9 @@ export async function POST(
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const body = await req.json().catch(() => null)
-
-  const result = await declineOrDeferSessionForUser({
-    db,
-    userId: user.id,
-    sessionId: id,
-    body,
-    generateLanguage: generateDeclineLanguage,
-  })
-
+  const result = await releaseGateForUser({ db, userId: user.id, sessionId: id })
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json({ status: result.status, language: result.language })
+  return NextResponse.json({ ok: true })
 }

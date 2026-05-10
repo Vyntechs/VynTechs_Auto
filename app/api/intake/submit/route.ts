@@ -15,6 +15,10 @@ import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 
+// Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
+// retrieval-validator AI grader stack past 10s easily. Cap at 60s.
+export const maxDuration = 60
+
 const ADAPTERS = [
   new NHTSAAdapter(),
   new ManufacturerRecallAdapter(),

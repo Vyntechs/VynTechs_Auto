@@ -15,6 +15,11 @@ import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 
+// Geolocation lookup (Open-Meteo, ~500ms) plus the same tree-update +
+// retrieval pipeline as /advance — same 60s cap to avoid mid-flight kills
+// on long round-trips.
+export const maxDuration = 60
+
 const ADAPTERS = [
   new NHTSAAdapter(),
   new ManufacturerRecallAdapter(),
