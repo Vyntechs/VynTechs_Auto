@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { TreeState } from '@/lib/ai/tree-engine'
 import {
   parseEvent,
@@ -90,24 +91,31 @@ export function useAdvanceStream() {
 
         const reader = res.body.getReader()
         for await (const event of readEvents(reader)) {
-          if (event.type === 'init') {
-            setState((s) => ({ ...s, stages: event.stages }))
-          } else if (event.type === 'stage') {
-            setState((s) => ({ ...s, stageIdx: event.idx }))
-          } else if (event.type === 'done') {
-            setState((s) => ({
-              ...s,
-              isLoading: false,
-              isDone: true,
-              tree: event.tree,
-            }))
-          } else if (event.type === 'error') {
-            setState((s) => ({
-              ...s,
-              isLoading: false,
-              error: event.message,
-            }))
-          }
+          // flushSync forces React to commit this update before we await the
+          // next chunk, otherwise React 19's automatic batching collapses
+          // every event's setState into one final render and the user sees
+          // the LogButton's internal timer cycling for the entire request
+          // (freezeStage stays null until the very end).
+          flushSync(() => {
+            if (event.type === 'init') {
+              setState((s) => ({ ...s, stages: event.stages }))
+            } else if (event.type === 'stage') {
+              setState((s) => ({ ...s, stageIdx: event.idx }))
+            } else if (event.type === 'done') {
+              setState((s) => ({
+                ...s,
+                isLoading: false,
+                isDone: true,
+                tree: event.tree,
+              }))
+            } else if (event.type === 'error') {
+              setState((s) => ({
+                ...s,
+                isLoading: false,
+                error: event.message,
+              }))
+            }
+          })
         }
       } catch (err) {
         setState({
