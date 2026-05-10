@@ -11,6 +11,7 @@ import type { retrieveCorpus as retrieveCorpusFn } from '@/lib/corpus/retrieval'
 import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from './types'
 import type { runRetrieval as runRetrievalFn } from './orchestrator'
 import type { validateRetrievalResults as validateResultsFn } from './validator'
+import type { AdvanceStreamEvent } from '@/lib/advance-stream-events'
 
 type UpdateTreeInput = Parameters<typeof updateTreeFn>[0]
 
@@ -29,6 +30,11 @@ export type BuildUpdateTreeWithRetrievalDeps = {
    *  corpus similarity score after each retrieval call. Optional for
    *  back-compat — when omitted, the score is not persisted. */
   sessionId?: string
+  /** Optional. Called with stage events when the wrapper enters retrieval
+   *  ('Updating retrieval ladder') and when it exits retrieval before the
+   *  LLM step ('Re-scoring confidence'). Defaults to no-op. The `idx` is a
+   *  -1 sentinel; the streaming route remaps it to a canonical index. */
+  onProgress?: (event: AdvanceStreamEvent) => void
 }
 
 /**
@@ -69,6 +75,12 @@ export function buildUpdateTreeWithRetrieval(
       complaintText: input.intake.customerComplaint,
       observation: input.observation,
     }
+
+    deps.onProgress?.({
+      type: 'stage',
+      idx: -1,
+      label: 'Updating retrieval ladder',
+    })
 
     const retrievalPromise = (async (): Promise<RetrievalResult[]> => {
       try {
@@ -114,6 +126,12 @@ export function buildUpdateTreeWithRetrieval(
       : Promise.resolve(undefined)
 
     const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
+
+    deps.onProgress?.({
+      type: 'stage',
+      idx: -1,
+      label: 'Re-scoring confidence',
+    })
 
     return deps.updateTree({
       ...input,

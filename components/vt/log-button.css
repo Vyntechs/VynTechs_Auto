@@ -1,0 +1,252 @@
+/* LogButton — narrated + shimmer loading state.
+   Three coordinated layers: substrate, shimmer, narration.
+*/
+
+/* ============================================================
+   BUTTON SUBSTRATE
+   ============================================================ */
+.lb {
+  --lb-h: 56px;
+  --lb-fg: var(--vt-bone-50);
+  --lb-bg: var(--vt-bone-900);
+  --lb-shimmer: oklch(98% 0.02 240 / 0.16);
+
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  justify-content: stretch;
+
+  height: var(--lb-h);
+  min-width: 220px;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 6px;
+
+  background: var(--lb-bg);
+  color: var(--lb-fg);
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  font-family: var(--vt-font-serif);
+
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 -1px 0 oklch(0% 0 0 / 0.35),
+    0 1px 0 oklch(0% 0 0 / 0.04),
+    0 6px 18px -10px oklch(20% 0.012 60 / 0.4);
+
+  transition: transform 80ms var(--vt-ease), background 200ms var(--vt-ease);
+}
+.lb:active { transform: translateY(0.5px); }
+.lb:focus-visible { outline: 2px solid var(--vt-amber-500); outline-offset: 2px; }
+
+.lb.is-loading { cursor: progress; }
+.lb.is-done {
+  background: oklch(38% 0.13 165);
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.10),
+    inset 0 -1px 0 oklch(0% 0 0 / 0.30),
+    0 6px 18px -10px oklch(38% 0.13 165 / 0.45);
+}
+
+/* ============================================================
+   SHIMMER
+   ============================================================ */
+.lb__shimmer {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 38%,
+    var(--lb-shimmer) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  background-position: 200% 0;
+  transition: opacity 280ms var(--vt-ease);
+  mix-blend-mode: screen;
+}
+.lb.is-loading .lb__shimmer {
+  opacity: 1;
+  animation: lb-shimmer 1700ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes lb-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -120% 0; }
+}
+
+/* ============================================================
+   PROGRESS HAIRLINE
+   ============================================================ */
+.lb__progress {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: oklch(0% 0 0 / 0.28);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 200ms var(--vt-ease);
+  z-index: 2;
+}
+.lb.is-loading .lb__progress, .lb.is-done .lb__progress { opacity: 1; }
+
+.lb__progress-fill {
+  position: absolute; inset: 0;
+  background: var(--vt-amber-400);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 380ms var(--vt-ease-instrument);
+  box-shadow: 0 0 8px var(--vt-amber-500);
+}
+.lb.is-done .lb__progress-fill {
+  background: oklch(82% 0.16 165);
+  box-shadow: 0 0 8px oklch(82% 0.16 165);
+}
+
+/* ============================================================
+   CONTENT — three faces share the slot, fade between
+   ============================================================ */
+.lb__content {
+  position: relative;
+  flex: 1;
+  display: grid;
+  align-items: center;
+  z-index: 1;
+}
+.lb__face {
+  grid-column: 1; grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 18px;
+  opacity: 1;
+  transition: opacity 220ms var(--vt-ease);
+}
+.lb__face--idle { letter-spacing: -0.005em; font-size: 17px; }
+.lb__face--idle.is-out { opacity: 0; pointer-events: none; }
+.lb__chevron { display: inline-flex; opacity: 0.55; }
+.lb__label { white-space: nowrap; }
+
+/* DONE face */
+.lb__face--done {
+  letter-spacing: -0.005em;
+  font-size: 16px;
+  color: oklch(96% 0.04 165);
+  animation: lb-fadein 280ms var(--vt-ease) both;
+}
+.lb__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: oklch(82% 0.16 165);
+  color: oklch(20% 0.05 165);
+  animation: lb-check-pop 320ms var(--vt-ease-out) both;
+}
+@keyframes lb-check-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* LOADING face — narration */
+.lb__face--loading {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 0 18px;
+  width: 100%;
+  box-sizing: border-box;
+  animation: lb-fadein 320ms var(--vt-ease) both;
+}
+@keyframes lb-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Pulsing leading dot */
+.lb__dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--vt-amber-400);
+  box-shadow:
+    0 0 0 0 oklch(62% 0.15 245 / 0.5),
+    0 0 8px var(--vt-amber-400);
+  animation: lb-dot-pulse 1700ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes lb-dot-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 oklch(62% 0.15 245 / 0.55), 0 0 8px var(--vt-amber-400);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 6px oklch(62% 0.15 245 / 0), 0 0 12px var(--vt-amber-400);
+  }
+}
+
+/* Narration text — serif, italic on stage change */
+.lb__narration {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.lb__narration-text {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 16px;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vt-bone-50);
+  animation: lb-narration-in 360ms var(--vt-ease-out) both;
+}
+@keyframes lb-narration-in {
+  0%   { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+  100% { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+
+/* Trailing animated dots */
+.lb__narration-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+.lb__narration-dots span {
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: oklch(82% 0.04 240 / 0.7);
+  animation: lb-dots 1100ms ease-in-out infinite;
+}
+.lb__narration-dots span:nth-child(2) { animation-delay: 140ms; }
+.lb__narration-dots span:nth-child(3) { animation-delay: 280ms; }
+@keyframes lb-dots {
+  0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
+  40%           { opacity: 1;   transform: translateY(-2px); }
+}
+
+/* Counter on the right — mono, tabular */
+.lb__counter {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: oklch(82% 0.02 240 / 0.55);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.lb__counter-num { color: var(--vt-amber-300); }
+.lb__counter-sep { opacity: 0.4; margin: 0 1px; }

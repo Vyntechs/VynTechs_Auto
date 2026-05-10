@@ -69,6 +69,12 @@
   --vt-signal-700: oklch(34% 0.14  252);
   --vt-signal-800: oklch(26% 0.10  254);
 
+  /* Signal-amber — ignition accent for loaders, focus, single brand pop. */
+  --vt-amber-200: oklch(94% 0.08   90);
+  --vt-amber-300: oklch(89% 0.14   88);
+  --vt-amber-400: oklch(84% 0.19   82);
+  --vt-amber-500: oklch(80% 0.215  78);   /* canonical brand ignition */
+
   /* Element-coded secondary palette — high-contrast, vibrant but never
      blinding. Each is a "signal color" for a diagnostic domain. Used
      in tags, charts, branch labels, and confidence visualizations
