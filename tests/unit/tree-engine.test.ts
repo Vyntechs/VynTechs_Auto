@@ -543,3 +543,148 @@ describe('updateTree with corpus context', () => {
     expect(userMsg).toContain('confidence=0.85')
   })
 })
+
+describe('parseTreeJson — structured whatWouldClose', () => {
+  function makeTree(proposedAction: unknown): string {
+    return JSON.stringify({
+      nodes: [{ id: 'n1', label: 'Step', status: 'active' }],
+      currentNodeId: 'n1',
+      message: 'm',
+      proposedAction,
+    })
+  }
+
+  it('accepts whatWouldClose as a confirm object', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'back-probe pin 4',
+        confidence: 0.7,
+        confidenceGap: 'unsure pin layout',
+        whatWouldClose: { kind: 'confirm', prompt: 'reseat clean? yes / no?' },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'confirm',
+      prompt: 'reseat clean? yes / no?',
+    })
+  })
+
+  it('accepts whatWouldClose as a photo object', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'back-probe pin 4',
+        confidence: 0.7,
+        confidenceGap: 'unsure pin layout',
+        whatWouldClose: {
+          kind: 'photo',
+          prompt: 'snap the C171 pinout',
+          extractFor: 'full pinout for C171',
+        },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'photo',
+      prompt: 'snap the C171 pinout',
+      extractFor: 'full pinout for C171',
+    })
+  })
+
+  it('accepts whatWouldClose as a legacy string (back-compat)', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'back-probe pin 4',
+        confidence: 0.7,
+        confidenceGap: 'unsure pin layout',
+        whatWouldClose: 'Quote the IPC supply spec from the FSM.',
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toBe(
+      'Quote the IPC supply spec from the FSM.',
+    )
+  })
+
+  it('rejects photo whatWouldClose missing extractFor', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.7,
+          whatWouldClose: { kind: 'photo', prompt: 'snap something' },
+        }),
+      ),
+    ).toThrow(/extractFor/)
+  })
+
+  it('rejects whatWouldClose with unknown kind', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.7,
+          whatWouldClose: { kind: 'somethingElse', prompt: 'p' },
+        }),
+      ),
+    ).toThrow(/kind/)
+  })
+
+  it('accepts yesLabel and noLabel on a confirm whatWouldClose', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'verify 12V at coil',
+        confidence: 0.85,
+        confidenceGap: 'no electrical confirmation yet',
+        whatWouldClose: {
+          kind: 'confirm',
+          prompt: 'Do you have 12V at the clutch coil?',
+          yesLabel: 'Yes — I have 12V',
+          noLabel: 'No — no voltage',
+        },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'confirm',
+      prompt: 'Do you have 12V at the clutch coil?',
+      yesLabel: 'Yes — I have 12V',
+      noLabel: 'No — no voltage',
+    })
+  })
+
+  it('accepts a confirm whatWouldClose without yesLabel/noLabel (back-compat)', () => {
+    const result = parseTreeJson(
+      makeTree({
+        description: 'check coolant',
+        confidence: 0.85,
+        confidenceGap: 'visual not yet attested',
+        whatWouldClose: { kind: 'confirm', prompt: 'Coolant milky?' },
+      }),
+    )
+    expect(result.proposedAction?.whatWouldClose).toEqual({
+      kind: 'confirm',
+      prompt: 'Coolant milky?',
+    })
+  })
+
+  it('rejects non-string yesLabel on a confirm whatWouldClose', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.5,
+          whatWouldClose: { kind: 'confirm', prompt: 'q', yesLabel: 42 },
+        }),
+      ),
+    ).toThrow(/yesLabel/)
+  })
+
+  it('rejects non-string noLabel on a confirm whatWouldClose', () => {
+    expect(() =>
+      parseTreeJson(
+        makeTree({
+          description: 'd',
+          confidence: 0.5,
+          whatWouldClose: { kind: 'confirm', prompt: 'q', noLabel: false },
+        }),
+      ),
+    ).toThrow(/noLabel/)
+  })
+})

@@ -1,12 +1,14 @@
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
+import type { AmbientConditions } from './types'
 import {
   createSession,
   getProfileByUserId,
   getSessionById,
   appendSessionEvent,
   updateSessionTreeState,
+  updateSessionIntake,
   closeSession,
   setSessionTerminalStatus,
   recordTechAssistRequest,
@@ -213,7 +215,10 @@ export async function advanceSession(opts: {
     nodeId: session.treeState.currentNodeId,
     eventType: 'observation',
     observationText: parsed.data.observation,
-    aiResponse: { nextNodeId: nextTree.currentNodeId },
+    aiResponse: {
+      nextNodeId: nextTree.currentNodeId,
+      messageText: nextTree.message,
+    },
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
 
@@ -427,6 +432,155 @@ export async function captureArtifact(opts: {
   return { ok: true, artifactId, storageKey, kind, extractionStatus }
 }
 
+const ambientGeoSchema = z.object({
+  source: z.literal('geolocation'),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+})
+
+const ambientManualSchema = z.object({
+  source: z.literal('manual'),
+  temperatureF: z.number().finite().min(-80).max(160),
+  humidityPct: z.number().min(0).max(100).optional(),
+})
+
+const ambientBodySchema = z.discriminatedUnion('source', [
+  ambientGeoSchema,
+  ambientManualSchema,
+])
+
+export type AmbientLookupFn = (input: {
+  latitude: number
+  longitude: number
+}) => Promise<{
+  temperatureC: number
+  temperatureF: number
+  humidityPct?: number
+  windKph?: number
+  conditions?: string
+}>
+
+export type RecordAmbientConditionsResult =
+  | { ok: true; conditions: AmbientConditions; tree: TreeState }
+  | { ok: false; status: 400 | 404 | 500 | 502; error: string }
+
+/**
+ * Capture ambient conditions for a session. Two paths:
+ *   - source=geolocation: server-side weather lookup from the tech's lat/lon
+ *     (Open-Meteo). Lat/lon are rounded to ~11km before persistence so the
+ *     stored intake can't pinpoint the tech.
+ *   - source=manual: tech-entered temperature override (used when the
+ *     geolocation lookup looks wrong, e.g. VPN or data-center IP).
+ *
+ * In both cases the conditions are written to session.intake.ambientConditions
+ * and the tree is advanced with a synthetic observation describing the
+ * captured value, so the AI can incorporate it on the next turn instead of
+ * generating a "look up the temp" step.
+ */
+export async function recordAmbientConditions(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  body: unknown
+  lookupAmbient: AmbientLookupFn
+  updateTree: (input: {
+    intake: IntakePayload
+    currentTree: TreeState
+    observation: string
+  }) => Promise<TreeState>
+}): Promise<RecordAmbientConditionsResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const parsed = ambientBodySchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  let conditions: AmbientConditions
+  if (parsed.data.source === 'geolocation') {
+    try {
+      const weather = await opts.lookupAmbient({
+        latitude: parsed.data.latitude,
+        longitude: parsed.data.longitude,
+      })
+      conditions = {
+        temperatureF: round1(weather.temperatureF),
+        humidityPct:
+          weather.humidityPct !== undefined ? Math.round(weather.humidityPct) : undefined,
+        windKph: weather.windKph !== undefined ? round1(weather.windKph) : undefined,
+        conditions: weather.conditions,
+        source: 'geolocation',
+        capturedAt: new Date().toISOString(),
+        approxLat: round1(parsed.data.latitude),
+        approxLon: round1(parsed.data.longitude),
+      }
+    } catch (err) {
+      console.error('ambient lookup failed:', err)
+      return { ok: false, status: 502, error: 'ambient lookup failed' }
+    }
+  } else {
+    conditions = {
+      temperatureF: round1(parsed.data.temperatureF),
+      humidityPct:
+        parsed.data.humidityPct !== undefined
+          ? Math.round(parsed.data.humidityPct)
+          : undefined,
+      source: 'manual',
+      capturedAt: new Date().toISOString(),
+    }
+  }
+
+  const nextIntake: IntakePayload = { ...session.intake, ambientConditions: conditions }
+  await updateSessionIntake(opts.db, opts.sessionId, nextIntake)
+
+  const observation = formatAmbientObservation(conditions)
+
+  let nextTree: TreeState
+  try {
+    nextTree = await opts.updateTree({
+      intake: nextIntake,
+      currentTree: session.treeState,
+      observation,
+    })
+  } catch (err) {
+    console.error('tree update after ambient capture failed:', err)
+    return { ok: false, status: 500, error: 'tree update failed' }
+  }
+
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'observation',
+    observationText: observation,
+    aiResponse: { nextNodeId: nextTree.currentNodeId },
+  })
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
+
+  return { ok: true, conditions, tree: nextTree }
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+function formatAmbientObservation(c: AmbientConditions): string {
+  const parts = [`Ambient ${c.temperatureF.toFixed(0)}°F`]
+  if (typeof c.humidityPct === 'number') parts.push(`${c.humidityPct}% RH`)
+  if (typeof c.windKph === 'number') parts.push(`wind ${c.windKph.toFixed(0)} kph`)
+  if (c.conditions) parts.push(c.conditions)
+  const tag = c.source === 'geolocation' ? 'geolocation lookup' : 'tech-entered'
+  return `${parts.join(', ')} (${tag}).`
+}
+
 function vehicleFamilyKey(intake: IntakePayload): string {
   return `${intake.vehicleMake.toLowerCase()}-${intake.vehicleModel.toLowerCase()}`
 }
@@ -440,14 +594,56 @@ function primarySymptomClass(complaint: string): string {
   return '*'
 }
 
+// Tech-initiated gate release. The Decline screen calls this from every
+// non-defer exit (Yes/No on the hero confirm card, Snap-it on the photo
+// card, Gather more low-risk data) so that after the user takes an action,
+// the session-routing layer doesn't redirect them right back to the same
+// Decline screen on the next page load. The next observation re-runs gating
+// naturally — this isn't a bypass, just a release of the *current displayed*
+// gate so the tech can act on the AI's updated context.
+export type ReleaseGateResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+export async function releaseGateForUser(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+}): Promise<ReleaseGateResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+
+  const { gateDecision: _drop, ...nextTree } = session.treeState
+  await updateSessionTreeState(opts.db, opts.sessionId, nextTree as TreeState)
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'tree_update',
+  })
+  return { ok: true }
+}
+
+// Decline-this-job was removed from the product 2026-05-09 — defer-for-curator
+// is the only escalation path. Stale clients posting reason='decline' get a
+// 400 from zod's literal('defer') here. The session.status enum still carries
+// 'declined' for back-compat with existing closed rows; the curator case page
+// reads them fine.
 const declineOrDeferSchema = z.object({
-  reason: z.enum(['decline', 'defer']),
+  reason: z.literal('defer'),
   gap: z.string().min(5).max(2000),
   riskClass: z.enum(['low', 'medium', 'high', 'destructive']),
 })
 
 export type DeclineOrDeferSessionResult =
-  | { ok: true; status: 'declined' | 'deferred'; language: DeclineLanguage }
+  | { ok: true; status: 'deferred'; language: DeclineLanguage }
   | { ok: false; status: 400 | 404 | 500; error: string }
 
 export async function declineOrDeferSessionForUser(opts: {
@@ -483,22 +679,21 @@ export async function declineOrDeferSessionForUser(opts: {
       complaint: session.intake.customerComplaint,
       gap: parsed.data.gap,
       riskClass: parsed.data.riskClass,
-      reason: parsed.data.reason,
+      reason: 'defer',
     })
   } catch (err) {
     console.error('decline language generation failed:', err)
     return { ok: false, status: 500, error: 'language generation failed' }
   }
 
-  const terminalStatus = parsed.data.reason === 'decline' ? 'declined' : 'deferred'
-  await setSessionTerminalStatus(opts.db, opts.sessionId, terminalStatus)
+  await setSessionTerminalStatus(opts.db, opts.sessionId, 'deferred')
   await appendSessionEvent(opts.db, {
     sessionId: opts.sessionId,
     nodeId: session.treeState.currentNodeId,
     eventType: 'close',
     aiResponse: {
       declineOrDefer: {
-        reason: parsed.data.reason,
+        reason: 'defer',
         gap: parsed.data.gap,
         riskClass: parsed.data.riskClass,
         language,
@@ -506,7 +701,7 @@ export async function declineOrDeferSessionForUser(opts: {
     },
   })
 
-  return { ok: true, status: terminalStatus, language }
+  return { ok: true, status: 'deferred', language }
 }
 
 const abandonSchema = z.object({

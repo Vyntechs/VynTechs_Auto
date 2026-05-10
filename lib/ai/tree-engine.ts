@@ -15,16 +15,26 @@ export type TreeNode = {
   children?: string[]
 }
 
+export type WhatWouldClose =
+  | { kind: 'confirm'; prompt: string; yesLabel?: string; noLabel?: string }
+  | { kind: 'photo'; prompt: string; extractFor: string }
+
 export type ProposedAction = {
   description: string
   confidence: number
   expectedSignal?: string
   confidenceGap?: string
-  whatWouldClose?: string
+  whatWouldClose?: string | WhatWouldClose
 }
 
 export type RequestedArtifact = {
-  kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+  kind:
+    | 'photo'
+    | 'scan_screen'
+    | 'wiring_diagram'
+    | 'audio'
+    | 'video'
+    | 'ambient_conditions'
   prompt: string
 }
 
@@ -88,9 +98,28 @@ function buildIntakeUserMessage(
   const mileage = intake.mileage ? `, ${intake.mileage} mi` : ''
   return `Vehicle: ${intake.vehicleYear} ${intake.vehicleMake} ${intake.vehicleModel}${engine}${mileage}.
 
-Customer complaint: ${intake.customerComplaint}${corpusContextBlock(corpus)}${retrievalContextBlock(retrieval)}
+Customer complaint: ${intake.customerComplaint}${ambientConditionsBlock(intake.ambientConditions)}${corpusContextBlock(corpus)}${retrievalContextBlock(retrieval)}
 
 Generate the initial decision tree. Return JSON only — no prose, no fences.`
+}
+
+export function ambientConditionsBlock(
+  conditions: IntakePayload['ambientConditions'],
+): string {
+  if (!conditions) return ''
+  const parts: string[] = [`${conditions.temperatureF.toFixed(0)}°F`]
+  if (typeof conditions.humidityPct === 'number') {
+    parts.push(`${conditions.humidityPct.toFixed(0)}% humidity`)
+  }
+  if (typeof conditions.windKph === 'number') {
+    parts.push(`wind ${conditions.windKph.toFixed(0)} kph`)
+  }
+  if (conditions.conditions) parts.push(conditions.conditions)
+  const tag =
+    conditions.source === 'geolocation'
+      ? 'geolocation lookup, tech-confirmed'
+      : 'tech-entered'
+  return `\n\nAmbient conditions at the bay: ${parts.join(', ')} (${tag}).`
 }
 
 function retrievalContextBlock(retrieval: RetrievalResult[] | undefined): string {
@@ -167,7 +196,7 @@ export async function updateTree(input: {
           .join('\n\n')}`
       : ''
 
-  const userMessage = `Initial intake: ${JSON.stringify(input.intake)}
+  const userMessage = `Initial intake: ${JSON.stringify(input.intake)}${ambientConditionsBlock(input.intake.ambientConditions)}
 
 Current tree state:
 ${JSON.stringify(input.currentTree, null, 2)}
@@ -232,5 +261,39 @@ export function parseTreeJson(text: string, stopReason?: string): TreeState {
   ) {
     throw new Error('invalid tree response shape')
   }
+
+  const proposedAction = (parsed as { proposedAction?: { whatWouldClose?: unknown } })
+    .proposedAction
+  const wwc = proposedAction?.whatWouldClose
+  if (wwc !== undefined && typeof wwc !== 'string') {
+    if (typeof wwc !== 'object' || wwc === null) {
+      throw new Error('invalid whatWouldClose: must be string or object')
+    }
+    const obj = wwc as {
+      kind?: unknown
+      prompt?: unknown
+      extractFor?: unknown
+      yesLabel?: unknown
+      noLabel?: unknown
+    }
+    if (typeof obj.prompt !== 'string') {
+      throw new Error('invalid whatWouldClose: prompt must be a string')
+    }
+    if (obj.kind !== 'confirm' && obj.kind !== 'photo') {
+      throw new Error(`invalid whatWouldClose: unknown kind "${String(obj.kind)}"`)
+    }
+    if (obj.kind === 'photo' && typeof obj.extractFor !== 'string') {
+      throw new Error('invalid whatWouldClose: photo kind requires extractFor')
+    }
+    if (obj.kind === 'confirm') {
+      if (obj.yesLabel !== undefined && typeof obj.yesLabel !== 'string') {
+        throw new Error('invalid whatWouldClose: yesLabel must be a string when present')
+      }
+      if (obj.noLabel !== undefined && typeof obj.noLabel !== 'string') {
+        throw new Error('invalid whatWouldClose: noLabel must be a string when present')
+      }
+    }
+  }
+
   return parsed as TreeState
 }

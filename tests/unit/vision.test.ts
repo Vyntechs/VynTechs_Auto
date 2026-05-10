@@ -238,3 +238,78 @@ describe('transcribeAudio', () => {
     ).resolves.toMatchObject({ transcript: 'tap tap tap' })
   })
 })
+
+describe('extractGenericPhoto', () => {
+  beforeEach(() => {
+    mockCreate.mockReset()
+  })
+
+  it('returns structured + summary + confidence per the extractFor instruction', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            text: 'pin 1 KEY/RUN, pin 2 GROUND, pin 3 HSCAN-, pin 4 HSCAN+, pin 5 LIN',
+            structured: {
+              pins: [
+                { number: 1, function: 'KEY/RUN' },
+                { number: 4, function: 'HSCAN+' },
+              ],
+            },
+            summary: 'C171 pinout — 5 pins identified, HSCAN+ on pin 4',
+            confidence: 0.92,
+          }),
+        },
+      ],
+      stop_reason: 'end_turn',
+    })
+
+    const { extractGenericPhoto } = await import('@/lib/ai/vision')
+    const result = await extractGenericPhoto({
+      bytes: new Uint8Array([0xff, 0xd8, 0xff]),
+      mimeType: 'image/jpeg',
+      extractFor: 'full pinout for connector C171',
+    })
+
+    expect(result.summary).toMatch(/HSCAN\+/)
+    expect(result.confidence).toBeGreaterThan(0.5)
+    expect(result.structured).toBeDefined()
+  })
+
+  it('returns confidence < 0.4 with re-snap suggestion when image is unreadable', async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            summary: 'pin column glared — re-snap with light angled away from the page',
+            confidence: 0.2,
+          }),
+        },
+      ],
+      stop_reason: 'end_turn',
+    })
+
+    const { extractGenericPhoto } = await import('@/lib/ai/vision')
+    const result = await extractGenericPhoto({
+      bytes: new Uint8Array([0xff, 0xd8, 0xff]),
+      mimeType: 'image/jpeg',
+      extractFor: 'full pinout for connector C171',
+    })
+
+    expect(result.confidence).toBeLessThan(0.4)
+    expect(result.summary).toMatch(/re-snap/i)
+  })
+
+  it('rejects unsupported mime type', async () => {
+    const { extractGenericPhoto } = await import('@/lib/ai/vision')
+    await expect(
+      extractGenericPhoto({
+        bytes: new Uint8Array([0]),
+        mimeType: 'application/pdf',
+        extractFor: 'anything',
+      }),
+    ).rejects.toThrow(/unsupported/)
+  })
+})

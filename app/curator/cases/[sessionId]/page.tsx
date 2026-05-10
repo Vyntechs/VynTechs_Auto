@@ -94,6 +94,14 @@ export default async function CuratorCasePage({
                             : '(tree update)'}
                     </span>
                   ) : null}
+                  {/* Per-turn AI message text — populated on observation events
+                      from 2026-05-09 onward. Older rows render the routing
+                      summary above only; not backfilled. */}
+                  {ev.aiResponse?.messageText ? (
+                    <p className="vt-event-ai-message" style={{ fontStyle: 'italic', margin: '4px 0 0', fontSize: 13 }}>
+                      {ev.aiResponse.messageText}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ))}

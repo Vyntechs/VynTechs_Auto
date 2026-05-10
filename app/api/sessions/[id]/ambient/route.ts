@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
-import { advanceSession } from '@/lib/sessions'
+import { recordAmbientConditions } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { fetchAmbientConditions } from '@/lib/external/weather'
 import { updateTree } from '@/lib/ai/tree-engine'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
 import { validateRetrievalResults } from '@/lib/retrieval/validator'
@@ -14,11 +15,9 @@ import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 
-// AI tree-update + risk classifier + 6 web-retrieval adapters in parallel
-// can stack past Vercel's default 10s hobby-tier limit, especially when
-// retries fire. 60s caps at the Pro tier ceiling — harmless on hobby
-// (still 10s) but avoids the killed-mid-request "Load failed" the tech
-// otherwise sees on long /advance round-trips.
+// Geolocation lookup (Open-Meteo, ~500ms) plus the same tree-update +
+// retrieval pipeline as /advance — same 60s cap to avoid mid-flight kills
+// on long round-trips.
 export const maxDuration = 60
 
 const ADAPTERS = [
@@ -55,16 +54,18 @@ export async function POST(
     sessionId: id,
   })
 
-  const result = await advanceSession({
+  const result = await recordAmbientConditions({
     db,
     userId: user.id,
     sessionId: id,
     body,
+    lookupAmbient: ({ latitude, longitude }) =>
+      fetchAmbientConditions({ latitude, longitude }),
     updateTree: updateTreeWithRetrieval,
   })
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json(result.tree)
+  return NextResponse.json({ conditions: result.conditions, tree: result.tree })
 }
