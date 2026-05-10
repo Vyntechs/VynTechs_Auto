@@ -7,6 +7,7 @@ import { PhotoCapture } from '@/components/session/photo-capture'
 import { AudioCapture } from '@/components/session/audio-capture'
 import { VideoCapture } from '@/components/session/video-capture'
 import { AmbientConditionsCapture } from '@/components/session/ambient-conditions-capture'
+import { LogButton } from '@/components/vt/log-button'
 
 type RequestedArtifact = {
   kind:
@@ -25,6 +26,8 @@ type Props = {
   requestedArtifact?: RequestedArtifact
 }
 
+const DONE_HOLD_MS = 700
+
 // iOS Safari surfaces a fetch failure (timeout / dropped connection /
 // CORS) as `TypeError: Load failed`. Chrome's equivalent is "Failed to
 // fetch". The string is opaque to a tech, so map fetch-level failures
@@ -40,8 +43,11 @@ function describeFetchError(err: unknown): string {
 export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) {
   const [observation, setObservation] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [phase, setPhase] = useState<'idle' | 'done'>('idle')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
+
+  const buttonState: 'idle' | 'loading' | 'done' = isPending ? 'loading' : phase
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -60,7 +66,11 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
           return
         }
         setObservation('')
-        router.refresh()
+        setPhase('done')
+        setTimeout(() => {
+          setPhase('idle')
+          router.refresh()
+        }, DONE_HOLD_MS)
       } catch (err) {
         setError(describeFetchError(err))
       }
@@ -147,14 +157,15 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ flex: 1 }}
-          disabled={isPending || !observation.trim()}
-        >
-          {isPending ? 'Logging…' : 'Log observation'}
-        </button>
+        <div style={{ flex: 1 }}>
+          <LogButton
+            type="submit"
+            state={buttonState}
+            disabled={isPending || !observation.trim()}
+            label="Log observation"
+            variant="graphite"
+          />
+        </div>
         <button
           type="button"
           className="btn btn-secondary"
