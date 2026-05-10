@@ -54,3 +54,17 @@ pnpm build
 UI-touching phases also need `chrome-devtools-mcp:a11y-debugging` on the wired surfaces.
 
 **Fresh Supabase projects** also need `supabase/storage-setup.sql` applied via Supabase MCP `execute_sql` — Drizzle doesn't manage the `storage` schema.
+
+## Communication preferences
+
+When explaining technical changes, code flow, or system architecture to the
+project owner (Brandon), use **ASCII branch-tree diagrams**: a vertical tree
+with `│ ├── └──` connectors, every user choice as a branch, every AI/API
+call annotated inline (`[AI #N]`, `[API]`). Plain English on the labels —
+the reader is non-technical. The full system flow is documented this way in
+[`docs/flow.md`](./docs/flow.md); reuse that style for any explanation that
+touches more than two hops.
+
+Avoid long prose paragraphs for system-flow questions. A diagram + a short
+"headline numbers" section + a "where current pain points live on the map"
+section is the preferred shape.
