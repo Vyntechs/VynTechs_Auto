@@ -30,6 +30,7 @@ import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
 import type { ScheduleFollowUpsFn } from './comeback/schedule'
 import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repair-guidance'
+import type { AdvanceStreamEvent } from './advance-stream-events'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
@@ -117,6 +118,11 @@ export async function advanceSession(opts: {
   }) => Promise<TreeState>
   gateAction?: GateActionFn
   listArtifacts?: ListArtifactsFn
+  /** Optional. Called as the function moves through narratable stages
+   *  (`Recording observation`, `Parsing photo · N frames` when photos exist,
+   *  `Promoting next step`). The retrieval wrapper emits its own stages.
+   *  Default is no-op so the JSON `/advance` route and tests are unaffected. */
+  onProgress?: (event: AdvanceStreamEvent) => void
 }): Promise<AdvanceSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -161,6 +167,23 @@ export async function advanceSession(opts: {
         ? codes.map((d) => d?.code).filter((c): c is string => typeof c === 'string')
         : []
     })
+
+  opts.onProgress?.({
+    type: 'stage',
+    idx: -1,
+    label: 'Recording observation',
+  })
+
+  const photoArtifactCount = nodeArtifacts.filter((a) =>
+    ['photo', 'scan_screen', 'wiring_diagram'].includes(a.kind),
+  ).length
+  if (photoArtifactCount > 0) {
+    opts.onProgress?.({
+      type: 'stage',
+      idx: -1,
+      label: `Parsing photo · ${photoArtifactCount} frames`,
+    })
+  }
 
   let nextTree: TreeState
   try {
@@ -209,6 +232,12 @@ export async function advanceSession(opts: {
       }
     }
   }
+
+  opts.onProgress?.({
+    type: 'stage',
+    idx: -1,
+    label: 'Promoting next step',
+  })
 
   await appendSessionEvent(opts.db, {
     sessionId: opts.sessionId,
