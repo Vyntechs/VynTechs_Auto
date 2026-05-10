@@ -6,15 +6,17 @@ import { LogButton, DEFAULT_STAGES } from '@/components/vt/log-button'
 
 describe('LogButton', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
-    // happy-dom's rAF doesn't always advance with vi.advanceTimersByTime
-    // so back it with setTimeout for deterministic stage-cycling tests.
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) =>
-      setTimeout(() => cb(performance.now()), 16) as unknown as number,
-    )
-    vi.stubGlobal('cancelAnimationFrame', (id: number) =>
-      clearTimeout(id as unknown as ReturnType<typeof setTimeout>),
-    )
+    vi.useFakeTimers({
+      toFake: [
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'performance',
+      ],
+    })
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -74,7 +76,6 @@ describe('LogButton', () => {
 
   it('fires onClick when idle and clicked', async () => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     const onClick = vi.fn()
     const user = userEvent.setup()
     render(<LogButton onClick={onClick} />)
@@ -84,7 +85,6 @@ describe('LogButton', () => {
 
   it('respects disabled prop', async () => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     const onClick = vi.fn()
     const user = userEvent.setup()
     render(<LogButton onClick={onClick} disabled />)
