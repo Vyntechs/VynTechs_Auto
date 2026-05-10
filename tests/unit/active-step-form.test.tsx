@@ -13,11 +13,39 @@ vi.mock('next/navigation', () => ({
   }),
 }))
 
+const submitMock = vi.fn()
+const resetMock = vi.fn()
+let mockState: {
+  stages: Array<{ label: string }> | null
+  stageIdx: number | null
+  isLoading: boolean
+  isDone: boolean
+  error: string | null
+  tree: unknown
+}
+vi.mock('@/lib/use-advance-stream', () => ({
+  useAdvanceStream: () => ({
+    state: mockState,
+    submit: submitMock,
+    reset: resetMock,
+  }),
+}))
+
 import { ActiveStepForm } from '@/components/screens/active-step-form'
 
 describe('ActiveStepForm — log-button integration', () => {
   beforeEach(() => {
     refreshMock.mockReset()
+    submitMock.mockReset()
+    resetMock.mockReset()
+    mockState = {
+      stages: null,
+      stageIdx: null,
+      isLoading: false,
+      isDone: false,
+      error: null,
+      tree: null,
+    }
     vi.useFakeTimers({
       toFake: [
         'setTimeout',
@@ -33,7 +61,6 @@ describe('ActiveStepForm — log-button integration', () => {
   })
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
   })
 
   it('shows the LogButton in idle state by default', () => {
@@ -49,33 +76,45 @@ describe('ActiveStepForm — log-button integration', () => {
     ).toBeDisabled()
   })
 
-  it('enters loading state on submit, then done state, then refreshes after 700ms hold', async () => {
-    let resolveFetch!: (v: Response) => void
-    const fetchPromise = new Promise<Response>((res) => {
-      resolveFetch = res
+  it('calls submit on click and shows loading state when hook reports isLoading', () => {
+    const { rerender } = render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
+    fireEvent.change(screen.getByPlaceholderText(/log what you observed/i), {
+      target: { value: 'left front squeal' },
     })
-    vi.stubGlobal('fetch', vi.fn().mockReturnValue(fetchPromise))
+    fireEvent.click(screen.getByRole('button', { name: /log observation/i }))
 
-    render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
+    expect(submitMock).toHaveBeenCalledWith({
+      sessionId: 's1',
+      observation: 'left front squeal',
+    })
 
-    const textarea = screen.getByPlaceholderText(/log what you observed/i)
-    fireEvent.change(textarea, { target: { value: 'left front squeal' } })
+    mockState.isLoading = true
+    rerender(<ActiveStepForm sessionId="s1" nodeId="n1" />)
+    expect(
+      screen.getByRole('button', { name: /log observation|recording/i }),
+    ).toHaveAttribute('aria-busy', 'true')
+  })
 
-    const btn = screen.getByRole('button', { name: /log observation/i })
-    fireEvent.click(btn)
+  it('holds done state for 700ms then triggers refresh', async () => {
+    const { rerender } = render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
+    fireEvent.change(screen.getByPlaceholderText(/log what you observed/i), {
+      target: { value: 'left front squeal' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /log observation/i }))
+
+    // Hook flips to done
+    mockState = {
+      ...mockState,
+      isLoading: false,
+      isDone: true,
+      tree: { nodes: [], currentNodeId: 'n2', message: 'ok' },
+    }
+    rerender(<ActiveStepForm sessionId="s1" nodeId="n1" />)
 
     await waitFor(() => {
-      expect(btn).toHaveAttribute('aria-busy', 'true')
-    })
-
-    await act(async () => {
-      resolveFetch(
-        new Response(JSON.stringify({ ok: true }), { status: 200 }),
-      )
-    })
-
-    await waitFor(() => {
-      expect(btn.className).toMatch(/is-done/)
+      expect(
+        screen.getByRole('button', { name: /logged.*advancing/i }).className,
+      ).toMatch(/is-done/)
     })
     expect(refreshMock).not.toHaveBeenCalled()
 
@@ -86,28 +125,9 @@ describe('ActiveStepForm — log-button integration', () => {
     expect(refreshMock).toHaveBeenCalledTimes(1)
   })
 
-  it('returns to idle on error, does NOT show done flash, refresh NOT called', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ error: 'nope' }), { status: 400 }),
-        ),
-    )
-
+  it('shows error text when hook reports an error', () => {
+    mockState.error = 'tree update failed'
     render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
-    const textarea = screen.getByPlaceholderText(/log what you observed/i)
-    fireEvent.change(textarea, { target: { value: 'left front squeal' } })
-
-    const btn = screen.getByRole('button', { name: /log observation/i })
-    fireEvent.click(btn)
-
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('nope')
-    })
-
-    expect(btn.className).not.toMatch(/is-done/)
-    expect(refreshMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('tree update failed')
   })
 })

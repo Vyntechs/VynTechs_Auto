@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DotsThree } from '@phosphor-icons/react/dist/ssr'
 import { PhotoCapture } from '@/components/session/photo-capture'
 import { AudioCapture } from '@/components/session/audio-capture'
 import { VideoCapture } from '@/components/session/video-capture'
 import { AmbientConditionsCapture } from '@/components/session/ambient-conditions-capture'
-import { LogButton } from '@/components/vt/log-button'
+import { LogButton, DEFAULT_STAGES } from '@/components/vt/log-button'
+import { useAdvanceStream } from '@/lib/use-advance-stream'
 
 type RequestedArtifact = {
   kind:
@@ -28,57 +29,43 @@ type Props = {
 
 const DONE_HOLD_MS = 700
 
-// iOS Safari surfaces a fetch failure (timeout / dropped connection /
-// CORS) as `TypeError: Load failed`. Chrome's equivalent is "Failed to
-// fetch". The string is opaque to a tech, so map fetch-level failures
-// to actionable copy. HTTP error bodies (thrown above as `new Error(...)`)
-// keep their original message — those are usually informative.
-function describeFetchError(err: unknown): string {
-  if (err instanceof TypeError) {
-    return 'AI took too long or your connection dropped — tap again to retry.'
-  }
-  return err instanceof Error ? err.message : 'Network error'
-}
-
 export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) {
   const [observation, setObservation] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<'idle' | 'done'>('idle')
-  const [isPending, startTransition] = useTransition()
   const router = useRouter()
+  const { state, submit } = useAdvanceStream()
 
-  const buttonState: 'idle' | 'loading' | 'done' = isPending ? 'loading' : phase
+  // When the hook reports done, hold the done face for 700ms then refresh.
+  useEffect(() => {
+    if (!state.isDone) return
+    setPhase('done')
+    setObservation('')
+    const t = setTimeout(() => {
+      setPhase('idle')
+      router.refresh()
+    }, DONE_HOLD_MS)
+    return () => clearTimeout(t)
+  }, [state.isDone, router])
 
-  function submit(e: React.FormEvent) {
+  const buttonState: 'idle' | 'loading' | 'done' = state.isLoading
+    ? 'loading'
+    : phase
+
+  // The wire stages only carry { label }; LogButton's stages need { label, ms }.
+  // ms only feeds the timer's totalMs calc — when freezeStage is set (it always
+  // is once the server speaks), the timer doesn't run, so any non-zero ms works.
+  const stages = state.stages
+    ? state.stages.map((s) => ({ ...s, ms: 800 }))
+    : DEFAULT_STAGES
+
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!observation.trim()) return
-    setError(null)
-    startTransition(async () => {
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/advance`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ observation: observation.trim() }),
-        })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          setError(body.error ?? `Failed (${res.status})`)
-          return
-        }
-        setObservation('')
-        setPhase('done')
-        setTimeout(() => {
-          setPhase('idle')
-          router.refresh()
-        }, DONE_HOLD_MS)
-      } catch (err) {
-        setError(describeFetchError(err))
-      }
-    })
+    submit({ sessionId, observation: observation.trim() })
   }
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={onSubmit}>
       {requestedArtifact && (
         <div style={{ marginBottom: 12 }}>
           {(requestedArtifact.kind === 'photo' ||
@@ -126,7 +113,7 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
         onChange={(e) => setObservation(e.target.value)}
         placeholder="Log what you observed."
         rows={2}
-        disabled={isPending}
+        disabled={state.isLoading}
         style={{
           width: '100%',
           boxSizing: 'border-box',
@@ -143,7 +130,7 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
           letterSpacing: '-0.005em',
         }}
       />
-      {error && (
+      {state.error && (
         <div
           role="alert"
           style={{
@@ -153,7 +140,7 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
             marginBottom: 8,
           }}
         >
-          {error}
+          {state.error}
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
@@ -161,7 +148,9 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
           <LogButton
             type="submit"
             state={buttonState}
-            disabled={isPending || !observation.trim()}
+            freezeStage={state.stageIdx}
+            stages={stages}
+            disabled={state.isLoading || !observation.trim()}
             label="Log observation"
             variant="graphite"
           />
@@ -170,7 +159,7 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
           type="button"
           className="btn btn-secondary"
           aria-label="More options"
-          disabled={isPending}
+          disabled={state.isLoading}
         >
           <DotsThree size={16} aria-hidden="true" />
         </button>

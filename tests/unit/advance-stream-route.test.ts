@@ -22,9 +22,14 @@ vi.mock('@/lib/db/queries', async () => {
     await vi.importActual<typeof import('@/lib/db/queries')>('@/lib/db/queries')
   return {
     ...actual,
-    getSessionById: (...args: unknown[]) => getSessionByIdMock(...args),
+    getSessionById: (...args: unknown[]) =>
+      (getSessionByIdMock as unknown as (...a: unknown[]) => unknown)(...args),
     listArtifactsForSession: (...args: unknown[]) =>
-      listArtifactsForSessionMock(...args),
+      (
+        listArtifactsForSessionMock as unknown as (
+          ...a: unknown[]
+        ) => unknown
+      )(...args),
   }
 })
 
@@ -34,7 +39,9 @@ vi.mock('@/lib/sessions', () => ({
     advanceSessionMock(opts),
 }))
 
-const buildUpdateTreeWithRetrievalMock = vi.fn(() => () => Promise.resolve({}))
+const buildUpdateTreeWithRetrievalMock = vi.fn(
+  (_deps: unknown) => () => Promise.resolve({}),
+)
 vi.mock('@/lib/retrieval/wire-into-tree', () => ({
   buildUpdateTreeWithRetrieval: (deps: unknown) =>
     buildUpdateTreeWithRetrievalMock(deps),
@@ -82,9 +89,11 @@ describe('POST /api/sessions/[id]/advance/stream', () => {
         idx: -1,
         label: 'Recording observation',
       })
-      const wrapperDeps = buildUpdateTreeWithRetrievalMock.mock.calls[0][0] as {
-        onProgress: (e: AdvanceStreamEvent) => void
-      }
+      const wrapperDeps = (
+        buildUpdateTreeWithRetrievalMock.mock.calls as unknown as Array<
+          [{ onProgress: (e: AdvanceStreamEvent) => void }]
+        >
+      )[0][0]
       wrapperDeps.onProgress({
         type: 'stage',
         idx: -1,
@@ -152,9 +161,11 @@ describe('POST /api/sessions/[id]/advance/stream', () => {
         idx: -1,
         label: 'Parsing photo · 3 frames',
       })
-      const wrapperDeps = buildUpdateTreeWithRetrievalMock.mock.calls[0][0] as {
-        onProgress: (e: AdvanceStreamEvent) => void
-      }
+      const wrapperDeps = (
+        buildUpdateTreeWithRetrievalMock.mock.calls as unknown as Array<
+          [{ onProgress: (e: AdvanceStreamEvent) => void }]
+        >
+      )[0][0]
       wrapperDeps.onProgress({
         type: 'stage',
         idx: -1,
