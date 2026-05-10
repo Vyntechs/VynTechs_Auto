@@ -3,6 +3,9 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { processArtifactExtraction } from '@/lib/ai/extraction-worker'
 
+// Vision extraction can take several seconds on large images.
+export const maxDuration = 60
+
 /**
  * POST /api/artifacts/:id/extract
  *

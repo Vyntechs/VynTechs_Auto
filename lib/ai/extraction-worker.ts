@@ -1,10 +1,15 @@
-import { getArtifactById, setArtifactExtraction } from '../db/queries'
+import {
+  getArtifactById,
+  setArtifactExtraction,
+  getWhatWouldCloseForNode,
+} from '../db/queries'
 import type { AppDb } from '../db/queries'
 import type { Artifact } from '../db/schema'
 import {
   extractScanScreen,
   extractWiringDiagram,
   transcribeAudio,
+  extractGenericPhoto,
 } from './vision'
 import { downloadArtifact } from '../storage/client'
 import { HIGH_SIGNAL_KINDS } from './artifact-kinds'
@@ -103,7 +108,32 @@ export async function processArtifactExtraction(
       case 'audio':
         extraction = await extractAudioArtifact(bytes, artifact.mimeType)
         break
-      case 'photo':
+      case 'photo': {
+        const wwc = await getWhatWouldCloseForNode(db, {
+          sessionId: artifact.sessionId,
+          nodeId: artifact.nodeId,
+        })
+        if (!wwc || wwc.kind !== 'photo') {
+          await setArtifactExtraction(
+            db,
+            artifactId,
+            { summary: 'Extraction failed: no extractFor on current node (tree may have advanced).' },
+            'failed',
+          )
+          throw new Error('photo extraction failed: extractFor not derivable from session state')
+        }
+        const generic = await extractGenericPhoto({
+          bytes,
+          mimeType: artifact.mimeType,
+          extractFor: wwc.extractFor,
+        })
+        extraction = {
+          text: generic.text,
+          structured: generic.structured,
+          summary: generic.summary,
+        }
+        break
+      }
       case 'video':
         extraction = {
           summary: 'Stored — vision not auto-invoked (describe-first policy).',

@@ -6,6 +6,11 @@ import { uploadArtifact } from '@/lib/storage/client'
 import { createArtifact } from '@/lib/db/queries'
 import { processArtifactExtraction } from '@/lib/ai/extraction-worker'
 
+// File upload + inline vision extraction (Claude vision call) on
+// HIGH_SIGNAL_KINDS. Vision can take several seconds on large images.
+// Cap at 60s.
+export const maxDuration = 60
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

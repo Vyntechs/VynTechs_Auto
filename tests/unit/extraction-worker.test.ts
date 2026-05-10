@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/db/queries', () => ({
   getArtifactById: vi.fn(),
   setArtifactExtraction: vi.fn(),
+  getWhatWouldCloseForNode: vi.fn(),
 }))
 
 vi.mock('@/lib/storage/client', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/ai/vision', () => ({
   extractScanScreen: vi.fn(),
   extractWiringDiagram: vi.fn(),
   transcribeAudio: vi.fn(),
+  extractGenericPhoto: vi.fn(),
 }))
 
 // ---------------------------------------------------------------------------
@@ -24,9 +26,18 @@ vi.mock('@/lib/ai/vision', () => ({
 // ---------------------------------------------------------------------------
 
 import { processArtifactExtraction } from '@/lib/ai/extraction-worker'
-import { getArtifactById, setArtifactExtraction } from '@/lib/db/queries'
+import {
+  getArtifactById,
+  setArtifactExtraction,
+  getWhatWouldCloseForNode,
+} from '@/lib/db/queries'
 import { downloadArtifact } from '@/lib/storage/client'
-import { extractScanScreen, extractWiringDiagram, transcribeAudio } from '@/lib/ai/vision'
+import {
+  extractScanScreen,
+  extractWiringDiagram,
+  transcribeAudio,
+  extractGenericPhoto,
+} from '@/lib/ai/vision'
 import type { Artifact } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
@@ -151,24 +162,53 @@ describe('processArtifactExtraction — audio', () => {
   })
 })
 
-describe('processArtifactExtraction — photo (describe-first)', () => {
-  it('stores a describe-first policy note without invoking vision', async () => {
+describe('processArtifactExtraction — photo', () => {
+  it('invokes extractGenericPhoto when extractFor is resolvable from session state', async () => {
     vi.mocked(getArtifactById).mockResolvedValue(
       makeArtifact({ kind: 'photo', mimeType: 'image/jpeg' }),
     )
+    vi.mocked(getWhatWouldCloseForNode).mockResolvedValue({
+      kind: 'photo',
+      prompt: 'snap pinout',
+      extractFor: 'full pinout for C171',
+    })
+    vi.mocked(extractGenericPhoto).mockResolvedValue({
+      summary: 'C171 pinout — 5 pins identified',
+      structured: { pins: [{ number: 4, function: 'HSCAN+' }] },
+      confidence: 0.92,
+    })
+    vi.mocked(downloadArtifact).mockResolvedValue(BYTES)
 
     await processArtifactExtraction(DB, 'artifact-uuid')
 
-    expect(extractScanScreen).not.toHaveBeenCalled()
-    expect(extractWiringDiagram).not.toHaveBeenCalled()
-    expect(transcribeAudio).not.toHaveBeenCalled()
+    expect(extractGenericPhoto).toHaveBeenCalledWith(
+      expect.objectContaining({ extractFor: 'full pinout for C171' }),
+    )
     expect(setArtifactExtraction).toHaveBeenCalledWith(
       DB,
       'artifact-uuid',
-      expect.objectContaining({
-        summary: expect.stringContaining('describe-first'),
-      }),
+      expect.objectContaining({ summary: expect.stringMatching(/pinout/i) }),
       'done',
+    )
+  })
+
+  it('records a failed extraction when extractFor is not derivable', async () => {
+    vi.mocked(getArtifactById).mockResolvedValue(
+      makeArtifact({ kind: 'photo', mimeType: 'image/jpeg' }),
+    )
+    vi.mocked(getWhatWouldCloseForNode).mockResolvedValue(null)
+    vi.mocked(downloadArtifact).mockResolvedValue(BYTES)
+
+    await expect(processArtifactExtraction(DB, 'artifact-uuid')).rejects.toThrow(
+      /extractFor/,
+    )
+
+    expect(extractGenericPhoto).not.toHaveBeenCalled()
+    expect(setArtifactExtraction).toHaveBeenCalledWith(
+      DB,
+      'artifact-uuid',
+      expect.objectContaining({ summary: expect.stringMatching(/extractFor/i) }),
+      'failed',
     )
   })
 })

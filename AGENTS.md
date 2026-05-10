@@ -30,8 +30,8 @@ This file holds load-bearing conventions for any agent working on the repo. The 
 - Every action the AI proposes that the tech will physically perform must include a `proposedAction` block with `confidence` (0-1) on the `TreeState`.
 - The `advanceSession` handler runs `classifyAction()` (`lib/gating/risk-classifier.ts`) — hardcoded rules first, Haiku LLM judge for novel actions.
 - `getThreshold()` (`lib/db/queries.ts`) looks up the per-(`risk_class` × `vehicle_family` × `symptom_class`) threshold from `confidence_calibration`. Seeded from spec §8.3 starting values; falls back to those values if the table is empty. Refit weekly by the calibration engine in Phase Q.
-- If `confidence < threshold`, `gateProposedAction()` (`lib/gating/gap-handler.ts`) returns `allow: false` with `gap` and `options: ['gather_more_low_risk', 'decline', 'defer']`. The `advanceSession` handler attaches the result as `treeState.gateDecision` and the `(app)/sessions/[id]/page.tsx` server component redirects to `/decline` when blocked.
-- The `/decline` route uses the live `DeclineOrDeferLive` wrapper around the Phase E presentational `DeclineOrDefer` screen. Decline/Defer POST to `/api/sessions/[id]/decline-or-defer`, which calls `declineOrDeferSessionForUser` (DI'd `generateDeclineLanguage` for customer-facing copy).
+- If `confidence < threshold`, `gateProposedAction()` (`lib/gating/gap-handler.ts`) returns `allow: false` with `gap` and `options: ['gather_more_low_risk', 'defer']`. The `advanceSession` handler attaches the result as `treeState.gateDecision` and the `(app)/sessions/[id]/page.tsx` server component redirects to `/decline` when blocked. **(`'decline'` was removed from the option set 2026-05-09 — defer is the only escalation. The `session.status` enum still carries `'declined'` for back-compat with rows closed before the change.)**
+- The `/decline` route uses the live `DeclineOrDeferLive` wrapper around the Phase E presentational `DeclineOrDefer` screen. Defer POSTs to `/api/sessions/[id]/decline-or-defer` (URL kept for back-compat), which calls `declineOrDeferSessionForUser` (DI'd `generateDeclineLanguage` for customer-facing copy). Yes/No on the hero confirm card POSTs to `/advance`; Snap-it POSTs to `/capture`; all three (plus the Gather spoke) then POST to `/api/sessions/[id]/release-gate` to clear the stale `gateDecision` so the session-routing layer doesn't bounce the user right back to `/decline`.
 - **Tech-Assisted Retrieval (Rung 2)** is bounded to 1 + 2 follow-ups per node. `recordTechAssistRequest` enforces the budget; on the third follow-up `advanceSession` strips `requestedArtifact` and appends a Rung-2 budget exhausted notice to `message`. Audit trail in `tech_assist_requests` table.
 - **Any change to a hardcoded risk rule must be reviewed by code review (not LLM-judged)** — these are the safety floor.
 
@@ -54,3 +54,17 @@ pnpm build
 UI-touching phases also need `chrome-devtools-mcp:a11y-debugging` on the wired surfaces.
 
 **Fresh Supabase projects** also need `supabase/storage-setup.sql` applied via Supabase MCP `execute_sql` — Drizzle doesn't manage the `storage` schema.
+
+## Communication preferences
+
+When explaining technical changes, code flow, or system architecture to the
+project owner (Brandon), use **ASCII branch-tree diagrams**: a vertical tree
+with `│ ├── └──` connectors, every user choice as a branch, every AI/API
+call annotated inline (`[AI #N]`, `[API]`). Plain English on the labels —
+the reader is non-technical. The full system flow is documented this way in
+[`docs/flow.md`](./docs/flow.md); reuse that style for any explanation that
+touches more than two hops.
+
+Avoid long prose paragraphs for system-flow questions. A diagram + a short
+"headline numbers" section + a "where current pain points live on the map"
+section is the preferred shape.

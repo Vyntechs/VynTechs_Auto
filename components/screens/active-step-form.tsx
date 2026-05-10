@@ -6,9 +6,16 @@ import { DotsThree } from '@phosphor-icons/react/dist/ssr'
 import { PhotoCapture } from '@/components/session/photo-capture'
 import { AudioCapture } from '@/components/session/audio-capture'
 import { VideoCapture } from '@/components/session/video-capture'
+import { AmbientConditionsCapture } from '@/components/session/ambient-conditions-capture'
 
 type RequestedArtifact = {
-  kind: 'photo' | 'scan_screen' | 'wiring_diagram' | 'audio' | 'video'
+  kind:
+    | 'photo'
+    | 'scan_screen'
+    | 'wiring_diagram'
+    | 'audio'
+    | 'video'
+    | 'ambient_conditions'
   prompt: string
 }
 
@@ -16,6 +23,18 @@ type Props = {
   sessionId: string
   nodeId: string
   requestedArtifact?: RequestedArtifact
+}
+
+// iOS Safari surfaces a fetch failure (timeout / dropped connection /
+// CORS) as `TypeError: Load failed`. Chrome's equivalent is "Failed to
+// fetch". The string is opaque to a tech, so map fetch-level failures
+// to actionable copy. HTTP error bodies (thrown above as `new Error(...)`)
+// keep their original message — those are usually informative.
+function describeFetchError(err: unknown): string {
+  if (err instanceof TypeError) {
+    return 'AI took too long or your connection dropped — tap again to retry.'
+  }
+  return err instanceof Error ? err.message : 'Network error'
 }
 
 export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) {
@@ -43,7 +62,7 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
         setObservation('')
         router.refresh()
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Network error')
+        setError(describeFetchError(err))
       }
     })
   }
@@ -77,6 +96,13 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
               nodeId={nodeId}
               label={requestedArtifact.prompt}
               onUploaded={() => router.refresh()}
+            />
+          )}
+          {requestedArtifact.kind === 'ambient_conditions' && (
+            <AmbientConditionsCapture
+              sessionId={sessionId}
+              prompt={requestedArtifact.prompt}
+              onCaptured={() => router.refresh()}
             />
           )}
         </div>

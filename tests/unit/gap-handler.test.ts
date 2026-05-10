@@ -46,6 +46,6 @@ describe('gateProposedAction', () => {
     })
     expect(r.allow).toBe(false)
     expect(r.gap).toMatch(/confidence/i)
-    expect(r.options).toEqual(['gather_more_low_risk', 'decline', 'defer'])
+    expect(r.options).toEqual(['gather_more_low_risk', 'defer'])
   })
 })

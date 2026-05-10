@@ -4,6 +4,10 @@ import { submitRepairObservationForUser } from '@/lib/sessions'
 import { getRepairGuidance } from '@/lib/ai/repair-guidance'
 import { getServerSupabase } from '@/lib/supabase-server'
 
+// Repair-guidance AI call can take several seconds on long context.
+// Cap at 60s to avoid mid-flight kills on slow turns.
+export const maxDuration = 60
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

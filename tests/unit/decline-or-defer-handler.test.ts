@@ -30,8 +30,11 @@ async function seedOpenSession(db: TestDb) {
   return { shop, tech, session }
 }
 
+// "Decline this job" was removed from the product 2026-05-09 — defer-for-curator
+// is now the only escalation path. Stale clients sending reason='decline' get
+// 400 by zod literal('defer'). The valid body is therefore a defer.
 const validBody = {
-  reason: 'decline' as const,
+  reason: 'defer' as const,
   gap: 'Required confidence 95% for risk class "destructive"; current 80%.',
   riskClass: 'destructive' as const,
 }
@@ -57,19 +60,24 @@ describe('declineOrDeferSessionForUser', () => {
     await close()
   })
 
-  it('declines an open session and returns generated language', async () => {
+  it('rejects a stale client posting reason=decline with 400', async () => {
     const { tech, session } = await seedOpenSession(db)
     const result = await declineOrDeferSessionForUser({
       db,
       userId: tech.userId,
       sessionId: session.id,
-      body: validBody,
+      body: {
+        reason: 'decline',
+        gap: 'Required confidence 95% for risk class "destructive"; current 80%.',
+        riskClass: 'destructive',
+      },
       generateLanguage,
     })
-    expect(result).toEqual({ ok: true, status: 'declined', language: fakeLanguage })
-    const updated = await db.select().from(sessions).where(eq(sessions.id, session.id))
-    expect(updated[0].status).toBe('declined')
-    expect(updated[0].closedAt).toBeInstanceOf(Date)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(400)
+    expect(generateLanguage).not.toHaveBeenCalled()
+    const fetched = await db.select().from(sessions).where(eq(sessions.id, session.id))
+    expect(fetched[0].status).toBe('open')
   })
 
   it('defers an open session', async () => {
@@ -78,7 +86,7 @@ describe('declineOrDeferSessionForUser', () => {
       db,
       userId: tech.userId,
       sessionId: session.id,
-      body: { ...validBody, reason: 'defer' as const },
+      body: validBody,
       generateLanguage,
     })
     expect(result.ok).toBe(true)
@@ -87,7 +95,7 @@ describe('declineOrDeferSessionForUser', () => {
     expect(updated[0].status).toBe('deferred')
   })
 
-  it('appends a close event with the decline payload', async () => {
+  it('appends a close event with the defer payload', async () => {
     const { tech, session } = await seedOpenSession(db)
     await declineOrDeferSessionForUser({
       db,
@@ -100,7 +108,7 @@ describe('declineOrDeferSessionForUser', () => {
     expect(events).toHaveLength(1)
     expect(events[0].eventType).toBe('close')
     expect(events[0].aiResponse?.declineOrDefer).toMatchObject({
-      reason: 'decline',
+      reason: 'defer',
       riskClass: 'destructive',
       language: fakeLanguage,
     })

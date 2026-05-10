@@ -107,6 +107,30 @@ describe('advanceSession', () => {
     expect(events[0].observationText).toBe('Got P0299')
   })
 
+  it('persists the AI message text on the observation event for curator timeline reconstruction', async () => {
+    const userId = crypto.randomUUID()
+    const { session } = await seedSession({ userId })
+    const updateTree = vi.fn().mockResolvedValue({
+      ...updatedTree,
+      message: 'next: scan ECM. inspect-cac is still queued.',
+    })
+    await advanceSession({
+      db,
+      userId,
+      sessionId: session.id,
+      body: { observation: 'pulled P0299' },
+      updateTree,
+    })
+    const events = await db
+      .select()
+      .from(sessionEvents)
+      .where(eq(sessionEvents.sessionId, session.id))
+    expect(events[0].aiResponse?.messageText).toBe(
+      'next: scan ECM. inspect-cac is still queued.',
+    )
+    expect(events[0].aiResponse?.nextNodeId).toBe('inspect-cac')
+  })
+
   it('returns 401 when the userId has no profile', async () => {
     const userId = crypto.randomUUID()
     const otherUser = crypto.randomUUID()
