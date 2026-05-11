@@ -456,6 +456,7 @@ describe('generateInitialTree with corpus context', () => {
           successConfirmCount: 5,
           comebackRecordedCount: 0,
           similarityScore: 0.91,
+          entrySource: 'auto_promoted',
         },
       ],
     )
@@ -534,6 +535,7 @@ describe('updateTree with corpus context', () => {
           successConfirmCount: 5,
           comebackRecordedCount: 0,
           similarityScore: 0.91,
+          entrySource: 'auto_promoted',
         },
       ],
     })

@@ -138,13 +138,16 @@ function corpusContextBlock(corpus: CorpusMatch[] | undefined): string {
   if (corpus.length === 0) {
     return '\n\nCorpus context: no prior matches in the network. Reason from training knowledge alone.'
   }
-  const lines = corpus
-    .map(
-      (c, i) =>
-        `(${i + 1}) confidence=${c.confidenceScore.toFixed(2)} success=${c.successConfirmCount} comebacks=${c.comebackRecordedCount} similarity=${c.similarityScore.toFixed(2)}\n    rootCause: ${c.rootCause}\n    summary: ${c.summary}`,
-    )
-    .join('\n\n')
+  const lines = corpus.map((c, i) => formatCorpusMatch(c, i)).join('\n\n')
   return `\n\nCorpus context (top ${corpus.length} matches, vehicle + DTC + symptom matched, vector-ranked):\n${lines}`
+}
+
+function formatCorpusMatch(c: CorpusMatch, i: number): string {
+  // Founder entries are the highest source of truth in the system —
+  // vetted by the shop owner. Tag them so the model treats their root
+  // cause as a strong prior and reflects that in proposedAction.confidence.
+  const tag = c.entrySource === 'founder' ? ' [SHOP-OWNER VERIFIED — highest trust]' : ''
+  return `(${i + 1})${tag} confidence=${c.confidenceScore.toFixed(2)} success=${c.successConfirmCount} comebacks=${c.comebackRecordedCount} similarity=${c.similarityScore.toFixed(2)}\n    rootCause: ${c.rootCause}\n    summary: ${c.summary}`
 }
 
 export async function updateTree(input: {
@@ -178,10 +181,7 @@ export async function updateTree(input: {
   const corpusBlock =
     (input.corpus ?? []).length > 0
       ? `\n\nCorpus matches (cross-shop prior cases, vector-ranked):\n${(input.corpus ?? [])
-          .map(
-            (c, i) =>
-              `(${i + 1}) confidence=${c.confidenceScore.toFixed(2)} success=${c.successConfirmCount} comebacks=${c.comebackRecordedCount} similarity=${c.similarityScore.toFixed(2)}\n    rootCause: ${c.rootCause}\n    summary: ${c.summary}`,
-          )
+          .map((c, i) => formatCorpusMatch(c, i))
           .join('\n\n')}`
       : ''
 

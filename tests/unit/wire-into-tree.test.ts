@@ -165,6 +165,7 @@ describe('buildUpdateTreeWithRetrieval — corpus retrieval (Phase K8)', () => {
     successConfirmCount: 5,
     comebackRecordedCount: 0,
     similarityScore: 0.91,
+    entrySource: 'auto_promoted',
   }
 
   beforeEach(() => {
@@ -299,6 +300,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
         successConfirmCount: 12,
         comebackRecordedCount: 0,
         similarityScore: 0.84,
+        entrySource: 'auto_promoted',
       },
     ]
     const retrieveCorpus = vi.fn(async (_db: AppDb, _input: CorpusRetrievalInput) => corpusMatches)

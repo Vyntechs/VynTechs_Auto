@@ -333,6 +333,13 @@ export const corpusEntries = pgTable('corpus_entries', {
   comebackRecordedCount: integer('comeback_recorded_count').notNull().default(0),
   confidenceScore: real('confidence_score').notNull().default(0.5),
   isCuratorEntry: boolean('is_curator_entry').notNull().default(false),
+  // Provenance for retrieval ranking + tree-engine prompt tagging.
+  // 'founder' rows are surfaced first by retrieveCorpus and tagged as
+  // SHOP-OWNER VERIFIED in the prompt. Backfilled in 0013 from the legacy
+  // is_curator_entry boolean.
+  entrySource: text('entry_source', {
+    enum: ['founder', 'curator', 'auto_promoted'],
+  }).notNull().default('auto_promoted'),
   isRetired: boolean('is_retired').notNull().default(false),
   embedding: jsonb('embedding').$type<number[] | null>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -433,3 +440,33 @@ export const novelPatternQueue = pgTable('novel_pattern_queue', {
 
 export type NovelPatternQueueRow = typeof novelPatternQueue.$inferSelect
 export type NewNovelPatternQueueRow = typeof novelPatternQueue.$inferInsert
+
+// Founder knowledge base — every free-form note from the shop owner lands
+// here first. structuredDraft holds whatever the LLM extracted (may be
+// partial or null on parse failure); the founder reviews each row at
+// /curator/founder-notes/[id] and either promotes (insert into corpus_entries
+// with entry_source='founder', confidence_score=0.95) or dismisses.
+export const founderNotesQueue = pgTable('founder_notes_queue', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  rawText: text('raw_text').notNull(),
+  structuredDraft: jsonb('structured_draft').$type<Record<string, unknown> | null>(),
+  parseStatus: text('parse_status', {
+    enum: ['parsed', 'partial', 'failed'],
+  }).notNull().default('failed'),
+  missingFields: text('missing_fields').array().notNull().default([]),
+  llmNotes: text('llm_notes'),
+  createdByUserId: uuid('created_by_user_id').references(() => profiles.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewedDecision: text('reviewed_decision', { enum: ['promoted', 'dismissed'] }),
+  reviewedByUserId: uuid('reviewed_by_user_id').references(() => profiles.id),
+  reviewedNote: text('reviewed_note'),
+  resultingCorpusEntryId: uuid('resulting_corpus_entry_id').references(() => corpusEntries.id, {
+    onDelete: 'set null',
+  }),
+}, (t) => ({
+  pendingIdx: index('founder_notes_queue_pending_idx').on(t.createdAt.desc()).where(sql`reviewed_at IS NULL`),
+}))
+
+export type FounderNotesQueueRow = typeof founderNotesQueue.$inferSelect
+export type NewFounderNotesQueueRow = typeof founderNotesQueue.$inferInsert

@@ -9,6 +9,31 @@ This file holds load-bearing conventions for any agent working on the repo. The 
 - **UI conventions:** `docs/superpowers/ui-design-toolkit.md` — mandatory pre-read for any UI/frontend task.
 - **Latest handoff:** `docs/superpowers/sessions/` — pick the newest file, paste it as the first message of a fresh session.
 
+## Working rules
+
+Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
+
+### Rule 1 — Think before coding
+- State assumptions explicitly. If uncertain, ask rather than guess.
+- Present multiple interpretations when ambiguity exists.
+- Push back when a simpler approach exists.
+- Stop when confused. Name what's unclear.
+
+### Rule 2 — Simplicity first
+- Minimum code that solves the problem. Nothing speculative.
+- No features beyond what was asked. No abstractions for single-use code.
+- Test: would a senior engineer say this is overcomplicated? If yes, simplify.
+
+### Rule 3 — Surgical changes
+- Touch only what you must. Clean up only your own mess.
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor what isn't broken. Match existing style.
+
+### Rule 4 — Goal-driven execution
+- Define success criteria. Loop until verified.
+- Don't follow steps. Define success and iterate.
+- Strong success criteria let you loop independently.
+
 ## Architecture conventions
 
 - **Handler-in-`lib/` + thin route shim.** Every API route follows this pattern: handler in `lib/sessions.ts` (or similar) takes `db: AppDb` plus injected dependencies, returns a discriminated union. The `app/api/.../route.ts` shim is ~30 lines: read user, call handler with prod deps, map result to `NextResponse`. Makes everything pglite-testable without mocking Next.js.
