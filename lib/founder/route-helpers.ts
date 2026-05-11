@@ -11,7 +11,7 @@ export type FounderAuth =
 
 /**
  * Founder gate for ingestion routes. The founder is the single user
- * identified by FOUNDER_USER_ID env var (their Supabase auth user UUID).
+ * identified by FOUNDER_EMAIL env var (their Supabase auth email).
  * Returns their profile id for inserts; mirrors requireCurator's shape
  * so route handlers stay symmetric.
  */
@@ -28,7 +28,7 @@ export async function requireFounder(): Promise<FounderAuth> {
     }
   }
 
-  if (!isFounder(user.id)) {
+  if (!isFounder(user.email)) {
     return {
       kind: 'forbidden',
       response: NextResponse.json({ error: 'forbidden' }, { status: 403 }),

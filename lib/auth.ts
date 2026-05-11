@@ -40,16 +40,19 @@ export async function requireUserAndProfile(opts: {
 
 /**
  * Founder gate. The founder is a single hardcoded user (the shop owner)
- * identified by FOUNDER_USER_ID — their Supabase auth user UUID. Used to
- * gate the founder-notes ingestion path: only the founder can submit
- * free-form knowledge into the queue. Curators (general role) can still
- * review the queue, but only the founder authors entries.
+ * identified by FOUNDER_EMAIL — their Supabase auth email. Used to gate
+ * the founder-notes ingestion path: only the founder can submit free-form
+ * knowledge into the queue. Curators (general role) can still review the
+ * queue, but only the founder authors entries.
  *
- * Returns false when the env var is unset so the gate stays closed in
- * any environment where it hasn't been deliberately configured.
+ * Email is compared case-insensitively — Supabase normalizes user emails
+ * to lowercase on signup, but we lowercase both sides to be safe against
+ * mixed-case env-var values. Returns false when the env var is unset so
+ * the gate stays closed in any environment where it hasn't been
+ * deliberately configured.
  */
-export function isFounder(userId: string | null | undefined): boolean {
-  const founderId = process.env.FOUNDER_USER_ID
-  if (!founderId || !userId) return false
-  return userId === founderId
+export function isFounder(email: string | null | undefined): boolean {
+  const founderEmail = process.env.FOUNDER_EMAIL
+  if (!founderEmail || !email) return false
+  return email.toLowerCase().trim() === founderEmail.toLowerCase().trim()
 }

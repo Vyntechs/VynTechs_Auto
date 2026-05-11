@@ -9,7 +9,7 @@ export default async function NewFounderNotePage() {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!isFounder(user?.id)) {
+  if (!isFounder(user?.email)) {
     // Curators can review the queue but only the founder can submit notes.
     // Bounce back to the list so the flow is clear.
     redirect('/curator/founder-notes')

@@ -9,7 +9,7 @@ export default async function FounderNotesQueuePage() {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const userIsFounder = isFounder(user?.id)
+  const userIsFounder = isFounder(user?.email)
 
   const rows = await listPendingFounderNotes(db)
 
