@@ -14,6 +14,7 @@ export type CounterWorkOrderConfirmProps = {
   steps: PlanStep[]
   authSummary: string
   customerMessage: { sentAt: string; body: string }
+  userEmail?: string
 }
 
 export function CounterWorkOrderConfirm({
@@ -26,6 +27,7 @@ export function CounterWorkOrderConfirm({
   steps,
   authSummary,
   customerMessage,
+  userEmail,
 }: CounterWorkOrderConfirmProps) {
   const router = useRouter()
 
@@ -45,7 +47,7 @@ export function CounterWorkOrderConfirm({
           { label: customerLabel },
           { label: 'Confirmed', bold: true },
         ]}
-        user="Diana"
+        user={userEmail || '—'}
       />
       <div className="vt-workspace">
         <main className="vt-main">

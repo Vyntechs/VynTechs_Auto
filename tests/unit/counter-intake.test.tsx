@@ -27,12 +27,12 @@ describe('CounterIntake', () => {
   })
 
   it('renders the screen title', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     expect(screen.getByRole('heading', { name: /who's at the counter/i })).toBeInTheDocument()
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/phone/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
@@ -44,14 +44,14 @@ describe('CounterIntake', () => {
   })
 
   it('auto-uppercases VIN as the writer types', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     const vin = screen.getByLabelText(/vin/i) as HTMLInputElement
     fireEvent.change(vin, { target: { value: 'wba3a5c50ejf12345' } })
     expect(vin.value).toBe('WBA3A5C50EJF12345')
   })
 
   it('toggles VIN scan state when the scan button is clicked', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     const scanBtn = screen.getByRole('button', { name: /scan/i })
     expect(scanBtn).toHaveTextContent(/scan with camera/i)
     fireEvent.click(scanBtn)
@@ -59,7 +59,7 @@ describe('CounterIntake', () => {
   })
 
   it('disables Send to Techs when required fields (name, VIN, complaint) are empty', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     // The screen has two Send-to-Techs buttons (header + form footer); both must be disabled.
     const submits = screen.getAllByRole('button', { name: /send to techs/i })
     expect(submits.length).toBeGreaterThan(0)
@@ -67,7 +67,7 @@ describe('CounterIntake', () => {
   })
 
   it('enables Send to Techs once name, VIN, and complaint are filled', () => {
-    render(<CounterIntake />)
+    render(<CounterIntake userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/vin/i), { target: { value: 'WBA3A5C50EJF12345' } })
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
@@ -77,8 +77,21 @@ describe('CounterIntake', () => {
     submits.forEach((btn) => expect(btn).toBeEnabled())
   })
 
-  it('POSTs the form values to /api/intake/submit and navigates on success', async () => {
+  it('shows the logged-in user email in the top bar (not the old "Diana" placeholder)', () => {
+    render(<CounterIntake userEmail="brandon@vyntechs.com" />)
+    expect(screen.getByText('brandon@vyntechs.com')).toBeInTheDocument()
+    expect(screen.queryByText('Diana')).not.toBeInTheDocument()
+  })
+
+  it('soft-fails to "—" in the top bar when no userEmail is supplied (no crash, no build break)', () => {
     render(<CounterIntake />)
+    // Two dashes render: one in the avatar circle, one in the name span.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Diana')).not.toBeInTheDocument()
+  })
+
+  it('POSTs the form values to /api/intake/submit and navigates on success', async () => {
+    render(<CounterIntake userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '(303) 555-0142' } })
     fireEvent.change(screen.getByLabelText(/vin/i), { target: { value: 'WBA3A5C50EJF12345' } })

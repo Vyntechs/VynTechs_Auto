@@ -31,6 +31,7 @@ const baseProps: CounterWorkOrderConfirmProps = {
     sentAt: 'Sent · 11:27 am',
     body: 'Hi Robert — your 335i is checked in. Diagnostic estimate is 1.5 hrs / $165.',
   },
+  userEmail: 'test@example.com',
 }
 
 describe('CounterWorkOrderConfirm', () => {
@@ -90,5 +91,18 @@ describe('CounterWorkOrderConfirm', () => {
     const btn = screen.getByRole('button', { name: /print receipt/i }) as HTMLButtonElement
     expect(btn).toBeDisabled()
     expect(btn.title).toMatch(/counter 04/i)
+  })
+
+  it('shows the logged-in user email in the top bar (not the old "Diana" placeholder)', () => {
+    render(<CounterWorkOrderConfirm {...baseProps} userEmail="brandon@vyntechs.com" />)
+    expect(screen.getByText('brandon@vyntechs.com')).toBeInTheDocument()
+    expect(screen.queryByText('Diana')).not.toBeInTheDocument()
+  })
+
+  it('soft-fails to "—" in the top bar when userEmail is missing (no crash, no build break)', () => {
+    const { userEmail: _unused, ...propsWithoutEmail } = baseProps
+    render(<CounterWorkOrderConfirm {...propsWithoutEmail} />)
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 })

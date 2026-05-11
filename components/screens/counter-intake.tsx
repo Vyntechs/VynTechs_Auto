@@ -29,7 +29,7 @@ type IntakeBody = {
   complaint: { description: string; whenStarted: string; howOften: string; authorized: string }
 }
 
-export function CounterIntake() {
+export function CounterIntake({ userEmail }: { userEmail?: string }) {
   const router = useRouter()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -102,7 +102,7 @@ export function CounterIntake() {
       <Topbar
         product="Counter"
         crumbs={[{ label: 'Today' }, { label: 'Intake', bold: true }]}
-        user="Diana"
+        user={userEmail || '—'}
       />
       <div className="vt-workspace">
         <main className="vt-main">
