@@ -32,9 +32,17 @@ describe('guardCuratorRoute', () => {
     expect(result).toEqual({ kind: 'allow' })
   })
 
-  it('redirects unauthed user on /curator path to /sign-in', async () => {
+  it('redirects unauthed user on /curator path to /sign-in with next= preserved', async () => {
     const result = await guardCuratorRoute(db, null, '/curator/drift')
-    expect(result).toEqual({ kind: 'redirect', to: '/sign-in' })
+    expect(result).toEqual({ kind: 'redirect', to: '/sign-in?next=%2Fcurator%2Fdrift' })
+  })
+
+  it('encodes a deeper /curator path correctly into the next param', async () => {
+    const result = await guardCuratorRoute(db, null, '/curator/founder-notes/abc?from=novel')
+    expect(result).toEqual({
+      kind: 'redirect',
+      to: '/sign-in?next=%2Fcurator%2Ffounder-notes%2Fabc%3Ffrom%3Dnovel',
+    })
   })
 
   it('redirects authed non-curator on /curator path to /', async () => {

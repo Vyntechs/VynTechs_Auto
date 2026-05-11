@@ -1,11 +1,22 @@
 'use client'
 import Link from 'next/link'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { getBrowserSupabase } from '@/lib/supabase-client'
+
+/** Same-origin path validator. Only accept relative paths starting with `/`
+ *  and not `//` (protocol-relative). Anything else falls through to the
+ *  default landing so we can't be tricked into sending the user to an
+ *  external URL after login. */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return '/today'
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/today'
+  return raw
+}
 
 export default function SignInPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -24,7 +35,7 @@ export default function SignInPage() {
       setBusy(false)
       return
     }
-    router.push('/today')
+    router.push(safeNextPath(searchParams.get('next')))
   }
 
   return (
