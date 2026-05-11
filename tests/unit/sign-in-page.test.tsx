@@ -10,17 +10,20 @@ vi.mock('@/lib/supabase-client', () => ({
   }),
 }))
 
-const mockSearchParams = { get: vi.fn(() => null as string | null) }
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
-  useSearchParams: () => mockSearchParams,
 }))
 
 import SignInPage from '@/app/(auth)/sign-in/page'
 
+function setLocationSearch(search: string) {
+  window.history.replaceState({}, '', `/sign-in${search}`)
+}
+
 describe('SignInPage', () => {
   beforeEach(() => {
     mockSignInWithPassword.mockResolvedValue({ error: null })
+    setLocationSearch('')
   })
 
   afterEach(() => {
@@ -72,7 +75,7 @@ describe('SignInPage', () => {
   })
 
   it('routes to ?next= after successful sign-in when it is a safe relative path', async () => {
-    mockSearchParams.get.mockReturnValueOnce('/curator/founder-notes')
+    setLocationSearch('?next=%2Fcurator%2Ffounder-notes')
     render(<SignInPage />)
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: 'brandon@vyntechs.com' },
@@ -85,7 +88,7 @@ describe('SignInPage', () => {
   })
 
   it('falls back to /today when ?next= is missing or unsafe', async () => {
-    mockSearchParams.get.mockReturnValueOnce('https://evil.example/steal')
+    setLocationSearch('?next=https%3A%2F%2Fevil.example%2Fsteal')
     render(<SignInPage />)
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: 'brandon@vyntechs.com' },
