@@ -811,7 +811,57 @@
     display: flex; align-items: center; justify-content: center;
     min-height: 100vh; padding: 24px; text-align: center;
   }
+  /* Founder-notes pages bypass the desktop-only gate — they're a phone-first
+   * jot-and-go workflow. When a founder-notes page is rendered into the
+   * curator shell, re-show the grid in a single-column mobile layout and
+   * hide the sidebar (founder-notes pages provide their own back link). */
+  .vt-curator-shell:has(.vt-founder-notes-page),
+  .vt-curator-shell:has(.vt-founder-note-new-page),
+  .vt-curator-shell:has(.vt-founder-note-review-page) {
+    .vt-curator-grid { display: grid; grid-template-columns: 1fr; }
+    .vt-curator-sidebar { display: none; }
+    .vt-curator-main { padding: 16px; }
+  }
 }
+
+/* Founder-notes list page — mobile-friendly card layout when narrow. */
+.vt-founder-notes-table { width: 100%; border-collapse: collapse; }
+.vt-founder-notes-table th, .vt-founder-notes-table td { padding: 8px 6px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--vt-border); font-size: 14px; }
+.vt-founder-notes-link { color: var(--vt-accent); text-decoration: none; }
+.vt-founder-notes-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.vt-founder-notes-status-parsed { background: #d8efd8; color: #1e5e1e; }
+.vt-founder-notes-status-partial { background: #fcf0c8; color: #6b4f00; }
+.vt-founder-notes-status-failed { background: #f4d4d4; color: #7a1f1f; }
+.vt-founder-notes-preview { color: var(--vt-fg-2); }
+.vt-founder-notes-missing { color: var(--vt-fg-3); font-size: 12px; }
+.vt-founder-notes-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.vt-founder-notes-new { display: inline-block; padding: 8px 14px; background: var(--vt-accent); color: var(--vt-bg); text-decoration: none; border-radius: 6px; font-weight: 600; }
+.vt-founder-notes-empty { color: var(--vt-fg-3); padding: 24px 0; }
+
+/* Founder note submit form — single textarea, mobile-first. */
+.vt-founder-note-new-help { color: var(--vt-fg-3); margin: 8px 0 16px; line-height: 1.5; }
+.vt-founder-note-submit-form { display: flex; flex-direction: column; gap: 12px; }
+.vt-founder-note-submit-form label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.vt-founder-note-submit-form textarea { font: inherit; padding: 12px; border: 1px solid var(--vt-border); border-radius: 8px; min-height: 200px; resize: vertical; }
+.vt-founder-note-submit-form button { padding: 12px 20px; background: var(--vt-accent); color: var(--vt-bg); border: 0; border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer; }
+.vt-founder-note-submit-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.vt-founder-note-submit-error { color: #7a1f1f; }
+
+/* Review form — stacked fieldsets, mobile-friendly inputs. */
+.vt-founder-note-review-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.vt-founder-note-raw { background: var(--vt-surface-2); padding: 12px; border-radius: 8px; margin-bottom: 16px; }
+.vt-founder-note-raw pre { white-space: pre-wrap; font-family: inherit; font-size: 14px; margin: 8px 0 0; }
+.vt-founder-note-llm-notes, .vt-founder-note-missing { background: #fcf0c8; padding: 12px; border-radius: 8px; margin-bottom: 16px; color: #6b4f00; }
+.vt-founder-note-review-form fieldset { border: 1px solid var(--vt-border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.vt-founder-note-review-form legend { padding: 0 6px; font-weight: 600; }
+.vt-founder-note-review-form label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 14px; }
+.vt-founder-note-review-form input, .vt-founder-note-review-form textarea, .vt-founder-note-review-form select { font: inherit; padding: 8px; border: 1px solid var(--vt-border); border-radius: 6px; }
+.vt-founder-note-review-form textarea { min-height: 80px; }
+.vt-founder-note-review-buttons button { padding: 12px 20px; background: var(--vt-accent); color: var(--vt-bg); border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.vt-founder-note-dismiss-block { margin-top: 16px; border-top: 1px solid var(--vt-border) !important; }
+.vt-founder-note-dismiss-block button { background: var(--vt-surface-3); color: var(--vt-fg); padding: 10px 16px; border-radius: 6px; border: 1px solid var(--vt-border); cursor: pointer; }
+.vt-founder-note-review-error { color: #7a1f1f; }
+.vt-founder-note-reviewed { color: var(--vt-fg-3); padding: 16px 0; }
 
 /* Phase P — case detail (Screen 3) */
 .vt-case-detail { max-width: 960px; }

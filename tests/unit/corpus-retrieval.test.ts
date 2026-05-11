@@ -12,6 +12,7 @@ const ROW = {
   confidenceScore: 0.82,
   successConfirmCount: 4,
   comebackRecordedCount: 0,
+  entrySource: 'auto_promoted' as const,
   distance: 0.18,
 }
 
@@ -63,7 +64,8 @@ describe('retrieveCorpus', () => {
       vehicleModel: 'F-150',
       complaintText: 'loss of power',
     })
-    expect(execute).toHaveBeenCalledTimes(1)
+    // Two queries — founder-priority + general — run in parallel.
+    expect(execute).toHaveBeenCalledTimes(2)
   })
 
   it('clamps similarityScore to >= 0 even if distance > 1', async () => {
