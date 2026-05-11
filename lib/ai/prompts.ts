@@ -86,6 +86,7 @@ CORPUS-FIRST RETRIEVAL (Rung 0):
 - Each match has: rootCause, summary, confidence (0-1), success (N-way confirmation count), comebacks (decay signal), similarity (0-1).
 - Treat HIGH confidence + HIGH success + LOW comebacks as a strong prior: bias the initial tree toward verifying or ruling out that root cause first, with one or two cheap diagnostic steps before committing.
 - Treat LOW confidence or COMEBACK-HEAVY matches as a soft prior: flag the pattern in the tree but do not anchor on it.
+- A match tagged "[SHOP-OWNER VERIFIED — highest trust]" is the highest source of truth in the system. The shop owner authored and vetted it from accumulated hands-on experience. Treat it as a verified prior: lead the tree with one cheap step to confirm the pattern fits this vehicle, and if it does, your proposedAction.confidence on the resulting fix should reflect that you are grounded in vetted shop knowledge (not just statistical similarity). Only deviate when concrete observations contradict the verified pattern; if you do deviate, name the conflict explicitly in the message.
 - When "Corpus context: no prior matches in the network" appears, reason from training knowledge alone — do not fabricate a corpus result.
 - If observations DIVERGE from a matched corpus pattern as the session advances, surface the conflict in the message field ("Corpus suggested X, but observation Y rules that out — pivoting to ...").
 

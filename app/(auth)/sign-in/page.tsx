@@ -4,6 +4,26 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBrowserSupabase } from '@/lib/supabase-client'
 
+/** Same-origin path validator. Only accept relative paths starting with `/`
+ *  and not `//` (protocol-relative). Anything else falls through to the
+ *  default landing so we can't be tricked into sending the user to an
+ *  external URL after login. */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return '/today'
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/today'
+  return raw
+}
+
+/** Read the post-login redirect target from the current URL's query string.
+ *  We read it directly from window.location at submit time rather than using
+ *  the useSearchParams hook so the page doesn't need a Suspense boundary
+ *  (Next.js forces dynamic rendering on pages that call useSearchParams
+ *  during render, which breaks static prerendering of /sign-in). */
+function readNextParam(): string | null {
+  if (typeof window === 'undefined') return null
+  return new URLSearchParams(window.location.search).get('next')
+}
+
 export default function SignInPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
@@ -24,7 +44,7 @@ export default function SignInPage() {
       setBusy(false)
       return
     }
-    router.push('/today')
+    router.push(safeNextPath(readNextParam()))
   }
 
   return (

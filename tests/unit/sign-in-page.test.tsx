@@ -16,9 +16,14 @@ vi.mock('next/navigation', () => ({
 
 import SignInPage from '@/app/(auth)/sign-in/page'
 
+function setLocationSearch(search: string) {
+  window.history.replaceState({}, '', `/sign-in${search}`)
+}
+
 describe('SignInPage', () => {
   beforeEach(() => {
     mockSignInWithPassword.mockResolvedValue({ error: null })
+    setLocationSearch('')
   })
 
   afterEach(() => {
@@ -67,5 +72,31 @@ describe('SignInPage', () => {
 
     expect(await screen.findByText(/invalid login credentials/i)).toBeInTheDocument()
     expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it('routes to ?next= after successful sign-in when it is a safe relative path', async () => {
+    setLocationSearch('?next=%2Fcurator%2Ffounder-notes')
+    render(<SignInPage />)
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'brandon@vyntechs.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'correct-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/curator/founder-notes'))
+  })
+
+  it('falls back to /today when ?next= is missing or unsafe', async () => {
+    setLocationSearch('?next=https%3A%2F%2Fevil.example%2Fsteal')
+    render(<SignInPage />)
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'brandon@vyntechs.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'correct-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/today'))
   })
 })

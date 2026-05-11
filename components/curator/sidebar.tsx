@@ -8,6 +8,7 @@ export const CURATOR_NAV = [
   { href: '/curator/deferred',     label: 'Incomplete' },
   { href: '/curator/novel',        label: 'New problems' },
   { href: '/curator/corpus',       label: 'Solved cases' },
+  { href: '/curator/founder-notes', label: 'Founder notes' },
   { href: '/curator/calibration',  label: 'Calibrator' },
 ]
 
