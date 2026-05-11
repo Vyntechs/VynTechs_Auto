@@ -19,7 +19,12 @@ export async function guardCuratorRoute(
   path: string,
 ): Promise<GuardResult> {
   if (!path.startsWith('/curator')) return { kind: 'allow' }
-  if (!userId) return { kind: 'redirect', to: '/sign-in' }
+  if (!userId) {
+    // Encode the original /curator/... path so the sign-in page can route
+    // the user back to where they were trying to go after successful auth.
+    const next = encodeURIComponent(path)
+    return { kind: 'redirect', to: `/sign-in?next=${next}` }
+  }
 
   const [profile] = await db
     .select({ role: profiles.role })

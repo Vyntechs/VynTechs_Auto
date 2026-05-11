@@ -5,7 +5,6 @@ import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
 import { canCurate } from '@/lib/curator/can-curate'
 import { CuratorSidebar } from '@/components/curator/sidebar'
-import { DesktopOnlyFallback } from '@/components/curator/desktop-only-fallback'
 
 export const metadata = { title: 'Vyntechs Curator' }
 
@@ -26,7 +25,6 @@ export default async function CuratorLayout({
 
   return (
     <div className="vt-curator-shell">
-      <DesktopOnlyFallback />
       <div className="vt-curator-grid">
         <CuratorSidebar />
         <main className="vt-curator-main">{children}</main>
