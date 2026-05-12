@@ -33,6 +33,8 @@ tests/e2e/.auth/
 
 # scratch + design-handoff bundles
 tmp/
+design_handoff_*/
+log-observation-loading/
 
 # Agent skills — managed by `npx skills` (see skills-lock.json).
 # Run `npx skills experimental_install` after clone to restore.
