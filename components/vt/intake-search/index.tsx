@@ -5,7 +5,7 @@ import { useIntakeSearch } from '@/lib/intake/use-search'
 import { tokensToPrefill, type CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 import { detectInputShape } from '@/lib/intake/input-shape'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
-import type { CustomerHit, VehicleHit } from '@/lib/intake/search'
+import type { CustomerHit, CustomerVehicle, VehicleHit } from '@/lib/intake/search'
 import { Bar } from './bar'
 import {
   DropdownEmpty,
@@ -31,7 +31,10 @@ export function PredictiveIntakeSearch({
   const [value, setValue] = useState('')
   const [open, setOpen] = useState(false)
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null)
-  const [tier, setTier] = useState<{ customer: CustomerHit; vehicles: VehicleHit[] } | null>(null)
+  const [tier, setTier] = useState<{
+    customer: { id: string; name: string; phone: string | null; email: string | null }
+    vehicles: CustomerVehicle[]
+  } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const dropdownId = useId()
 
@@ -110,39 +113,30 @@ export function PredictiveIntakeSearch({
 
   const pickCustomer = useCallback(
     (c: CustomerHit | RecentCustomer) => {
-      if (c.vehicleCount === 0) {
+      if (c.vehicles.length === 0) {
         onCreateNew({
           name: c.name,
           phone: c.phone ?? undefined,
           email: c.email ?? undefined,
         })
         setOpen(false)
+        setFocusedIdx(null)
         return
       }
-      // Find this customer's vehicles in the current matched results.
-      if (state.kind === 'matched' && 'id' in c) {
-        const owned = state.vehicles.filter((v) => v.ownerId === c.id)
-        if (owned.length === 1) {
-          onPickVehicle(owned[0].id)
-          setOpen(false)
-          return
-        }
-        if (owned.length > 1) {
-          setTier({ customer: c as CustomerHit, vehicles: owned })
-          setFocusedIdx(0)
-          return
-        }
+      if (c.vehicles.length === 1) {
+        onPickVehicle(c.vehicles[0].id)
+        setOpen(false)
+        setFocusedIdx(null)
+        return
       }
-      // Recents path or matched-but-no-owned-vehicles-in-result fallback:
-      // commit to create-new with the customer's known data prefilled.
-      onCreateNew({
-        name: c.name,
-        phone: c.phone ?? undefined,
-        email: c.email ?? undefined,
+      // 2+ vehicles → open the Which vehicle? tier carrying customer linkage.
+      setTier({
+        customer: { id: c.id, name: c.name, phone: c.phone, email: c.email },
+        vehicles: c.vehicles,
       })
-      setOpen(false)
+      setFocusedIdx(0)
     },
-    [state, onPickVehicle, onCreateNew],
+    [onPickVehicle, onCreateNew],
   )
 
   const handleKeyDown = useCallback(
@@ -262,7 +256,16 @@ export function PredictiveIntakeSearch({
                 onPickVehicle(v.id)
                 setOpen(false)
               }}
-              onCreateNew={fireCreateNew}
+              onCreateNew={() => {
+                onCreateNew({
+                  name: tier.customer.name,
+                  phone: tier.customer.phone ?? undefined,
+                  email: tier.customer.email ?? undefined,
+                })
+                setOpen(false)
+                setFocusedIdx(null)
+                setTier(null)
+              }}
             />
           ) : state.kind === 'idle' && value.trim() === '' ? (
             <DropdownEmpty

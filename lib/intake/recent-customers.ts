@@ -1,6 +1,9 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import { customers, sessions, vehicles } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
+import type { CustomerVehicle } from './search'
+
+export type { CustomerVehicle }
 
 export type RecentCustomer = {
   id: string
@@ -8,6 +11,7 @@ export type RecentCustomer = {
   phone: string | null
   email: string | null
   vehicleCount: number
+  vehicles: CustomerVehicle[]
   lastVisit: Date
 }
 
@@ -45,12 +49,65 @@ export async function getRecentIntakeCustomers(opts: {
     .orderBy(desc(sql`MAX(${sessions.createdAt})`))
     .limit(limit)
 
+  // Embed top-10 most-recent vehicles per recent customer.
+  const customerIds = rows.map((r) => r.id)
+  const vehiclesByCustomer = new Map<string, CustomerVehicle[]>()
+  if (customerIds.length > 0) {
+    const embeddedLastVisitExpr = sql<Date | null>`(
+      SELECT MAX(${sessions.createdAt}) FROM ${sessions} WHERE ${sessions.vehicleId} = ${vehicles.id}
+    )`
+    const embeddedRows = await opts.db
+      .select({
+        customerId: vehicles.customerId,
+        id: vehicles.id,
+        year: vehicles.year,
+        make: vehicles.make,
+        model: vehicles.model,
+        engine: vehicles.engine,
+        vin: vehicles.vin,
+        plate: vehicles.plate,
+        mileage: vehicles.mileage,
+        lastVisit: embeddedLastVisitExpr.as('embedded_last_visit'),
+      })
+      .from(vehicles)
+      .where(inArray(vehicles.customerId, customerIds))
+      .orderBy(
+        vehicles.customerId,
+        desc(sql`COALESCE(${embeddedLastVisitExpr}, TIMESTAMP 'epoch')`),
+        desc(vehicles.year),
+        vehicles.id,
+      )
+    for (const row of embeddedRows) {
+      const bucket = vehiclesByCustomer.get(row.customerId) ?? []
+      if (bucket.length < 10) {
+        bucket.push({
+          id: row.id,
+          year: row.year,
+          make: row.make,
+          model: row.model,
+          engine: row.engine,
+          vin: row.vin,
+          plate: row.plate,
+          mileage: row.mileage,
+          lastVisit:
+            row.lastVisit instanceof Date
+              ? row.lastVisit
+              : row.lastVisit
+                ? new Date(row.lastVisit as unknown as string)
+                : null,
+        })
+      }
+      vehiclesByCustomer.set(row.customerId, bucket)
+    }
+  }
+
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     phone: r.phone,
     email: r.email,
     vehicleCount: Number(r.vehicleCount),
+    vehicles: vehiclesByCustomer.get(r.id) ?? [],
     lastVisit: r.lastVisit instanceof Date ? r.lastVisit : new Date(r.lastVisit as unknown as string),
   }))
 }
