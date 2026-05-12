@@ -55,3 +55,15 @@ describe('detectInputShape', () => {
     expect(detectInputShape('1ftfw1et5bfa12345')).toEqual({ kind: 'vin', value: '1FTFW1ET5BFA12345' })
   })
 })
+
+describe('detectInputShape — extended make coverage', () => {
+  it.each([
+    ['chevrolet', 'Chevrolet'],
+    ['ram', 'RAM'],
+    ['tesla', 'Tesla'],
+    ['mercedes-benz', 'Mercedes-Benz'],
+    ['land rover', 'Land Rover'],
+  ])('detects "%s" as make %s', (input, expected) => {
+    expect(detectInputShape(input)).toEqual({ kind: 'make', value: expected })
+  })
+})
