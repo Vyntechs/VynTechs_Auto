@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, or, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import type * as schema from './schema'
@@ -10,6 +10,8 @@ import {
   confidenceCalibration,
   techAssistRequests,
   artifacts,
+  whatsNewEntries,
+  type WhatsNewEntry,
   type Shop,
   type NewShop,
   type Profile,
@@ -348,4 +350,41 @@ export async function getWhatWouldCloseForNode(
     return wwc as import('@/lib/ai/tree-engine').WhatWouldClose
   }
   return null
+}
+
+// What's New — per-deploy changelog. Entries authored manually via Supabase
+// `execute_sql` for v1 (no admin UI). Each user's `lastSeenWhatsNewAt` drives
+// the in-nav "New" pill and the per-entry "new" marker on the page.
+
+export async function listWhatsNewEntries(db: AppDb): Promise<WhatsNewEntry[]> {
+  return db
+    .select()
+    .from(whatsNewEntries)
+    .orderBy(desc(whatsNewEntries.publishedAt))
+}
+
+export async function countUnseenWhatsNewForUser(
+  db: AppDb,
+  userId: string,
+): Promise<number> {
+  const profile = await getProfileByUserId(db, userId)
+  if (!profile) return 0
+
+  if (profile.lastSeenWhatsNewAt) {
+    const rows = await db
+      .select({ id: whatsNewEntries.id })
+      .from(whatsNewEntries)
+      .where(gt(whatsNewEntries.publishedAt, profile.lastSeenWhatsNewAt))
+    return rows.length
+  }
+
+  const rows = await db.select({ id: whatsNewEntries.id }).from(whatsNewEntries)
+  return rows.length
+}
+
+export async function markWhatsNewSeen(db: AppDb, userId: string): Promise<void> {
+  await db
+    .update(profiles)
+    .set({ lastSeenWhatsNewAt: new Date() })
+    .where(eq(profiles.userId, userId))
 }

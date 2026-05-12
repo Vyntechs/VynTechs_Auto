@@ -37,6 +37,7 @@ describe('POST /api/intake/decode-vin', () => {
         fullName: 'Owner',
         role: 'owner',
         isComp: false,
+        lastSeenWhatsNewAt: null,
         createdAt: new Date(),
       },
       user: { id: 'u1', email: 'owner@shop.test' },
