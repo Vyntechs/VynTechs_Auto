@@ -233,6 +233,12 @@
   gap: 4px;
   min-width: 0;
 }
+.vt-main__eyebrow-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
 .vt-main__eyebrow {
   font-family: var(--vt-font-mono);
   font-size: 10px;

@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
+import { getShopTeam } from '@/lib/intake/team'
 import { CounterIntake } from '@/components/screens/counter-intake'
 
 export default async function IntakePage() {
@@ -10,14 +11,26 @@ export default async function IntakePage() {
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const recentCustomers = ctx.profile.shopId
-    ? await getRecentIntakeCustomers({
-        db,
-        shopId: ctx.profile.shopId,
-        withinHours: 12,
-        limit: 8,
-      })
-    : []
+  const [recentCustomers, team] = await Promise.all([
+    ctx.profile.shopId
+      ? getRecentIntakeCustomers({
+          db,
+          shopId: ctx.profile.shopId,
+          withinHours: 12,
+          limit: 8,
+        })
+      : Promise.resolve([]),
+    ctx.profile.shopId
+      ? getShopTeam({ db, shopId: ctx.profile.shopId, currentUserId: ctx.profile.id })
+      : Promise.resolve({ members: [], workloadFailed: false }),
+  ])
 
-  return <CounterIntake userEmail={ctx.user.email} recentCustomers={recentCustomers} />
+  return (
+    <CounterIntake
+      userEmail={ctx.user.email}
+      recentCustomers={recentCustomers}
+      team={team.members}
+      workloadFailed={team.workloadFailed}
+    />
+  )
 }

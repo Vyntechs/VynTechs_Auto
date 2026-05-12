@@ -15,7 +15,7 @@ import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
 import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
-import { customers as customersTable, vehicles as vehiclesTable } from '@/lib/db/schema'
+import { customers as customersTable, profiles, vehicles as vehiclesTable } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
 // retrieval-validator AI grader stack past 10s easily. Cap at 60s.
@@ -51,7 +51,10 @@ type IntakeBody = {
     howOften?: string
     authorized?: string
   }
+  assignedTechId?: string | null
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function nonEmpty(v: string | undefined): string | null {
   if (!v) return null
@@ -86,6 +89,28 @@ export async function POST(req: Request) {
   const description = nonEmpty(body.complaint?.description)
   if (!description) {
     return NextResponse.json({ error: 'complaint description is required' }, { status: 422 })
+  }
+
+  // ---- Validate assignedTechId (optional override) ----
+  // Null / undefined falls through to the helper's advisor fallback. A provided
+  // value must be a UUID belonging to the caller's shop.
+  let assignedTechId: string | null = null
+  if (body.assignedTechId !== undefined && body.assignedTechId !== null) {
+    if (typeof body.assignedTechId !== 'string' || !UUID_RE.test(body.assignedTechId)) {
+      return NextResponse.json({ error: 'invalid_assigned_tech_id' }, { status: 422 })
+    }
+    const [target] = await db
+      .select({ id: profiles.id, shopId: profiles.shopId })
+      .from(profiles)
+      .where(eq(profiles.id, body.assignedTechId))
+      .limit(1)
+    if (!target) {
+      return NextResponse.json({ error: 'profile_not_found' }, { status: 404 })
+    }
+    if (target.shopId !== ctx.profile.shopId) {
+      return NextResponse.json({ error: 'cross_shop_forbidden' }, { status: 403 })
+    }
+    assignedTechId = body.assignedTechId
   }
 
   // ---- Resolve customer + vehicle (two branches) ----
@@ -200,6 +225,7 @@ export async function POST(req: Request) {
   const { sessionId } = await createSessionFromIntake(db, {
     shopId: ctx.profile.shopId,
     advisorProfileId: ctx.profile.id,
+    assignedTechId,
     customer: {
       name: resolvedCustomerName,
       phone: resolvedCustomerPhone,
