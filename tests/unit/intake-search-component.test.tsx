@@ -10,6 +10,7 @@ const recents = [
     phone: '7705551234',
     email: null,
     vehicleCount: 1,
+    vehicles: [],
     lastVisit: new Date(),
   },
   {
@@ -18,6 +19,7 @@ const recents = [
     phone: '7205557710',
     email: null,
     vehicleCount: 2,
+    vehicles: [],
     lastVisit: new Date(),
   },
 ]
