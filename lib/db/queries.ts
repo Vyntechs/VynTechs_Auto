@@ -102,6 +102,17 @@ export async function listSessionsForShop(
     .orderBy(desc(sessions.createdAt))
 }
 
+export async function listSessionsForVehicle(
+  db: AppDb,
+  vehicleId: string,
+): Promise<Session[]> {
+  return db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.vehicleId, vehicleId))
+    .orderBy(desc(sessions.createdAt))
+}
+
 export async function getOpenSessionForTech(
   db: AppDb,
   techId: string,
