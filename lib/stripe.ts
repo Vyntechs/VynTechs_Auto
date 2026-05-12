@@ -91,6 +91,57 @@ export async function createBillingPortalSessionForUser(opts: {
   return { ok: true, url: session.url }
 }
 
+export type CreateCheckoutSessionFn = (params: {
+  customer: string
+  mode: 'subscription'
+  line_items: Array<{ price: string; quantity: number }>
+  success_url: string
+  cancel_url: string
+}) => Promise<{ id: string; url: string | null }>
+
+export type CreateCheckoutSessionResult =
+  | { ok: true; url: string }
+  | { ok: false; status: 400 | 500; error: string }
+
+export async function createCheckoutSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  email: string
+  origin: string
+  priceId: string
+  createCheckout?: CreateCheckoutSessionFn
+  createCustomer?: CreateStripeCustomerFn
+}): Promise<CreateCheckoutSessionResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
+  if (!opts.priceId) {
+    return { ok: false, status: 500, error: 'price not configured' }
+  }
+
+  const customerId = await ensureStripeCustomer({
+    db: opts.db,
+    shopId: profile.shopId,
+    email: opts.email,
+    createCustomer: opts.createCustomer,
+  })
+
+  const create =
+    opts.createCheckout ??
+    ((params) => stripe.checkout.sessions.create(params))
+  const session = await create({
+    customer: customerId,
+    mode: 'subscription',
+    line_items: [{ price: opts.priceId, quantity: 1 }],
+    success_url: `${opts.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${opts.origin}/sign-up?canceled=true`,
+  })
+  if (!session.url) {
+    return { ok: false, status: 500, error: 'no checkout url returned' }
+  }
+  return { ok: true, url: session.url }
+}
+
 export type ConstructStripeEventFn = (
   body: string,
   signature: string,
