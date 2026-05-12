@@ -52,8 +52,9 @@ describe('CounterIntake', () => {
 
   it('toggles VIN scan state when the scan button is clicked', () => {
     render(<CounterIntake userEmail="test@example.com" />)
-    const scanBtn = screen.getByRole('button', { name: /scan/i })
-    expect(scanBtn).toHaveTextContent(/scan with camera/i)
+    // /scan/i would also match the disabled "Scan VIN/plate" placeholder in
+    // the new PredictiveIntakeSearch bar; narrow to the form's scan toggle.
+    const scanBtn = screen.getByRole('button', { name: /scan with camera/i })
     fireEvent.click(scanBtn)
     expect(scanBtn).toHaveTextContent(/scanned/i)
   })

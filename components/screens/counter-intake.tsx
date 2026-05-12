@@ -13,10 +13,14 @@ import {
   Textarea,
   Topbar,
 } from '@/components/vt/desktop'
+import { PredictiveIntakeSearch } from '@/components/vt/intake-search'
+import type { RecentCustomer } from '@/lib/intake/recent-customers'
+import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 
 type IntakeBody = {
-  customer: { name: string; phone: string; email: string }
-  vehicle: {
+  existingVehicleId?: string
+  customer?: { name: string; phone: string; email: string }
+  vehicle?: {
     vin: string
     vinScanned: boolean
     year: string
@@ -29,8 +33,16 @@ type IntakeBody = {
   complaint: { description: string; whenStarted: string; howOften: string; authorized: string }
 }
 
-export function CounterIntake({ userEmail }: { userEmail?: string }) {
+export function CounterIntake({
+  userEmail,
+  recentCustomers = [],
+}: {
+  userEmail?: string
+  recentCustomers?: RecentCustomer[]
+}) {
   const router = useRouter()
+  const [pickedVehicleId, setPickedVehicleId] = useState<string | null>(null)
+  const [pickedLabel, setPickedLabel] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -49,35 +61,80 @@ export function CounterIntake({ userEmail }: { userEmail?: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const canSubmit = !busy && name.trim() !== '' && vin.trim() !== '' && description.trim() !== ''
+  const isPickExisting = pickedVehicleId !== null
+  const canSubmit =
+    !busy &&
+    description.trim() !== '' &&
+    (isPickExisting || (name.trim() !== '' && vin.trim() !== ''))
 
-  const handleVinChange = (e: ChangeEvent<HTMLInputElement>) =>
-    setVin(e.target.value.toUpperCase())
+  const handlePickVehicle = (vehicleId: string) => {
+    setPickedVehicleId(vehicleId)
+    setError(null)
+  }
+
+  const handleCreateNew = (prefill: CreateNewPrefill) => {
+    setPickedVehicleId(null)
+    setPickedLabel(null)
+    if (prefill.name !== undefined) setName(prefill.name)
+    if (prefill.phone !== undefined) setPhone(prefill.phone)
+    if (prefill.email !== undefined) setEmail(prefill.email)
+    if (prefill.vin !== undefined) setVin(prefill.vin)
+    if (prefill.year !== undefined) setYear(String(prefill.year))
+    if (prefill.make !== undefined) setMake(prefill.make)
+    if (prefill.plate !== undefined) setPlate(prefill.plate)
+  }
+
+  const handleClearPicked = () => {
+    setPickedVehicleId(null)
+    setPickedLabel(null)
+  }
+
+  const handleVinChange = (e: ChangeEvent<HTMLInputElement>) => setVin(e.target.value.toUpperCase())
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!canSubmit) return
     setBusy(true)
     setError(null)
-    const body: IntakeBody = {
-      customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
-      vehicle: {
-        vin: vin.trim(),
-        vinScanned: scanned,
-        year: year.trim(),
-        make: make.trim(),
-        model: model.trim(),
-        engine: engine.trim(),
-        mileage: mileage.trim(),
-        plate: plate.trim(),
-      },
-      complaint: {
-        description: description.trim(),
-        whenStarted: whenStarted.trim(),
-        howOften: howOften.trim(),
-        authorized: authorized.trim(),
-      },
-    }
+    const body: IntakeBody = isPickExisting
+      ? {
+          existingVehicleId: pickedVehicleId!,
+          vehicle: {
+            vin: '',
+            vinScanned: false,
+            year: '',
+            make: '',
+            model: '',
+            engine: '',
+            mileage: mileage.trim(),
+            plate: '',
+          },
+          complaint: {
+            description: description.trim(),
+            whenStarted: whenStarted.trim(),
+            howOften: howOften.trim(),
+            authorized: authorized.trim(),
+          },
+        }
+      : {
+          customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
+          vehicle: {
+            vin: vin.trim(),
+            vinScanned: scanned,
+            year: year.trim(),
+            make: make.trim(),
+            model: model.trim(),
+            engine: engine.trim(),
+            mileage: mileage.trim(),
+            plate: plate.trim(),
+          },
+          complaint: {
+            description: description.trim(),
+            whenStarted: whenStarted.trim(),
+            howOften: howOften.trim(),
+            authorized: authorized.trim(),
+          },
+        }
     try {
       const res = await fetch('/api/intake/submit', {
         method: 'POST',
@@ -109,7 +166,7 @@ export function CounterIntake({ userEmail }: { userEmail?: string }) {
           <MainHeader
             eyebrow="New work order"
             title="Who's at the counter?"
-            sub="Type or paste. Tab moves through fields. When you submit, the job lands in a tech's queue."
+            sub="Search to find an existing customer or vehicle, or fill in the form below."
             actions={
               <>
                 <Btn kind="ghost" size="sm" type="button" onClick={() => router.push('/today')}>
@@ -130,122 +187,188 @@ export function CounterIntake({ userEmail }: { userEmail?: string }) {
 
           <div className="vt-main__body">
             <form id="counter-intake-form" className="vt-form" onSubmit={handleSubmit}>
-              <FormGroup name="Customer" hint="Name and phone are required. Email is optional.">
-                <FormRow>
-                  <Field label="Name" htmlFor="ci-name">
-                    <Input
-                      id="ci-name"
-                      name="name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      autoFocus
-                      required
-                    />
-                  </Field>
-                  <Field label="Phone" htmlFor="ci-phone" hint="Used for completion text">
-                    <Input
-                      id="ci-phone"
-                      name="phone"
-                      type="tel"
-                      mono
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Email" htmlFor="ci-email">
-                    <Input
-                      id="ci-email"
-                      name="email"
-                      type="email"
-                      placeholder="optional"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </Field>
-                </FormRow>
-              </FormGroup>
+              <div style={{ padding: '20px 32px 0' }}>
+                <PredictiveIntakeSearch
+                  recentCustomers={recentCustomers}
+                  onPickVehicle={handlePickVehicle}
+                  onCreateNew={handleCreateNew}
+                />
+              </div>
 
-              <FormGroup
-                name="Vehicle"
-                hint="VIN auto-fills year, make, model. Verify the engine."
-              >
-                <Field label="VIN" htmlFor="ci-vin">
-                  <div className="vt-field__compound">
-                    <Input
-                      id="ci-vin"
-                      name="vin"
-                      mono
-                      maxLength={17}
-                      value={vin}
-                      onChange={handleVinChange}
-                      placeholder="17 characters"
-                    />
-                    <button
-                      type="button"
-                      className={`vt-field__scan-btn${scanned ? ' vt-field__scan-btn--scanned' : ''}`}
-                      onClick={() => setScanned((s) => !s)}
-                      aria-pressed={scanned}
-                    >
-                      {scanned ? '◎ Scanned' : 'Scan with camera'}
-                    </button>
-                  </div>
-                </Field>
-                <FormRow>
-                  <Field label="Year" htmlFor="ci-year">
-                    <Input
-                      id="ci-year"
-                      name="year"
-                      mono
-                      value={year}
-                      onChange={(e) => setYear(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Make" htmlFor="ci-make">
-                    <Input
-                      id="ci-make"
-                      name="make"
-                      value={make}
-                      onChange={(e) => setMake(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Model" htmlFor="ci-model">
-                    <Input
-                      id="ci-model"
-                      name="model"
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Engine" htmlFor="ci-engine">
-                    <Input
-                      id="ci-engine"
-                      name="engine"
-                      value={engine}
-                      onChange={(e) => setEngine(e.target.value)}
-                    />
-                  </Field>
-                </FormRow>
-                <FormRow>
-                  <Field label="Mileage today" htmlFor="ci-mileage">
-                    <Input
-                      id="ci-mileage"
-                      name="mileage"
-                      mono
-                      value={mileage}
-                      onChange={(e) => setMileage(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="License plate" htmlFor="ci-plate">
-                    <Input
-                      id="ci-plate"
-                      name="plate"
-                      mono
-                      value={plate}
-                      onChange={(e) => setPlate(e.target.value)}
-                    />
-                  </Field>
-                </FormRow>
-              </FormGroup>
+              {isPickExisting ? (
+                <div
+                  role="status"
+                  style={{
+                    margin: '16px 32px',
+                    padding: '14px 18px',
+                    background: 'var(--vt-bone-100)',
+                    border: '0.5px solid var(--vt-rule-strong)',
+                    borderRadius: 3,
+                    fontFamily: 'var(--vt-font-serif)',
+                    fontSize: 15,
+                    color: 'var(--vt-fg-2)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 16,
+                  }}
+                >
+                  <span>
+                    Existing vehicle selected{pickedLabel ? ` · ${pickedLabel}` : ''}. Type the
+                    complaint below and submit to start the ticket.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearPicked}
+                    style={{
+                      background: 'transparent',
+                      border: 0,
+                      color: 'var(--vt-signal-500)',
+                      fontFamily: 'var(--vt-font-serif)',
+                      fontStyle: 'italic',
+                      fontSize: 14,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <FormGroup name="Customer" hint="Name and phone are required. Email is optional.">
+                    <FormRow>
+                      <Field label="Name" htmlFor="ci-name">
+                        <Input
+                          id="ci-name"
+                          name="name"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          required
+                        />
+                      </Field>
+                      <Field label="Phone" htmlFor="ci-phone" hint="Used for completion text">
+                        <Input
+                          id="ci-phone"
+                          name="phone"
+                          type="tel"
+                          mono
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Email" htmlFor="ci-email">
+                        <Input
+                          id="ci-email"
+                          name="email"
+                          type="email"
+                          placeholder="optional"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                        />
+                      </Field>
+                    </FormRow>
+                  </FormGroup>
+
+                  <FormGroup
+                    name="Vehicle"
+                    hint="VIN auto-fills year, make, model. Verify the engine."
+                  >
+                    <Field label="VIN" htmlFor="ci-vin">
+                      <div className="vt-field__compound">
+                        <Input
+                          id="ci-vin"
+                          name="vin"
+                          mono
+                          maxLength={17}
+                          value={vin}
+                          onChange={handleVinChange}
+                          placeholder="17 characters"
+                        />
+                        <button
+                          type="button"
+                          className={`vt-field__scan-btn${scanned ? ' vt-field__scan-btn--scanned' : ''}`}
+                          onClick={() => setScanned((s) => !s)}
+                          aria-pressed={scanned}
+                        >
+                          {scanned ? '◎ Scanned' : 'Scan with camera'}
+                        </button>
+                      </div>
+                    </Field>
+                    <FormRow>
+                      <Field label="Year" htmlFor="ci-year">
+                        <Input
+                          id="ci-year"
+                          name="year"
+                          mono
+                          value={year}
+                          onChange={(e) => setYear(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Make" htmlFor="ci-make">
+                        <Input
+                          id="ci-make"
+                          name="make"
+                          value={make}
+                          onChange={(e) => setMake(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Model" htmlFor="ci-model">
+                        <Input
+                          id="ci-model"
+                          name="model"
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Engine" htmlFor="ci-engine">
+                        <Input
+                          id="ci-engine"
+                          name="engine"
+                          value={engine}
+                          onChange={(e) => setEngine(e.target.value)}
+                        />
+                      </Field>
+                    </FormRow>
+                    <FormRow>
+                      <Field label="Mileage today" htmlFor="ci-mileage">
+                        <Input
+                          id="ci-mileage"
+                          name="mileage"
+                          mono
+                          value={mileage}
+                          onChange={(e) => setMileage(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="License plate" htmlFor="ci-plate">
+                        <Input
+                          id="ci-plate"
+                          name="plate"
+                          mono
+                          value={plate}
+                          onChange={(e) => setPlate(e.target.value)}
+                        />
+                      </Field>
+                    </FormRow>
+                  </FormGroup>
+                </>
+              )}
+
+              {isPickExisting && (
+                <FormGroup name="This visit" hint="Optional — log the current odometer reading.">
+                  <FormRow>
+                    <Field label="Mileage today" htmlFor="ci-mileage-pick">
+                      <Input
+                        id="ci-mileage-pick"
+                        name="mileage"
+                        mono
+                        value={mileage}
+                        onChange={(e) => setMileage(e.target.value)}
+                      />
+                    </Field>
+                  </FormRow>
+                </FormGroup>
+              )}
 
               <FormGroup
                 name="Complaint"
