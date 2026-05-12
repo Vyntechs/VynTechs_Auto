@@ -37,6 +37,7 @@ const ownerProfile = {
   shopId: 's1',
   fullName: 'Owner',
   role: 'owner',
+  isComp: false,
   createdAt: new Date(),
 }
 
