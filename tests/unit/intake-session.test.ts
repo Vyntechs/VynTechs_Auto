@@ -145,4 +145,76 @@ describe('createSessionFromIntake', () => {
     expect(await db.select().from(vehicles)).toHaveLength(2)
     expect(await db.select().from(sessions)).toHaveLength(2)
   })
+
+  it('falls back to advisorProfileId when assignedTechId is omitted', async () => {
+    const { sessionId } = await createSessionFromIntake(db, {
+      shopId,
+      advisorProfileId,
+      customer: { name: 'Tester', phone: '555-0001', email: null },
+      vehicle: {
+        year: 2018,
+        make: 'Ford',
+        model: 'F-150',
+        engine: null,
+        vin: null,
+        mileage: null,
+        plate: null,
+      },
+      complaint: { description: 'no start', whenStarted: '', howOften: '', authorized: '' },
+    })
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+    expect(row.techId).toBe(advisorProfileId)
+  })
+
+  it('uses assignedTechId when provided', async () => {
+    const [other] = await db
+      .insert(profiles)
+      .values({
+        userId: '00000000-0000-0000-0000-000000000099',
+        role: 'tech',
+        shopId,
+        fullName: 'Other Tech',
+      })
+      .returning()
+
+    const { sessionId } = await createSessionFromIntake(db, {
+      shopId,
+      advisorProfileId,
+      assignedTechId: other.id,
+      customer: { name: 'Tester', phone: '555-0002', email: null },
+      vehicle: {
+        year: 2018,
+        make: 'Ford',
+        model: 'F-150',
+        engine: null,
+        vin: null,
+        mileage: null,
+        plate: null,
+      },
+      complaint: { description: 'no start', whenStarted: '', howOften: '', authorized: '' },
+    })
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+    expect(row.techId).toBe(other.id)
+  })
+
+  it('falls back to advisorProfileId when assignedTechId is explicitly null', async () => {
+    const { sessionId } = await createSessionFromIntake(db, {
+      shopId,
+      advisorProfileId,
+      assignedTechId: null,
+      customer: { name: 'Tester', phone: '555-0003', email: null },
+      vehicle: {
+        year: 2018,
+        make: 'Ford',
+        model: 'F-150',
+        engine: null,
+        vin: null,
+        mileage: null,
+        plate: null,
+      },
+      complaint: { description: 'no start', whenStarted: '', howOften: '', authorized: '' },
+    })
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+    expect(row.techId).toBe(advisorProfileId)
+  })
 })
