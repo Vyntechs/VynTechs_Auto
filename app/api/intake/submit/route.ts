@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
@@ -14,6 +15,7 @@ import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
 import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
+import { customers as customersTable, vehicles as vehiclesTable } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
 // retrieval-validator AI grader stack past 10s easily. Cap at 60s.
@@ -29,6 +31,10 @@ const ADAPTERS = [
 ]
 
 type IntakeBody = {
+  // Pick-existing path:
+  existingVehicleId?: string
+
+  // Manual path (existing):
   customer?: { name?: string; phone?: string; email?: string }
   vehicle?: {
     vin?: string
@@ -77,36 +83,100 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'no_shop' }, { status: 403 })
   }
 
-  const name = nonEmpty(body.customer?.name)
-  const phone = nonEmpty(body.customer?.phone)
-  const email = nonEmpty(body.customer?.email)
-  const vin = nonEmpty(body.vehicle?.vin)
-  const year = toIntOrNull(body.vehicle?.year)
-  const make = nonEmpty(body.vehicle?.make)
-  const model = nonEmpty(body.vehicle?.model)
-  const engine = nonEmpty(body.vehicle?.engine)
-  const mileage = toIntOrNull(body.vehicle?.mileage)
   const description = nonEmpty(body.complaint?.description)
-
-  if (!name || !phone) {
-    return NextResponse.json({ error: 'customer name and phone are required' }, { status: 422 })
-  }
-  if (!year || !make || !model) {
-    return NextResponse.json({ error: 'vehicle year, make, and model are required' }, { status: 422 })
-  }
   if (!description) {
     return NextResponse.json({ error: 'complaint description is required' }, { status: 422 })
+  }
+
+  // ---- Resolve customer + vehicle (two branches) ----
+  let resolvedCustomerId: string | undefined
+  let resolvedVehicleId: string | undefined
+  let resolvedYear: number
+  let resolvedMake: string
+  let resolvedModel: string
+  let resolvedEngine: string | null
+  let resolvedVin: string | null
+  let resolvedMileage: number | null
+  let resolvedPlate: string | null
+  let resolvedCustomerName: string
+  let resolvedCustomerPhone: string
+  let resolvedCustomerEmail: string | null
+
+  if (body.existingVehicleId) {
+    // Pick-existing branch. Look up the vehicle and validate cross-shop
+    // BEFORE the heavy tree-generation work.
+    const [v] = await db
+      .select()
+      .from(vehiclesTable)
+      .where(eq(vehiclesTable.id, body.existingVehicleId))
+      .limit(1)
+    if (!v) {
+      return NextResponse.json({ error: 'vehicle_not_found' }, { status: 404 })
+    }
+    const [c] = await db
+      .select()
+      .from(customersTable)
+      .where(eq(customersTable.id, v.customerId))
+      .limit(1)
+    if (!c || c.shopId !== ctx.profile.shopId) {
+      return NextResponse.json({ error: 'cross_shop_forbidden' }, { status: 403 })
+    }
+    resolvedCustomerId = c.id
+    resolvedVehicleId = v.id
+    resolvedYear = v.year
+    resolvedMake = v.make
+    resolvedModel = v.model
+    resolvedEngine = v.engine
+    resolvedVin = v.vin
+    // Mileage may be updated on this visit; use the body value if provided,
+    // otherwise stay with the stored value. The helper will write the update
+    // to the row in its transaction when a new value is present.
+    const newMileage = toIntOrNull(body.vehicle?.mileage)
+    resolvedMileage = newMileage ?? v.mileage
+    resolvedPlate = v.plate
+    resolvedCustomerName = c.name
+    resolvedCustomerPhone = c.phone
+    resolvedCustomerEmail = c.email
+  } else {
+    // Manual-entry branch (unchanged).
+    const name = nonEmpty(body.customer?.name)
+    const phone = nonEmpty(body.customer?.phone)
+    const email = nonEmpty(body.customer?.email)
+    const vin = nonEmpty(body.vehicle?.vin)
+    const year = toIntOrNull(body.vehicle?.year)
+    const make = nonEmpty(body.vehicle?.make)
+    const model = nonEmpty(body.vehicle?.model)
+    const engine = nonEmpty(body.vehicle?.engine)
+    const mileage = toIntOrNull(body.vehicle?.mileage)
+    const plate = nonEmpty(body.vehicle?.plate)
+
+    if (!name || !phone) {
+      return NextResponse.json({ error: 'customer name and phone are required' }, { status: 422 })
+    }
+    if (!year || !make || !model) {
+      return NextResponse.json({ error: 'vehicle year, make, and model are required' }, { status: 422 })
+    }
+    resolvedYear = year
+    resolvedMake = make
+    resolvedModel = model
+    resolvedEngine = engine
+    resolvedVin = vin
+    resolvedMileage = mileage
+    resolvedPlate = plate
+    resolvedCustomerName = name
+    resolvedCustomerPhone = phone
+    resolvedCustomerEmail = email
   }
 
   // Mirror /api/sessions: best-effort corpus + retrieval, then mandatory AI
   // tree generation. Without a populated tree, the diagnostic page hangs on
   // "Building your diagnostic plan..." forever.
   const intakePayload = {
-    vehicleYear: year,
-    vehicleMake: make,
-    vehicleModel: model,
-    vehicleEngine: engine ?? undefined,
-    mileage: mileage ?? undefined,
+    vehicleYear: resolvedYear,
+    vehicleMake: resolvedMake,
+    vehicleModel: resolvedModel,
+    vehicleEngine: resolvedEngine ?? undefined,
+    mileage: resolvedMileage ?? undefined,
     customerComplaint: description,
   }
 
@@ -130,15 +200,19 @@ export async function POST(req: Request) {
   const { sessionId } = await createSessionFromIntake(db, {
     shopId: ctx.profile.shopId,
     advisorProfileId: ctx.profile.id,
-    customer: { name, phone, email },
+    customer: {
+      name: resolvedCustomerName,
+      phone: resolvedCustomerPhone,
+      email: resolvedCustomerEmail,
+    },
     vehicle: {
-      year,
-      make,
-      model,
-      engine,
-      vin,
-      mileage,
-      plate: nonEmpty(body.vehicle?.plate),
+      year: resolvedYear,
+      make: resolvedMake,
+      model: resolvedModel,
+      engine: resolvedEngine,
+      vin: resolvedVin,
+      mileage: resolvedMileage,
+      plate: resolvedPlate,
     },
     complaint: {
       description,
@@ -147,6 +221,8 @@ export async function POST(req: Request) {
       authorized: body.complaint?.authorized?.trim() ?? '',
     },
     treeState,
+    existingCustomerId: resolvedCustomerId,
+    existingVehicleId: resolvedVehicleId,
   })
 
   return NextResponse.json({ sessionId }, { status: 201 })
