@@ -86,7 +86,7 @@ describe('CounterIntake page wiring (search + form)', () => {
 
   it('disables Send to Techs initially (no name, no vin, no complaint)', () => {
     render(<CounterIntake userEmail="test@example.com" recentCustomers={[]} />)
-    const submits = screen.getAllByRole('button', { name: /send to techs/i })
+    const submits = screen.getAllByRole('button', { name: /create repair order/i })
     submits.forEach((b) => expect(b).toBeDisabled())
   })
 

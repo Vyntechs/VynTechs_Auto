@@ -62,10 +62,18 @@ export function CounterIntake({
   const [error, setError] = useState<string | null>(null)
 
   const isPickExisting = pickedVehicleId !== null
+  // Mirror /api/intake/submit's requirements exactly so the UI gate never
+  // disables submit for a body the route would accept. VIN is NOT required
+  // (some walk-ins genuinely don't have one in hand); year/make/model ARE.
   const canSubmit =
     !busy &&
     description.trim() !== '' &&
-    (isPickExisting || (name.trim() !== '' && vin.trim() !== ''))
+    (isPickExisting ||
+      (name.trim() !== '' &&
+        phone.trim() !== '' &&
+        year.trim() !== '' &&
+        make.trim() !== '' &&
+        model.trim() !== ''))
 
   const handlePickVehicle = (vehicleId: string) => {
     setPickedVehicleId(vehicleId)
@@ -179,7 +187,7 @@ export function CounterIntake({
                   kbd="⌘ ↵"
                   disabled={!canSubmit}
                 >
-                  Send to Techs
+                  Create repair order
                 </Btn>
               </>
             }
@@ -439,7 +447,7 @@ export function CounterIntake({
                       Cancel
                     </Btn>
                     <Btn kind="primary" type="submit" disabled={!canSubmit} kbd="⌘ ↵">
-                      Send to Techs
+                      Create repair order
                     </Btn>
                   </>
                 }

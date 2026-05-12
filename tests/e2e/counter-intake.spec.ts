@@ -30,7 +30,7 @@ test.describe('Counter intake — advisor write-up persistence', () => {
     await page.getByLabel(/model/i).fill('F-150')
     await page.getByLabel(/what brought them in/i).fill('Test complaint from e2e suite')
 
-    await page.getByRole('button', { name: /send to techs/i }).first().click()
+    await page.getByRole('button', { name: /create repair order/i }).first().click()
     await page.waitForURL(/\/sessions\/[0-9a-f-]+$/)
 
     expect(page.url()).toMatch(/\/sessions\/[0-9a-f-]+$/)
