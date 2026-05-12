@@ -38,6 +38,7 @@ const ownerProfile = {
   fullName: 'Owner',
   role: 'owner',
   isComp: false,
+  lastSeenWhatsNewAt: null,
   createdAt: new Date(),
 }
 
