@@ -37,6 +37,7 @@ describe('CounterIntake page wiring (search + form)', () => {
             phone: '7705551234',
             email: null,
             vehicleCount: 1,
+            vehicles: [],
             lastVisit: new Date(),
           },
         ]}
@@ -58,6 +59,7 @@ describe('CounterIntake page wiring (search + form)', () => {
             phone: '7705551234',
             email: null,
             vehicleCount: 1,
+            vehicles: [],
             lastVisit: new Date(),
           },
           {
@@ -66,6 +68,7 @@ describe('CounterIntake page wiring (search + form)', () => {
             phone: '7205557710',
             email: null,
             vehicleCount: 2,
+            vehicles: [],
             lastVisit: new Date(),
           },
         ]}

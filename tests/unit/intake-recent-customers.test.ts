@@ -146,4 +146,46 @@ describe('getRecentIntakeCustomers', () => {
     })
     expect(result[0].vehicleCount).toBe(2)
   })
+
+  it("embeds the customer's vehicles (capped at 10) on each recent row", async () => {
+    const { shop, tech } = await seedShopAndTech('multi')
+    const [c] = await db
+      .insert(customers)
+      .values({ shopId: shop.id, name: 'Multi Customer', phone: '5559100', email: null })
+      .returning()
+
+    const seededVehicleIds: string[] = []
+    for (let i = 0; i < 3; i += 1) {
+      const [v] = await db
+        .insert(vehicles)
+        .values({ customerId: c.id, year: 2018 + i, make: 'Ford', model: `M${i}` })
+        .returning()
+      seededVehicleIds.push(v.id)
+    }
+    const intakePayload = {
+      vehicleYear: 2018, vehicleMake: 'Ford', vehicleModel: 'M0', customerComplaint: 'noise',
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const createdAt = new Date(Date.now() - (3 - i) * 3600_000)
+      await db.insert(sessions).values({
+        shopId: shop.id,
+        techId: tech.id,
+        vehicleId: seededVehicleIds[i],
+        status: 'open',
+        intake: intakePayload,
+        treeState: EMPTY_TREE,
+        createdAt,
+      })
+    }
+
+    const result = await getRecentIntakeCustomers({
+      db, shopId: shop.id, withinHours: 12, limit: 8,
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].vehicleCount).toBe(3)
+    expect(result[0].vehicles).toHaveLength(3)
+    expect(result[0].vehicles[0].id).toBe(seededVehicleIds[2])
+    expect(result[0].vehicles[2].id).toBe(seededVehicleIds[0])
+  })
 })
