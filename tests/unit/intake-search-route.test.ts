@@ -48,7 +48,7 @@ describe('POST /api/intake/search', () => {
 
   it('returns search results for a non-empty query', async () => {
     searchMock.mockResolvedValue({
-      customers: [{ id: 'c1', name: 'X', phone: null, email: null, vehicleCount: 0, lastVisit: null }],
+      customers: [{ id: 'c1', name: 'X', phone: null, email: null, vehicleCount: 0, vehicles: [], lastVisit: null }],
       vehicles: [],
     })
     const res = await POST(req({ q: 'smith' }))
@@ -61,7 +61,7 @@ describe('POST /api/intake/search', () => {
 
   it('returns recent customers when q is empty', async () => {
     recentsMock.mockResolvedValue([
-      { id: 'c1', name: 'Recent', phone: null, email: null, vehicleCount: 1, lastVisit: new Date() },
+      { id: 'c1', name: 'Recent', phone: null, email: null, vehicleCount: 1, vehicles: [], lastVisit: new Date() },
     ])
     const res = await POST(req({ q: '' }))
     expect(res.status).toBe(200)
