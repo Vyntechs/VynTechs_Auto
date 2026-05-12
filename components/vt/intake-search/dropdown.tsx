@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { CreateRow, GroupHead, Row } from './rows'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
-import type { CustomerHit, VehicleHit } from '@/lib/intake/search'
+import type { CustomerHit, CustomerVehicle, VehicleHit } from '@/lib/intake/search'
 import type { InputShape } from '@/lib/intake/input-shape'
 
 export function DropdownEmpty({
@@ -346,10 +346,10 @@ export function DropdownWhichVehicle({
   onCreateNew,
 }: {
   customerName: string
-  vehicles: VehicleHit[]
+  vehicles: CustomerVehicle[]
   focusedIdx: number | null
   onBack: () => void
-  onPickVehicle: (vehicle: VehicleHit) => void
+  onPickVehicle: (vehicle: CustomerVehicle) => void
   onCreateNew: () => void
 }) {
   return (
