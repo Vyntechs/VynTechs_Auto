@@ -19,10 +19,11 @@ export type TechSelectorProps = {
 }
 
 export function TechSelector(props: TechSelectorProps) {
-  const { team, selectedId, onChange } = props
+  const { team, selectedId, onChange, workloadFailed = false } = props
   const labelId = useId()
   const listboxId = `${labelId}-listbox`
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function TechSelector(props: TechSelectorProps) {
     return () => document.removeEventListener('mousedown', onDocMouseDown)
   }, [open])
 
-  // Solo inert variant — unchanged from Task 5.
+  // Solo inert variant.
   if (team.length === 1) {
     return (
       <div
@@ -59,6 +60,11 @@ export function TechSelector(props: TechSelectorProps) {
   }
 
   const selected = selectedId ? team.find((m) => m.id === selectedId) ?? null : null
+  const showSearch = team.length > 5
+  const filteredTeam =
+    showSearch && query.trim() !== ''
+      ? team.filter((m) => m.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : team
 
   function commit(id: string | null) {
     onChange(id)
@@ -99,9 +105,24 @@ export function TechSelector(props: TechSelectorProps) {
 
       {open && (
         <div className="ts__popover">
+          {showSearch && (
+            <div className="ts__search">
+              <input
+                type="search"
+                role="searchbox"
+                className="ts__search-input"
+                placeholder="Filter techs"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <span className="ts__search-count">
+                {filteredTeam.length} of {team.length}
+              </span>
+            </div>
+          )}
           <span className="ts__eyebrow">Assigning to</span>
           <ul id={listboxId} className="ts__list" role="listbox">
-            {team.map((m) => (
+            {filteredTeam.map((m) => (
               <li
                 key={m.id}
                 role="option"
@@ -112,6 +133,19 @@ export function TechSelector(props: TechSelectorProps) {
                 <span className="ts__avatar" aria-hidden="true">{initials(m.name)}</span>
                 <span className="ts__name">{m.name}</span>
                 {m.isCurrentUser && <span className="ts__tag">You</span>}
+                {!workloadFailed && m.workload && (
+                  <span
+                    className={`ts__badge${m.workload.open >= 5 ? ' ts__badge--busy' : ''}`}
+                  >
+                    <span className="ts__badge-num ts__badge-num--open">
+                      {m.workload.open} open
+                    </span>
+                    <span className="ts__badge-sep" aria-hidden="true">·</span>
+                    <span className="ts__badge-num ts__badge-num--today">
+                      {m.workload.today} today
+                    </span>
+                  </span>
+                )}
               </li>
             ))}
             {selectedId !== null && (

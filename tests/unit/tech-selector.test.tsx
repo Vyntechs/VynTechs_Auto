@@ -134,3 +134,96 @@ describe('TechSelector — popover', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 })
+
+describe('TechSelector — search + workload', () => {
+  function bigTeam(n: number): TeamMember[] {
+    const names = ['Brandon', 'Diana', 'Marcus', 'Alice', 'Bob', 'Charlie', 'Eve', 'Frank', 'Grace']
+    return Array.from({ length: n }, (_, i) => ({
+      id: `m${i}`,
+      name: names[i],
+      isCurrentUser: i === 0,
+      workload: { open: i, today: 0 },
+    }))
+  }
+
+  it('does NOT render the search input when team.length <= 5', () => {
+    render(
+      <TechSelector
+        currentUserId="m0"
+        team={bigTeam(5)}
+        selectedId={null}
+        onChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+  })
+
+  it('renders a search input when team.length > 5 and filters live', () => {
+    render(
+      <TechSelector
+        currentUserId="m0"
+        team={bigTeam(8)}
+        selectedId={null}
+        onChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    const input = screen.getByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'di' } })
+    const options = screen.getAllByRole('option').filter(
+      (o) => !o.getAttribute('aria-label')?.includes('Clear'),
+    )
+    expect(options).toHaveLength(1)
+    expect(options[0]).toHaveTextContent(/diana/i)
+  })
+
+  it('renders workload badges {open} open / {today} today when workloadFailed is false', () => {
+    const team: TeamMember[] = [
+      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 3, today: 1 } },
+      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 5, today: 2 } },
+    ]
+    render(
+      <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    expect(screen.getByText(/3 open/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 today/i)).toBeInTheDocument()
+    expect(screen.getByText(/5 open/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 today/i)).toBeInTheDocument()
+  })
+
+  it('does NOT render workload badges when workloadFailed is true', () => {
+    const team: TeamMember[] = [
+      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 3, today: 1 } },
+      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 5, today: 2 } },
+    ]
+    render(
+      <TechSelector
+        currentUserId="a"
+        team={team}
+        workloadFailed
+        selectedId={null}
+        onChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    expect(screen.queryByText(/\d+ open/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+ today/i)).not.toBeInTheDocument()
+  })
+
+  it('tints the open badge with --busy class when open >= 5', () => {
+    const team: TeamMember[] = [
+      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 5, today: 0 } },
+      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 4, today: 0 } },
+    ]
+    render(
+      <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    const brandonBadge = screen.getByText(/5 open/i).closest('.ts__badge')
+    const dianaBadge = screen.getByText(/4 open/i).closest('.ts__badge')
+    expect(brandonBadge).toHaveClass('ts__badge--busy')
+    expect(dianaBadge).not.toHaveClass('ts__badge--busy')
+  })
+})
