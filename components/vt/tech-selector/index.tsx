@@ -24,6 +24,7 @@ export function TechSelector(props: TechSelectorProps) {
   const listboxId = `${labelId}-listbox`
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -36,6 +37,15 @@ export function TechSelector(props: TechSelectorProps) {
     document.addEventListener('mousedown', onDocMouseDown)
     return () => document.removeEventListener('mousedown', onDocMouseDown)
   }, [open])
+
+  // Reset the keyboard-focused row whenever the popover opens or the filter
+  // shrinks the list past the current index.
+  useEffect(() => {
+    if (open) setActiveIndex(0)
+  }, [open])
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
 
   // Solo inert variant.
   if (team.length === 1) {
@@ -66,6 +76,8 @@ export function TechSelector(props: TechSelectorProps) {
       ? team.filter((m) => m.name.toLowerCase().includes(query.trim().toLowerCase()))
       : team
 
+  const optionIdOf = (memberId: string) => `${listboxId}-opt-${memberId}`
+
   function commit(id: string | null) {
     onChange(id)
     setOpen(false)
@@ -75,6 +87,31 @@ export function TechSelector(props: TechSelectorProps) {
     if (e.key === 'Escape') {
       e.preventDefault()
       setOpen(false)
+      return
+    }
+    if (!open) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setOpen(true)
+      }
+      return
+    }
+    if (filteredTeam.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIndex((i) => (i + 1) % filteredTeam.length)
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIndex((i) => (i - 1 + filteredTeam.length) % filteredTeam.length)
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const m = filteredTeam[activeIndex]
+      if (m) commit(m.id)
+      return
     }
   }
 
@@ -89,6 +126,11 @@ export function TechSelector(props: TechSelectorProps) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
+        aria-activedescendant={
+          open && filteredTeam[activeIndex]
+            ? optionIdOf(filteredTeam[activeIndex].id)
+            : undefined
+        }
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onTriggerKeyDown}
       >
@@ -122,12 +164,16 @@ export function TechSelector(props: TechSelectorProps) {
           )}
           <span className="ts__eyebrow">Assigning to</span>
           <ul id={listboxId} className="ts__list" role="listbox">
-            {filteredTeam.map((m) => (
+            {filteredTeam.map((m, idx) => (
               <li
                 key={m.id}
+                id={optionIdOf(m.id)}
                 role="option"
                 aria-selected={selectedId === m.id}
-                className={`ts__row${selectedId === m.id ? ' ts__row--selected' : ''}`}
+                className={`ts__row${selectedId === m.id ? ' ts__row--selected' : ''}${
+                  idx === activeIndex ? ' ts__row--active' : ''
+                }`}
+                onMouseEnter={() => setActiveIndex(idx)}
                 onClick={() => commit(m.id)}
               >
                 <span className="ts__avatar" aria-hidden="true">{initials(m.name)}</span>

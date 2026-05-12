@@ -227,3 +227,75 @@ describe('TechSelector — search + workload', () => {
     expect(dianaBadge).not.toHaveClass('ts__badge--busy')
   })
 })
+
+describe('TechSelector — keyboard', () => {
+  const TEAM = [
+    mem('a', 'Brandon', true),
+    mem('b', 'Diana'),
+    mem('c', 'Marcus'),
+  ]
+
+  it('opens on Enter from the trigger and aria-activedescendant points at first row', () => {
+    render(
+      <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
+    )
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    const options = screen.getAllByRole('option')
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(options[0].id)
+  })
+
+  it('opens on Space from the trigger', () => {
+    render(
+      <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
+    )
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: ' ' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('moves focus with ArrowDown and wraps at the bottom', () => {
+    render(
+      <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
+    )
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    const options = screen.getAllByRole('option')
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(options[1].id)
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(options[2].id)
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(options[0].id)
+  })
+
+  it('moves focus with ArrowUp and wraps at the top', () => {
+    render(
+      <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
+    )
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    const options = screen.getAllByRole('option')
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' })
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(options[options.length - 1].id)
+  })
+
+  it('commits the activedescendant on Enter and closes the popover', () => {
+    const onChange = vi.fn()
+    render(
+      <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={onChange} />,
+    )
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    expect(onChange).toHaveBeenCalledWith('b')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+})
