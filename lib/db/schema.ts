@@ -28,6 +28,7 @@ export const profiles = pgTable('profiles', {
   shopId: uuid('shop_id').references(() => shops.id),
   fullName: text('full_name'),
   role: text('role').default('tech').notNull(),
+  isComp: boolean('is_comp').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
