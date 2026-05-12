@@ -133,4 +133,60 @@ describe('useIntakeSearch', () => {
     await wait(50)
     expect(result.current.state.kind).toBe('idle')
   })
+
+  it('does not transition to "slow" when a stale slowTimer from a previous fire fires later', async () => {
+    // Regression for the PR-27 preview bug: typing fast leaks slowTimers
+    // from earlier queries; one fires 5s later and corrupts state to "slow"
+    // even though the current query already came back fast.
+    vi.useFakeTimers()
+    let callCount = 0
+    const fetchMock = vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => {
+      callCount += 1
+      if (callCount === 1) {
+        // First fetch never resolves on its own (simulates in-flight).
+        // It will be aborted by the second setQuery.
+        await new Promise<void>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        })
+        // never reaches here
+        return new Response('', { status: 200 })
+      }
+      // Second fetch resolves fast.
+      return new Response(
+        JSON.stringify({
+          customers: [
+            { id: 'c1', name: 'X', phone: null, email: null, vehicleCount: 0, lastVisit: null },
+          ],
+          vehicles: [],
+          latencyMs: 5,
+        }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useIntakeSearch())
+    // First query — fires fetch1 (pending forever until aborted)
+    act(() => {
+      result.current.setQuery('B')
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160)
+    })
+    // Second query — aborts fetch1, fires fetch2 (resolves fast → matched)
+    act(() => {
+      result.current.setQuery('Brand')
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160)
+    })
+    expect(result.current.state.kind).toBe('matched')
+    // The slowTimer attached to fire1 must have been cleared. Walk past 5s
+    // from the original fire1 start. Without the fix, the orphan timer fires
+    // and corrupts state to 'slow'.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(result.current.state.kind).toBe('matched')
+  })
 })

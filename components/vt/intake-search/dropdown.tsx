@@ -266,11 +266,15 @@ export function DropdownSlow({
   prev,
   focusedIdx,
   onCreateNew,
+  onPickCustomer,
+  onPickVehicle,
 }: {
   elapsedSec: number
   prev: { customers: CustomerHit[]; vehicles: VehicleHit[] } | null
   focusedIdx: number | null
   onCreateNew: () => void
+  onPickCustomer: (customer: CustomerHit) => void
+  onPickVehicle: (vehicle: VehicleHit) => void
 }) {
   return (
     <div className="pis__dropdown" role="listbox" id="pis-dropdown">
@@ -291,8 +295,8 @@ export function DropdownSlow({
             lineHeight: 1.45,
           }}
         >
-          Holding previous matches. You can still create a new customer — we&apos;ll merge when
-          the search returns.
+          Holding previous matches. You can still create a new customer — or pick one of the
+          cached rows below — we&apos;ll reconcile when the search returns.
         </div>
         {prev && (prev.customers.length > 0 || prev.vehicles.length > 0) && (
           <>
@@ -301,7 +305,14 @@ export function DropdownSlow({
               count={`${prev.customers.length} customer${prev.customers.length === 1 ? '' : 's'} · ${prev.vehicles.length} vehicle${prev.vehicles.length === 1 ? '' : 's'}`}
             />
             {prev.customers.map((c) => (
-              <Row key={c.id} kind="C" primary={c.name} secondary={c.phone ?? '—'} meta="cached" />
+              <Row
+                key={c.id}
+                kind="C"
+                primary={c.name}
+                secondary={c.phone ?? '—'}
+                meta="cached"
+                onClick={() => onPickCustomer(c)}
+              />
             ))}
             {prev.vehicles.map((v) => (
               <Row
@@ -310,6 +321,7 @@ export function DropdownSlow({
                 primary={`${v.year ?? ''} ${v.make ?? ''} ${v.model ?? ''} · ${v.ownerName}`.trim()}
                 secondary={v.vin ?? '—'}
                 meta="cached"
+                onClick={() => onPickVehicle(v)}
               />
             ))}
           </>

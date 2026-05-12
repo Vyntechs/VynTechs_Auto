@@ -53,6 +53,16 @@ export function useIntakeSearch() {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+
+    // Clear any slowTimer left behind by a previous fire() before we set a
+    // new one. Without this, a stale timer from an aborted query fires 5s
+    // later and corrupts state to 'slow' even after the current query came
+    // back fast.
+    if (slowTimer.current !== null) {
+      clearTimeout(slowTimer.current)
+      slowTimer.current = null
+    }
+
     const startedAt = Date.now()
 
     setState({ kind: 'searching', query, elapsedMs: 0 })

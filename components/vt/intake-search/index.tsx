@@ -283,6 +283,11 @@ export function PredictiveIntakeSearch({
               prev={state.prev}
               focusedIdx={focusedIdx}
               onCreateNew={fireCreateNew}
+              onPickCustomer={pickCustomer}
+              onPickVehicle={(v) => {
+                onPickVehicle(v.id)
+                setOpen(false)
+              }}
             />
           ) : state.kind === 'matched' ? (
             <DropdownResults
