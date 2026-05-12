@@ -29,6 +29,7 @@ export const profiles = pgTable('profiles', {
   fullName: text('full_name'),
   role: text('role').default('tech').notNull(),
   isComp: boolean('is_comp').default(false).notNull(),
+  lastSeenWhatsNewAt: timestamp('last_seen_whats_new_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
@@ -471,3 +472,23 @@ export const founderNotesQueue = pgTable('founder_notes_queue', {
 
 export type FounderNotesQueueRow = typeof founderNotesQueue.$inferSelect
 export type NewFounderNotesQueueRow = typeof founderNotesQueue.$inferInsert
+
+// What's New — per-deploy changelog entries surfaced to logged-in users.
+// Brandon authors rows by hand via Supabase MCP execute_sql. Each user has
+// a `last_seen_whats_new_at` timestamp on `profiles`; entries newer than
+// that mark the in-nav badge "New" and render with a "new" pill on the
+// /whats-new page.
+export const whatsNewEntries = pgTable(
+  'whats_new_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    publishedAt: timestamp('published_at', { withTimezone: true }).defaultNow().notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('whats_new_entries_published_at_idx').on(table.publishedAt.desc())],
+)
+
+export type WhatsNewEntry = typeof whatsNewEntries.$inferSelect
+export type NewWhatsNewEntry = typeof whatsNewEntries.$inferInsert
