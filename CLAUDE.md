@@ -26,3 +26,8 @@ Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 - Define success criteria. Loop until verified.
 - Don't follow steps. Define success and iterate.
 - Strong success criteria let you loop independently.
+
+### Rule 5 — Check time and context before each reply
+- Check the current date and what's going on before replying.
+- If it changes what you'd say or do, adjust.
+- If not, stay quiet.
