@@ -92,6 +92,158 @@ describe('<PredictiveIntakeSearch>', () => {
     await waitFor(() => expect(input).toHaveAttribute('aria-activedescendant', 'pis-row-0'))
   })
 
+  describe('customer-pick routing', () => {
+    it('routes customer click with 0 vehicles to onCreateNew with prefill', async () => {
+      const onCreate = vi.fn()
+      const onPick = vi.fn()
+      const user = userEvent.setup()
+      const zero = [
+        {
+          id: 'c-zero', name: 'Zero Customer', phone: '555-1', email: null,
+          vehicleCount: 0, vehicles: [], lastVisit: new Date(),
+        },
+      ]
+      render(
+        <PredictiveIntakeSearch
+          recentCustomers={zero}
+          onPickVehicle={onPick}
+          onCreateNew={onCreate}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      await user.click(screen.getByText('Zero Customer'))
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Zero Customer', phone: '555-1' }),
+      )
+      expect(onPick).not.toHaveBeenCalled()
+    })
+
+    it('routes customer click with 1 vehicle to onPickVehicle (auto-pick)', async () => {
+      const onCreate = vi.fn()
+      const onPick = vi.fn()
+      const user = userEvent.setup()
+      const one = [
+        {
+          id: 'c-one', name: 'One Vehicle Customer', phone: '555-2', email: null,
+          vehicleCount: 1,
+          vehicles: [{
+            id: 'v-1', year: 2020, make: 'Honda', model: 'Civic',
+            engine: null, vin: null, plate: null, mileage: null, lastVisit: null,
+          }],
+          lastVisit: new Date(),
+        },
+      ]
+      render(
+        <PredictiveIntakeSearch
+          recentCustomers={one}
+          onPickVehicle={onPick}
+          onCreateNew={onCreate}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      await user.click(screen.getByText('One Vehicle Customer'))
+      expect(onPick).toHaveBeenCalledWith('v-1')
+      expect(onCreate).not.toHaveBeenCalled()
+    })
+
+    it('routes customer click with 2+ vehicles to the Which vehicle? tier', async () => {
+      const user = userEvent.setup()
+      const many = [
+        {
+          id: 'c-many', name: 'Multi Customer', phone: '555-3', email: null,
+          vehicleCount: 2,
+          vehicles: [
+            { id: 'v-a', year: 2020, make: 'Honda', model: 'Civic',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+            { id: 'v-b', year: 2018, make: 'Ford', model: 'F-150',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+          ],
+          lastVisit: new Date(),
+        },
+      ]
+      const onPick = vi.fn()
+      const onCreate = vi.fn()
+      render(
+        <PredictiveIntakeSearch
+          recentCustomers={many}
+          onPickVehicle={onPick}
+          onCreateNew={onCreate}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      await user.click(screen.getByText('Multi Customer'))
+      expect(screen.getByText(/which vehicle\?/i)).toBeInTheDocument()
+      expect(screen.getByText(/2020 Honda Civic/i)).toBeInTheDocument()
+      expect(screen.getByText(/2018 Ford F-150/i)).toBeInTheDocument()
+      expect(onPick).not.toHaveBeenCalled()
+      expect(onCreate).not.toHaveBeenCalled()
+    })
+
+    it('picks a vehicle from the tier when its row is clicked', async () => {
+      const onPick = vi.fn()
+      const user = userEvent.setup()
+      const many = [
+        {
+          id: 'c-many', name: 'Multi Customer', phone: '555-3', email: null,
+          vehicleCount: 2,
+          vehicles: [
+            { id: 'v-a', year: 2020, make: 'Honda', model: 'Civic',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+            { id: 'v-b', year: 2018, make: 'Ford', model: 'F-150',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+          ],
+          lastVisit: new Date(),
+        },
+      ]
+      render(
+        <PredictiveIntakeSearch
+          recentCustomers={many}
+          onPickVehicle={onPick}
+          onCreateNew={vi.fn()}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      await user.click(screen.getByText('Multi Customer'))
+      await user.click(screen.getByText(/2018 Ford F-150/i))
+      expect(onPick).toHaveBeenCalledWith('v-b')
+    })
+
+    it('tier "Add another vehicle" preserves customer prefill (not blank tokens)', async () => {
+      const onCreate = vi.fn()
+      const user = userEvent.setup()
+      const many = [
+        {
+          id: 'c-many', name: 'Multi Customer', phone: '555-3', email: 'mc@x.test',
+          vehicleCount: 2,
+          vehicles: [
+            { id: 'v-a', year: 2020, make: 'Honda', model: 'Civic',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+            { id: 'v-b', year: 2018, make: 'Ford', model: 'F-150',
+              engine: null, vin: null, plate: null, mileage: null, lastVisit: null },
+          ],
+          lastVisit: new Date(),
+        },
+      ]
+      render(
+        <PredictiveIntakeSearch
+          recentCustomers={many}
+          onPickVehicle={vi.fn()}
+          onCreateNew={onCreate}
+        />,
+      )
+      await user.click(screen.getByRole('combobox'))
+      await user.click(screen.getByText('Multi Customer'))
+      await user.click(screen.getByText(/add another vehicle for this customer/i))
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Multi Customer',
+          phone: '555-3',
+          email: 'mc@x.test',
+        }),
+      )
+    })
+  })
+
   it('Shift+Enter activates "+ Create new" from anywhere in the list', async () => {
     const onCreate = vi.fn()
     const user = userEvent.setup()
@@ -193,6 +345,12 @@ describe('<PredictiveIntakeSearch>', () => {
               phone: null,
               email: null,
               vehicleCount: 1,
+              vehicles: [
+                {
+                  id: 'v1', year: 2014, make: 'BMW', model: '335i',
+                  engine: null, vin: null, plate: null, mileage: null, lastVisit: null,
+                },
+              ],
               lastVisit: null,
             },
           ],
@@ -244,6 +402,16 @@ describe('<PredictiveIntakeSearch>', () => {
               phone: null,
               email: null,
               vehicleCount: 2,
+              vehicles: [
+                {
+                  id: 'v1', year: 2014, make: 'BMW', model: '335i',
+                  engine: null, vin: 'A', plate: null, mileage: null, lastVisit: null,
+                },
+                {
+                  id: 'v2', year: 2019, make: 'Honda', model: 'Pilot',
+                  engine: null, vin: 'B', plate: null, mileage: null, lastVisit: null,
+                },
+              ],
               lastVisit: null,
             },
           ],
