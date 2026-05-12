@@ -90,6 +90,7 @@ export function useAdvanceStream() {
         }
 
         const reader = res.body.getReader()
+        let sawTerminal = false
         for await (const event of readEvents(reader)) {
           // flushSync forces React to commit this update before we await the
           // next chunk, otherwise React 19's automatic batching collapses
@@ -102,6 +103,7 @@ export function useAdvanceStream() {
             } else if (event.type === 'stage') {
               setState((s) => ({ ...s, stageIdx: event.idx }))
             } else if (event.type === 'done') {
+              sawTerminal = true
               setState((s) => ({
                 ...s,
                 isLoading: false,
@@ -109,6 +111,7 @@ export function useAdvanceStream() {
                 tree: event.tree,
               }))
             } else if (event.type === 'error') {
+              sawTerminal = true
               setState((s) => ({
                 ...s,
                 isLoading: false,
@@ -116,6 +119,18 @@ export function useAdvanceStream() {
               }))
             }
           })
+        }
+        // The server closed the stream without a `done` or `error` event —
+        // almost always means Vercel killed the function mid-flight (timeout)
+        // and the stream got torn down without a terminal frame. Without this,
+        // isLoading stays true forever and the button spins indefinitely.
+        if (!sawTerminal) {
+          setState((s) => ({
+            ...s,
+            isLoading: false,
+            error:
+              'AI took too long to respond — the server timed out. Tap again to retry.',
+          }))
         }
       } catch (err) {
         setState({

@@ -60,6 +60,15 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       return await fn()
     } catch (e) {
       lastErr = e
+      // Bail on abort/timeout — retrying just burns the remaining Vercel
+      // budget on another guaranteed timeout, so the stream gets killed
+      // mid-flight and the client never sees the clean error.
+      if (
+        e instanceof Error &&
+        (e.name === 'AbortError' || e.name === 'TimeoutError')
+      ) {
+        throw e
+      }
       if (i < attempts - 1) {
         await new Promise((r) => setTimeout(r, 500 * (i + 1)))
       }
