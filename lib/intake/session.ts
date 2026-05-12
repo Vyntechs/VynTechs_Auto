@@ -7,6 +7,12 @@ import { upsertVehicle } from './vehicles'
 export type CreateSessionFromIntakeInput = {
   shopId: string
   advisorProfileId: string
+  /**
+   * Optional override for sessions.tech_id. When null/undefined, falls back to
+   * advisorProfileId. The caller (route) is responsible for cross-shop
+   * validation BEFORE calling this helper.
+   */
+  assignedTechId?: string | null
   customer: { name: string; phone: string; email: string | null }
   vehicle: {
     year: number
@@ -127,7 +133,7 @@ export async function createSessionFromIntake(
       .insert(sessions)
       .values({
         shopId: input.shopId,
-        techId: input.advisorProfileId,
+        techId: input.assignedTechId ?? input.advisorProfileId,
         vehicleId,
         status: 'open',
         intake: {

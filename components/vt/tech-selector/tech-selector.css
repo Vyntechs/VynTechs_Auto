@@ -1,0 +1,339 @@
+/* ============================================================
+   Tech selector — component styles
+   Direction A only (inline pill in MainHeader.eyebrowSlot).
+   Visual values ported from designs/design_handoff_tech_selector/.
+   Token rename applied: --vt-amber-*  →  --vt-signal-*.
+   ============================================================ */
+
+/* ===== root ===== */
+
+.ts {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--vt-font-serif);
+  color: var(--vt-fg);
+}
+
+/* ===== label ("ASSIGNED TO") ===== */
+
+.ts__label {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ===== trigger pill (active) ===== */
+
+.ts__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px 6px 6px;
+  background: var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
+  transition: border-color 120ms var(--vt-ease), box-shadow 120ms var(--vt-ease);
+}
+
+.ts__trigger:hover { border-color: var(--vt-rule-strong); }
+
+.ts__trigger[aria-expanded="true"] {
+  border-color: var(--vt-signal-500);
+  box-shadow: 0 0 0 1px var(--vt-signal-500) inset;
+}
+
+/* ===== solo inert variant ===== */
+
+.ts__trigger--inert {
+  background: transparent;
+  border-style: dashed;
+  color: var(--vt-fg-2);
+  cursor: default;
+}
+
+/* ===== avatar disc ===== */
+
+.ts__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--vt-bone-100);
+  border: 0.5px solid var(--vt-rule-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-2);
+  text-transform: uppercase;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== name in pill ===== */
+
+.ts__name {
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.ts__name--placeholder {
+  color: var(--vt-fg-2);
+}
+
+/* ===== "Only tech" / "You" mono tag inside pill ===== */
+
+.ts__tag {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  padding-left: 9px;
+  border-left: 0.5px solid var(--vt-rule);
+}
+
+/* ===== caret chevron ===== */
+
+.ts__caret {
+  width: 10px;
+  height: 10px;
+  position: relative;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+/* ===== popover surface ===== */
+
+.ts__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-height: 420px;
+  background: var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 3px;
+  box-shadow: var(--vt-shadow-pop);
+  overflow: hidden;
+}
+
+/* ===== "Assigning to" eyebrow inside popover ===== */
+
+.ts__eyebrow {
+  padding: 10px 16px 6px;
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+
+/* ===== search input (shown when team.length > 5) ===== */
+
+.ts__search {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+
+.ts__search-input {
+  border: 0;
+  background: transparent;
+  outline: 0;
+  width: 100%;
+  font-family: var(--vt-font-serif);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
+}
+
+.ts__search-input::placeholder {
+  color: var(--vt-fg-3);
+  font-style: italic;
+}
+
+.ts__search-count {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ===== listbox ===== */
+
+.ts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ===== option row ===== */
+
+.ts__row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 16px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 80ms var(--vt-ease), border-color 80ms var(--vt-ease);
+}
+
+.ts__row:hover,
+.ts__row--active {
+  background: var(--vt-bone-100);
+  border-left-color: var(--vt-signal-500);
+}
+
+.ts__row--selected .ts__name {
+  color: var(--vt-signal-500);
+}
+
+.ts__row .ts__name {
+  font-family: var(--vt-font-serif);
+  font-size: 17px;
+  letter-spacing: -0.012em;
+  line-height: 1.2;
+}
+
+.ts__row .ts__tag {
+  border-left: 0;
+  padding-left: 0;
+  padding: 2px 6px;
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 1px;
+  font-size: 8.5px;
+}
+
+/* ===== clear row at the bottom ===== */
+
+.ts__row--clear {
+  grid-template-columns: 1fr;
+  padding: 12px 16px;
+  border-top: 0.5px solid var(--vt-rule);
+  background: var(--vt-bone-100);
+}
+
+.ts__row--clear .ts__name {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  text-align: left;
+}
+
+/* ===== workload badge ===== */
+
+.ts__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts__badge-num {
+  color: var(--vt-fg-2);
+}
+
+.ts__badge-sep {
+  color: var(--vt-rule-strong);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ts__badge--busy .ts__badge-num--open {
+  color: var(--vt-signal-500);
+}
+
+/* ============================================================
+   Phone — bottom sheet variant
+   Re-positions the popover as a fixed sheet rising from the
+   viewport floor. Markup stays identical to laptop; only the
+   surface geometry + tap-target sizes change.
+   ============================================================ */
+
+@media (max-width: 767px) {
+  .ts__popover {
+    position: fixed;
+    inset: auto 0 0 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 78vh;
+    border-top: 0.5px solid var(--vt-rule-strong);
+    border-radius: 10px 10px 0 0;
+    box-shadow: var(--vt-shadow-sheet);
+  }
+
+  /* Drag-handle sliver above the eyebrow — purely visual,
+     reinforces "this is a sheet you can dismiss." */
+  .ts__popover::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--vt-rule-strong);
+    border-radius: 2px;
+    margin: 8px auto 4px;
+  }
+
+  /* Generous tap targets (56px minimum) for fingers. */
+  .ts__row {
+    padding: 16px 20px;
+    grid-template-columns: 40px 1fr auto;
+    gap: 14px;
+  }
+
+  .ts__row .ts__name {
+    font-size: 19px;
+  }
+
+  .ts__avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .ts__search-input {
+    font-size: 17px;
+  }
+}
