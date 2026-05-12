@@ -221,7 +221,7 @@ describe('advanceSession', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.status).toBe(500)
-      expect(result.error).toBe('tree update failed')
+      expect(result.error).toBe('tree update failed: llm down')
     }
   })
 

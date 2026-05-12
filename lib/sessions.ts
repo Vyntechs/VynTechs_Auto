@@ -196,7 +196,8 @@ export async function advanceSession(opts: {
     })
   } catch (err) {
     console.error('tree update failed:', err)
-    return { ok: false, status: 500, error: 'tree update failed' }
+    const cause = err instanceof Error ? err.message : String(err)
+    return { ok: false, status: 500, error: `tree update failed: ${cause}` }
   }
 
   if (nextTree.proposedAction) {
@@ -582,7 +583,8 @@ export async function recordAmbientConditions(opts: {
     })
   } catch (err) {
     console.error('tree update after ambient capture failed:', err)
-    return { ok: false, status: 500, error: 'tree update failed' }
+    const cause = err instanceof Error ? err.message : String(err)
+    return { ok: false, status: 500, error: `tree update failed: ${cause}` }
   }
 
   await appendSessionEvent(opts.db, {

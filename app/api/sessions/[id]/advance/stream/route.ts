@@ -20,6 +20,12 @@ import {
 } from '@/lib/advance-stream-events'
 
 export const runtime = 'nodejs'
+// Mirrors the non-stream /advance route: AI tree-update + 6 retrieval adapters
+// can stack past Vercel's default 10s hobby-tier function limit, especially when
+// retries fire. Without this, the streaming connection gets killed mid-flight
+// and the client sees a TypeError fetch ("AI took too long or your connection
+// dropped"). 60s caps at the Pro-tier ceiling; harmless on hobby (still 10s).
+export const maxDuration = 60
 
 const ADAPTERS = [
   new NHTSAAdapter(),
