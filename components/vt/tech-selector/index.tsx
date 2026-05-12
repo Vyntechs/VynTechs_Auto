@@ -1,6 +1,6 @@
 'use client'
 
-import { useId } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import './tech-selector.css'
 
 export type TeamMember = {
@@ -19,13 +19,28 @@ export type TechSelectorProps = {
 }
 
 export function TechSelector(props: TechSelectorProps) {
-  const { team, selectedId } = props
+  const { team, selectedId, onChange } = props
   const labelId = useId()
+  const listboxId = `${labelId}-listbox`
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
 
-  // Solo inert variant.
+  useEffect(() => {
+    if (!open) return
+    function onDocMouseDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    return () => document.removeEventListener('mousedown', onDocMouseDown)
+  }, [open])
+
+  // Solo inert variant — unchanged from Task 5.
   if (team.length === 1) {
     return (
       <div
+        ref={rootRef}
         className="ts ts--solo"
         role="group"
         aria-labelledby={labelId}
@@ -43,10 +58,22 @@ export function TechSelector(props: TechSelectorProps) {
     )
   }
 
-  // Active multi-member variant.
   const selected = selectedId ? team.find((m) => m.id === selectedId) ?? null : null
+
+  function commit(id: string | null) {
+    onChange(id)
+    setOpen(false)
+  }
+
+  function onTriggerKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+    }
+  }
+
   return (
-    <div className="ts" role="group" aria-labelledby={labelId}>
+    <div ref={rootRef} className="ts" role="group" aria-labelledby={labelId}>
       <span id={labelId} className="ts__label">Assigned to</span>
       <button
         type="button"
@@ -54,7 +81,10 @@ export function TechSelector(props: TechSelectorProps) {
         role="combobox"
         aria-labelledby={labelId}
         aria-haspopup="listbox"
-        aria-expanded={false}
+        aria-expanded={open}
+        aria-controls={listboxId}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={onTriggerKeyDown}
       >
         {selected ? (
           <>
@@ -66,6 +96,38 @@ export function TechSelector(props: TechSelectorProps) {
         )}
         <span className="ts__caret" aria-hidden="true">▾</span>
       </button>
+
+      {open && (
+        <div className="ts__popover">
+          <span className="ts__eyebrow">Assigning to</span>
+          <ul id={listboxId} className="ts__list" role="listbox">
+            {team.map((m) => (
+              <li
+                key={m.id}
+                role="option"
+                aria-selected={selectedId === m.id}
+                className={`ts__row${selectedId === m.id ? ' ts__row--selected' : ''}`}
+                onClick={() => commit(m.id)}
+              >
+                <span className="ts__avatar" aria-hidden="true">{initials(m.name)}</span>
+                <span className="ts__name">{m.name}</span>
+                {m.isCurrentUser && <span className="ts__tag">You</span>}
+              </li>
+            ))}
+            {selectedId !== null && (
+              <li
+                role="option"
+                aria-selected="false"
+                aria-label="Clear assignment, return to open queue"
+                className="ts__row ts__row--clear"
+                onClick={() => commit(null)}
+              >
+                <span className="ts__name">× Clear · Open queue</span>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
