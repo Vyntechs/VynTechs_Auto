@@ -232,6 +232,36 @@
   white-space: nowrap;
 }
 
+/* Vehicle tier rows pair the primary pick button with an adjacent history
+   link to the vehicle's session history. Sibling link (not nested) so the
+   button-vs-link click targets stay distinct. */
+.pis__row-with-history {
+  display: flex;
+  align-items: stretch;
+}
+.pis__row-with-history > .pis__row {
+  flex: 1;
+  min-width: 0;
+}
+.pis__row-history {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  text-decoration: none;
+  color: var(--vt-fg-3);
+  white-space: nowrap;
+  border-left: 1px solid var(--vt-bone-200);
+  transition: color 80ms var(--vt-ease), background 80ms var(--vt-ease);
+}
+.pis__row-history:hover {
+  color: var(--vt-signal-500);
+  background: var(--vt-bone-100);
+}
+
 /* Match highlight — signal-navy underline.
    Does NOT change weight (would shift tnum). Does NOT change bg
    (too loud on bone). Color + 1px underline is calm and obvious. */

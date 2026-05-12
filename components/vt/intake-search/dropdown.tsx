@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import Link from 'next/link'
 import { CreateRow, GroupHead, Row } from './rows'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CustomerHit, CustomerVehicle, VehicleHit } from '@/lib/intake/search'
@@ -363,24 +364,35 @@ export function DropdownWhichVehicle({
             ← Back to results
           </button>
         </div>
-        {vehicles.map((v, i) => (
-          <Row
-            key={v.id}
-            id={`pis-row-${i}`}
-            kind="V"
-            primary={`${v.year ?? ''} ${v.make ?? ''} ${v.model ?? ''}`.trim()}
-            secondary={
-              <>
-                {v.vin && <>VIN {v.vin}</>}
-                {v.plate && <> · {v.plate}</>}
-                {v.mileage != null && <> · {v.mileage.toLocaleString()} mi</>}
-              </>
-            }
-            meta={v.lastVisit ? formatRelative(v.lastVisit) : '—'}
-            focused={focusedIdx === i}
-            onClick={() => onPickVehicle(v)}
-          />
-        ))}
+        {vehicles.map((v, i) => {
+          const ymm = `${v.year ?? ''} ${v.make ?? ''} ${v.model ?? ''}`.trim()
+          return (
+            <div key={v.id} className="pis__row-with-history">
+              <Row
+                id={`pis-row-${i}`}
+                kind="V"
+                primary={ymm}
+                secondary={
+                  <>
+                    {v.vin && <>VIN {v.vin}</>}
+                    {v.plate && <> · {v.plate}</>}
+                    {v.mileage != null && <> · {v.mileage.toLocaleString()} mi</>}
+                  </>
+                }
+                meta={v.lastVisit ? formatRelative(v.lastVisit) : '—'}
+                focused={focusedIdx === i}
+                onClick={() => onPickVehicle(v)}
+              />
+              <Link
+                href={`/vehicles/${v.id}`}
+                className="pis__row-history"
+                aria-label={`History for ${ymm || 'this vehicle'}`}
+              >
+                history →
+              </Link>
+            </div>
+          )
+        })}
       </div>
       <CreateRow
         id="pis-row-create"
