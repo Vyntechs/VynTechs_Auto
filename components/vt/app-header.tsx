@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import { WhatsNewBadge } from './whats-new-badge'
 
 export function AppHeader({
   title,
@@ -27,7 +28,10 @@ export function AppHeader({
         <div className="title">{title}</div>
         {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}
       </div>
-      {right}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <WhatsNewBadge />
+        {right}
+      </div>
     </header>
   )
 }
