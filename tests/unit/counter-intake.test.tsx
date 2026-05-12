@@ -128,4 +128,90 @@ describe('CounterIntake', () => {
       expect(mockPush).toHaveBeenCalledWith('/sessions/session-abc')
     })
   })
+
+  describe('tech selector wiring', () => {
+    function team(...members: Array<{ id: string; name: string; isCurrentUser?: boolean }>) {
+      return members.map((m) => ({
+        id: m.id,
+        name: m.name,
+        isCurrentUser: m.isCurrentUser ?? false,
+        workload: { open: 0, today: 0 },
+      }))
+    }
+
+    function fillRequired() {
+      fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
+      fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
+      fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2020' } })
+      fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'X' } })
+      fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'Y' } })
+      fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+        target: { value: 'noise' },
+      })
+    }
+
+    it('renders the inert "You · only tech" pill when team has one member', () => {
+      render(
+        <CounterIntake
+          userEmail="brandon@example.com"
+          team={team({ id: 'a', name: 'Brandon', isCurrentUser: true })}
+          workloadFailed={false}
+        />,
+      )
+      const pill = screen.getByRole('group', { name: /assigned to/i })
+      expect(pill).toHaveAttribute('aria-disabled', 'true')
+    })
+
+    it('sends assignedTechId: null in the submit body when nothing is picked', async () => {
+      render(
+        <CounterIntake
+          userEmail="brandon@example.com"
+          team={team(
+            { id: 'a', name: 'Brandon', isCurrentUser: true },
+            { id: 'b', name: 'Diana' },
+          )}
+          workloadFailed={false}
+        />,
+      )
+      fillRequired()
+      fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalled()
+      })
+      const [, init] = vi.mocked(globalThis.fetch).mock.calls[0]
+      const body = JSON.parse(init!.body as string) as { assignedTechId?: string | null }
+      expect(body.assignedTechId).toBeNull()
+    })
+
+    it('sends the picked assignedTechId in the submit body', async () => {
+      render(
+        <CounterIntake
+          userEmail="brandon@example.com"
+          team={team(
+            { id: 'a', name: 'Brandon', isCurrentUser: true },
+            { id: 'b', name: 'Diana' },
+          )}
+          workloadFailed={false}
+        />,
+      )
+      fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+      fireEvent.click(screen.getByRole('option', { name: /diana/i }))
+      fillRequired()
+      fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+      await waitFor(() => {
+        expect(globalThis.fetch).toHaveBeenCalled()
+      })
+      const [, init] = vi.mocked(globalThis.fetch).mock.calls[0]
+      const body = JSON.parse(init!.body as string) as { assignedTechId?: string | null }
+      expect(body.assignedTechId).toBe('b')
+    })
+
+    it('omits the pill entirely when team is empty (existing-tests safety)', () => {
+      render(<CounterIntake userEmail="brandon@example.com" />)
+      expect(screen.queryByRole('group', { name: /assigned to/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: /assigned to/i })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -14,11 +14,13 @@ import {
   Topbar,
 } from '@/components/vt/desktop'
 import { PredictiveIntakeSearch } from '@/components/vt/intake-search'
+import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 
 type IntakeBody = {
   existingVehicleId?: string
+  assignedTechId?: string | null
   customer?: { name: string; phone: string; email: string }
   vehicle?: {
     vin: string
@@ -36,11 +38,17 @@ type IntakeBody = {
 export function CounterIntake({
   userEmail,
   recentCustomers = [],
+  team = [],
+  workloadFailed = false,
 }: {
   userEmail?: string
   recentCustomers?: RecentCustomer[]
+  team?: TeamMember[]
+  workloadFailed?: boolean
 }) {
   const router = useRouter()
+  const currentUserId = team.find((m) => m.isCurrentUser)?.id ?? ''
+  const [assignedTechId, setAssignedTechId] = useState<string | null>(null)
   const [pickedVehicleId, setPickedVehicleId] = useState<string | null>(null)
   const [pickedLabel, setPickedLabel] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -107,6 +115,7 @@ export function CounterIntake({
     const body: IntakeBody = isPickExisting
       ? {
           existingVehicleId: pickedVehicleId!,
+          assignedTechId,
           vehicle: {
             vin: '',
             vinScanned: false,
@@ -125,6 +134,7 @@ export function CounterIntake({
           },
         }
       : {
+          assignedTechId,
           customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
           vehicle: {
             vin: vin.trim(),
@@ -173,6 +183,17 @@ export function CounterIntake({
         <main className="vt-main">
           <MainHeader
             eyebrow="New work order"
+            eyebrowSlot={
+              team.length > 0 && currentUserId ? (
+                <TechSelector
+                  currentUserId={currentUserId}
+                  team={team}
+                  workloadFailed={workloadFailed}
+                  selectedId={assignedTechId}
+                  onChange={setAssignedTechId}
+                />
+              ) : undefined
+            }
             title="Who's at the counter?"
             sub="Search to find an existing customer or vehicle, or fill in the form below."
             actions={
