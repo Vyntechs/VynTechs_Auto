@@ -51,11 +51,13 @@ export function Topbar({
 
 export function MainHeader({
   eyebrow,
+  eyebrowSlot,
   title,
   sub,
   actions,
 }: {
   eyebrow?: string
+  eyebrowSlot?: ReactNode
   title: string
   sub?: string
   actions?: ReactNode
@@ -63,7 +65,12 @@ export function MainHeader({
   return (
     <header className="vt-main__header">
       <div className="vt-main__title-block">
-        {eyebrow && <span className="vt-main__eyebrow">{eyebrow}</span>}
+        {(eyebrow || eyebrowSlot) && (
+          <div className="vt-main__eyebrow-row">
+            {eyebrow && <span className="vt-main__eyebrow">{eyebrow}</span>}
+            {eyebrowSlot}
+          </div>
+        )}
         <h1 className="vt-main__title">{title}</h1>
         {sub && <p className="vt-main__sub">{sub}</p>}
       </div>
