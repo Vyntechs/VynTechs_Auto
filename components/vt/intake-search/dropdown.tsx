@@ -422,8 +422,14 @@ function routeHint(shape: InputShape): { kind: string; field: string; value: str
   }
 }
 
-function formatRelative(d: Date): string {
-  const diffMs = Date.now() - d.getTime()
+function formatRelative(d: Date | string): string {
+  // The API hands back ISO strings (JSON serialization), but our types claim
+  // Date for ergonomics. Hydrate at the boundary so this never crashes the
+  // tree on a string that looked like a Date in the types.
+  const date = d instanceof Date ? d : new Date(d)
+  const time = date.getTime()
+  if (!Number.isFinite(time)) return '—'
+  const diffMs = Date.now() - time
   const days = Math.floor(diffMs / (24 * 60 * 60 * 1000))
   if (days === 0) return 'today'
   if (days < 7) return `${days}d ago`

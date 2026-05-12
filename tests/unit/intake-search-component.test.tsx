@@ -122,6 +122,61 @@ describe('<PredictiveIntakeSearch>', () => {
     expect(screen.queryByText('Sandoval')).not.toBeInTheDocument()
   })
 
+  it('does not crash when results contain ISO-string dates (wire-format)', async () => {
+    // Reproduces a real PR-27 preview bug: /api/intake/search returns
+    // lastVisit as an ISO string, but our types claimed Date. Calling
+    // .getTime() on a string crashed the React tree → "page couldn't load".
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        fetchOk({
+          customers: [
+            {
+              id: 'c1',
+              name: 'Sandoval',
+              phone: '7705551234',
+              email: null,
+              vehicleCount: 1,
+              lastVisit: '2026-05-11T10:24:00.000Z', // ← ISO string, like real JSON
+            },
+          ],
+          vehicles: [
+            {
+              id: 'v1',
+              year: 2014,
+              make: 'BMW',
+              model: '335i',
+              engine: null,
+              vin: null,
+              plate: null,
+              mileage: null,
+              ownerId: 'c1',
+              ownerName: 'Sandoval',
+              lastVisit: '2026-05-11T10:24:00.000Z',
+            },
+          ],
+          latencyMs: 5,
+        }),
+      ),
+    )
+    render(
+      <PredictiveIntakeSearch
+        recentCustomers={[]}
+        onPickVehicle={vi.fn()}
+        onCreateNew={vi.fn()}
+      />,
+    )
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'sandoval')
+    await new Promise((r) => setTimeout(r, 300))
+    // Should not have thrown; the customer + vehicle rows should be there.
+    const options = screen.queryAllByRole('option')
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.some((o) => o.textContent?.includes('Sandoval'))).toBe(true)
+  })
+
   it('typing a query that matches a single-vehicle customer → picking it calls onPickVehicle', async () => {
     const onPick = vi.fn()
     const user = userEvent.setup()
