@@ -124,4 +124,98 @@ describe('searchIntake', () => {
     expect(r.customers).toEqual([])
     expect(r.vehicles).toEqual([])
   })
+
+  it('embeds an empty vehicles array when the matched customer has 0 vehicles', async () => {
+    const { shop } = await seedShop('zero')
+    await db.insert(customers).values({
+      shopId: shop.id, name: 'Solo Customer', phone: '5559001', email: null,
+    })
+    const r = await searchIntake({ db, shopId: shop.id, q: 'Solo' })
+    expect(r.customers).toHaveLength(1)
+    expect(r.customers[0].vehicles).toEqual([])
+    expect(r.customers[0].vehicleCount).toBe(0)
+  })
+
+  it("embeds the customer's vehicles ordered by last_visit DESC, capped at 10", async () => {
+    const { shop, tech } = await seedShop('multi')
+    const [c] = await db
+      .insert(customers)
+      .values({ shopId: shop.id, name: 'Multi Customer', phone: '5559002', email: null })
+      .returning()
+
+    const seededVehicleIds: string[] = []
+    for (let i = 0; i < 12; i += 1) {
+      const [v] = await db
+        .insert(vehicles)
+        .values({ customerId: c.id, year: 2010 + i, make: 'Ford', model: `M${i}` })
+        .returning()
+      seededVehicleIds.push(v.id)
+    }
+    const intakePayload = {
+      vehicleYear: 2018, vehicleMake: 'Ford', vehicleModel: 'M0', customerComplaint: 'noise',
+    }
+    for (let i = 0; i < 12; i += 1) {
+      const createdAt = new Date(Date.now() - (12 - i) * 86_400_000)
+      await db.insert(sessions).values({
+        shopId: shop.id,
+        techId: tech.id,
+        vehicleId: seededVehicleIds[i],
+        status: 'open',
+        intake: intakePayload,
+        treeState: EMPTY_TREE,
+        createdAt,
+      })
+    }
+
+    const r = await searchIntake({ db, shopId: shop.id, q: 'Multi' })
+    expect(r.customers).toHaveLength(1)
+    expect(r.customers[0].vehicleCount).toBe(12)
+    expect(r.customers[0].vehicles).toHaveLength(10)
+    expect(r.customers[0].vehicles[0].id).toBe(seededVehicleIds[11])
+    expect(r.customers[0].vehicles[9].id).toBe(seededVehicleIds[2])
+    expect(r.customers[0].vehicles.map((v) => v.id)).not.toContain(seededVehicleIds[0])
+    expect(r.customers[0].vehicles.map((v) => v.id)).not.toContain(seededVehicleIds[1])
+  })
+
+  it("falls back to year DESC ordering when the customer has no sessions yet", async () => {
+    const { shop } = await seedShop('fresh')
+    const [c] = await db
+      .insert(customers)
+      .values({ shopId: shop.id, name: 'Fresh Customer', phone: '5559003', email: null })
+      .returning()
+    await db.insert(vehicles).values([
+      { customerId: c.id, year: 2018, make: 'Honda', model: 'Civic' },
+      { customerId: c.id, year: 2020, make: 'Honda', model: 'Accord' },
+    ])
+    const r = await searchIntake({ db, shopId: shop.id, q: 'Fresh' })
+    expect(r.customers[0].vehicles).toHaveLength(2)
+    expect(r.customers[0].vehicles[0].year).toBe(2020)
+    expect(r.customers[0].vehicles[1].year).toBe(2018)
+  })
+
+  it('embedded vehicle shape matches CustomerVehicle (no ownerId / ownerName)', async () => {
+    const { shop } = await seedShop('shape')
+    const [c] = await db
+      .insert(customers)
+      .values({ shopId: shop.id, name: 'Shape Customer', phone: '5559004', email: null })
+      .returning()
+    await db.insert(vehicles).values({
+      customerId: c.id,
+      year: 2019, make: 'BMW', model: '335i', engine: 'N55',
+      vin: '1FTEW1EP5JFC10001', plate: 'ABC123', mileage: 84000,
+    })
+    const r = await searchIntake({ db, shopId: shop.id, q: 'Shape' })
+    const v = r.customers[0].vehicles[0]
+    expect(v.id).toBeTruthy()
+    expect(v.year).toBe(2019)
+    expect(v.make).toBe('BMW')
+    expect(v.model).toBe('335i')
+    expect(v.engine).toBe('N55')
+    expect(v.vin).toBe('1FTEW1EP5JFC10001')
+    expect(v.plate).toBe('ABC123')
+    expect(v.mileage).toBe(84000)
+    expect(v.lastVisit).toBeNull()
+    expect((v as unknown as { ownerId?: string }).ownerId).toBeUndefined()
+    expect((v as unknown as { ownerName?: string }).ownerName).toBeUndefined()
+  })
 })
