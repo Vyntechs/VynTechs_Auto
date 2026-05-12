@@ -76,12 +76,19 @@ export async function generateInitialTree(
   const userMessage = buildIntakeUserMessage(intake, corpus, retrieval)
 
   return withRetry(async () => {
-    const res = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system: cachedSystem(TREE_ENGINE_SYSTEM),
-      messages: [{ role: 'user', content: userMessage }],
-    })
+    const t0 = Date.now()
+    const res = await anthropic.messages.create(
+      {
+        model: MODEL,
+        max_tokens: 4096,
+        system: cachedSystem(TREE_ENGINE_SYSTEM),
+        messages: [{ role: 'user', content: userMessage }],
+      },
+      { signal: AbortSignal.timeout(45_000) },
+    )
+    console.log(
+      `generateInitialTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars)`,
+    )
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
@@ -209,12 +216,19 @@ Update the tree based on this observation, any artifact evidence, the corpus mat
 Return JSON only — no prose, no fences.`
 
   return withRetry(async () => {
-    const res = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system: cachedSystem(TREE_ENGINE_SYSTEM),
-      messages: [{ role: 'user', content: userMessage }],
-    })
+    const t0 = Date.now()
+    const res = await anthropic.messages.create(
+      {
+        model: MODEL,
+        max_tokens: 4096,
+        system: cachedSystem(TREE_ENGINE_SYSTEM),
+        messages: [{ role: 'user', content: userMessage }],
+      },
+      { signal: AbortSignal.timeout(45_000) },
+    )
+    console.log(
+      `updateTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars, ${input.currentTree.nodes.length} nodes)`,
+    )
 
     const block = res.content.find((b: { type: string }) => b.type === 'text')
     if (!block || block.type !== 'text') throw new Error('no text block in response')
