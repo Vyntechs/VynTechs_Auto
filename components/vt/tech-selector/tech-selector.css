@@ -281,3 +281,59 @@
 .ts__badge--busy .ts__badge-num--open {
   color: var(--vt-signal-500);
 }
+
+/* ============================================================
+   Phone — bottom sheet variant
+   Re-positions the popover as a fixed sheet rising from the
+   viewport floor. Markup stays identical to laptop; only the
+   surface geometry + tap-target sizes change.
+   ============================================================ */
+
+@media (max-width: 767px) {
+  .ts__popover {
+    position: fixed;
+    inset: auto 0 0 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 78vh;
+    border-top: 0.5px solid var(--vt-rule-strong);
+    border-radius: 10px 10px 0 0;
+    box-shadow: var(--vt-shadow-sheet);
+  }
+
+  /* Drag-handle sliver above the eyebrow — purely visual,
+     reinforces "this is a sheet you can dismiss." */
+  .ts__popover::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--vt-rule-strong);
+    border-radius: 2px;
+    margin: 8px auto 4px;
+  }
+
+  /* Generous tap targets (56px minimum) for fingers. */
+  .ts__row {
+    padding: 16px 20px;
+    grid-template-columns: 40px 1fr auto;
+    gap: 14px;
+  }
+
+  .ts__row .ts__name {
+    font-size: 19px;
+  }
+
+  .ts__avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .ts__search-input {
+    font-size: 17px;
+  }
+}
