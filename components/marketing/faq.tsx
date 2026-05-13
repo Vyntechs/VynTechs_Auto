@@ -5,7 +5,7 @@ import { useState } from 'react'
 const FAQ_ITEMS = [
   {
     q: 'What does it work on?',
-    a: 'Any car you describe in words. Strongest where prior info is widely documented; honest “I don’t know” otherwise.',
+    a: 'Any car you can describe in words. Best on cars with a lot of forum and TSB history. When the open web doesn’t have good info, it tells you.',
   },
   {
     q: 'Can I use it on customer cars from day one?',
@@ -13,19 +13,19 @@ const FAQ_ITEMS = [
   },
   {
     q: 'How does it know it’s right?',
-    a: 'Every reasoning step cites the source it’s pulling from. Tap a citation, see what it read.',
+    a: 'It doesn’t claim to be right. It shows you what it read. Tap any source. Check the work yourself.',
   },
   {
-    q: 'Can I see past diagnoses on the same vehicle?',
-    a: 'Yes — vehicle history view ships with launch.',
+    q: 'Can I see past diagnoses on the same car?',
+    a: 'Yes. Every car has its own history page. Past sessions, locked diagnoses, the lot.',
   },
   {
     q: 'Is my shop data private?',
-    a: 'Your sessions train the engine — that’s how it gets smarter. Sessions stay private between you and Vyntechs; we don’t sell or share data.',
+    a: 'Your sessions train the engine. That’s how it gets sharper. We don’t sell or share your data.',
   },
   {
     q: 'Can I cancel anytime?',
-    a: 'Yes, instantly from your billing page.',
+    a: 'Yes. Cancel button is on your billing page.',
   },
 ] as const
 
@@ -36,7 +36,7 @@ export function FAQ() {
       <div className="mk-container">
         <div className="mk__faq-head">
           <div className="mk__eyebrow">Questions</div>
-          <h2 className="mk__h2">Six common ones.</h2>
+          <h2 className="mk__h2">The common ones.</h2>
         </div>
         <div className="mk__faq">
           {FAQ_ITEMS.map((it, i) => {
