@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { createSessionFromIntake } from '@/lib/intake/session'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
@@ -82,6 +83,10 @@ export async function POST(req: Request) {
   if (!ctx) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
+
+  const denied = await paywallReject(db, ctx.user.id)
+  if (denied) return denied
+
   if (!ctx.profile.shopId) {
     return NextResponse.json({ error: 'no_shop' }, { status: 403 })
   }

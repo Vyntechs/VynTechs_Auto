@@ -113,6 +113,20 @@
       "when": 1778544000000,
       "tag": "0013_founder_knowledge_base",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778544000001,
+      "tag": "0014_comp_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778544000002,
+      "tag": "0015_whats_new",
+      "breakpoints": true
     }
   ]
 }

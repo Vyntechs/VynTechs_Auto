@@ -162,6 +162,11 @@
   color: var(--vt-fg-2);
 }
 .pill.deferred .dot { background: var(--vt-status-deferred); }
+.pill.new {
+  background: var(--vt-signal-500);
+  color: var(--vt-bone-50);
+}
+.pill.new .dot { background: var(--vt-bone-50); }
 
 @keyframes heartbeat {
   0%, 100% { opacity: 0.4; }

@@ -6,6 +6,7 @@ import { createServerClient } from '@supabase/ssr'
 import { type NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { guardCuratorRoute } from '@/lib/curator/role-gate'
+import { checkAccess, isApiRoute, isPaywallExempt } from '@/lib/auth-access'
 
 async function refreshSession(req: NextRequest) {
   const res = NextResponse.next({ request: req })
@@ -34,14 +35,46 @@ async function refreshSession(req: NextRequest) {
 
 export async function middleware(req: NextRequest) {
   const { res, supabase } = await refreshSession(req)
+  const pathname = req.nextUrl.pathname
+  const exempt = isPaywallExempt(pathname)
+  const isCurator = pathname.startsWith('/curator')
 
-  // Curator role-gate (Phase P). Stage 3 will extend with an entitlement gate.
-  if (req.nextUrl.pathname.startsWith('/curator')) {
-    const { data: { user } } = await supabase.auth.getUser()
-    const result = await guardCuratorRoute(db, user?.id ?? null, req.nextUrl.pathname)
+  // Fast path: exempt-and-not-curator routes skip all auth/DB I/O.
+  if (exempt && !isCurator) return res
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  // Curator role-gate (Phase P) — runs for any /curator/* request.
+  if (isCurator) {
+    const result = await guardCuratorRoute(db, user?.id ?? null, pathname)
     if (result.kind === 'redirect') {
       return NextResponse.redirect(new URL(result.to, req.url))
     }
+  }
+
+  // Paywall gate — closed by default. Exempt list lives in lib/auth-access.
+  // Option B: API routes are gated too (defense against curl-bypass).
+  if (exempt) return res
+
+  if (!user) {
+    if (isApiRoute(pathname)) {
+      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    }
+    const next = encodeURIComponent(pathname)
+    return NextResponse.redirect(new URL(`/sign-in?next=${next}`, req.url))
+  }
+
+  const access = await checkAccess(db, user.id)
+  if (access.kind === 'paywall') {
+    if (isApiRoute(pathname)) {
+      return NextResponse.json(
+        { error: 'paywall', reason: access.reason },
+        { status: 403 },
+      )
+    }
+    return NextResponse.redirect(new URL('/subscribe', req.url))
   }
 
   return res
