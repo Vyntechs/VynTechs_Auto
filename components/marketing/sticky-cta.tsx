@@ -13,10 +13,15 @@ export function StickyCTA({ isSignedIn }: StickyCTAProps) {
           Go to app
         </a>
       ) : (
-        <a className="mk__sticky__cta" href="/sign-up">
-          Subscribe
-          <span className="mk__sticky__cta__price">$100/MO</span>
-        </a>
+        <>
+          <a className="mk__sticky__login" href="/sign-in">
+            Sign in
+          </a>
+          <a className="mk__sticky__cta" href="/sign-up">
+            Subscribe
+            <span className="mk__sticky__cta__price">$100/MO</span>
+          </a>
+        </>
       )}
     </div>
   )

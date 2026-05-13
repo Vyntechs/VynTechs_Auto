@@ -114,6 +114,24 @@
   .mk__sticky__brand { display: inline-flex; }
 }
 
+.mk__sticky__login {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--vt-space-2) var(--vt-space-3);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  text-decoration: none;
+  transition: color var(--vt-dur-2) var(--vt-ease);
+}
+.mk__sticky__login:hover { color: var(--vt-fg); }
+@media (min-width: 768px) {
+  .mk__sticky__login { font-size: 12px; padding: var(--vt-space-2) var(--vt-space-4); }
+}
+
 .mk__sticky__cta {
   display: inline-flex;
   align-items: baseline;
