@@ -37,6 +37,13 @@ describe('SignInPage', () => {
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
   })
 
+  it('does not show a "Forgot password" affordance until the flow exists', () => {
+    // Was rendered as a styled non-link <span>, which looks clickable but does
+    // nothing. Drop it until we ship a real password-reset flow.
+    render(<SignInPage />)
+    expect(screen.queryByText(/forgot password/i)).not.toBeInTheDocument()
+  })
+
   it('calls supabase.auth.signInWithPassword with the entered email and password on submit', async () => {
     render(<SignInPage />)
     fireEvent.change(screen.getByLabelText(/email/i), {

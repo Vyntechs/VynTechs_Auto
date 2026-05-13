@@ -112,11 +112,6 @@ export default function SignInPage() {
       <div
         style={{
           marginTop: 20,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          gap: 12,
-          flexWrap: 'wrap',
           fontFamily: 'var(--vt-font-mono)',
           fontSize: 10,
           letterSpacing: '0.14em',
@@ -127,7 +122,6 @@ export default function SignInPage() {
         <Link href="/sign-up" style={{ textDecoration: 'none', color: 'var(--vt-fg-2)' }}>
           New tech · Create account →
         </Link>
-        <span>Forgot password</span>
       </div>
     </>
   )
