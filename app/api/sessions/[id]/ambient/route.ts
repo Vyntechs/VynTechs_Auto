@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { recordAmbientConditions } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { paywallReject } from '@/lib/auth-access'
 import { fetchAmbientConditions } from '@/lib/external/weather'
 import { updateTree } from '@/lib/ai/tree-engine'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
@@ -41,6 +42,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
+
+  const denied = await paywallReject(db, user.id)
+  if (denied) return denied
 
   const body = await req.json().catch(() => null)
 

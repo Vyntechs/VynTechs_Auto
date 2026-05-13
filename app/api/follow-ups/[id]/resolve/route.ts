@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { paywallReject } from '@/lib/auth-access'
 import { resolveFollowUp } from '@/lib/comeback/resolve'
 import { recordCorpusComeback } from '@/lib/corpus/decay'
 
@@ -16,6 +17,9 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
+
+  const denied = await paywallReject(db, user.id)
+  if (denied) return denied
 
   const body = await req.json().catch(() => null)
 
