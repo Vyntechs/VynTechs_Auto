@@ -47,6 +47,23 @@ export default function SignInPage() {
     router.push(safeNextPath(readNextParam()))
   }
 
+  async function handleGoogleSignIn() {
+    setError(null)
+    setBusy(true)
+    const next = safeNextPath(readNextParam())
+    const supabase = getBrowserSupabase()
+    const { error: authError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    })
+    if (authError) {
+      setError(authError.message)
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <span className="eyebrow">Vyntechs · Authentication</span>
@@ -68,6 +85,40 @@ export default function SignInPage() {
       >
         Pick up where you left off — your bay, your queue, your sessions.
       </p>
+
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={handleGoogleSignIn}
+        disabled={busy}
+        style={{ width: '100%' }}
+      >
+        Continue with Google
+      </button>
+
+      <div
+        style={{
+          margin: '20px 0 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          fontFamily: 'var(--vt-font-mono)',
+          fontSize: 10,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: 'var(--vt-fg-3)',
+        }}
+      >
+        <span
+          style={{ flex: 1, height: 0, borderTop: '0.5px solid var(--vt-rule)' }}
+          aria-hidden
+        />
+        or
+        <span
+          style={{ flex: 1, height: 0, borderTop: '0.5px solid var(--vt-rule)' }}
+          aria-hidden
+        />
+      </div>
 
       <form onSubmit={handleSubmit} noValidate>
         <div className="field">
@@ -101,9 +152,9 @@ export default function SignInPage() {
         )}
         <button
           type="submit"
-          className="btn btn-primary"
+          className="btn"
           disabled={busy}
-          style={{ width: '100%', marginTop: 18 }}
+          style={{ width: '100%', marginTop: 14 }}
         >
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
