@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { PhoneFrame } from './phone-frame'
 import { SCREENS } from './screens'
+import { SCREENSHOTS } from './screenshots.config'
 
 const STEPS = [
   {
@@ -58,7 +59,8 @@ export function Motion() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const Screen = SCREENS[active]
+  const ActiveScreen = SCREENS[active]
+  const activeImage = SCREENSHOTS.motionPhone[active]
 
   return (
     <section
@@ -91,8 +93,12 @@ export function Motion() {
           </div>
 
           <div className="mk__motion-screen">
-            <PhoneFrame size="lg">
-              <Screen />
+            <PhoneFrame
+              size="lg"
+              image={activeImage}
+              loading={active < 2 ? 'eager' : undefined}
+            >
+              <ActiveScreen />
             </PhoneFrame>
           </div>
 

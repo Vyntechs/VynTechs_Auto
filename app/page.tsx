@@ -4,6 +4,7 @@ import { Hero } from '@/components/marketing/hero'
 import { WhatItIs } from '@/components/marketing/what-it-is'
 import { Problem } from '@/components/marketing/problem'
 import { Motion } from '@/components/marketing/motion'
+import { OnLaptop } from '@/components/marketing/on-laptop'
 import { HowItWorks } from '@/components/marketing/how-it-works'
 import { Different } from '@/components/marketing/different'
 import { NotYet } from '@/components/marketing/not-yet'
@@ -29,6 +30,7 @@ export default async function HomePage() {
       <WhatItIs />
       <Problem />
       <Motion />
+      <OnLaptop />
       <HowItWorks />
       <Different />
       <NotYet />
