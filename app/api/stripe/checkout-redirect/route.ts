@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   }
 
   const origin = new URL(req.url).origin
-  const priceId = process.env.STRIPE_PRICE_ID_TECH_MONTHLY ?? ''
+  const priceId = process.env.STRIPE_PRICE_ID ?? ''
 
   const result = await createCheckoutSessionForUser({
     db,
