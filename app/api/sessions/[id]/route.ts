@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { getSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { paywallReject } from '@/lib/auth-access'
 
 export async function GET(
   _req: Request,
@@ -15,6 +16,9 @@ export async function GET(
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
+
+  const denied = await paywallReject(db, user.id)
+  if (denied) return denied
 
   const result = await getSessionForUser({ db, userId: user.id, sessionId: id })
   if (!result.ok) {
