@@ -2,11 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 const mockSignInWithPassword = vi.fn()
+const mockSignInWithOAuth = vi.fn()
 const mockPush = vi.fn()
 
 vi.mock('@/lib/supabase-client', () => ({
   getBrowserSupabase: () => ({
-    auth: { signInWithPassword: mockSignInWithPassword },
+    auth: {
+      signInWithPassword: mockSignInWithPassword,
+      signInWithOAuth: mockSignInWithOAuth,
+    },
   }),
 }))
 
@@ -23,6 +27,7 @@ function setLocationSearch(search: string) {
 describe('SignInPage', () => {
   beforeEach(() => {
     mockSignInWithPassword.mockResolvedValue({ error: null })
+    mockSignInWithOAuth.mockResolvedValue({ error: null })
     setLocationSearch('')
   })
 
@@ -92,6 +97,29 @@ describe('SignInPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/curator/founder-notes'))
+  })
+
+  it('renders a "Continue with Google" button that calls signInWithOAuth with the callback next param', async () => {
+    setLocationSearch('?next=%2Fcurator%2Ffounder-notes')
+    render(<SignInPage />)
+    const googleBtn = screen.getByRole('button', { name: /continue with google/i })
+    expect(googleBtn).toBeInTheDocument()
+    fireEvent.click(googleBtn)
+    await waitFor(() => expect(mockSignInWithOAuth).toHaveBeenCalled())
+    const call = mockSignInWithOAuth.mock.calls[0][0]
+    expect(call.provider).toBe('google')
+    expect(call.options.redirectTo).toContain('/auth/callback')
+    expect(call.options.redirectTo).toContain(
+      encodeURIComponent('/curator/founder-notes'),
+    )
+  })
+
+  it('Google sign-in falls back to /today as the post-auth next when ?next= is missing', async () => {
+    render(<SignInPage />)
+    fireEvent.click(screen.getByRole('button', { name: /continue with google/i }))
+    await waitFor(() => expect(mockSignInWithOAuth).toHaveBeenCalled())
+    const call = mockSignInWithOAuth.mock.calls[0][0]
+    expect(call.options.redirectTo).toContain(encodeURIComponent('/today'))
   })
 
   it('falls back to /today when ?next= is missing or unsafe', async () => {
