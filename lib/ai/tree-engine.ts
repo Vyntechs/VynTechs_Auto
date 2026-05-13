@@ -93,7 +93,7 @@ export async function generateInitialTree(
         system: cachedSystem(TREE_ENGINE_SYSTEM),
         messages: [{ role: 'user', content: userMessage }],
       },
-      { signal: AbortSignal.timeout(45_000) },
+      { signal: AbortSignal.timeout(45_000), maxRetries: 0 },
     )
     console.log(
       `generateInitialTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars)`,
@@ -233,7 +233,7 @@ Return JSON only — no prose, no fences.`
         system: cachedSystem(TREE_ENGINE_SYSTEM),
         messages: [{ role: 'user', content: userMessage }],
       },
-      { signal: AbortSignal.timeout(45_000) },
+      { signal: AbortSignal.timeout(45_000), maxRetries: 0 },
     )
     console.log(
       `updateTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars, ${input.currentTree.nodes.length} nodes)`,
