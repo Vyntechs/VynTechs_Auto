@@ -40,7 +40,7 @@ These rules govern every rewrite below.
 2. **Period-period rhythm, not em-dash drama.** Short declarative sentences, separated by periods. Em-dashes survive only when they serve grammar, not rhetoric.
 3. **No counted-list headlines.** "Five things this gets right" → "What's different." "Three things it can't" → "What it can't do." "Six common ones" → "The common ones." "Four moves, in order" → a descriptive headline.
 4. **No "X isn't just Y, it's Z" pivots, no "Picture this:" openers, no "Here's the thing," no three-fragment escalations.**
-5. **Founder voice in exactly one beat** — Section 9 (Improving) shifts to first-person "I" for the retraining claim. Every other section stays third-person about the product.
+5. **No founder voice.** The page stays third-person about the product everywhere. Section 9 (Improving) uses collective "we" for the hand-retraining beat — not "I." (An earlier draft used "I retrain it by hand" but landed as founder bragging; v3 drops it.)
 6. **Truth-flag rule.** No reference to "AllData," "iATN," "Mitchell," or any other licensed third-party data source as something the system pulls from. (The price comparison to AllData/Identifix in Pricing stays — that's competitive pricing, not a sourcing claim.)
 7. **The parts-counter test.** Read each sentence out loud. If a guy at the parts counter would say it, ship it. If he'd squint at it, rewrite it.
 
@@ -144,18 +144,18 @@ Bullet 1 fix is important: the page today claims the AI can't read photos, but t
 
 ### 5.10 Improving / credibility (`components/marketing/improving.tsx`)
 
-Repurposes the existing two-beat section. Section now answers "who's behind this" instead of restating "always improving."
+Repurposes the existing two-beat section. After two revision rounds with Brandon, the section drops both the "four techs" count (reads small, ages fast) and the first-person "I" (reads as founder bragging). Lands on the group-effort flywheel — the more it runs, the sharper it gets — with the hand-tuning beat preserved as collective "we."
 
 | Element | Today | Rewrite |
 |---|---|---|
-| Eyebrow | `Always improving` | `Who's behind it` |
-| H2 | `It gets sharper every week.` | `Built by a tech. Used by techs.` |
-| Beat 1 label | `The data deal` | `Built by a working tech` |
-| Beat 1 body | `Your sessions train the engine. Every diagnosis you run makes it smarter — for you and every tech using it. The more you help it, the better it gets. That's the trade.` | `Used by four every day. Three of them push it every shift, hunting the cases that break it.` |
+| Eyebrow | `Always improving` | `Always improving` (kept) |
+| H2 | `It gets sharper every week.` | `Sharper with every diagnostic.` |
+| Beat 1 label | `The data deal` | `Used by techs, made sharper by techs` |
+| Beat 1 body | `Your sessions train the engine. Every diagnosis you run makes it smarter — for you and every tech using it. The more you help it, the better it gets. That's the trade.` | `Every diagnostic teaches it. The more it runs, the better it gets.` |
 | Beat 2 label | `The velocity` | `Hand-tuned every week` |
-| Beat 2 body | `Some weeks 75 updates, some weeks 300, some weeks 1–2 — but it never stops getting smarter.` | `Every week, I retrain it by hand on what those cases taught us. Your sessions go into that pile too.` |
+| Beat 2 body | `Some weeks 75 updates, some weeks 300, some weeks 1–2 — but it never stops getting smarter.` | `Every week we retrain it on what the bay learned. Your sessions go into that pile too.` |
 
-The first-person "I" in Beat 2 is the only first-person shift on the page. It's a deliberate founder-voice beat for credibility.
+No first-person on the page. "We retrain it" in Beat 2 keeps the trust signal that real humans tune this weekly, without naming the founder.
 
 ### 5.11 Pricing (`components/marketing/pricing.tsx`)
 
