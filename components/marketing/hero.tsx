@@ -1,5 +1,6 @@
 import { PhoneFrame } from './phone-frame'
 import { ScreenPropose } from './screens'
+import { SCREENSHOTS } from './screenshots.config'
 
 export function Hero() {
   return (
@@ -15,7 +16,7 @@ export function Hero() {
             </p>
           </div>
           <div className="mk__hero__phone-wrap">
-            <PhoneFrame size="lg">
+            <PhoneFrame size="lg" image={SCREENSHOTS.heroPhone} priority>
               <ScreenPropose />
             </PhoneFrame>
           </div>
