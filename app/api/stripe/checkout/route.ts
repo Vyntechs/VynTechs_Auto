@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   }
 
   const origin = req.headers.get('origin') ?? new URL(req.url).origin
-  const priceId = process.env.STRIPE_PRICE_ID_TECH_MONTHLY ?? ''
+  const priceId = process.env.STRIPE_PRICE_ID ?? ''
 
   const result = await createCheckoutSessionForUser({
     db,
