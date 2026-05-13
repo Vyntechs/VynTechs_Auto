@@ -1,0 +1,1369 @@
+/* ============================================================
+   Vyntechs marketing / pricing landing page — component styles
+   Single page at vyntechs.dev. Sells the $100 / month individual
+   technician subscription end to end.
+
+   All tokens (--vt-*) come from app/globals.css. No imports
+   here — globals are loaded once via app/layout.tsx.
+
+   The page is canonical light/bone with ONE inverted section
+   (§04 "Product in motion") that flips to graphite-950.
+   ============================================================ */
+
+/* ===========================================================
+   PAGE SHELL
+   =========================================================== */
+
+.mk-page {
+  background: var(--vt-bg);
+  color: var(--vt-fg);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-16);
+  line-height: var(--vt-lh-normal);
+  letter-spacing: -0.005em;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "cv11";
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 23px,
+      oklch(40% 0.012 70 / 0.022) 23px 24px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 23px,
+      oklch(40% 0.012 70 / 0.022) 23px 24px
+    );
+}
+
+.mk-container {
+  max-width: var(--vt-content-max);
+  margin: 0 auto;
+  padding: 0 var(--vt-space-6);
+}
+@media (min-width: 768px) {
+  .mk-container { padding: 0 var(--vt-space-10); }
+}
+@media (min-width: 1280px) {
+  .mk-container { padding: 0 var(--vt-space-20); }
+}
+
+.mk__section {
+  padding-top: var(--vt-space-16);
+  padding-bottom: var(--vt-space-16);
+}
+@media (min-width: 1024px) {
+  .mk__section {
+    padding-top: var(--vt-space-20);
+    padding-bottom: var(--vt-space-20);
+  }
+}
+
+.mk__section + .mk__section:not(.mk__section--bleed) {
+  border-top: 0.5px solid var(--vt-rule);
+}
+
+/* ===========================================================
+   STICKY CTA — fixed top-right, persists across the whole page
+   =========================================================== */
+
+.mk__sticky {
+  position: fixed;
+  top: var(--vt-space-4);
+  right: var(--vt-space-4);
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vt-space-2);
+}
+@media (min-width: 768px) {
+  .mk__sticky {
+    top: var(--vt-space-6);
+    right: var(--vt-space-6);
+  }
+}
+
+.mk__sticky__brand {
+  display: none;
+  align-items: center;
+  gap: var(--vt-space-2);
+  padding: var(--vt-space-2) var(--vt-space-3);
+  background: var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-3);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-15);
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  text-decoration: none;
+  box-shadow: var(--vt-shadow-pop);
+}
+.mk__sticky__brand small {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  padding-left: var(--vt-space-2);
+  border-left: 0.5px solid var(--vt-rule);
+}
+@media (min-width: 768px) {
+  .mk__sticky__brand { display: inline-flex; }
+}
+
+.mk__sticky__login {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--vt-space-2) var(--vt-space-3);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  text-decoration: none;
+  transition: color var(--vt-dur-2) var(--vt-ease);
+}
+.mk__sticky__login:hover { color: var(--vt-fg); }
+@media (min-width: 768px) {
+  .mk__sticky__login { font-size: 12px; padding: var(--vt-space-2) var(--vt-space-4); }
+}
+
+.mk__sticky__cta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--vt-space-2);
+  padding: var(--vt-space-3) var(--vt-space-5);
+  background: var(--vt-accent);
+  color: var(--vt-graphite-50);
+  border: 0;
+  border-radius: var(--vt-radius-3);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-15);
+  letter-spacing: -0.012em;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: var(--vt-shadow-pop);
+  transition: background var(--vt-dur-2) var(--vt-ease),
+              transform var(--vt-dur-2) var(--vt-ease);
+}
+.mk__sticky__cta:hover { background: var(--vt-accent-hover); }
+.mk__sticky__cta:active {
+  background: var(--vt-accent-press);
+  transform: translateY(0.5px);
+}
+.mk__sticky__cta__price {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.85;
+  padding-left: var(--vt-space-2);
+  border-left: 0.5px solid oklch(98% 0.003 260 / 0.3);
+}
+@media (min-width: 768px) {
+  .mk__sticky__cta { font-size: var(--vt-fs-16); }
+}
+
+/* ===========================================================
+   PHONE DEVICE FRAME — reusable content element
+   =========================================================== */
+
+.mk__phone {
+  width: 320px;
+  max-width: 100%;
+  aspect-ratio: 393 / 852;
+  background: var(--vt-graphite-1000);
+  border-radius: 44px;
+  padding: 9px;
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / 0.10) inset,
+    0 30px 60px -20px oklch(28% 0.02 60 / 0.28),
+    0 8px 24px -8px oklch(28% 0.02 60 / 0.18);
+  position: relative;
+  flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  /* Phones get 280px so the device fits in the container with
+     breathing room even at iPhone-SE width. The lg/xl variants
+     defer to this on mobile — they only differ on tablet+. */
+  .mk__phone,
+  .mk__phone--lg,
+  .mk__phone--xl { width: 280px; }
+}
+.mk__phone__screen {
+  width: 100%;
+  height: 100%;
+  background: var(--vt-graphite-950);
+  border-radius: 36px;
+  overflow: hidden;
+  position: relative;
+}
+.mk__phone__notch {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 96px;
+  height: 26px;
+  background: var(--vt-graphite-1000);
+  border-radius: 0 0 14px 14px;
+  z-index: 2;
+}
+.mk__phone--lg { width: 360px; }
+.mk__phone--xl { width: 420px; }
+
+.mk__phone__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+}
+
+/* ===========================================================
+   PLACEHOLDER SCREEN — until Brandon supplies real PNGs
+   =========================================================== */
+
+.mk__screen--placeholder {
+  position: absolute;
+  inset: 0;
+  background: var(--vt-bone-50);
+  display: flex;
+  flex-direction: column;
+}
+.mk__screen-bar {
+  padding: 36px 16px 12px;
+  border-bottom: 0.5px solid var(--vt-rule);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.mk__screen-eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+}
+.mk__screen-title {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+}
+.mk__screen-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  overflow: hidden;
+}
+.mk__screen-card {
+  background: var(--vt-bone-100);
+  border: 0.5px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  padding: 12px 14px;
+}
+.mk__screen-card--accent {
+  border-color: var(--vt-amber-500);
+  background: oklch(80% 0.215 78 / 0.08);
+}
+.mk__screen-card--ready {
+  border-color: var(--vt-amber-500);
+  background: oklch(80% 0.215 78 / 0.10);
+}
+.mk__screen-card__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.mk__screen-card__eyebrow--accent { color: var(--vt-amber-500); }
+.mk__screen-card__h {
+  font-family: var(--vt-font-serif);
+  font-size: 14px;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  line-height: 1.25;
+}
+.mk__screen-card__sub {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 11.5px;
+  color: var(--vt-fg-3);
+  line-height: 1.3;
+  margin-top: 4px;
+}
+.mk__screen-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--vt-rule);
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.mk__screen-card__row b {
+  font-weight: 600;
+  color: var(--vt-amber-500);
+}
+.mk__screen-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-3);
+}
+.mk__screen-source::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vt-amber-500);
+  flex-shrink: 0;
+}
+.mk__screen-input {
+  padding: 8px 10px;
+  background: var(--vt-bone-100);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  font-family: var(--vt-font-serif);
+  font-size: 13px;
+  color: var(--vt-fg);
+  line-height: 1.3;
+}
+.mk__screen-confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+}
+.mk__screen-confidence__bar {
+  position: relative;
+  width: 56px;
+  height: 4px;
+  background: var(--vt-bone-200);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.mk__screen-confidence__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: var(--mk-conf, 78%);
+  background: var(--vt-amber-500);
+}
+
+/* ===========================================================
+   LAPTOP DEVICE FRAME — used in the "Also on the laptop" section
+   MacBook-style chrome: thin titlebar with three traffic-light
+   dots and a centered URL chip. The screen below holds either an
+   <Image> (when SCREENSHOTS.laptopHero is set) or a placeholder
+   mini app surface.
+   =========================================================== */
+
+.mk__laptop {
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 16 / 10;
+  background: oklch(94% 0.012 80);
+  border: 0.5px solid oklch(60% 0.02 70 / 0.4);
+  border-radius: 10px;
+  box-shadow:
+    0 1px 0 oklch(100% 0 0 / 0.6) inset,
+    0 40px 80px -30px oklch(28% 0.02 60 / 0.30),
+    0 14px 36px -12px oklch(28% 0.02 60 / 0.22);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 1280px) {
+  .mk__laptop { max-width: 960px; }
+}
+
+.mk__laptop__titlebar {
+  display: grid;
+  grid-template-columns: 80px 1fr 80px;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: oklch(92% 0.011 80);
+  border-bottom: 0.5px solid oklch(60% 0.02 70 / 0.4);
+  flex-shrink: 0;
+}
+.mk__laptop__lights {
+  display: flex;
+  gap: 8px;
+}
+.mk__laptop__light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.mk__laptop__l1 { background: #ff5f57; }
+.mk__laptop__l2 { background: #febc2e; }
+.mk__laptop__l3 { background: #28c840; }
+.mk__laptop__url {
+  text-align: center;
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: oklch(45% 0.012 60);
+}
+.mk__laptop__spacer {}
+
+.mk__laptop__screen {
+  position: relative;
+  flex: 1;
+  background: var(--vt-bone-50);
+  overflow: hidden;
+}
+.mk__laptop__img {
+  display: block;
+  object-fit: cover;
+}
+
+/* ===========================================================
+   ALSO ON THE LAPTOP — new section between Motion and HowItWorks
+   =========================================================== */
+
+.mk__on-laptop__head {
+  margin-bottom: var(--vt-space-10);
+  max-width: 32ch;
+}
+.mk__on-laptop__frame {
+  display: flex;
+  justify-content: center;
+}
+
+/* Placeholder mini-app surface inside the laptop frame.
+   Two-column rail+main layout that reads as the real
+   Vyntechs app shell. Replaced by an <Image> once the
+   real laptop screenshot lands in screenshots.config.ts. */
+.mk__laptop-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  background: var(--vt-bone-50);
+  font-family: var(--vt-font-serif);
+  color: var(--vt-fg);
+}
+.mk__laptop-placeholder__rail {
+  background: var(--vt-bone-100);
+  border-right: 0.5px solid var(--vt-rule);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mk__laptop-placeholder__brand {
+  font-family: var(--vt-font-serif);
+  font-size: 13px;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+}
+.mk__laptop-placeholder__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.mk__laptop-placeholder__nav span[data-active="true"] {
+  color: var(--vt-accent);
+  border-left: 1px solid var(--vt-accent);
+  padding-left: 8px;
+  margin-left: -8px;
+}
+.mk__laptop-placeholder__main {
+  padding: 12px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.mk__laptop-placeholder__topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+.mk__laptop-placeholder__crumbs {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--vt-fg-2);
+  text-transform: uppercase;
+}
+.mk__laptop-placeholder__status {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--vt-amber-500);
+  text-transform: uppercase;
+}
+.mk__laptop-placeholder__hero-card {
+  background: oklch(80% 0.215 78 / 0.08);
+  border: 0.5px solid var(--vt-amber-500);
+  border-radius: var(--vt-radius-2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mk__laptop-placeholder__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.mk__laptop-placeholder__hero-card .mk__laptop-placeholder__eyebrow {
+  color: var(--vt-amber-500);
+}
+.mk__laptop-placeholder__h {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  line-height: 1.25;
+}
+.mk__laptop-placeholder__sub {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--vt-fg-2);
+  margin: 2px 0 0;
+}
+.mk__laptop-placeholder__sub b {
+  font-style: normal;
+  font-family: var(--vt-font-mono);
+  color: var(--vt-amber-500);
+  font-weight: 600;
+}
+.mk__laptop-placeholder__row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.mk__laptop-placeholder__chip {
+  padding: 5px 9px;
+  background: var(--vt-accent);
+  color: var(--vt-graphite-50);
+  border-radius: var(--vt-radius-2);
+  font-family: var(--vt-font-serif);
+  font-size: 11px;
+  letter-spacing: -0.012em;
+}
+.mk__laptop-placeholder__chip--ghost {
+  background: transparent;
+  color: var(--vt-fg-2);
+  border: 0.5px solid var(--vt-rule-strong);
+}
+.mk__laptop-placeholder__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.mk__laptop-placeholder__minor {
+  background: var(--vt-bone-100);
+  border: 0.5px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.mk__laptop-placeholder__line {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-3);
+  position: relative;
+  padding-left: 10px;
+}
+.mk__laptop-placeholder__line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vt-amber-500);
+}
+.mk__laptop-placeholder__bars {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  align-items: end;
+  height: 36px;
+  margin-top: 4px;
+}
+.mk__laptop-placeholder__bars span {
+  background: var(--vt-amber-500);
+  border-radius: 1px;
+  height: var(--bar, 50%);
+  opacity: 0.85;
+}
+
+@media (max-width: 767px) {
+  /* The placeholder is a stand-in until the real laptop screenshot
+     lands. On a phone-width frame (~327px), the rail+main+grid
+     density doesn't fit. Hide the rail and collapse the grid so the
+     placeholder reads as "an app surface" without overflowing.
+     Once the real <Image> swaps in via SCREENSHOTS.laptopHero, the
+     frame just shows the screenshot — these mobile tweaks become
+     dead code that can be removed alongside the placeholder. */
+  .mk__laptop-placeholder { grid-template-columns: 1fr; }
+  .mk__laptop-placeholder__rail { display: none; }
+  .mk__laptop-placeholder__main { padding: 8px 10px; gap: 6px; }
+  .mk__laptop-placeholder__h { font-size: 12px; }
+  .mk__laptop-placeholder__sub { font-size: 9.5px; line-height: 1.3; }
+  .mk__laptop-placeholder__chip { font-size: 9px; padding: 3px 6px; }
+  .mk__laptop-placeholder__grid { grid-template-columns: 1fr; gap: 6px; }
+  .mk__laptop-placeholder__minor { padding: 6px 8px; gap: 3px; }
+  .mk__laptop-placeholder__line { font-size: 8.5px; }
+  .mk__laptop-placeholder__bars { height: 22px; }
+}
+
+/* ===========================================================
+   SECTION 1 · HERO
+   =========================================================== */
+
+.mk__hero {
+  padding-top: calc(var(--vt-space-20) + var(--vt-space-8));
+}
+@media (min-width: 1024px) {
+  .mk__hero {
+    padding-top: calc(var(--vt-space-20) + var(--vt-space-12));
+  }
+}
+.mk__hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--vt-space-12);
+  align-items: center;
+}
+@media (min-width: 1024px) {
+  .mk__hero__grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: var(--vt-space-16);
+  }
+}
+
+/* The headline and sub paragraph carry their own max-widths
+   based on their own font sizes (H1: 20ch @ 64px, sub: 30ch @ 32px).
+   Constraining the column with `ch` at body font (16px) here
+   would squish everything to ~110px — wrong reference frame. */
+.mk__hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-5);
+}
+
+.mk__hero__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vt-space-2);
+}
+.mk__hero__eyebrow::before {
+  content: "";
+  width: 14px;
+  height: 0.5px;
+  background: var(--vt-rule-strong);
+}
+
+.mk__hero__h {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-44), 7.5vw, var(--vt-fs-64));
+  line-height: var(--vt-lh-tight);
+  letter-spacing: var(--vt-tr-display);
+  font-weight: 400;
+  color: var(--vt-fg);
+  margin: 0;
+  max-width: 20ch;
+}
+
+.mk__hero__sub {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: clamp(var(--vt-fs-20), 2.6vw, var(--vt-fs-32));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.012em;
+  color: var(--vt-fg-2);
+  margin: 0;
+  max-width: 30ch;
+}
+
+.mk__hero__phone-wrap {
+  display: flex;
+  justify-content: center;
+}
+@media (min-width: 1024px) {
+  .mk__hero__phone-wrap { justify-content: flex-end; }
+  .mk__hero .mk__phone { width: 380px; }
+}
+
+/* ===========================================================
+   SECTION 2 · WHAT IT IS
+   =========================================================== */
+
+.mk__what { text-align: left; }
+.mk__what__p {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: clamp(var(--vt-fs-24), 3.4vw, var(--vt-fs-44));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.018em;
+  color: var(--vt-fg);
+  max-width: 22ch;
+  margin: 0;
+}
+
+/* ===========================================================
+   SECTION 3 · THE PROBLEM
+   =========================================================== */
+
+.mk__problem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-10);
+  max-width: 36ch;
+}
+@media (min-width: 1024px) {
+  .mk__problem {
+    flex-direction: row;
+    max-width: none;
+    gap: 0;
+  }
+  .mk__problem__beat {
+    flex: 1;
+    padding-right: var(--vt-space-12);
+  }
+  .mk__problem__beat + .mk__problem__beat {
+    padding-right: 0;
+    padding-left: var(--vt-space-12);
+    border-left: 0.5px solid var(--vt-rule);
+  }
+}
+.mk__problem__beat__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  margin-bottom: var(--vt-space-4);
+}
+.mk__problem__beat__h {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-24), 3vw, var(--vt-fs-32));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.015em;
+  color: var(--vt-fg);
+  margin: 0;
+  font-weight: 400;
+}
+
+/* ===========================================================
+   SECTION 4 · PRODUCT IN MOTION (scroll-pinned)
+   =========================================================== */
+
+.mk__motion {
+  background: var(--vt-graphite-950);
+  color: var(--vt-graphite-100);
+  background-image: none;
+  position: relative;
+}
+.mk__motion-track {
+  position: relative;
+  height: 500svh;
+}
+@media (max-width: 767px) {
+  .mk__motion-track { height: 600svh; }
+}
+
+.mk__motion-pin {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+@media (min-width: 1024px) {
+  .mk__motion-pin {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: 1fr auto;
+  }
+}
+
+.mk__motion-head {
+  position: absolute;
+  top: var(--vt-space-8);
+  left: 0;
+  right: 0;
+  text-align: center;
+  z-index: 2;
+  opacity: calc(1 - var(--mk-progress, 0) * 20);
+  transition: opacity var(--vt-dur-3) var(--vt-ease);
+  pointer-events: none;
+}
+.mk__motion__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--vt-graphite-500);
+}
+.mk__motion-scrollhint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vt-space-2);
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-graphite-500);
+  margin-top: var(--vt-space-2);
+}
+.mk__motion-scrollhint::after {
+  content: "";
+  width: 1px;
+  height: 20px;
+  background: var(--vt-graphite-700);
+  display: inline-block;
+}
+
+.mk__motion-copy {
+  position: relative;
+  padding: var(--vt-space-12) var(--vt-space-8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  grid-row: 2 / 3;
+  min-height: 0;
+}
+@media (min-width: 1024px) {
+  .mk__motion-copy {
+    grid-row: 1 / 3;
+    grid-column: 1 / 2;
+    padding: 0 var(--vt-space-16);
+  }
+}
+
+.mk__motion-step {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--vt-space-3);
+  padding: var(--vt-space-8);
+  opacity: 0;
+  transition: opacity var(--vt-dur-3) var(--vt-ease);
+  text-align: left;
+  max-width: 28ch;
+  margin: 0 auto;
+}
+@media (min-width: 1024px) {
+  .mk__motion-step {
+    padding: 0;
+    max-width: 32ch;
+  }
+}
+.mk__motion-step[data-active="true"] { opacity: 1; }
+
+.mk__motion-step__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--vt-amber-500);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vt-space-2);
+}
+.mk__motion-step__eyebrow b {
+  font-weight: 600;
+  font-family: var(--vt-font-mono);
+  color: var(--vt-amber-300);
+  letter-spacing: 0.06em;
+  padding-right: var(--vt-space-2);
+  border-right: 0.5px solid var(--vt-graphite-700);
+  margin-right: var(--vt-space-2);
+}
+.mk__motion-step__h {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-24), 3.6vw, var(--vt-fs-44));
+  line-height: var(--vt-lh-tight);
+  letter-spacing: -0.018em;
+  color: var(--vt-graphite-100);
+  margin: 0;
+  font-weight: 400;
+}
+.mk__motion-step__sub {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: clamp(var(--vt-fs-18), 2vw, var(--vt-fs-24));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.01em;
+  color: var(--vt-graphite-300);
+  margin: 0;
+  max-width: 30ch;
+}
+
+.mk__motion-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--vt-space-8) var(--vt-space-4);
+  grid-row: 1 / 2;
+  min-height: 0;
+}
+@media (min-width: 1024px) {
+  .mk__motion-screen {
+    grid-row: 1 / 3;
+    grid-column: 2 / 3;
+    padding: var(--vt-space-12);
+  }
+}
+.mk__motion-screen .mk__phone {
+  width: clamp(220px, 32vw, 380px);
+}
+@media (max-width: 767px) {
+  .mk__motion-screen .mk__phone { width: clamp(180px, 50vw, 240px); }
+}
+
+.mk__motion-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--vt-graphite-800);
+  z-index: 3;
+}
+.mk__motion-progress__fill {
+  height: 100%;
+  background: var(--vt-amber-500);
+  width: calc(var(--mk-progress, 0) * 100%);
+  transition: width var(--vt-dur-1) linear;
+}
+
+/* Reduced-motion: drop the scroll-pin entirely, stack steps. */
+@media (prefers-reduced-motion: reduce) {
+  .mk__motion-track { height: auto; }
+  .mk__motion-pin {
+    position: relative;
+    height: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    overflow: visible;
+  }
+  .mk__motion-copy {
+    grid-row: auto;
+    grid-column: auto;
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--vt-space-8) var(--vt-space-6);
+  }
+  .mk__motion-step {
+    position: relative;
+    inset: auto;
+    opacity: 1;
+    padding: var(--vt-space-6) 0;
+    border-top: 0.5px solid var(--vt-graphite-800);
+  }
+  .mk__motion-screen {
+    grid-row: auto;
+    grid-column: auto;
+    padding: var(--vt-space-8);
+  }
+  .mk__motion-head { display: none; }
+  .mk__motion-progress { display: none; }
+}
+
+/* ===========================================================
+   SECTIONS §05 / §06 / §07 — HOW / DIFFERENT / NOT YET
+   =========================================================== */
+
+.mk__how-head,
+.mk__diff-head,
+.mk__improving-head,
+.mk__faq-head {
+  margin-bottom: var(--vt-space-10);
+  max-width: 32ch;
+}
+.mk__h2 {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-32), 4vw, var(--vt-fs-44));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.02em;
+  color: var(--vt-fg);
+  font-weight: 400;
+  margin: 0 0 var(--vt-space-3);
+}
+.mk__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  display: inline-block;
+  margin-bottom: var(--vt-space-3);
+}
+
+.mk__how-list,
+.mk__diff-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border-top: 0.5px solid var(--vt-rule);
+}
+@media (min-width: 1024px) {
+  .mk__how-list,
+  .mk__diff-list {
+    grid-template-columns: 1fr 1fr;
+    border-top: 0;
+  }
+}
+
+.mk__how-row,
+.mk__diff-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  align-items: baseline;
+  gap: var(--vt-space-5);
+  padding: var(--vt-space-6) 0;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+@media (min-width: 1024px) {
+  .mk__how-row,
+  .mk__diff-row {
+    padding: var(--vt-space-8) var(--vt-space-8) var(--vt-space-8) 0;
+    border-top: 0.5px solid var(--vt-rule);
+    border-bottom: 0;
+  }
+  .mk__how-row:nth-child(odd),
+  .mk__diff-row:nth-child(odd) {
+    padding-right: var(--vt-space-12);
+    border-right: 0.5px solid var(--vt-rule);
+  }
+  .mk__how-row:nth-child(even),
+  .mk__diff-row:nth-child(even) {
+    padding-left: var(--vt-space-12);
+  }
+}
+
+.mk__num {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--vt-fg-3);
+  font-variant-numeric: tabular-nums;
+}
+.mk__how-row__body,
+.mk__diff-row__body {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-18), 1.7vw, var(--vt-fs-24));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+}
+
+.mk__not-yet .mk__num { color: var(--vt-fg-3); }
+.mk__not-yet .mk__num::before {
+  content: "—";
+  margin-right: var(--vt-space-1);
+}
+
+/* ===========================================================
+   SECTION §08 — ALWAYS IMPROVING
+   =========================================================== */
+
+.mk__improving__beats {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--vt-space-10);
+}
+@media (min-width: 1024px) {
+  .mk__improving__beats {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--vt-space-12);
+  }
+}
+
+.mk__improving__beat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-4);
+}
+.mk__improving__beat__label {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-amber-500);
+}
+.mk__improving__beat__body {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-20), 2.2vw, var(--vt-fs-32));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.015em;
+  color: var(--vt-fg);
+  margin: 0;
+}
+.mk__improving__beat--deal .mk__improving__beat__body {
+  font-style: italic;
+  border-left: 2px solid var(--vt-amber-500);
+  padding-left: var(--vt-space-5);
+}
+
+/* ===========================================================
+   SECTION §09 — PRICING
+   =========================================================== */
+
+.mk__pricing { display: flex; justify-content: center; }
+.mk__pricing__card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--vt-surface);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-4);
+  padding: var(--vt-space-12) var(--vt-space-10);
+  text-align: center;
+  box-shadow: var(--vt-shadow-pop);
+}
+.mk__pricing__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  margin-bottom: var(--vt-space-4);
+}
+.mk__pricing__price {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-64);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--vt-fg);
+  line-height: 1;
+  margin: 0;
+}
+.mk__pricing__period {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-14);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  margin-top: var(--vt-space-2);
+}
+.mk__pricing__terms {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: var(--vt-fs-20);
+  letter-spacing: -0.01em;
+  color: var(--vt-fg-2);
+  margin: var(--vt-space-6) 0 var(--vt-space-5);
+}
+.mk__pricing__comp {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: var(--vt-fs-15);
+  letter-spacing: -0.005em;
+  color: var(--vt-fg-3);
+  margin: 0 0 var(--vt-space-8);
+  line-height: var(--vt-lh-snug);
+}
+.mk__pricing__btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--vt-space-3);
+  padding: var(--vt-space-4) var(--vt-space-8);
+  background: var(--vt-accent);
+  color: var(--vt-graphite-50);
+  border: 0;
+  border-radius: var(--vt-radius-3);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+  letter-spacing: -0.012em;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: var(--vt-shadow-pop);
+  transition: background var(--vt-dur-2) var(--vt-ease);
+}
+.mk__pricing__btn:hover { background: var(--vt-accent-hover); }
+.mk__pricing__btn:active { background: var(--vt-accent-press); }
+.mk__pricing__btn__price {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-13);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.85;
+  padding-left: var(--vt-space-3);
+  border-left: 0.5px solid oklch(98% 0.003 260 / 0.3);
+}
+
+/* ===========================================================
+   SECTION §10 — FAQ
+   =========================================================== */
+
+.mk__faq {
+  display: flex;
+  flex-direction: column;
+  border-top: 0.5px solid var(--vt-rule);
+}
+.mk__faq__item { border-bottom: 0.5px solid var(--vt-rule); }
+.mk__faq__q {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--vt-space-6);
+  padding: var(--vt-space-6) 0;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-18), 1.8vw, var(--vt-fs-24));
+  line-height: var(--vt-lh-snug);
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  transition: color var(--vt-dur-2) var(--vt-ease);
+}
+.mk__faq__q:hover { color: var(--vt-accent); }
+.mk__faq__glyph {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  flex-shrink: 0;
+  transition: transform var(--vt-dur-2) var(--vt-ease);
+  color: var(--vt-fg-3);
+}
+.mk__faq__glyph::before,
+.mk__faq__glyph::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+}
+.mk__faq__glyph::before {
+  top: 50%; left: 0; right: 0; height: 1px;
+  transform: translateY(-50%);
+}
+.mk__faq__glyph::after {
+  left: 50%; top: 0; bottom: 0; width: 1px;
+  transform: translateX(-50%);
+  transition: transform var(--vt-dur-2) var(--vt-ease);
+}
+.mk__faq__item[data-open="true"] .mk__faq__glyph::after {
+  transform: translateX(-50%) scaleY(0);
+}
+.mk__faq__item[data-open="true"] .mk__faq__q { color: var(--vt-accent); }
+
+.mk__faq__a {
+  display: none;
+  padding: 0 var(--vt-space-12) var(--vt-space-6) 0;
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: clamp(var(--vt-fs-15), 1.3vw, var(--vt-fs-18));
+  line-height: var(--vt-lh-normal);
+  letter-spacing: -0.005em;
+  color: var(--vt-fg-2);
+  max-width: 60ch;
+}
+.mk__faq__item[data-open="true"] .mk__faq__a { display: block; }
+
+/* ===========================================================
+   SECTION §11 — FINAL CTA
+   =========================================================== */
+
+.mk__final {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--vt-space-8);
+}
+.mk__final__h {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: clamp(var(--vt-fs-32), 5vw, var(--vt-fs-64));
+  line-height: var(--vt-lh-tight);
+  letter-spacing: -0.022em;
+  color: var(--vt-fg);
+  margin: 0;
+  max-width: 18ch;
+  font-weight: 400;
+}
+.mk__final__terms {
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.mk__final__legal {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: var(--vt-fs-13);
+  color: var(--vt-fg-3);
+  margin-top: var(--vt-space-8);
+  max-width: 50ch;
+  line-height: var(--vt-lh-normal);
+}
