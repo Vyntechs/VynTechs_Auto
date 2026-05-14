@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import {
   Pill,
@@ -12,6 +12,17 @@ import {
   DtcChip,
   HairlineProgress,
 } from '@/components/vt'
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/today',
+}))
+
+vi.mock('@/lib/supabase-client', () => ({
+  getBrowserSupabase: () => ({
+    auth: { signOut: vi.fn().mockResolvedValue({ error: null }) },
+  }),
+}))
 
 describe('Pill', () => {
   it('applies kind class and renders children', () => {
