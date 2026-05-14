@@ -24,6 +24,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata = {
   title: 'Vyntechs',
   description: 'AI-led diagnostic assistant for automotive repair shops.',
+  appleWebApp: {
+    capable: true,
+    title: 'Vyntechs',
+    statusBarStyle: 'default' as const,
+  },
 }
 
 export const viewport = {

@@ -66,6 +66,28 @@
 }
 
 /* ===========================================================
+   BRAND MARK — fixed top-left, visible on every screen size.
+   The standalone V° lives here on every marketing page so the
+   brand is present even when the right-side CTA chip is hidden.
+   =========================================================== */
+
+.mk__brand-mark {
+  position: fixed;
+  top: var(--vt-space-4);
+  left: var(--vt-space-4);
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+@media (min-width: 768px) {
+  .mk__brand-mark {
+    top: var(--vt-space-6);
+    left: var(--vt-space-6);
+  }
+}
+
+/* ===========================================================
    STICKY CTA — fixed top-right, persists across the whole page
    =========================================================== */
 
