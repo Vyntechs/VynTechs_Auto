@@ -30,21 +30,21 @@ export function AppHeader({
             priority
           />
         </Link>
-        <div>
-          {back && (
-            <Link
-              href={back.href}
-              className="app-header__back"
-              aria-label={`Back to ${back.label}`}
-            >
-              ← {back.label}
-            </Link>
-          )}
+        {back && (
+          <Link
+            href={back.href}
+            className="app-header__back"
+            aria-label={`Back to ${back.label}`}
+          >
+            ← {back.label}
+          </Link>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ textAlign: 'right' }}>
           <div className="title">{title}</div>
           {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}
         </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <WhatsNewBadge />
         {right}
       </div>

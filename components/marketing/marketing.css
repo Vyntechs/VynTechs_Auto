@@ -76,14 +76,27 @@
   top: var(--vt-space-4);
   left: var(--vt-space-4);
   z-index: 100;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  gap: 2px;
   text-decoration: none;
+}
+.mk__brand-mark__word {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
 }
 @media (min-width: 768px) {
   .mk__brand-mark {
     top: var(--vt-space-6);
     left: var(--vt-space-6);
+  }
+  .mk__brand-mark__word {
+    font-size: 14px;
   }
 }
 
