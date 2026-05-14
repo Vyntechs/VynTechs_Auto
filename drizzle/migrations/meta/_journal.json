@@ -127,6 +127,13 @@
       "when": 1778544000002,
       "tag": "0015_whats_new",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778544000003,
+      "tag": "0016_comp_db_custom_offroad",
+      "breakpoints": true
     }
   ]
 }
