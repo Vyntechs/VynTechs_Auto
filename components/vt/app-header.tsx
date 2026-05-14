@@ -23,10 +23,10 @@ export function AppHeader({
           style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
         >
           <Image
-            src="/icons/icon-512.png"
-            alt=""
-            width={24}
-            height={24}
+            src="/brand/lockup.png"
+            alt="Vyntechs"
+            width={57}
+            height={48}
             priority
           />
         </Link>
