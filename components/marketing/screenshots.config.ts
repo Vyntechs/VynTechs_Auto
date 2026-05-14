@@ -47,24 +47,36 @@ export type ScreenshotsConfig = {
 }
 
 export const SCREENSHOTS: ScreenshotsConfig = {
-  heroPhone: null,
-  // heroPhone: {
-  //   src: '/marketing/screenshots/hero.png',
-  //   alt: 'Active diagnostic session — Propose view with branches and confidence',
-  // },
+  heroPhone: {
+    src: '/marketing/screenshots/hero.png',
+    alt: 'Active diagnostic session — Step 01 with reasoning, 97% confidence, and a 14-step plan on a 2015 Ford F-150 cylinder 4 misfire',
+  },
 
-  motionPhone: [null, null, null, null, null],
-  // motionPhone: [
-  //   { src: '/marketing/screenshots/motion-01-open.png',     alt: 'Empty intake screen with vehicle field focused' },
-  //   { src: '/marketing/screenshots/motion-02-research.png', alt: 'Research panel with TSBs, forum threads, and uploaded wiring photos' },
-  //   { src: '/marketing/screenshots/motion-03-propose.png',  alt: 'Branch card with reasoning and confidence bar' },
-  //   { src: '/marketing/screenshots/motion-04-confirm.png',  alt: 'Free-text confirm box and updated branch with raised confidence' },
-  //   { src: '/marketing/screenshots/motion-05-lock.png',     alt: 'Locked diagnosis card with Phase 02 repair preview' },
-  // ],
+  motionPhone: [
+    {
+      src: '/marketing/screenshots/motion-01-open.png',
+      alt: 'Intake form with the vehicle and customer complaint typed in plain text',
+    },
+    {
+      src: '/marketing/screenshots/motion-02-research.png',
+      alt: 'AI putting together the diagnostic plan — pulling reference info for the exact car',
+    },
+    {
+      src: '/marketing/screenshots/motion-03-propose.png',
+      alt: 'Active step with reasoning, confidence bar, and the 14-step plan preview',
+    },
+    {
+      src: '/marketing/screenshots/motion-04-confirm.png',
+      alt: 'Tree updated after the tech logged an observation — Step 02 active, plan refined to 12 steps, honest gap disclosure visible',
+    },
+    {
+      src: '/marketing/screenshots/motion-05-lock.png',
+      alt: 'Locked case summary showing root cause, repair done, verification, and notes for next time',
+    },
+  ],
 
-  laptopHero: null,
-  // laptopHero: {
-  //   src: '/marketing/screenshots/laptop-hero.png',
-  //   alt: 'Vyntechs locked-diagnosis view on a laptop',
-  // },
+  laptopHero: {
+    src: '/marketing/screenshots/laptop-hero.png',
+    alt: 'Locked diagnosis view on a laptop — same diagnostic surface, bigger screen',
+  },
 }
