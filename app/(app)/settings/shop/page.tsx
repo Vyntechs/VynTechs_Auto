@@ -15,16 +15,9 @@ export default async function SettingsShopPage() {
 
   return (
     <Module label="Shop">
-      <div
-        style={{
-          padding: 14,
-          color: 'var(--vt-fg-2)',
-          fontSize: 14,
-          lineHeight: 1.5,
-        }}
-      >
+      <p className="vt-settings-coming-soon">
         Coming soon — Shop settings land in PR 5.
-      </div>
+      </p>
     </Module>
   )
 }
