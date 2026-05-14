@@ -27,7 +27,7 @@ export async function requireCurator(): Promise<
     .where(eq(profiles.userId, user.id))
     .limit(1)
 
-  if (!profile || !canCurate(profile.role)) {
+  if (!profile || !canCurate(profile.role, user.email ?? null)) {
     return {
       kind: 'forbidden',
       response: NextResponse.json({ error: 'forbidden' }, { status: 403 }),

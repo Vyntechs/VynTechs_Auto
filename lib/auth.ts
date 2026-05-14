@@ -39,20 +39,35 @@ export async function requireUserAndProfile(opts: {
 }
 
 /**
- * Founder gate. The founder is a single hardcoded user (the shop owner)
- * identified by FOUNDER_EMAIL — their Supabase auth email. Used to gate
- * the founder-notes ingestion path: only the founder can submit free-form
- * knowledge into the queue. Curators (general role) can still review the
- * queue, but only the founder authors entries.
+ * Founder gate. Founders are a small set of hardcoded users (typically the
+ * shop owner and any co-founders) identified by FOUNDER_EMAILS — a
+ * comma-separated list of their Supabase auth emails. Used to gate the
+ * founder-notes ingestion path AND the curator (super-admin) gate: only
+ * founders author notes and only founders pass canCurate via the email path.
+ *
+ * Backward compatibility: if FOUNDER_EMAILS is unset, falls back to the
+ * legacy single-value FOUNDER_EMAIL env var so a transition can be made
+ * without locking anyone out.
  *
  * Email is compared case-insensitively — Supabase normalizes user emails
  * to lowercase on signup, but we lowercase both sides to be safe against
- * mixed-case env-var values. Returns false when the env var is unset so
- * the gate stays closed in any environment where it hasn't been
- * deliberately configured.
+ * mixed-case env-var values. Empty entries are ignored. Returns false when
+ * no env var is set so the gate stays closed in any environment where it
+ * hasn't been deliberately configured.
  */
 export function isFounder(email: string | null | undefined): boolean {
-  const founderEmail = process.env.FOUNDER_EMAIL
-  if (!founderEmail || !email) return false
-  return email.toLowerCase().trim() === founderEmail.toLowerCase().trim()
+  if (!email) return false
+  // Prefer the plural list, but only when it has content — an explicit
+  // empty string should fall through to the singular legacy var, not block it.
+  const raw =
+    process.env.FOUNDER_EMAILS?.trim() ||
+    process.env.FOUNDER_EMAIL?.trim() ||
+    ''
+  const needle = email.toLowerCase().trim()
+  if (!needle) return false
+  for (const entry of raw.split(',')) {
+    const candidate = entry.toLowerCase().trim()
+    if (candidate && candidate === needle) return true
+  }
+  return false
 }

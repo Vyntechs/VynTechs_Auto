@@ -21,7 +21,7 @@ export default async function CuratorLayout({
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
-  if (!canCurate(profile?.role)) redirect('/')
+  if (!canCurate(profile?.role, user.email ?? null)) redirect('/')
 
   return (
     <div className="vt-curator-shell">

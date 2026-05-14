@@ -48,7 +48,12 @@ export async function middleware(req: NextRequest) {
 
   // Curator role-gate (Phase P) — runs for any /curator/* request.
   if (isCurator) {
-    const result = await guardCuratorRoute(db, user?.id ?? null, pathname)
+    const result = await guardCuratorRoute(
+      db,
+      user?.id ?? null,
+      user?.email ?? null,
+      pathname,
+    )
     if (result.kind === 'redirect') {
       return NextResponse.redirect(new URL(result.to, req.url))
     }
