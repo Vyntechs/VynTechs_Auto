@@ -1,6 +1,7 @@
 import Link from 'next/link'
+import Image from 'next/image'
 
-/* Auth shell — bone canvas, hairline header with the wordmark + a
+/* Auth shell — bone canvas, hairline header with the V° mark + a
    "back to home" affordance. Centered max-width column for the form. */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,21 +17,27 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         style={{
           padding: '20px 24px',
           display: 'flex',
-          alignItems: 'baseline',
+          alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '0.5px solid var(--vt-rule)',
         }}
       >
         <Link
           href="/"
-          className="eyebrow"
+          aria-label="Vyntechs home"
           style={{
-            color: 'var(--vt-fg-2)',
-            letterSpacing: '0.18em',
+            display: 'inline-flex',
+            alignItems: 'center',
             textDecoration: 'none',
           }}
         >
-          Vyntechs
+          <Image
+            src="/icons/icon-512.png"
+            alt="Vyntechs"
+            width={28}
+            height={28}
+            priority
+          />
         </Link>
         <Link
           href="/"
