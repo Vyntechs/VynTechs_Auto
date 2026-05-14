@@ -1,7 +1,7 @@
 // Vyntechs PWA service worker
 // App-shell cache + network-passthrough for API and Next.js dynamic chunks.
 
-const CACHE = 'vyntechs-shell-v1'
+const CACHE = 'vyntechs-shell-v2'
 const SHELL = ['/']
 
 self.addEventListener('install', (event) => {
