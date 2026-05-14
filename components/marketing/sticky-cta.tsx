@@ -1,3 +1,5 @@
+import Image from 'next/image'
+
 type StickyCTAProps = {
   isSignedIn: boolean
 }
@@ -6,7 +8,16 @@ export function StickyCTA({ isSignedIn }: StickyCTAProps) {
   return (
     <div className="mk__sticky">
       <a className="mk__sticky__brand" href="/">
-        Vyntechs <small>AI master tech</small>
+        <Image
+          src="/icons/icon-512.png"
+          alt=""
+          width={24}
+          height={24}
+          priority
+        />
+        <span>
+          Vyntechs <small>AI master tech</small>
+        </span>
       </a>
       {isSignedIn ? (
         <a className="mk__sticky__cta mk__sticky__cta--app" href="/today">
