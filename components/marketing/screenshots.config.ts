@@ -56,7 +56,7 @@ export const SCREENSHOTS: ScreenshotsConfig = {
   motionPhone: [null, null, null, null, null],
   // motionPhone: [
   //   { src: '/marketing/screenshots/motion-01-open.png',     alt: 'Empty intake screen with vehicle field focused' },
-  //   { src: '/marketing/screenshots/motion-02-research.png', alt: 'Research panel with TSB, AllData, forum, iATN sources' },
+  //   { src: '/marketing/screenshots/motion-02-research.png', alt: 'Research panel with TSBs, forum threads, and uploaded wiring photos' },
   //   { src: '/marketing/screenshots/motion-03-propose.png',  alt: 'Branch card with reasoning and confidence bar' },
   //   { src: '/marketing/screenshots/motion-04-confirm.png',  alt: 'Free-text confirm box and updated branch with raised confidence' },
   //   { src: '/marketing/screenshots/motion-05-lock.png',     alt: 'Locked diagnosis card with Phase 02 repair preview' },

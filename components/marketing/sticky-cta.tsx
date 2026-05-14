@@ -6,7 +6,7 @@ export function StickyCTA({ isSignedIn }: StickyCTAProps) {
   return (
     <div className="mk__sticky">
       <a className="mk__sticky__brand" href="/">
-        Vyntechs <small>Diagnostic Co-Pilot</small>
+        Vyntechs <small>AI master tech</small>
       </a>
       {isSignedIn ? (
         <a className="mk__sticky__cta mk__sticky__cta--app" href="/today">

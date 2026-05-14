@@ -3,9 +3,12 @@ export function WhatItIs() {
     <section className="mk__section mk__what">
       <div className="mk-container">
         <p className="mk__what__p">
-          Vyntechs is an AI co-pilot that diagnoses with you, not for you.
-          Every step cites the evidence it&apos;s reasoning from. When it
-          doesn&apos;t know, it says so.
+          Proprietary diagnostic reasoning.
+          <br />
+          Tells you what to check next. Locks the diagnosis when it&apos;s
+          sure. Coaches the fix.
+          <br />
+          Won&apos;t turn the wrench. Will teach you the way through.
         </p>
       </div>
     </section>

@@ -63,12 +63,12 @@ export function ScreenResearch() {
           Ford TSB 21-2156 · cyl 4 misfire after hot soak
         </div>
         <div className="mk__screen-source">
-          AllData wiring · cyl 4 injector harness
+          Wiring photo · uploaded · cyl 4 pinout
         </div>
         <div className="mk__screen-source">
           F150forum · 23 threads · resolved
         </div>
-        <div className="mk__screen-source">iATN case · 2022 · same symptom</div>
+        <div className="mk__screen-source">Open web · cyl 4 misfire after hot soak</div>
         <div style={{ flex: 1 }} />
         <div className="mk__screen-card">
           <div className="mk__screen-card__eyebrow">Coverage</div>

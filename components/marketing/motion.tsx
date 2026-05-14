@@ -9,32 +9,32 @@ const STEPS = [
   {
     n: '01',
     eyebrow: 'Open',
-    h: 'Start with the vehicle and what’s wrong.',
-    sub: 'No drop-downs. No checklists. Plain words.',
+    h: 'Start with the car and what’s wrong.',
+    sub: 'Type what the customer told you. That’s it.',
   },
   {
     n: '02',
     eyebrow: 'Research',
-    h: 'It studies the exact car you’re working on.',
-    sub: 'Pulls service info, TSBs, forum reports — for this VIN. Cites every source.',
+    h: 'It researches the exact car you’re on.',
+    sub: 'Reads forums, TSBs, the open web. For the car in your bay. Shows you every source.',
   },
   {
     n: '03',
     eyebrow: 'Propose',
-    h: 'It asks what to check, and tells you why.',
-    sub: 'Each branch shows the reasoning, the calibrated confidence, and the citations behind it.',
+    h: 'It tells you what to check, and why.',
+    sub: 'Every step shows the reasoning, how sure it is, and what it read.',
   },
   {
     n: '04',
     eyebrow: 'Confirm',
-    h: 'You confirm in your own words.',
-    sub: 'Type what you saw at the harness, the connector, the smell. It updates everything downstream.',
+    h: 'You tell it what you found.',
+    sub: 'Type what you saw at the harness, the connector, the smell. The whole plan updates.',
   },
   {
     n: '05',
     eyebrow: 'Lock',
     h: 'Diagnosis locks. Repair coaching opens.',
-    sub: 'Two phases. It doesn’t conflate finding the problem with fixing it.',
+    sub: 'Two jobs, kept separate. Find the problem first. Fix it second.',
   },
 ] as const
 
