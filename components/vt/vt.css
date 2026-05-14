@@ -69,10 +69,140 @@
   letter-spacing: 0.04em;
   margin-bottom: 4px;
   padding: 2px 0;
+  white-space: nowrap;
 }
 .app-header__back:hover {
   color: var(--vt-fg-1);
   text-decoration: underline;
+}
+@media (max-width: 480px) {
+  .app-header__lockup img {
+    width: 40px;
+    height: auto;
+  }
+  .app-header__back-label {
+    /* Hide back-button text on small mobile to keep header on one row.
+       Hamburger menu provides the primary navigation; back arrow remains
+       visible as a contextual hint. */
+    display: none;
+  }
+}
+
+/* ====== App header — left cluster (menu + brand + back) ====== */
+.app-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+.app-header__lockup {
+  display: inline-flex;
+  align-items: center;
+}
+.app-header__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header__shop-name {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  max-width: 30vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -4px;
+}
+@media (max-width: 480px) {
+  .app-header__shop-name {
+    display: none;
+  }
+}
+
+/* ====== Hamburger menu (slide-down anchored to header) ====== */
+.app-header__menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.app-header__menu-trigger {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vt-fg);
+  cursor: pointer;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--vt-radius-2);
+  margin-left: -10px; /* hug viewport edge for thumb reach */
+}
+.app-header__menu-trigger:hover {
+  background: var(--vt-surface-2);
+}
+.app-header__menu-trigger:focus-visible {
+  outline: 2px solid var(--vt-fg);
+  outline-offset: 2px;
+}
+.app-header__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-3);
+  box-shadow: var(--vt-shadow-sheet);
+  min-width: 220px;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+.app-header__menu-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  min-height: 44px;
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  color: var(--vt-fg);
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.app-header__menu-item:hover {
+  background: var(--vt-surface-2);
+}
+.app-header__menu-item:focus-visible {
+  outline: 2px solid var(--vt-fg);
+  outline-offset: -2px;
+}
+.app-header__menu-item--button {
+  font-family: var(--vt-font-serif);
+  border-top: 1px solid var(--vt-rule);
+  margin-top: 4px;
+  padding-top: 14px;
+  color: var(--vt-fg-2);
+}
+.app-header__menu-item--button:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* ====== Eyebrow ====== */
