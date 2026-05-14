@@ -9,13 +9,12 @@ export function StickyCTA({ isSignedIn }: StickyCTAProps) {
     <>
       <a className="mk__brand-mark" href="/" aria-label="Vyntechs home">
         <Image
-          src="/icons/icon-512.png"
-          alt=""
-          width={36}
-          height={36}
+          src="/brand/lockup.png"
+          alt="Vyntechs"
+          width={80}
+          height={67}
           priority
         />
-        <span className="mk__brand-mark__word">Vyntechs</span>
       </a>
       <div className="mk__sticky">
         <a className="mk__sticky__brand" href="/">
