@@ -40,6 +40,26 @@
   text-transform: uppercase;
   margin-top: 4px;
 }
+/* Mobile: tighten title and force meta truncation so a long vehicle/customer
+   description doesn't blow out the right side of the header next to the
+   lockup. */
+@media (max-width: 767px) {
+  .app-header .title {
+    font-size: 18px;
+    max-width: 60vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-header .meta {
+    font-size: 9px;
+    max-width: 60vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+}
 .app-header__back {
   display: inline-block;
   font-family: var(--vt-font-mono);
