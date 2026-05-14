@@ -41,68 +41,71 @@ export function TodayHome({
 
   return (
     <main className="app">
-      <AppHeader
-        title="My Jobs"
-        meta={meta}
-        right={
-          <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-            {canCurate && (
-              <Link
-                href="/curator"
-                aria-label="Reviewer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '6px 12px',
-                  fontSize: 13,
-                  textDecoration: 'none',
-                  color: 'var(--vt-fg-2)',
-                  fontFamily: 'var(--vt-font-mono)',
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                Reviewer →
-              </Link>
-            )}
-            {canWriteCounterOrder && (
-              <Link
-                href="/intake"
-                aria-label="New work order"
-                className="btn btn-primary"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '6px 12px',
-                  fontSize: 13,
-                  textDecoration: 'none',
-                }}
-              >
-                <Plus size={14} weight="bold" aria-hidden="true" />
-                New work order
-              </Link>
-            )}
-            <Link
-              href="/sessions/new"
-              aria-label="New diagnosis"
-              className="btn btn-primary"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 12px',
-                fontSize: 13,
-                textDecoration: 'none',
-              }}
-            >
-              <Plus size={14} weight="bold" aria-hidden="true" />
-              New diagnosis
-            </Link>
-          </div>
-        }
-      />
+      <AppHeader title="My Jobs" meta={meta} />
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          padding: '12px 14px 0',
+        }}
+      >
+        {canCurate && (
+          <Link
+            href="/curator"
+            aria-label="Reviewer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              fontSize: 13,
+              textDecoration: 'none',
+              color: 'var(--vt-fg-2)',
+              fontFamily: 'var(--vt-font-mono)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Reviewer →
+          </Link>
+        )}
+        {canWriteCounterOrder && (
+          <Link
+            href="/intake"
+            aria-label="New work order"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              fontSize: 13,
+              textDecoration: 'none',
+            }}
+          >
+            <Plus size={14} weight="bold" aria-hidden="true" />
+            New work order
+          </Link>
+        )}
+        <Link
+          href="/sessions/new"
+          aria-label="New diagnosis"
+          className="btn btn-primary"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            fontSize: 13,
+            textDecoration: 'none',
+          }}
+        >
+          <Plus size={14} weight="bold" aria-hidden="true" />
+          New diagnosis
+        </Link>
+      </div>
       <div
         style={{
           padding: '14px',

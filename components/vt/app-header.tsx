@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { WhatsNewBadge } from './whats-new-badge'
+import { SignOutButton } from './sign-out-button'
 
 export function AppHeader({
   title,
@@ -15,7 +17,20 @@ export function AppHeader({
 }) {
   return (
     <header className="app-header">
-      <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Link
+          href="/today"
+          aria-label="Vyntechs home"
+          style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
+        >
+          <Image
+            src="/brand/lockup.png"
+            alt="Vyntechs"
+            width={57}
+            height={48}
+            priority
+          />
+        </Link>
         {back && (
           <Link
             href={back.href}
@@ -25,11 +40,14 @@ export function AppHeader({
             ← {back.label}
           </Link>
         )}
-        <div className="title">{title}</div>
-        {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ textAlign: 'right' }}>
+          <div className="title">{title}</div>
+          {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}
+        </div>
         <WhatsNewBadge />
+        <SignOutButton />
         {right}
       </div>
     </header>

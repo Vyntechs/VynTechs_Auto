@@ -1,7 +1,12 @@
 // Vyntechs PWA service worker
-// App-shell cache + network-passthrough for API and Next.js dynamic chunks.
+// Strategy:
+//   - HTML / page navigations: network-first (so new deployments are seen
+//     automatically on the next refresh). Falls back to cache if offline.
+//   - Static assets: cache-first (Next.js fingerprints filenames, so the
+//     cache identifier is implicitly per-version).
+//   - API + /_next: pass through to network, never intercepted.
 
-const CACHE = 'vyntechs-shell-v1'
+const CACHE = 'vyntechs-shell-v3'
 const SHELL = ['/']
 
 self.addEventListener('install', (event) => {
@@ -28,7 +33,29 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Cache-first for the static shell.
+  // Network-first for HTML navigation requests so new deploys land immediately.
+  // Fall back to cache for offline use.
+  const isNavigate =
+    event.request.mode === 'navigate' || event.request.destination === 'document'
+
+  if (isNavigate) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone()
+          caches.open(CACHE).then((cache) => cache.put(event.request, clone))
+          return response
+        })
+        .catch(() =>
+          caches
+            .match(event.request)
+            .then((cached) => cached ?? caches.match('/')),
+        ),
+    )
+    return
+  }
+
+  // Cache-first for static assets (images, fonts, anything else).
   event.respondWith(
     caches.match(event.request).then((cached) => cached ?? fetch(event.request)),
   )
