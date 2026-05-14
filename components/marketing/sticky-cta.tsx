@@ -15,6 +15,7 @@ export function StickyCTA({ isSignedIn }: StickyCTAProps) {
           height={36}
           priority
         />
+        <span className="mk__brand-mark__word">Vyntechs</span>
       </a>
       <div className="mk__sticky">
         <a className="mk__sticky__brand" href="/">
