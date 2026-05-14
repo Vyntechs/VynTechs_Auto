@@ -1,8 +1,8 @@
 const HOW = [
-  'You describe the vehicle and the symptom in plain text.',
-  'It researches the exact vehicle live, cites its sources, asks you what to check next.',
-  'It explains why it’s asking — not just what to check. You see the reasoning, not a black-box answer.',
-  'It locks the diagnosis only when it has enough evidence. Then it coaches the repair.',
+  'You type the car and what’s wrong.',
+  'It reads the open web for that exact car. Forums, TSBs, the works. Shows you every source.',
+  'It tells you what to check next, and why. Every step shows how sure it is.',
+  'It locks the diagnosis when the evidence is there. Then it walks you through the fix.',
 ] as const
 
 export function HowItWorks() {
@@ -11,7 +11,7 @@ export function HowItWorks() {
       <div className="mk-container">
         <div className="mk__how-head">
           <div className="mk__eyebrow">How it works</div>
-          <h2 className="mk__h2">Four moves, in order.</h2>
+          <h2 className="mk__h2">From &ldquo;what&rsquo;s wrong&rdquo; to the locked diagnosis.</h2>
         </div>
         <div className="mk__how-list">
           {HOW.map((row, i) => (

@@ -1,7 +1,7 @@
 const NOT_YET = [
-  'Doesn’t read your scope, scan tool, or photos — you describe what you see in words.',
-  'Doesn’t integrate with shop software.',
-  'If the web doesn’t have good info on your vehicle, it says so.',
+  'Doesn’t read scope traces or scan tool screens. Wiring diagrams it does — upload a photo.',
+  'Doesn’t talk to shop software.',
+  'When the open web doesn’t have info on your car, it tells you.',
 ] as const
 
 export function NotYet() {
@@ -9,8 +9,8 @@ export function NotYet() {
     <section className="mk__section mk__not-yet">
       <div className="mk-container">
         <div className="mk__diff-head">
-          <div className="mk__eyebrow">What it doesn&apos;t do yet</div>
-          <h2 className="mk__h2">Three things it can&apos;t.</h2>
+          <div className="mk__eyebrow">Not yet</div>
+          <h2 className="mk__h2">What it can&apos;t do.</h2>
         </div>
         <div className="mk__diff-list">
           {NOT_YET.map((row, i) => (

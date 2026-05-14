@@ -10,7 +10,7 @@ export function FinalCTA({ isSignedIn }: FinalCTAProps) {
       <div className="mk-container">
         <div className="mk__final">
           <h2 className="mk__final__h">
-            Built for techs who have to be right.
+            Take it on the next hard car.
           </h2>
           <a className="mk__pricing__btn" href={href}>
             {label}
@@ -18,10 +18,9 @@ export function FinalCTA({ isSignedIn }: FinalCTAProps) {
               <span className="mk__pricing__btn__price">$100/MO</span>
             )}
           </a>
-          <div className="mk__final__terms">Single seat · cancel anytime</div>
+          <div className="mk__final__terms">One tech · cancel anytime</div>
           <p className="mk__final__legal">
-            Vyntechs · vyntechs.dev · A diagnostic co-pilot built by working
-            techs.
+            Vyntechs · vyntechs.dev · Built by a working tech.
           </p>
         </div>
       </div>

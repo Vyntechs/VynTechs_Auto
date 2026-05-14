@@ -12,11 +12,10 @@ export function Pricing({ isSignedIn }: PricingProps) {
           <div className="mk__pricing__card">
             <div className="mk__pricing__eyebrow">Subscription</div>
             <div className="mk__pricing__price">$100</div>
-            <div className="mk__pricing__period">per month / single seat</div>
-            <p className="mk__pricing__terms">Cancel anytime, no contract.</p>
+            <div className="mk__pricing__period">per month, one tech</div>
+            <p className="mk__pricing__terms">Cancel anytime. No contract.</p>
             <p className="mk__pricing__comp">
-              Less than AllData ($209/mo) or Identifix ($180/mo). Thinks
-              alongside you in real time.
+              Less than AllData ($209). Less than Identifix ($180).
             </p>
             <a className="mk__pricing__btn" href={href}>
               {label}

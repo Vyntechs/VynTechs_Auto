@@ -6,8 +6,8 @@ export function OnLaptop() {
     <section className="mk__section mk__on-laptop">
       <div className="mk-container">
         <div className="mk__on-laptop__head">
-          <div className="mk__eyebrow">Also on the laptop</div>
-          <h2 className="mk__h2">Bigger screen. Same brain.</h2>
+          <div className="mk__eyebrow">On the laptop</div>
+          <h2 className="mk__h2">Same thing, bigger screen.</h2>
         </div>
         <div className="mk__on-laptop__frame">
           <LaptopFrame image={SCREENSHOTS.laptopHero}>
@@ -50,9 +50,8 @@ function LaptopPlaceholder() {
           </div>
           <p className="mk__laptop-placeholder__sub">
             High-resistance corrosion at the harness connector. Replace harness
-            pigtail; refresh adjacent grounds. Confidence{' '}
-            <b>94</b> · cited from 8 sources across TSB, AllData, and 23 F150
-            forum threads.
+            pigtail. Refresh adjacent grounds. <b>94</b> confidence. 8 sources
+            cited.
           </p>
           <div className="mk__laptop-placeholder__row">
             <span className="mk__laptop-placeholder__chip">
@@ -70,7 +69,7 @@ function LaptopPlaceholder() {
               Ford TSB 21-2156 · cyl 4 misfire after hot soak
             </div>
             <div className="mk__laptop-placeholder__line">
-              AllData wiring · cyl 4 injector harness
+              Wiring photo · uploaded · cyl 4 pinout
             </div>
             <div className="mk__laptop-placeholder__line">
               F150forum · 23 threads · resolved

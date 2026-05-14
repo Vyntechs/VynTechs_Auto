@@ -6,13 +6,13 @@ export function Problem() {
           <div className="mk__problem__beat">
             <div className="mk__problem__beat__eyebrow">The pain</div>
             <h2 className="mk__problem__beat__h">
-              The hard problems eat hours.
+              The hard cars eat your day.
             </h2>
           </div>
           <div className="mk__problem__beat">
-            <div className="mk__problem__beat__eyebrow">The tradeoff</div>
+            <div className="mk__problem__beat__eyebrow">The trade</div>
             <h2 className="mk__problem__beat__h">
-              You shouldn&apos;t have to choose between speed and being right.
+              Fast or right. Pick one. Then watch the bay back up.
             </h2>
           </div>
         </div>
