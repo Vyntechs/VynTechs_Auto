@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { WhatsNewBadge } from './whats-new-badge'
+import { SignOutButton } from './sign-out-button'
 
 export function AppHeader({
   title,
@@ -46,6 +47,7 @@ export function AppHeader({
           {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}
         </div>
         <WhatsNewBadge />
+        <SignOutButton />
         {right}
       </div>
     </header>
