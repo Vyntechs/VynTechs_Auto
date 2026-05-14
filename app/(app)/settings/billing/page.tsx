@@ -15,16 +15,9 @@ export default async function SettingsBillingPage() {
 
   return (
     <Module label="Billing">
-      <div
-        style={{
-          padding: 14,
-          color: 'var(--vt-fg-2)',
-          fontSize: 14,
-          lineHeight: 1.5,
-        }}
-      >
+      <p className="vt-settings-coming-soon">
         Coming soon — Billing moves here in PR 3.
-      </div>
+      </p>
     </Module>
   )
 }
