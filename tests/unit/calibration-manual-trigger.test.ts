@@ -15,17 +15,25 @@ async function seedProfile(db: TestDb, role: string) {
 describe('triggerCalibrationAnalysis', () => {
   let db: TestDb
   let close: () => Promise<void>
+  let prevFounderEmail: string | undefined
 
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
+    prevFounderEmail = process.env.FOUNDER_EMAIL
+    process.env.FOUNDER_EMAIL = 'founder@example.test'
   })
 
   afterEach(async () => {
     await close()
+    process.env.FOUNDER_EMAIL = prevFounderEmail
   })
 
   it('returns 401 when no userId is provided', async () => {
-    const result = await triggerCalibrationAnalysis({ db, userId: null })
+    const result = await triggerCalibrationAnalysis({
+      db,
+      userId: null,
+      userEmail: null,
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.status).toBe(401)
@@ -34,7 +42,11 @@ describe('triggerCalibrationAnalysis', () => {
 
   it('returns 403 when the user is not a curator', async () => {
     const tech = await seedProfile(db, 'tech')
-    const result = await triggerCalibrationAnalysis({ db, userId: tech.userId })
+    const result = await triggerCalibrationAnalysis({
+      db,
+      userId: tech.userId,
+      userEmail: 'tech@example.test',
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.status).toBe(403)
@@ -45,6 +57,7 @@ describe('triggerCalibrationAnalysis', () => {
     const result = await triggerCalibrationAnalysis({
       db,
       userId: crypto.randomUUID(),
+      userEmail: 'ghost@example.test',
     })
     expect(result.ok).toBe(false)
     if (!result.ok) {
@@ -54,7 +67,11 @@ describe('triggerCalibrationAnalysis', () => {
 
   it('runs the analysis and returns the result when the user is a curator', async () => {
     const curator = await seedProfile(db, 'curator')
-    const result = await triggerCalibrationAnalysis({ db, userId: curator.userId })
+    const result = await triggerCalibrationAnalysis({
+      db,
+      userId: curator.userId,
+      userEmail: 'curator@example.test',
+    })
     expect(result.ok).toBe(true)
     if (result.ok) {
       // No closed sessions seeded → empty result, but the call succeeded.
@@ -66,9 +83,27 @@ describe('triggerCalibrationAnalysis', () => {
     }
   })
 
-  it('runs the analysis when the user is an owner (founder is both)', async () => {
+  it('returns 403 when the user is an owner who is NOT the founder', async () => {
+    // PR 6 tightening: role==='owner' alone no longer grants curator access.
     const owner = await seedProfile(db, 'owner')
-    const result = await triggerCalibrationAnalysis({ db, userId: owner.userId })
+    const result = await triggerCalibrationAnalysis({
+      db,
+      userId: owner.userId,
+      userEmail: 'mac@example.test',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+    }
+  })
+
+  it('runs the analysis when the user is the founder via FOUNDER_EMAIL', async () => {
+    const owner = await seedProfile(db, 'owner')
+    const result = await triggerCalibrationAnalysis({
+      db,
+      userId: owner.userId,
+      userEmail: 'founder@example.test',
+    })
     expect(result.ok).toBe(true)
   })
 })

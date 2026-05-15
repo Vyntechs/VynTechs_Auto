@@ -75,13 +75,20 @@ export async function ensureProfileAndShop(
   db: AppDb,
   userId: string,
   email: string,
+  fullName?: string,
 ): Promise<Profile> {
   const existing = await getProfileByUserId(db, userId)
   if (existing) return existing
   const [shop] = await db.insert(shops).values({ name: `${email}'s Shop` }).returning()
+  const trimmedName = fullName?.trim()
   const [profile] = await db
     .insert(profiles)
-    .values({ userId, role: 'owner', shopId: shop.id })
+    .values({
+      userId,
+      role: 'owner',
+      shopId: shop.id,
+      fullName: trimmedName && trimmedName.length > 0 ? trimmedName : null,
+    })
     .returning()
   return profile
 }

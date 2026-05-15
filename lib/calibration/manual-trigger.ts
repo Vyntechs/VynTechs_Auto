@@ -18,6 +18,7 @@ export type TriggerResult =
 export async function triggerCalibrationAnalysis(input: {
   db: AppDb
   userId: string | null
+  userEmail: string | null
 }): Promise<TriggerResult> {
   if (!input.userId) {
     return { ok: false, status: 401, error: 'unauthorized' }
@@ -27,7 +28,7 @@ export async function triggerCalibrationAnalysis(input: {
     .from(profiles)
     .where(eq(profiles.userId, input.userId))
     .limit(1)
-  if (!canCurate(profile?.role)) {
+  if (!canCurate(profile?.role, input.userEmail)) {
     return { ok: false, status: 403, error: 'forbidden' }
   }
   const result = await runCalibrationAnalysis(input.db)
