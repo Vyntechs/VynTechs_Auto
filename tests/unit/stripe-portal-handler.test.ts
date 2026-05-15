@@ -85,7 +85,7 @@ describe('createBillingPortalSessionForUser', () => {
     expect(result.url).toBe('https://billing.stripe.com/session/test_xyz')
     expect(createPortalSession).toHaveBeenCalledWith({
       customer: 'cus_garage',
-      return_url: 'https://app.vyntechs.com/billing',
+      return_url: 'https://app.vyntechs.com/settings/billing',
     })
   })
 })

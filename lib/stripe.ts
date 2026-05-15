@@ -86,7 +86,7 @@ export async function createBillingPortalSessionForUser(opts: {
     ((params) => stripe.billingPortal.sessions.create(params))
   const session = await create({
     customer: customer.stripeCustomerId,
-    return_url: `${opts.origin}/billing`,
+    return_url: `${opts.origin}/settings/billing`,
   })
   return { ok: true, url: session.url }
 }

@@ -10,9 +10,26 @@ const EXEMPT_EXACT = new Set<string>([
   '/sign-up',
   '/subscribe',
   '/auth/callback',
+  // Server route that verifies the recovery OTP from the password-reset
+  // email; sets cookies, then redirects to /reset-password. Always reached
+  // by an unauthenticated user landing from email.
+  '/auth/confirm',
   '/checkout/success',
   '/billing',
   '/whats-new',
+  // The Supabase password-reset email lands an unauthenticated user here
+  // with a PKCE `?code=` query param; the page itself does the
+  // exchangeCodeForSession on mount. If middleware redirected to /sign-in,
+  // the code would be lost and the reset flow would silently break.
+  '/reset-password',
+  // Self-serve "I forgot my password" entry point — locked-out users have
+  // no session, so the auth gate must let them through to request the
+  // recovery email.
+  '/forgot-password',
+  // Deactivated landing — a deactivated user with a live session must be
+  // able to reach this page without bouncing through the paywall or back
+  // through the deactivation gate (which would loop).
+  '/deactivated',
   '/api/health',
 ])
 
@@ -41,6 +58,7 @@ export type PaywallReason =
 export type AccessResult =
   | { kind: 'allow' }
   | { kind: 'paywall'; reason: PaywallReason }
+  | { kind: 'deactivated' }
 
 export async function checkAccess(
   db: AppDb,
@@ -48,6 +66,10 @@ export async function checkAccess(
 ): Promise<AccessResult> {
   const profile = await getProfileByUserId(db, userId)
   if (!profile) return { kind: 'paywall', reason: 'no_subscription' }
+  // Deactivation gate runs ahead of every other access check. A deactivated
+  // user with isComp:true must still be locked out — the shop admin's
+  // intent overrides any subscription override.
+  if (profile.deactivatedAt) return { kind: 'deactivated' }
   if (profile.isComp) return { kind: 'allow' }
   if (!profile.shopId) return { kind: 'paywall', reason: 'no_subscription' }
 
@@ -78,15 +100,19 @@ export async function checkAccess(
 }
 
 // Defense-in-depth helper for API route handlers. Middleware already blocks
-// paywalled requests, but per Option B this check ships inside the handler
-// too: if the middleware matcher ever drops a route, the gate still holds.
-// Returns null when access is allowed; a 403 NextResponse otherwise.
+// paywalled / deactivated requests, but per Option B this check ships inside
+// the handler too: if the middleware matcher ever drops a route, the gate
+// still holds. Returns null when access is allowed; a 403 NextResponse
+// otherwise (with error code 'paywall' or 'deactivated' for the caller).
 export async function paywallReject(
   db: AppDb,
   userId: string,
 ): Promise<NextResponse | null> {
   const access = await checkAccess(db, userId)
   if (access.kind === 'allow') return null
+  if (access.kind === 'deactivated') {
+    return NextResponse.json({ error: 'deactivated' }, { status: 403 })
+  }
   return NextResponse.json(
     { error: 'paywall', reason: access.reason },
     { status: 403 },

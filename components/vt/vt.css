@@ -69,10 +69,140 @@
   letter-spacing: 0.04em;
   margin-bottom: 4px;
   padding: 2px 0;
+  white-space: nowrap;
 }
 .app-header__back:hover {
   color: var(--vt-fg-1);
   text-decoration: underline;
+}
+@media (max-width: 480px) {
+  .app-header__lockup img {
+    width: 40px;
+    height: auto;
+  }
+  .app-header__back-label {
+    /* Hide back-button text on small mobile to keep header on one row.
+       Hamburger menu provides the primary navigation; back arrow remains
+       visible as a contextual hint. */
+    display: none;
+  }
+}
+
+/* ====== App header — left cluster (menu + brand + back) ====== */
+.app-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+.app-header__lockup {
+  display: inline-flex;
+  align-items: center;
+}
+.app-header__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header__shop-name {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  max-width: 30vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -4px;
+}
+@media (max-width: 480px) {
+  .app-header__shop-name {
+    display: none;
+  }
+}
+
+/* ====== Hamburger menu (slide-down anchored to header) ====== */
+.app-header__menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.app-header__menu-trigger {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vt-fg);
+  cursor: pointer;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--vt-radius-2);
+  margin-left: -10px; /* hug viewport edge for thumb reach */
+}
+.app-header__menu-trigger:hover {
+  background: var(--vt-surface-2);
+}
+.app-header__menu-trigger:focus-visible {
+  outline: 2px solid var(--vt-fg);
+  outline-offset: 2px;
+}
+.app-header__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-3);
+  box-shadow: var(--vt-shadow-sheet);
+  min-width: 220px;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+.app-header__menu-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  min-height: 44px;
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  color: var(--vt-fg);
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.app-header__menu-item:hover {
+  background: var(--vt-surface-2);
+}
+.app-header__menu-item:focus-visible {
+  outline: 2px solid var(--vt-fg);
+  outline-offset: -2px;
+}
+.app-header__menu-item--button {
+  font-family: var(--vt-font-serif);
+  border-top: 1px solid var(--vt-rule);
+  margin-top: 4px;
+  padding-top: 14px;
+  color: var(--vt-fg-2);
+}
+.app-header__menu-item--button:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* ====== Eyebrow ====== */
@@ -829,11 +959,15 @@
 .vt-curator-sidebar a.vt-curator-nav-back:hover { background: transparent; color: var(--vt-fg-1); }
 .vt-curator-main { padding: 32px; }
 
-/* Mobile curator layout — the entire reviewer area renders on phones.
- * Sidebar collapses to a sticky horizontal scroll-strip across the top,
- * main content takes full width, and any wide data tables scroll
- * horizontally inside their container so rows stay legible without
- * breaking the page layout. */
+/* Hamburger trigger is mobile-only; hidden on desktop where the sidebar
+ * column shows the full nav inline. */
+.vt-curator-mobile-toggle { display: none; }
+
+/* Mobile curator layout — sidebar column collapses to a sticky strip
+ * with a hamburger button labeled by the current section. The section
+ * list is hidden until the hamburger opens it, then slides down as a
+ * tappable menu. Data tables inside main scroll horizontally so rows
+ * stay legible without breaking the layout. */
 @media (max-width: 959px) {
   .vt-curator-grid {
     grid-template-columns: 1fr;
@@ -841,30 +975,61 @@
   .vt-curator-sidebar {
     border-right: none;
     border-bottom: 1px solid var(--vt-border);
-    padding: 12px 16px;
+    padding: 0;
     position: sticky;
     top: 0;
     z-index: 10;
+    background: var(--vt-surface-2);
   }
   .vt-curator-brand { display: none; }
+  .vt-curator-mobile-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 16px;
+    background: transparent;
+    border: 0;
+    color: var(--vt-fg);
+    font-family: inherit;
+    font-size: 15px;
+    cursor: pointer;
+    min-height: 44px;
+    text-align: left;
+  }
+  .vt-curator-mobile-toggle:focus-visible {
+    outline: 2px solid var(--vt-fg);
+    outline-offset: -2px;
+  }
+  .vt-curator-mobile-toggle-label {
+    font-weight: 600;
+  }
   .vt-curator-sidebar ul {
-    flex-direction: row;
-    gap: 4px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    display: none;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid var(--vt-border);
+    background: var(--vt-bone-50);
+    padding: 6px 0;
+  }
+  .vt-curator-sidebar--open ul {
+    display: flex;
   }
   .vt-curator-sidebar li { flex: 0 0 auto; }
   .vt-curator-sidebar a {
-    white-space: nowrap;
-    padding: 8px 12px;
-    font-size: 13px;
+    padding: 12px 16px;
+    font-size: 15px;
+    min-height: 44px;
+    border-radius: 0;
+    display: flex;
+    align-items: center;
   }
   .vt-curator-sidebar a.vt-curator-nav-back {
-    border-bottom: none;
-    padding: 8px 12px;
-    margin-bottom: 0;
-    border-right: 1px solid var(--vt-border);
-    padding-right: 12px;
+    border-bottom: 1px solid var(--vt-border);
+    padding: 12px 16px;
+    margin-bottom: 4px;
+    border-right: none;
+    border-radius: 0;
   }
   .vt-curator-main { padding: 16px; }
   .vt-curator-main table {
@@ -874,6 +1039,28 @@
     white-space: nowrap;
     max-width: 100%;
   }
+
+  /* Curator content responsiveness — page-specific layouts that would
+   * otherwise spill past the viewport. Stacks the drift cell's 5-column
+   * grid, the case-detail definition list's label-then-value grid, and
+   * section page headers that pack count chips next to their titles. */
+  .vt-drift-cell { grid-template-columns: 1fr; gap: 6px; }
+  .vt-drift-row { gap: 8px; padding: 12px; }
+  .vt-drift-actions { width: 100%; }
+  .vt-drift-page-header { flex-wrap: wrap; gap: 8px; }
+  .vt-drift-filters { flex-wrap: wrap; }
+
+  .vt-case-detail dl { grid-template-columns: 1fr; gap: 4px 0; }
+  .vt-case-detail dt { margin-top: 10px; font-weight: 600; color: var(--vt-fg-2); }
+  .vt-case-detail dd { margin-left: 0; }
+  .vt-event { flex-direction: column; gap: 4px; padding: 10px 0; }
+  .vt-event time { min-width: 0; }
+
+  .vt-deferred-header,
+  .vt-calibration-header,
+  .vt-corpus-list-header,
+  .vt-founder-notes-header { flex-wrap: wrap; gap: 8px; }
+  .vt-corpus-list-actions { margin-left: 0; }
 }
 
 /* Founder-notes list page — mobile-friendly card layout when narrow. */
@@ -1069,7 +1256,331 @@
 .vt-corpus-list-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-corpus-list-tags { color: var(--vt-fg-3); font-size: 13px; }
 
-/* Phase Q — /curator/cases index + curator mobile responsiveness */
+/* ====== Settings page (list-detail layout) ======
+   Three modes — mobile (single-pane, large touch targets), tablet
+   (split-pane, active state), desktop (split-pane, constrained reading
+   width). Same DOM, three native-feeling experiences. */
+
+.vt-settings-grid {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.vt-settings-list {
+  display: flex;
+  flex-direction: column;
+}
+.vt-settings-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* List rows — flat, full-width tappable. Refined type hierarchy:
+   serif label, mono micro-eyebrow description. */
+.vt-settings-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 0.5px solid var(--vt-rule);
+  color: var(--vt-fg);
+  text-decoration: none;
+  font-family: var(--vt-font-serif);
+  position: relative;
+  transition: background 150ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+.vt-settings-list-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.vt-settings-list-row__label {
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--vt-fg);
+}
+.vt-settings-list-row__desc {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--vt-fg-3);
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+.vt-settings-list-row__chevron {
+  margin-left: auto;
+  color: var(--vt-fg-3);
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 150ms ease-out, transform 200ms ease-out;
+}
+
+/* Cursor-only hover. Touch devices skip — avoids sticky hover after tap. */
+@media (hover: hover) {
+  .vt-settings-list-row:hover { background: var(--vt-surface-2); }
+  .vt-settings-list-row:hover .vt-settings-list-row__chevron {
+    opacity: 0.9;
+    transform: translateX(2px);
+  }
+}
+
+/* Press feedback — every device. */
+.vt-settings-list-row:active { background: var(--vt-surface-3); }
+
+/* Active route — meaningful on tablet+desktop (mobile hides the list). */
+.vt-settings-list-row[aria-current='page'] {
+  background: var(--vt-bone-200);
+  box-shadow: inset 3px 0 0 var(--vt-accent);
+}
+.vt-settings-list-row[aria-current='page'] .vt-settings-list-row__chevron {
+  opacity: 0.9;
+  color: var(--vt-fg-2);
+}
+
+.vt-settings-list-row:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: -2px;
+}
+
+/* "Coming soon" placeholder text — clean Module body until PRs 3-6 fill in. */
+.vt-settings-coming-soon {
+  margin: 0;
+  padding: 14px 16px 18px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--vt-fg-2);
+}
+
+/* Back-to-list link — mobile only. Sized as a real touch target. */
+.vt-settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-2);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 6px;
+  margin: -6px -6px 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.vt-settings-back:active { color: var(--vt-fg); }
+@media (hover: hover) {
+  .vt-settings-back:hover { color: var(--vt-fg); }
+}
+
+/* "Pick a section" empty state — tablet/desktop only (mobile hides detail pane).
+   Refined typography over a card; atmosphere via negative space. */
+.vt-settings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 14px;
+  padding: 48px 32px;
+  text-align: center;
+}
+.vt-settings-empty__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.vt-settings-empty__heading {
+  margin: 0;
+  font-family: var(--vt-font-serif);
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--vt-fg-2);
+  max-width: 24ch;
+}
+
+/* === Mobile (<768px) — single-pane; bigger touch targets ===
+   List rows are full-bleed visual cells; one column of focus. */
+@media (max-width: 767px) {
+  .vt-settings-grid[data-mobile-pane='list'] .vt-settings-detail { display: none; }
+  .vt-settings-grid[data-mobile-pane='detail'] .vt-settings-list { display: none; }
+
+  .vt-settings-detail { padding: 12px; gap: 12px; }
+
+  .vt-settings-list-row {
+    min-height: 68px;
+    padding: 16px 18px;
+  }
+  .vt-settings-list-row__label { font-size: 18px; }
+  /* Slightly larger chevron presence on mobile (it's the only affordance). */
+  .vt-settings-list-row__chevron { font-size: 22px; opacity: 0.6; }
+}
+
+/* === Tablet (768-1023px) — split-pane; active state appears === */
+@media (min-width: 768px) {
+  .vt-settings-grid {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 0;
+  }
+  .vt-settings-list { border-right: 0.5px solid var(--vt-rule); }
+  .vt-settings-back { display: none; }
+
+  .vt-settings-detail { padding: 24px; gap: 16px; }
+
+  .vt-settings-list-row {
+    min-height: 60px;
+    padding: 13px 20px;
+  }
+  .vt-settings-list-row__label { font-size: 17px; }
+}
+
+/* === Desktop (≥1024px) — wider rail; constrained reading width ===
+   Detail content tops out at 720px so text doesn't sprawl across wide
+   monitors. Padding generous; hover transitions refined. */
+@media (min-width: 1024px) {
+  .vt-settings-grid { grid-template-columns: 280px 1fr; }
+
+  .vt-settings-detail {
+    padding: 32px 40px;
+    gap: 20px;
+  }
+  .vt-settings-detail > * { max-width: 720px; width: 100%; }
+  .vt-settings-detail > .vt-settings-empty { max-width: none; }
+
+  .vt-settings-list-row {
+    min-height: 62px;
+    padding: 14px 22px;
+  }
+}
+
+/* ====== Settings / Team section ======
+   Members list: stacked cards at <768px (avoiding the curator-page mobile
+   failure pattern of wide tables without responsive treatment), table-like
+   flex rows at ≥768px. Action buttons all ≥44px tap targets. */
+
+.vt-team-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.vt-team-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 0.5px solid var(--vt-rule);
+  font-family: var(--vt-font-serif);
+}
+.vt-team-row:last-child { border-bottom: none; }
+
+.vt-team-row--deactivated {
+  opacity: 0.55;
+}
+
+.vt-team-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.vt-team-row__name-text {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vt-team-row__you {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 3px;
+  color: var(--vt-fg-3);
+  flex-shrink: 0;
+}
+
+.vt-team-row__role,
+.vt-team-row__status {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+
+.vt-team-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vt-team-row__actions .btn {
+  min-height: 44px;
+  font-size: 13px;
+}
+.vt-team-row__deactivate {
+  color: var(--vt-risk-high, #b22);
+}
+
+.vt-team-error {
+  margin: 12px 0 0;
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--vt-risk-high, #b22);
+}
+
+/* Mobile (<768px) — fully stacked card per member. */
+@media (max-width: 767px) {
+  .vt-team-row {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .vt-team-row__actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+/* Tablet + desktop (≥768px) — table-like row with column alignment.
+   Columns: name | role | status | actions. */
+@media (min-width: 768px) {
+  .vt-team-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr) minmax(0, 0.6fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+  .vt-team-row__actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+  .vt-team-row__actions .btn {
+    min-height: 38px;
+  }
+}
+
+/* ====== /curator/cases — cross-shop case browser ======
+   Filter row, status pills, and table for the cases index page.
+   Mobile rules stack the filter row, full-width the action buttons,
+   and let the complaint column wrap. The drift / case-detail / event
+   / section-header mobile rules already live in the curator media
+   query above (ported from PR #58 ahead of this merge). */
 .vt-cases-page { max-width: 1200px; }
 .vt-cases-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .vt-cases-header h1 { margin: 0; font-size: 22px; }
@@ -1097,31 +1608,9 @@
 .vt-cases-status-deferred { background: #fcf0c8; color: #6b4f00; }
 .vt-cases-status-declined { background: #f4d4d4; color: #7a1f1f; }
 
-/* Curator mobile: stack filter rows, collapse multi-column grids, give touch
- * targets room. The existing @media (max-width: 959px) rule already turns wide
- * tables into horizontal-scroll containers — these rules tune the surfaces
- * around them so the page itself doesn't overflow. */
 @media (max-width: 959px) {
   .vt-cases-filter-row label,
   .vt-cases-filter-row label.vt-cases-search { flex: 1 1 100%; min-width: 0; }
   .vt-cases-filter-actions { width: 100%; justify-content: flex-end; padding-top: 4px; }
   .vt-cases-table .vt-cases-complaint { white-space: normal; max-width: 260px; }
-
-  .vt-drift-cell { grid-template-columns: 1fr; gap: 6px; }
-  .vt-drift-row { gap: 8px; padding: 12px; }
-  .vt-drift-actions { width: 100%; }
-  .vt-drift-page-header { flex-wrap: wrap; gap: 8px; }
-  .vt-drift-filters { flex-wrap: wrap; }
-
-  .vt-case-detail dl { grid-template-columns: 1fr; gap: 4px 0; }
-  .vt-case-detail dt { margin-top: 10px; font-weight: 600; color: var(--vt-fg-2); }
-  .vt-case-detail dd { margin-left: 0; }
-  .vt-event { flex-direction: column; gap: 4px; padding: 10px 0; }
-  .vt-event time { min-width: 0; }
-
-  .vt-deferred-header,
-  .vt-calibration-header,
-  .vt-corpus-list-header,
-  .vt-founder-notes-header { flex-wrap: wrap; gap: 8px; }
-  .vt-corpus-list-actions { margin-left: 0; }
 }
