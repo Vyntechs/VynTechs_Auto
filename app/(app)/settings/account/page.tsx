@@ -1,11 +1,18 @@
-import { Module } from '@/components/vt'
+import { redirect } from 'next/navigation'
+import { db } from '@/lib/db/client'
+import { getServerSupabase } from '@/lib/supabase-server'
+import { requireUserAndProfile } from '@/lib/auth'
+import { AccountSection } from '@/components/vt/account-section'
 
-export default function SettingsAccountPage() {
+export default async function SettingsAccountPage() {
+  const supabase = await getServerSupabase()
+  const ctx = await requireUserAndProfile({ supabase, db })
+  if (!ctx) redirect('/sign-in')
+
   return (
-    <Module label="My Account">
-      <p className="vt-settings-coming-soon">
-        Coming soon — Account settings land in PR 4.
-      </p>
-    </Module>
+    <AccountSection
+      initialFullName={ctx.profile.fullName ?? ''}
+      email={ctx.user.email}
+    />
   )
 }

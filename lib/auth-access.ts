@@ -10,9 +10,18 @@ const EXEMPT_EXACT = new Set<string>([
   '/sign-up',
   '/subscribe',
   '/auth/callback',
+  // Server route that verifies the recovery OTP from the password-reset
+  // email; sets cookies, then redirects to /reset-password. Always reached
+  // by an unauthenticated user landing from email.
+  '/auth/confirm',
   '/checkout/success',
   '/billing',
   '/whats-new',
+  // The Supabase password-reset email lands an unauthenticated user here
+  // with a PKCE `?code=` query param; the page itself does the
+  // exchangeCodeForSession on mount. If middleware redirected to /sign-in,
+  // the code would be lost and the reset flow would silently break.
+  '/reset-password',
   '/api/health',
 ])
 
