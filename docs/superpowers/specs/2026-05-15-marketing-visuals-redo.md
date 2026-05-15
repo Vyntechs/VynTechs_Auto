@@ -70,7 +70,8 @@ If we capture from `main`, the screenshots will be stale the moment `settings-pa
 ### Both
 - Background must be the actual app background (`var(--vt-bone-50)` light, `var(--vt-graphite-950)` if dark mode is shown).
 - No mouse cursor. No dev tools. No `localhost:3000` artifacts.
-- All copy must be **real-looking but anonymized**. Use the existing diagnostic scenario: `2019 Ford F-150 · 3.5L EcoBoost · 124k mi · cyl 4 misfire after hot soak` (see `components/marketing/screens.tsx` for the canonical scenario and copy). No real customer names, no real VINs.
+- All copy must be **real-looking but anonymized**. No real customer names, no real VINs.
+- **Scenarios are per-slot — see §11.** Do NOT ship one diagnostic session repeated 11 times. Each shot is a chance to demo a distinct Vyntechs capability. Coherence applies *within* a scenario (e.g. the two Vibration shots are the same session), not across the whole page.
 
 ---
 
@@ -78,20 +79,24 @@ If we capture from `main`, the screenshots will be stale the moment `settings-pa
 
 Each row: marketing slot → file path → what the app needs to show → which app route to navigate to.
 
-| Slot | File | What it shows | App route (on `settings-page`) |
-| --- | --- | --- | --- |
-| Hero phone | `hero.png` | "Propose" view — active step with reasoning, 97% confidence, 14-step plan. F-150 misfire. | `/sessions/[id]` for a session paused at step 01 with reasoning panel open. |
-| Motion 01 — Open | `motion-01-open.png` | Intake form with vehicle + complaint typed in plain text. | `/intake` with vehicle filled and complaint typed. |
-| Motion 02 — Research | `motion-02-research.png` | AI assembling the diagnostic plan, pulling references for the exact car. | `/sessions/[id]` showing the research/sources phase. |
-| Motion 03 — Propose | `motion-03-propose.png` | Active step with reasoning, confidence bar, 14-step plan preview. | `/sessions/[id]` step 01 active, plan visible. Same shot family as hero but different framing. |
-| Motion 04 — Confirm | `motion-04-confirm.png` | Tree updated after tech logs observation; step 02 active, plan refined to 12 steps, gap disclosure visible. | `/sessions/[id]` after a logged observation, with step 02 highlighted. |
-| Motion 05 — Lock | `motion-05-lock.png` | Locked case summary: root cause, repair done, verification, notes. | `/sessions/[id]` locked-state view. |
-| Laptop motion (×5) | `laptop-01-open.png` … `laptop-05-lock.png` | **NEW — see §10.** 5 laptop screens, one per phase, captured in laptop viewport (1280×800). Each shot demonstrates a laptop-only affordance (multi-pane, persistent citations, denser plan tree, etc.) — not just the phone UI scaled up. | `/intake`, `/sessions/[id]` at various phase states, in a 1280×800 Chrome viewport. |
-| ~~Laptop hero~~ | ~~`laptop-hero.png`~~ | **RETIRED.** Replaced by the 5-slot laptop motion above. Delete the file and remove `laptopHero` from `screenshots.config.ts`. | n/a |
+| Slot | File | Scenario (§11) | Phase view | Route |
+| --- | --- | --- | --- | --- |
+| Hero phone | `hero.png` | **A — AC + ambient (REQUIRED)** | Propose: pressure diagnostic + auto-pulled humidity/temp panel + reasoning calling out the delta | `/sessions/[id]` paused on the AC pressure-check step |
+| Motion 01 — Open | `motion-01-open.png` | D — Vibration | Intake: vehicle + "Vibration 55–65 mph, feels like wheel hop, worse on right turns" | `/intake` |
+| Motion 02 — Research | `motion-02-research.png` | B — Electrical | Research: AI reading TSBs, wiring diagrams, forum threads for the harness fault | `/sessions/[id]` research phase, sources panel surfaced |
+| Motion 03 — Propose | `motion-03-propose.png` | A — AC | Propose: active pressure-test step, ambient panel visible, confidence + plan tree | `/sessions/[id]` AC session, propose step |
+| Motion 04 — Confirm | `motion-04-confirm.png` | C — Oil leak | Confirm: tech logged observation ("oil at PCV grommet, valve cover dry"), plan refined | `/sessions/[id]` oil-leak session, post-observation |
+| Motion 05 — Lock | `motion-05-lock.png` | D — Vibration | Lock: locked finding "right rear wheel bearing — heat-induced play above 50 mph" + notes | `/sessions/[id]` vibration session, locked |
+| Laptop L1 — Open | `laptop-01-open.png` | D — Vibration | Open at laptop width: vehicle history sidebar + customer search + complaint field | `/intake` in 1280×800 viewport |
+| Laptop L2 — Research | `laptop-02-research.png` | B — Electrical | Research with **persistent citations/sources panel** alongside the plan — the laptop-only affordance | `/sessions/[id]` in 1280×800, research phase, sources panel pinned open |
+| Laptop L3 — Propose | `laptop-03-propose.png` | A — AC | Propose multi-pane: pressure diagnostic + ambient panel + reasoning + 14-step plan all on screen | `/sessions/[id]` in 1280×800, AC propose step |
+| Laptop L4 — Confirm | `laptop-04-confirm.png` | C — Oil leak | Confirm with **photo evidence + observation log + plan refinement** in one view | `/sessions/[id]` in 1280×800, oil-leak session, post-observation |
+| Laptop L5 — Lock | `laptop-05-lock.png` | D — Vibration | Lock with full citations panel + confidence-over-time chart visible | `/sessions/[id]` in 1280×800, vibration session, locked |
+| ~~Laptop hero~~ | ~~`laptop-hero.png`~~ | **RETIRED.** Replaced by the 5-slot laptop motion above. Delete the file and remove `laptopHero` from `screenshots.config.ts`. | — | — |
 
-Alt text for each slot is already written in `components/marketing/screenshots.config.ts:55-81`. Don't rewrite it; just make the image match.
+**Alt text needs rewriting.** The existing alt strings in `components/marketing/screenshots.config.ts:55-81` describe the old F-150 misfire scenario which is now retired. Rewrite each `alt` to describe what the new shot actually shows per the table above — keep the sentences specific (vehicle, complaint, what's on screen) so a screen reader user gets the same "this is a real product" feel a sighted user does.
 
-If a real session matching the F-150 scenario doesn't exist in dev, **seed one** — don't fake screenshots from Figma. The point is for prospects to see the real product. Faked mockups read as fake.
+If a real session matching each scenario doesn't exist in dev, **seed it** — don't fake screenshots from Figma. The point is for prospects to see the real product. Faked mockups read as fake.
 
 ---
 
@@ -134,8 +139,8 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 2. Old single `laptop-hero.png` retired; **5 new laptop motion screenshots** (see §10) shipped at 2560 × 1600 px.
 3. `OnLaptop` re-implemented as a scroll-pinned motion section (see §10).
 4. Every screenshot captured from a build of the app at `settings-page` (or later, if `settings-page` has merged to main by the time you're reading this).
-5. Hamburger header visible on all screens that include the AppHeader.
-6. Scenario coherence: every shot belongs to the same diagnostic session (2019 F-150, cyl 4 misfire after hot soak).
+5. Hamburger header visible (closed) on all screens that include the AppHeader.
+6. Scenarios per §11: AC + auto-pulled humidity/temp (mandatory in the hero), electrical, oil leak, vibration/drivability all represented across the 11 shots. Within-scenario coherence: shots that share a scenario share the same session, VIN, and complaint text.
 7. `app/page.tsx` renders without layout regression on iPhone SE (375px), iPhone 14 Pro (393px), iPad portrait (768px), MacBook (1280px), and a 1920px desktop.
 8. No 1x assets left in `public/marketing/screenshots/`.
 
@@ -147,6 +152,7 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 - **`/settings` screenshot in marketing:** skip. Not in this pass.
 - **Laptop section composition:** change scope — `OnLaptop` becomes a scroll-pinned motion section with 5 laptop screens, mirroring the phone `Motion`. The point is to show that the laptop UI is **genuinely different** from mobile, not just "the same thing, bigger." See §10.
 - **Hamburger menu state in laptop shots:** closed on every shot. Don't draw it open.
+- **Scenario coverage:** stop reusing one F-150 misfire across every shot. Use four distinct scenarios (AC + auto-pulled humidity/temp, electrical, oil leak, vibration/drivability), each chosen to demo a capability scan tools don't have. The AC + ambient shot is the hero. See §11 for the full per-slot mapping.
 
 ---
 
@@ -174,4 +180,77 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 
 **Copy.** Each phase keeps the same eyebrow/headline/sub as the phone `Motion` (Open / Research / Propose / Confirm / Lock — see `motion.tsx:8-39`) **unless** a laptop-specific sub-line reads better. Optional: add one short laptop-specific sub-line per phase that names the laptop-only affordance ("Citations panel stays open while you work" for Research, etc.). Brandon to approve copy if changed.
 
-**Same constraints as phone Motion:** ratio, no chrome, app surface only, real session content, same F-150 scenario.
+**Same constraints as phone Motion:** ratio, no chrome, app surface only, real session content. Per §11, the laptop motion shots show the **same scenarios** as their corresponding phone phases (Open→D vibration, Research→B electrical, Propose→A AC + ambient, Confirm→C oil leak, Lock→D vibration), so a prospect scrolling through both motions feels the same loop on both form factors AND sees Vyntechs handling four genuinely different problem types.
+
+---
+
+## 11. Scenarios — what each shot is selling
+
+We are **NOT** shipping one diagnostic session repeated 11 times. Each shot is an opportunity to demonstrate a distinct Vyntechs capability that scan tools and shop-management software don't have. Pick the scenario per slot to maximize the "this is wild" reaction.
+
+### Scenario A — AC pressure diagnostic with auto-pulled humidity + temperature (MANDATORY · HERO)
+
+**The wild feature.** Vyntechs pulls the shop's location and reads current ambient temperature + humidity, then uses that to compute target AC pressure ranges live. Refrigerant high-side pressure is a direct function of ambient conditions — most techs eyeball it, most diagnostic tools ignore it entirely. We compute it and call out deltas.
+
+**What the shot shows.** AC system pressure diagnostic. A sidecar panel reads `Ambient 84°F · 67% RH · Target high-side 165–185 PSI` (or similar live-pulled values). The active step's reasoning calls out: "Reading 210 PSI is ~25 PSI above target for these ambient conditions. Suggests overcharge or restricted condenser airflow — check fan operation and condenser face before recovery."
+
+**Where this shot goes.** **Hero phone (`hero.png`) is required.** Also appears on Laptop L3 — Propose (full multi-pane: pressure diagnostic, ambient panel, reasoning, and plan side-by-side).
+
+### Scenario B — Detailed electrical diagnostic
+
+**The strength.** Pin-level reasoning. Citations panel that reads TSBs, wiring diagrams, and forum threads inline. Voltage drop testing as a directed, reasoned step — not a generic "check for power."
+
+**What the shot shows.** Cyl 4 injector harness diagnostic with active step "Measure voltage drop pin 2 to ground under crank." Citations panel visible with Ford TSB 21-2156, an F150forum thread, an uploaded wiring photo. Reasoning explains the why.
+
+**Where this shot goes.** Motion 02 — Research, Motion 03 — Propose, Laptop L2 — Research (citations panel is the headline affordance on the laptop research shot).
+
+### Scenario C — Oil leak diagnostic
+
+**The strength.** Non-electrical, non-obvious problem. Visual + under-car. The AI handles photo evidence and refines the plan when the tech logs what they actually saw.
+
+**What the shot shows.** "Trace oil seepage upper engine, driver side." Active step suggests degrease + 200 mi re-run + photo. After tech logs observation ("oil at PCV grommet, valve cover dry"), plan refines from "valve cover / PCV / rear main" to focused PCV grommet replacement + breather check.
+
+**Where this shot goes.** Motion 04 — Confirm (the observation-and-refine loop is the headline). Laptop L4 — Confirm.
+
+### Scenario D — Vibration / drivability
+
+**The strength.** Fuzzy, subjective complaint. The AI handles ambiguity without dismissing it or jumping to "balance the wheels."
+
+**What the shot shows.** Intake: "Vibration between 55–65 mph, feels like wheel hop, worse on right turns." Locked case converges to "right rear wheel bearing — heat-induced play above 50 mph, lateral load on right turns amplifies." Notes: "Customer described 'wheel hop' — the lateral component matches bearing failure, not tire balance."
+
+**Where this shot goes.** Motion 01 — Open (the plain-English intake is the headline). Motion 05 — Lock (the locked case demonstrates the AI nailing a fuzzy complaint). Laptop L1 — Open. Laptop L5 — Lock.
+
+### Coverage matrix — recommended slot → scenario mapping
+
+| Slot | Scenario | Why this slot |
+| --- | --- | --- |
+| Hero phone | **A — AC + humidity/temp** | Strongest "this is wild" demo. Must be hero. |
+| Motion 01 — Open | D — Vibration intake | Plain-English fuzzy complaint shines in the Open shot. |
+| Motion 02 — Research | B — Electrical sources | Citations panel reads TSBs + wiring diagrams. |
+| Motion 03 — Propose | A — AC reasoning | Pressure-vs-ambient reasoning in the active-step view. |
+| Motion 04 — Confirm | C — Oil leak observation | Tech logs photo + observation; plan refines. |
+| Motion 05 — Lock | D — Vibration locked case | AI converged on bearing from a fuzzy complaint. |
+| Laptop L1 — Open | D — Vibration, wide intake | Vehicle history + customer search visible alongside complaint. |
+| Laptop L2 — Research | B — Electrical, persistent citations | Citations panel stays open — the laptop-only affordance. |
+| Laptop L3 — Propose | A — AC, multi-pane | Pressure diagnostic + ambient panel + reasoning + plan all visible. |
+| Laptop L4 — Confirm | C — Oil leak, photo evidence | Photo upload + observation log + plan refinement in one view. |
+| Laptop L5 — Lock | D — Vibration locked, full citations + chart | Confidence-over-time chart + 8 cited sources visible. |
+
+This is a recommendation. Claude design can swap scenarios per slot if a better fit emerges during capture, with two hard rules:
+
+1. **Scenario A appears in the hero.** Non-negotiable. It's the killer demo.
+2. **All four scenarios appear somewhere across the 11 shots.** Don't drop any.
+
+### Within-scenario coherence
+
+When a scenario spans multiple shots (e.g. Scenario D in Motion 01 + Motion 05 + Laptop L1 + Laptop L5), all four shots must be the same session — same VIN, same complaint text, same plan refinement arc. Don't show "vibration on a 2020 Tacoma" in one shot and "vibration on a 2018 Silverado" in another.
+
+### Cross-scenario constraint
+
+Use four genuinely different vehicles across A/B/C/D so the page reads as "Vyntechs works on every car," not "Vyntechs is a Ford tool." Suggested split:
+- Scenario A (AC): late-model domestic SUV (e.g. 2022 Chevy Tahoe).
+- Scenario B (electrical): 2019 Ford F-150 (carries the original brief vehicle — keeps `motion-02-research` and `motion-03-propose` recognizable if Brandon wants).
+- Scenario C (oil leak): older import (e.g. 2014 BMW 328i — known oil-leak prone, demonstrates the AI handles non-domestic).
+- Scenario D (vibration): mid-2010s domestic truck or SUV (e.g. 2017 Ram 1500).
+
+Final vehicle picks: Claude design's call, with Brandon approving the slate before captures start.
