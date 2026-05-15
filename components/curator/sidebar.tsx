@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 export const CURATOR_NAV = [
+  { href: '/curator/cases',        label: 'All cases' },
   { href: '/curator/drift',        label: 'Needs review' },
   { href: '/curator/deferred',     label: 'Incomplete' },
   { href: '/curator/novel',        label: 'New problems' },
