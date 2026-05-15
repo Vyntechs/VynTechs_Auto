@@ -53,8 +53,12 @@ export function AccountSection({ initialFullName, email }: Props) {
     setResetState('sending')
     setResetError(null)
     const supabase = getBrowserSupabase()
+    // Points at the server route handler that calls verifyOtp and sets the
+    // session cookie before the user lands on /reset-password. The email
+    // template (Supabase dashboard) appends `?token_hash=...&type=recovery
+    // &next=/reset-password` to this URL.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${window.location.origin}/auth/confirm`,
     })
     if (error) {
       setResetError(error.message)

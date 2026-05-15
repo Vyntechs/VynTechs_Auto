@@ -3,38 +3,24 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBrowserSupabase } from '@/lib/supabase-client'
 
-type Phase = 'verifying' | 'ready' | 'invalid' | 'expired'
+type Phase = 'verifying' | 'ready' | 'invalid'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('verifying')
-  const [verifyError, setVerifyError] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
+  // The user lands here AFTER /auth/confirm has called verifyOtp() and set
+  // session cookies. We just need to confirm the session is present, then
+  // render the form. If there's no session, the OTP confirmation didn't
+  // happen (direct visit, expired link routed elsewhere, etc.) — show the
+  // "invalid" copy.
   useEffect(() => {
     let cancelled = false
-    async function verify() {
+    async function check() {
       const supabase = getBrowserSupabase()
-      const params = new URLSearchParams(window.location.search)
-      const code = params.get('code')
-
-      // PKCE flow: exchange the ?code= for a session.
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code)
-        if (cancelled) return
-        if (error) {
-          setVerifyError(error.message)
-          setPhase('expired')
-          return
-        }
-        setPhase('ready')
-        return
-      }
-
-      // Fallback: an active session may already exist (implicit-flow auto-detection
-      // or a user who refreshed the page after the exchange already happened).
       const { data, error } = await supabase.auth.getUser()
       if (cancelled) return
       if (error || !data.user) {
@@ -43,7 +29,7 @@ export default function ResetPasswordPage() {
       }
       setPhase('ready')
     }
-    verify()
+    check()
     return () => {
       cancelled = true
     }
@@ -92,7 +78,7 @@ export default function ResetPasswordPage() {
         </p>
       )}
 
-      {(phase === 'invalid' || phase === 'expired') && (
+      {phase === 'invalid' && (
         <>
           <p
             style={{
@@ -104,18 +90,21 @@ export default function ResetPasswordPage() {
               margin: '0 0 16px',
             }}
           >
-            This reset link {phase === 'expired' ? 'has expired or already been used.' : 'is invalid.'}{' '}
-            Request a new one from <strong style={{ color: 'var(--vt-fg)', fontStyle: 'normal' }}>Settings → My Account</strong>.
+            This reset link is invalid or has expired. Request a new one from{' '}
+            <strong style={{ color: 'var(--vt-fg)', fontStyle: 'normal' }}>
+              Settings → My Account
+            </strong>
+            .
           </p>
-          {verifyError && (
-            <div className="ai-reject" role="alert" style={{ marginBottom: 16 }}>
-              {verifyError}
-            </div>
-          )}
           <a
             href="/sign-in"
             className="btn btn-primary"
-            style={{ width: '100%', display: 'block', textAlign: 'center', textDecoration: 'none' }}
+            style={{
+              width: '100%',
+              display: 'block',
+              textAlign: 'center',
+              textDecoration: 'none',
+            }}
           >
             Back to sign in
           </a>

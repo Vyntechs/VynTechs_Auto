@@ -190,6 +190,7 @@ describe('isPaywallExempt', () => {
       '/sign-up',
       '/subscribe',
       '/auth/callback',
+      '/auth/confirm',
       '/checkout/success',
       '/billing',
       '/whats-new',
