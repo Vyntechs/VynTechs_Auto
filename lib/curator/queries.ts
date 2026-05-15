@@ -1,6 +1,6 @@
-import { sql, isNull, and, eq, asc, desc, getTableColumns, count } from 'drizzle-orm'
+import { sql, isNull, and, eq, asc, desc, getTableColumns, count, or, isNotNull, type SQL } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { driftAlerts, sessions, novelPatternQueue, confidenceCalibration, corpusEntries, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
+import { driftAlerts, sessions, novelPatternQueue, confidenceCalibration, corpusEntries, profiles, shops, type RiskClass, type Session, type DriftAlert, type ConfidenceCalibration, type IntakePayload } from '@/lib/db/schema'
 import { unwrapRows } from '@/lib/db/unwrap-rows'
 import { CELL_RISK_CLASS_SQL, CELL_VEHICLE_FAMILY_SQL, CELL_SYMPTOM_CLASS_SQL } from '@/lib/calibration/cell-sql'
 
@@ -276,4 +276,108 @@ export async function listCorpusEntries(
     .from(corpusEntries)
     .where(opts.curatorOnly ? eq(corpusEntries.isCuratorEntry, true) : undefined)
     .orderBy(desc(corpusEntries.createdAt))
+}
+
+// ---------------------------------------------------------------------------
+// listAllCases
+// ---------------------------------------------------------------------------
+//
+// Cross-shop session browser for the /curator/cases index. Beta-scale: hard
+// LIMIT 100, no pagination. Joins shop + tech (profile) so the table can show
+// who's working on what across all beta shops without an N+1.
+//
+// Search matches the JSON intake fields most useful for "find that Tahoe with
+// the misfire" — vehicle make, model, and customer complaint. Case-insensitive
+// via ilike. VIN search would require joining vehicles; deferred until asked.
+
+export type CaseStatusFilter = 'open' | 'closed' | 'declined' | 'deferred'
+
+export type AllCasesRow = {
+  id: string
+  shopId: string
+  shopName: string | null
+  techId: string
+  techName: string | null
+  status: 'open' | 'closed' | 'declined' | 'deferred'
+  intake: IntakePayload
+  createdAt: Date
+  closedAt: Date | null
+}
+
+export async function listAllCases(
+  db: AppDb,
+  filters: {
+    status?: CaseStatusFilter
+    shopId?: string
+    techId?: string
+    search?: string
+    limit?: number
+  } = {},
+): Promise<AllCasesRow[]> {
+  const wheres: SQL[] = []
+  if (filters.status) wheres.push(eq(sessions.status, filters.status))
+  if (filters.shopId) wheres.push(eq(sessions.shopId, filters.shopId))
+  if (filters.techId) wheres.push(eq(sessions.techId, filters.techId))
+  if (filters.search && filters.search.trim()) {
+    const term = `%${filters.search.trim()}%`
+    const searchExpr = or(
+      sql`${sessions.intake} ->> 'vehicleMake' ILIKE ${term}`,
+      sql`${sessions.intake} ->> 'vehicleModel' ILIKE ${term}`,
+      sql`${sessions.intake} ->> 'customerComplaint' ILIKE ${term}`,
+    )
+    if (searchExpr) wheres.push(searchExpr)
+  }
+
+  const rows = await db
+    .select({
+      id: sessions.id,
+      shopId: sessions.shopId,
+      shopName: shops.name,
+      techId: sessions.techId,
+      techName: profiles.fullName,
+      status: sessions.status,
+      intake: sessions.intake,
+      createdAt: sessions.createdAt,
+      closedAt: sessions.closedAt,
+    })
+    .from(sessions)
+    .leftJoin(shops, eq(shops.id, sessions.shopId))
+    .leftJoin(profiles, eq(profiles.id, sessions.techId))
+    .where(wheres.length ? and(...wheres) : undefined)
+    .orderBy(desc(sessions.createdAt))
+    .limit(filters.limit ?? 100)
+
+  return rows
+}
+
+// ---------------------------------------------------------------------------
+// listCaseFilterOptions
+// ---------------------------------------------------------------------------
+//
+// Populates the shop + tech dropdowns on /curator/cases. Returns every shop
+// and every tech with a name set; sessions whose tech has no fullName still
+// appear in the listing but won't show up as a filter choice. Cheap enough
+// to call on every page render at beta scale.
+
+export type CaseFilterOptions = {
+  shops: { id: string; name: string }[]
+  techs: { id: string; fullName: string; shopId: string | null }[]
+}
+
+export async function listCaseFilterOptions(db: AppDb): Promise<CaseFilterOptions> {
+  const [shopRows, techRows] = await Promise.all([
+    db
+      .select({ id: shops.id, name: shops.name })
+      .from(shops)
+      .orderBy(asc(shops.name)),
+    db
+      .select({ id: profiles.id, fullName: profiles.fullName, shopId: profiles.shopId })
+      .from(profiles)
+      .where(isNotNull(profiles.fullName))
+      .orderBy(asc(profiles.fullName)),
+  ])
+  return {
+    shops: shopRows,
+    techs: techRows.filter((t): t is { id: string; fullName: string; shopId: string | null } => t.fullName !== null),
+  }
 }
