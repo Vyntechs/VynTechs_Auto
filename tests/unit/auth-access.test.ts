@@ -190,9 +190,11 @@ describe('isPaywallExempt', () => {
       '/sign-up',
       '/subscribe',
       '/auth/callback',
+      '/auth/confirm',
       '/checkout/success',
       '/billing',
       '/whats-new',
+      '/reset-password',
     ])('exempts %s', (path) => {
       expect(isPaywallExempt(path)).toBe(true)
     })
@@ -240,6 +242,7 @@ describe('isPaywallExempt', () => {
       '/api/curator/sessions/abc/approve',
       '/api/founder-notes',
       '/api/founder-notes/abc/promote',
+      '/api/account/profile',
     ])('gates %s', (path) => {
       expect(isPaywallExempt(path)).toBe(false)
     })
