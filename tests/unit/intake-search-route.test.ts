@@ -13,6 +13,11 @@ vi.mock('@/lib/supabase-server', () => ({
   getServerSupabase: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
+// Stub the paywall check so the test exercises route logic only — the
+// route's real paywall path is covered by auth-access.test.ts.
+vi.mock('@/lib/auth-access', () => ({
+  paywallReject: vi.fn(async () => null),
+}))
 
 import { POST } from '@/app/api/intake/search/route'
 import { searchIntake } from '@/lib/intake/search'

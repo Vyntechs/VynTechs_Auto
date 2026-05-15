@@ -4,8 +4,13 @@ import { TodayHome } from '@/components/screens/today-home'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
 
+// The AppHeader subtree pulls in WhatsNewBadge (usePathname) and curator
+// sidebar (useSearchParams indirectly via sibling routes), so the mock
+// stubs every navigation hook the rendered subtree might reach.
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/today',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 const baseSession: Session = {
