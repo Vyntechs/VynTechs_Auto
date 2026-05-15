@@ -11,7 +11,7 @@
 
 We are getting ready to start posting publicly. The landing page (`app/page.tsx`) is the surface every prospect hits first. The screenshots in `public/marketing/screenshots/` look terrible — blurry, mushy edges, soft type. We are not shipping screenshots like this.
 
-The marketing structure itself (Hero / WhatItIs / Problem / Motion / OnLaptop / HowItWorks / Different / NotYet / Improving / Pricing / FAQ / FinalCTA) is fine and stays. This brief is about the **visuals** — primarily the phone + laptop screenshots — with room for design polish if Claude design sees obvious wins.
+The marketing structure (Hero / WhatItIs / Problem / Motion / OnLaptop / HowItWorks / Different / NotYet / Improving / Pricing / FAQ / FinalCTA) **mostly** stays — one structural change: `OnLaptop` becomes a scroll-pinned motion section mirroring `Motion`, with 5 laptop screenshots instead of a single hero. See §10 for the requirement. The rest of this brief is about the **visuals** — primarily the phone + laptop screenshots — with room for design polish if Claude design sees obvious wins.
 
 ---
 
@@ -33,6 +33,8 @@ What's actually checked in (`public/marketing/screenshots/`):
 The phone aspect ratio is actually fine (390:844 vs frame 393:852, off by 0.2%) — `object-fit: cover` is barely cropping. **"Not fitted right" reads from blur on the edges, not from real cropping.** Fix the resolution and the perceived fit problem dissolves.
 
 This regressed in PR #45 — placeholders shipped as real assets at 1x.
+
+**Note on the swap workflow.** Brandon's original spec describes the swap as *"change `null` to `{ src, alt }` in `screenshots.config.ts`."* That was the pre-PR-#45 workflow. The slots are already non-null today, pointing at the same paths the new captures will land at, so the live workflow is **just overwrite the PNGs in place** — no config edit needed for the phone + hero-laptop slots. Config edits ARE needed for the new laptop-motion slots in §10.
 
 ---
 
@@ -84,7 +86,8 @@ Each row: marketing slot → file path → what the app needs to show → which 
 | Motion 03 — Propose | `motion-03-propose.png` | Active step with reasoning, confidence bar, 14-step plan preview. | `/sessions/[id]` step 01 active, plan visible. Same shot family as hero but different framing. |
 | Motion 04 — Confirm | `motion-04-confirm.png` | Tree updated after tech logs observation; step 02 active, plan refined to 12 steps, gap disclosure visible. | `/sessions/[id]` after a logged observation, with step 02 highlighted. |
 | Motion 05 — Lock | `motion-05-lock.png` | Locked case summary: root cause, repair done, verification, notes. | `/sessions/[id]` locked-state view. |
-| Laptop hero | `laptop-hero.png` | Locked diagnosis on the laptop — same diagnostic surface, bigger screen, hamburger header visible. | `/sessions/[id]` in laptop viewport (1280×800), session in locked state. |
+| Laptop motion (×5) | `laptop-01-open.png` … `laptop-05-lock.png` | **NEW — see §10.** 5 laptop screens, one per phase, captured in laptop viewport (1280×800). Each shot demonstrates a laptop-only affordance (multi-pane, persistent citations, denser plan tree, etc.) — not just the phone UI scaled up. | `/intake`, `/sessions/[id]` at various phase states, in a 1280×800 Chrome viewport. |
+| ~~Laptop hero~~ | ~~`laptop-hero.png`~~ | **RETIRED.** Replaced by the 5-slot laptop motion above. Delete the file and remove `laptopHero` from `screenshots.config.ts`. | n/a |
 
 Alt text for each slot is already written in `components/marketing/screenshots.config.ts:55-81`. Don't rewrite it; just make the image match.
 
@@ -116,29 +119,58 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 
 ## 7. Out of scope
 
-- **Marketing-page IA / section list.** Stays as in `app/page.tsx:26-42`. We are not removing or adding sections in this pass.
+- **Marketing-page IA / section list.** Stays as in `app/page.tsx:26-42`. We are not removing or adding sections in this pass — but `OnLaptop` is becoming a scroll-pinned motion section (see §10). That's a re-implementation of an existing slot, not a new one.
+- **`/settings` screenshot in marketing.** Confirmed skipped. Settings doesn't sell the diagnostic loop; not in this pass.
 - **Pricing / Stripe / paywall surfaces.** Already shipped (PR #43). Don't redesign.
 - **Logo redesign.** V° lockup is final (PR #46).
 - **Dark-mode marketing variant.** Light only for now.
-- **Animations / scroll choreography beyond what `Motion` already does.** The pinned-scroll motion section is the one piece of choreography on the page and it works. Don't add more.
+- **New scroll choreography beyond Motion + the new OnLaptop motion.** Two pinned-scroll sections is the cap. Don't add more.
 
 ---
 
 ## 8. Done criteria
 
-1. All 7 screenshots replaced at the exact pixel dimensions above.
-2. Every screenshot captured from a build of the app at `settings-page` (or later, if `settings-page` has merged to main by the time you're reading this).
-3. Hamburger header visible on all screens that include the AppHeader.
-4. Scenario coherence: every shot belongs to the same diagnostic session (2019 F-150, cyl 4 misfire after hot soak).
-5. `app/page.tsx` renders without layout regression on iPhone SE (375px), iPhone 14 Pro (393px), iPad portrait (768px), MacBook (1280px), and a 1920px desktop.
-6. No 1x assets left in `public/marketing/screenshots/`.
+1. All 6 phone screenshots replaced at 1170 × 2532 px.
+2. Old single `laptop-hero.png` retired; **5 new laptop motion screenshots** (see §10) shipped at 2560 × 1600 px.
+3. `OnLaptop` re-implemented as a scroll-pinned motion section (see §10).
+4. Every screenshot captured from a build of the app at `settings-page` (or later, if `settings-page` has merged to main by the time you're reading this).
+5. Hamburger header visible on all screens that include the AppHeader.
+6. Scenario coherence: every shot belongs to the same diagnostic session (2019 F-150, cyl 4 misfire after hot soak).
+7. `app/page.tsx` renders without layout regression on iPhone SE (375px), iPhone 14 Pro (393px), iPad portrait (768px), MacBook (1280px), and a 1920px desktop.
+8. No 1x assets left in `public/marketing/screenshots/`.
 
 ---
 
-## 9. Open questions for Brandon
+## 9. Resolved decisions (Brandon)
 
-Drop answers inline here as they come in.
+- **Original specs:** match this brief; folded in. The "flip `null` to object" line in the original is stale (slots are already wired) — overwrite-in-place is the current workflow. See §2 note.
+- **`/settings` screenshot in marketing:** skip. Not in this pass.
+- **Laptop section composition:** change scope — `OnLaptop` becomes a scroll-pinned motion section with 5 laptop screens, mirroring the phone `Motion`. The point is to show that the laptop UI is **genuinely different** from mobile, not just "the same thing, bigger." See §10.
 
-- **Are there original specs from when the marketing page was first built that should override anything above?** (Brandon mentioned having some.)
-- **Should the laptop screenshot show the hamburger menu OPEN (revealing settings/team/billing nav) or closed?** Open advertises the new settings work; closed is cleaner.
-- **Do we want a `/settings` screenshot in marketing at all?** Not in the current section list, but worth asking before captures start.
+---
+
+## 10. NEW: `OnLaptop` becomes a scroll-pinned motion section
+
+**What changes.** Today `OnLaptop` (`components/marketing/on-laptop.tsx`) renders a single `LaptopFrame` with one screenshot. Brandon wants it re-implemented as a pinned-scroll section that mirrors the phone `Motion` (`components/marketing/motion.tsx`): one laptop frame stays pinned while the user scrolls, and the laptop screen swaps through 5 phases. Section heading stays "On the laptop. Same thing, bigger screen." — but the **content** demonstrates that the laptop surface is structurally different (more density, side panels, citations visible inline, etc.), not literally the same UI scaled up.
+
+**Why.** The single laptop hero shot doesn't pay off the "On the laptop" promise. Two motion sections back-to-back lets prospects feel the diagnostic loop on both form factors and signals that we built each surface for its medium.
+
+**New asset slots — laptop motion (5 × 2560 × 1600 px PNG):**
+
+| Slot | Filename | Phase | What the laptop should show |
+| --- | --- | --- | --- |
+| L1 | `laptop-01-open.png` | Open | Intake at full laptop width. Vehicle search + recent customers + complaint field side-by-side. Not the cramped phone intake. |
+| L2 | `laptop-02-research.png` | Research | Plan being assembled with a **persistent citations/sources panel** alongside — something the phone can't do. Reading the open web for THIS car. |
+| L3 | `laptop-03-propose.png` | Propose | Multi-pane: active step + reasoning on the left, full 14-step plan tree on the right. Confidence bar visible. |
+| L4 | `laptop-04-confirm.png` | Confirm | Tree updated after a logged observation. Observation log + plan refinement visible at the same time. Step 02 active. |
+| L5 | `laptop-05-lock.png` | Lock | Locked case summary with all citations, the confidence-over-time chart, and the "Open repair coaching" CTA — the existing `LaptopPlaceholder` is a sketch of this; ship the real thing. |
+
+**Retire:** `public/marketing/screenshots/laptop-hero.png`. Delete from the repo and from `screenshots.config.ts`.
+
+**Add to config:** new `laptopMotion` array in `components/marketing/screenshots.config.ts` (alongside `motionPhone`), typed as `[ScreenshotAsset, ScreenshotAsset, ScreenshotAsset, ScreenshotAsset, ScreenshotAsset]`. Remove `laptopHero` from the config type.
+
+**Implementation pattern.** Copy the scroll/pin logic from `components/marketing/motion.tsx:46-60`. Likely viable to extract a shared `<MotionSection>` primitive that both `Motion` (phone) and the new `OnLaptopMotion` consume. Judgment call — don't refactor if it's awkward.
+
+**Copy.** Each phase keeps the same eyebrow/headline/sub as the phone `Motion` (Open / Research / Propose / Confirm / Lock — see `motion.tsx:8-39`) **unless** a laptop-specific sub-line reads better. Optional: add one short laptop-specific sub-line per phase that names the laptop-only affordance ("Citations panel stays open while you work" for Research, etc.). Brandon to approve copy if changed.
+
+**Same constraints as phone Motion:** ratio, no chrome, app surface only, real session content, same F-150 scenario.
