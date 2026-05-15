@@ -146,6 +146,7 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 - **Original specs:** match this brief; folded in. The "flip `null` to object" line in the original is stale (slots are already wired) — overwrite-in-place is the current workflow. See §2 note.
 - **`/settings` screenshot in marketing:** skip. Not in this pass.
 - **Laptop section composition:** change scope — `OnLaptop` becomes a scroll-pinned motion section with 5 laptop screens, mirroring the phone `Motion`. The point is to show that the laptop UI is **genuinely different** from mobile, not just "the same thing, bigger." See §10.
+- **Hamburger menu state in laptop shots:** closed on every shot. Don't draw it open.
 
 ---
 
