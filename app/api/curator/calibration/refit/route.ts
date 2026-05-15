@@ -11,6 +11,7 @@ export async function POST() {
   const outcome = await triggerCalibrationAnalysis({
     db,
     userId: user?.id ?? null,
+    userEmail: user?.email ?? null,
   })
   if (!outcome.ok) {
     return NextResponse.json({ error: outcome.error }, { status: outcome.status })

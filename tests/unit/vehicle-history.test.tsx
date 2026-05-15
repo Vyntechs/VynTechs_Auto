@@ -1,7 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import { VehicleHistory } from '@/components/screens/vehicle-history'
 import type { Session } from '@/lib/db/schema'
+
+// The component renders AppHeader, which transitively pulls in
+// AppHeaderMenu (useRouter), SignOutButton (useRouter), WhatsNewBadge
+// (usePathname). Stub them out for the test renderer.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/vehicles',
+  useSearchParams: () => new URLSearchParams(),
+}))
 
 const baseIntake = {
   vehicleYear: 2018,

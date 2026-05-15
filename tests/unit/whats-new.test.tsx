@@ -1,7 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import { WhatsNew } from '@/components/screens/whats-new'
 import type { WhatsNewEntry } from '@/lib/db/schema'
+
+// The component renders AppHeader, which transitively imports
+// AppHeaderMenu (useRouter), SignOutButton (useRouter), and WhatsNewBadge
+// (usePathname). Stub them all out for the test renderer.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/whats-new',
+  useSearchParams: () => new URLSearchParams(),
+}))
 
 function mkEntry(over: Partial<WhatsNewEntry>): WhatsNewEntry {
   return {

@@ -3,6 +3,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { WhatsNewBadge } from './whats-new-badge'
 import { SignOutButton } from './sign-out-button'
+import { AppHeaderMenu } from './app-header-menu'
+import { AppHeaderShopName } from './app-header-shop-name'
 
 export function AppHeader({
   title,
@@ -17,31 +19,35 @@ export function AppHeader({
 }) {
   return (
     <header className="app-header">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Link
-          href="/today"
-          aria-label="Vyntechs home"
-          style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
-        >
-          <Image
-            src="/brand/lockup.png"
-            alt="Vyntechs"
-            width={57}
-            height={48}
-            priority
-          />
-        </Link>
+      <div className="app-header__left">
+        <AppHeaderMenu />
+        <div className="app-header__brand">
+          <Link
+            href="/today"
+            aria-label="Vyntechs home"
+            className="app-header__lockup"
+          >
+            <Image
+              src="/brand/lockup.png"
+              alt="Vyntechs"
+              width={57}
+              height={48}
+              priority
+            />
+          </Link>
+          <AppHeaderShopName />
+        </div>
         {back && (
           <Link
             href={back.href}
             className="app-header__back"
             aria-label={`Back to ${back.label}`}
           >
-            ← {back.label}
+            ← <span className="app-header__back-label">{back.label}</span>
           </Link>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="app-header__right">
         <div style={{ textAlign: 'right' }}>
           <div className="title">{title}</div>
           {meta && <div className="meta" style={{ marginTop: 2 }}>{meta}</div>}

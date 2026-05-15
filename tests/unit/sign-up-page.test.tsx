@@ -61,11 +61,24 @@ describe('SignUpForm', () => {
     hrefSetter.mockReset()
   })
 
-  it('renders Google button, email field, password field, and submit', () => {
+  function fillSignUpForm(name = 'Mike Joe', email = 'mike@joesgarage.com', password = 'hunter22hunter22') {
+    fireEvent.change(screen.getByLabelText(/your name/i), {
+      target: { value: name },
+    })
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: email },
+    })
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: password },
+    })
+  }
+
+  it('renders Google button, name field, email field, password field, and submit', () => {
     render(<SignUpForm />)
     expect(
       screen.getByRole('button', { name: /continue with google/i }),
     ).toBeInTheDocument()
+    expect(screen.getByLabelText(/your name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
     expect(
@@ -73,7 +86,20 @@ describe('SignUpForm', () => {
     ).toBeInTheDocument()
   })
 
-  it('email submit calls supabase.auth.signUp with entered creds', async () => {
+  it('email submit calls supabase.auth.signUp with entered creds and full_name metadata', async () => {
+    render(<SignUpForm />)
+    fillSignUpForm()
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => expect(mockSignUp).toHaveBeenCalled())
+    expect(mockSignUp).toHaveBeenCalledWith({
+      email: 'mike@joesgarage.com',
+      password: 'hunter22hunter22',
+      options: { data: { full_name: 'Mike Joe' } },
+    })
+  })
+
+  it('blocks submission and shows an error when the name field is empty', async () => {
     render(<SignUpForm />)
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: 'mike@joesgarage.com' },
@@ -83,21 +109,25 @@ describe('SignUpForm', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 
+    expect(
+      await screen.findByText(/please enter your name/i),
+    ).toBeInTheDocument()
+    expect(mockSignUp).not.toHaveBeenCalled()
+  })
+
+  it('trims surrounding whitespace from the name before submitting', async () => {
+    render(<SignUpForm />)
+    fillSignUpForm('  Mike Joe  ')
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }))
+
     await waitFor(() => expect(mockSignUp).toHaveBeenCalled())
-    expect(mockSignUp).toHaveBeenCalledWith({
-      email: 'mike@joesgarage.com',
-      password: 'hunter22hunter22',
-    })
+    const call = mockSignUp.mock.calls[0]?.[0]
+    expect(call.options.data.full_name).toBe('Mike Joe')
   })
 
   it('after successful sign-up, POSTs /api/stripe/checkout and uses the returned URL', async () => {
     render(<SignUpForm />)
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'mike@joesgarage.com' },
-    })
-    fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'hunter22hunter22' },
-    })
+    fillSignUpForm()
     fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
@@ -114,12 +144,7 @@ describe('SignUpForm', () => {
     })
 
     render(<SignUpForm />)
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'mike@joesgarage.com' },
-    })
-    fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'hunter22hunter22' },
-    })
+    fillSignUpForm()
     fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 
     expect(
@@ -137,12 +162,7 @@ describe('SignUpForm', () => {
     )
 
     render(<SignUpForm />)
-    fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'mike@joesgarage.com' },
-    })
-    fireEvent.change(screen.getByLabelText(/password/i), {
-      target: { value: 'hunter22hunter22' },
-    })
+    fillSignUpForm()
     fireEvent.click(screen.getByRole('button', { name: /create account/i }))
 
     expect(
