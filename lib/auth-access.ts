@@ -10,6 +10,10 @@ const EXEMPT_EXACT = new Set<string>([
   '/sign-up',
   '/subscribe',
   '/auth/callback',
+  // Server route that verifies the recovery OTP from the password-reset
+  // email; sets cookies, then redirects to /reset-password. Always reached
+  // by an unauthenticated user landing from email.
+  '/auth/confirm',
   '/checkout/success',
   '/billing',
   '/whats-new',
