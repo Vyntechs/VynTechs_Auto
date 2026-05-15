@@ -1,9 +1,9 @@
 # Marketing Visuals Redo — Brief
 
 **Date:** 2026-05-15
-**Branch (work):** `staging/marketing-visuals` (cuts from `settings-page`)
-**Source-of-truth branch for app UI being captured:** `settings-page`
-**Final destination:** `main`, AFTER `settings-page` has merged
+**Branch (work):** `staging-marketing-visuals` (cuts from `main`)
+**Source-of-truth branch for app UI being captured:** `main` (after the `settings-page` merge in PR #56 brought all the new app surfaces in)
+**Final destination:** `main`
 
 ---
 
@@ -38,19 +38,19 @@ This regressed in PR #45 — placeholders shipped as real assets at 1x.
 
 ---
 
-## 3. Why `settings-page` is the source-of-truth branch (NOT main)
+## 3. Source-of-truth branch: `main`
 
-Captures must show the **current** Vyntechs UI as users will see it after the settings work merges. That includes:
+Brandon merged the full `settings-page` vertical to `main` on 2026-05-15 in PR #56 (commit `e82aa38`). That brought in:
 
-- **New `AppHeader` hamburger menu** (`components/vt/app-header-menu.tsx`) — first persistent nav element in the app. Any screenshot that includes the header should show the hamburger.
+- **`AppHeader` hamburger menu** (`components/vt/app-header-menu.tsx`) — the first persistent nav element in the app. Any screenshot that includes the header should show the hamburger (closed — see §9).
 - **Shop name display** in the header (`components/vt/app-header-shop-name.tsx`).
-- **V° logo lockup** at top-left (already on main via PR #46, but also present here).
-- **`/settings` routes** (account / shop / team / billing) exist on this branch — if marketing wants to add a "Settings" screenshot somewhere, capture from here.
+- **V° logo lockup** at top-left (PR #46).
+- **`/settings` routes** (account / shop / team / billing).
 - **Sign-out button** + responsive mobile header polish.
 
-If we capture from `main`, the screenshots will be stale the moment `settings-page` lands. Capture from `settings-page` (this branch's parent) and the assets stay valid through the merge.
+Capture from `main` (or from `staging-marketing-visuals`, which is `main` plus this spec doc — same app code).
 
-`main` is also missing: forgot-password flow, account section, shop section, team section. None of those are marketed yet, but the **header** appears in every other screenshot, and it differs.
+> One thing NOT on main yet: the auth-side polish that lived on `settings-page` (self-serve "Forgot password?" entry from `/sign-in`, redirect-fix for `/reset-password`). Brandon's PR #56 squash didn't include those auth commits. None of them are marketed in this brief, so it doesn't affect captures.
 
 ---
 
@@ -138,7 +138,7 @@ public/marketing/screenshots/laptop-hero.png     # overwrite at 2560×1600
 1. All 6 phone screenshots replaced at 1170 × 2532 px.
 2. Old single `laptop-hero.png` retired; **5 new laptop motion screenshots** (see §10) shipped at 2560 × 1600 px.
 3. `OnLaptop` re-implemented as a scroll-pinned motion section (see §10).
-4. Every screenshot captured from a build of the app at `settings-page` (or later, if `settings-page` has merged to main by the time you're reading this).
+4. Every screenshot captured from a build of the app at `main` (post-PR #56) — or equivalently this branch, which is `main` plus the spec doc.
 5. Hamburger header visible (closed) on all screens that include the AppHeader.
 6. Scenarios per §11: AC + auto-pulled humidity/temp (mandatory in the hero), electrical, oil leak, vibration/drivability all represented across the 11 shots. Within-scenario coherence: shots that share a scenario share the same session, VIN, and complaint text.
 7. `app/page.tsx` renders without layout regression on iPhone SE (375px), iPhone 14 Pro (393px), iPad portrait (768px), MacBook (1280px), and a 1920px desktop.
