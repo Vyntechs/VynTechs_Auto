@@ -1405,3 +1405,115 @@
     padding: 14px 22px;
   }
 }
+
+/* ====== Settings / Team section ======
+   Members list: stacked cards at <768px (avoiding the curator-page mobile
+   failure pattern of wide tables without responsive treatment), table-like
+   flex rows at ≥768px. Action buttons all ≥44px tap targets. */
+
+.vt-team-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.vt-team-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 0.5px solid var(--vt-rule);
+  font-family: var(--vt-font-serif);
+}
+.vt-team-row:last-child { border-bottom: none; }
+
+.vt-team-row--deactivated {
+  opacity: 0.55;
+}
+
+.vt-team-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.vt-team-row__name-text {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--vt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vt-team-row__you {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 3px;
+  color: var(--vt-fg-3);
+  flex-shrink: 0;
+}
+
+.vt-team-row__role,
+.vt-team-row__status {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+
+.vt-team-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vt-team-row__actions .btn {
+  min-height: 44px;
+  font-size: 13px;
+}
+.vt-team-row__deactivate {
+  color: var(--vt-risk-high, #b22);
+}
+
+.vt-team-error {
+  margin: 12px 0 0;
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--vt-risk-high, #b22);
+}
+
+/* Mobile (<768px) — fully stacked card per member. */
+@media (max-width: 767px) {
+  .vt-team-row {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .vt-team-row__actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+/* Tablet + desktop (≥768px) — table-like row with column alignment.
+   Columns: name | role | status | actions. */
+@media (min-width: 768px) {
+  .vt-team-row {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr) minmax(0, 0.6fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+  .vt-team-row__actions {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+  .vt-team-row__actions .btn {
+    min-height: 38px;
+  }
+}
