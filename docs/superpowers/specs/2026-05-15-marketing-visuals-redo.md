@@ -190,11 +190,20 @@ We are **NOT** shipping one diagnostic session repeated 11 times. Each shot is a
 
 ### Scenario A — AC pressure diagnostic with auto-pulled humidity + temperature (MANDATORY · HERO)
 
-**The wild feature.** Vyntechs pulls the shop's location and reads current ambient temperature + humidity, then uses that to compute target AC pressure ranges live. Refrigerant high-side pressure is a direct function of ambient conditions — most techs eyeball it, most diagnostic tools ignore it entirely. We compute it and call out deltas.
+**Confirmed real feature (verified with Brandon 2026-05-15).** When a diagnostic plan reaches a step that needs AC pressure, Vyntechs **pops up a location prompt, retrieves the user's location, fetches current weather (ambient temperature + humidity), and uses those values to compute target high-side pressure ranges** for the active diagnostic. Refrigerant high-side pressure is a direct function of ambient conditions — most techs eyeball it, most diagnostic tools ignore it entirely. We compute it and call out deltas.
 
-**What the shot shows.** AC system pressure diagnostic. A sidecar panel reads `Ambient 84°F · 67% RH · Target high-side 165–185 PSI` (or similar live-pulled values). The active step's reasoning calls out: "Reading 210 PSI is ~25 PSI above target for these ambient conditions. Suggests overcharge or restricted condenser airflow — check fan operation and condenser face before recovery."
+**The actual flow to capture:**
+1. Plan reaches an AC pressure step. Native location-permission popup appears in the app (or the in-app prompt that triggers it).
+2. User grants location. App retrieves location → fetches weather.
+3. Active step renders with the live ambient values inline and a target pressure range computed against those values.
+4. If actual pressure reading is logged, reasoning calls out the delta vs. the ambient-adjusted target.
 
-**Where this shot goes.** **Hero phone (`hero.png`) is required.** Also appears on Laptop L3 — Propose (full multi-pane: pressure diagnostic, ambient panel, reasoning, and plan side-by-side).
+**What the hero shot shows (step 3 — the payoff).** AC pressure diagnostic in the Propose view. Ambient panel reads something like `Ambient 84°F · 67% RH · Target high-side 165–185 PSI for these conditions`. Active step reasoning calls out: "Reading 210 PSI is ~25 PSI above target for these ambient conditions. Suggests overcharge or restricted condenser airflow — check fan operation and condenser face before recovery." Don't show the permission popup in the hero — show the result, which is where the magic lands.
+
+**Where this shot goes.**
+- **Hero phone (`hero.png`) is required** — show the payoff (step 3) with ambient values active.
+- **Laptop L3 — Propose** — same scenario, multi-pane (pressure diagnostic + ambient panel + reasoning + plan all visible at once). This is the laptop affordance moment.
+- **Optional supporting shot:** if Claude design wants to demonstrate the flow rather than just the payoff, capture the location-permission popup mid-flow on the laptop variant. Don't do this on the phone — popup mid-screen on a hero shot reads as "asking for permission" rather than "this is what the product does."
 
 ### Scenario B — Detailed electrical diagnostic
 
