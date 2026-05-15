@@ -1,17 +1,16 @@
 import { isFounder } from '@/lib/auth'
 
-// Curator gate. Previously this passed for both `'curator'` and `'owner'`
-// roles, but PR 6 introduces Admin (DB role `'owner'`) as a shop-level
-// management role distinct from corpus curation. After the tightening,
-// Admins do NOT inherit curator access — only role `'curator'` or the
-// founder (single hardcoded user via FOUNDER_EMAIL env var) can curate.
+// Curator gate. Admin (DB role `'owner'`) inherits curator access by
+// design: today the curator team is the three people who all worked at
+// the same original shop (Brandon as founder, plus the two Admins).
+// Any future shop-level Admin will also inherit curator unless we
+// switch to an explicit allowlist or an additive `is_curator` flag.
 //
-// Brandon (founder) keeps full access either way: his role is `'curator'`
-// AND his email matches FOUNDER_EMAIL. Mac (Admin / role `'owner'`) is
-// correctly blocked.
+// Founder (Brandon) matches via FOUNDER_EMAIL even if the profile row
+// is missing or has a non-curator role.
 export function canCurate(
   role: string | null | undefined,
   email: string | null | undefined,
 ): boolean {
-  return role === 'curator' || isFounder(email)
+  return role === 'curator' || role === 'owner' || isFounder(email)
 }

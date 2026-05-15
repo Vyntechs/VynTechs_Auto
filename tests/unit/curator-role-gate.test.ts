@@ -62,12 +62,11 @@ describe('guardCuratorRoute', () => {
     expect(result).toEqual({ kind: 'allow' })
   })
 
-  it('redirects authed owner who is NOT the founder (Mac case)', async () => {
-    // PR 6 tightening: role==='owner' alone no longer grants curator access.
-    // Mac as Admin (DB role 'owner') without FOUNDER_EMAIL match must NOT
-    // reach /curator — this is the security-sensitive change PR 6 ships.
+  it('allows authed owner who is NOT the founder (Mac case)', async () => {
+    // Admin (DB role 'owner') inherits curator access. Mac and Angel
+    // both run as Admins of their shops and curate alongside Brandon.
     const result = await guardCuratorRoute(db, OWNER_USER, 'mac@example.test', '/curator/drift')
-    expect(result).toEqual({ kind: 'redirect', to: '/' })
+    expect(result).toEqual({ kind: 'allow' })
   })
 
   it('allows authed owner who IS the founder via FOUNDER_EMAIL', async () => {
