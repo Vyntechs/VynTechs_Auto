@@ -1068,3 +1068,60 @@
 .vt-corpus-list-table th, .vt-corpus-list-table td { padding: 8px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; }
 .vt-corpus-list-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-corpus-list-tags { color: var(--vt-fg-3); font-size: 13px; }
+
+/* Phase Q — /curator/cases index + curator mobile responsiveness */
+.vt-cases-page { max-width: 1200px; }
+.vt-cases-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.vt-cases-header h1 { margin: 0; font-size: 22px; }
+.vt-cases-count { font-size: 12px; color: var(--vt-fg-3); font-family: var(--vt-font-mono); letter-spacing: 0.04em; }
+.vt-cases-filters { background: var(--vt-surface-2); padding: 16px; border-radius: 8px; margin-bottom: 24px; }
+.vt-cases-filter-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.vt-cases-filter-row label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; flex: 1 1 140px; min-width: 140px; }
+.vt-cases-filter-row label.vt-cases-search { flex: 2 1 220px; min-width: 200px; }
+.vt-cases-filter-row select, .vt-cases-filter-row input { font: inherit; padding: 8px 10px; border: 1px solid var(--vt-border); border-radius: 6px; background: var(--vt-bg); color: var(--vt-fg); width: 100%; box-sizing: border-box; min-height: 40px; }
+.vt-cases-filter-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.vt-cases-filter-actions .btn { min-height: 40px; padding: 8px 18px; }
+.vt-cases-clear { font-size: 13px; color: var(--vt-fg-3); text-decoration: none; }
+.vt-cases-clear:hover { color: var(--vt-fg); text-decoration: underline; }
+.vt-cases-empty { color: var(--vt-fg-3); padding: 64px 16px; text-align: center; background: var(--vt-surface-2); border-radius: 8px; }
+.vt-cases-table { width: 100%; border-collapse: collapse; }
+.vt-cases-table th, .vt-cases-table td { padding: 10px 12px; border-bottom: 1px solid var(--vt-border); text-align: left; vertical-align: top; font-size: 14px; }
+.vt-cases-table th { font-size: 12px; color: var(--vt-fg-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.vt-cases-link { color: var(--vt-accent); text-decoration: none; font-weight: 500; }
+.vt-cases-link:hover { text-decoration: underline; }
+.vt-cases-complaint { color: var(--vt-fg-2); max-width: 360px; }
+.vt-cases-date { font-family: var(--vt-font-mono); font-size: 12px; color: var(--vt-fg-3); white-space: nowrap; }
+.vt-cases-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.vt-cases-status-open { background: #d4e8f7; color: #1a4d7a; }
+.vt-cases-status-closed { background: #d8efd8; color: #1e5e1e; }
+.vt-cases-status-deferred { background: #fcf0c8; color: #6b4f00; }
+.vt-cases-status-declined { background: #f4d4d4; color: #7a1f1f; }
+
+/* Curator mobile: stack filter rows, collapse multi-column grids, give touch
+ * targets room. The existing @media (max-width: 959px) rule already turns wide
+ * tables into horizontal-scroll containers — these rules tune the surfaces
+ * around them so the page itself doesn't overflow. */
+@media (max-width: 959px) {
+  .vt-cases-filter-row label,
+  .vt-cases-filter-row label.vt-cases-search { flex: 1 1 100%; min-width: 0; }
+  .vt-cases-filter-actions { width: 100%; justify-content: flex-end; padding-top: 4px; }
+  .vt-cases-table .vt-cases-complaint { white-space: normal; max-width: 260px; }
+
+  .vt-drift-cell { grid-template-columns: 1fr; gap: 6px; }
+  .vt-drift-row { gap: 8px; padding: 12px; }
+  .vt-drift-actions { width: 100%; }
+  .vt-drift-page-header { flex-wrap: wrap; gap: 8px; }
+  .vt-drift-filters { flex-wrap: wrap; }
+
+  .vt-case-detail dl { grid-template-columns: 1fr; gap: 4px 0; }
+  .vt-case-detail dt { margin-top: 10px; font-weight: 600; color: var(--vt-fg-2); }
+  .vt-case-detail dd { margin-left: 0; }
+  .vt-event { flex-direction: column; gap: 4px; padding: 10px 0; }
+  .vt-event time { min-width: 0; }
+
+  .vt-deferred-header,
+  .vt-calibration-header,
+  .vt-corpus-list-header,
+  .vt-founder-notes-header { flex-wrap: wrap; gap: 8px; }
+  .vt-corpus-list-actions { margin-left: 0; }
+}
