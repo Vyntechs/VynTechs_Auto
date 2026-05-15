@@ -29,11 +29,27 @@ export function SignUpForm() {
     setError(null)
     setBusy(true)
     const formData = new FormData(e.currentTarget)
+    const fullName = String(formData.get('fullName') ?? '').trim()
     const email = String(formData.get('email') ?? '')
     const password = String(formData.get('password') ?? '')
 
+    if (fullName.length === 0) {
+      setError('Please enter your name.')
+      setBusy(false)
+      return
+    }
+    if (fullName.length > 100) {
+      setError('Name must be 100 characters or fewer.')
+      setBusy(false)
+      return
+    }
+
     const supabase = getBrowserSupabase()
-    const { error: authError } = await supabase.auth.signUp({ email, password })
+    const { error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } },
+    })
     if (authError) {
       setError(authError.message)
       setBusy(false)
@@ -143,6 +159,19 @@ export function SignUpForm() {
       </div>
 
       <form onSubmit={handleEmailSubmit} noValidate>
+        <div className="field">
+          <label htmlFor="fullName">Your name</label>
+          <input
+            id="fullName"
+            name="fullName"
+            type="text"
+            autoComplete="name"
+            required
+            maxLength={100}
+            disabled={busy}
+            placeholder="First & last"
+          />
+        </div>
         <div className="field">
           <label htmlFor="email">Email</label>
           <input
