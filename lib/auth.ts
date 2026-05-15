@@ -24,7 +24,9 @@ export async function requireUserAndProfile(opts: {
     data: { user },
   } = await opts.supabase.auth.getUser()
   if (!user || !user.email) return null
-  const profile = await ensureProfileAndShop(opts.db, user.id, user.email)
+  const metadataName = user.user_metadata?.full_name
+  const fullName = typeof metadataName === 'string' ? metadataName : undefined
+  const profile = await ensureProfileAndShop(opts.db, user.id, user.email, fullName)
   if (profile.shopId) {
     const ensure: EnsureCustomerFn =
       opts.ensureCustomer ??
