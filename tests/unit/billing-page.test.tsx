@@ -8,7 +8,7 @@ beforeEach(() => {
     configurable: true,
     value: {
       get href() {
-        return 'http://localhost/billing'
+        return 'http://localhost/settings/billing'
       },
       set href(v: string) {
         hrefSetter(v)
@@ -23,11 +23,11 @@ afterEach(() => {
   hrefSetter.mockReset()
 })
 
-import { BillingClient } from '@/components/screens/billing-client'
+import SettingsBillingPage from '@/app/(app)/settings/(admin)/billing/page'
 
-describe('BillingClient', () => {
+describe('SettingsBillingPage', () => {
   it('renders an actionable manage-subscription button', () => {
-    render(<BillingClient />)
+    render(<SettingsBillingPage />)
     const btn = screen.getByRole('button', { name: /manage subscription/i })
     expect(btn).toBeEnabled()
   })
@@ -39,7 +39,7 @@ describe('BillingClient', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<BillingClient />)
+    render(<SettingsBillingPage />)
     fireEvent.click(screen.getByRole('button', { name: /manage subscription/i }))
 
     await waitFor(() => {
@@ -61,7 +61,7 @@ describe('BillingClient', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<BillingClient />)
+    render(<SettingsBillingPage />)
     const btn = screen.getByRole('button', { name: /manage subscription/i })
     fireEvent.click(btn)
 
