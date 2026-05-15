@@ -22,6 +22,10 @@ const EXEMPT_EXACT = new Set<string>([
   // exchangeCodeForSession on mount. If middleware redirected to /sign-in,
   // the code would be lost and the reset flow would silently break.
   '/reset-password',
+  // Self-serve "I forgot my password" entry point — locked-out users have
+  // no session, so the auth gate must let them through to request the
+  // recovery email.
+  '/forgot-password',
   // Deactivated landing — a deactivated user with a live session must be
   // able to reach this page without bouncing through the paywall or back
   // through the deactivation gate (which would loop).
