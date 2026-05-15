@@ -10,6 +10,12 @@ vi.mock('@/lib/supabase-server', () => ({
   getServerSupabase: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
+// The route's paywall check runs against a real DB by default; with `db: {}`
+// here it would throw. Stub it to no-op so the test exercises route logic
+// only. Paywall semantics are covered separately in auth-access.test.ts.
+vi.mock('@/lib/auth-access', () => ({
+  paywallReject: vi.fn(async () => null),
+}))
 
 import { POST } from '@/app/api/intake/decode-vin/route'
 import { decodeVin } from '@/lib/intake/decode-vin'
@@ -38,6 +44,7 @@ describe('POST /api/intake/decode-vin', () => {
         role: 'owner',
         isComp: false,
         lastSeenWhatsNewAt: null,
+        deactivatedAt: null,
         createdAt: new Date(),
       },
       user: { id: 'u1', email: 'owner@shop.test' },

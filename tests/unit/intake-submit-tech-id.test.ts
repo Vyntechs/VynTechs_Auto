@@ -88,6 +88,9 @@ describe('POST /api/intake/submit — assignedTechId', () => {
         role: 'owner',
         shopId,
         fullName: 'Owner',
+        // isComp:true bypasses the Stripe paywall check; the unit test is
+        // about the assignedTechId flow, not billing.
+        isComp: true,
       })
       .returning()
     ownerProfileId = owner.id
