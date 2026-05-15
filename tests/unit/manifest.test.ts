@@ -14,10 +14,14 @@ describe('PWA manifest', () => {
     expect(m.start_url).toBe('/today')
   })
 
-  it('uses Workshop Instrument graphite for theme + background', () => {
+  it('uses bone canvas for theme + background', () => {
+    // The brand pivoted from graphite to bone (#fdfaf4) in the Workshop
+    // Instrument · 2026-05-02 iteration. Theme colour must match the body
+    // background so the iOS PWA chrome doesn't show a graphite seam at
+    // the top of the screen.
     const m = manifest()
-    expect(m.theme_color).toBe('#0d0d10')
-    expect(m.background_color).toBe('#0d0d10')
+    expect(m.theme_color).toBe('#fdfaf4')
+    expect(m.background_color).toBe('#fdfaf4')
   })
 
   it('declares PNG icons at 192 and 512', () => {
