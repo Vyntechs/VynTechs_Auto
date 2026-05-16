@@ -12,13 +12,15 @@ export function Why() {
             <em>Sharing it because it works.</em>
           </h2>
           <p className="vm-section-lede">
-            Every diagnostic AI I&rsquo;d tried would happily invent a part
-            number to keep me moving. The cost of that confidence isn&rsquo;t a
-            wrong sentence — it&rsquo;s an ordered part, a torn-down assembly,
-            a comeback. So I wrote one that refuses. It cites everything, gates
-            every destructive action behind a confidence threshold, and tells
-            me what evidence is still missing. After running on my own work for
-            long enough to trust it, I&rsquo;m opening it up.
+            Every diagnostic AI I&rsquo;d tried would happily make something up
+            to keep me moving — a procedure that doesn&rsquo;t apply to my
+            build year, a TSB number that doesn&rsquo;t exist, a pinout pulled
+            from thin air. The cost isn&rsquo;t a wrong sentence. It&rsquo;s
+            eight wasted hours, a torn-down assembly, a comeback. So I wrote
+            one that refuses. It cites everything, gates every destructive
+            action behind a confidence threshold, and tells me what evidence
+            is still missing. After running on my own work long enough to
+            trust it, I&rsquo;m opening it up.
           </p>
         </div>
       </div>
