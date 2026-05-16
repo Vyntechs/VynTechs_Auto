@@ -201,10 +201,20 @@
 .mk__phone {
   width: 320px;
   max-width: 100%;
-  aspect-ratio: 393 / 852;
+  /* Outer aspect matches the captured screenshot aspect (1170 × 2532).
+     Combined with the asymmetric padding below, this makes the inner screen
+     aspect exactly match the image — so the screen fills the content box,
+     no flex remainder, no "excessive" top/bottom bezel. */
+  aspect-ratio: 1170 / 2532;
   background: var(--vt-graphite-1000);
   border-radius: 44px;
-  padding: 9px;
+  /* Asymmetric padding — thicker top/bottom (~19px) than sides (~9px). This
+     matches a real iPhone's bezel proportions (Dynamic Island / home-indicator
+     regions are deeper than the side rails) AND it's what makes the inner
+     content box match the image's aspect ratio. Specifically: if outer is
+     W × W*2.164 and we want inner aspect = 1170/2532, then v_pad must be
+     ~2.16× h_pad. 9 × 2.164 ≈ 19.5, rounded to 19. */
+  padding: 19px 9px;
   /* Phone-as-physical-object effect. On a light page (hero) the outer drop
      shadows lift it off the surface. On a dark page (motion) the body color
      alone reads as the background — so we also need a glass-edge highlight
@@ -263,33 +273,12 @@
   inset: 0;
 }
 
-/* When the frame carries a real screenshot we detach the inner-screen aspect
-   from the outer-frame aspect. Outer keeps iPhone-look proportions (393/852).
-   Inner screen takes the image's exact aspect (1170/2532 = 0.4621). Fixed
-   9px outer padding eats more from width than height, so the default `inner
-   = outer minus 9px all around` ends up squarer (0.442) than the image and
-   `object-fit: cover` zoomed-and-clipped a few px each side.
+/* When the frame carries a real screenshot, the outer-aspect + asymmetric
+   padding above already make the inner content box exactly match the image
+   aspect. So the screen just fills 100% × 100% — no flex centering, no
+   aspect-ratio override, no vertical remainder. The --has-image class
+   remains on the DOM so the notch overlay logic still keys off it. */
 
-   Flex centering on the outer + aspect-ratio + height:auto on the inner make
-   the screen exactly match the image. The tiny remainder above and below
-   shows as natural phone-body bezel — same effect as a real iPhone's Dynamic
-   Island / home-indicator regions. NO crop, NO letterbox. */
-.mk__phone--has-image {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Thicker bezel than the empty/placeholder case (which uses 9px). The image
-     captures already include the app's full top bar — they don't need to
-     hug the phone edge. A chunkier bezel gives the device more breathing
-     room around the screenshot and matches the visual heft of a real
-     iPhone's Dynamic Island + home-indicator regions. */
-  padding: 14px;
-}
-.mk__phone__screen--has-image {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1170 / 2532;
-}
 
 /* ===========================================================
    PLACEHOLDER SCREEN — until Brandon supplies real PNGs
@@ -807,7 +796,9 @@
 }
 @media (min-width: 1024px) {
   .mk__hero__phone-wrap { justify-content: flex-end; }
-  .mk__hero .mk__phone { width: 380px; }
+  /* Cap width by viewport height too, so the hero phone doesn't exceed the
+     visible area on short laptop screens. Same pattern as motion section. */
+  .mk__hero .mk__phone { width: min(380px, calc(82vh * (1170 / 2532))); }
 }
 
 /* ===========================================================
@@ -1055,10 +1046,16 @@
   }
 }
 .mk__motion-screen .mk__phone {
-  width: clamp(220px, 32vw, 380px);
+  /* Width clamps for narrow viewports, but ALSO caps width based on viewport
+     height so the phone never exceeds the visible motion area on a short
+     laptop screen. 82vh × 0.4621 = max phone width that keeps height ≤ 82vh.
+     This prevents the desktop-laptop overflow Brandon flagged. */
+  width: min(clamp(220px, 32vw, 380px), calc(82vh * (1170 / 2532)));
 }
 @media (max-width: 767px) {
-  .mk__motion-screen .mk__phone { width: clamp(180px, 50vw, 240px); }
+  .mk__motion-screen .mk__phone {
+    width: min(clamp(180px, 50vw, 240px), calc(82vh * (1170 / 2532)));
+  }
 }
 
 .mk__motion-progress {
