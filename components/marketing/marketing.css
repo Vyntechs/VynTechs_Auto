@@ -242,21 +242,22 @@
   .mk__phone--lg,
   .mk__phone--xl { width: 280px; }
 
-  /* Mobile screen radius is a compromise between iPhone-y curve and content
-     clip. 14px gives a visible rounded-corner curve (the silhouette reads
-     as iPhone-y) but the arc only reaches ~4px from each edge — small
-     enough that the captured timestamp / VOICE / SCAN / hamburger labels
-     stay fully visible without needing a safe-area inset frame. */
+  /* Phone body keeps its iPhone-y rounded outer corners on mobile.
+     Screen has NO border-radius — screenshot stays rectangular. */
   .mk__phone { border-radius: 32px; }
-  .mk__phone__screen { border-radius: 14px; }
 }
 .mk__phone__screen {
   width: 100%;
   height: 100%;
   background: var(--vt-graphite-950);
-  border-radius: 36px;
-  overflow: hidden;
+  /* No border-radius on the screen — the screenshot stays a clean
+     rectangle with all corner content fully visible. The phone BODY's
+     rounded outer corners live entirely in the bezel area outside this
+     rectangle (the corners wrap around the screenshot rather than over
+     it). This was Brandon's call: stop cramming the screenshot into a
+     rounded clip, let the bezel define the iPhone shape instead. */
   position: relative;
+  overflow: hidden;
 }
 .mk__phone__notch {
   position: absolute;
