@@ -251,6 +251,28 @@
   inset: 0;
 }
 
+/* When the frame carries a real screenshot we detach the inner-screen aspect
+   from the outer-frame aspect. Outer keeps iPhone-look proportions (393/852).
+   Inner screen takes the image's exact aspect (1170/2532 = 0.4621). Fixed
+   9px outer padding eats more from width than height, so the default `inner
+   = outer minus 9px all around` ends up squarer (0.442) than the image and
+   `object-fit: cover` zoomed-and-clipped a few px each side.
+
+   Flex centering on the outer + aspect-ratio + height:auto on the inner make
+   the screen exactly match the image. The tiny remainder above and below
+   shows as natural phone-body bezel — same effect as a real iPhone's Dynamic
+   Island / home-indicator regions. NO crop, NO letterbox. */
+.mk__phone--has-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mk__phone__screen--has-image {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1170 / 2532;
+}
+
 /* ===========================================================
    PLACEHOLDER SCREEN — until Brandon supplies real PNGs
    =========================================================== */
