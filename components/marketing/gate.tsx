@@ -12,8 +12,8 @@ export function Gate() {
           </h2>
           <p className="vm-section-lede">
             Above the threshold, Vyntechs surfaces a precise next step with
-            parts, torque, and time estimate. Below it, the assistant tells you
-            exactly what evidence is missing — and refuses to recommend a
+            the source it&rsquo;s pulling from. Below it, the assistant tells
+            you exactly what evidence is missing — and refuses to recommend a
             destructive action.
           </p>
         </div>

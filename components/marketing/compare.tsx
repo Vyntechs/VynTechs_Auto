@@ -11,7 +11,7 @@ const ROWS: CompareRow[] = [
   {
     subj: 'Refusal at low confidence',
     chatbot:
-      'None. Confidently invents part numbers, torque specs, recall windows.',
+      'None. Confidently invents torque specs, TSB numbers, wiring pinouts.',
     scantool: 'N/A. Returns a DTC definition; no diagnostic stance.',
     us: 'Hard refusal below 95% gate. Tells you which evidence is missing.',
   },

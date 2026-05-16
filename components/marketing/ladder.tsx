@@ -13,8 +13,8 @@ export function Ladder() {
           <p className="vm-section-lede">
             The model climbs from your shop&rsquo;s own history → the open web
             for that exact vehicle → asking you for a specific observation. It
-            stops where the evidence stops. No hallucinated part numbers, no
-            invented torque specs.
+            stops where the evidence stops. No fabricated TSBs, no invented
+            torque specs.
           </p>
         </div>
       </div>

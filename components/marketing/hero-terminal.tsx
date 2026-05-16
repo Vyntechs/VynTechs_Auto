@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 
 // Illustrative session — a single F-150 commit path. The data is the
-// shape a real session takes; numbers + part IDs are example.
+// shape a real session takes; specific numbers are example.
 type Row = { time: string; kind: string; cls: string; html: string }
 
 const SCRIPT_ROWS: Row[] = [
@@ -53,7 +53,7 @@ const SCRIPT_ROWS: Row[] = [
     time: '08:14:53',
     kind: 'OK',
     cls: 'k-ok',
-    html: 'Above gate · committable. <b>Replace lower clamp · part FL3Z-6K786-A</b>',
+    html: 'Above gate · committable. <b>Replace lower clamp at throttle-body joint.</b>',
   },
   { time: '', kind: '', cls: '', html: '' },
 ]
