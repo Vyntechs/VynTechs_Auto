@@ -13,7 +13,8 @@
   -moz-osx-font-smoothing: grayscale;
 }
 .vm-page * { box-sizing: border-box; }
-.vm-page a { color: inherit; text-decoration: none; }
+/* :where() keeps this at specificity (0,1,0) so .vm-btn (also 0,1,0) wins on source order. */
+.vm-page :where(a) { color: inherit; text-decoration: none; }
 
 /* ===========================================================
    SHARED CHROME
@@ -42,11 +43,11 @@
   height: 44px; padding: 0 22px;
   font-family: var(--vt-font-serif);
   font-size: 16px; letter-spacing: -0.005em;
-  background: var(--vt-bone-900); color: var(--vt-bone-50);
+  background: var(--vt-signal-500); color: var(--vt-bone-900);
   border: 0; border-radius: 4px; cursor: pointer;
   transition: transform 80ms var(--vt-ease), background 160ms var(--vt-ease);
 }
-.vm-btn:hover { background: oklch(12% 0.012 60); transform: translateY(-1px); }
+.vm-btn:hover { background: var(--vt-signal-600); transform: translateY(-1px); }
 .vm-btn:active { transform: translateY(0); }
 .vm-btn--ghost {
   background: transparent; color: var(--vt-bone-900);
