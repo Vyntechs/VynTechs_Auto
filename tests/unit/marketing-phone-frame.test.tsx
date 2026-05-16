@@ -28,4 +28,25 @@ describe('PhoneFrame', () => {
     expect(container.querySelector('.mk__phone__screen')).toBeTruthy()
     expect(container.querySelector('.mk__phone__screen img')).toBeTruthy()
   })
+
+  // With `object-fit: cover` and the outer frame's fixed 9px padding, the inner
+  // screen ends up at a SQUARER aspect than the image (0.442 vs 0.462), so
+  // `cover` was zooming the image to fill height and clipping ~5px on each
+  // side. Real iPhones display 1170×2532 captures edge-to-edge with no crop.
+  // Fix: a --has-image modifier on the frame and screen that detaches the
+  // inner aspect from the outer aspect, making the inner screen exactly match
+  // the image's aspect ratio (1170/2532). The tiny remainder above and below
+  // shows as natural phone-body bezel (Dynamic Island / home-indicator area).
+  it('marks the frame with --has-image when an image is supplied so CSS can preserve image aspect', () => {
+    const image = { src: '/marketing/screenshots/hero.png', alt: 'test hero' }
+    const { container } = render(<PhoneFrame image={image} />)
+    expect(container.querySelector('.mk__phone--has-image')).toBeTruthy()
+    expect(container.querySelector('.mk__phone__screen--has-image')).toBeTruthy()
+  })
+
+  it('does not mark the frame with --has-image in the empty/placeholder case', () => {
+    const { container } = render(<PhoneFrame />)
+    expect(container.querySelector('.mk__phone--has-image')).toBeNull()
+    expect(container.querySelector('.mk__phone__screen--has-image')).toBeNull()
+  })
 })
