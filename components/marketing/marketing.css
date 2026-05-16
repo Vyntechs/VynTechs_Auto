@@ -242,20 +242,24 @@
   .mk__phone--lg,
   .mk__phone--xl { width: 280px; }
 
-  /* Phone body keeps its iPhone-y rounded outer corners on mobile.
-     Screen has NO border-radius — screenshot stays rectangular. */
+  /* Phone body keeps its iPhone-y rounded outer corners on mobile. Screen
+     drops to 8 px radius (~2 px corner-arc reach, basically invisible
+     clip) — enough to soften the screen corner so it doesn't look pointy
+     against the rounded body. */
   .mk__phone { border-radius: 32px; }
+  .mk__phone__screen { border-radius: 8px; }
 }
 .mk__phone__screen {
   width: 100%;
   height: 100%;
   background: var(--vt-graphite-950);
-  /* No border-radius on the screen — the screenshot stays a clean
-     rectangle with all corner content fully visible. The phone BODY's
-     rounded outer corners live entirely in the bezel area outside this
-     rectangle (the corners wrap around the screenshot rather than over
-     it). This was Brandon's call: stop cramming the screenshot into a
-     rounded clip, let the bezel define the iPhone shape instead. */
+  /* Subtle screen-corner rounding so the screen doesn't look "pointy"
+     against the rounded phone body. 14 px on desktop, 8 px on mobile
+     (overridden below). At these radii the corner-arc only reaches
+     ~4 px (desktop) / ~2 px (mobile) into the image — small enough that
+     captured content stays visible, while the corners read as gently
+     rounded rather than sharp 90°. */
+  border-radius: 14px;
   position: relative;
   overflow: hidden;
 }
