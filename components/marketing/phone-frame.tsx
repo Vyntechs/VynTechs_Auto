@@ -21,11 +21,15 @@ export function PhoneFrame({
 }: PhoneFrameProps) {
   const sizeClass =
     size === 'lg' ? 'mk__phone--lg' : size === 'xl' ? 'mk__phone--xl' : ''
-  const classes = ['mk__phone', sizeClass, className].filter(Boolean).join(' ')
+  const hasImageClass = image ? 'mk__phone--has-image' : ''
+  const classes = ['mk__phone', sizeClass, hasImageClass, className].filter(Boolean).join(' ')
+  const screenClasses = ['mk__phone__screen', image ? 'mk__phone__screen--has-image' : '']
+    .filter(Boolean)
+    .join(' ')
   return (
     <div className={classes} aria-hidden="true">
-      <div className="mk__phone__notch" />
-      <div className="mk__phone__screen">
+      {!image && <div className="mk__phone__notch" />}
+      <div className={screenClasses}>
         {image ? (
           <Image
             className="mk__phone__img"
