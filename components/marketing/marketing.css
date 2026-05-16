@@ -266,6 +266,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Thicker bezel than the empty/placeholder case (which uses 9px). The image
+     captures already include the app's full top bar — they don't need to
+     hug the phone edge. A chunkier bezel gives the device more breathing
+     room around the screenshot and matches the visual heft of a real
+     iPhone's Dynamic Island + home-indicator regions. */
+  padding: 14px;
 }
 .mk__phone__screen--has-image {
   width: 100%;
