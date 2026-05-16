@@ -242,16 +242,11 @@
   .mk__phone--lg,
   .mk__phone--xl { width: 280px; }
 
-  /* The captured screenshots have UI that runs edge-to-edge (timestamp at
-     the top-right, capture-bar labels at the bottom corners). On mobile the
-     phone is only ~195 px wide so ANY meaningful screen-radius eats real
-     content — 22 px at 195 px wide is 11 % of width, still clipping the
-     time / VOICE / SCAN labels. Drop the screen radius to 8 px (~4 % of
-     width) so the corner curve is just a hint of rounding rather than a
-     content-eater. Phone BODY keeps its rounded shape (32 px) so the
-     device still reads as an iPhone from the outside. */
+  /* Mobile keeps the modern-iPhone screen rounding (24px — proportional to
+     the smaller mobile phone width). Content stays clear of the rounded
+     corners thanks to the .mk__phone__safe-area inset wrapper below. */
   .mk__phone { border-radius: 32px; }
-  .mk__phone__screen { border-radius: 8px; }
+  .mk__phone__screen { border-radius: 24px; }
 }
 .mk__phone__screen {
   width: 100%;
@@ -282,6 +277,23 @@
   object-fit: cover;
   position: absolute;
   inset: 0;
+}
+
+/* Safe-area wrapper inside the rounded screen. Mimics iOS's
+   safe-area-inset-* behavior: keeps the captured image away from the
+   rounded screen corners so they don't clip content. Image is inset 12 px
+   on all sides on desktop (clears a 36 px screen-radius arc); 8 px on
+   mobile (clears the 24 px mobile screen-radius arc). The screen
+   background (graphite-950) shows in the inset gap, reading as a thin
+   "status-bar / home-indicator" frame around the screenshot — the same
+   visual cue a real iPhone gives. */
+.mk__phone__safe-area {
+  position: absolute;
+  inset: 12px;
+  overflow: hidden;
+}
+@media (max-width: 767px) {
+  .mk__phone__safe-area { inset: 8px; }
 }
 
 /* When the frame carries a real screenshot, the outer-aspect + asymmetric
