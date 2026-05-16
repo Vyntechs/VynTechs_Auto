@@ -31,15 +31,22 @@ export function PhoneFrame({
       {!image && <div className="mk__phone__notch" />}
       <div className={screenClasses}>
         {image ? (
-          <Image
-            className="mk__phone__img"
-            src={image.src}
-            alt={image.alt}
-            fill
-            priority={priority ?? false}
-            loading={loading}
-            sizes="(max-width: 768px) 280px, 360px"
-          />
+          // Safe-area wrapper sits inside the rounded screen and insets the
+          // image away from the screen corners — same role as
+          // `safe-area-inset-*` on iOS. Lets the screen keep generous
+          // iPhone-y rounding without the rounded corners eating content
+          // at the edges of the captured screenshot.
+          <div className="mk__phone__safe-area">
+            <Image
+              className="mk__phone__img"
+              src={image.src}
+              alt={image.alt}
+              fill
+              priority={priority ?? false}
+              loading={loading}
+              sizes="(max-width: 768px) 280px, 360px"
+            />
+          </div>
         ) : (
           children
         )}
