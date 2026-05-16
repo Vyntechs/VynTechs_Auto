@@ -849,6 +849,22 @@
   .mk__motion-track { height: 600svh; }
 }
 
+/* Step-position markers inside the track. The Motion component's scroll
+   handler uses these as semantic anchors for its JS-driven snap-on-release
+   behavior (see motion.tsx). They're invisible and non-interactive — they
+   exist so the snap implementation has a single source of truth for where
+   each step boundary lives and so tests have something stable to assert
+   against. CSS scroll-snap was attempted here but rejected: html-scoped
+   `mandatory` pulled scroll into the motion section from other sections,
+   and `proximity` was too gentle to actually snap. */
+.mk__motion-snap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
 .mk__motion-pin {
   position: sticky;
   top: 0;
