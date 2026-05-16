@@ -24,7 +24,7 @@ export function PhoneFrame({
   const classes = ['mk__phone', sizeClass, className].filter(Boolean).join(' ')
   return (
     <div className={classes} aria-hidden="true">
-      <div className="mk__phone__notch" />
+      {!image && <div className="mk__phone__notch" />}
       <div className="mk__phone__screen">
         {image ? (
           <Image
