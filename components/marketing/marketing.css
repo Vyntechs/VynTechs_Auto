@@ -205,8 +205,20 @@
   background: var(--vt-graphite-1000);
   border-radius: 44px;
   padding: 9px;
+  /* Phone-as-physical-object effect. On a light page (hero) the outer drop
+     shadows lift it off the surface. On a dark page (motion) the body color
+     alone reads as the background — so we also need a glass-edge highlight
+     (inset white ring) + an aluminum side-rail layer (inset solid shadow)
+     to define the silhouette. Same approach as devices.css + Raycast +
+     Stripe's frame library. Looks like a real iPhone in both contexts. */
   box-shadow:
-    0 1px 0 oklch(100% 0 0 / 0.10) inset,
+    /* glass-edge highlight just inside the body, the "light catching the
+       chamfered glass edge" effect */
+    0 0 4px 2px oklch(100% 0 0 / 0.12) inset,
+    /* aluminum side rail — a 6px-wide solid ring inside the highlight that
+       reads as the titanium/aluminum frame */
+    0 0 0 6px oklch(30% 0.006 250) inset,
+    /* ambient drop shadow — keeps the lift effect on light backgrounds */
     0 30px 60px -20px oklch(28% 0.02 60 / 0.28),
     0 8px 24px -8px oklch(28% 0.02 60 / 0.18);
   position: relative;
