@@ -243,13 +243,15 @@
   .mk__phone--xl { width: 280px; }
 
   /* The captured screenshots have UI that runs edge-to-edge (timestamp at
-     the top-right, capture-bar labels at the bottom corners). At small
-     screen widths the 36 px screen radius eats too much content at the
-     corners — the time shows as "0:" instead of "0:54", VOICE shows as
-     OICE, etc. Reduce both the body and screen radii on mobile so the
-     corner-clip stops at the bezel instead of the content. */
+     the top-right, capture-bar labels at the bottom corners). On mobile the
+     phone is only ~195 px wide so ANY meaningful screen-radius eats real
+     content — 22 px at 195 px wide is 11 % of width, still clipping the
+     time / VOICE / SCAN labels. Drop the screen radius to 8 px (~4 % of
+     width) so the corner curve is just a hint of rounding rather than a
+     content-eater. Phone BODY keeps its rounded shape (32 px) so the
+     device still reads as an iPhone from the outside. */
   .mk__phone { border-radius: 32px; }
-  .mk__phone__screen { border-radius: 22px; }
+  .mk__phone__screen { border-radius: 8px; }
 }
 .mk__phone__screen {
   width: 100%;
