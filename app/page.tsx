@@ -1,17 +1,16 @@
 import { getServerSupabase } from '@/lib/supabase-server'
-import { StickyCTA } from '@/components/marketing/sticky-cta'
+import { Nav } from '@/components/marketing/nav'
 import { Hero } from '@/components/marketing/hero'
-import { WhatItIs } from '@/components/marketing/what-it-is'
-import { Problem } from '@/components/marketing/problem'
-import { Motion } from '@/components/marketing/motion'
-import { OnLaptop } from '@/components/marketing/on-laptop'
-import { HowItWorks } from '@/components/marketing/how-it-works'
-import { Different } from '@/components/marketing/different'
-import { NotYet } from '@/components/marketing/not-yet'
-import { Improving } from '@/components/marketing/improving'
+import { Strip } from '@/components/marketing/strip'
+import { Why } from '@/components/marketing/why'
+import { Ladder } from '@/components/marketing/ladder'
+import { Gate } from '@/components/marketing/gate'
+import { Reel } from '@/components/marketing/reel'
 import { Pricing } from '@/components/marketing/pricing'
+import { Compare } from '@/components/marketing/compare'
 import { FAQ } from '@/components/marketing/faq'
 import { FinalCTA } from '@/components/marketing/final-cta'
+import { Footer } from '@/components/marketing/footer'
 import '@/components/marketing/marketing.css'
 
 export const dynamic = 'force-dynamic'
@@ -24,20 +23,19 @@ export default async function HomePage() {
   const isSignedIn = !!user
 
   return (
-    <main className="mk-page">
-      <StickyCTA isSignedIn={isSignedIn} />
-      <Hero />
-      <WhatItIs />
-      <Problem />
-      <Motion />
-      <OnLaptop />
-      <HowItWorks />
-      <Different />
-      <NotYet />
-      <Improving />
+    <main className="vm-page">
+      <Nav isSignedIn={isSignedIn} />
+      <Hero isSignedIn={isSignedIn} />
+      <Strip />
+      <Why />
+      <Ladder />
+      <Gate />
+      <Reel />
       <Pricing isSignedIn={isSignedIn} />
+      <Compare />
       <FAQ />
       <FinalCTA isSignedIn={isSignedIn} />
+      <Footer isSignedIn={isSignedIn} />
     </main>
   )
 }
