@@ -81,22 +81,96 @@ const NoteSchema = z.object({
   structuredData: z.object({}).optional(),
 })
 
-export const SAVE_SIMPLE_TYPES = ['cause_fix', 'reference_doc', 'bulletin', 'note'] as const
-export const RICH_TYPES_NOT_YET_SUPPORTED = [
-  'pinout',
-  'connector',
-  'wiring_diagram',
-  'theory_of_operation',
-] as const
+const PinRowSchema = z.object({
+  pin_number: z.string().min(1).max(8),
+  signal_name: z.string().min(1).max(120),
+  wire_color: z.string().max(40).optional(),
+  expected_voltage_or_waveform: z.string().max(200).optional(),
+  notes: z.string().max(500).optional(),
+})
 
-export const SimpleSaveSchema = z.discriminatedUnion('type', [
+const PinoutSchema = z.object({
+  type: z.literal('pinout'),
+  ...CommonFields,
+  body: z.string().max(20_000).optional(),
+  structuredData: z.object({
+    connector_ref: z.string().min(1).max(120),
+    pins: z
+      .array(PinRowSchema)
+      .min(1)
+      .max(120)
+      .refine(
+        (arr) => new Set(arr.map((p) => p.pin_number)).size === arr.length,
+        { message: 'duplicate pin_number values' },
+      ),
+  }),
+})
+
+const ConnectorSchema = z.object({
+  type: z.literal('connector'),
+  ...CommonFields,
+  body: z.string().max(20_000).optional(),
+  structuredData: z.object({
+    connector_id: z.string().min(1).max(60),
+    component_name: z.string().min(1).max(120),
+    location_description: z.string().max(2_000).optional(),
+    image_ref: z.string().max(500).optional(),
+    mating_end_image_ref: z.string().max(500).optional(),
+  }),
+})
+
+const WiringConnectionSchema = z.object({
+  from_component: z.string().min(1).max(120),
+  from_pin: z.string().max(20).optional(),
+  to_component: z.string().min(1).max(120),
+  to_pin: z.string().max(20).optional(),
+  wire_color: z.string().max(40).optional(),
+  splice_id: z.string().max(60).optional(),
+  notes: z.string().max(500).optional(),
+})
+
+const WiringDiagramSchema = z.object({
+  type: z.literal('wiring_diagram'),
+  ...CommonFields,
+  body: z.string().max(20_000).optional(),
+  structuredData: z.object({
+    name: z.string().min(1).max(200),
+    image_ref: z.string().min(1).max(500),
+    connections: z.array(WiringConnectionSchema).max(200).optional().default([]),
+  }),
+})
+
+const TheorySectionSchema = z.object({
+  heading: z.string().min(1).max(200),
+  body: z.string().min(1).max(20_000),
+})
+
+const TheoryOfOperationSchema = z.object({
+  type: z.literal('theory_of_operation'),
+  ...CommonFields,
+  body: z.string().max(20_000).optional(),
+  structuredData: z.object({
+    title: z.string().min(1).max(200),
+    sections: z.array(TheorySectionSchema).min(1).max(40),
+  }),
+})
+
+export const SAVE_SIMPLE_TYPES = ['cause_fix', 'reference_doc', 'bulletin', 'note'] as const
+export const SAVE_RICH_TYPES = ['pinout', 'connector', 'wiring_diagram', 'theory_of_operation'] as const
+export const SAVE_ALL_TYPES = [...SAVE_SIMPLE_TYPES, ...SAVE_RICH_TYPES] as const
+
+export const KnowledgeSaveSchema = z.discriminatedUnion('type', [
   CauseFixSchema,
   BulletinSchema,
   ReferenceDocSchema,
   NoteSchema,
+  PinoutSchema,
+  ConnectorSchema,
+  WiringDiagramSchema,
+  TheoryOfOperationSchema,
 ])
 
-export type SimpleSaveInput = z.infer<typeof SimpleSaveSchema>
+export type KnowledgeSaveInput = z.infer<typeof KnowledgeSaveSchema>
 
 type SaveContext = {
   shopId: string
@@ -106,7 +180,7 @@ type SaveContext = {
 export type SaveResult = { id: string }
 
 export async function saveKnowledgeItem(
-  input: SimpleSaveInput,
+  input: KnowledgeSaveInput,
   ctx: SaveContext,
 ): Promise<SaveResult> {
   const normalizedDtcs = Array.from(
