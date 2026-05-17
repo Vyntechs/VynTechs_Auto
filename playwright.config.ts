@@ -27,6 +27,14 @@ export default defineConfig({
       },
       testMatch: /curator\.spec\.ts/,
     },
+    {
+      name: 'knowledge',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: STORAGE_STATE_PATH,
+      },
+      testMatch: /knowledge\.spec\.ts/,
+    },
   ],
   webServer: {
     command: 'pnpm dev',
