@@ -40,7 +40,7 @@ export async function updateKnowledgeItem(
         updatedAt: new Date(),
       })
       .where(and(eq(knowledgeItems.id, args.id), eq(knowledgeItems.shopId, args.shopId)))
-      .returning({ id: knowledgeItems.id })
+      .returning()
 
     if (result.length === 0) {
       throw new Error(`knowledge item not found or not owned by shop: ${args.id}`)
