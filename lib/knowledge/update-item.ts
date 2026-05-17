@@ -14,14 +14,32 @@ export async function updateKnowledgeItem(
 ): Promise<void> {
   KnowledgeSaveSchema.parse(input)
 
-  const normalizedDtcs = Array.from(
-    new Set(
-      (input.dtcList ?? [])
-        .map(d => normalizeDtc(d))
-        .filter((n): n is NormalizedDtc => n !== null)
-        .map(n => n.canonical),
-    ),
-  )
+  const normalizedPairs = (input.dtcList ?? [])
+    .map(d => normalizeDtc(d))
+    .filter((n): n is NormalizedDtc => n !== null)
+
+  const dtcSet = new Set<string>()
+  const subCodesByDtc: Record<string, string> = {}
+
+  const inputSubCodes = 'dtcSubCodes' in input ? input.dtcSubCodes : undefined
+  for (const [rawKey, val] of Object.entries(inputSubCodes ?? {})) {
+    const n = normalizeDtc(rawKey)
+    if (n && typeof val === 'string') subCodesByDtc[n.canonical] = val
+  }
+
+  for (const p of normalizedPairs) {
+    dtcSet.add(p.canonical)
+    if (p.subCode !== null && !(p.canonical in subCodesByDtc)) {
+      subCodesByDtc[p.canonical] = p.subCode
+    }
+  }
+
+  for (const key of Object.keys(subCodesByDtc)) {
+    if (!dtcSet.has(key)) delete subCodesByDtc[key]
+  }
+
+  const normalizedDtcs = Array.from(dtcSet)
+  const dtcSubCodes = Object.keys(subCodesByDtc).length > 0 ? subCodesByDtc : null
 
   await db.transaction(async tx => {
     const result = await tx
@@ -35,6 +53,7 @@ export async function updateKnowledgeItem(
             ? (input.structuredData as Record<string, unknown>)
             : null,
         dtcList: normalizedDtcs,
+        dtcSubCodes,
         systemCodes: input.systemCodes ?? [],
         symptoms: input.symptoms ?? [],
         relatedItemIds: input.relatedItemIds ?? null,
