@@ -32,7 +32,13 @@ export async function listKnowledgeItems(
 ): Promise<KnowledgeListRow[]> {
   const { shopId, filter, limit = 200 } = args
   const status = filter.status ?? 'active'
-  const cutoff = new Date(Date.now() - TWENTY_FOUR_HOURS_MS)
+  // Cast to ISO string explicitly — the production Postgres driver (node-
+  // postgres via postgres-js) rejects raw Date objects in query parameters
+  // with TypeError("string argument must be ... Received an instance of Date").
+  // Our test DB (PGlite) is forgiving and converts automatically, which hid
+  // the bug locally. Crashes /knowledge with a 500 on every shop with active
+  // items.
+  const cutoff = new Date(Date.now() - TWENTY_FOUR_HOURS_MS).toISOString()
 
   const conditions = [eq(knowledgeItems.shopId, shopId)]
 
