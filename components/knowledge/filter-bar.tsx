@@ -2,6 +2,7 @@
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useCallback } from 'react'
 import { TYPE_LABELS, SYSTEM_CODES, type KnowledgeType } from '@/lib/knowledge/constants'
+import { normalizeDtc } from '@/lib/knowledge/normalize'
 
 const TYPE_KEYS = Object.keys(TYPE_LABELS) as KnowledgeType[]
 
@@ -95,6 +96,14 @@ export function FilterBar() {
             value={dtc}
             placeholder="P0562"
             onChange={e => update({ dtc: e.target.value.toUpperCase() || null })}
+            onBlur={e => {
+              const v = e.target.value.trim()
+              if (!v) return
+              const n = normalizeDtc(v)
+              if (n && n.canonical !== v.toUpperCase()) {
+                update({ dtc: n.canonical })
+              }
+            }}
           />
         </label>
 

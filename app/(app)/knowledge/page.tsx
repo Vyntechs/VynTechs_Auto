@@ -6,6 +6,7 @@ import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
 import { canCurate } from '@/lib/curator/can-curate'
 import { listKnowledgeItems, type KnowledgeListFilter } from '@/lib/knowledge/list'
+import { normalizeDtc } from '@/lib/knowledge/normalize'
 import { getKnowledgeItem } from '@/lib/knowledge/get-item'
 import { SAVE_ALL_TYPES } from '@/lib/knowledge/save'
 import { FilterBar } from '@/components/knowledge/filter-bar'
@@ -105,7 +106,11 @@ function parseFilters(sp: Record<string, string | string[] | undefined>): Knowle
   const filter: KnowledgeListFilter = {}
   const type = singleParam(sp.type)
   if (type && TYPE_SET.has(type)) filter.type = type as KnowledgeListFilter['type']
-  const dtc = singleParam(sp.dtc); if (dtc) filter.dtc = dtc.toUpperCase()
+  const dtcRaw = singleParam(sp.dtc)
+  if (dtcRaw) {
+    const n = normalizeDtc(dtcRaw)
+    filter.dtc = n ? n.canonical : dtcRaw
+  }
   const sc = singleParam(sp.systemCode); if (sc) filter.systemCode = sc
   const sy = singleParam(sp.symptom); if (sy) filter.symptom = sy
   const make = singleParam(sp.vehicleMake); if (make) filter.vehicleMake = make
