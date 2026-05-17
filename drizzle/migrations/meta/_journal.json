@@ -134,6 +134,13 @@
       "when": 1778544000003,
       "tag": "0016_profile_deactivated_at",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778544000004,
+      "tag": "0017_shop_mgmt_foundation",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,8 @@ const fixtureSession: Session = {
   createdAt: MIN_AGO(14),
   closedAt: null,
   outcome: null,
+  repairOrderId: null,
+  customerAuthorized: null,
   intake: {
     vehicleYear: 2018,
     vehicleMake: 'Ford',
