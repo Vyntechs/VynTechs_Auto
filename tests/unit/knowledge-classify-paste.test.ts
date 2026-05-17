@@ -77,7 +77,10 @@ describe('classifyPaste', () => {
       },
       sourceSpans: {},
     })
-    const result = await classifyPaste({ rawText: 'TSB 21-2299 alternator pulley...' }, client)
+    const result = await classifyPaste(
+      { rawText: 'TSB 21-2299 alternator pulley failure on 2017-2019 Ford F-250' },
+      client,
+    )
     expect(result.draft.type).toBe('bulletin')
     expect(result.draft.structuredData).toMatchObject({ source: 'Ford', bulletin_id: 'TSB 21-2299' })
   })
@@ -107,7 +110,10 @@ describe('classifyPaste', () => {
     })
     const client: AnthropicLike = { messages: { create } }
     await classifyPaste(
-      { rawText: 'check the ground strap', scopeHint: '2018 F-250 6.7L Powerstroke' },
+      {
+        rawText: 'check the ground strap on the alternator harness terminals',
+        scopeHint: '2018 F-250 6.7L Powerstroke',
+      },
       client,
     )
     const call = create.mock.calls[0][0] as { messages: Array<{ content: string }> }
@@ -126,7 +132,10 @@ describe('classifyPaste', () => {
       sourceSpans: {},
     })
     await expect(
-      classifyPaste({ rawText: 'C2280 pinout for alternator' }, client),
+      classifyPaste(
+        { rawText: 'C2280 pinout for the alternator field circuit harness' },
+        client,
+      ),
     ).rejects.toThrow(/simple type/i)
   })
 
@@ -142,9 +151,12 @@ describe('classifyPaste', () => {
         }),
       },
     }
-    await expect(classifyPaste({ rawText: 'hello' }, client)).rejects.toThrow(
-      /did not call/i,
-    )
+    await expect(
+      classifyPaste(
+        { rawText: 'hello world this is sufficiently long for the parser' },
+        client,
+      ),
+    ).rejects.toThrow(/did not call/i)
   })
 
   it('throws on invalid status value in the tool input', async () => {
@@ -153,8 +165,85 @@ describe('classifyPaste', () => {
       draft: { type: 'note', title: 'x', body: 'x' },
       sourceSpans: {},
     })
-    await expect(classifyPaste({ rawText: 'hello' }, client)).rejects.toThrow(
-      /invalid status/i,
-    )
+    await expect(
+      classifyPaste(
+        { rawText: 'hello world this is sufficiently long for the parser' },
+        client,
+      ),
+    ).rejects.toThrow(/invalid status/i)
+  })
+
+  describe('min-paste guard', () => {
+    const noopClient = {
+      messages: { create: vi.fn() },
+    } as unknown as AnthropicLike
+
+    it('returns paste_too_short for a paste below 30 chars', async () => {
+      const r = await classifyPaste({ rawText: 'P0420 misfire' }, noopClient)
+      expect(r.status).toBe('paste_too_short')
+      expect(r.draft).toEqual({})
+      expect(r.sourceSpans).toEqual({})
+    })
+
+    it('returns paste_too_short for a paste with fewer than 6 words', async () => {
+      const r = await classifyPaste(
+        { rawText: 'transmission control module software calibration' },
+        noopClient,
+      )
+      expect(r.status).toBe('paste_too_short')
+    })
+
+    it('proceeds to call the model when both thresholds are met', async () => {
+      const client = {
+        messages: {
+          create: vi.fn().mockResolvedValue({
+            content: [
+              {
+                type: 'tool_use',
+                name: 'submit_classified_paste',
+                input: {
+                  status: 'parsed',
+                  draft: { type: 'note', title: 'ok' },
+                  sourceSpans: {},
+                },
+                id: 'tu_test',
+              },
+            ],
+          }),
+        },
+      } as unknown as AnthropicLike
+      const r = await classifyPaste(
+        { rawText: 'Customer concern: harsh shift on the F-150 EcoBoost.' },
+        client,
+      )
+      expect(r.status).toBe('parsed')
+      expect(client.messages.create).toHaveBeenCalledOnce()
+    })
+
+    it('does NOT call the model when below threshold', async () => {
+      const create = vi.fn()
+      const client = {
+        messages: { create },
+      } as unknown as AnthropicLike
+      await classifyPaste({ rawText: 'short' }, client)
+      expect(create).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('grounding-required prompt', () => {
+    it('CLASSIFY_PASTE_SYSTEM contains the GROUNDING RULE block', async () => {
+      const { CLASSIFY_PASTE_SYSTEM } = await import('@/lib/knowledge/classify-paste')
+      expect(CLASSIFY_PASTE_SYSTEM).toContain('GROUNDING RULE')
+      expect(CLASSIFY_PASTE_SYSTEM).toContain('leave the field empty')
+    })
+
+    it('GROUNDING RULE appears BEFORE the ALLOWED TYPES section', async () => {
+      const { CLASSIFY_PASTE_SYSTEM } = await import('@/lib/knowledge/classify-paste')
+      const gIdx = CLASSIFY_PASTE_SYSTEM.indexOf('GROUNDING RULE')
+      const tIdx = CLASSIFY_PASTE_SYSTEM.indexOf('ALLOWED TYPES')
+      expect(gIdx).toBeGreaterThan(-1)
+      expect(tIdx).toBeGreaterThan(-1)
+      expect(gIdx).toBeLessThan(tIdx)
+    })
   })
 })

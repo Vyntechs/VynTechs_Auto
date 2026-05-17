@@ -5,6 +5,9 @@ const HAIKU = process.env.ANTHROPIC_HAIKU_MODEL ?? 'claude-haiku-4-5-20251001'
 export const SIMPLE_TYPES = ['cause_fix', 'reference_doc', 'bulletin', 'note'] as const
 export type SimpleType = (typeof SIMPLE_TYPES)[number]
 
+export const MIN_PASTE_CHARS = 30
+export const MIN_PASTE_WORDS = 6
+
 export type ProposedVehicleScope = {
   yearStart: number
   yearEnd: number
@@ -16,7 +19,7 @@ export type ProposedVehicleScope = {
 }
 
 export type ClassifiedPasteResult = {
-  status: 'parsed' | 'failed'
+  status: 'parsed' | 'failed' | 'paste_too_short'
   draft: {
     type?: SimpleType
     title?: string
@@ -43,6 +46,30 @@ export type AnthropicLike = {
 }
 
 export const CLASSIFY_PASTE_SYSTEM = `You convert an automotive shop owner's pasted reference text into a structured draft for a vehicle-knowledge entry. Output is a proposal the owner reviews and edits before saving.
+
+GROUNDING RULE — Before filling any field, locate the exact verbatim text in the paste that supports it. Copy that text into sourceSpans[fieldName]. If you cannot find verbatim text supporting a value, leave the field empty. Empty is correct; fabricated is wrong.
+
+EXAMPLE (sparse paste):
+
+Input: "P0420 — check downstream O2"
+
+Output:
+{
+  "status": "parsed",
+  "draft": {
+    "type": "note",
+    "title": "P0420 — check downstream O2",
+    "body": "P0420 — check downstream O2",
+    "dtcList": ["P0420"]
+  },
+  "sourceSpans": {
+    "title": "P0420 — check downstream O2",
+    "body": "P0420 — check downstream O2",
+    "dtcList": "P0420"
+  }
+}
+
+(No invented complaint, cause, vehicle scope, or symptoms — the paste does not contain verbatim text for them, so they are omitted.)
 
 ALLOWED TYPES (exactly one):
 - "cause_fix" — a complaint/cause/correction case: "X symptom on Y vehicle = check Z first; fix is W". Use when the paste names a specific failure pattern with a verified cause and corrective action.
@@ -114,6 +141,16 @@ export type ClassifyPasteInput = {
   scopeHint?: string
 }
 
+export type PasteRouteResponse = {
+  status: 'parsed' | 'failed' | 'paste_too_short'
+  draft: ClassifiedPasteResult['draft']
+  sourceSpans: Record<string, string>
+  stripped: string[]
+  unverified: string[]
+  llmNotes?: string
+  message?: string
+}
+
 export async function classifyPaste(
   input: ClassifyPasteInput,
   client: AnthropicLike = anthropic as unknown as AnthropicLike,
@@ -121,6 +158,11 @@ export async function classifyPaste(
   const trimmed = input.rawText.trim()
   if (trimmed.length === 0) {
     return { status: 'failed', draft: {}, sourceSpans: {} }
+  }
+
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length
+  if (trimmed.length < MIN_PASTE_CHARS || wordCount < MIN_PASTE_WORDS) {
+    return { status: 'paste_too_short', draft: {}, sourceSpans: {} }
   }
 
   const userContent = input.scopeHint
