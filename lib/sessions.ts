@@ -19,6 +19,7 @@ import type { TreeState, TreeEngineResult } from './ai/tree-engine'
 import type { IntakePayload } from './types'
 import type { MatchedKnowledgeItem } from './knowledge/retrieval'
 import { extractCitedItems } from './knowledge/citations'
+import { attributeCitationsToCurrentNode } from './knowledge/attribute-citations'
 import type { ValidatorResult } from './ai/outcome-validator'
 import type {
   DeclineLanguage,
@@ -255,6 +256,17 @@ export async function advanceSession(opts: {
     label: 'Promoting next step',
   })
 
+  const citedItems = extractCitedItems(nextTree.message, consultedItems)
+
+  // PR 6: attribute cited item IDs onto the current step's tree node so
+  // the citation surface persists across page reloads. Must happen before
+  // updateSessionTreeState so the DB has the IDs.
+  nextTree = attributeCitationsToCurrentNode(
+    session.treeState,
+    nextTree,
+    citedItems.map((i) => i.id),
+  )
+
   await appendSessionEvent(opts.db, {
     sessionId: opts.sessionId,
     nodeId: session.treeState.currentNodeId,
@@ -266,8 +278,6 @@ export async function advanceSession(opts: {
     },
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
-
-  const citedItems = extractCitedItems(nextTree.message, consultedItems)
 
   return { ok: true, tree: nextTree, consultedItems, citedItems }
 }
@@ -613,6 +623,17 @@ export async function recordAmbientConditions(opts: {
     return { ok: false, status: 500, error: `tree update failed: ${cause}` }
   }
 
+  const citedItems = extractCitedItems(nextTree.message, consultedItems)
+
+  // PR 6: attribute cited item IDs onto the current step's tree node so
+  // the citation surface persists across page reloads (see attribute-
+  // citations for append + dedupe semantics).
+  nextTree = attributeCitationsToCurrentNode(
+    session.treeState,
+    nextTree,
+    citedItems.map((i) => i.id),
+  )
+
   await appendSessionEvent(opts.db, {
     sessionId: opts.sessionId,
     nodeId: session.treeState.currentNodeId,
@@ -621,8 +642,6 @@ export async function recordAmbientConditions(opts: {
     aiResponse: { nextNodeId: nextTree.currentNodeId },
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
-
-  const citedItems = extractCitedItems(nextTree.message, consultedItems)
 
   return { ok: true, conditions, tree: nextTree, consultedItems, citedItems }
 }

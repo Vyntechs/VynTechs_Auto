@@ -20,27 +20,25 @@ export type ParsedTheoryResult = {
 export type AnthropicLike = {
   messages: {
     create: (args: unknown) => Promise<{
-      content: Array<{ type: string; text?: string }>
+      content: Array<
+        | { type: 'text'; text?: string }
+        | { type: 'tool_use'; name?: string; input?: unknown; id?: string }
+      >
     }>
   }
 }
 
 export const PARSE_THEORY_SYSTEM = `You split raw OEM "theory of operation" or "description and operation" text — pasted by an automotive shop owner — into structured sections. Output is a proposal the owner reviews and edits before saving.
 
-OUTPUT FORMAT — return valid JSON matching this TypeScript type:
+You submit your proposal by calling the submit_parsed_theory tool. Do NOT return prose — only invoke the tool. The tool's input schema enforces the JSON shape, so you cannot produce malformed output.
 
-type Result = {
-  status: "parsed" | "failed"
-  draft: {
-    title?: string                 // a 1-line title for the whole document; omit if the paste doesn't suggest one
-    sections: Array<{
-      heading: string              // 1-line section title
-      body: string                 // section body — plain text, paragraphs preserved with \\n\\n
-    }>
-  }
-  sourceSpans: { [fieldName: string]: string }   // optional verbatim quotes from the paste
-  llmNotes?: string                              // 1-2 sentences if something was ambiguous
-}
+FIELD GUIDANCE:
+- status: "parsed" when you extracted at least one section with a non-empty body. "failed" when paste is empty / gibberish / fundamentally not theory text (e.g. a pinout was pasted by mistake).
+- draft.title: a 1-line title for the whole document. Omit if the paste doesn't suggest one.
+- draft.sections[].heading: 1-line section title.
+- draft.sections[].body: section body — plain text. Preserve paragraph structure within each section using \\n\\n between paragraphs.
+- sourceSpans: optional verbatim quotes from the paste, one per field where one is meaningful.
+- llmNotes: 1-2 sentences if something was ambiguous.
 
 RULES — these reflect REAL structure of OEM theory pastes (GM SI, Ford TIS, AllData, ProDemand, Toyota TIS):
 
@@ -63,13 +61,39 @@ RULES — these reflect REAL structure of OEM theory pastes (GM SI, Ford TIS, Al
 
 6. Non-breaking spaces ( ) in pasted OEM HTML should be treated as regular spaces.
 
-7. Never invent content. Do not summarize. Preserve the original text verbatim within each section's body.
+7. Never invent content. Do not summarize. Preserve the original text verbatim within each section's body.`
 
-STATUS:
-- "parsed" if you extracted at least one section with a non-empty body.
-- "failed" if the paste is empty, gibberish, or fundamentally not theory text (e.g. a pinout was pasted by mistake).
-
-Return JSON only — no prose, no fences.`
+const PARSE_THEORY_TOOL = {
+  name: 'submit_parsed_theory',
+  description: 'Submit the parsed theory of operation as a structured proposal the curator will review.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['parsed', 'failed'] },
+      draft: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          sections: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                heading: { type: 'string' },
+                body: { type: 'string' },
+              },
+              required: ['heading', 'body'],
+            },
+          },
+        },
+        required: ['sections'],
+      },
+      sourceSpans: { type: 'object', additionalProperties: { type: 'string' } },
+      llmNotes: { type: 'string' },
+    },
+    required: ['status', 'draft'],
+  },
+} as const
 
 export type ParseTheoryInput = {
   rawText: string
@@ -86,27 +110,33 @@ export async function parseTheory(
   }
 
   const userContent = input.titleHint
-    ? `Title hint: ${input.titleHint}\n\nPaste:\n${trimmed}\n\nReturn JSON only.`
-    : `Paste:\n${trimmed}\n\nReturn JSON only.`
+    ? `Title hint: ${input.titleHint}\n\nPaste:\n${trimmed}`
+    : `Paste:\n${trimmed}`
 
   const res = await client.messages.create({
     model: HAIKU,
-    max_tokens: 4096,
+    // Theory pastes preserve OEM prose verbatim per section, so output scales
+    // ~1:1 with input. 8192 covers the full 20k-char input cap with headroom.
+    max_tokens: 8192,
     system: cachedSystem(PARSE_THEORY_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
-  })
+    tools: [PARSE_THEORY_TOOL],
+    // Force the model to call our tool (not free-form text). The Anthropic
+    // SDK validates the model's output against input_schema before returning,
+    // so the response shape is structurally guaranteed — no JSON.parse, no
+    // malformed-string risk.
+    tool_choice: { type: 'tool', name: 'submit_parsed_theory' },
+  } as unknown as Parameters<AnthropicLike['messages']['create']>[0])
 
-  const block = res.content.find((b) => b.type === 'text')
-  if (!block || block.type !== 'text' || !block.text) {
-    throw new Error('parse-theory returned no text block')
+  const toolUse = res.content.find(
+    (b): b is { type: 'tool_use'; name?: string; input?: unknown; id?: string } =>
+      b.type === 'tool_use',
+  )
+  if (!toolUse || typeof toolUse.input !== 'object' || toolUse.input === null) {
+    throw new Error('parse-theory: model did not call submit_parsed_theory tool')
   }
 
-  const cleaned = block.text
-    .trim()
-    .replace(/^```(?:json)?\n?/, '')
-    .replace(/\n?```$/, '')
-
-  const parsed = JSON.parse(cleaned) as Partial<ParsedTheoryResult>
+  const parsed = toolUse.input as Partial<ParsedTheoryResult>
 
   if (parsed.status !== 'parsed' && parsed.status !== 'failed') {
     throw new Error(`parse-theory returned invalid status: ${String(parsed.status)}`)
