@@ -14,8 +14,6 @@ import { KnowledgeEmptyState } from '@/components/knowledge/empty-state'
 import { KnowledgeDrawer } from '@/components/knowledge/drawer'
 import { AddKnowledgePicker } from '@/components/knowledge/add-picker'
 import { PasteSheet } from '@/components/knowledge/paste-sheet'
-import { KnowledgePasteForm } from './paste-form'
-import { RichKnowledgeForm } from './rich-form'
 
 export const metadata = { title: 'Knowledge' }
 
@@ -93,31 +91,6 @@ export default async function KnowledgePage({
       <KnowledgeDrawer item={detail} />
       <AddKnowledgePicker />
       <PasteSheet />
-
-      <section
-        className="vk-interim"
-        style={{
-          marginTop: 48,
-          padding: '24px 32px',
-          background: 'var(--vt-bone-100)',
-          borderTop: '0.5px solid var(--vt-rule-strong)',
-        }}
-      >
-        <p
-          style={{
-            fontFamily: 'var(--vt-font-mono)',
-            fontSize: 10,
-            letterSpacing: '0.18em',
-            color: 'var(--vt-fg-3)',
-            textTransform: 'uppercase',
-            margin: '0 0 16px',
-          }}
-        >
-          PR 5b contribution UI · interim
-        </p>
-        <KnowledgePasteForm />
-        <RichKnowledgeForm />
-      </section>
     </main>
   )
 }
