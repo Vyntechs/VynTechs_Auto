@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireCurator } from '@/lib/curator/route-helpers'
+import { requireProfile } from '@/lib/auth/route-helpers'
 import { db } from '@/lib/db/client'
 import { getKnowledgeItem } from '@/lib/knowledge/get-item'
 import { updateKnowledgeItem } from '@/lib/knowledge/update-item'
@@ -11,9 +12,13 @@ type RouteCtx = { params: Promise<{ id: string }> }
 
 const IdSchema = z.string().uuid()
 
+// PR 6: GET is tech-readable so the citation drawer can hydrate by id
+// during a live diagnostic session. Shop scope is still enforced by
+// getKnowledgeItem (cross-shop returns null → 404). Retired items are
+// returned — citations are a historical record of what the AI saw.
 export async function GET(_req: Request, ctx: RouteCtx) {
-  const auth = await requireCurator()
-  if (auth.kind === 'forbidden') return auth.response
+  const auth = await requireProfile()
+  if (auth.kind === 'unauthed') return auth.response
 
   const { id: rawId } = await ctx.params
   if (!IdSchema.safeParse(rawId).success) {

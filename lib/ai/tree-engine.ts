@@ -15,6 +15,12 @@ export type TreeNode = {
   status: 'pending' | 'active' | 'resolved' | 'pruned'
   rationale?: string
   children?: string[]
+  // PR 6. Knowledge item IDs the AI cited when grounding this node.
+  // Set by the advance-stream route handler after each turn; append-only
+  // with dedupe (Set semantics, preserve first-citation order). Optional
+  // for backward compat — older nodes have no field and render no
+  // citations.
+  citationItemIds?: string[]
 }
 
 export type WhatWouldClose =
