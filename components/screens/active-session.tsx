@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import {
   VehicleStrip,
@@ -137,7 +138,9 @@ export function ActiveSession({
               {session.treeState.message}
             </p>
           )}
-          <ActiveStepCitations items={citedItems} />
+          <Suspense fallback={null}>
+            <ActiveStepCitations items={citedItems} />
+          </Suspense>
           <ActiveStepForm
             sessionId={session.id}
             nodeId={session.treeState.currentNodeId}
@@ -204,7 +207,9 @@ export function ActiveSession({
         </Module>
       </div>
       <CaptureBar />
-      <KnowledgeDrawer item={drawerItem} ownerMode={false} />
+      <Suspense fallback={null}>
+        <KnowledgeDrawer item={drawerItem} ownerMode={false} />
+      </Suspense>
     </div>
   )
 }
