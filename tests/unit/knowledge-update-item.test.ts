@@ -120,4 +120,67 @@ describe('updateKnowledgeItem', () => {
       .where(eq(knowledgeItemVehicles.knowledgeItemId, item.id))
     expect(scopes).toEqual([])
   })
+
+  it('persists sub-codes on update', async () => {
+    const { shopId, userId } = await seedShop('A')
+    const [item] = await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'T', body: 'b',
+      dtcList: ['P0420'], dtcSubCodes: { P0420: '00' },
+      createdByUserId: userId,
+    }).returning()
+
+    await updateKnowledgeItem(
+      handle.db, { id: item.id, shopId },
+      {
+        type: 'note', title: 'T', body: 'b',
+        dtcList: ['P0430'], dtcSubCodes: { P0430: '11' },
+      },
+    )
+
+    const [refreshed] = await handle.db
+      .select().from(knowledgeItems).where(eq(knowledgeItems.id, item.id))
+    expect(refreshed.dtcList).toEqual(['P0430'])
+    expect(refreshed.dtcSubCodes).toEqual({ P0430: '11' })
+  })
+
+  it('cleans up sub-codes for DTCs removed during update', async () => {
+    const { shopId, userId } = await seedShop('A')
+    const [item] = await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'T', body: 'b',
+      dtcList: ['P0420', 'P0430'],
+      dtcSubCodes: { P0420: '00', P0430: '11' },
+      createdByUserId: userId,
+    }).returning()
+
+    await updateKnowledgeItem(
+      handle.db, { id: item.id, shopId },
+      {
+        type: 'note', title: 'T', body: 'b',
+        dtcList: ['P0420'], dtcSubCodes: { P0420: '00' },
+      },
+    )
+
+    const [refreshed] = await handle.db
+      .select().from(knowledgeItems).where(eq(knowledgeItems.id, item.id))
+    expect(refreshed.dtcList).toEqual(['P0420'])
+    expect(refreshed.dtcSubCodes).toEqual({ P0420: '00' })
+  })
+
+  it('sets dtcSubCodes to null when no DTC carries a tail', async () => {
+    const { shopId, userId } = await seedShop('A')
+    const [item] = await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'T', body: 'b',
+      dtcList: ['P0420'], dtcSubCodes: { P0420: '00' },
+      createdByUserId: userId,
+    }).returning()
+
+    await updateKnowledgeItem(
+      handle.db, { id: item.id, shopId },
+      { type: 'note', title: 'T', body: 'b', dtcList: ['P0420'] },
+    )
+
+    const [refreshed] = await handle.db
+      .select().from(knowledgeItems).where(eq(knowledgeItems.id, item.id))
+    expect(refreshed.dtcSubCodes).toBeNull()
+  })
 })
