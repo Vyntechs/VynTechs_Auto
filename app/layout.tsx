@@ -4,6 +4,7 @@ import '@/components/vt/vt.css'
 import '@/components/vt/v2.css'
 import '@/components/vt/v2-instruments.css'
 import '@/components/vt/log-button.css'
+import '@/components/knowledge/knowledge.css'
 import { SwRegister } from '@/components/sw-register'
 import { Analytics } from '@vercel/analytics/next'
 
