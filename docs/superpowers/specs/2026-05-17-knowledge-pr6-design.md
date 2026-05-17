@@ -34,11 +34,22 @@ Show source cards for items in `citedItems` (AI explicitly referenced in its rat
 
 Reasoning: techs are hand-trained weekly; the convention is teachable. Big-tech AI tools must surface absence loudly because they serve strangers; vyntechs doesn't.
 
-### 3. Mini-card stack visual treatment
+### 3. Docket-row stack visual treatment
 
-Each citation renders as a 2-line mini-card: row 1 = TYPE icon + item title; row 2 = type-specific teaser (table below). Tap a mini-card → existing `KnowledgeDrawer` opens in `ownerMode={false}` (hides Retire/Restore; Edit isn't in the drawer today).
+**Updated 2026-05-17 after Claude Design handoff.** The package shipped three variants and recommended **Docket** over Brandon's MiniCard lean. Brandon picked Docket.
 
-Reasoning: chips are too compact (techs need to know which pinout this is before tapping); a full inline pinout table is too heavy (pushes the form down). Mini-card is the middle ground. Tap → drawer keeps full content one tap away without bloating the step card.
+Each citation renders as a hairline-divided row inside the Module body (no card chrome). Row anatomy:
+- Type glyph (left, 22px, currentColor)
+- Meta line: TYPE label (mono caps), optional "Retired" tag
+- Title (serif, up to 2 lines)
+- **Type-aware peek** — pinout shows first pin data inline (`pin 31 · Boost pressure · GN/WT · 0.5-4.5 V analog`); wiring shows first connection (`Boost sensor B → PCM C175 31 · GN/WT`); bulletin shows source + ID + summary; theory/cause-fix/connector/note show italic-serif prose
+- Chevron (right)
+
+Tap a row → existing `KnowledgeDrawer` opens in `ownerMode={false}` (hides Retire/Restore).
+
+Reasoning Claude Design gave (visible in `Citations.jsx` and `citations.css` comments): the REASON a pinout gets cited is the pin data. Showing the first pin's data inline lets the tech recognize *why this card matters* before tapping. MiniCard's generic teaser is the same shape regardless of type. And hairline rows read as IN the Module rather than next to it.
+
+The per-type peek shape is implemented in `lib/knowledge/citation-peek.ts` as a pure function returning either `{ kind: 'prose', text }` or `{ kind: 'data', segments }` (mono-rendered segments with optional dim styling for separators/labels).
 
 ### 4. Persistence on tree nodes
 
@@ -59,19 +70,21 @@ Render based on `citationItemIds.length` (= N after hydration):
 
 Ranking comes from the order the AI cited them in (the order they appear in `citationItemIds`). Not a numeric score — simpler than persisting scores and trusts AI's own ordering as the relevance signal.
 
-### 6. Per-type teaser formula
+### 6. Per-type peek formula
 
-| Type | Teaser row 2 | Example |
-|---|---|---|
-| `pinout` | `connector_ref · N pins` | `C0561 · 22 pins` |
-| `connector` | `location_description, first 60 chars` | `Behind kick panel, driver side` |
-| `wiring_diagram` | `name · N connections` | `Body wiring · 14 connections` |
-| `theory_of_operation` | `first section heading · N sections` | `Mass airflow basics · 5 sections` |
-| `cause_fix` | `complaint, truncated 60` | `Hesitation off idle` |
-| `bulletin` | `source · bulletin_id` | `GM · TSB 23-NA-046` |
-| `note` / `reference_doc` | `body, first 60 chars` | (whatever's there) |
+Claude Design proposed a type-aware peek (data vs. prose) instead of a uniform "teaser" line. Implemented in `lib/knowledge/citation-peek.ts` as `getCitationPeek(item)`:
 
-Truncation is mid-word with `…` ellipsis at 60 chars. Formula implemented in `lib/knowledge/teaser.ts` as a pure function.
+| Type | Peek shape | Source fields | Example |
+|---|---|---|---|
+| `pinout` | data (mono) | first pin's `pin_number / signal_name / wire_color / expected_voltage_or_waveform` | `pin 31 · Boost pressure · GN/WT · 0.5-4.5 V analog` |
+| `connector` | prose (italic-serif) | `location_description ?? component_name` | `Behind kick panel, driver side` |
+| `wiring_diagram` | data (mono) | first connection's `from_component → to_component · wire_color` | `Boost sensor B → PCM C175 31 · GN/WT` |
+| `theory_of_operation` | prose | first section's `body ?? heading` | `Commanded vs. actual boost…` |
+| `cause_fix` | prose | `correction ?? cause ?? complaint` | `Replace cold-side CAC pipe.` |
+| `bulletin` | data (mono) | `source bulletin_id · summary` | `Ford TSB 18-2218 · Updated CAC pipe…` |
+| `note` / `reference_doc` | prose | `body` | (whatever's there) |
+
+Missing/empty fields fall through to a type-specific generic label (`"Pin reference."`, `"Shop note."`, etc.). 20 unit tests in `tests/unit/citation-peek.test.ts` cover the formula per type + the robustness cases.
 
 ### 7. Retired-while-cited
 
