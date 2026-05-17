@@ -13,7 +13,7 @@ describe('knowledge tool definitions', () => {
   it('all tools have name + description + input_schema', () => {
     for (const tool of KNOWLEDGE_TOOLS) {
       expect(tool.name).toMatch(/^[a-z_]+$/)
-      expect(tool.description.length).toBeGreaterThan(40)
+      expect(tool.description?.length ?? 0).toBeGreaterThan(40)
       expect(tool.input_schema.type).toBe('object')
       expect(tool.input_schema.properties).toBeDefined()
     }
