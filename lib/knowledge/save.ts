@@ -32,6 +32,12 @@ const VehicleScopeSchema = z
 const CommonFields = {
   title: z.string().min(1).max(200),
   dtcList: z.array(z.string()).max(40).optional(),
+  dtcSubCodes: z
+    .record(
+      z.string().regex(/^[PBCU][0-3][0-9A-F]{3}$/),
+      z.string().regex(/^[0-9A-F]{2}$/),
+    )
+    .optional(),
   systemCodes: z.array(z.string()).max(20).optional(),
   symptoms: z.array(z.string()).max(20).optional(),
   vehicleScopes: z.array(VehicleScopeSchema).max(20).optional(),
@@ -183,14 +189,38 @@ export async function saveKnowledgeItem(
   input: KnowledgeSaveInput,
   ctx: SaveContext,
 ): Promise<SaveResult> {
-  const normalizedDtcs = Array.from(
-    new Set(
-      (input.dtcList ?? [])
-        .map((d) => normalizeDtc(d))
-        .filter((n): n is NormalizedDtc => n !== null)
-        .map((n) => n.canonical),
-    ),
-  )
+  const normalizedPairs = (input.dtcList ?? [])
+    .map((d) => normalizeDtc(d))
+    .filter((n): n is NormalizedDtc => n !== null)
+
+  const dtcSet = new Set<string>()
+  const subCodesByDtc: Record<string, string> = {}
+
+  // Sub-codes from the explicit dtcSubCodes input (typed in via the chip).
+  // Only keep entries whose key passes normalizeDtc (defense in depth — the
+  // zod schema already restricts the shape, but the parallel map could drift).
+  const inputSubCodes = 'dtcSubCodes' in input ? input.dtcSubCodes : undefined
+  for (const [rawKey, val] of Object.entries(inputSubCodes ?? {})) {
+    const n = normalizeDtc(rawKey)
+    if (n && typeof val === 'string') subCodesByDtc[n.canonical] = val
+  }
+
+  // Sub-codes inferred from dtcList entries that themselves carried a tail
+  // (e.g. AI parser emitted "P0420-00" — rare but handled).
+  for (const p of normalizedPairs) {
+    dtcSet.add(p.canonical)
+    if (p.subCode !== null && !(p.canonical in subCodesByDtc)) {
+      subCodesByDtc[p.canonical] = p.subCode
+    }
+  }
+
+  // Drop stale sub-codes: only keep entries for DTCs in the final list.
+  for (const key of Object.keys(subCodesByDtc)) {
+    if (!dtcSet.has(key)) delete subCodesByDtc[key]
+  }
+
+  const normalizedDtcs = Array.from(dtcSet)
+  const dtcSubCodes = Object.keys(subCodesByDtc).length > 0 ? subCodesByDtc : null
 
   const itemRow: NewKnowledgeItem = {
     shopId: ctx.shopId,
@@ -202,6 +232,7 @@ export async function saveKnowledgeItem(
         ? (input.structuredData as Record<string, unknown>)
         : null,
     dtcList: normalizedDtcs,
+    dtcSubCodes,
     systemCodes: input.systemCodes ?? [],
     symptoms: input.symptoms ?? [],
     relatedItemIds: input.relatedItemIds ?? null,
