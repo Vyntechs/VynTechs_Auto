@@ -51,7 +51,7 @@ describe('buildUpdateTreeWithRetrieval onProgress', () => {
       errors: [],
     })
     const validateRetrievalResults = vi.fn().mockResolvedValue([])
-    const updateTree = vi.fn().mockResolvedValue(makeFakeTree())
+    const updateTree = vi.fn().mockResolvedValue({ tree: makeFakeTree(), consultedItems: [] })
 
     const wrapped = buildUpdateTreeWithRetrieval({
       db: {} as never,
@@ -91,7 +91,7 @@ describe('buildUpdateTreeWithRetrieval onProgress', () => {
       .fn()
       .mockResolvedValue({ results: [], cacheHits: [], errors: [] })
     const validateRetrievalResults = vi.fn().mockResolvedValue([])
-    const updateTree = vi.fn().mockResolvedValue(makeFakeTree())
+    const updateTree = vi.fn().mockResolvedValue({ tree: makeFakeTree(), consultedItems: [] })
 
     const wrapped = buildUpdateTreeWithRetrieval({
       db: {} as never,
@@ -139,7 +139,7 @@ describe('advanceSession onProgress', () => {
       userId: 'u1',
       sessionId: 's1',
       body: { observation: 'plug 4 burnt' },
-      updateTree: vi.fn().mockResolvedValue(makeFakeTree()) as never,
+      updateTree: vi.fn().mockResolvedValue({ tree: makeFakeTree(), consultedItems: [] }) as never,
       listArtifacts: vi.fn().mockResolvedValue([]) as never,
       onProgress,
     })
@@ -161,7 +161,7 @@ describe('advanceSession onProgress', () => {
       userId: 'u1',
       sessionId: 's1',
       body: { observation: 'plug 4 burnt' },
-      updateTree: vi.fn().mockResolvedValue(makeFakeTree()) as never,
+      updateTree: vi.fn().mockResolvedValue({ tree: makeFakeTree(), consultedItems: [] }) as never,
       listArtifacts: vi
         .fn()
         .mockResolvedValue(makeArtifacts(['photo', 'photo'])) as never,
@@ -185,7 +185,7 @@ describe('advanceSession onProgress', () => {
       userId: 'u1',
       sessionId: 's1',
       body: { observation: 'plug 4 burnt' },
-      updateTree: vi.fn().mockResolvedValue(makeFakeTree()) as never,
+      updateTree: vi.fn().mockResolvedValue({ tree: makeFakeTree(), consultedItems: [] }) as never,
       listArtifacts: vi.fn().mockResolvedValue(makeArtifacts(['audio'])) as never,
       onProgress,
     })

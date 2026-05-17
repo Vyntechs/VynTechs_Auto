@@ -1,8 +1,8 @@
 import type { AppDb } from '@/lib/db/queries'
 import { updateSessionMaxCorpusSimilarity } from '@/lib/db/queries'
 import type {
-  TreeState,
   CorpusMatch,
+  TreeEngineResult,
   updateTree as updateTreeFn,
   generateInitialTree as generateInitialTreeFn,
 } from '@/lib/ai/tree-engine'
@@ -12,8 +12,117 @@ import type { RetrievalAdapter, RetrievalContext, RetrievalResult } from './type
 import type { runRetrieval as runRetrievalFn } from './orchestrator'
 import type { validateRetrievalResults as validateResultsFn } from './validator'
 import type { AdvanceStreamEvent } from '@/lib/advance-stream-events'
+import { KNOWLEDGE_TOOLS } from '@/lib/knowledge/tools'
+import {
+  lookupKnowledge,
+  getConnectorPinout,
+  getTheoryOfOperation,
+  getWiringPath,
+  getComponentLocation,
+  getSpec,
+  incrementFireCount,
+  type MatchedKnowledgeItem,
+} from '@/lib/knowledge/retrieval'
 
 type UpdateTreeInput = Parameters<typeof updateTreeFn>[0]
+
+/** PR 4. Dispatches an Anthropic tool call to the matching knowledge SQL fn,
+ *  scoped to the caller's shopId. Throws on unknown tool name (defensive —
+ *  the tools we pass to the AI come from KNOWLEDGE_TOOLS, so any unknown
+ *  name means the AI invented one). */
+export type KnowledgeDispatcher = (
+  toolName: string,
+  toolInput: Record<string, unknown>,
+) => Promise<{ items: MatchedKnowledgeItem[] }>
+
+function toStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  return v.filter((x): x is string => typeof x === 'string')
+}
+
+function vehicleFromInput(toolInput: Record<string, unknown>) {
+  const raw = toolInput.vehicle as
+    | { year?: unknown; make?: unknown; model?: unknown; engine?: unknown }
+    | undefined
+  return {
+    year: Number(raw?.year),
+    make: String(raw?.make ?? ''),
+    model: String(raw?.model ?? ''),
+    engine: typeof raw?.engine === 'string' ? raw.engine : undefined,
+  }
+}
+
+export function defaultBuildKnowledgeDispatcher(args: {
+  db: AppDb
+  shopId: string
+}): KnowledgeDispatcher {
+  return async (toolName, toolInput) => {
+    const v = vehicleFromInput(toolInput)
+    let items: MatchedKnowledgeItem[] = []
+    switch (toolName) {
+      case 'lookup_knowledge':
+        items = await lookupKnowledge(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          dtcs: toStringArray(toolInput.dtcs),
+          systemCodes: toStringArray(toolInput.system_codes),
+          symptoms: toStringArray(toolInput.symptoms),
+          typeFilter:
+            typeof toolInput.type_filter === 'string'
+              ? (toolInput.type_filter as Parameters<typeof lookupKnowledge>[1]['typeFilter'])
+              : undefined,
+          limit: typeof toolInput.limit === 'number' ? toolInput.limit : undefined,
+        })
+        break
+      case 'get_connector_pinout':
+        items = await getConnectorPinout(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          connectorRef: String(toolInput.connector_ref ?? ''),
+        })
+        break
+      case 'get_theory_of_operation':
+        items = await getTheoryOfOperation(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          systemCode: String(toolInput.system_code ?? ''),
+        })
+        break
+      case 'get_wiring_path':
+        items = await getWiringPath(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          fromComponent: String(toolInput.from_component ?? ''),
+          toComponent: String(toolInput.to_component ?? ''),
+        })
+        break
+      case 'get_component_location':
+        items = await getComponentLocation(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          componentName: String(toolInput.component_name ?? ''),
+        })
+        break
+      case 'get_spec':
+        items = await getSpec(args.db, {
+          shopId: args.shopId,
+          vehicle: v,
+          specName: String(toolInput.spec_name ?? ''),
+        })
+        break
+      default:
+        console.warn(`unknown knowledge tool: ${toolName}`)
+        return { items: [] }
+    }
+    if (items.length > 0) {
+      // Fire-and-forget — telemetry must never block retrieval.
+      incrementFireCount(args.db, items.map((i) => i.id)).catch((e) =>
+        console.warn('fire_count increment failed:', e),
+      )
+    }
+    return { items }
+  }
+}
 
 export type BuildUpdateTreeWithRetrievalDeps = {
   db: AppDb
@@ -35,6 +144,11 @@ export type BuildUpdateTreeWithRetrievalDeps = {
    *  LLM step ('Re-scoring confidence'). Defaults to no-op. The `idx` is a
    *  -1 sentinel; the streaming route remaps it to a canonical index. */
   onProgress?: (event: AdvanceStreamEvent) => void
+  /** PR 4 knowledge wiring. Both fields together (factory + shopId) bind a
+   *  scoped dispatcher into the tree-engine call. Either omitted = AI sees
+   *  no knowledge tools (back-compat). */
+  buildKnowledgeDispatcher?: (args: { db: AppDb; shopId: string }) => KnowledgeDispatcher
+  shopId?: string
 }
 
 /**
@@ -49,7 +163,7 @@ export type BuildUpdateTreeWithRetrievalDeps = {
  */
 export function buildUpdateTreeWithRetrieval(
   deps: BuildUpdateTreeWithRetrievalDeps,
-): (input: UpdateTreeInput) => Promise<TreeState> {
+): (input: UpdateTreeInput) => Promise<TreeEngineResult> {
   return async (input) => {
     // Prefer session-wide DTCs (from advanceSession) so retrieval keeps its DTC
     // anchor after the tree advances past `scan-codes`. Fall back to current-node
@@ -133,10 +247,18 @@ export function buildUpdateTreeWithRetrieval(
       label: 'Re-scoring confidence',
     })
 
+    const tools =
+      deps.buildKnowledgeDispatcher && deps.shopId ? KNOWLEDGE_TOOLS : undefined
+    const dispatcher =
+      deps.buildKnowledgeDispatcher && deps.shopId
+        ? deps.buildKnowledgeDispatcher({ db: deps.db, shopId: deps.shopId })
+        : undefined
+
     return deps.updateTree({
       ...input,
       retrieval,
       ...(corpus !== undefined ? { corpus } : {}),
+      ...(tools && dispatcher ? { tools, dispatcher } : {}),
     })
   }
 }
@@ -150,6 +272,9 @@ export type BuildGenerateInitialTreeWithRetrievalDeps = {
   /** Optional. When provided, corpus matches are fetched in parallel with
    *  retrieval and forwarded to generateInitialTree. */
   retrieveCorpus?: typeof retrieveCorpusFn
+  /** PR 4 knowledge wiring (mirrors updateTree wrapper). */
+  buildKnowledgeDispatcher?: (args: { db: AppDb; shopId: string }) => KnowledgeDispatcher
+  shopId?: string
 }
 
 /**
@@ -162,7 +287,7 @@ export type BuildGenerateInitialTreeWithRetrievalDeps = {
  */
 export function buildGenerateInitialTreeWithRetrieval(
   deps: BuildGenerateInitialTreeWithRetrievalDeps,
-): (intake: IntakePayload) => Promise<TreeState> {
+): (intake: IntakePayload) => Promise<TreeEngineResult> {
   return async (intake) => {
     const ctx: RetrievalContext = {
       vehicleYear: intake.vehicleYear,
@@ -206,6 +331,18 @@ export function buildGenerateInitialTreeWithRetrieval(
 
     const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
 
-    return deps.generateInitialTree(intake, corpus, retrieval)
+    const tools =
+      deps.buildKnowledgeDispatcher && deps.shopId ? KNOWLEDGE_TOOLS : undefined
+    const dispatcher =
+      deps.buildKnowledgeDispatcher && deps.shopId
+        ? deps.buildKnowledgeDispatcher({ db: deps.db, shopId: deps.shopId })
+        : undefined
+
+    return deps.generateInitialTree(
+      intake,
+      corpus,
+      retrieval,
+      tools && dispatcher ? { tools, dispatcher } : {},
+    )
   }
 }

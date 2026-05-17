@@ -38,7 +38,7 @@ describe('generateInitialTree', () => {
       usage: { input_tokens: 100, output_tokens: 80 },
     })
 
-    const tree = await generateInitialTree({
+    const { tree } = await generateInitialTree({
       vehicleYear: 2018,
       vehicleMake: 'Ford',
       vehicleModel: 'F-150',
@@ -179,7 +179,7 @@ describe('withRetry behavior in generateInitialTree', () => {
       .mockRejectedValueOnce(new Error('overloaded'))
       .mockResolvedValueOnce(validResponse)
 
-    const tree = await generateInitialTree({
+    const { tree } = await generateInitialTree({
       vehicleYear: 2018,
       vehicleMake: 'Ford',
       vehicleModel: 'F-150',
@@ -212,7 +212,7 @@ describe('withRetry behavior in generateInitialTree', () => {
       .mockResolvedValueOnce(proseResponse)
       .mockResolvedValueOnce(validResponse)
 
-    const tree = await generateInitialTree({
+    const { tree } = await generateInitialTree({
       vehicleYear: 2018,
       vehicleMake: 'Ford',
       vehicleModel: 'F-150',
@@ -260,7 +260,7 @@ describe('updateTree', () => {
       usage: { input_tokens: 100, output_tokens: 80 },
     })
 
-    const result = await updateTree({
+    const { tree } = await updateTree({
       intake: {
         vehicleYear: 2018,
         vehicleMake: 'Ford',
@@ -275,8 +275,8 @@ describe('updateTree', () => {
       observation: 'Got P0299 with 3.6 psi underboost in the freeze frame',
     })
 
-    expect(result.currentNodeId).toBe('inspect-cac')
-    expect(result.nodes.find((n) => n.id === 'scan-codes')?.status).toBe('resolved')
+    expect(tree.currentNodeId).toBe('inspect-cac')
+    expect(tree.nodes.find((n) => n.id === 'scan-codes')?.status).toBe('resolved')
   })
 
   it('includes artifact evidence in the user message when artifacts are provided', async () => {
