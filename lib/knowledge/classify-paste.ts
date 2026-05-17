@@ -141,6 +141,16 @@ export type ClassifyPasteInput = {
   scopeHint?: string
 }
 
+export type PasteRouteResponse = {
+  status: 'parsed' | 'failed' | 'paste_too_short'
+  draft: ClassifiedPasteResult['draft']
+  sourceSpans: Record<string, string>
+  stripped: string[]
+  unverified: string[]
+  llmNotes?: string
+  message?: string
+}
+
 export async function classifyPaste(
   input: ClassifyPasteInput,
   client: AnthropicLike = anthropic as unknown as AnthropicLike,

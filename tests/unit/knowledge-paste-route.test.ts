@@ -169,4 +169,94 @@ describe('POST /api/knowledge/paste', () => {
     )
     expect(res.status).toBe(502)
   })
+
+  it('attaches verifier output: stripped/unverified arrays on parsed status', async () => {
+    await mockUser(OWNER_USER_ID)
+    const { classifyPaste } = await import('@/lib/knowledge/classify-paste')
+    vi.mocked(classifyPaste).mockResolvedValue({
+      status: 'parsed',
+      draft: {
+        type: 'note',
+        title: 'P0420 check downstream',
+        body: 'random fabricated body text',
+      },
+      sourceSpans: {
+        title: 'P0420 check downstream',
+        body: 'not actually in the paste',
+      },
+    })
+    const { POST } = await import('@/app/api/knowledge/paste/route')
+    const res = await POST(
+      new Request('http://localhost/api/knowledge/paste', {
+        method: 'POST',
+        body: JSON.stringify({ rawText: 'P0420 check downstream' }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      status: string
+      draft: { title?: string; body?: string }
+      sourceSpans: Record<string, string>
+      stripped: string[]
+      unverified: string[]
+    }
+    expect(json.status).toBe('parsed')
+    expect(json.stripped).toEqual(['body'])
+    expect(json.unverified).toEqual([])
+    expect(json.draft.title).toBe('P0420 check downstream')
+    expect(json.draft.body).toBeUndefined()
+    expect(json.sourceSpans).toEqual({ title: 'P0420 check downstream' })
+  })
+
+  it('flags fields with no span as unverified', async () => {
+    await mockUser(OWNER_USER_ID)
+    const { classifyPaste } = await import('@/lib/knowledge/classify-paste')
+    vi.mocked(classifyPaste).mockResolvedValue({
+      status: 'parsed',
+      draft: { type: 'note', title: 'synthesized title', body: 'matched' },
+      sourceSpans: { body: 'matched' },
+    })
+    const { POST } = await import('@/app/api/knowledge/paste/route')
+    const res = await POST(
+      new Request('http://localhost/api/knowledge/paste', {
+        method: 'POST',
+        body: JSON.stringify({ rawText: 'this paste contains matched text' }),
+      }),
+    )
+    const json = (await res.json()) as { stripped: string[]; unverified: string[] }
+    expect(json.unverified).toEqual(['title'])
+    expect(json.stripped).toEqual([])
+  })
+
+  it('returns paste_too_short status with consistent empty fields', async () => {
+    await mockUser(OWNER_USER_ID)
+    const { classifyPaste } = await import('@/lib/knowledge/classify-paste')
+    vi.mocked(classifyPaste).mockResolvedValue({
+      status: 'paste_too_short',
+      draft: {},
+      sourceSpans: {},
+    })
+    const { POST } = await import('@/app/api/knowledge/paste/route')
+    const res = await POST(
+      new Request('http://localhost/api/knowledge/paste', {
+        method: 'POST',
+        body: JSON.stringify({ rawText: 'short' }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const json = (await res.json()) as {
+      status: string
+      message: string
+      draft: Record<string, unknown>
+      sourceSpans: Record<string, string>
+      stripped: string[]
+      unverified: string[]
+    }
+    expect(json.status).toBe('paste_too_short')
+    expect(json.message).toContain('Paste too short')
+    expect(json.draft).toEqual({})
+    expect(json.sourceSpans).toEqual({})
+    expect(json.stripped).toEqual([])
+    expect(json.unverified).toEqual([])
+  })
 })
