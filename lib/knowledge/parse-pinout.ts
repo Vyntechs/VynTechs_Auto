@@ -23,30 +23,28 @@ export type ParsedPinoutResult = {
 export type AnthropicLike = {
   messages: {
     create: (args: unknown) => Promise<{
-      content: Array<{ type: string; text?: string }>
+      content: Array<
+        | { type: 'text'; text?: string }
+        | { type: 'tool_use'; name?: string; input?: unknown; id?: string }
+      >
     }>
   }
 }
 
 export const PARSE_PINOUT_SYSTEM = `You convert raw OEM pinout text — pasted by an automotive shop owner — into structured pin rows. Output is a proposal the owner reviews and edits before saving.
 
-OUTPUT FORMAT — return valid JSON matching this TypeScript type:
+You submit your proposal by calling the submit_parsed_pinout tool. Do NOT return prose — only invoke the tool. The tool's input schema enforces the JSON shape, so you cannot produce malformed output.
 
-type Result = {
-  status: "parsed" | "failed"
-  draft: {
-    connector_ref?: string         // a name or OEM ID for the connector (e.g. "BCM C2280", "Alternator 4-pin"); omit if you can't infer it
-    pins: Array<{
-      pin_number: string           // e.g. "1", "12", "A3", "C1-3" — preserve exactly as in the source
-      signal_name: string          // e.g. "12V SUPPLY", "LIN BUS", "GROUND" — preserve OEM terminology
-      wire_color?: string          // preserve exactly as pasted (see RULES below)
-      expected_voltage_or_waveform?: string   // free text; only fill when the source explicitly states a voltage / waveform / spec
-      notes?: string               // anything else the owner should see
-    }>
-  }
-  sourceSpans: { [fieldName: string]: string }   // optional verbatim quotes from the paste
-  llmNotes?: string                              // 1-2 sentences if something was ambiguous
-}
+FIELD GUIDANCE:
+- status: "parsed" when you extracted at least one pin row. "failed" when paste is empty / gibberish / fundamentally not a pinout (e.g. theory text was pasted by mistake).
+- draft.connector_ref: a name or OEM ID for the connector (e.g. "BCM C2280", "Alternator 4-pin"). Omit if you can't infer it.
+- draft.pins[].pin_number: e.g. "1", "12", "A3", "C1-3". Preserve exactly as in the source.
+- draft.pins[].signal_name: e.g. "12V SUPPLY", "LIN BUS", "GROUND". Preserve OEM terminology.
+- draft.pins[].wire_color: preserve exactly as pasted (see RULES below).
+- draft.pins[].expected_voltage_or_waveform: free text; only fill when the source explicitly states a voltage / waveform / spec.
+- draft.pins[].notes: anything else the owner should see.
+- sourceSpans: optional verbatim quotes from the paste, one per field where one is meaningful.
+- llmNotes: 1-2 sentences if something was ambiguous.
 
 RULES — these reflect REAL variation in OEM pinout pastes across Mitchell1, AllData, Ford TIS, GM SI, and Identifix:
 
@@ -71,13 +69,42 @@ RULES — these reflect REAL variation in OEM pinout pastes across Mitchell1, Al
 
 8. Connector ID inline. "C1-3" means Connector 1, Pin 3 — preserve as pin_number "C1-3"; the form has a separate connector_ref field.
 
-STATUS:
-- "parsed" if you extracted at least one pin row.
-- "failed" if the paste is empty, gibberish, or fundamentally not a pinout (e.g. someone pasted theory text by mistake).
+Never invent pins. Do not fabricate wire colors that aren't in the source.`
 
-Never invent pins. Do not fabricate wire colors that aren't in the source.
-
-Return JSON only — no prose, no fences.`
+const PARSE_PINOUT_TOOL = {
+  name: 'submit_parsed_pinout',
+  description: 'Submit the parsed pinout as a structured proposal the curator will review.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['parsed', 'failed'] },
+      draft: {
+        type: 'object',
+        properties: {
+          connector_ref: { type: 'string' },
+          pins: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                pin_number: { type: 'string' },
+                signal_name: { type: 'string' },
+                wire_color: { type: 'string' },
+                expected_voltage_or_waveform: { type: 'string' },
+                notes: { type: 'string' },
+              },
+              required: ['pin_number', 'signal_name'],
+            },
+          },
+        },
+        required: ['pins'],
+      },
+      sourceSpans: { type: 'object', additionalProperties: { type: 'string' } },
+      llmNotes: { type: 'string' },
+    },
+    required: ['status', 'draft'],
+  },
+} as const
 
 export type ParsePinoutInput = {
   rawText: string
@@ -94,8 +121,8 @@ export async function parsePinout(
   }
 
   const userContent = input.connectorHint
-    ? `Connector hint: ${input.connectorHint}\n\nPaste:\n${trimmed}\n\nReturn JSON only.`
-    : `Paste:\n${trimmed}\n\nReturn JSON only.`
+    ? `Connector hint: ${input.connectorHint}\n\nPaste:\n${trimmed}`
+    : `Paste:\n${trimmed}`
 
   const res = await client.messages.create({
     model: HAIKU,
@@ -105,19 +132,23 @@ export async function parsePinout(
     max_tokens: 8192,
     system: cachedSystem(PARSE_PINOUT_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
-  })
+    tools: [PARSE_PINOUT_TOOL],
+    // Force the model to call our tool (not free-form text). The Anthropic
+    // SDK validates the model's output against input_schema before returning,
+    // so the response shape is structurally guaranteed — no JSON.parse, no
+    // malformed-string risk.
+    tool_choice: { type: 'tool', name: 'submit_parsed_pinout' },
+  } as unknown as Parameters<AnthropicLike['messages']['create']>[0])
 
-  const block = res.content.find((b) => b.type === 'text')
-  if (!block || block.type !== 'text' || !block.text) {
-    throw new Error('parse-pinout returned no text block')
+  const toolUse = res.content.find(
+    (b): b is { type: 'tool_use'; name?: string; input?: unknown; id?: string } =>
+      b.type === 'tool_use',
+  )
+  if (!toolUse || typeof toolUse.input !== 'object' || toolUse.input === null) {
+    throw new Error('parse-pinout: model did not call submit_parsed_pinout tool')
   }
 
-  const cleaned = block.text
-    .trim()
-    .replace(/^```(?:json)?\n?/, '')
-    .replace(/\n?```$/, '')
-
-  const parsed = JSON.parse(cleaned) as Partial<ParsedPinoutResult>
+  const parsed = toolUse.input as Partial<ParsedPinoutResult>
 
   if (parsed.status !== 'parsed' && parsed.status !== 'failed') {
     throw new Error(`parse-pinout returned invalid status: ${String(parsed.status)}`)
