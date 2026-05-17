@@ -635,10 +635,13 @@ describe('incrementFireCount', () => {
       fireCount: 5,
     })
     await incrementFireCount(handle.db, [a, b, a]) // a appears twice
-    const result = await handle.db.execute<{ id: string; fire_count: number }>(sql`
+    const result = await handle.db.execute(sql`
       SELECT id, fire_count FROM knowledge_items WHERE id IN (${a}, ${b}) ORDER BY id
     `)
-    const rowsArr = Array.isArray(result) ? result : (result as { rows: typeof result }).rows
+    type FireRow = { id: string; fire_count: number }
+    const rowsArr: FireRow[] = Array.isArray(result)
+      ? (result as FireRow[])
+      : ((result as unknown as { rows: FireRow[] }).rows ?? [])
     const map = new Map(rowsArr.map((r) => [r.id, r.fire_count]))
     expect(map.get(a)).toBe(2)
     expect(map.get(b)).toBe(6)

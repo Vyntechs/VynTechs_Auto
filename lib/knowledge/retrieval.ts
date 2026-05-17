@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { normalizeDtc, normalizeEngine } from '@/lib/knowledge/normalize'
+import type { AppDb } from '@/lib/db/queries'
 
 export type RetrievalVehicle = {
   year: number
@@ -51,14 +52,17 @@ function arrayLit(arr: string[]): SQL {
   return sql.raw(`ARRAY[${elements}]::text[]`)
 }
 
-// Drizzle's full DB type bundles a long schema generic; use a structural
-// type so PGlite tests can inject without typing gymnastics.
-export type RetrievalDb = {
-  execute<T = unknown>(query: SQL): Promise<{ rows: T[] } | T[]>
-}
+// Use AppDb (PgliteDatabase | PostgresJsDatabase) so production callers
+// and PGlite test setups share the same type without casting.
+export type RetrievalDb = AppDb
 
-function rows<T>(res: { rows: T[] } | T[]): T[] {
-  return Array.isArray(res) ? res : res.rows
+// PGlite returns `Results<T>` with a `.rows` property; postgres-js returns
+// `T[]` directly. The unwrap handles both shapes — pattern lifted from
+// tests/unit/knowledge-scoring.test.ts (PR 1).
+function rows<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[]
+  const r = (res as { rows?: T[] }).rows
+  return r ?? []
 }
 
 type Row = {
@@ -105,7 +109,7 @@ export async function lookupKnowledge(
   const normalizedEngine = normalizeEngine(input.vehicle.engine ?? null)
   const typeFilter = input.typeFilter ?? null
 
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count,
@@ -130,7 +134,7 @@ export async function lookupKnowledge(
     ORDER BY score DESC, items.fire_count DESC, items.updated_at DESC
     LIMIT ${limit}
   `)
-  return rows(res).map(toMatched)
+  return rows<Row>(res).map(toMatched)
 }
 
 // Shared vehicle-scope WHERE clause used by every specialized fn. Inlined
@@ -164,7 +168,7 @@ export async function getConnectorPinout(
 ): Promise<MatchedKnowledgeItem[]> {
   const limit = input.limit ?? 3
   const v = vehicleScopeFragment(input.vehicle)
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count, 0::int AS score
@@ -181,7 +185,7 @@ export async function getConnectorPinout(
     ORDER BY items.fire_count DESC, items.updated_at DESC
     LIMIT ${limit}
   `)
-  return rows(res).map(toMatched)
+  return rows<Row>(res).map(toMatched)
 }
 
 export type GetTheoryOfOperationInput = {
@@ -198,7 +202,7 @@ export async function getTheoryOfOperation(
   const limit = input.limit ?? 3
   const v = vehicleScopeFragment(input.vehicle)
   const systems = arrayLit([input.systemCode])
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count, 0::int AS score
@@ -215,7 +219,7 @@ export async function getTheoryOfOperation(
     ORDER BY items.fire_count DESC, items.updated_at DESC
     LIMIT ${limit}
   `)
-  return rows(res).map(toMatched)
+  return rows<Row>(res).map(toMatched)
 }
 
 export type GetWiringPathInput = {
@@ -235,7 +239,7 @@ export async function getWiringPath(
 ): Promise<MatchedKnowledgeItem[]> {
   const limit = input.limit ?? 3
   const v = vehicleScopeFragment(input.vehicle)
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count, 0::int AS score
@@ -251,7 +255,7 @@ export async function getWiringPath(
     ORDER BY items.fire_count DESC, items.updated_at DESC
     LIMIT 50
   `)
-  const filtered = rows(res)
+  const filtered = rows<Row>(res)
     .map(toMatched)
     .filter((m) => {
       const conns = (
@@ -282,7 +286,7 @@ export async function getComponentLocation(
 ): Promise<MatchedKnowledgeItem[]> {
   const limit = input.limit ?? 3
   const v = vehicleScopeFragment(input.vehicle)
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count, 0::int AS score
@@ -299,7 +303,7 @@ export async function getComponentLocation(
     ORDER BY items.fire_count DESC, items.updated_at DESC
     LIMIT ${limit}
   `)
-  return rows(res).map(toMatched)
+  return rows<Row>(res).map(toMatched)
 }
 
 export type GetSpecInput = {
@@ -335,7 +339,7 @@ export async function getSpec(
   const limit = input.limit ?? 3
   const v = vehicleScopeFragment(input.vehicle)
   const pattern = `%${input.specName.replace(/[%_\\]/g, (m) => `\\${m}`)}%`
-  const res = await db.execute<Row>(sql`
+  const res = await db.execute(sql`
     SELECT items.id, items.shop_id, items.type, items.title, items.body,
       items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
       items.fire_count, 0::int AS score
@@ -355,5 +359,5 @@ export async function getSpec(
     ORDER BY items.fire_count DESC, items.updated_at DESC
     LIMIT ${limit}
   `)
-  return rows(res).map(toMatched)
+  return rows<Row>(res).map(toMatched)
 }
