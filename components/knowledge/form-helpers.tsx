@@ -9,27 +9,44 @@ export type Scope = {
   engine?: string
 }
 
+export type FieldAttribution = 'verified' | 'unverified' | 'none'
+
 export function FieldGroup({
   label,
-  aiAttributed,
+  attribution = 'none',
   source,
   children,
 }: {
   label: string
-  aiAttributed: boolean
+  attribution?: FieldAttribution
   source?: string
   children: React.ReactNode
 }) {
+  const effectiveAttribution: FieldAttribution =
+    attribution === 'verified' && !source ? 'unverified' : attribution
+
   return (
-    <div className={`vk-fg ${aiAttributed ? 'vk-fg--ai' : ''}`}>
+    <div
+      className={
+        effectiveAttribution === 'verified'
+          ? 'vk-fg vk-fg--verified'
+          : effectiveAttribution === 'unverified'
+            ? 'vk-fg vk-fg--unverified'
+            : 'vk-fg'
+      }
+    >
       <div className="vk-fg__head">
         <label className="vk-fg__label">{label}</label>
-        {aiAttributed && <span className="vk-fg__badge">AI</span>}
+        {effectiveAttribution === 'unverified' && (
+          <span className="vk-fg__chip vk-fg__chip--verify" aria-label="needs verification">
+            ⚠ VERIFY
+          </span>
+        )}
       </div>
       <div className="vk-fg__body">{children}</div>
-      {aiAttributed && source && (
+      {effectiveAttribution === 'verified' && source && (
         <div className="vk-fg__source">
-          <span className="vk-fg__source-prefix">AI · from your paste:</span>
+          <span className="vk-fg__source-prefix">From your paste:</span>
           <mark>{source}</mark>
         </div>
       )}

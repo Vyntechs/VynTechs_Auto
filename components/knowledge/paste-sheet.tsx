@@ -1,7 +1,7 @@
 'use client'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
-import type { ClassifiedPasteResult } from '@/lib/knowledge/classify-paste'
+import type { PasteRouteResponse } from '@/lib/knowledge/classify-paste'
 
 const SOFT_CAP = 8_000
 const HARD_CAP = 20_000
@@ -38,7 +38,7 @@ export function PasteSheet() {
         const j = await res.json().catch(() => ({}))
         throw new Error(j.message || j.error || `HTTP ${res.status}`)
       }
-      const proposal = (await res.json()) as ClassifiedPasteResult
+      const proposal = (await res.json()) as PasteRouteResponse
       sessionStorage.setItem(
         'vk-paste-proposal',
         JSON.stringify({ proposal, rawText: text, scopeHint: scope }),
