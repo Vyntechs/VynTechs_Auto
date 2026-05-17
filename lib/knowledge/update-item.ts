@@ -5,7 +5,7 @@ import {
 } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
 import { KnowledgeSaveSchema, type KnowledgeSaveInput } from './save'
-import { normalizeDtc, normalizeEngine } from './normalize'
+import { normalizeDtc, normalizeEngine, type NormalizedDtc } from './normalize'
 
 export async function updateKnowledgeItem(
   db: AppDb,
@@ -18,7 +18,8 @@ export async function updateKnowledgeItem(
     new Set(
       (input.dtcList ?? [])
         .map(d => normalizeDtc(d))
-        .filter((d): d is string => d !== null),
+        .filter((n): n is NormalizedDtc => n !== null)
+        .map(n => n.canonical),
     ),
   )
 
