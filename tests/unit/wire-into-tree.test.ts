@@ -34,6 +34,10 @@ const stubTree: TreeState = {
   message: 'next step',
 }
 
+// PR 4: tree-engine functions return TreeEngineResult (tree + consultedItems).
+// Wrap the stub for mocks.
+const stubResult = { tree: stubTree, consultedItems: [] }
+
 describe('buildUpdateTreeWithRetrieval', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
 
@@ -55,7 +59,7 @@ describe('buildUpdateTreeWithRetrieval', () => {
       } satisfies RetrievalRun
     })
     const validateRetrievalResults = vi.fn(async () => [] as RetrievalResult[])
-    const updateTree = vi.fn(async () => stubTree)
+    const updateTree = vi.fn(async () => stubResult)
 
     const wrapped = buildUpdateTreeWithRetrieval({
       db: fakeDb,
@@ -80,7 +84,7 @@ describe('buildUpdateTreeWithRetrieval', () => {
     const updateTree = vi.fn(
       async (input: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0]) => {
         capturedUpdateTreeInput = input
-        return stubTree
+        return stubResult
       },
     )
 
@@ -120,7 +124,7 @@ describe('buildUpdateTreeWithRetrieval', () => {
     const updateTree = vi.fn(
       async (input: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0]) => {
         capturedUpdateTreeInput = input
-        return stubTree
+        return stubResult
       },
     )
 
@@ -176,7 +180,7 @@ describe('buildUpdateTreeWithRetrieval — corpus retrieval (Phase K8)', () => {
     let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
     const updateTree = vi.fn(async (input) => {
       capturedInput = input
-      return stubTree
+      return stubResult
     })
     const retrieveCorpus = vi.fn(async (_db: AppDb, _input: CorpusRetrievalInput) => [corpusMatch])
 
@@ -200,7 +204,7 @@ describe('buildUpdateTreeWithRetrieval — corpus retrieval (Phase K8)', () => {
     let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
     const updateTree = vi.fn(async (input) => {
       capturedInput = input
-      return stubTree
+      return stubResult
     })
     const retrieveCorpus = vi.fn(async (_db: AppDb, _input: CorpusRetrievalInput) => {
       throw new Error('corpus boom')
@@ -223,7 +227,7 @@ describe('buildUpdateTreeWithRetrieval — corpus retrieval (Phase K8)', () => {
     let capturedInput: Parameters<typeof import('@/lib/ai/tree-engine').updateTree>[0] | undefined
     const updateTree = vi.fn(async (input) => {
       capturedInput = input
-      return stubTree
+      return stubResult
     })
 
     const wrapped = buildUpdateTreeWithRetrieval({
@@ -258,6 +262,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
     currentNodeId: 'scan-codes',
     message: 'pull DTCs',
   }
+  const initialResult = { tree: initialTree, consultedItems: [] }
 
   const okRetrieval = {
     runRetrieval: vi.fn(
@@ -288,7 +293,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
         captured.intake = a
         captured.corpus = c
         captured.retrieval = r
-        return initialTree
+        return initialResult
       },
     )
     const corpusMatches: CorpusMatch[] = [
@@ -315,7 +320,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
 
     const result = await wrapped(intake)
 
-    expect(result).toBe(initialTree)
+    expect(result).toBe(initialResult)
     expect(captured.intake).toEqual(intake)
     expect(captured.corpus).toEqual(corpusMatches)
     expect(captured.retrieval).toHaveLength(1)
@@ -327,7 +332,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
     const generateInitialTree = vi.fn(
       async (_a: IntakePayload, _c?: CorpusMatch[], r?: RetrievalResult[]) => {
         capturedRetrieval = r
-        return initialTree
+        return initialResult
       },
     )
 
@@ -351,7 +356,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
     const generateInitialTree = vi.fn(
       async (_a: IntakePayload, c?: CorpusMatch[], _r?: RetrievalResult[]) => {
         capturedCorpus = c
-        return initialTree
+        return initialResult
       },
     )
 
@@ -375,7 +380,7 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
     const generateInitialTree = vi.fn(
       async (_a: IntakePayload, c?: CorpusMatch[], _r?: RetrievalResult[]) => {
         capturedCorpus = c
-        return initialTree
+        return initialResult
       },
     )
 

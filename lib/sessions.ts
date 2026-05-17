@@ -15,8 +15,10 @@ import {
   listArtifactsForSession,
 } from './db/queries'
 import type { AppDb } from './db/queries'
-import type { TreeState } from './ai/tree-engine'
+import type { TreeState, TreeEngineResult } from './ai/tree-engine'
 import type { IntakePayload } from './types'
+import type { MatchedKnowledgeItem } from './knowledge/retrieval'
+import { extractCitedItems } from './knowledge/citations'
 import type { ValidatorResult } from './ai/outcome-validator'
 import type {
   DeclineLanguage,
@@ -87,7 +89,17 @@ const advanceSchema = z.object({
 })
 
 export type AdvanceSessionResult =
-  | { ok: true; tree: TreeState }
+  | {
+      ok: true
+      tree: TreeState
+      /** PR 4. Vetted knowledge items the AI consulted via tool calls
+       *  (whether cited in the final message or not). Empty when no
+       *  knowledge tools were registered or AI did not call any. */
+      consultedItems?: MatchedKnowledgeItem[]
+      /** PR 4. Subset of consultedItems whose ids appear as [ref:item_id]
+       *  markers in tree.message. UI uses this to render inline embeds. */
+      citedItems?: MatchedKnowledgeItem[]
+    }
   | { ok: false; status: 400 | 401 | 404 | 500; error: string }
 
 export type GateActionFn = (input: {
@@ -115,7 +127,7 @@ export async function advanceSession(opts: {
       text?: string
     }>
     sessionDtcs?: string[]
-  }) => Promise<TreeState>
+  }) => Promise<TreeEngineResult>
   gateAction?: GateActionFn
   listArtifacts?: ListArtifactsFn
   /** Optional. Called as the function moves through narratable stages
@@ -186,14 +198,17 @@ export async function advanceSession(opts: {
   }
 
   let nextTree: TreeState
+  let consultedItems: MatchedKnowledgeItem[] = []
   try {
-    nextTree = await opts.updateTree({
+    const result = await opts.updateTree({
       intake: session.intake,
       currentTree: session.treeState,
       observation: parsed.data.observation,
       artifacts: nodeArtifacts.length > 0 ? nodeArtifacts : undefined,
       sessionDtcs: sessionDtcs.length > 0 ? sessionDtcs : undefined,
     })
+    nextTree = result.tree
+    consultedItems = result.consultedItems
   } catch (err) {
     console.error('tree update failed:', err)
     const cause = err instanceof Error ? err.message : String(err)
@@ -252,7 +267,9 @@ export async function advanceSession(opts: {
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
 
-  return { ok: true, tree: nextTree }
+  const citedItems = extractCitedItems(nextTree.message, consultedItems)
+
+  return { ok: true, tree: nextTree, consultedItems, citedItems }
 }
 
 export type CloseSessionResult =
@@ -491,7 +508,13 @@ export type AmbientLookupFn = (input: {
 }>
 
 export type RecordAmbientConditionsResult =
-  | { ok: true; conditions: AmbientConditions; tree: TreeState }
+  | {
+      ok: true
+      conditions: AmbientConditions
+      tree: TreeState
+      consultedItems?: MatchedKnowledgeItem[]
+      citedItems?: MatchedKnowledgeItem[]
+    }
   | { ok: false; status: 400 | 404 | 500 | 502; error: string }
 
 /**
@@ -517,7 +540,7 @@ export async function recordAmbientConditions(opts: {
     intake: IntakePayload
     currentTree: TreeState
     observation: string
-  }) => Promise<TreeState>
+  }) => Promise<TreeEngineResult>
 }): Promise<RecordAmbientConditionsResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -575,12 +598,15 @@ export async function recordAmbientConditions(opts: {
   const observation = formatAmbientObservation(conditions)
 
   let nextTree: TreeState
+  let consultedItems: MatchedKnowledgeItem[] = []
   try {
-    nextTree = await opts.updateTree({
+    const result = await opts.updateTree({
       intake: nextIntake,
       currentTree: session.treeState,
       observation,
     })
+    nextTree = result.tree
+    consultedItems = result.consultedItems
   } catch (err) {
     console.error('tree update after ambient capture failed:', err)
     const cause = err instanceof Error ? err.message : String(err)
@@ -596,7 +622,9 @@ export async function recordAmbientConditions(opts: {
   })
   await updateSessionTreeState(opts.db, opts.sessionId, nextTree)
 
-  return { ok: true, conditions, tree: nextTree }
+  const citedItems = extractCitedItems(nextTree.message, consultedItems)
+
+  return { ok: true, conditions, tree: nextTree, consultedItems, citedItems }
 }
 
 function round1(n: number): number {

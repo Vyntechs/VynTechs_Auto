@@ -81,7 +81,12 @@ export async function POST(req: Request) {
 
   let treeState
   try {
-    treeState = await generateInitialTreeWithRetrieval(parsed.data)
+    // PR 4: wrapper now returns TreeEngineResult; we only need the tree for
+    // initial session creation. Consulted/cited items aren't surfaced at intake
+    // because there is no AI session response yet — they enter the picture on
+    // the first /advance call.
+    const result = await generateInitialTreeWithRetrieval(parsed.data)
+    treeState = result.tree
   } catch (err) {
     console.error('tree generation failed:', err)
     return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
