@@ -497,6 +497,7 @@ export const knowledgeItems = pgTable(
     body: text('body'),
     structuredData: jsonb('structured_data'),
     dtcList: text('dtc_list').array().notNull().default([]),
+    dtcSubCodes: jsonb('dtc_sub_codes').$type<Record<string, string> | null>(),
     systemCodes: text('system_codes').array().notNull().default([]),
     symptoms: text('symptoms').array().notNull().default([]),
     relatedItemIds: jsonb('related_item_ids').$type<string[] | null>(),
