@@ -10,6 +10,7 @@ import {
   getWiringPath,
   getComponentLocation,
   getSpec,
+  incrementFireCount,
 } from '@/lib/knowledge/retrieval'
 
 type SeedScope = {
@@ -595,6 +596,57 @@ describe('getSpec', () => {
       vehicle: F250_VEHICLE,
     })
     expect(matches).toHaveLength(0)
+  })
+})
+
+describe('incrementFireCount', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('increments fire_count once per id and counts duplicates in input', async () => {
+    const a = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'A',
+      dtcList: ['P0420'],
+      fireCount: 0,
+    })
+    const b = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'B',
+      dtcList: ['P0420'],
+      fireCount: 5,
+    })
+    await incrementFireCount(handle.db, [a, b, a]) // a appears twice
+    const result = await handle.db.execute<{ id: string; fire_count: number }>(sql`
+      SELECT id, fire_count FROM knowledge_items WHERE id IN (${a}, ${b}) ORDER BY id
+    `)
+    const rowsArr = Array.isArray(result) ? result : (result as { rows: typeof result }).rows
+    const map = new Map(rowsArr.map((r) => [r.id, r.fire_count]))
+    expect(map.get(a)).toBe(2)
+    expect(map.get(b)).toBe(6)
+  })
+
+  it('is a no-op for empty input', async () => {
+    await incrementFireCount(handle.db, [])
+    // No throw; nothing to assert beyond no-error completion.
   })
 })
 

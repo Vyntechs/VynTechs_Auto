@@ -309,6 +309,24 @@ export type GetSpecInput = {
   limit?: number
 }
 
+// Background increment of fire_count per consulted item. Duplicate ids in
+// the input increment that row N times. Caller invokes fire-and-forget to
+// keep retrieval off the critical path.
+export async function incrementFireCount(
+  db: RetrievalDb,
+  ids: string[],
+): Promise<void> {
+  if (ids.length === 0) return
+  const counts = new Map<string, number>()
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1)
+  for (const [id, n] of counts) {
+    await db.execute(sql`
+      UPDATE knowledge_items SET fire_count = fire_count + ${n}
+      WHERE id = ${id}
+    `)
+  }
+}
+
 // v1 keyword scan; spec calls out a dedicated `spec` type as v2 work.
 export async function getSpec(
   db: RetrievalDb,
