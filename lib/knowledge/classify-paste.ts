@@ -5,6 +5,9 @@ const HAIKU = process.env.ANTHROPIC_HAIKU_MODEL ?? 'claude-haiku-4-5-20251001'
 export const SIMPLE_TYPES = ['cause_fix', 'reference_doc', 'bulletin', 'note'] as const
 export type SimpleType = (typeof SIMPLE_TYPES)[number]
 
+export const MIN_PASTE_CHARS = 30
+export const MIN_PASTE_WORDS = 6
+
 export type ProposedVehicleScope = {
   yearStart: number
   yearEnd: number
@@ -16,7 +19,7 @@ export type ProposedVehicleScope = {
 }
 
 export type ClassifiedPasteResult = {
-  status: 'parsed' | 'failed'
+  status: 'parsed' | 'failed' | 'paste_too_short'
   draft: {
     type?: SimpleType
     title?: string
@@ -121,6 +124,11 @@ export async function classifyPaste(
   const trimmed = input.rawText.trim()
   if (trimmed.length === 0) {
     return { status: 'failed', draft: {}, sourceSpans: {} }
+  }
+
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length
+  if (trimmed.length < MIN_PASTE_CHARS || wordCount < MIN_PASTE_WORDS) {
+    return { status: 'paste_too_short', draft: {}, sourceSpans: {} }
   }
 
   const userContent = input.scopeHint
