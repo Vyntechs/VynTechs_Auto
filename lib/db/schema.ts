@@ -470,3 +470,95 @@ export const founderNotesQueue = pgTable('founder_notes_queue', {
 
 export type FounderNotesQueueRow = typeof founderNotesQueue.$inferSelect
 export type NewFounderNotesQueueRow = typeof founderNotesQueue.$inferInsert
+
+// Vehicle knowledge platform — vetted shop-owner-curated reference data.
+// Sits alongside corpus_entries (session-derived); separate concerns. See
+// docs/superpowers/specs/2026-05-16-vehicle-knowledge-platform-design.md.
+export const knowledgeItems = pgTable(
+  'knowledge_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id')
+      .references(() => shops.id, { onDelete: 'cascade' })
+      .notNull(),
+    type: text('type', {
+      enum: [
+        'cause_fix',
+        'reference_doc',
+        'bulletin',
+        'note',
+        'pinout',
+        'connector',
+        'wiring_diagram',
+        'theory_of_operation',
+      ],
+    }).notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    structuredData: jsonb('structured_data'),
+    dtcList: text('dtc_list').array().notNull().default([]),
+    systemCodes: text('system_codes').array().notNull().default([]),
+    symptoms: text('symptoms').array().notNull().default([]),
+    relatedItemIds: jsonb('related_item_ids').$type<string[] | null>(),
+    createdByUserId: uuid('created_by_user_id')
+      .references(() => profiles.id)
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    retired: boolean('retired').notNull().default(false),
+    retiredAt: timestamp('retired_at', { withTimezone: true }),
+    retiredByUserId: uuid('retired_by_user_id').references(() => profiles.id),
+    fireCount: integer('fire_count').notNull().default(0),
+  },
+  (table) => [
+    index('knowledge_items_shop_id_idx').on(table.shopId),
+    index('knowledge_items_type_idx').on(table.type),
+    index('knowledge_items_dtc_list_idx').using('gin', table.dtcList),
+    index('knowledge_items_system_codes_idx').using('gin', table.systemCodes),
+    index('knowledge_items_symptoms_idx').using('gin', table.symptoms),
+    index('knowledge_items_active_idx').on(table.retired),
+  ],
+)
+
+export const knowledgeItemVehicles = pgTable(
+  'knowledge_item_vehicles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    knowledgeItemId: uuid('knowledge_item_id')
+      .references(() => knowledgeItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    yearStart: integer('year_start').notNull(),
+    yearEnd: integer('year_end').notNull(),
+    make: text('make').notNull(),
+    model: text('model'),
+    engine: text('engine'),
+    trim: text('trim'),
+    drivetrain: text('drivetrain'),
+    buildDateAfter: timestamp('build_date_after', { withTimezone: true }),
+    buildDateBefore: timestamp('build_date_before', { withTimezone: true }),
+    extraQualifiers: jsonb('extra_qualifiers'),
+  },
+  (table) => [
+    index('knowledge_item_vehicles_lookup_idx').on(
+      table.make,
+      table.model,
+      table.yearStart,
+      table.yearEnd,
+    ),
+    index('knowledge_item_vehicles_item_idx').on(table.knowledgeItemId),
+  ],
+)
+
+export const symptoms = pgTable('symptoms', {
+  name: text('name').primaryKey(),
+  displayLabel: text('display_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  usageCount: integer('usage_count').notNull().default(0),
+})
+
+export type KnowledgeItem = typeof knowledgeItems.$inferSelect
+export type NewKnowledgeItem = typeof knowledgeItems.$inferInsert
+export type KnowledgeItemVehicle = typeof knowledgeItemVehicles.$inferSelect
+export type NewKnowledgeItemVehicle = typeof knowledgeItemVehicles.$inferInsert
+export type Symptom = typeof symptoms.$inferSelect
+export type NewSymptom = typeof symptoms.$inferInsert
