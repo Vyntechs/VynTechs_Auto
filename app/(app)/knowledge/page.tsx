@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { db } from '@/lib/db/client'
@@ -11,8 +12,8 @@ import { FilterBar } from '@/components/knowledge/filter-bar'
 import { KnowledgeRow } from '@/components/knowledge/row'
 import { KnowledgeEmptyState } from '@/components/knowledge/empty-state'
 import { KnowledgeDrawer } from '@/components/knowledge/drawer'
-import { KnowledgePasteForm } from './paste-form'
-import { RichKnowledgeForm } from './rich-form'
+import { AddKnowledgePicker } from '@/components/knowledge/add-picker'
+import { PasteSheet } from '@/components/knowledge/paste-sheet'
 
 export const metadata = { title: 'Knowledge' }
 
@@ -51,6 +52,10 @@ export default async function KnowledgePage({
   const currentQuery = queryString.toString()
   const hasActiveFilters = Object.keys(filter).length > 0
 
+  const addHrefParams = new URLSearchParams(currentQuery)
+  addHrefParams.set('add', '1')
+  const addHref = `?${addHrefParams.toString()}`
+
   return (
     <main className="vk-root">
       <header className="vk-header">
@@ -63,14 +68,9 @@ export default async function KnowledgePage({
           <h1 className="vk-title">Vetted shop knowledge</h1>
         </div>
         <div className="vk-header__r">
-          <button
-            type="button"
-            className="vk-btn vk-btn--primary"
-            disabled
-            title="Contribution UI ships in PR 5b. For now, use the paste/rich form below."
-          >
+          <Link href={addHref} className="vk-btn vk-btn--primary" scroll={false}>
             <span className="vk-btn__plus">+</span> Add knowledge
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -89,31 +89,8 @@ export default async function KnowledgePage({
       </div>
 
       <KnowledgeDrawer item={detail} />
-
-      <section
-        className="vk-interim"
-        style={{
-          marginTop: 48,
-          padding: '24px 32px',
-          background: 'var(--vt-bone-100)',
-          borderTop: '0.5px solid var(--vt-rule-strong)',
-        }}
-      >
-        <p
-          style={{
-            fontFamily: 'var(--vt-font-mono)',
-            fontSize: 10,
-            letterSpacing: '0.18em',
-            color: 'var(--vt-fg-3)',
-            textTransform: 'uppercase',
-            margin: '0 0 16px',
-          }}
-        >
-          PR 5b contribution UI · interim
-        </p>
-        <KnowledgePasteForm />
-        <RichKnowledgeForm />
-      </section>
+      <AddKnowledgePicker />
+      <PasteSheet />
     </main>
   )
 }
