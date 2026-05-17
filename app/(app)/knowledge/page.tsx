@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { db } from '@/lib/db/client'
@@ -11,6 +12,7 @@ import { FilterBar } from '@/components/knowledge/filter-bar'
 import { KnowledgeRow } from '@/components/knowledge/row'
 import { KnowledgeEmptyState } from '@/components/knowledge/empty-state'
 import { KnowledgeDrawer } from '@/components/knowledge/drawer'
+import { AddKnowledgePicker } from '@/components/knowledge/add-picker'
 import { KnowledgePasteForm } from './paste-form'
 import { RichKnowledgeForm } from './rich-form'
 
@@ -51,6 +53,10 @@ export default async function KnowledgePage({
   const currentQuery = queryString.toString()
   const hasActiveFilters = Object.keys(filter).length > 0
 
+  const addHrefParams = new URLSearchParams(currentQuery)
+  addHrefParams.set('add', '1')
+  const addHref = `?${addHrefParams.toString()}`
+
   return (
     <main className="vk-root">
       <header className="vk-header">
@@ -63,14 +69,9 @@ export default async function KnowledgePage({
           <h1 className="vk-title">Vetted shop knowledge</h1>
         </div>
         <div className="vk-header__r">
-          <button
-            type="button"
-            className="vk-btn vk-btn--primary"
-            disabled
-            title="Contribution UI ships in PR 5b. For now, use the paste/rich form below."
-          >
+          <Link href={addHref} className="vk-btn vk-btn--primary" scroll={false}>
             <span className="vk-btn__plus">+</span> Add knowledge
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -89,6 +90,7 @@ export default async function KnowledgePage({
       </div>
 
       <KnowledgeDrawer item={detail} />
+      <AddKnowledgePicker />
 
       <section
         className="vk-interim"
