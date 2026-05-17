@@ -117,7 +117,11 @@ export async function classifyPaste(
 
   const res = await client.messages.create({
     model: HAIKU,
-    max_tokens: 1024,
+    // Output includes the verbatim body for note/reference_doc, plus title +
+    // optional structuredData. For a 20k-char input paste, the draft can run
+    // ~5-8k tokens. 1024 truncated mid-JSON and crashed JSON.parse with
+    // "Unterminated string" on real curator pastes.
+    max_tokens: 8192,
     system: cachedSystem(CLASSIFY_PASTE_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
   })
