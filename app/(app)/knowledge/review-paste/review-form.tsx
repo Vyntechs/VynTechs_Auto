@@ -1,7 +1,7 @@
 'use client'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import type { ClassifiedPasteResult } from '@/lib/knowledge/classify-paste'
+import type { PasteRouteResponse } from '@/lib/knowledge/classify-paste'
 import { TYPE_LABELS, SYSTEM_CODES } from '@/lib/knowledge/constants'
 import {
   ChipPicker,
@@ -12,13 +12,34 @@ import {
 } from '@/components/knowledge/form-helpers'
 
 type Stored = {
-  proposal: ClassifiedPasteResult
+  proposal: PasteRouteResponse
   rawText: string
   scopeHint: string
 }
 
 const SIMPLE_TYPES = ['cause_fix', 'reference_doc', 'bulletin', 'note'] as const
 type SimpleType = (typeof SIMPLE_TYPES)[number]
+
+const FIELD_LABELS: Record<string, string> = {
+  type: 'Type',
+  title: 'Title',
+  body: 'Body',
+  complaint: 'Complaint',
+  cause: 'Cause',
+  correction: 'Correction',
+  first_check: 'First check',
+  source: 'Source',
+  bulletin_id: 'Bulletin ID',
+  summary: 'Summary',
+  link: 'Link',
+  dtcList: 'DTCs',
+  systemCodes: 'System codes',
+  symptoms: 'Symptoms',
+}
+
+function labelFor(field: string): string {
+  return FIELD_LABELS[field] ?? field
+}
 
 export function ReviewForm() {
   const router = useRouter()
@@ -50,7 +71,8 @@ export function ReviewForm() {
         setType(d.type as SimpleType)
       }
       setTitle(d.title ?? '')
-      setBody(d.body ?? '')
+      const tooShortInit = parsed.proposal.status === 'paste_too_short'
+      setBody(d.body ?? (tooShortInit ? parsed.rawText : ''))
       setStructured((d.structuredData as Record<string, string>) ?? {})
       setDtcs(d.dtcList ?? [])
       setSystemCodes(d.systemCodes ?? [])
@@ -70,6 +92,19 @@ export function ReviewForm() {
   }, [router])
 
   const sources = useMemo(() => stored?.proposal.sourceSpans ?? {}, [stored])
+  const unverified = useMemo(
+    () => new Set(stored?.proposal.unverified ?? []),
+    [stored],
+  )
+  const stripped = useMemo(() => stored?.proposal.stripped ?? [], [stored])
+  const tooShort = stored?.proposal.status === 'paste_too_short'
+
+  function attributionFor(field: string): 'verified' | 'unverified' | 'none' {
+    if (editedFields.has(field)) return 'none'
+    if (unverified.has(field)) return 'unverified'
+    if (sources[field]) return 'verified'
+    return 'none'
+  }
 
   function markEdited(field: string) {
     setEditedFields((prev) => new Set(prev).add(field))
@@ -127,7 +162,7 @@ export function ReviewForm() {
   }
 
   function discard() {
-    if (!confirm('Throw away the paste and the AI sort?')) return
+    if (!confirm('Throw away this paste?')) return
     sessionStorage.removeItem('vk-paste-proposal')
     router.push('/knowledge')
   }
@@ -143,9 +178,20 @@ export function ReviewForm() {
         handleSave()
       }}
     >
+      {tooShort && (
+        <div className="vk-fg__notice">
+          Paste too short to assist — fill the form manually.
+        </div>
+      )}
+      {!tooShort && stripped.length > 0 && (
+        <div className="vk-fg__notice">
+          Couldn&apos;t find these in your paste — fill them yourself:{' '}
+          {stripped.map(labelFor).join(', ')}.
+        </div>
+      )}
       <FieldGroup
         label="Type"
-        aiAttributed={!editedFields.has('type') && !!sources.type}
+        attribution={attributionFor('type')}
         source={sources.type}
       >
         <select
@@ -165,7 +211,7 @@ export function ReviewForm() {
 
       <FieldGroup
         label="Title"
-        aiAttributed={!editedFields.has('title') && !!sources.title}
+        attribution={attributionFor('title')}
         source={sources.title}
       >
         <input
@@ -182,7 +228,7 @@ export function ReviewForm() {
       {(type === 'reference_doc' || type === 'note') && (
         <FieldGroup
           label="Body"
-          aiAttributed={!editedFields.has('body') && !!sources.body}
+          attribution={attributionFor('body')}
           source={sources.body}
         >
           <textarea
@@ -202,7 +248,7 @@ export function ReviewForm() {
           <FieldGroup
             key={k}
             label={k.replace('_', ' ')}
-            aiAttributed={!editedFields.has(k) && !!sources[k]}
+            attribution={attributionFor(k)}
             source={sources[k]}
           >
             <textarea
@@ -222,7 +268,7 @@ export function ReviewForm() {
           <FieldGroup
             key={k}
             label={k.replace('_', ' ')}
-            aiAttributed={!editedFields.has(k) && !!sources[k]}
+            attribution={attributionFor(k)}
             source={sources[k]}
           >
             <input
@@ -238,7 +284,7 @@ export function ReviewForm() {
 
       <FieldGroup
         label="DTCs"
-        aiAttributed={!editedFields.has('dtcList') && !!sources.dtcList}
+        attribution={attributionFor('dtcList')}
         source={sources.dtcList}
       >
         <TagInput
@@ -253,7 +299,7 @@ export function ReviewForm() {
 
       <FieldGroup
         label="System codes"
-        aiAttributed={!editedFields.has('systemCodes') && !!sources.systemCodes}
+        attribution={attributionFor('systemCodes')}
         source={sources.systemCodes}
       >
         <ChipPicker
@@ -268,7 +314,7 @@ export function ReviewForm() {
 
       <FieldGroup
         label="Symptoms"
-        aiAttributed={!editedFields.has('symptoms') && !!sources.symptoms}
+        attribution={attributionFor('symptoms')}
         source={sources.symptoms}
       >
         <TagInput
@@ -283,7 +329,7 @@ export function ReviewForm() {
 
       <FieldGroup
         label="Vehicle scope"
-        aiAttributed={!editedFields.has('scopes') && scopes.length > 0}
+        attribution="none"
       >
         <ScopeEditor
           scopes={scopes}

@@ -98,7 +98,7 @@ export function WiringForm({ existing }: { existing: KnowledgeListRow | null }) 
         handleSave()
       }}
     >
-      <FieldGroup label="Title" aiAttributed={false}>
+      <FieldGroup label="Title">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -106,7 +106,7 @@ export function WiringForm({ existing }: { existing: KnowledgeListRow | null }) 
           maxLength={200}
         />
       </FieldGroup>
-      <FieldGroup label="Diagram name" aiAttributed={false}>
+      <FieldGroup label="Diagram name">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -114,7 +114,7 @@ export function WiringForm({ existing }: { existing: KnowledgeListRow | null }) 
           placeholder="defaults to title if blank"
         />
       </FieldGroup>
-      <FieldGroup label="Diagram image (required)" aiAttributed={false}>
+      <FieldGroup label="Diagram image (required)">
         <ImageUpload
           knowledgeType="wiring_diagram"
           value={imageRef}
@@ -122,20 +122,20 @@ export function WiringForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Vehicle scope" aiAttributed={false}>
+      <FieldGroup label="Vehicle scope">
         <ScopeEditor scopes={scopes} setScopes={setScopes} />
       </FieldGroup>
-      <FieldGroup label="DTCs" aiAttributed={false}>
+      <FieldGroup label="DTCs">
         <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
       </FieldGroup>
-      <FieldGroup label="System codes" aiAttributed={false}>
+      <FieldGroup label="System codes">
         <ChipPicker
           values={systemCodes}
           options={[...SYSTEM_CODES]}
           setValues={setSystemCodes}
         />
       </FieldGroup>
-      <FieldGroup label="Symptoms" aiAttributed={false}>
+      <FieldGroup label="Symptoms">
         <TagInput
           values={symptoms}
           setValues={setSymptoms}
@@ -143,7 +143,7 @@ export function WiringForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Connections (optional)" aiAttributed={false}>
+      <FieldGroup label="Connections (optional)">
         <table className="vk-conntable">
           <thead>
             <tr>

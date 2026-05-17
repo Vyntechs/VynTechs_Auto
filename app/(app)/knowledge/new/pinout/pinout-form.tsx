@@ -94,7 +94,7 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
         handleSave()
       }}
     >
-      <FieldGroup label="Title" aiAttributed={false}>
+      <FieldGroup label="Title">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -102,7 +102,7 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
           maxLength={200}
         />
       </FieldGroup>
-      <FieldGroup label="Connector ref" aiAttributed={false}>
+      <FieldGroup label="Connector ref">
         <input
           value={connectorRef}
           onChange={(e) => setConnectorRef(e.target.value)}
@@ -112,15 +112,15 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Vehicle scope" aiAttributed={false}>
+      <FieldGroup label="Vehicle scope">
         <ScopeEditor scopes={scopes} setScopes={setScopes} />
       </FieldGroup>
 
-      <FieldGroup label="DTCs" aiAttributed={false}>
+      <FieldGroup label="DTCs">
         <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
       </FieldGroup>
 
-      <FieldGroup label="System codes" aiAttributed={false}>
+      <FieldGroup label="System codes">
         <ChipPicker
           values={systemCodes}
           options={[...SYSTEM_CODES]}
@@ -128,7 +128,7 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Symptoms" aiAttributed={false}>
+      <FieldGroup label="Symptoms">
         <TagInput
           values={symptoms}
           setValues={setSymptoms}
@@ -136,7 +136,7 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Pin table" aiAttributed={false}>
+      <FieldGroup label="Pin table">
         <table className="vk-pintable">
           <thead>
             <tr>

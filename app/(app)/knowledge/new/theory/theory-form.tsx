@@ -84,7 +84,7 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
         handleSave()
       }}
     >
-      <FieldGroup label="Title" aiAttributed={false}>
+      <FieldGroup label="Title">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -92,7 +92,7 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
           maxLength={200}
         />
       </FieldGroup>
-      <FieldGroup label="Theory title" aiAttributed={false}>
+      <FieldGroup label="Theory title">
         <input
           value={theoryTitle}
           onChange={(e) => setTheoryTitle(e.target.value)}
@@ -101,7 +101,7 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
         />
       </FieldGroup>
 
-      <FieldGroup label="Sections (≥ 1)" aiAttributed={false}>
+      <FieldGroup label="Sections (≥ 1)">
         {sections.map((s, i) => (
           <div className="vk-section-row" key={i}>
             <span className="vk-section-row__num">{i + 1}</span>
@@ -149,20 +149,20 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
         </button>
       </FieldGroup>
 
-      <FieldGroup label="Vehicle scope" aiAttributed={false}>
+      <FieldGroup label="Vehicle scope">
         <ScopeEditor scopes={scopes} setScopes={setScopes} />
       </FieldGroup>
-      <FieldGroup label="DTCs" aiAttributed={false}>
+      <FieldGroup label="DTCs">
         <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
       </FieldGroup>
-      <FieldGroup label="System codes" aiAttributed={false}>
+      <FieldGroup label="System codes">
         <ChipPicker
           values={systemCodes}
           options={[...SYSTEM_CODES]}
           setValues={setSystemCodes}
         />
       </FieldGroup>
-      <FieldGroup label="Symptoms" aiAttributed={false}>
+      <FieldGroup label="Symptoms">
         <TagInput
           values={symptoms}
           setValues={setSymptoms}

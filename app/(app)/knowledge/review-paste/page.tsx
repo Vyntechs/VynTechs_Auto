@@ -27,7 +27,7 @@ export default async function ReviewPastePage() {
       <header className="vk-page__head">
         <div>
           <p className="vk-page__eyebrow">REVIEW</p>
-          <h1 className="vk-page__title">Review AI sort</h1>
+          <h1 className="vk-page__title">Review your paste</h1>
         </div>
       </header>
       <ReviewForm />

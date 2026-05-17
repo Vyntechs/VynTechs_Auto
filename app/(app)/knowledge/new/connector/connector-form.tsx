@@ -90,7 +90,7 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
         handleSave()
       }}
     >
-      <FieldGroup label="Title" aiAttributed={false}>
+      <FieldGroup label="Title">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -98,7 +98,7 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
           maxLength={200}
         />
       </FieldGroup>
-      <FieldGroup label="Connector ID" aiAttributed={false}>
+      <FieldGroup label="Connector ID">
         <input
           value={connectorId}
           onChange={(e) => setConnectorId(e.target.value)}
@@ -106,7 +106,7 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
           maxLength={60}
         />
       </FieldGroup>
-      <FieldGroup label="Component" aiAttributed={false}>
+      <FieldGroup label="Component">
         <input
           value={componentName}
           onChange={(e) => setComponentName(e.target.value)}
@@ -114,7 +114,7 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
           maxLength={120}
         />
       </FieldGroup>
-      <FieldGroup label="Location" aiAttributed={false}>
+      <FieldGroup label="Location">
         <textarea
           rows={3}
           value={location}
@@ -123,10 +123,10 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
         />
       </FieldGroup>
 
-      <FieldGroup label="In-place image (required)" aiAttributed={false}>
+      <FieldGroup label="In-place image (required)">
         <ImageUpload knowledgeType="connector" value={imageRef} onChange={setImageRef} />
       </FieldGroup>
-      <FieldGroup label="Mating end image (optional)" aiAttributed={false}>
+      <FieldGroup label="Mating end image (optional)">
         <ImageUpload
           knowledgeType="connector"
           value={matingImageRef}
@@ -134,20 +134,20 @@ export function ConnectorForm({ existing }: { existing: KnowledgeListRow | null 
         />
       </FieldGroup>
 
-      <FieldGroup label="Vehicle scope" aiAttributed={false}>
+      <FieldGroup label="Vehicle scope">
         <ScopeEditor scopes={scopes} setScopes={setScopes} />
       </FieldGroup>
-      <FieldGroup label="DTCs" aiAttributed={false}>
+      <FieldGroup label="DTCs">
         <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
       </FieldGroup>
-      <FieldGroup label="System codes" aiAttributed={false}>
+      <FieldGroup label="System codes">
         <ChipPicker
           values={systemCodes}
           options={[...SYSTEM_CODES]}
           setValues={setSystemCodes}
         />
       </FieldGroup>
-      <FieldGroup label="Symptoms" aiAttributed={false}>
+      <FieldGroup label="Symptoms">
         <TagInput
           values={symptoms}
           setValues={setSymptoms}
