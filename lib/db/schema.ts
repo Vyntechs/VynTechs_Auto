@@ -19,6 +19,7 @@ export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
 export const shops = pgTable('shops', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
+  shopMgmtEnabled: boolean('shop_mgmt_enabled').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
@@ -69,6 +70,26 @@ export const vehicles = pgTable(
   ],
 )
 
+export const repairOrders = pgTable(
+  'repair_orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'cascade' }).notNull(),
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'restrict' }).notNull(),
+    vehicleId: uuid('vehicle_id').references(() => vehicles.id, { onDelete: 'restrict' }).notNull(),
+    status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
+    openedBy: uuid('opened_by').references(() => profiles.id, { onDelete: 'restrict' }).notNull(),
+    openedAt: timestamp('opened_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('repair_orders_shop_status_idx').on(table.shopId, table.status),
+    index('repair_orders_customer_idx').on(table.customerId),
+    index('repair_orders_vehicle_idx').on(table.vehicleId),
+  ],
+)
+
 export type AmbientConditions = {
   temperatureF: number
   humidityPct?: number
@@ -116,6 +137,8 @@ export const sessions = pgTable('sessions', {
   curatorNote: text('curator_note'),
   curatorOverrideAction: text('curator_override_action'),
   maxCorpusSimilarity: real('max_corpus_similarity'),
+  repairOrderId: uuid('repair_order_id').references(() => repairOrders.id, { onDelete: 'set null' }),
+  customerAuthorized: boolean('customer_authorized'),
 })
 
 export const sessionEvents = pgTable('session_events', {
@@ -240,8 +263,17 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   shop: one(shops, { fields: [sessions.shopId], references: [shops.id] }),
   tech: one(profiles, { fields: [sessions.techId], references: [profiles.id] }),
   vehicle: one(vehicles, { fields: [sessions.vehicleId], references: [vehicles.id] }),
+  repairOrder: one(repairOrders, { fields: [sessions.repairOrderId], references: [repairOrders.id] }),
   events: many(sessionEvents),
   artifacts: many(artifacts),
+}))
+
+export const repairOrdersRelations = relations(repairOrders, ({ one, many }) => ({
+  shop: one(shops, { fields: [repairOrders.shopId], references: [shops.id] }),
+  customer: one(customers, { fields: [repairOrders.customerId], references: [customers.id] }),
+  vehicle: one(vehicles, { fields: [repairOrders.vehicleId], references: [vehicles.id] }),
+  openedByProfile: one(profiles, { fields: [repairOrders.openedBy], references: [profiles.id] }),
+  sessions: many(sessions),
 }))
 
 export const customersRelations = relations(customers, ({ one, many }) => ({
