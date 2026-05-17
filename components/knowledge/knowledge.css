@@ -752,12 +752,22 @@
    9. Form shell (used by Review, Pinout, Connector, Wiring, Theory)
    =========================================================== */
 .vk-form {
+  /* Originally designed as a 2-column grid (main + 320px aside) but none of
+     the form pages actually render an aside — so FieldGroups fell into the
+     grid as alternating left/right cells, producing the broken desktop
+     layout where Title and Theory-title (etc.) sat side-by-side instead of
+     vertically stacked. Phone viewport masked it via the .vk-root--phone
+     override below. Switch to a single-column flex with max-width to match
+     what the forms actually need. */
   flex: 1; min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-width: 920px;
+  width: 100%;
+  padding: 24px 32px 80px;
+  margin: 0;
 }
-.vk-form--no-aside { grid-template-columns: 1fr; }
+.vk-form--no-aside { /* legacy modifier; default is now single-column */ }
 .vk-form__main {
   overflow: auto;
   min-height: 0;
