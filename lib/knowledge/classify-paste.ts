@@ -34,7 +34,10 @@ export type ClassifiedPasteResult = {
 export type AnthropicLike = {
   messages: {
     create: (args: unknown) => Promise<{
-      content: Array<{ type: string; text?: string }>
+      content: Array<
+        | { type: 'text'; text?: string }
+        | { type: 'tool_use'; name?: string; input?: unknown; id?: string }
+      >
     }>
   }
 }
@@ -47,55 +50,64 @@ ALLOWED TYPES (exactly one):
 - "reference_doc" — a short generic technical reference that doesn't fit cause_fix or bulletin. Use when the paste is general technical info (a snippet from a service manual, a wiring color code chart, a torque spec note).
 - "note" — anything that doesn't fit the three structured types. Free-form text.
 
-OUTPUT FORMAT — return valid JSON matching this TypeScript type:
+You submit your proposal by calling the submit_classified_paste tool with the structured fields below. Do NOT return prose — only invoke the tool. The tool's input schema enforces the JSON shape, so you cannot produce malformed output.
 
-type Result = {
-  status: "parsed" | "failed"
-  draft: {
-    type: "cause_fix" | "reference_doc" | "bulletin" | "note"
-    title: string                  // <= 120 chars, names the vehicle scope + symptom/system if applicable
-    body?: string                  // populate for "note" and "reference_doc"; omit for "cause_fix" and "bulletin"
-    structuredData?: {
-      // for cause_fix:
-      complaint?: string
-      cause?: string
-      correction?: string
-      first_check?: string
-      dtcs_common?: string[]
-      // for bulletin:
-      source?: string              // OEM name (Ford, GM, Toyota, ...)
-      bulletin_id?: string         // e.g. "TSB 21-2299"
-      summary?: string
-      body?: string                // bulletin body (separate from top-level body)
-      link?: string
-    }
-    dtcList?: string[]             // OBD-II codes mentioned, bare form (no "-XX" suffix), uppercase
-    systemCodes?: string[]         // pick from: transmission, engine, can_bus, fuel_delivery, ignition, charging, hvac, brakes, suspension, body_electrical, cooling, emissions, lighting, steering, abs, sas, hybrid_drive, restraint, infotainment, network
-    symptoms?: string[]            // short snake_case tags (e.g. "hard_shift", "no_start", "rough_idle")
-    vehicleScopes?: Array<{
-      yearStart: number            // e.g. 2011
-      yearEnd: number              // single year = yearStart == yearEnd
-      make: string                 // canonical: "Ford", "Chevrolet", "Toyota"
-      model?: string               // canonical: "F-150", "Silverado 1500"
-      engine?: string              // canonical: "6.7L Powerstroke", "5.0L V8"
-      trim?: string
-      drivetrain?: string
-    }>
-  }
-  sourceSpans: { [fieldName: string]: string }   // quoted substring from the paste that produced each proposed field
-  llmNotes?: string                              // 1-2 sentences for the owner if anything was ambiguous
-}
+FIELD GUIDANCE:
+- status: "parsed" when you extract at least title and type. "failed" when paste is empty / gibberish / impossible to classify.
+- draft.type: one of cause_fix, reference_doc, bulletin, note. Never propose pinout/connector/wiring_diagram/theory_of_operation — those are handled by a different flow.
+- draft.title: <= 120 chars, names the vehicle scope + symptom/system if applicable.
+- draft.body: populate for "note" and "reference_doc"; omit for "cause_fix" and "bulletin".
+- draft.structuredData for cause_fix: { complaint, cause, correction, first_check, dtcs_common[] }
+- draft.structuredData for bulletin: { source (OEM name), bulletin_id (e.g. "TSB 21-2299"), summary, body, link }
+- draft.dtcList: bare OBD-II codes ("P0420" not "P0420-00"). Uppercase. Do not invent codes.
+- draft.systemCodes: from the fixed set { transmission, engine, can_bus, fuel_delivery, ignition, charging, hvac, brakes, suspension, body_electrical, cooling, emissions, lighting, steering, abs, sas, hybrid_drive, restraint, infotainment, network }.
+- draft.symptoms: short snake_case tags ("hard_shift", "no_start", "rough_idle").
+- draft.vehicleScopes: extract from the paste. If a scope hint is supplied by the user, prefer that scope unless the paste contradicts. Canonical makes/models ("Ford", "F-150", "6.7L Powerstroke").
+- sourceSpans: short verbatim quotes from the paste, one per field where one is meaningful. Skip fields with no clear source.
+- llmNotes: 1-2 sentences for the owner if something was ambiguous.
 
-RULES:
-- status: "parsed" — you extracted at least title and type.
-- status: "failed" — paste is empty / gibberish / impossible to extract type and title.
-- DTCs: bare form ("P0420", not "P0420-00"). Uppercase. Do not invent codes.
-- Vehicle scope: extract from the paste; if a scope hint is supplied by the user, prefer that scope unless the paste contradicts.
-- Never propose a type outside the four allowed values. The rich types (pinout, connector, wiring_diagram, theory_of_operation) are handled by a different flow — do not return them.
-- sourceSpans: short verbatim quotes from the paste, one per field where one is meaningful. Skip fields that have no clear source.
-- Do not fabricate. If the paste doesn't name a field, omit it.
+Never fabricate. If the paste doesn't name a field, omit it from the tool input.`
 
-Return JSON only — no prose, no fences.`
+const VEHICLE_SCOPE_SCHEMA = {
+  type: 'object',
+  properties: {
+    yearStart: { type: 'integer' },
+    yearEnd: { type: 'integer' },
+    make: { type: 'string' },
+    model: { type: 'string' },
+    engine: { type: 'string' },
+    trim: { type: 'string' },
+    drivetrain: { type: 'string' },
+  },
+  required: ['yearStart', 'yearEnd', 'make'],
+} as const
+
+const CLASSIFY_PASTE_TOOL = {
+  name: 'submit_classified_paste',
+  description: 'Submit the classified paste as a structured proposal the curator will review.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['parsed', 'failed'] },
+      draft: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: [...SIMPLE_TYPES] },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          structuredData: { type: 'object', additionalProperties: true },
+          dtcList: { type: 'array', items: { type: 'string' } },
+          systemCodes: { type: 'array', items: { type: 'string' } },
+          symptoms: { type: 'array', items: { type: 'string' } },
+          vehicleScopes: { type: 'array', items: VEHICLE_SCOPE_SCHEMA },
+        },
+      },
+      sourceSpans: { type: 'object', additionalProperties: { type: 'string' } },
+      llmNotes: { type: 'string' },
+    },
+    required: ['status', 'draft'],
+  },
+} as const
 
 export type ClassifyPasteInput = {
   rawText: string
@@ -112,27 +124,36 @@ export async function classifyPaste(
   }
 
   const userContent = input.scopeHint
-    ? `Scope hint: ${input.scopeHint}\n\nPaste:\n${trimmed}\n\nReturn JSON only.`
-    : `Paste:\n${trimmed}\n\nReturn JSON only.`
+    ? `Scope hint: ${input.scopeHint}\n\nPaste:\n${trimmed}`
+    : `Paste:\n${trimmed}`
 
   const res = await client.messages.create({
     model: HAIKU,
-    max_tokens: 1024,
+    // Haiku 4.5 supports up to 32k output tokens. 8192 is conservative
+    // headroom; the tool-use path produces structured fields so the
+    // model isn't paying tokens for JSON syntax.
+    max_tokens: 8192,
     system: cachedSystem(CLASSIFY_PASTE_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
-  })
+    tools: [CLASSIFY_PASTE_TOOL],
+    // Force the model to call our tool (not free-form text). The Anthropic
+    // SDK validates input against input_schema before returning, so the
+    // shape we get back is structurally guaranteed — no JSON.parse,
+    // no malformed-string risk, no unterminated-string crashes.
+    tool_choice: { type: 'tool', name: 'submit_classified_paste' },
+  } as unknown as Parameters<AnthropicLike['messages']['create']>[0])
 
-  const block = res.content.find((b) => b.type === 'text')
-  if (!block || block.type !== 'text' || !block.text) {
-    throw new Error('classify-paste classifier returned no text block')
+  const toolUse = res.content.find(
+    (b): b is { type: 'tool_use'; name?: string; input?: unknown; id?: string } =>
+      b.type === 'tool_use',
+  )
+  if (!toolUse || typeof toolUse.input !== 'object' || toolUse.input === null) {
+    throw new Error(
+      'classify-paste: model did not call submit_classified_paste tool',
+    )
   }
 
-  const cleaned = block.text
-    .trim()
-    .replace(/^```(?:json)?\n?/, '')
-    .replace(/\n?```$/, '')
-
-  const parsed = JSON.parse(cleaned) as Partial<ClassifiedPasteResult>
+  const parsed = toolUse.input as Partial<ClassifiedPasteResult>
 
   if (parsed.status !== 'parsed' && parsed.status !== 'failed') {
     throw new Error(`classify-paste returned invalid status: ${String(parsed.status)}`)

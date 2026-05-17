@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import {
   VehicleStrip,
@@ -10,17 +11,32 @@ import {
 } from '@/components/vt'
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
 import type { Session, SessionEvent } from '@/lib/db/schema'
+import type { KnowledgeListRow } from '@/lib/knowledge/list'
 import { ActiveStepForm } from './active-step-form'
 import { AbandonButton } from './abandon-button'
 import { DiagnosisProposedReview } from './diagnosis-proposed-review'
 import { RepairPhaseView } from './repair-phase-view'
+import { ActiveStepCitations } from './active-step-citations'
+import { KnowledgeDrawer } from '@/components/knowledge/drawer'
 
 type Props = {
   session: Session
   events?: SessionEvent[]
+  // PR 6: cited knowledge items for the current diagnose step, hydrated
+  // server-side from currentNode.citationItemIds. Empty in repair phase
+  // and on the proposed-review screen (out of scope for PR 6).
+  citedItems?: KnowledgeListRow[]
+  // PR 6: the knowledge item currently open in the drawer (from ?detail=
+  // in the URL). Null when the drawer is closed.
+  drawerItem?: KnowledgeListRow | null
 }
 
-export function ActiveSession({ session, events = [] }: Props) {
+export function ActiveSession({
+  session,
+  events = [],
+  citedItems = [],
+  drawerItem = null,
+}: Props) {
   const phase = session.treeState.phase ?? 'diagnosing'
   const done = session.treeState.done === true
 
@@ -122,6 +138,9 @@ export function ActiveSession({ session, events = [] }: Props) {
               {session.treeState.message}
             </p>
           )}
+          <Suspense fallback={null}>
+            <ActiveStepCitations items={citedItems} />
+          </Suspense>
           <ActiveStepForm
             sessionId={session.id}
             nodeId={session.treeState.currentNodeId}
@@ -188,6 +207,9 @@ export function ActiveSession({ session, events = [] }: Props) {
         </Module>
       </div>
       <CaptureBar />
+      <Suspense fallback={null}>
+        <KnowledgeDrawer item={drawerItem} ownerMode={false} />
+      </Suspense>
     </div>
   )
 }

@@ -10,13 +10,18 @@ import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
 import { sessionEvents } from '@/lib/db/schema'
+import { getKnowledgeItem } from '@/lib/knowledge/get-item'
+import type { KnowledgeListRow } from '@/lib/knowledge/list'
 
 export default async function SessionPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ detail?: string }>
 }) {
   const { id } = await params
+  const { detail } = await searchParams
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
@@ -48,11 +53,44 @@ export default async function SessionPage({
   // Cheap query (indexed by session_id) and idempotent for non-repairing
   // sessions — the renderer filters to repair_observation +
   // repair_guidance only.
-  const events = await db
+  const eventsPromise = db
     .select()
     .from(sessionEvents)
     .where(eq(sessionEvents.sessionId, session.id))
     .orderBy(sessionEvents.createdAt)
 
-  return <ActiveSession session={session} events={events} />
+  // PR 6: hydrate the active step's cited knowledge items so the
+  // citation surface renders server-side (no waterfall). The shop scope
+  // on getKnowledgeItem matches the session's user's shop — cross-shop
+  // citations (which shouldn't happen today) silently drop.
+  const currentNode = session.treeState.nodes.find(
+    (n) => n.id === session.treeState.currentNodeId,
+  )
+  const citationIds = currentNode?.citationItemIds ?? []
+  const shopId = ctx.profile.shopId
+  const citedItemsPromise: Promise<KnowledgeListRow[]> = shopId
+    ? Promise.all(
+        citationIds.map((cid) => getKnowledgeItem(db, { id: cid, shopId })),
+      ).then((rows) => rows.filter((r): r is KnowledgeListRow => r !== null))
+    : Promise.resolve([])
+
+  // PR 6: hydrate the drawer item when ?detail=<id> is in the URL.
+  // Same shop scope. Returns null when missing or cross-shop.
+  const drawerItemPromise: Promise<KnowledgeListRow | null> =
+    detail && shopId ? getKnowledgeItem(db, { id: detail, shopId }) : Promise.resolve(null)
+
+  const [events, citedItems, drawerItem] = await Promise.all([
+    eventsPromise,
+    citedItemsPromise,
+    drawerItemPromise,
+  ])
+
+  return (
+    <ActiveSession
+      session={session}
+      events={events}
+      citedItems={citedItems}
+      drawerItem={drawerItem}
+    />
+  )
 }
