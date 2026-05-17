@@ -229,4 +229,21 @@ describe('classifyPaste', () => {
       expect(create).not.toHaveBeenCalled()
     })
   })
+
+  describe('grounding-required prompt', () => {
+    it('CLASSIFY_PASTE_SYSTEM contains the GROUNDING RULE block', async () => {
+      const { CLASSIFY_PASTE_SYSTEM } = await import('@/lib/knowledge/classify-paste')
+      expect(CLASSIFY_PASTE_SYSTEM).toContain('GROUNDING RULE')
+      expect(CLASSIFY_PASTE_SYSTEM).toContain('leave the field empty')
+    })
+
+    it('GROUNDING RULE appears BEFORE the ALLOWED TYPES section', async () => {
+      const { CLASSIFY_PASTE_SYSTEM } = await import('@/lib/knowledge/classify-paste')
+      const gIdx = CLASSIFY_PASTE_SYSTEM.indexOf('GROUNDING RULE')
+      const tIdx = CLASSIFY_PASTE_SYSTEM.indexOf('ALLOWED TYPES')
+      expect(gIdx).toBeGreaterThan(-1)
+      expect(tIdx).toBeGreaterThan(-1)
+      expect(gIdx).toBeLessThan(tIdx)
+    })
+  })
 })

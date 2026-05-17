@@ -47,6 +47,30 @@ export type AnthropicLike = {
 
 export const CLASSIFY_PASTE_SYSTEM = `You convert an automotive shop owner's pasted reference text into a structured draft for a vehicle-knowledge entry. Output is a proposal the owner reviews and edits before saving.
 
+GROUNDING RULE — Before filling any field, locate the exact verbatim text in the paste that supports it. Copy that text into sourceSpans[fieldName]. If you cannot find verbatim text supporting a value, leave the field empty. Empty is correct; fabricated is wrong.
+
+EXAMPLE (sparse paste):
+
+Input: "P0420 — check downstream O2"
+
+Output:
+{
+  "status": "parsed",
+  "draft": {
+    "type": "note",
+    "title": "P0420 — check downstream O2",
+    "body": "P0420 — check downstream O2",
+    "dtcList": ["P0420"]
+  },
+  "sourceSpans": {
+    "title": "P0420 — check downstream O2",
+    "body": "P0420 — check downstream O2",
+    "dtcList": "P0420"
+  }
+}
+
+(No invented complaint, cause, vehicle scope, or symptoms — the paste does not contain verbatim text for them, so they are omitted.)
+
 ALLOWED TYPES (exactly one):
 - "cause_fix" — a complaint/cause/correction case: "X symptom on Y vehicle = check Z first; fix is W". Use when the paste names a specific failure pattern with a verified cause and corrective action.
 - "bulletin" — a TSB / recall / OEM campaign reference. Use when the paste cites a bulletin ID, a recall, or an OEM campaign.
