@@ -6,7 +6,7 @@ import {
   type NewKnowledgeItem,
   type NewKnowledgeItemVehicle,
 } from '@/lib/db/schema'
-import { normalizeDtc, normalizeEngine } from '@/lib/knowledge/normalize'
+import { normalizeDtc, normalizeEngine, type NormalizedDtc } from '@/lib/knowledge/normalize'
 
 // Vehicle scope sub-schema: shared across every type. yearEnd must be >= yearStart
 // (the DB CHECK constraint will reject otherwise; we validate here so the
@@ -187,7 +187,8 @@ export async function saveKnowledgeItem(
     new Set(
       (input.dtcList ?? [])
         .map((d) => normalizeDtc(d))
-        .filter((d): d is string => d !== null),
+        .filter((n): n is NormalizedDtc => n !== null)
+        .map((n) => n.canonical),
     ),
   )
 
