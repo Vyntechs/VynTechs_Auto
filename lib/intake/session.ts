@@ -1,8 +1,19 @@
 import { eq } from 'drizzle-orm'
-import { customers, sessions, vehicles, type TreeState } from '@/lib/db/schema'
+import { customers, sessions, vehicles, shops, repairOrders, type TreeState } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
 import { upsertCustomer } from './customers'
 import { upsertVehicle } from './vehicles'
+
+// Intake form sends "yes" / "no" / "" for the customer-authorized question.
+// Empty or unrecognized → null (the honest "we didn't get a clean answer"
+// signal), distinguishing it from explicit false.
+function parseAuthorized(raw: string | undefined | null): boolean | null {
+  if (raw === undefined || raw === null) return null
+  const v = raw.trim().toLowerCase()
+  if (v === 'yes' || v === 'true' || v === '1') return true
+  if (v === 'no' || v === 'false' || v === '0') return false
+  return null
+}
 
 export type CreateSessionFromIntakeInput = {
   shopId: string
@@ -61,6 +72,7 @@ export async function createSessionFromIntake(
 ): Promise<{ sessionId: string }> {
   return db.transaction(async (tx) => {
     let vehicleId: string
+    let customerId: string
     let intakeVehicle: {
       year: number
       make: string
@@ -82,6 +94,7 @@ export async function createSessionFromIntake(
         throw new Error('vehicle_not_found')
       }
       vehicleId = existing.id
+      customerId = input.existingCustomerId
 
       const newMileage = input.vehicle.mileage
       let appliedMileage = existing.mileage
@@ -120,6 +133,7 @@ export async function createSessionFromIntake(
       })
 
       vehicleId = vehicle.id
+      customerId = customer.id
       intakeVehicle = {
         year: vehicle.year,
         make: vehicle.make,
@@ -127,6 +141,31 @@ export async function createSessionFromIntake(
         engine: vehicle.engine,
         mileage: vehicle.mileage,
       }
+    }
+
+    // Read the shop's shop_mgmt_enabled flag inside the transaction so the RO
+    // decision reflects intake-time state. Defaults to false if the row is
+    // somehow absent — diagnostic-only semantics is the safer default.
+    const [shopRow] = await tx
+      .select({ shopMgmtEnabled: shops.shopMgmtEnabled })
+      .from(shops)
+      .where(eq(shops.id, input.shopId))
+      .limit(1)
+    const shopMgmtOn = shopRow?.shopMgmtEnabled ?? false
+
+    let repairOrderId: string | null = null
+    if (shopMgmtOn) {
+      const [ro] = await tx
+        .insert(repairOrders)
+        .values({
+          shopId: input.shopId,
+          customerId,
+          vehicleId,
+          status: 'open',
+          openedBy: input.advisorProfileId,
+        })
+        .returning()
+      repairOrderId = ro.id
     }
 
     const [session] = await tx
@@ -145,6 +184,8 @@ export async function createSessionFromIntake(
           customerComplaint: input.complaint.description,
         },
         treeState: input.treeState ?? EMPTY_TREE,
+        repairOrderId,
+        customerAuthorized: parseAuthorized(input.complaint.authorized),
       })
       .returning()
 
