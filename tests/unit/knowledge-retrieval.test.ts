@@ -3,7 +3,14 @@ import { sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
 import { knowledgeItems, knowledgeItemVehicles } from '@/lib/db/schema'
-import { lookupKnowledge } from '@/lib/knowledge/retrieval'
+import {
+  lookupKnowledge,
+  getConnectorPinout,
+  getTheoryOfOperation,
+  getWiringPath,
+  getComponentLocation,
+  getSpec,
+} from '@/lib/knowledge/retrieval'
 
 type SeedScope = {
   yearStart: number
@@ -267,7 +274,329 @@ describe('lookupKnowledge', () => {
   })
 })
 
-// Re-export sql for type-friendly use across test files in this PR (avoid
-// re-importing in every block). Not actually needed by lookupKnowledge tests
-// — leave for sibling describe blocks added in Task 2 + 3.
+describe('getConnectorPinout', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('returns the pinout for a matching connector_ref', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Alt 4-pin',
+      type: 'pinout',
+      structuredData: {
+        connector_ref: 'Alternator 4-pin',
+        pins: [{ pin_number: '1', signal_name: 'B+' }],
+      },
+    })
+    const matches = await getConnectorPinout(handle.db, {
+      shopId,
+      connectorRef: 'Alternator 4-pin',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('only returns pinout type, never other types with the same connector_ref', async () => {
+    await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Note about Alternator 4-pin',
+      type: 'note',
+      structuredData: { connector_ref: 'Alternator 4-pin' },
+    })
+    const matches = await getConnectorPinout(handle.db, {
+      shopId,
+      connectorRef: 'Alternator 4-pin',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches).toHaveLength(0)
+  })
+})
+
+describe('getTheoryOfOperation', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('returns theory_of_operation items matching system code', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Charging theory',
+      type: 'theory_of_operation',
+      systemCodes: ['charging'],
+      structuredData: {
+        title: 'Charging system theory',
+        sections: [{ heading: 'Overview', body: 'BCM commands the alternator field via LIN.' }],
+      },
+    })
+    const matches = await getTheoryOfOperation(handle.db, {
+      shopId,
+      systemCode: 'charging',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('excludes items with mismatched system code', async () => {
+    await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Fuel theory',
+      type: 'theory_of_operation',
+      systemCodes: ['fuel_delivery'],
+    })
+    const matches = await getTheoryOfOperation(handle.db, {
+      shopId,
+      systemCode: 'charging',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches).toHaveLength(0)
+  })
+})
+
+describe('getWiringPath', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('returns the wiring diagram when an A→B connection exists', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'BCM to Alternator',
+      type: 'wiring_diagram',
+      structuredData: {
+        name: 'BCM ↔ Alternator',
+        image_ref: 'placeholder',
+        connections: [
+          { from_component: 'BCM', to_component: 'Alternator', wire_color: 'YEL' },
+        ],
+      },
+    })
+    const matches = await getWiringPath(handle.db, {
+      shopId,
+      fromComponent: 'BCM',
+      toComponent: 'Alternator',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('matches in either direction (A→B or B→A)', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'B to A',
+      type: 'wiring_diagram',
+      structuredData: {
+        name: 'B ↔ A',
+        image_ref: 'placeholder',
+        connections: [{ from_component: 'B', to_component: 'A' }],
+      },
+    })
+    const matches = await getWiringPath(handle.db, {
+      shopId,
+      fromComponent: 'A',
+      toComponent: 'B',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('excludes wiring diagrams with no matching connection', async () => {
+    await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'BCM to PCM',
+      type: 'wiring_diagram',
+      structuredData: {
+        name: 'BCM ↔ PCM',
+        image_ref: 'placeholder',
+        connections: [{ from_component: 'BCM', to_component: 'PCM' }],
+      },
+    })
+    const matches = await getWiringPath(handle.db, {
+      shopId,
+      fromComponent: 'BCM',
+      toComponent: 'Alternator',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches).toHaveLength(0)
+  })
+})
+
+describe('getComponentLocation', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('returns the connector item matching component_name', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Alternator C123',
+      type: 'connector',
+      structuredData: {
+        connector_id: 'C123',
+        component_name: 'Alternator',
+        location_description: 'Driver-side, front of engine',
+      },
+    })
+    const matches = await getComponentLocation(handle.db, {
+      shopId,
+      componentName: 'Alternator',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('only returns connector type', async () => {
+    await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Note for Alternator',
+      type: 'note',
+      structuredData: { component_name: 'Alternator' },
+    })
+    const matches = await getComponentLocation(handle.db, {
+      shopId,
+      componentName: 'Alternator',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches).toHaveLength(0)
+  })
+})
+
+describe('getSpec', () => {
+  let handle: { db: TestDb; close: () => Promise<void> }
+  let shopId: string
+  let profileId: string
+
+  beforeEach(async () => {
+    handle = await createTestDb()
+    const shop = await createShop(handle.db, { name: 'Shop' })
+    const profile = await createProfile(handle.db, {
+      userId: crypto.randomUUID(),
+      shopId: shop.id,
+    })
+    shopId = shop.id
+    profileId = profile.id
+  })
+
+  afterEach(async () => {
+    await handle.close()
+  })
+
+  it('matches spec by title keyword', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Torque spec: alternator mounting bolt 35 ft-lb',
+      type: 'note',
+    })
+    const matches = await getSpec(handle.db, {
+      shopId,
+      specName: 'alternator mounting bolt',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('matches spec by structured_data content', async () => {
+    const id = await seedItem(handle.db, {
+      shopId,
+      profileId,
+      title: 'Various specs',
+      type: 'reference_doc',
+      structuredData: { ride_height_front_inches: 36.5 },
+    })
+    const matches = await getSpec(handle.db, {
+      shopId,
+      specName: 'ride_height_front_inches',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches.map((m) => m.id)).toContain(id)
+  })
+
+  it('does not leak across shops', async () => {
+    const otherShop = await createShop(handle.db, { name: 'Other' })
+    await seedItem(handle.db, {
+      shopId: otherShop.id,
+      profileId,
+      title: 'Torque spec stranger',
+      type: 'note',
+    })
+    const matches = await getSpec(handle.db, {
+      shopId,
+      specName: 'Torque spec stranger',
+      vehicle: F250_VEHICLE,
+    })
+    expect(matches).toHaveLength(0)
+  })
+})
+
+// Re-export sql for type-friendly use across test files in this PR.
 export { sql }
