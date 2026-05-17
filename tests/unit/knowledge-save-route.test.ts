@@ -252,7 +252,11 @@ describe('POST /api/knowledge/save', () => {
     expect(res.status).toBe(422)
   })
 
-  it('returns 400 when type is a rich type (pinout/connector/etc) — handled in PR 3', async () => {
+  it('returns 422 (not 400) when a rich type fails validation — gate dropped in PR 3', async () => {
+    // PR 2 used to return 400 'rich_type_not_yet_supported' to signal "use the
+    // structured form." PR 3 removes that gate; rich types are validated by the
+    // unified schema like every other type. This empty-pinout payload is an
+    // invalid pinout structure and should now return 422.
     await mockUser(OWNER_USER_ID)
     const { POST } = await import('@/app/api/knowledge/save/route')
     const res = await POST(
@@ -261,7 +265,7 @@ describe('POST /api/knowledge/save', () => {
         body: JSON.stringify({ type: 'pinout', title: 'x', body: 'x' }),
       }),
     )
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(422)
   })
 
   it('ignores any shopId in the request body — uses the owner profile shop', async () => {
