@@ -136,4 +136,27 @@ describe('createSessionFromIntake — shop-management foundation', () => {
     const [s] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
     expect(s.customerAuthorized).toBe(false)
   })
+
+  it('rolls back the entire intake transaction when RO insert fails', async () => {
+    const { shop } = await seedShopAndTech(db, true)
+
+    // Force the RO insert to fail via a FK violation on opened_by (RESTRICT).
+    // A non-existent profile id triggers the same failure path as deleting the
+    // profile mid-flight — and the failure must roll back the customer and
+    // vehicle upserts that happened earlier in the same transaction.
+    const ghostProfileId = '00000000-0000-0000-0000-000000000001'
+
+    await expect(
+      createSessionFromIntake(db, {
+        shopId: shop.id,
+        advisorProfileId: ghostProfileId,
+        ...SAMPLE_INTAKE,
+      }),
+    ).rejects.toThrow()
+
+    expect(await db.select().from(customers)).toHaveLength(0)
+    expect(await db.select().from(vehicles)).toHaveLength(0)
+    expect(await db.select().from(repairOrders)).toHaveLength(0)
+    expect(await db.select().from(sessions)).toHaveLength(0)
+  })
 })
