@@ -5,7 +5,11 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { updateTree } from '@/lib/ai/tree-engine'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
 import { validateRetrievalResults } from '@/lib/retrieval/validator'
-import { buildUpdateTreeWithRetrieval } from '@/lib/retrieval/wire-into-tree'
+import {
+  buildUpdateTreeWithRetrieval,
+  defaultBuildKnowledgeDispatcher,
+} from '@/lib/retrieval/wire-into-tree'
+import { getProfileByUserId } from '@/lib/db/queries'
 import { NHTSAAdapter } from '@/lib/retrieval/adapters/nhtsa'
 import { ManufacturerRecallAdapter } from '@/lib/retrieval/adapters/manufacturer-recall'
 import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
@@ -45,6 +49,14 @@ export async function POST(
 
   const body = await req.json().catch(() => null)
 
+  // PR 4: scope knowledge tools to the caller's shop so vetted-knowledge
+  // lookups can never leak across shops. Profile lookup is cheap and
+  // already done downstream in advanceSession; we re-do it here so the
+  // wrapper has shopId at construction time. (Refactoring this to a
+  // single lookup would touch advanceSession's signature unnecessarily.)
+  const profile = await getProfileByUserId(db, user.id)
+  const shopId = profile?.shopId
+
   const updateTreeWithRetrieval = buildUpdateTreeWithRetrieval({
     db,
     adapters: ADAPTERS,
@@ -53,6 +65,9 @@ export async function POST(
     validateRetrievalResults,
     retrieveCorpus,
     sessionId: id,
+    ...(shopId
+      ? { buildKnowledgeDispatcher: defaultBuildKnowledgeDispatcher, shopId }
+      : {}),
   })
 
   const result = await advanceSession({
@@ -66,5 +81,9 @@ export async function POST(
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json(result.tree)
+  return NextResponse.json({
+    ...result.tree,
+    citedItems: result.citedItems ?? [],
+    consultedItems: result.consultedItems ?? [],
+  })
 }

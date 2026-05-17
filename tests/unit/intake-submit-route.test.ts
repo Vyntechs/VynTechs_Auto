@@ -31,10 +31,16 @@ vi.mock('@/lib/ai/tree-engine', async () => {
   )
   return {
     ...actual,
+    // PR 4: generateInitialTree returns TreeEngineResult (tree +
+    // consultedItems). Intake doesn't use consultedItems but the shape
+    // must match for the route's destructuring to work.
     generateInitialTree: vi.fn().mockResolvedValue({
-      nodes: [{ id: 'scan-codes', label: 'Pull DTCs', status: 'active' }],
-      currentNodeId: 'scan-codes',
-      message: 'pull codes',
+      tree: {
+        nodes: [{ id: 'scan-codes', label: 'Pull DTCs', status: 'active' }],
+        currentNodeId: 'scan-codes',
+        message: 'pull codes',
+      },
+      consultedItems: [],
     }),
   }
 })

@@ -17,6 +17,9 @@ const getSessionByIdMock = vi.fn().mockResolvedValue({
   treeState: { currentNodeId: 'n1' },
 })
 const listArtifactsForSessionMock = vi.fn().mockResolvedValue([])
+const getProfileByUserIdMock = vi
+  .fn()
+  .mockResolvedValue({ id: 'p1', shopId: 'shop1' })
 vi.mock('@/lib/db/queries', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/db/queries')>('@/lib/db/queries')
@@ -30,6 +33,8 @@ vi.mock('@/lib/db/queries', async () => {
           ...a: unknown[]
         ) => unknown
       )(...args),
+    getProfileByUserId: (...args: unknown[]) =>
+      (getProfileByUserIdMock as unknown as (...a: unknown[]) => unknown)(...args),
   }
 })
 
@@ -45,6 +50,7 @@ const buildUpdateTreeWithRetrievalMock = vi.fn(
 vi.mock('@/lib/retrieval/wire-into-tree', () => ({
   buildUpdateTreeWithRetrieval: (deps: unknown) =>
     buildUpdateTreeWithRetrievalMock(deps),
+  defaultBuildKnowledgeDispatcher: vi.fn(() => async () => ({ items: [] })),
 }))
 
 vi.mock('@/lib/ai/tree-engine', () => ({ updateTree: vi.fn() }))

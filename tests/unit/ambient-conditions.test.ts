@@ -69,7 +69,7 @@ describe('recordAmbientConditions', () => {
       windKph: 8,
       conditions: 'partly cloudy',
     })
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
 
     const result = await recordAmbientConditions({
       db,
@@ -98,7 +98,7 @@ describe('recordAmbientConditions', () => {
     const userId = crypto.randomUUID()
     const { session } = await seed({ userId })
     const lookupAmbient = vi.fn()
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
 
     const result = await recordAmbientConditions({
       db,
@@ -126,7 +126,7 @@ describe('recordAmbientConditions', () => {
       temperatureF: 86,
       humidityPct: 50,
     })
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
 
     await recordAmbientConditions({
       db,
@@ -157,7 +157,7 @@ describe('recordAmbientConditions', () => {
       sessionId: session.id,
       body: { source: 'manual', temperatureF: 70 },
       lookupAmbient: vi.fn(),
-      updateTree: vi.fn().mockResolvedValue(updatedTree),
+      updateTree: vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] }),
     })
 
     const events = await db
@@ -174,7 +174,7 @@ describe('recordAmbientConditions', () => {
     const userId = crypto.randomUUID()
     const { session } = await seed({ userId })
     const lookupAmbient = vi.fn().mockRejectedValue(new Error('open-meteo 503'))
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
 
     const result = await recordAmbientConditions({
       db,
