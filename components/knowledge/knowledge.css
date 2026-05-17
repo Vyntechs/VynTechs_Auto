@@ -2048,3 +2048,210 @@
   border-radius: 0 0 16px 16px;
   z-index: 50;
 }
+
+/* ============================================================
+   PR 6 — Citation surface on the diagnose-step Active Step card
+   ----
+   Docket variant: hairline-divided rows inside the Module body,
+   below the rationale and above the form. Type-aware data peek
+   per row. No card chrome — inherits the Module's surface.
+   ============================================================ */
+
+.vk-cite {
+  margin: 4px 0 14px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--vt-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.vk-cite__eyebrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  margin-bottom: 6px;
+}
+.vk-cite__eyebrow .vk-cite__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--vt-fg-2);
+}
+
+.vk-cite-docket {
+  display: flex;
+  flex-direction: column;
+}
+
+.vk-cite-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 14px;
+  column-gap: 10px;
+  align-items: start;
+  padding: 11px 0;
+  min-height: 56px;
+  background: transparent;
+  border: 0;
+  border-top: 0.5px dashed var(--vt-bone-300);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  font-family: inherit;
+  color: var(--vt-fg);
+  transition: background var(--vt-dur-1) var(--vt-ease);
+  box-sizing: border-box;
+}
+.vk-cite-row:first-child { border-top: 0; padding-top: 6px; }
+.vk-cite-row:hover { background: oklch(96% 0.008 60); }
+.vk-cite-row:active { background: oklch(94% 0.012 60); }
+.vk-cite-row:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: -2px;
+  border-radius: 2px;
+}
+
+.vk-cite-row__glyph {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vt-fg-2);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.vk-cite-row__body { min-width: 0; }
+
+.vk-cite-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+.vk-cite-row__type { color: var(--vt-fg-2); }
+.vk-cite-row__sep {
+  display: inline-block;
+  width: 8px;
+  height: 0.5px;
+  background: var(--vt-fg-3);
+  opacity: 0.6;
+}
+.vk-cite-row__scope {
+  color: var(--vt-fg-3);
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.vk-cite-row__title {
+  font-family: var(--vt-font-serif);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+  color: var(--vt-fg);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-wrap: pretty;
+}
+
+.vk-cite-row__peek {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--vt-fg-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vk-cite-row__peek--prose {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+}
+.vk-cite-row__peek--data {
+  font-family: var(--vt-font-mono);
+  font-size: 11.5px;
+  letter-spacing: -0.005em;
+  color: var(--vt-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+.vk-cite-row__peek-dim { color: var(--vt-fg-3); }
+
+.vk-cite-row__chevron {
+  color: var(--vt-fg-3);
+  opacity: 0.5;
+  margin-top: 4px;
+  transition: opacity var(--vt-dur-2) var(--vt-ease),
+              transform var(--vt-dur-2) var(--vt-ease);
+}
+.vk-cite-row:hover .vk-cite-row__chevron {
+  opacity: 0.9;
+  transform: translateX(2px);
+}
+
+/* Retired-but-cited — faded row with a small tag next to the type label. */
+.vk-cite-row--retired { opacity: 0.62; }
+.vk-cite-row--retired .vk-cite-row__title { color: var(--vt-fg-2); }
+.vk-cite-row__retired-tag {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  padding: 1px 6px;
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 2px;
+  background: var(--vt-bone-100);
+  white-space: nowrap;
+}
+
+/* "+N more" foot row — full-width tappable. */
+.vk-cite-more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 0;
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  border-top: 0.5px dashed var(--vt-bone-300);
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  cursor: pointer;
+  text-align: left;
+}
+.vk-cite-more:hover { color: var(--vt-fg); }
+.vk-cite-more__sep {
+  display: inline-block;
+  width: 10px;
+  height: 0.5px;
+  background: var(--vt-fg-3);
+  opacity: 0.55;
+}
