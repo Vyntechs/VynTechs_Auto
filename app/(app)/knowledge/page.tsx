@@ -13,6 +13,7 @@ import { KnowledgeRow } from '@/components/knowledge/row'
 import { KnowledgeEmptyState } from '@/components/knowledge/empty-state'
 import { KnowledgeDrawer } from '@/components/knowledge/drawer'
 import { AddKnowledgePicker } from '@/components/knowledge/add-picker'
+import { PasteSheet } from '@/components/knowledge/paste-sheet'
 import { KnowledgePasteForm } from './paste-form'
 import { RichKnowledgeForm } from './rich-form'
 
@@ -91,6 +92,7 @@ export default async function KnowledgePage({
 
       <KnowledgeDrawer item={detail} />
       <AddKnowledgePicker />
+      <PasteSheet />
 
       <section
         className="vk-interim"
