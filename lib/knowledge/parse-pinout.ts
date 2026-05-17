@@ -99,7 +99,10 @@ export async function parsePinout(
 
   const res = await client.messages.create({
     model: HAIKU,
-    max_tokens: 2048,
+    // Pinouts produce structured JSON (one row per pin); 80-pin connectors
+    // can exceed 2048 tokens. 8192 covers any realistic pinout pasted from
+    // OEM source.
+    max_tokens: 8192,
     system: cachedSystem(PARSE_PINOUT_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
   })

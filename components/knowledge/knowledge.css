@@ -2265,3 +2265,147 @@
   background: var(--vt-fg-3);
   opacity: 0.55;
 }
+
+/* ============================================================
+   PR 5b hotfix — Paste sheet modal styling
+   ----
+   Original PR 5b shipped the paste-sheet markup (vk-paste-overlay,
+   vk-paste-sheet, etc.) but never added CSS for it, so curators saw
+   raw browser-default text boxes scattered across the viewport with
+   no overlay, no centering, no padding. Adding it here keeps the
+   one-file CSS convention.
+   ============================================================ */
+
+.vk-paste-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(20% 0.012 60 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 60;
+}
+
+.vk-paste-sheet {
+  background: var(--vt-paper);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 6px;
+  box-shadow: var(--vt-shadow-sheet);
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vk-paste-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 0.5px solid var(--vt-rule);
+}
+.vk-paste-sheet__head > div { flex: 1; min-width: 0; }
+
+.vk-paste-sheet__title {
+  font-family: var(--vt-font-serif);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--vt-fg);
+  margin: 0 0 8px;
+}
+
+.vk-paste-sheet__scope {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--vt-bone-50);
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 3px;
+  font-family: var(--vt-font-serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--vt-fg-2);
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+.vk-paste-sheet__scope:focus {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: -1px;
+  font-style: normal;
+  color: var(--vt-fg);
+}
+.vk-paste-sheet__scope::placeholder {
+  color: var(--vt-fg-3);
+}
+
+.vk-paste-sheet__area {
+  flex: 1;
+  min-height: 240px;
+  margin: 0;
+  padding: 18px 24px;
+  background: var(--vt-paper);
+  border: 0;
+  border-bottom: 0.5px solid var(--vt-rule);
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--vt-fg);
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+}
+.vk-paste-sheet__area::placeholder {
+  color: var(--vt-fg-3);
+  font-style: italic;
+}
+
+.vk-paste-sheet__status {
+  padding: 10px 24px;
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-3);
+  border-bottom: 0.5px solid var(--vt-rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+.vk-paste-sheet__count--medium { color: var(--vt-risk-medium); }
+.vk-paste-sheet__count--high { color: var(--vt-risk-destructive); }
+
+.vk-paste-sheet__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px 18px;
+}
+
+/* Phone: full-bleed sheet, no overlay padding, scrollable */
+@media (max-width: 640px) {
+  .vk-paste-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+  .vk-paste-sheet {
+    max-height: 100vh;
+    border-radius: 0;
+    border: 0;
+  }
+  .vk-paste-sheet__head {
+    padding: 16px 16px 12px;
+  }
+  .vk-paste-sheet__area {
+    padding: 14px 16px;
+  }
+  .vk-paste-sheet__status,
+  .vk-paste-sheet__foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

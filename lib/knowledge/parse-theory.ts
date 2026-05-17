@@ -91,7 +91,10 @@ export async function parseTheory(
 
   const res = await client.messages.create({
     model: HAIKU,
-    max_tokens: 4096,
+    // Theory pastes preserve OEM prose verbatim per section, so output scales
+    // ~1:1 with input. 4096 truncated multi-section pastes; 8192 covers the
+    // full 20k-char input cap with headroom.
+    max_tokens: 8192,
     system: cachedSystem(PARSE_THEORY_SYSTEM),
     messages: [{ role: 'user', content: userContent }],
   })
