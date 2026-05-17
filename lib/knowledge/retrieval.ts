@@ -132,3 +132,210 @@ export async function lookupKnowledge(
   `)
   return rows(res).map(toMatched)
 }
+
+// Shared vehicle-scope WHERE clause used by every specialized fn. Inlined
+// per call because Drizzle sql templates don't compose cleanly as
+// sub-fragments here — kept readable by extracting only the input.
+function vehicleScopeFragment(vehicle: RetrievalVehicle): {
+  make: SQL
+  model: SQL
+  engine: SQL
+  year: SQL
+} {
+  const normalizedEngine = normalizeEngine(vehicle.engine ?? null)
+  return {
+    make: sql`v.make = ${vehicle.make}`,
+    model: sql`(v.model IS NULL OR v.model = ${vehicle.model})`,
+    engine: sql`(v.engine IS NULL OR v.engine = ${normalizedEngine} OR v.engine = ${vehicle.engine ?? null})`,
+    year: sql`${vehicle.year}::int BETWEEN v.year_start AND v.year_end`,
+  }
+}
+
+export type GetConnectorPinoutInput = {
+  shopId: string
+  connectorRef: string
+  vehicle: RetrievalVehicle
+  limit?: number
+}
+
+export async function getConnectorPinout(
+  db: RetrievalDb,
+  input: GetConnectorPinoutInput,
+): Promise<MatchedKnowledgeItem[]> {
+  const limit = input.limit ?? 3
+  const v = vehicleScopeFragment(input.vehicle)
+  const res = await db.execute<Row>(sql`
+    SELECT items.id, items.shop_id, items.type, items.title, items.body,
+      items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
+      items.fire_count, 0::int AS score
+    FROM knowledge_items items
+    JOIN knowledge_item_vehicles v ON v.knowledge_item_id = items.id
+    WHERE items.shop_id = ${input.shopId}
+      AND items.retired = false
+      AND items.type = 'pinout'
+      AND items.structured_data->>'connector_ref' = ${input.connectorRef}
+      AND ${v.make}
+      AND ${v.model}
+      AND ${v.engine}
+      AND ${v.year}
+    ORDER BY items.fire_count DESC, items.updated_at DESC
+    LIMIT ${limit}
+  `)
+  return rows(res).map(toMatched)
+}
+
+export type GetTheoryOfOperationInput = {
+  shopId: string
+  systemCode: string
+  vehicle: RetrievalVehicle
+  limit?: number
+}
+
+export async function getTheoryOfOperation(
+  db: RetrievalDb,
+  input: GetTheoryOfOperationInput,
+): Promise<MatchedKnowledgeItem[]> {
+  const limit = input.limit ?? 3
+  const v = vehicleScopeFragment(input.vehicle)
+  const systems = arrayLit([input.systemCode])
+  const res = await db.execute<Row>(sql`
+    SELECT items.id, items.shop_id, items.type, items.title, items.body,
+      items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
+      items.fire_count, 0::int AS score
+    FROM knowledge_items items
+    JOIN knowledge_item_vehicles v ON v.knowledge_item_id = items.id
+    WHERE items.shop_id = ${input.shopId}
+      AND items.retired = false
+      AND items.type = 'theory_of_operation'
+      AND items.system_codes && ${systems}
+      AND ${v.make}
+      AND ${v.model}
+      AND ${v.engine}
+      AND ${v.year}
+    ORDER BY items.fire_count DESC, items.updated_at DESC
+    LIMIT ${limit}
+  `)
+  return rows(res).map(toMatched)
+}
+
+export type GetWiringPathInput = {
+  shopId: string
+  fromComponent: string
+  toComponent: string
+  vehicle: RetrievalVehicle
+  limit?: number
+}
+
+// JSON connection arrays are filtered in TypeScript after the SQL pull so
+// PGlite + Postgres behave identically. We pull up to 50 candidate wiring
+// diagrams for the vehicle, then filter by connection-list contents.
+export async function getWiringPath(
+  db: RetrievalDb,
+  input: GetWiringPathInput,
+): Promise<MatchedKnowledgeItem[]> {
+  const limit = input.limit ?? 3
+  const v = vehicleScopeFragment(input.vehicle)
+  const res = await db.execute<Row>(sql`
+    SELECT items.id, items.shop_id, items.type, items.title, items.body,
+      items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
+      items.fire_count, 0::int AS score
+    FROM knowledge_items items
+    JOIN knowledge_item_vehicles v ON v.knowledge_item_id = items.id
+    WHERE items.shop_id = ${input.shopId}
+      AND items.retired = false
+      AND items.type = 'wiring_diagram'
+      AND ${v.make}
+      AND ${v.model}
+      AND ${v.engine}
+      AND ${v.year}
+    ORDER BY items.fire_count DESC, items.updated_at DESC
+    LIMIT 50
+  `)
+  const filtered = rows(res)
+    .map(toMatched)
+    .filter((m) => {
+      const conns = (
+        m.structuredData as
+          | { connections?: Array<{ from_component?: string; to_component?: string }> }
+          | null
+      )?.connections
+      if (!Array.isArray(conns)) return false
+      return conns.some(
+        (c) =>
+          (c.from_component === input.fromComponent && c.to_component === input.toComponent) ||
+          (c.from_component === input.toComponent && c.to_component === input.fromComponent),
+      )
+    })
+  return filtered.slice(0, limit)
+}
+
+export type GetComponentLocationInput = {
+  shopId: string
+  componentName: string
+  vehicle: RetrievalVehicle
+  limit?: number
+}
+
+export async function getComponentLocation(
+  db: RetrievalDb,
+  input: GetComponentLocationInput,
+): Promise<MatchedKnowledgeItem[]> {
+  const limit = input.limit ?? 3
+  const v = vehicleScopeFragment(input.vehicle)
+  const res = await db.execute<Row>(sql`
+    SELECT items.id, items.shop_id, items.type, items.title, items.body,
+      items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
+      items.fire_count, 0::int AS score
+    FROM knowledge_items items
+    JOIN knowledge_item_vehicles v ON v.knowledge_item_id = items.id
+    WHERE items.shop_id = ${input.shopId}
+      AND items.retired = false
+      AND items.type = 'connector'
+      AND items.structured_data->>'component_name' = ${input.componentName}
+      AND ${v.make}
+      AND ${v.model}
+      AND ${v.engine}
+      AND ${v.year}
+    ORDER BY items.fire_count DESC, items.updated_at DESC
+    LIMIT ${limit}
+  `)
+  return rows(res).map(toMatched)
+}
+
+export type GetSpecInput = {
+  shopId: string
+  specName: string
+  vehicle: RetrievalVehicle
+  limit?: number
+}
+
+// v1 keyword scan; spec calls out a dedicated `spec` type as v2 work.
+export async function getSpec(
+  db: RetrievalDb,
+  input: GetSpecInput,
+): Promise<MatchedKnowledgeItem[]> {
+  const limit = input.limit ?? 3
+  const v = vehicleScopeFragment(input.vehicle)
+  const pattern = `%${input.specName.replace(/[%_\\]/g, (m) => `\\${m}`)}%`
+  const res = await db.execute<Row>(sql`
+    SELECT items.id, items.shop_id, items.type, items.title, items.body,
+      items.structured_data, items.dtc_list, items.system_codes, items.symptoms,
+      items.fire_count, 0::int AS score
+    FROM knowledge_items items
+    JOIN knowledge_item_vehicles v ON v.knowledge_item_id = items.id
+    WHERE items.shop_id = ${input.shopId}
+      AND items.retired = false
+      AND (
+        items.title ILIKE ${pattern}
+        OR items.body ILIKE ${pattern}
+        OR items.structured_data::text ILIKE ${pattern}
+      )
+      AND ${v.make}
+      AND ${v.model}
+      AND ${v.engine}
+      AND ${v.year}
+    ORDER BY items.fire_count DESC, items.updated_at DESC
+    LIMIT ${limit}
+  `)
+  return rows(res).map(toMatched)
+}
