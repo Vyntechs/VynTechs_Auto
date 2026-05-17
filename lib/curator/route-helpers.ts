@@ -6,7 +6,7 @@ import { profiles } from '@/lib/db/schema'
 import { canCurate } from './can-curate'
 
 export async function requireCurator(): Promise<
-  | { kind: 'ok'; profileId: string }
+  | { kind: 'ok'; profileId: string; shopId: string }
   | { kind: 'forbidden'; response: NextResponse }
 > {
   const supabase = await getServerSupabase()
@@ -22,17 +22,17 @@ export async function requireCurator(): Promise<
   }
 
   const [profile] = await db
-    .select({ id: profiles.id, role: profiles.role })
+    .select({ id: profiles.id, role: profiles.role, shopId: profiles.shopId })
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
 
-  if (!profile || !canCurate(profile.role)) {
+  if (!profile || !canCurate(profile.role) || !profile.shopId) {
     return {
       kind: 'forbidden',
       response: NextResponse.json({ error: 'forbidden' }, { status: 403 }),
     }
   }
 
-  return { kind: 'ok', profileId: profile.id }
+  return { kind: 'ok', profileId: profile.id, shopId: profile.shopId }
 }
