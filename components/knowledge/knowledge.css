@@ -2409,3 +2409,56 @@
     padding-right: 16px;
   }
 }
+
+/* Root A — VERIFY chip + top-of-form notice
+   (tri-state field attribution: verified / unverified / none) */
+
+.vk-fg--verified {
+  /* attribution: verified — the highlighted source quote IS the affordance */
+}
+
+.vk-fg--unverified {
+  /* attribution: unverified — amber border-left so the chip lands */
+  border-left: 3px solid var(--vt-amber-500);
+  padding-left: 12px;
+}
+
+.vk-fg__chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-left: 8px;
+  text-transform: uppercase;
+}
+
+.vk-fg__chip--verify {
+  background: var(--vt-amber-300);
+  color: var(--vt-fg);
+  border: 1px solid var(--vt-amber-500);
+}
+
+.vk-fg__notice {
+  background: var(--vt-amber-200);
+  color: var(--vt-fg);
+  border: 1px solid var(--vt-amber-400);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+@media (max-width: 414px) {
+  .vk-fg__notice {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .vk-fg__chip {
+    margin-left: 6px;
+  }
+}
