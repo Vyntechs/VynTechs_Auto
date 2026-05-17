@@ -62,7 +62,7 @@ describe('advanceSession', () => {
   it('returns the updated tree on a valid observation', async () => {
     const userId = crypto.randomUUID()
     const { session } = await seedSession({ userId })
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     const result = await advanceSession({
       db,
       userId,
@@ -77,7 +77,7 @@ describe('advanceSession', () => {
   it('persists the new tree_state on the session row', async () => {
     const userId = crypto.randomUUID()
     const { session } = await seedSession({ userId })
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     await advanceSession({
       db,
       userId,
@@ -92,7 +92,7 @@ describe('advanceSession', () => {
   it('appends an observation event with the previous nodeId and the observation text', async () => {
     const userId = crypto.randomUUID()
     const { session } = await seedSession({ userId })
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     await advanceSession({
       db,
       userId,
@@ -111,8 +111,11 @@ describe('advanceSession', () => {
     const userId = crypto.randomUUID()
     const { session } = await seedSession({ userId })
     const updateTree = vi.fn().mockResolvedValue({
-      ...updatedTree,
-      message: 'next: scan ECM. inspect-cac is still queued.',
+      tree: {
+        ...updatedTree,
+        message: 'next: scan ECM. inspect-cac is still queued.',
+      },
+      consultedItems: [],
     })
     await advanceSession({
       db,
@@ -237,7 +240,7 @@ describe('advanceSession', () => {
       userId,
       sessionId: session.id,
       body: { observation: 'No diagram in the corpus' },
-      updateTree: vi.fn().mockResolvedValue(treeWithRung2),
+      updateTree: vi.fn().mockResolvedValue({ tree: treeWithRung2, consultedItems: [] }),
     })
     const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
     expect(rows).toHaveLength(1)
@@ -258,7 +261,7 @@ describe('advanceSession', () => {
       userId,
       sessionId: session.id,
       body: { observation: 'I see a crack' },
-      updateTree: vi.fn().mockResolvedValue(treeWithRung1),
+      updateTree: vi.fn().mockResolvedValue({ tree: treeWithRung1, consultedItems: [] }),
     })
     const rows = await db.select().from(techAssistRequests).where(eq(techAssistRequests.sessionId, session.id))
     expect(rows).toHaveLength(0)
@@ -285,7 +288,7 @@ describe('advanceSession', () => {
       userId,
       sessionId: session.id,
       body: { observation: 'corpus is thin' },
-      updateTree: vi.fn().mockResolvedValue(treeWithAction),
+      updateTree: vi.fn().mockResolvedValue({ tree: treeWithAction, consultedItems: [] }),
       gateAction,
     })
     expect(gateAction).toHaveBeenCalledTimes(1)
@@ -307,7 +310,7 @@ describe('advanceSession', () => {
       userId,
       sessionId: session.id,
       body: { observation: 'x' },
-      updateTree: vi.fn().mockResolvedValue(updatedTree),
+      updateTree: vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] }),
       gateAction,
     })
     expect(gateAction).not.toHaveBeenCalled()
@@ -335,7 +338,7 @@ describe('advanceSession', () => {
       userId,
       sessionId: session.id,
       body: { observation: 'tried but no luck' },
-      updateTree: vi.fn().mockResolvedValue(treeWithRung2),
+      updateTree: vi.fn().mockResolvedValue({ tree: treeWithRung2, consultedItems: [] }),
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -367,7 +370,7 @@ describe('advanceSession', () => {
       createdAt: new Date(),
     }
 
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     await advanceSession({
       db,
       userId,
@@ -405,7 +408,7 @@ describe('advanceSession', () => {
       createdAt: new Date(),
     }
 
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     await advanceSession({
       db,
       userId,
@@ -438,7 +441,7 @@ describe('advanceSession', () => {
       createdAt: new Date(),
     }
 
-    const updateTree = vi.fn().mockResolvedValue(updatedTree)
+    const updateTree = vi.fn().mockResolvedValue({ tree: updatedTree, consultedItems: [] })
     await advanceSession({
       db,
       userId,

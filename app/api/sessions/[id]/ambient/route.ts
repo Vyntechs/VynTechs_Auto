@@ -6,7 +6,11 @@ import { fetchAmbientConditions } from '@/lib/external/weather'
 import { updateTree } from '@/lib/ai/tree-engine'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
 import { validateRetrievalResults } from '@/lib/retrieval/validator'
-import { buildUpdateTreeWithRetrieval } from '@/lib/retrieval/wire-into-tree'
+import {
+  buildUpdateTreeWithRetrieval,
+  defaultBuildKnowledgeDispatcher,
+} from '@/lib/retrieval/wire-into-tree'
+import { getProfileByUserId } from '@/lib/db/queries'
 import { NHTSAAdapter } from '@/lib/retrieval/adapters/nhtsa'
 import { ManufacturerRecallAdapter } from '@/lib/retrieval/adapters/manufacturer-recall'
 import { ForumAdapter } from '@/lib/retrieval/adapters/forum'
@@ -44,6 +48,10 @@ export async function POST(
 
   const body = await req.json().catch(() => null)
 
+  // PR 4: scope knowledge tools to caller's shop.
+  const profile = await getProfileByUserId(db, user.id)
+  const shopId = profile?.shopId
+
   const updateTreeWithRetrieval = buildUpdateTreeWithRetrieval({
     db,
     adapters: ADAPTERS,
@@ -52,6 +60,9 @@ export async function POST(
     validateRetrievalResults,
     retrieveCorpus,
     sessionId: id,
+    ...(shopId
+      ? { buildKnowledgeDispatcher: defaultBuildKnowledgeDispatcher, shopId }
+      : {}),
   })
 
   const result = await recordAmbientConditions({
@@ -67,5 +78,10 @@ export async function POST(
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json({ conditions: result.conditions, tree: result.tree })
+  return NextResponse.json({
+    conditions: result.conditions,
+    tree: result.tree,
+    citedItems: result.citedItems ?? [],
+    consultedItems: result.consultedItems ?? [],
+  })
 }
