@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
 import { canCurate } from '@/lib/curator/can-curate'
 import { KnowledgePasteForm } from './paste-form'
+import { RichKnowledgeForm } from './rich-form'
 
 // PR 2 placeholder. Claude Design's PR 5 package replaces this with the real
 // Knowledge page (list view, filters, detail drawer). For now the page exists
@@ -28,10 +29,12 @@ export default async function KnowledgePage() {
     <main style={{ maxWidth: 720, margin: '24px auto', padding: '0 16px' }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>Knowledge (preview)</h1>
       <p style={{ color: '#666', marginBottom: 24, fontSize: 14 }}>
-        Placeholder for PR 5. Paste reference text below; the AI proposes structured
-        fields; review and save.
+        Placeholder for PR 5. Paste reference text for simple types (cause/fix,
+        bulletin, reference, note); use the rich-type form below for pinouts,
+        connectors, wiring diagrams, and theory of operation.
       </p>
       <KnowledgePasteForm />
+      <RichKnowledgeForm />
     </main>
   )
 }
