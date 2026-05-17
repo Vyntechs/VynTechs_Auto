@@ -1,9 +1,11 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import { anthropic, MODEL, cachedSystem } from './client'
 import { TREE_ENGINE_SYSTEM } from './prompts'
 import type { IntakePayload } from '@/lib/types'
 import type { GateDecision } from '@/lib/gating/gap-handler'
 import type { RetrievalResult } from '@/lib/retrieval/types'
 import type { CorpusMatch } from '@/lib/corpus/retrieval'
+import type { MatchedKnowledgeItem } from '@/lib/knowledge/retrieval'
 
 export type { CorpusMatch }
 
@@ -53,6 +55,44 @@ export type TreeState = {
   diagnosisLockedAt?: string
 }
 
+export type ToolDispatcher = (
+  toolName: string,
+  toolInput: Record<string, unknown>,
+) => Promise<{ items: MatchedKnowledgeItem[] }>
+
+export type TreeEngineResult = {
+  tree: TreeState
+  consultedItems: MatchedKnowledgeItem[]
+}
+
+type ToolUseBlock = {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+type TextBlock = { type: 'text'; text: string }
+type ContentBlock = TextBlock | ToolUseBlock
+
+type AnthropicLikeResponse = {
+  stop_reason?: string
+  content: ContentBlock[]
+}
+
+export type AnthropicClient = {
+  messages: {
+    create: (args: unknown, opts?: { signal?: AbortSignal }) => Promise<AnthropicLikeResponse>
+  }
+}
+
+export type ToolUseDeps = {
+  tools?: Anthropic.Tool[]
+  dispatcher?: ToolDispatcher
+  client?: AnthropicClient
+}
+
+const MAX_TOOL_ROUNDS = 5
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown
   for (let i = 0; i < attempts; i++) {
@@ -77,32 +117,123 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw lastErr
 }
 
-export async function generateInitialTree(
-  intake: IntakePayload,
-  corpus?: CorpusMatch[],
-  retrieval?: RetrievalResult[],
-): Promise<TreeState> {
-  const userMessage = buildIntakeUserMessage(intake, corpus, retrieval)
+type RunToolLoopInput = {
+  system: ReturnType<typeof cachedSystem>
+  initialUserMessage: string
+  tools?: Anthropic.Tool[]
+  dispatcher?: ToolDispatcher
+  client: AnthropicClient
+  callName: 'generateInitialTree' | 'updateTree'
+  inputSize: number
+}
 
-  return withRetry(async () => {
+async function runToolLoop(input: RunToolLoopInput): Promise<TreeEngineResult> {
+  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [
+    { role: 'user', content: input.initialUserMessage },
+  ]
+  const consulted: MatchedKnowledgeItem[] = []
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const t0 = Date.now()
-    const res = await anthropic.messages.create(
+    const res = await input.client.messages.create(
       {
         model: MODEL,
         max_tokens: 4096,
-        system: cachedSystem(TREE_ENGINE_SYSTEM),
-        messages: [{ role: 'user', content: userMessage }],
+        system: input.system,
+        messages,
+        ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
       },
       { signal: AbortSignal.timeout(45_000) },
     )
     console.log(
-      `generateInitialTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars)`,
+      `${input.callName}: anthropic call took ${Date.now() - t0}ms (round=${round}, input ~${input.inputSize} chars)`,
     )
 
-    const block = res.content.find((b: { type: string }) => b.type === 'text')
-    if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseTreeJson(block.text, res.stop_reason ?? undefined)
-  })
+    const toolUseBlocks = res.content.filter(
+      (b): b is ToolUseBlock => b.type === 'tool_use',
+    )
+    if (toolUseBlocks.length === 0 || res.stop_reason !== 'tool_use') {
+      const textBlock = res.content.find((b): b is TextBlock => b.type === 'text')
+      if (!textBlock) throw new Error('no text block in response')
+      const tree = parseTreeJson(textBlock.text, res.stop_reason ?? undefined)
+      return { tree, consultedItems: consulted }
+    }
+
+    messages.push({ role: 'assistant', content: res.content })
+    const toolResults: Array<{
+      type: 'tool_result'
+      tool_use_id: string
+      content: string
+      is_error?: boolean
+    }> = []
+    for (const tu of toolUseBlocks) {
+      if (!input.dispatcher) {
+        // No dispatcher means caller didn't wire knowledge. The AI shouldn't
+        // be able to call tools in this case (we wouldn't have passed `tools`),
+        // but defend in depth: return empty so the AI continues normally.
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify({ items: [] }),
+        })
+        continue
+      }
+      try {
+        const result = await input.dispatcher(tu.name, tu.input)
+        consulted.push(...result.items)
+        if (result.items.length === 0) {
+          // PR 4 telemetry hook (option a — console.log to Vercel logs). The
+          // 'gaps to fill' backlog is populated by grepping these lines. If we
+          // ever want to query gaps, this becomes a table (kickoff item 7).
+          console.log(
+            JSON.stringify({
+              event: 'knowledge_tool_empty',
+              tool: tu.name,
+              input: tu.input,
+            }),
+          )
+        }
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify({ items: result.items }),
+        })
+      } catch (err) {
+        console.warn(`knowledge tool ${tu.name} failed:`, err)
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify({ items: [], error: 'tool_execution_failed' }),
+          is_error: true,
+        })
+      }
+    }
+    messages.push({ role: 'user', content: toolResults })
+  }
+
+  throw new Error(
+    `${input.callName} exceeded tool-use round cap (MAX_TOOL_ROUNDS=${MAX_TOOL_ROUNDS})`,
+  )
+}
+
+export async function generateInitialTree(
+  intake: IntakePayload,
+  corpus?: CorpusMatch[],
+  retrieval?: RetrievalResult[],
+  deps: ToolUseDeps = {},
+): Promise<TreeEngineResult> {
+  const userMessage = buildIntakeUserMessage(intake, corpus, retrieval)
+  return withRetry(async () =>
+    runToolLoop({
+      system: cachedSystem(TREE_ENGINE_SYSTEM),
+      initialUserMessage: userMessage,
+      tools: deps.tools,
+      dispatcher: deps.dispatcher,
+      client: deps.client ?? (anthropic as unknown as AnthropicClient),
+      callName: 'generateInitialTree',
+      inputSize: userMessage.length,
+    }),
+  )
 }
 
 function buildIntakeUserMessage(
@@ -183,7 +314,13 @@ export async function updateTree(input: {
    *  context that keeps its DTC anchor after the tree advances past `scan-codes`.
    *  Not consumed by `updateTree` itself — pass-through for the wrapper. */
   sessionDtcs?: string[]
-}): Promise<TreeState> {
+  /** PR 4. Optional knowledge tool wiring. When `tools` is non-empty and
+   *  `dispatcher` is set, the AI may call knowledge tools mid-conversation
+   *  and consulted items are returned in the result. */
+  tools?: Anthropic.Tool[]
+  dispatcher?: ToolDispatcher
+  client?: AnthropicClient
+}): Promise<TreeEngineResult> {
   const artifactBlock =
     (input.artifacts ?? []).length > 0
       ? `\n\nArtifacts captured for this step (extracted by the perception layer):\n${(input.artifacts ?? [])
@@ -224,25 +361,17 @@ Update the tree based on this observation, any artifact evidence, the corpus mat
 
 Return JSON only — no prose, no fences.`
 
-  return withRetry(async () => {
-    const t0 = Date.now()
-    const res = await anthropic.messages.create(
-      {
-        model: MODEL,
-        max_tokens: 4096,
-        system: cachedSystem(TREE_ENGINE_SYSTEM),
-        messages: [{ role: 'user', content: userMessage }],
-      },
-      { signal: AbortSignal.timeout(45_000) },
-    )
-    console.log(
-      `updateTree: anthropic call took ${Date.now() - t0}ms (input ~${userMessage.length} chars, ${input.currentTree.nodes.length} nodes)`,
-    )
-
-    const block = res.content.find((b: { type: string }) => b.type === 'text')
-    if (!block || block.type !== 'text') throw new Error('no text block in response')
-    return parseTreeJson(block.text, res.stop_reason ?? undefined)
-  })
+  return withRetry(async () =>
+    runToolLoop({
+      system: cachedSystem(TREE_ENGINE_SYSTEM),
+      initialUserMessage: userMessage,
+      tools: input.tools,
+      dispatcher: input.dispatcher,
+      client: input.client ?? (anthropic as unknown as AnthropicClient),
+      callName: 'updateTree',
+      inputSize: userMessage.length,
+    }),
+  )
 }
 
 export function parseTreeJson(text: string, stopReason?: string): TreeState {
