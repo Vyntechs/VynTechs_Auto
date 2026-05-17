@@ -66,6 +66,26 @@ export function TodayHome({
                 Reviewer →
               </Link>
             )}
+            {canCurate && (
+              <Link
+                href="/knowledge"
+                aria-label="Knowledge"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  textDecoration: 'none',
+                  color: 'var(--vt-fg-2)',
+                  fontFamily: 'var(--vt-font-mono)',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Knowledge →
+              </Link>
+            )}
             {canWriteCounterOrder && (
               <Link
                 href="/intake"
