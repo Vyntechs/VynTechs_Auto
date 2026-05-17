@@ -55,9 +55,15 @@ export function KnowledgeRow({ item, currentQuery }: { item: KnowledgeListRow; c
         )}
         {(item.dtcList.length > 0 || item.systemCodes.length > 0 || item.symptoms.length > 0) && (
           <div className="vk-row__tags">
-            {item.dtcList.map(d => (
-              <span className="vk-tag vk-tag--dtc" key={d}>{d}</span>
-            ))}
+            {item.dtcList.map(d => {
+              const sub = item.dtcSubCodes?.[d]
+              return (
+                <span className="vk-tag vk-tag--dtc" key={d}>
+                  {d}
+                  {sub && <span className="vk-tag__sub"> ·{sub}</span>}
+                </span>
+              )
+            })}
             {item.dtcList.length > 0 && item.systemCodes.length > 0 && (
               <span className="vk-row__tags-dot" />
             )}
