@@ -454,4 +454,100 @@ describe('advanceSession', () => {
     const callArgs = updateTree.mock.calls[0][0]
     expect(callArgs.artifacts).toBeUndefined()
   })
+
+  // PR 6 — Citation attribution onto the current step's tree node so the
+  // diagnose-phase citation surface persists across page refreshes.
+  describe('PR 6: cited knowledge IDs persist on the current node', () => {
+    function consulted(id: string) {
+      return {
+        id,
+        shopId: 's',
+        type: 'pinout' as const,
+        title: `Item ${id}`,
+        body: null,
+        structuredData: null,
+        dtcList: [],
+        systemCodes: [],
+        symptoms: [],
+        fireCount: 0,
+        score: 0.8,
+      }
+    }
+
+    it('writes citationItemIds onto the new currentNode when AI reply cites items', async () => {
+      const userId = crypto.randomUUID()
+      const { session } = await seedSession({ userId })
+      const updateTree = vi.fn().mockResolvedValue({
+        tree: {
+          ...updatedTree,
+          message: 'See [ref:k-pinout] and [ref:k-theory] for context.',
+        },
+        consultedItems: [consulted('k-pinout'), consulted('k-theory'), consulted('k-unused')],
+      })
+      await advanceSession({
+        db,
+        userId,
+        sessionId: session.id,
+        body: { observation: 'observed' },
+        updateTree,
+      })
+      const fetched = await getSessionById(db, session.id)
+      const current = fetched?.treeState.nodes.find((n) => n.id === 'inspect-cac')
+      expect(current?.citationItemIds).toEqual(['k-pinout', 'k-theory'])
+      // k-unused was consulted but not cited — must NOT appear.
+      expect(current?.citationItemIds).not.toContain('k-unused')
+    })
+
+    it('appends + dedupes citationItemIds across multiple turns', async () => {
+      const userId = crypto.randomUUID()
+      const { session } = await seedSession({ userId })
+
+      // Turn 1: AI cites k-a and k-b, lands on inspect-cac.
+      await advanceSession({
+        db,
+        userId,
+        sessionId: session.id,
+        body: { observation: 'first' },
+        updateTree: vi.fn().mockResolvedValue({
+          tree: { ...updatedTree, message: '[ref:k-a] and [ref:k-b].' },
+          consultedItems: [consulted('k-a'), consulted('k-b')],
+        }),
+      })
+
+      // Turn 2: tree stays on inspect-cac; AI cites k-b again + k-c new.
+      await advanceSession({
+        db,
+        userId,
+        sessionId: session.id,
+        body: { observation: 'second' },
+        updateTree: vi.fn().mockResolvedValue({
+          tree: { ...updatedTree, message: 'Now consider [ref:k-b] and [ref:k-c].' },
+          consultedItems: [consulted('k-b'), consulted('k-c')],
+        }),
+      })
+
+      const fetched = await getSessionById(db, session.id)
+      const current = fetched?.treeState.nodes.find((n) => n.id === 'inspect-cac')
+      // k-b appears once (dedupe), order is first-citation (a, b, c).
+      expect(current?.citationItemIds).toEqual(['k-a', 'k-b', 'k-c'])
+    })
+
+    it('leaves citationItemIds undefined when AI reply has no [ref:] markers', async () => {
+      const userId = crypto.randomUUID()
+      const { session } = await seedSession({ userId })
+      await advanceSession({
+        db,
+        userId,
+        sessionId: session.id,
+        body: { observation: 'observed' },
+        updateTree: vi.fn().mockResolvedValue({
+          tree: { ...updatedTree, message: 'No citations in this turn.' },
+          consultedItems: [consulted('k-quiet')],
+        }),
+      })
+      const fetched = await getSessionById(db, session.id)
+      const current = fetched?.treeState.nodes.find((n) => n.id === 'inspect-cac')
+      expect(current?.citationItemIds).toBeUndefined()
+    })
+  })
 })
