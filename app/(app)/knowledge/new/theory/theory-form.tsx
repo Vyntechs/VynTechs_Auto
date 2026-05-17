@@ -7,6 +7,7 @@ import {
   FieldGroup,
   ScopeEditor,
   TagInput,
+  useDtcChips,
   type Scope,
 } from '@/components/knowledge/form-helpers'
 import { SYSTEM_CODES } from '@/lib/knowledge/constants'
@@ -24,7 +25,16 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
   const [sections, setSections] = useState<Section[]>(
     sd.sections ?? [{ heading: '', body: '' }],
   )
-  const [dtcs, setDtcs] = useState<string[]>(existing?.dtcList ?? [])
+  const {
+    dtcs,
+    subCodes: dtcSubCodes,
+    setDtcs,
+    normalize: normalizeDtcInput,
+    displaySuffix: dtcSuffix,
+  } = useDtcChips({
+    dtcs: existing?.dtcList ?? [],
+    subCodes: existing?.dtcSubCodes ?? {},
+  })
   const [systemCodes, setSystemCodes] = useState<string[]>(existing?.systemCodes ?? [])
   const [symptoms, setSymptoms] = useState<string[]>(existing?.symptoms ?? [])
   const [scopes, setScopes] = useState<Scope[]>(
@@ -52,6 +62,7 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
           sections,
         },
         dtcList: dtcs,
+        dtcSubCodes: Object.keys(dtcSubCodes).length > 0 ? dtcSubCodes : undefined,
         systemCodes,
         symptoms,
         vehicleScopes: scopes,
@@ -153,7 +164,13 @@ export function TheoryForm({ existing }: { existing: KnowledgeListRow | null }) 
         <ScopeEditor scopes={scopes} setScopes={setScopes} />
       </FieldGroup>
       <FieldGroup label="DTCs">
-        <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
+        <TagInput
+          values={dtcs}
+          setValues={setDtcs}
+          placeholder="P0562"
+          normalize={normalizeDtcInput}
+          displaySuffix={dtcSuffix}
+        />
       </FieldGroup>
       <FieldGroup label="System codes">
         <ChipPicker

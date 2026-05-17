@@ -7,6 +7,7 @@ import {
   FieldGroup,
   ScopeEditor,
   TagInput,
+  useDtcChips,
   type Scope,
 } from '@/components/knowledge/form-helpers'
 import { SYSTEM_CODES } from '@/lib/knowledge/constants'
@@ -31,7 +32,16 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
   const [pins, setPins] = useState<Pin[]>(
     sd.pins ?? [{ pin_number: '1', signal_name: '' }],
   )
-  const [dtcs, setDtcs] = useState<string[]>(existing?.dtcList ?? [])
+  const {
+    dtcs,
+    subCodes: dtcSubCodes,
+    setDtcs,
+    normalize: normalizeDtcInput,
+    displaySuffix: dtcSuffix,
+  } = useDtcChips({
+    dtcs: existing?.dtcList ?? [],
+    subCodes: existing?.dtcSubCodes ?? {},
+  })
   const [systemCodes, setSystemCodes] = useState<string[]>(existing?.systemCodes ?? [])
   const [symptoms, setSymptoms] = useState<string[]>(existing?.symptoms ?? [])
   const [scopes, setScopes] = useState<Scope[]>(
@@ -62,6 +72,7 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
         title,
         structuredData: { connector_ref: connectorRef, pins },
         dtcList: dtcs,
+        dtcSubCodes: Object.keys(dtcSubCodes).length > 0 ? dtcSubCodes : undefined,
         systemCodes,
         symptoms,
         vehicleScopes: scopes,
@@ -117,7 +128,13 @@ export function PinoutForm({ existing }: { existing: KnowledgeListRow | null }) 
       </FieldGroup>
 
       <FieldGroup label="DTCs">
-        <TagInput values={dtcs} setValues={setDtcs} placeholder="P0562" />
+        <TagInput
+          values={dtcs}
+          setValues={setDtcs}
+          placeholder="P0562"
+          normalize={normalizeDtcInput}
+          displaySuffix={dtcSuffix}
+        />
       </FieldGroup>
 
       <FieldGroup label="System codes">
