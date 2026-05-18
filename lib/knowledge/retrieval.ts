@@ -1,5 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm'
-import { normalizeDtc, normalizeEngine } from '@/lib/knowledge/normalize'
+import { normalizeDtc, normalizeEngine, type NormalizedDtc } from '@/lib/knowledge/normalize'
 import type { AppDb } from '@/lib/db/queries'
 
 export type RetrievalVehicle = {
@@ -101,7 +101,8 @@ export async function lookupKnowledge(
 ): Promise<MatchedKnowledgeItem[]> {
   const normalizedDtcs = (input.dtcs ?? [])
     .map((d) => normalizeDtc(d))
-    .filter((d): d is string => d !== null)
+    .filter((n): n is NormalizedDtc => n !== null)
+    .map((n) => n.canonical)
   const dtcs = arrayLit(normalizedDtcs)
   const systems = arrayLit(input.systemCodes ?? [])
   const symptoms = arrayLit(input.symptoms ?? [])

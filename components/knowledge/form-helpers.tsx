@@ -1,5 +1,6 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { normalizeDtcForChip } from '@/lib/knowledge/normalize'
 
 export type Scope = {
   yearStart: number
@@ -58,37 +59,110 @@ export function TagInput({
   values,
   setValues,
   placeholder,
+  normalize,
+  displaySuffix,
 }: {
   values: string[]
   setValues: (v: string[]) => void
   placeholder?: string
+  // When provided, runs on Enter/comma. Returns the canonical value (and an
+  // optional suffix to display) — or null to hard-reject the input.
+  normalize?: (raw: string) => { value: string; suffix: string | null } | null
+  // Optional per-chip suffix renderer (for re-displaying suffixes loaded from
+  // a parallel state map — e.g. dtcSubCodes — when values were not just typed).
+  displaySuffix?: (value: string) => string | null
 }) {
   const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const commit = () => {
+    const t = draft.trim()
+    if (!t) return
+    if (normalize) {
+      const result = normalize(t)
+      if (!result) {
+        setError('Not a valid DTC — try P/B/C/U + 4 hex digits (e.g. P0420).')
+        return
+      }
+      setValues([...values, result.value])
+    } else {
+      setValues([...values, t])
+    }
+    setDraft('')
+    setError(null)
+  }
+
   return (
     <div className="vk-taginput">
-      {values.map((v, i) => (
-        <span className="vk-taginput__chip" key={i}>
-          {v}
-          <button type="button" onClick={() => setValues(values.filter((_, j) => j !== i))}>
-            ×
-          </button>
-        </span>
-      ))}
+      {values.map((v, i) => {
+        const suffix = displaySuffix?.(v)
+        return (
+          <span className="vk-taginput__chip" key={i}>
+            {v}
+            {suffix && <span className="vk-taginput__chip-sub"> ·{suffix}</span>}
+            <button type="button" onClick={() => setValues(values.filter((_, j) => j !== i))}>
+              ×
+            </button>
+          </span>
+        )
+      })}
       <input
+        className={error ? 'vk-taginput__input vk-taginput__input--error' : 'vk-taginput__input'}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          if (error) setError(null)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault()
-            const t = draft.trim()
-            if (t) setValues([...values, t])
-            setDraft('')
+            commit()
           }
         }}
         placeholder={placeholder}
       />
+      {error && <div className="vk-taginput__error">{error}</div>}
     </div>
   )
+}
+
+// Manages parallel state for DTC chips + sub-codes. The form passes
+// (dtcs, setDtcs, normalize, displaySuffix) to TagInput. When a new chip is
+// added, the `normalize` callback (a wrapper around normalizeDtcForChip) stashes
+// the resulting suffix in a ref; the wrapped `setDtcs` then attaches it to the
+// chip just added — and drops sub-code entries for chips that were removed.
+export function useDtcChips(initial: {
+  dtcs: string[]
+  subCodes: Record<string, string>
+}) {
+  const [dtcs, setDtcsRaw] = useState<string[]>(initial.dtcs)
+  const [subCodes, setSubCodes] = useState<Record<string, string>>(initial.subCodes)
+  const pendingSuffixRef = useRef<string | null>(null)
+
+  const normalize = (raw: string) => {
+    const result = normalizeDtcForChip(raw)
+    pendingSuffixRef.current = result?.suffix ?? null
+    return result
+  }
+
+  const setDtcs = (next: string[]) => {
+    const added = next.filter((v) => !dtcs.includes(v))
+    const removed = dtcs.filter((v) => !next.includes(v))
+
+    const nextSub = { ...subCodes }
+    for (const v of removed) delete nextSub[v]
+    if (added.length === 1 && pendingSuffixRef.current !== null) {
+      nextSub[added[0]] = pendingSuffixRef.current
+    }
+    pendingSuffixRef.current = null
+
+    setDtcsRaw(next)
+    setSubCodes(nextSub)
+  }
+
+  const displaySuffix = (value: string): string | null => subCodes[value] ?? null
+
+  return { dtcs, subCodes, setDtcs, normalize, displaySuffix }
 }
 
 export function ChipPicker({

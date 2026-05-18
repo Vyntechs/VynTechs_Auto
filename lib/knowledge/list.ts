@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { knowledgeItems, knowledgeItemVehicles, type KnowledgeItem } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
+import { normalizeDtc } from '@/lib/knowledge/normalize'
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 
@@ -52,7 +53,9 @@ export async function listKnowledgeItems(
 
   if (filter.type) conditions.push(eq(knowledgeItems.type, filter.type))
   if (filter.dtc) {
-    conditions.push(sql`${filter.dtc} = ANY(${knowledgeItems.dtcList})`)
+    const n = normalizeDtc(filter.dtc)
+    if (!n) return []
+    conditions.push(sql`${n.canonical} = ANY(${knowledgeItems.dtcList})`)
   }
   if (filter.systemCode) {
     conditions.push(sql`${filter.systemCode} = ANY(${knowledgeItems.systemCodes})`)

@@ -29,6 +29,7 @@ function makeItem(overrides: Partial<KnowledgeListRow>): KnowledgeListRow {
     body: 'A short body of the note.',
     structuredData: null,
     dtcList: [],
+    dtcSubCodes: null,
     systemCodes: [],
     symptoms: [],
     relatedItemIds: null,

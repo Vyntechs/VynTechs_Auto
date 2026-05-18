@@ -12,6 +12,7 @@ function makeRow(overrides: Partial<KnowledgeListRow>): KnowledgeListRow {
     body: null,
     structuredData: null,
     dtcList: [],
+    dtcSubCodes: null,
     systemCodes: [],
     symptoms: [],
     relatedItemIds: null,

@@ -1,12 +1,62 @@
-// DTCs are stored bare (no suffix) so retrieval matches across variants
-// (`P0420-00` and `P0420-FF` collapse to `P0420`). UI re-displays the full
-// code from the source paste; storage is the canonical form.
-const DTC_RE = /^([PBCU])(\d{4})(?:-[0-9A-F]{2})?$/i
+// DTC = OBD-II Diagnostic Trouble Code. Canonical shape: one letter (P/B/C/U)
+// followed by 4 hex chars (with the second char restricted to 0-3 per SAE J2012).
+// An optional 2-hex-char "failure type byte" (FTB) tail comes after a `-` or `:`
+// separator and carries fault-mode detail (e.g. P0420-11 = signal above range).
+// We preserve the FTB tail as orthogonal metadata via `subCode`; the canonical
+// base is the library-identity key (same fix recipe regardless of tail).
+const DTC_BASE_RE = /^[PBCU][0-3][0-9A-F]{3}$/
+const DTC_TAIL_RE = /^[0-9A-F]{2}$/
 
-export function normalizeDtc(input: string): string | null {
-  const match = input.trim().match(DTC_RE)
-  if (!match) return null
-  return `${match[1].toUpperCase()}${match[2]}`
+export type NormalizedDtc = { canonical: string; subCode: string | null }
+
+export function normalizeDtc(input: string): NormalizedDtc | null {
+  let s = input.trim()
+  if (s.length === 0) return null
+  s = s.toUpperCase()
+
+  s = s.replace(/^(CODE|DTC)[\s:]+/, '')
+
+  s = s.replace(/\s+/g, '')
+  if (s.length === 0) return null
+
+  // Find a `-` or `:` separator at position 5+ (i.e. AFTER the 5-char base).
+  let base = s
+  let tail: string | null = null
+  let sepIdx = -1
+  for (let i = 5; i < s.length; i++) {
+    if (s[i] === '-' || s[i] === ':') {
+      sepIdx = i
+      break
+    }
+  }
+  if (sepIdx !== -1) {
+    base = s.slice(0, sepIdx)
+    tail = s.slice(sepIdx + 1)
+  }
+
+  // Strip any `-` or `:` left inside the base (e.g. "P-0420" → "P0420").
+  base = base.replace(/[-:]/g, '')
+
+  // Letter-O → digit-0 fix in body positions only (first char untouched).
+  if (base.length >= 1) {
+    base = base[0] + base.slice(1).replace(/O/g, '0')
+  }
+
+  if (!DTC_BASE_RE.test(base)) return null
+
+  const subCode = tail !== null && DTC_TAIL_RE.test(tail) ? tail : null
+
+  return { canonical: base, subCode }
+}
+
+// TagInput-shaped wrapper: maps NormalizedDtc to the { value, suffix } shape
+// expected by the TagInput's `normalize` prop.
+export function normalizeDtcForChip(
+  raw: string,
+): { value: string; suffix: string | null } | null {
+  const n = normalizeDtc(raw)
+  if (!n) return null
+  return { value: n.canonical, suffix: n.subCode }
 }
 
 // Owner-volunteered engine variants collapse to one canonical token so a
