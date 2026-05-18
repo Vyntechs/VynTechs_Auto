@@ -8,6 +8,8 @@ const { pushSpy, refreshSpy } = vi.hoisted(() => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushSpy, refresh: refreshSpy }),
+  usePathname: () => '/sessions/test',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 import { ActiveSession } from '@/components/screens/active-session'

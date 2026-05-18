@@ -2462,3 +2462,31 @@
     margin-left: 6px;
   }
 }
+
+/* Root B — DTC sub-code suffix on chips (rendered as " ·00") */
+.vk-tag__sub,
+.vk-taginput__chip-sub {
+  margin-left: 2px;
+  font-size: 0.85em;
+  color: var(--vt-graphite-500);
+  font-weight: 400;
+}
+
+/* Root B — chip input hard-reject error state */
+.vk-taginput__input--error {
+  border-color: var(--vt-risk-destructive);
+  background: oklch(62% 0.22 25 / 0.06);
+}
+
+.vk-taginput__error {
+  color: var(--vt-risk-destructive);
+  font-size: 12px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+@media (max-width: 414px) {
+  .vk-taginput__error {
+    font-size: 11px;
+  }
+}

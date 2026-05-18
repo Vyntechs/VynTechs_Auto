@@ -129,7 +129,15 @@ export function KnowledgeDrawer({
             </span>
           </div>
           <div className="vk-drawer__foot-tags">
-            {item.dtcList.map(d => <span className="vk-tag vk-tag--dtc" key={d}>{d}</span>)}
+            {item.dtcList.map(d => {
+              const sub = item.dtcSubCodes?.[d]
+              return (
+                <span className="vk-tag vk-tag--dtc" key={d}>
+                  {d}
+                  {sub && <span className="vk-tag__sub"> ·{sub}</span>}
+                </span>
+              )
+            })}
             {item.systemCodes.map(s => <span className="vk-tag" key={s}>{s.replace(/_/g, ' ')}</span>)}
             {item.symptoms.map(s => <span className="vk-tag vk-tag--sym" key={s}>{s.replace(/_/g, ' ')}</span>)}
             {totalTags === 0 && (

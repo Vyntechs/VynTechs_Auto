@@ -8,6 +8,7 @@ import {
   FieldGroup,
   ScopeEditor,
   TagInput,
+  useDtcChips,
   type Scope,
 } from '@/components/knowledge/form-helpers'
 
@@ -49,7 +50,13 @@ export function ReviewForm() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [structured, setStructured] = useState<Record<string, string>>({})
-  const [dtcs, setDtcs] = useState<string[]>([])
+  const {
+    dtcs,
+    subCodes: dtcSubCodes,
+    setDtcs,
+    normalize: normalizeDtcInput,
+    displaySuffix: dtcSuffix,
+  } = useDtcChips({ dtcs: [], subCodes: {} })
   const [systemCodes, setSystemCodes] = useState<string[]>([])
   const [symptoms, setSymptoms] = useState<string[]>([])
   const [scopes, setScopes] = useState<Scope[]>([])
@@ -119,6 +126,7 @@ export function ReviewForm() {
         type,
         title,
         dtcList: dtcs,
+        dtcSubCodes: Object.keys(dtcSubCodes).length > 0 ? dtcSubCodes : undefined,
         systemCodes,
         symptoms,
         vehicleScopes: scopes,
@@ -294,6 +302,8 @@ export function ReviewForm() {
             markEdited('dtcList')
           }}
           placeholder="P0562"
+          normalize={normalizeDtcInput}
+          displaySuffix={dtcSuffix}
         />
       </FieldGroup>
 

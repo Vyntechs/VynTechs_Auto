@@ -295,4 +295,102 @@ describe('POST /api/knowledge/save', () => {
     expect(row.shopId).toBe(shopId)
     expect(row.shopId).not.toBe(otherShop.id)
   })
+
+  describe('DTC sub-codes (root B)', () => {
+    it('persists sub-codes alongside canonical DTCs', async () => {
+      await mockUser(OWNER_USER_ID)
+      const { POST } = await import('@/app/api/knowledge/save/route')
+      const res = await POST(
+        new Request('http://localhost/api/knowledge/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'note',
+            title: 'sub-code test',
+            body: 'whatever',
+            dtcList: ['P0420'],
+            dtcSubCodes: { P0420: '00' },
+          }),
+        }),
+      )
+      expect(res.status).toBe(201)
+      const json = (await res.json()) as { id: string }
+      const [row] = await currentDb
+        .select()
+        .from(knowledgeItems)
+        .where(eq(knowledgeItems.id, json.id))
+      expect(row.dtcList).toEqual(['P0420'])
+      expect(row.dtcSubCodes).toEqual({ P0420: '00' })
+    })
+
+    it('infers sub-codes from dtcList entries that carry tails', async () => {
+      await mockUser(OWNER_USER_ID)
+      const { POST } = await import('@/app/api/knowledge/save/route')
+      const res = await POST(
+        new Request('http://localhost/api/knowledge/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'note',
+            title: 'tail-carrying inputs',
+            body: 'whatever',
+            dtcList: ['p0420-00', 'P0430:11'],
+          }),
+        }),
+      )
+      expect(res.status).toBe(201)
+      const json = (await res.json()) as { id: string }
+      const [row] = await currentDb
+        .select()
+        .from(knowledgeItems)
+        .where(eq(knowledgeItems.id, json.id))
+      expect([...row.dtcList].sort()).toEqual(['P0420', 'P0430'])
+      expect(row.dtcSubCodes).toEqual({ P0420: '00', P0430: '11' })
+    })
+
+    it('persists null dtcSubCodes when no DTC had a tail', async () => {
+      await mockUser(OWNER_USER_ID)
+      const { POST } = await import('@/app/api/knowledge/save/route')
+      const res = await POST(
+        new Request('http://localhost/api/knowledge/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'note',
+            title: 'no tails',
+            body: 'whatever',
+            dtcList: ['P0420'],
+          }),
+        }),
+      )
+      expect(res.status).toBe(201)
+      const json = (await res.json()) as { id: string }
+      const [row] = await currentDb
+        .select()
+        .from(knowledgeItems)
+        .where(eq(knowledgeItems.id, json.id))
+      expect(row.dtcSubCodes).toBeNull()
+    })
+
+    it('drops stale dtcSubCodes entries for DTCs not in the final list', async () => {
+      await mockUser(OWNER_USER_ID)
+      const { POST } = await import('@/app/api/knowledge/save/route')
+      const res = await POST(
+        new Request('http://localhost/api/knowledge/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            type: 'note',
+            title: 'stale-sub-code',
+            body: 'whatever',
+            dtcList: ['P0420'],
+            dtcSubCodes: { P0420: '00', P0430: 'FF' },
+          }),
+        }),
+      )
+      expect(res.status).toBe(201)
+      const json = (await res.json()) as { id: string }
+      const [row] = await currentDb
+        .select()
+        .from(knowledgeItems)
+        .where(eq(knowledgeItems.id, json.id))
+      expect(row.dtcSubCodes).toEqual({ P0420: '00' })
+    })
+  })
 })

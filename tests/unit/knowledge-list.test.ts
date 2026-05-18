@@ -91,6 +91,39 @@ describe('listKnowledgeItems', () => {
     expect(rows.map(r => r.id)).toEqual([withDtc.id])
   })
 
+  it('filters by dtc — normalizes mixed-case + dash input to canonical', async () => {
+    const { shopId, userId } = await seedShop('Shop A')
+    const [match] = await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'with P0420', body: 'b',
+      dtcList: ['P0420'], createdByUserId: userId,
+    }).returning()
+
+    const rows = await listKnowledgeItems(handle.db, { shopId, filter: { dtc: 'p-0420' } })
+    expect(rows.map(r => r.id)).toEqual([match.id])
+  })
+
+  it('filters by dtc — tail-tolerant (P0420-00 matches stored P0420)', async () => {
+    const { shopId, userId } = await seedShop('Shop A')
+    const [match] = await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'with P0420', body: 'b',
+      dtcList: ['P0420'], createdByUserId: userId,
+    }).returning()
+
+    const rows = await listKnowledgeItems(handle.db, { shopId, filter: { dtc: 'P0420-00' } })
+    expect(rows.map(r => r.id)).toEqual([match.id])
+  })
+
+  it('filters by dtc — returns empty list when filter input is unnormalizable', async () => {
+    const { shopId, userId } = await seedShop('Shop A')
+    await handle.db.insert(knowledgeItems).values({
+      shopId, type: 'note', title: 'unrelated', body: 'b',
+      dtcList: ['P0420'], createdByUserId: userId,
+    })
+
+    const rows = await listKnowledgeItems(handle.db, { shopId, filter: { dtc: 'garbage' } })
+    expect(rows).toEqual([])
+  })
+
   it('filters by systemCode', async () => {
     const { shopId, userId } = await seedShop('Shop A')
     const [charging] = await handle.db.insert(knowledgeItems).values({

@@ -164,3 +164,48 @@ describe('KnowledgeSaveSchema — theory_of_operation', () => {
     expect(result.success).toBe(false)
   })
 })
+
+describe('KnowledgeSaveSchema — dtcSubCodes (root B)', () => {
+  it('accepts a well-formed sub-code map', () => {
+    const result = KnowledgeSaveSchema.safeParse({
+      type: 'note',
+      title: 'with sub-codes',
+      body: 'whatever',
+      dtcList: ['P0420'],
+      dtcSubCodes: { P0420: '00' },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts an absent dtcSubCodes (optional)', () => {
+    const result = KnowledgeSaveSchema.safeParse({
+      type: 'note',
+      title: 'no sub-codes',
+      body: 'whatever',
+      dtcList: ['P0420'],
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a sub-code key that is not a canonical DTC base', () => {
+    const result = KnowledgeSaveSchema.safeParse({
+      type: 'note',
+      title: 'bad key',
+      body: 'whatever',
+      dtcList: ['P0420'],
+      dtcSubCodes: { 'p0420': '00' },
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a sub-code value that is not 2 hex chars', () => {
+    const result = KnowledgeSaveSchema.safeParse({
+      type: 'note',
+      title: 'bad val',
+      body: 'whatever',
+      dtcList: ['P0420'],
+      dtcSubCodes: { P0420: 'invalid' },
+    })
+    expect(result.success).toBe(false)
+  })
+})
