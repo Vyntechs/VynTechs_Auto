@@ -82,6 +82,14 @@ export function Footer({ isSignedIn }: FooterProps) {
             <li>One bay</li>
           </ul>
         </div>
+        <div>
+          <h5>Legal</h5>
+          <ul>
+            <li>
+              <a href="/privacy">Privacy</a>
+            </li>
+          </ul>
+        </div>
       </div>
       <div className="vm-foot-bot">
         <span>© 2026 Vyntechs &middot; vyntechs.dev</span>
