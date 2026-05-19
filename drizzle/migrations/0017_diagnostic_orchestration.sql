@@ -14,6 +14,23 @@
 --
 -- Spec: docs/superpowers/specs/2026-05-19-orchestration-schema-design.md
 
+-- Ensure the `authenticated` role exists. Supabase installs this role by default;
+-- on bare local Postgres (e.g., vyntechs_rehearsal) it's absent and would cause
+-- `CREATE POLICY ... TO authenticated` to fail. No-op on Supabase.
+DO $do$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+END $do$;
+--> statement-breakpoint
+
+-- Drop legacy `symptoms` table (orphan scaffolding: 0 rows on prod, no FK references,
+-- no app/code references). The orchestration schema redefines `symptoms` with a
+-- different shape (id UUID PK, slug, description, category) supplanting the
+-- legacy shape (name TEXT PK, display_label, usage_count). Verified empty on
+-- prod 2026-05-19 prior to this drop.
+DROP TABLE IF EXISTS "symptoms" CASCADE;
+--> statement-breakpoint
 CREATE TABLE "platforms" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"slug" text NOT NULL,
