@@ -765,15 +765,27 @@ EOF
 **Files:**
 - Create: `drizzle/migrations/0017_<auto_name>.sql`
 
-- [ ] **Step 1: Generate the base migration**
+- [ ] **Step 1: Generate the base migration (or hand-write it — drizzle-kit is currently broken)**
 
-Run:
+Try:
 
 ```bash
 pnpm drizzle-kit generate
 ```
 
-Expected output: a new file created at `drizzle/migrations/0017_<random_words>.sql` plus an updated `drizzle/migrations/meta/_journal.json`. The migration file will contain `CREATE TABLE` statements for the 12 new tables, the `ALTER TABLE vehicles ADD COLUMN platform_id...`, and the index definitions from `(table) => [...]` blocks.
+**Expected — but doesn't currently work:** a new file at `drizzle/migrations/0017_<random_words>.sql` + updated `drizzle/migrations/meta/_journal.json`.
+
+**Actual current behavior:** drizzle-kit exits with `drizzle/migrations/meta/0011b_snapshot.json data is malformed`. This pre-existing issue has blocked drizzle-kit generation since migration 0012; every migration from 0012 onward has been hand-written. Treat this as the established workaround: read the new tables in `lib/db/schema.ts` and hand-translate each to SQL.
+
+Hand-translation approach:
+- Pick a descriptive filename: `drizzle/migrations/0017_diagnostic_orchestration.sql`.
+- For each new table, write `CREATE TABLE "<table_name>" (...)` with columns matching the Drizzle TypeScript definition (Drizzle's snake_case naming → Postgres column names; explicit FK constraints with `ON DELETE` clauses matching the spec).
+- For `vehicles.platform_id`, write `ALTER TABLE "vehicles" ADD COLUMN "platform_id" uuid;` plus the matching `CREATE INDEX` and FK constraint.
+- For each `(table) => [...]` block in schema.ts, write the equivalent `CREATE INDEX` statements.
+- Update `drizzle/migrations/meta/_journal.json` to add the new entry following the existing pattern (next index, the new tag, timestamp).
+- A future cleanup task should fix the broken snapshot to restore drizzle-kit automation; out of scope for Phase 1.
+
+**Safety net:** any structural mismatch between the hand-written SQL and what would have been generated (column types, constraints, indexes) gets caught when Task 3 applies the migration against `vyntechs_rehearsal`. psql will error on bad SQL. That's the verification layer.
 
 - [ ] **Step 2: Inspect the generated migration**
 
