@@ -34,6 +34,10 @@ const EXEMPT_EXACT = new Set<string>([
   // by deactivated users; sits in the fast-path exempt set so middleware
   // never bounces a public-policy reader to /sign-in.
   '/privacy',
+  // Terms of Service — same public-reachability requirement as /privacy;
+  // also signs the contract every shop accepts on sign-up, so it must be
+  // readable without auth at any point.
+  '/terms',
   '/api/health',
 ])
 

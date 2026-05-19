@@ -88,6 +88,9 @@ export function Footer({ isSignedIn }: FooterProps) {
             <li>
               <a href="/privacy">Privacy</a>
             </li>
+            <li>
+              <a href="/terms">Terms</a>
+            </li>
           </ul>
         </div>
       </div>
