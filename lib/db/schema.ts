@@ -9,7 +9,6 @@ import {
   real,
   boolean,
   index,
-  uniqueIndex,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'

@@ -55,12 +55,11 @@ import {
   real,
   boolean,
   index,
-  uniqueIndex,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 ```
 
-Two additions: `uniqueIndex` (for full uniques on slugs of non-fact-bearing tables), and the `AnyPgColumn` type import (for self-referential FK type cast).
+One addition: the `AnyPgColumn` type import (for self-referential FK type cast). The Drizzle `.unique()` chained method on the column itself handles the unique constraints on `platforms.slug` and `symptoms.slug` — `uniqueIndex` is not needed at the TypeScript layer; partial unique indexes on fact-bearing tables are hand-written SQL in Task 2.
 
 - [ ] **Step 2: Add `platforms` table**
 
