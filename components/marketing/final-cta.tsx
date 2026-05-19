@@ -11,10 +11,13 @@ export function FinalCTA({ isSignedIn }: FinalCTAProps) {
             Stop guessing. <em>Start gating.</em>
           </h2>
           <p className="vm-cta-p">
-            $100 per technician, per month. One account, one path in, no
-            salesperson on the other side. Bring one stubborn vehicle. If it
-            doesn&rsquo;t change how you commit work, cancel — your sessions
-            stay yours, always.
+            $100 per technician, per month, billed on Stripe. One account,
+            one path in, no salesperson on the other side. Bring one
+            stubborn vehicle — an intermittent CAN-bus dropout, a
+            recurring P0420, an AC system that flips between the P-T
+            curve and the DTC tree. If it doesn&rsquo;t change how you
+            commit work, cancel — your per-shop corpus stays yours,
+            always.
           </p>
         </div>
         <div className="vm-cta-actions">

@@ -11,52 +11,52 @@ const ROWS: CompareRow[] = [
   {
     subj: 'Refusal at low confidence',
     chatbot:
-      'None. Confidently invents torque specs, TSB numbers, wiring pinouts.',
-    scantool: 'N/A. Returns a DTC definition; no diagnostic stance.',
-    us: 'Hard refusal below 95% gate. Tells you which evidence is missing.',
+      'None. Confidently invents torque specs, TSB numbers, pinouts, freeze-frame values.',
+    scantool: 'N/A. Returns a DTC definition off a static table; no diagnostic stance.',
+    us: 'Five-class risk model. Hard-coded floor on cuts, splices, reflashes; LLM-judged refusal on novel irreversibles. Names the missing observation.',
   },
   {
     subj: 'Cites sources',
-    chatbot: 'Sometimes. Often hallucinated, often dead links.',
-    scantool: 'OEM only, no shop context.',
-    us: 'Every claim. Corpus row, TSB number, forum thread URL.',
+    chatbot: 'Sometimes. Often hallucinated TSB numbers, often dead URLs.',
+    scantool: 'Licensed OEM repair info only; no shop context, no comeback history.',
+    us: 'Every claim. Corpus row ID, OEM TSB, NHTSA bulletin, or forum / YouTube / Reddit URL — inline.',
   },
   {
     subj: 'Learns from your shop',
-    chatbot: 'No. State resets per chat.',
-    scantool: 'No. Static lookup tables.',
-    us: 'Yes. Every closed session feeds back into the corpus for next time.',
+    chatbot: 'No. Session state resets every chat.',
+    scantool: 'No. Static lookup tables, refreshed by annual subscription.',
+    us: 'Yes. Closed sessions embed into the per-shop corpus on Voyage 1024-d. Comeback-driven decay; weekly Beta-Binomial refit; auto-retire on drift.',
   },
   {
     subj: 'Asks for evidence',
-    chatbot: 'Rarely. Will guess and hope.',
-    scantool: 'No. Reads what the tool returns.',
-    us: 'Yes. When evidence is thin, asks for a specific observation. Capped at 3.',
+    chatbot: 'Rarely. Guesses and hopes the tech doesn’t cut anything.',
+    scantool: 'No. Echoes whatever the scan-tool screen shows.',
+    us: 'Yes. Vision extractor reads scan-screens, wiring diagrams, build-code labels. One targeted ask plus two follow-ups, then Decline-or-Defer.',
   },
   {
     subj: 'Built for the bay',
-    chatbot: 'Desktop-first chat UI. Glove-hostile.',
-    scantool: 'Bench tool, not shop-floor.',
-    us: 'Phone-first. Thumb-reach UI. Bone-paper readability in shop lighting.',
+    chatbot: 'Desktop chat UI. Glove-hostile, lighting-hostile.',
+    scantool: 'Bench tool or cart. Not designed for thumb-reach under the hood.',
+    us: 'Mobile-first PWA. Thumb-reach. Bone-paper readability in shop lighting. Ambient temp + humidity captured per-bay for R-134a P-T reads.',
   },
   {
     subj: 'Voice match',
-    chatbot: '"Hi there! I\'d be happy to help you with…"',
+    chatbot: '"Hi there! I\'d be happy to help diagnose your turbocharger!"',
     scantool: 'N/A.',
     us: (
       <em>
-        &ldquo;Smoke test the cold-side intercooler. Photograph any escape
-        locations.&rdquo;
+        &ldquo;Smoke-test the cold-side CAC at 5 psi. Photograph any escape
+        locations at the throttle-body joint.&rdquo;
       </em>
     ),
   },
   {
     subj: 'Price per technician',
-    chatbot: "$20–40/mo, plus rework when it's wrong.",
-    scantool: '$1,800–4,200/yr per bench license.',
+    chatbot: "$20–40/mo plus the comeback when it’s wrong.",
+    scantool: '$1,800–4,200/yr per bench license, locked to one terminal.',
     us: (
       <>
-        <b>$100/mo flat.</b> Cancel anytime.
+        <b>$100/tech/mo.</b> Stripe live. Cancel anytime.
       </>
     ),
   },
@@ -71,13 +71,15 @@ export function Compare() {
         </div>
         <div>
           <h2 className="vm-section-title">
-            What we deliberately aren&rsquo;t.
+            Where the category stands today.
           </h2>
           <p className="vm-section-lede">
-            Most &ldquo;AI for the trades&rdquo; tools are wrappers around a
-            general model with a wrench-shaped icon, or stale DTC lookup
-            tables. Here&rsquo;s how we measure against what techs actually
-            replace.
+            The current landscape is generic LLM wrappers with
+            wrench-shaped icons or static DTC databases. Vyntechs is
+            purpose-built for the asymmetric cost of confident wrong
+            answers in a bay — eight billable hours and a comeback the
+            shop eats. Here&rsquo;s how it measures against the categories
+            it displaces.
           </p>
         </div>
       </div>

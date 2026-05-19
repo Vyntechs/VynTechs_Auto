@@ -7,14 +7,16 @@ export function Gate() {
         </div>
         <div>
           <h2 className="vm-section-title">
-            A finding either crosses the gate, or it doesn&rsquo;t.{' '}
+            Five risk classes. One irreversibility floor.{' '}
             <em>No middle ground.</em>
           </h2>
           <p className="vm-section-lede">
-            Above the threshold, Vyntechs surfaces a precise next step with
-            the source it&rsquo;s pulling from. Below it, the assistant tells
-            you exactly what evidence is missing — and refuses to recommend a
-            destructive action.
+            Findings are scored across five risk classes — zero, low,
+            medium, high, destructive — and gated against a calibrated
+            per-cell threshold refit weekly via Beta-Binomial against real
+            outcomes. A hard-coded floor covers cuts, splices, and
+            reflashes; novel cases get a second pass from a Haiku-4.5 risk
+            classifier before the gate ever opens.
           </p>
         </div>
       </div>
@@ -91,8 +93,10 @@ export function Gate() {
           </div>
           <p className="vm-card-finding">
             <em>
-              &ldquo;Cold-side intercooler boot, lower clamp. Smoke test
-              localizes leak to clamp seam at the throttle-body joint.&rdquo;
+              &ldquo;Cold-side CAC boot, lower clamp at the throttle-body
+              joint. Smoke test localizes leak to clamp seam; corroborated
+              by OEM TSB 22-2148 and 14 corpus matches on MY18–19 build
+              code.&rdquo;
             </em>
           </p>
           <div className="vm-card-meta">
@@ -106,7 +110,7 @@ export function Gate() {
             </div>
             <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">42 min</div>
-              <div className="vm-card-meta-lab">time to commit</div>
+              <div className="vm-card-meta-lab">intake to commit</div>
             </div>
           </div>
         </div>
@@ -185,9 +189,11 @@ export function Gate() {
           </div>
           <p className="vm-card-finding">
             <em>
-              &ldquo;Cat replacement not authorized. Need post-cat O₂ readings
-              under warm cruise; ambient temp data missing for 9 of 12 corpus
-              matches.&rdquo;
+              &ldquo;Cat replacement refused — destructive class. Need
+              post-cat O₂ trace under closed-loop warm cruise; long-term
+              fuel trim history absent; 9 of 12 corpus matches missing
+              ambient temp at intake. Decline-or-Defer until evidence
+              lands.&rdquo;
             </em>
           </p>
           <div className="vm-card-meta">
@@ -197,11 +203,11 @@ export function Gate() {
             </div>
             <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">— —</div>
-              <div className="vm-card-meta-lab">post-cat o₂ data</div>
+              <div className="vm-card-meta-lab">post-cat O₂ trace</div>
             </div>
             <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">refused</div>
-              <div className="vm-card-meta-lab">destructive action</div>
+              <div className="vm-card-meta-lab">irreversible action</div>
             </div>
           </div>
         </div>

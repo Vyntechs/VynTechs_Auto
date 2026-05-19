@@ -4,7 +4,7 @@ type NavProps = { isSignedIn: boolean }
 
 export function Nav({ isSignedIn }: NavProps) {
   const ctaHref = isSignedIn ? '/today' : '/sign-up'
-  const ctaLabel = isSignedIn ? 'Go to app' : 'Start — $100/mo'
+  const ctaLabel = isSignedIn ? 'Go to app' : 'Subscribe — $100/tech/mo'
   return (
     <nav className="vm-nav">
       <div className="vm-nav-inner">

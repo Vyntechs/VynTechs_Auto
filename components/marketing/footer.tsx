@@ -26,8 +26,9 @@ export function Footer({ isSignedIn }: FooterProps) {
               margin: '16px 0 0',
             }}
           >
-            A diagnostic co-pilot for working technicians. Built in one bay, by
-            a working tech, and shared because it works.
+            An AI diagnostic layer for working technicians. Built in one
+            bay, by a working tech, hardened on real comebacks before it
+            shipped.
           </p>
         </div>
         <div>
@@ -78,15 +79,15 @@ export function Footer({ isSignedIn }: FooterProps) {
             <li>
               <a href="#why">Why it exists</a>
             </li>
-            <li>One working tech</li>
-            <li>One bay</li>
+            <li>Founder: working mechanic</li>
+            <li>Built bay-side, engineered to ship</li>
           </ul>
         </div>
       </div>
       <div className="vm-foot-bot">
         <span>© 2026 Vyntechs &middot; vyntechs.dev</span>
-        <span className="vm-foot-mark">Built in the bay, not the boardroom.</span>
-        <span>Beta &middot; invite-only</span>
+        <span className="vm-foot-mark">Built in the bay by a working tech, not the boardroom.</span>
+        <span>Invite-only beta &middot; Vercel + Supabase</span>
       </div>
     </footer>
   )
