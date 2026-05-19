@@ -11,10 +11,11 @@ export function Ladder() {
             <em>cited</em>, every commit is <em>gated</em>.
           </h2>
           <p className="vm-section-lede">
-            The model climbs from your shop&rsquo;s own history → the open web
-            for that exact vehicle → asking you for a specific observation. It
-            stops where the evidence stops. No fabricated TSBs, no invented
-            torque specs.
+            Per-shop corpus → six-source web sweep (OEM, NHTSA,
+            manufacturer recall, forum, YouTube, Reddit) → a capped
+            tech-assist of one ask plus two follow-ups. It stops where the
+            evidence stops. No fabricated TSB numbers, no invented torque
+            specs, no pinouts borrowed from the wrong chassis.
           </p>
         </div>
       </div>
@@ -26,10 +27,12 @@ export function Ladder() {
           <div className="vm-rung resolved">
             <div className="vm-rung-node">0</div>
             <div>
-              <div className="vm-rung-title">Your shop&rsquo;s history</div>
+              <div className="vm-rung-title">Per-shop corpus</div>
               <div className="vm-rung-desc">
-                Every closed session from your bay. Per-VIN, per-DTC, per-tech
-                outcomes. Confidence decays when comebacks happen.
+                Every closed session, indexed with Voyage 1024-d
+                embeddings. Per-VIN, per-DTC, per-tech outcomes.
+                Comeback-driven decay; weekly Beta-Binomial refit
+                auto-retires rows that stop predicting.
               </div>
             </div>
             <div className="vm-rung-meta">
@@ -43,11 +46,13 @@ export function Ladder() {
             <div className="vm-rung-node">1</div>
             <div>
               <div className="vm-rung-title">
-                The open web for that car
+                Six-source web for that exact car
               </div>
               <div className="vm-rung-desc">
-                OEM TSBs, manufacturer recalls, NHTSA bulletins, forum threads,
-                technician videos. Every source cited inline with a link back.
+                OEM repair info, manufacturer recall feeds, NHTSA bulletins,
+                forum threads, technician YouTube, Reddit. Every claim
+                cited inline with a working URL — no dead links, no
+                invented TSB numbers.
               </div>
             </div>
             <div className="vm-rung-meta">
@@ -60,11 +65,13 @@ export function Ladder() {
           <div className="vm-rung">
             <div className="vm-rung-node">2</div>
             <div>
-              <div className="vm-rung-title">Asks you</div>
+              <div className="vm-rung-title">Capped tech-assist</div>
               <div className="vm-rung-desc">
-                When evidence is thin, it asks for one specific observation or
-                photo. Capped at 3 asks — past that, it&rsquo;s
-                Decline-or-Defer, not a guess.
+                When evidence is thin, it requests one specific observation
+                — a scan-screen photo, a smoke-test result, a wiring shot,
+                a freeze-frame value. Hard cap of one ask plus two
+                follow-ups. Past that it&rsquo;s Decline-or-Defer, never a
+                guess.
               </div>
             </div>
             <div className="vm-rung-meta">
@@ -79,9 +86,9 @@ export function Ladder() {
           <div className="vm-ladder-stat">
             <div className="vm-ladder-stat-n">3</div>
             <div className="vm-ladder-stat-l">
-              retrieval rungs, every claim cited
+              retrieval rungs &middot; every claim cited inline
             </div>
-            <div className="vm-ladder-stat-s">no black box</div>
+            <div className="vm-ladder-stat-s">auditable end-to-end</div>
           </div>
           <div
             className="vm-ladder-stat"
@@ -91,17 +98,17 @@ export function Ladder() {
               95<small>%</small>
             </div>
             <div className="vm-ladder-stat-l">
-              gate threshold before destructive work is unlocked
+              default floor before any cut, splice, or reflash unlocks
             </div>
-            <div className="vm-ladder-stat-s">configurable</div>
+            <div className="vm-ladder-stat-s">Beta-Binomial refit, weekly &middot; per-cell calibrated</div>
           </div>
           <div
             className="vm-ladder-stat"
             style={{ borderColor: 'oklch(62% 0.22 25)' }}
           >
             <div className="vm-ladder-stat-n">0</div>
-            <div className="vm-ladder-stat-l">guesses below the gate</div>
-            <div className="vm-ladder-stat-s">hard refusal</div>
+            <div className="vm-ladder-stat-l">irreversible work below the gate</div>
+            <div className="vm-ladder-stat-s">hard-coded floor + LLM-judged novel cases</div>
           </div>
         </div>
       </div>

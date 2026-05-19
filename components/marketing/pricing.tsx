@@ -3,27 +3,27 @@ type PricingProps = { isSignedIn: boolean }
 const INCLUSIONS = [
   {
     title: 'Unlimited diagnostic sessions',
-    sub: 'No per-session caps, no per-VIN caps. Every active session, every observation, every commit-or-decline.',
+    sub: 'No per-session caps, no per-VIN caps. Every intake, every observation, every gated commit-or-decline runs through the same retrieval and calibration stack.',
   },
   {
-    title: 'Three-rung retrieval',
-    sub: 'Your shop corpus + the open web for that exact car + tech-assist when evidence is thin. Every claim cited inline.',
+    title: 'Three-rung retrieval, six-source web',
+    sub: 'Per-shop corpus on Voyage 1024-d vectors, plus OEM / NHTSA / manufacturer-recall / forum / YouTube / Reddit web sweep, plus a 1+2-capped tech-assist when evidence is thin. Every claim cited inline.',
   },
   {
-    title: 'Confidence-gated commit',
-    sub: 'Default 95% threshold. Below-gate destructive actions are refused — not warned, not greyed out, gone.',
+    title: 'Calibrated confidence gate',
+    sub: 'Default 95% floor, refit weekly per (risk × vehicle-family × symptom) cell via Beta-Binomial. Below-gate cuts, splices, and reflashes are refused — not warned, not greyed out, gone.',
   },
   {
-    title: 'Photo capture for wiring diagrams',
-    sub: 'Upload a wiring-diagram photo and the AI pulls pinouts, color codes, and connector callouts into the session.',
+    title: 'Vision extraction off the bay floor',
+    sub: 'Photograph a wiring diagram, scan-screen, build-code label, or component tag. The vision extractor pulls DTCs, pinouts, wire colors, and build codes straight into the session.',
   },
   {
-    title: 'Today queue',
-    sub: 'Your morning bay schedule — in-progress sessions, closed today, follow-ups due. Built for the shop floor.',
+    title: 'Today queue · shop-floor surface',
+    sub: 'Open sessions, closed today, comeback follow-ups due. Daily comeback prompts feed back into per-cell calibration.',
   },
   {
-    title: 'Per-vehicle history',
-    sub: 'Every prior session for a VIN shows up automatically the next time it comes through your bay.',
+    title: 'Per-VIN history, automatic',
+    sub: 'Every prior session for that VIN surfaces on the next intake — DTC history, prior commits, comebacks, the works. The corpus compounds per shop with every closed case.',
   },
 ]
 
@@ -42,9 +42,9 @@ export function Pricing({ isSignedIn }: PricingProps) {
             One plan. <em>Per technician.</em> No bundles, no seat-haggling.
           </h2>
           <p className="vm-section-lede">
-            We don&rsquo;t sell shop tiers. We don&rsquo;t sell platinum
-            bay-fleet packs. We sell one thing: an account, for one technician,
-            for one month. Scale it by hiring; cancel it when you don&rsquo;t.
+            No shop tiers. No bay-fleet packs. No annual lock. One
+            account, one tech, one month, Stripe-billed end-to-end. Scale
+            it by hiring; cancel it when you don&rsquo;t.
           </p>
         </div>
       </div>
@@ -53,14 +53,15 @@ export function Pricing({ isSignedIn }: PricingProps) {
         <div className="vm-price-main">
           <div className="vm-price-eyebrow">
             <span className="vm-dot" />
-            Technician account &middot; monthly
+            Technician seat &middot; monthly &middot; Stripe
           </div>
           <h3 className="vm-price-name">
             Vyntechs <em>Bay</em>
           </h3>
           <p className="vm-price-desc">
-            A single technician seat. Full retrieval, full confidence gating,
-            full session history. Cancel anytime; your sessions stay yours.
+            A single technician seat. Full three-rung retrieval, full
+            calibrated risk-class gating, full per-VIN history, full
+            vision capture. Cancel anytime; your corpus stays yours.
           </p>
 
           <div className="vm-price-tag">
@@ -79,7 +80,7 @@ export function Pricing({ isSignedIn }: PricingProps) {
             </a>
           </div>
           <div className="vm-price-foot">
-            USD &middot; billed monthly &middot; cancel anytime
+            USD &middot; Stripe &middot; monthly billing &middot; cancel via portal
           </div>
         </div>
 
@@ -116,14 +117,17 @@ export function Pricing({ isSignedIn }: PricingProps) {
         <div className="vm-price-fine-cell">
           <div className="vm-price-fine-h">If you cancel</div>
           <div className="vm-price-fine-b">
-            Your sessions and shop corpus stay yours. You can come back anytime.
+            Sessions and per-shop corpus belong to the shop. Daily DB
+            backups; US-hosted on Supabase; encrypted at rest. Come back
+            anytime.
           </div>
         </div>
         <div className="vm-price-fine-cell">
-          <div className="vm-price-fine-h">Shop packages</div>
+          <div className="vm-price-fine-h">Multi-seat &amp; partnership</div>
           <div className="vm-price-fine-b">
-            <em>Not yet.</em> If you need 30+ seats, we&rsquo;ll talk. Otherwise
-            add one tech, pay $100, scale as you hire.
+            For 30+ seats, MSO rollups, or integration conversations,
+            reach out directly. Otherwise add one tech, pay $100, scale
+            as you hire.
           </div>
         </div>
       </div>

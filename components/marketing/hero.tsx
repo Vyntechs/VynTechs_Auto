@@ -10,16 +10,18 @@ export function Hero({ isSignedIn }: HeroProps) {
       <div className="vm-hero-lead">
         <div className="vm-hero-eyebrow vm-eyebrow">
           <span className="vm-dot" />
-          Built in one bay &middot; still in beta
+          Built in the bay &middot; production live &middot; invite-only beta
         </div>
         <h1 className="vm-hero-title">
           The diagnostic that knows when <em>not</em> to commit.
         </h1>
         <p className="vm-hero-sub">
-          A working technician built this for his own bay because nothing else
-          would say <em>&ldquo;I don&rsquo;t know yet.&rdquo;</em> It surfaces
-          the next step, cites every claim, and refuses destructive work below a
-          confidence gate. Sharing it now because it works.
+          A working tech built this in his own bay because no other AI would
+          say <em>&ldquo;I don&rsquo;t know yet.&rdquo;</em> Three-rung
+          retrieval — per-shop corpus, OEM/TSB/NHTSA web sweep, then a capped
+          tech-assist — every claim cited, every cut, splice, or reflash
+          gated behind a calibrated confidence floor. Hardened on real
+          comebacks before it shipped.
         </p>
         <div className="vm-hero-cta">
           <a href={ctaHref} className="vm-btn">
@@ -35,17 +37,17 @@ export function Hero({ isSignedIn }: HeroProps) {
         <div className="vm-hero-meta">
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">3</div>
-            <div className="vm-hero-meta-lab">retrieval rungs, all cited</div>
+            <div className="vm-hero-meta-lab">retrieval rungs &middot; every claim cited inline</div>
           </div>
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">
               95<small>%</small>
             </div>
-            <div className="vm-hero-meta-lab">default commit gate</div>
+            <div className="vm-hero-meta-lab">default gate &middot; per-cell calibrated</div>
           </div>
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">0</div>
-            <div className="vm-hero-meta-lab">guesses below the gate</div>
+            <div className="vm-hero-meta-lab">irreversible work below the gate</div>
           </div>
         </div>
       </div>

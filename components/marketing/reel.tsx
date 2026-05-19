@@ -24,11 +24,13 @@ export function Reel() {
           <b>§ 03</b>What you&rsquo;ll use
         </div>
         <div>
-          <h2 className="vm-section-title">A phone in the bay.</h2>
+          <h2 className="vm-section-title">A PWA in the bay.</h2>
           <p className="vm-section-lede">
-            Built for the shop floor — thumb-reach, glove-friendly, designed
-            for noise and shop lighting. Real screens from the build, not
-            mockups.
+            Mobile-first PWA, glove-tolerant under sodium lighting.
+            Multi-modal capture — photo, video, audio, scan-screen, wiring
+            diagram, ambient temp and humidity via Open-Meteo. The vision
+            extractor reads DTCs, pinouts, wire colors, and build codes
+            off the photo. Real screens from the production build.
           </p>
         </div>
       </div>
