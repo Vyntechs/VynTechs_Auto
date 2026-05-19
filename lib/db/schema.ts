@@ -9,6 +9,8 @@ import {
   real,
   boolean,
   index,
+  uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 
@@ -48,6 +50,27 @@ export const customers = pgTable(
   (table) => [index('customers_shop_id_phone_idx').on(table.shopId, table.phone)],
 )
 
+export const platforms = pgTable(
+  'platforms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    yearRange: text('year_range').notNull(),
+    parentMake: text('parent_make').notNull(),
+    parentModelFamily: text('parent_model_family').notNull(),
+    generation: text('generation'),
+    parentPlatformId: uuid('parent_platform_id').references(
+      (): AnyPgColumn => platforms.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('platforms_parent_platform_id_idx').on(table.parentPlatformId),
+  ],
+)
+
 export const vehicles = pgTable(
   'vehicles',
   {
@@ -60,12 +83,416 @@ export const vehicles = pgTable(
     vin: text('vin'),
     mileage: integer('mileage'),
     plate: text('plate'),
+    platformId: uuid('platform_id').references(() => platforms.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('vehicles_customer_id_idx').on(table.customerId),
     index('vehicles_customer_id_vin_idx').on(table.customerId, table.vin),
+    index('vehicles_platform_id_idx').on(table.platformId),
+  ],
+)
+
+export const architectureFacts = pgTable(
+  'architecture_facts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    fieldVerifyRequired: boolean('field_verify_required').notNull().default(false),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => architectureFacts.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('architecture_facts_platform_id_idx').on(table.platformId),
+  ],
+)
+
+export const components = pgTable(
+  'components',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: text('name').notNull(),
+    kind: text('kind', {
+      enum: ['sensor', 'actuator', 'pump', 'valve', 'module', 'mechanical', 'splice', 'connector'],
+    }).notNull(),
+    electricalContract: text('electrical_contract'),
+    location: text('location'),
+    function: text('function'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => components.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('components_platform_id_idx').on(table.platformId),
+  ],
+)
+
+export const observableProperties = pgTable(
+  'observable_properties',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    observationMethod: text('observation_method', {
+      enum: [
+        'scan_tool_pid',
+        'pressure_test_with_gauge',
+        'electrical_measurement_at_pin',
+        'waveform_capture',
+        'direct_visual_internal',
+        'direct_visual_external',
+        'audible',
+        'touch',
+        'smell',
+      ],
+    }).notNull(),
+    housingOpacityStatus: text('housing_opacity_status', {
+      enum: ['opaque', 'transparent', 'removable', 'unknown'],
+    }),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => observableProperties.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('observable_properties_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const symptoms = pgTable(
+  'symptoms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    description: text('description').notNull(),
+    category: text('category', {
+      enum: ['dtc', 'performance', 'no-start', 'drivability', 'noise-vibration', 'electrical', 'other'],
+    }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('symptoms_category_idx').on(table.category),
+  ],
+)
+
+export const testActions = pgTable(
+  'test_actions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    scenarioRequired: text('scenario_required', {
+      enum: ['key-off', 'key-on', 'cranking', 'idle', 'medium-load', 'heavy-load', 'hot-soak', 'none'],
+    }).notNull(),
+    observationMethod: text('observation_method', {
+      enum: [
+        'scan_tool_pid',
+        'pressure_test_with_gauge',
+        'electrical_measurement_at_pin',
+        'waveform_capture',
+        'direct_visual_internal',
+        'direct_visual_external',
+        'audible',
+        'touch',
+        'smell',
+      ],
+    }).notNull(),
+    meterMode: text('meter_mode'),
+    expectedValue: real('expected_value'),
+    expectedUnit: text('expected_unit'),
+    expectedTolerance: real('expected_tolerance'),
+    expectedObservation: text('expected_observation'),
+    invasiveness: integer('invasiveness').notNull(),
+    confidenceBoost: real('confidence_boost').notNull().default(0),
+    sourceCitation: text('source_citation'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => testActions.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('test_actions_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const branchLogic = pgTable(
+  'branch_logic',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    testActionId: uuid('test_action_id')
+      .references(() => testActions.id, { onDelete: 'cascade' })
+      .notNull(),
+    condition: text('condition').notNull(),
+    verdict: text('verdict', {
+      enum: ['ok', 'warn', 'fail', 'impossible'],
+    }).notNull(),
+    nextAction: text('next_action').notNull(),
+    routesToTestActionId: uuid('routes_to_test_action_id').references(
+      () => testActions.id,
+      { onDelete: 'set null' },
+    ),
+    reasoning: text('reasoning'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => branchLogic.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('branch_logic_test_action_id_idx').on(table.testActionId),
+    index('branch_logic_routes_to_idx').on(table.routesToTestActionId),
+  ],
+)
+
+export const diagnosticSessions = pgTable(
+  'diagnostic_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    vehicleId: uuid('vehicle_id')
+      .references(() => vehicles.id, { onDelete: 'restrict' })
+      .notNull(),
+    symptomId: uuid('symptom_id')
+      .references(() => symptoms.id, { onDelete: 'restrict' })
+      .notNull(),
+    shopId: uuid('shop_id')
+      .references(() => shops.id, { onDelete: 'cascade' })
+      .notNull(),
+    techId: uuid('tech_id')
+      .references(() => profiles.id, { onDelete: 'restrict' })
+      .notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    finalVerdict: text('final_verdict', {
+      enum: ['commit-allowed', 'commit-refused', 'incomplete'],
+    }),
+    resolvedComponentId: uuid('resolved_component_id').references(
+      () => components.id,
+      { onDelete: 'set null' },
+    ),
+    cumulativeConfidence: real('cumulative_confidence').notNull().default(0),
+  },
+  (table) => [
+    index('diagnostic_sessions_vehicle_id_idx').on(table.vehicleId),
+    index('diagnostic_sessions_symptom_id_idx').on(table.symptomId),
+    index('diagnostic_sessions_shop_id_idx').on(table.shopId),
+    index('diagnostic_sessions_started_at_idx').on(table.startedAt),
+  ],
+)
+
+export const techOutcomes = pgTable(
+  'tech_outcomes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    testActionId: uuid('test_action_id')
+      .references(() => testActions.id, { onDelete: 'restrict' })
+      .notNull(),
+    sessionId: uuid('session_id')
+      .references(() => diagnosticSessions.id, { onDelete: 'restrict' })
+      .notNull(),
+    shopId: uuid('shop_id')
+      .references(() => shops.id, { onDelete: 'restrict' })
+      .notNull(),
+    techId: uuid('tech_id')
+      .references(() => profiles.id, { onDelete: 'restrict' })
+      .notNull(),
+    measuredValue: real('measured_value'),
+    measuredUnit: text('measured_unit'),
+    measuredObservation: text('measured_observation'),
+    verdict: text('verdict', {
+      enum: ['ok', 'warn', 'fail', 'impossible'],
+    }).notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('tech_outcomes_test_action_id_idx').on(table.testActionId),
+    index('tech_outcomes_session_id_idx').on(table.sessionId),
+    index('tech_outcomes_shop_id_idx').on(table.shopId),
+    index('tech_outcomes_recorded_at_idx').on(table.recordedAt),
+  ],
+)
+
+export const componentConnections = pgTable(
+  'component_connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fromComponentId: uuid('from_component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    toComponentId: uuid('to_component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    connectionKind: text('connection_kind', {
+      enum: ['electrical-wire', 'fluid-line', 'mechanical-linkage', 'can-bus', 'lin-bus', 'reports_to', 'controlled_by'],
+    }).notNull(),
+    direction: text('direction', {
+      enum: ['unidirectional', 'bidirectional'],
+    }).notNull().default('unidirectional'),
+    description: text('description'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => componentConnections.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('component_connections_from_idx').on(table.fromComponentId),
+    index('component_connections_to_idx').on(table.toComponentId),
+    index('component_connections_kind_idx').on(table.connectionKind),
+  ],
+)
+
+export const symptomTestImplications = pgTable(
+  'symptom_test_implications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    symptomId: uuid('symptom_id')
+      .references(() => symptoms.id, { onDelete: 'cascade' })
+      .notNull(),
+    testActionId: uuid('test_action_id')
+      .references(() => testActions.id, { onDelete: 'cascade' })
+      .notNull(),
+    priority: integer('priority').notNull(),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => symptomTestImplications.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('symptom_test_implications_symptom_priority_idx').on(
+      table.symptomId,
+      table.priority,
+    ),
+    index('symptom_test_implications_test_action_id_idx').on(table.testActionId),
+  ],
+)
+
+export const platformEquivalents = pgTable(
+  'platform_equivalents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    platformAId: uuid('platform_a_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    platformBId: uuid('platform_b_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    system: text('system', {
+      enum: [
+        'fuel',
+        'fuel-injection',
+        'air-induction',
+        'aftertreatment',
+        'turbo',
+        'egr',
+        'cooling',
+        'electrical',
+        'transmission',
+        'driveline',
+        'hvac',
+        'brakes',
+        'steering',
+        'engine-mechanical',
+      ],
+    }).notNull(),
+    verdict: text('verdict', {
+      enum: ['FULLY', 'PARTIALLY', 'NOT', 'INSUFFICIENT'],
+    }).notNull(),
+    verdictReasoning: text('verdict_reasoning'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => platformEquivalents.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('platform_equivalents_a_system_idx').on(table.platformAId, table.system),
+    index('platform_equivalents_b_system_idx').on(table.platformBId, table.system),
   ],
 )
 
@@ -267,6 +694,81 @@ export const shopsRelations = relations(shops, ({ many, one }) => ({
   profiles: many(profiles),
   sessions: many(sessions),
   stripeCustomer: one(stripeCustomers, { fields: [shops.id], references: [stripeCustomers.shopId] }),
+}))
+
+export const platformsRelations = relations(platforms, ({ many }) => ({
+  architectureFacts: many(architectureFacts),
+  components: many(components),
+}))
+
+export const architectureFactsRelations = relations(architectureFacts, ({ one }) => ({
+  platform: one(platforms, {
+    fields: [architectureFacts.platformId],
+    references: [platforms.id],
+  }),
+}))
+
+export const componentsRelations = relations(components, ({ one, many }) => ({
+  platform: one(platforms, {
+    fields: [components.platformId],
+    references: [platforms.id],
+  }),
+  observableProperties: many(observableProperties),
+  testActions: many(testActions),
+}))
+
+export const observablePropertiesRelations = relations(observableProperties, ({ one }) => ({
+  component: one(components, {
+    fields: [observableProperties.componentId],
+    references: [components.id],
+  }),
+}))
+
+export const symptomsRelations = relations(symptoms, ({ many }) => ({
+  testImplications: many(symptomTestImplications),
+}))
+
+export const testActionsRelations = relations(testActions, ({ one, many }) => ({
+  component: one(components, {
+    fields: [testActions.componentId],
+    references: [components.id],
+  }),
+  branches: many(branchLogic),
+  outcomes: many(techOutcomes),
+}))
+
+export const branchLogicRelations = relations(branchLogic, ({ one }) => ({
+  testAction: one(testActions, {
+    fields: [branchLogic.testActionId],
+    references: [testActions.id],
+  }),
+}))
+
+export const techOutcomesRelations = relations(techOutcomes, ({ one }) => ({
+  testAction: one(testActions, {
+    fields: [techOutcomes.testActionId],
+    references: [testActions.id],
+  }),
+  session: one(diagnosticSessions, {
+    fields: [techOutcomes.sessionId],
+    references: [diagnosticSessions.id],
+  }),
+  shop: one(shops, { fields: [techOutcomes.shopId], references: [shops.id] }),
+  tech: one(profiles, { fields: [techOutcomes.techId], references: [profiles.id] }),
+}))
+
+export const diagnosticSessionsRelations = relations(diagnosticSessions, ({ one, many }) => ({
+  vehicle: one(vehicles, {
+    fields: [diagnosticSessions.vehicleId],
+    references: [vehicles.id],
+  }),
+  symptom: one(symptoms, {
+    fields: [diagnosticSessions.symptomId],
+    references: [symptoms.id],
+  }),
+  shop: one(shops, { fields: [diagnosticSessions.shopId], references: [shops.id] }),
+  tech: one(profiles, { fields: [diagnosticSessions.techId], references: [profiles.id] }),
+  outcomes: many(techOutcomes),
 }))
 
 export type Shop = typeof shops.$inferSelect
@@ -493,3 +995,28 @@ export const whatsNewEntries = pgTable(
 
 export type WhatsNewEntry = typeof whatsNewEntries.$inferSelect
 export type NewWhatsNewEntry = typeof whatsNewEntries.$inferInsert
+
+export type Platform = typeof platforms.$inferSelect
+export type NewPlatform = typeof platforms.$inferInsert
+export type ArchitectureFact = typeof architectureFacts.$inferSelect
+export type NewArchitectureFact = typeof architectureFacts.$inferInsert
+export type Component = typeof components.$inferSelect
+export type NewComponent = typeof components.$inferInsert
+export type ObservableProperty = typeof observableProperties.$inferSelect
+export type NewObservableProperty = typeof observableProperties.$inferInsert
+export type Symptom = typeof symptoms.$inferSelect
+export type NewSymptom = typeof symptoms.$inferInsert
+export type TestAction = typeof testActions.$inferSelect
+export type NewTestAction = typeof testActions.$inferInsert
+export type BranchLogicRow = typeof branchLogic.$inferSelect
+export type NewBranchLogicRow = typeof branchLogic.$inferInsert
+export type TechOutcome = typeof techOutcomes.$inferSelect
+export type NewTechOutcome = typeof techOutcomes.$inferInsert
+export type DiagnosticSession = typeof diagnosticSessions.$inferSelect
+export type NewDiagnosticSession = typeof diagnosticSessions.$inferInsert
+export type ComponentConnection = typeof componentConnections.$inferSelect
+export type NewComponentConnection = typeof componentConnections.$inferInsert
+export type SymptomTestImplication = typeof symptomTestImplications.$inferSelect
+export type NewSymptomTestImplication = typeof symptomTestImplications.$inferInsert
+export type PlatformEquivalent = typeof platformEquivalents.$inferSelect
+export type NewPlatformEquivalent = typeof platformEquivalents.$inferInsert
