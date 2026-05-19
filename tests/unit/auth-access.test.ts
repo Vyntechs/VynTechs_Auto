@@ -195,6 +195,7 @@ describe('isPaywallExempt', () => {
       '/billing',
       '/whats-new',
       '/reset-password',
+      '/privacy',
     ])('exempts %s', (path) => {
       expect(isPaywallExempt(path)).toBe(true)
     })

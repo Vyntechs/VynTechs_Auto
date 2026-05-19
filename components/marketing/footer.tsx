@@ -7,7 +7,7 @@ export function Footer({ isSignedIn }: FooterProps) {
     <footer className="vm-foot">
       <div className="vm-foot-inner">
         <div>
-          <a href="#top" className="vm-brand" aria-label="Vyntechs home">
+          <a href="/" className="vm-brand" aria-label="Vyntechs home">
             <Image
               src="/brand/lockup.png"
               alt="Vyntechs"
@@ -34,19 +34,19 @@ export function Footer({ isSignedIn }: FooterProps) {
           <h5>Product</h5>
           <ul>
             <li>
-              <a href="#how">How it works</a>
+              <a href="/#how">How it works</a>
             </li>
             <li>
-              <a href="#product">Surfaces</a>
+              <a href="/#product">Surfaces</a>
             </li>
             <li>
-              <a href="#pricing">Pricing</a>
+              <a href="/#pricing">Pricing</a>
             </li>
             <li>
-              <a href="#compare">Compare</a>
+              <a href="/#compare">Compare</a>
             </li>
             <li>
-              <a href="#faq">FAQ</a>
+              <a href="/#faq">FAQ</a>
             </li>
           </ul>
         </div>
@@ -76,15 +76,24 @@ export function Footer({ isSignedIn }: FooterProps) {
           <h5>About</h5>
           <ul>
             <li>
-              <a href="#why">Why it exists</a>
+              <a href="/#why">Why it exists</a>
             </li>
             <li>One working tech</li>
             <li>One bay</li>
           </ul>
         </div>
+        <div>
+          <h5>Legal</h5>
+          <ul>
+            <li>
+              <a href="/privacy">Privacy</a>
+            </li>
+          </ul>
+        </div>
       </div>
       <div className="vm-foot-bot">
         <span>© 2026 Vyntechs &middot; vyntechs.dev</span>
+        <a href="/privacy" className="vm-foot-legal">Privacy</a>
         <span className="vm-foot-mark">Built in the bay, not the boardroom.</span>
         <span>Beta &middot; invite-only</span>
       </div>

@@ -30,6 +30,10 @@ const EXEMPT_EXACT = new Set<string>([
   // able to reach this page without bouncing through the paywall or back
   // through the deactivation gate (which would loop).
   '/deactivated',
+  // Privacy policy — must be reachable signed-out (GDPR Article 12) and
+  // by deactivated users; sits in the fast-path exempt set so middleware
+  // never bounces a public-policy reader to /sign-in.
+  '/privacy',
   '/api/health',
 ])
 
