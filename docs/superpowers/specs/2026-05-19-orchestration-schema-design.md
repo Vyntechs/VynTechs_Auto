@@ -57,10 +57,34 @@ Fact-bearing tables additionally carry:
 - `source_provenance` text NOT NULL — see §6.
 - `inference_class` text NULL — see §6. (Omitted on `platform_equivalents`; that table uses only `source_provenance`.)
 - `is_retired` boolean NOT NULL DEFAULT false — retirement flag.
-- `replaced_by_id` UUID NULL self-FK — points at the row that replaced this one.
+- `replaced_by_id` UUID NULL self-FK with `ON DELETE SET NULL` — points at the row that replaced this one. SET NULL means: if the replacement row is itself deleted, the predecessor's pointer becomes null (still retired, no successor).
 
 Fact-bearing tables: `architecture_facts`, `components`, `observable_properties`, `test_actions`, `branch_logic`, `component_connections`, `symptom_test_implications`, `platform_equivalents`.
 Non-fact-bearing: `platforms`, `symptoms`, `tech_outcomes`, `diagnostic_sessions`.
+
+**Retirement invariant.** Every fact-bearing table carries a CHECK constraint enforcing that active rows cannot point at a successor:
+
+```sql
+CHECK (replaced_by_id IS NULL OR is_retired = true)
+```
+
+This catches the bug-class where an application layer sets `replaced_by_id` on a row but forgets to flip `is_retired`. The constraint is hand-written per table in step 4 of §8 (drizzle-kit doesn't emit table-level CHECKs from the TypeScript schema).
+
+**Slug case sensitivity.** Postgres text comparisons are case-sensitive. `"67psd-frp-sensor"` and `"67PSD-FRP-Sensor"` are distinct slugs. The orchestration application layer is responsible for normalizing prompt-emitted slugs (lowercase, replace whitespace with hyphens, strip non-`[a-z0-9-]` characters) before INSERT. This normalization is application-side; the schema does not enforce it.
+
+**Self-referential foreign keys in Drizzle TypeScript.** Two tables in this design have self-FKs (`platforms.parent_platform_id`, plus the `replaced_by_id` column on every fact-bearing table). Drizzle requires an explicit `AnyPgColumn` type cast in the reference closure because the table identifier isn't yet defined when the column is declared:
+
+```typescript
+import { type AnyPgColumn, pgTable, uuid } from 'drizzle-orm/pg-core'
+
+export const platforms = pgTable('platforms', {
+  // ...
+  parentPlatformId: uuid('parent_platform_id')
+    .references((): AnyPgColumn => platforms.id, { onDelete: 'set null' }),
+})
+```
+
+Same idiom applies to every `replaced_by_id` column.
 
 ### 4.1 `platforms`
 
@@ -73,7 +97,7 @@ Columns:
 - `parent_make` text NOT NULL
 - `parent_model_family` text NOT NULL
 - `generation` text NULL
-- `parent_platform_id` UUID NULL → `platforms.id` (self-FK for the HAS_ANCESTOR lineage edge)
+- `parent_platform_id` UUID NULL → `platforms.id` ON DELETE SET NULL (self-FK for the HAS_ANCESTOR lineage edge; if a parent platform is deleted, the child's pointer becomes null, child platform survives)
 - `created_at`, `updated_at` standard
 
 Indexes:
@@ -191,7 +215,7 @@ Columns:
 - `expected_tolerance` real NULL
 - `expected_observation` text NULL — for non-numeric tests
 - `invasiveness` integer NOT NULL — CHECK (invasiveness BETWEEN 1 AND 5)
-- `confidence_boost` real NOT NULL DEFAULT 0 — cumulative-confidence increment when the test returns `ok`
+- `confidence_boost` real NOT NULL DEFAULT 0 — cumulative-confidence increment when the test returns `ok`. CHECK (`confidence_boost BETWEEN 0 AND 100`).
 - `source_citation` text NULL — free-text reference to the architecture_fact or observable_property the expected value derives from (mirrors graph-schema.md's `source_citation` field)
 - standard fact-bearing fields
 
@@ -213,7 +237,7 @@ Columns:
 - `condition` text NOT NULL — e.g., `"reading > 5.25V"`
 - `verdict` text NOT NULL — enum: `'ok' | 'warn' | 'fail' | 'impossible'`
 - `next_action` text NOT NULL — free-text instruction for the tech
-- `routes_to_test_action_id` UUID NULL → `test_actions.id` — null for terminal halts
+- `routes_to_test_action_id` UUID NULL → `test_actions.id` ON DELETE SET NULL — null for terminal halts; if the routed-to test is later deleted, this becomes null (branch becomes terminal)
 - `reasoning` text NULL — the `LAW` / `LOGIC` reflected by the condition
 - standard fact-bearing fields
 
@@ -231,10 +255,10 @@ What a tech measured when running a test. The unit of field-data accumulation.
 
 Columns:
 - `id` UUID PK
-- `test_action_id` UUID NOT NULL → `test_actions.id`
-- `session_id` UUID NOT NULL → `diagnostic_sessions.id` ON DELETE CASCADE
-- `shop_id` UUID NOT NULL → `shops.id` (attribution)
-- `tech_id` UUID NOT NULL → `profiles.id` (attribution; required, not nullable as in graph-schema.md)
+- `test_action_id` UUID NOT NULL → `test_actions.id` ON DELETE RESTRICT (outcomes are valuable field data; never lose them to a test row delete — tests are retired, not deleted)
+- `session_id` UUID NOT NULL → `diagnostic_sessions.id` ON DELETE RESTRICT (outcomes survive even if a session is later deleted — the field-data accumulation is shop-shared and outlives individual sessions; sessions in Phase 1 aren't deleted in normal flow)
+- `shop_id` UUID NOT NULL → `shops.id` ON DELETE RESTRICT (attribution; if a shop is hard-deleted, blocks the delete rather than losing outcomes — recovery path: detach outcomes manually first)
+- `tech_id` UUID NOT NULL → `profiles.id` ON DELETE RESTRICT (attribution; same logic as shop_id; required, not nullable as in graph-schema.md)
 - `measured_value` real NULL
 - `measured_unit` text NULL
 - `measured_observation` text NULL
@@ -284,15 +308,15 @@ A complete diagnostic run by one tech.
 
 Columns:
 - `id` UUID PK
-- `vehicle_id` UUID NOT NULL → `vehicles.id`
-- `symptom_id` UUID NOT NULL → `symptoms.id`
-- `shop_id` UUID NOT NULL → `shops.id`
-- `tech_id` UUID NOT NULL → `profiles.id`
+- `vehicle_id` UUID NOT NULL → `vehicles.id` ON DELETE RESTRICT (sessions are work records; don't disappear if a vehicle row is deleted)
+- `symptom_id` UUID NOT NULL → `symptoms.id` ON DELETE RESTRICT (sessions reference the symptom they targeted; symptom rows are stable identifiers, deletion is unusual)
+- `shop_id` UUID NOT NULL → `shops.id` ON DELETE CASCADE (a shop's sessions are shop-private content; cleanup follows shop deletion, matching the `customers` → `shops` pattern in `lib/db/schema.ts`)
+- `tech_id` UUID NOT NULL → `profiles.id` ON DELETE RESTRICT (matches the existing `sessions.tech_id` convention)
 - `started_at` timestamp NOT NULL DEFAULT NOW()
 - `completed_at` timestamp NULL
 - `final_verdict` text NULL — enum: `'commit-allowed' | 'commit-refused' | 'incomplete'`
-- `resolved_component_id` UUID NULL → `components.id` — what was actually replaced/repaired when `final_verdict = 'commit-allowed'`
-- `cumulative_confidence` real NOT NULL DEFAULT 0
+- `resolved_component_id` UUID NULL → `components.id` ON DELETE SET NULL — what was actually replaced/repaired when `final_verdict = 'commit-allowed'`; if the component is later deleted, this becomes null (session record survives without its resolution pointer)
+- `cumulative_confidence` real NOT NULL DEFAULT 0 — CHECK (`cumulative_confidence BETWEEN 0 AND 100`). Application layer is responsible for clamping at 100 when accumulating `confidence_boost` values.
 
 Indexes:
 - `diagnostic_sessions_vehicle_id_idx` on `vehicle_id`
@@ -363,7 +387,7 @@ Columns:
 - `verdict_reasoning` text NULL — free-text explanation from Prompt 4A
 - `source_provenance` text NOT NULL
 - `is_retired` boolean NOT NULL DEFAULT false
-- `replaced_by_id` UUID NULL → `platform_equivalents.id`
+- `replaced_by_id` UUID NULL → `platform_equivalents.id` ON DELETE SET NULL
 - `created_at`, `updated_at` standard
 
 Constraints:
@@ -442,22 +466,32 @@ Index: `vehicles_platform_id_idx` on `platform_id`.
 
 ## 8. Migration plan
 
-1. Edit `lib/db/schema.ts` to add the 12 new table definitions and the `vehicles.platform_id` column. Default to inline addition; if `schema.ts` exceeds ~1000 lines after the addition, refactor into a multi-file pattern (`lib/db/schema/diagnostic-graph.ts`) in a follow-up cleanup PR.
+1. Edit `lib/db/schema.ts` to add the 12 new table definitions and the `vehicles.platform_id` column. Also add `relations()` exports for the new tables, matching the existing convention (see `sessionsRelations`, `corpusEntriesRelations` in `lib/db/schema.ts` for the pattern). Default to inline addition; if `schema.ts` exceeds ~1000 lines after the addition, split into `lib/db/schema/diagnostic-graph.ts` and re-export from `schema.ts` so `drizzle.config.ts`'s `schema: './lib/db/schema.ts'` entry stays valid.
 2. Run `pnpm drizzle-kit generate` to produce the migration SQL at `drizzle/migrations/0017_<auto_name>.sql`.
 3. Inspect generated SQL: verify constraints, partial indexes, and FK cascades match the spec. Drizzle-kit produces most of the DDL correctly; manual review catches anywhere the TypeScript schema didn't translate.
 4. Append hand-written DDL for items Drizzle doesn't manage:
-   - `ALTER TABLE tech_outcomes ENABLE ROW LEVEL SECURITY;` + `CREATE POLICY ...` statements (per §4.8)
-   - Same for `diagnostic_sessions` (per §4.9)
-   - Any partial-unique-index that drizzle-kit didn't generate (e.g., `WHERE is_retired = false` uniqueness)
-   - CHECK constraints if drizzle-kit doesn't emit them
+   - **RLS policies:** `ALTER TABLE tech_outcomes ENABLE ROW LEVEL SECURITY;` + four `CREATE POLICY` statements (per §4.8). Same for `diagnostic_sessions` (per §4.9).
+   - **Partial unique indexes** (`CREATE UNIQUE INDEX ... WHERE is_retired = false`):
+     - One per fact-bearing node table on `slug`: `architecture_facts`, `components`, `observable_properties`, `test_actions`, `branch_logic` (5 indexes).
+     - One per junction table on its natural identity tuple: `component_connections (from_component_id, to_component_id, connection_kind)`, `symptom_test_implications (symptom_id, test_action_id)`, `platform_equivalents (platform_a_id, platform_b_id, system)` (3 indexes).
+   - **Partial indexes on `is_retired = false` for active-row lookups:** per-table `<table>_active_idx` (already noted in each table's Indexes list).
+   - **CHECK constraints:**
+     - Retirement invariant: `CHECK (replaced_by_id IS NULL OR is_retired = true)` on every fact-bearing table (8 tables).
+     - Range constraints: `test_actions.invasiveness BETWEEN 1 AND 5`, `test_actions.confidence_boost BETWEEN 0 AND 100`, `diagnostic_sessions.cumulative_confidence BETWEEN 0 AND 100`, `symptom_test_implications.priority BETWEEN 1 AND 10`.
+     - Value-shape constraints: `tech_outcomes` requires either `measured_value` or `measured_observation` to be non-null; `component_connections.from_component_id <> to_component_id`; `platform_equivalents.platform_a_id < platform_b_id`.
 5. Rehearse on `vyntechs_rehearsal` local DB:
    - Apply via `psql -d vyntechs_rehearsal -f drizzle/migrations/0017_*.sql`
-   - Verify `\dt` shows new tables, `\d+ <table>` shows expected shape, RLS policies present
-   - Run sample INSERTs + FK-violation tests to confirm constraints hold
-   - Verify the partial-unique-index on retirement-aware uniqueness behaves correctly (insert two `is_retired=false` rows with same slug → error; insert one with `is_retired=true` + one with `is_retired=false` → ok)
+   - Verify `\dt` shows new tables, `\d+ <table>` shows expected shape, RLS policies present (`\d+ tech_outcomes` should list the four policies)
+   - **FK cascade tests:** insert sample rows; verify cascade behaviors match the spec (e.g., deleting a `platforms` row cascades to its `architecture_facts`; deleting a `diagnostic_sessions` row is RESTRICTED if `tech_outcomes` reference it)
+   - **CHECK constraint tests:** verify rejected inputs fail (`priority = 100` on `symptom_test_implications` → fails; `confidence_boost = -5` on `test_actions` → fails; `invasiveness = 7` on `test_actions` → fails; `cumulative_confidence = 150` on `diagnostic_sessions` → fails)
+   - **Retirement invariant test:** INSERT an active row (`is_retired = false`) with a non-null `replaced_by_id` → fails
+   - **Partial-unique-index test:** insert two `is_retired = false` rows with same slug → fails; retire the first then re-insert → succeeds; insert one with `is_retired = true` + one with `is_retired = false` and same slug → succeeds
+   - **RLS testing is NOT performed locally.** Local Postgres has no `auth.uid()` context. Verify SQL parses without errors (policies attach to the tables) locally; functional RLS verification happens post-apply against live in step 8.
 6. Surface migration SQL + rehearsal log to Brandon for **per-op approval** (per `feedback_no_dangerous_prod_ops`).
 7. After approval, apply to live Supabase via Supabase MCP `apply_migration`.
-8. Run MCP `get_advisors`. Fix any new lints (unindexed FKs, missing RLS) before declaring Phase 1 done.
+8. Post-apply verification:
+   - Run MCP `get_advisors`. Fix any new lints (unindexed FKs, missing RLS) before declaring Phase 1 done.
+   - **Functional RLS check** (live DB, since branching is parked per `project_db_branching_parked`): as Brandon's authenticated session, INSERT a `tech_outcomes` row with the correct `shop_id` → succeeds. INSERT with a fake `shop_id` not matching the caller's profile → fails. SELECT from another shop's perspective — verify aggregate queries (counts, averages) still work but individual rows are not exposed. Roll back the test inserts via `BEGIN; ...; ROLLBACK;` envelope so live data isn't polluted.
 
 ---
 
@@ -481,7 +515,6 @@ When all five pass, Phase 3 (Claude Code skill wrapper) is unblocked.
 - **Denormalized field-outcome stats on `test_actions`:** the design package's queries compute `avg(measured_value)` and `stdev` on demand. If query performance becomes an issue at scale, add denormalized columns and update via triggers.
 - **`provenance_history` audit table:** retirement pattern preserves history via retired rows. Dedicated history table is a future optimization.
 - **Application-layer mapping from `vehicles` to `platforms`:** Phase 2 hand-sets `vehicles.platform_id`. A general lookup/inference layer is Phase 3+ work.
-- **Drizzle relations() exports:** add for the new tables during Phase 1 if cheap, or defer to Phase 2 when application code starts traversing the graph. Not strictly required for the migration itself.
 - **Per-field provenance on `components`:** a single component row currently carries one `source_provenance` for the whole entity (name, kind, location, function, electrical_contract). If a future requirement needs "location is FIELD-VERIFIED but electrical_contract is still TRAINING-INFERRED" granularity, factor each property into an `observable_properties` row.
 - **Structured `source_citation` on `test_actions`:** today it's free-text. A future refactor could make it a FK to the originating `architecture_facts` or `observable_properties` row so "find all tests citing this fact" becomes a normal join.
 - **Multi-wire `component_connections` between the same pair:** the current `UNIQUE (from_component_id, to_component_id, connection_kind)` blocks multiple connections of the same kind between the same component pair (e.g., two electrical wires between the FRP sensor and the PCM for different signals). If this becomes a real-world need, add a distinguishing column (e.g., `pin_pair_label`) to the uniqueness key.
@@ -493,4 +526,4 @@ When all five pass, Phase 3 (Claude Code skill wrapper) is unblocked.
 - All 4 prompts cold-context validated 2026-05-19 across 5+ test cases per prompt covering Ford, GM, and Dodge diesel platforms. See `docs/interactive-diagnostics/validation-2026-05-19-orchestration.md`.
 - Two architectural fixes applied during validation are baked into this schema:
   - **Fix 1 (Prompt 1 closing-line count):** affects Prompt 1's output formatting, not the schema. No-op here.
-  - **Fix 2 (Prompt 2 opacity-not-stated = GAP):** load-bearing for the schema. `observable_properties.housing_opacity_status = NULL` / `'unknown'` is the row state that triggers OBSERVABILITY HALT in Prompt 3. The `opacity_required` boolean on `observable_properties` lets the halt query target only opacity-dependent rows.
+  - **Fix 2 (Prompt 2 opacity-not-stated = GAP):** load-bearing for the schema. `observable_properties.housing_opacity_status = NULL` / `'unknown'` is the row state that triggers OBSERVABILITY HALT in Prompt 3. The halt query filters by `observation_method = 'direct_visual_internal'` (see §4.4) to target only opacity-dependent rows — the opacity requirement is derived from the observation method, not stored as a separate flag.
