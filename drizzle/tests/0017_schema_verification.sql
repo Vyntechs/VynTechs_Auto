@@ -145,18 +145,31 @@ BEGIN
 END $$;
 
 -- Test 9: CHECK cumulative_confidence BETWEEN 0 AND 100 rejects 150
+-- Wrapped in BEGIN/ROLLBACK so throwaway fixtures (shop/profile/customer/
+-- vehicle/symptom) don't persist. Self-contained — doesn't depend on
+-- pre-existing rows in vehicles/shops/profiles.
+BEGIN;
 DO $$
 DECLARE
-  fake_vehicle_id UUID;
-  fake_symptom_id UUID;
   fake_shop_id UUID;
   fake_profile_id UUID;
+  fake_customer_id UUID;
+  fake_vehicle_id UUID;
+  fake_symptom_id UUID;
 BEGIN
-  -- Setup minimum fixtures inside this DO block
-  SELECT id INTO fake_vehicle_id FROM vehicles LIMIT 1;
-  SELECT id INTO fake_shop_id FROM shops LIMIT 1;
-  SELECT id INTO fake_profile_id FROM profiles LIMIT 1;
-  INSERT INTO symptoms (slug, description, category) VALUES ('verif-cc-s', 't', 'dtc')
+  INSERT INTO shops (name) VALUES ('verif-cc-shop')
+    RETURNING id INTO fake_shop_id;
+  INSERT INTO profiles (user_id, shop_id, role)
+    VALUES (gen_random_uuid(), fake_shop_id, 'tech')
+    RETURNING id INTO fake_profile_id;
+  INSERT INTO customers (shop_id, name, phone)
+    VALUES (fake_shop_id, 'verif-cc-cust', '555-0000')
+    RETURNING id INTO fake_customer_id;
+  INSERT INTO vehicles (customer_id, year, make, model)
+    VALUES (fake_customer_id, 2020, 'V', 'F')
+    RETURNING id INTO fake_vehicle_id;
+  INSERT INTO symptoms (slug, description, category)
+    VALUES ('verif-cc-s', 't', 'dtc')
     RETURNING id INTO fake_symptom_id;
 
   BEGIN
@@ -167,10 +180,8 @@ BEGIN
     WHEN check_violation THEN
       RAISE NOTICE 'TEST 9 OK: cumulative_confidence=150 rejected';
   END;
-
-  -- Clean up
-  DELETE FROM symptoms WHERE slug = 'verif-cc-s';
 END $$;
+ROLLBACK;
 
 -- Test 10: CHECK priority BETWEEN 1 AND 10 rejects 100
 DO $$
