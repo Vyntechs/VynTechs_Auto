@@ -8,7 +8,7 @@
 | Gate | What | Status | Result |
 |---|---|---|---|
 | 1 | P1 subagent → vet step → P1 inserts | **DONE 2026-05-19** | 1 platform + 23 architecture_facts live on Supabase. Verification: 17 confirmed / 1 inferred / 5 gap. Rehearsed on local vyntechs_rehearsal first; counts matched live exactly. |
-| 2 | P2 subagent → P2 inserts (components, observable_properties, component_connections) | pending | — |
+| 2 | P2 subagent → P2 inserts (components, observable_properties, component_connections) | **DONE 2026-05-19** | 28 components + 49 observable_properties + 43 component_connections live on Supabase. Verification: 27 components TRAINING-CONFIRMED / 1 TRAINING-INFERRED (cluster, via LOGIC). Rehearsed on local first; counts matched live exactly. Zero validation issues across all enum constraints. |
 | 3 | P3 subagent (× P0087) → P3 inserts | pending | — |
 | 4 | P4A subagent (no candidates yet — empty result expected) | pending | — |
 | 5 | Simulated diagnostic walk for P0087 → outcomes | pending | — |
@@ -49,13 +49,37 @@ The subagent followed the additional-instructions block, emitted clean JSON, mad
 - 23 architecture facts attached to that platform
 - Brandon's rule for downstream prompts: "no guesstimates, only logical facts" — Prompts 2, 3, 4A subagent instructions should reinforce this explicitly
 
+## Gate 2 findings logged
+
+### Finding 6: Subagent estimates were 2-3x lower than reality
+
+Phase 2 spec estimated ~12 components, ~25 observables, ~15 connections from P2. Actual: 28 / 49 / 43. The subagent went deeper than the spec assumed — it captured all 8 injectors as separate components (not as a collective "injectors" entity), broke out the engine gear-train and DEF dosing system, and emitted multiple observable properties per component (scan-tool PID + electrical pin + waveform + audible cues per major sensor/actuator).
+
+**Implication for Phase 3:** the Phase 3 plan needs to budget for larger row counts when estimating storage growth + query performance. Per-platform component count is closer to 25-30 than the spec's ~12.
+
+### Finding 7: Zero enum-mismatch translations needed in practice for P2
+
+Phase 2 spec Section 1 catalogued expected vocab mismatches (drained_into_container, audible_at_location, etc.). The subagent's actual output used ONLY schema-valid values — likely because the additional-instructions block in the subagent dispatch was explicit about the schema enum constraints AND included the prompt-vocab → schema-enum translation table. The subagent self-translated correctly.
+
+**Implication for Phase 3:** the production translator's enum-mapping logic is critical to get right; this run validates that explicit enum constraints in the subagent prompt enable the LLM to self-translate at emission time, reducing the need for post-emission SQL rewriting.
+
+### Finding 8: PATTERN-class inferences appeared in P2 output (correctly conservative)
+
+One observable_properties row (`sd4-67psd-can-signal-waveform`) was tagged TRAINING-INFERRED with inference_class=PATTERN. One component_connections row (`sd4-67psd-fuel-level-sender → sd4-67psd-pcm`) was also tagged TRAINING-INFERRED with PATTERN. Both are appropriately marked as "typical for this class of system, confirm" rather than asserted as fact — exactly what the prompt's refusal protocol demands.
+
+**Validation:** Brandon's "no guesstimates, only logical facts" rule held. The single PATTERN row in the connections is honest about uncertainty (the fuel level sender might route directly to the cluster rather than via the PCM — common on some platforms).
+
 ## Next when Phase 2 resumes
 
-Gate 2 — Prompt 2 (System Operation Intake). The subagent input is:
-1. The Prompt 2 text from `docs/interactive-diagnostics/prompts/prompt-2-system-operation-intake.md`
-2. A plain-English narration of the fuel system, synthesized from the 23 vetted architecture facts
-3. JSON sidecar instructions matching the components / observable_properties / component_connections table shapes
+Gate 3 — Prompt 3 (Diagnostic Session Generator) for P0087 (fuel rail pressure too low). The subagent input is:
+1. The Prompt 3 text from `docs/interactive-diagnostics/prompts/prompt-3-diagnostic-session.md`
+2. The full structured model (components + observable_properties + component_connections JSON — retrieved from the live DB)
+3. The symptom payload: P0087 fuel rail pressure too low, no prior test results
+4. JSON sidecar instructions matching the symptoms / test_actions / branch_logic / symptom_test_implications table shapes
+5. Schema constraint reminder: invasiveness 1-5, confidence_boost 0-100, priority 1-10 for symptom_test_implications
 
-Brandon's vet doesn't happen again at Gate 2 (the vet step is between P1 and P2 only). Gate 2 approval is the single "OK to commit these inserts to live Supabase" check after the subagent returns.
+Brandon's vet doesn't happen at Gate 3. Gate 3 approval is the single "OK to commit" check after subagent returns.
 
-**Expected Gate 2 outcome:** ~12 components, ~25 observable_properties, ~15 component_connections inserted. Subagent may surface enum-mismatch translation cases (Phase 2 spec Section 1 table) — those become run-report additions.
+**Expected Gate 3 outcome:** 1 symptom (P0087) + ~8 test_actions + ~6 branch_logic + ~8 symptom_test_implications inserted. Subagent must respect the rule that test_actions reference existing components by slug (not create new ones).
+
+**Expected Gate 3 finding to watch for:** does the subagent attempt to create new components when generating a test that needs one not in the structured model? Per Prompt 3's refusal protocol, it should surface a gap and refuse rather than fabricate. Phase 2 watches for this.
