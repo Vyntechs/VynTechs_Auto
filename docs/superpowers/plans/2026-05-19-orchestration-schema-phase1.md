@@ -1003,14 +1003,332 @@ CREATE INDEX symptom_test_implications_symptom_priority_idx
   ON symptom_test_implications (symptom_id, priority DESC);
 ```
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 12: Write the checked-in schema verification file**
+
+Create `drizzle/tests/0017_schema_verification.sql` with the following content. This file is a self-contained regression test that can be re-run anytime to confirm the schema is correctly built and the constraints behave as specified. Task 3 will execute this file against the local rehearsal DB; future migrations can re-execute it to catch regressions.
+
+```sql
+-- drizzle/tests/0017_schema_verification.sql
+--
+-- Schema verification for migration 0017 (diagnostic orchestration).
+-- Run via:
+--   psql -d <dbname> -v ON_ERROR_STOP=1 -f drizzle/tests/0017_schema_verification.sql
+--
+-- Exits 0 if every check passes. Non-zero exit (with diagnostic message)
+-- on the first failure. All behavioral tests use BEGIN/ROLLBACK envelopes
+-- so the DB state is unchanged after a successful run.
+
+\echo '=== Verifying migration 0017 ==='
+
+-- ============================================================
+-- STRUCTURE CHECKS
+-- ============================================================
+
+-- Test 1: All 12 new tables exist
+DO $$
+DECLARE
+  expected_tables TEXT[] := ARRAY[
+    'platforms', 'architecture_facts', 'components', 'observable_properties',
+    'symptoms', 'test_actions', 'branch_logic', 'tech_outcomes',
+    'diagnostic_sessions', 'component_connections',
+    'symptom_test_implications', 'platform_equivalents'
+  ];
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY expected_tables LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = t) THEN
+      RAISE EXCEPTION 'TEST 1 FAILED: missing table %', t;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'TEST 1 OK: all 12 tables exist';
+END $$;
+
+-- Test 2: vehicles.platform_id column exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'vehicles' AND column_name = 'platform_id'
+  ) THEN
+    RAISE EXCEPTION 'TEST 2 FAILED: vehicles.platform_id column missing';
+  END IF;
+  RAISE NOTICE 'TEST 2 OK: vehicles.platform_id exists';
+END $$;
+
+-- Test 3: RLS policies on tech_outcomes (expect 4)
+DO $$
+DECLARE
+  n INTEGER;
+BEGIN
+  SELECT count(*) INTO n FROM pg_policy WHERE polrelid = 'tech_outcomes'::regclass;
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'TEST 3 FAILED: tech_outcomes expected 4 RLS policies, found %', n;
+  END IF;
+  RAISE NOTICE 'TEST 3 OK: tech_outcomes has 4 RLS policies';
+END $$;
+
+-- Test 4: RLS policies on diagnostic_sessions (expect 4)
+DO $$
+DECLARE
+  n INTEGER;
+BEGIN
+  SELECT count(*) INTO n FROM pg_policy WHERE polrelid = 'diagnostic_sessions'::regclass;
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'TEST 4 FAILED: diagnostic_sessions expected 4 RLS policies, found %', n;
+  END IF;
+  RAISE NOTICE 'TEST 4 OK: diagnostic_sessions has 4 RLS policies';
+END $$;
+
+-- Test 5: tech_outcomes.session_id FK has RESTRICT cascade
+DO $$
+DECLARE
+  delete_action CHAR;
+BEGIN
+  SELECT confdeltype INTO delete_action
+  FROM pg_constraint
+  WHERE conrelid = 'tech_outcomes'::regclass
+    AND contype = 'f'
+    AND pg_get_constraintdef(oid) LIKE '%session_id%';
+  IF delete_action <> 'r' THEN
+    RAISE EXCEPTION 'TEST 5 FAILED: tech_outcomes.session_id should be RESTRICT (r), found %', delete_action;
+  END IF;
+  RAISE NOTICE 'TEST 5 OK: tech_outcomes.session_id is RESTRICT';
+END $$;
+
+-- ============================================================
+-- BEHAVIORAL CHECKS — constraints enforce as specified
+-- ============================================================
+
+-- Test 6: CASCADE — deleting a platform cascades to its architecture_facts
+BEGIN;
+INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+  VALUES ('verif-cascade', '2020', 'V', 'F');
+INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
+  SELECT 'verif-cascade-fact', id, 't', 'TRAINING-CONFIRMED'
+  FROM platforms WHERE slug = 'verif-cascade';
+DELETE FROM platforms WHERE slug = 'verif-cascade';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM architecture_facts WHERE slug = 'verif-cascade-fact') THEN
+    RAISE EXCEPTION 'TEST 6 FAILED: CASCADE did not fire on platforms';
+  END IF;
+  RAISE NOTICE 'TEST 6 OK: CASCADE fires on platforms → architecture_facts';
+END $$;
+ROLLBACK;
+
+-- Test 7: CHECK invasiveness BETWEEN 1 AND 5 rejects 7
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+      VALUES ('verif-inv', '2020', 'V', 'F');
+    INSERT INTO components (slug, platform_id, name, kind, source_provenance)
+      SELECT 'verif-inv-c', id, 'c', 'sensor', 'TRAINING-CONFIRMED'
+      FROM platforms WHERE slug = 'verif-inv';
+    INSERT INTO test_actions (slug, component_id, description, scenario_required, observation_method, invasiveness, source_provenance)
+      SELECT 'verif-inv-t', id, 't', 'idle', 'scan_tool_pid', 7, 'TRAINING-CONFIRMED'
+      FROM components WHERE slug = 'verif-inv-c';
+    RAISE EXCEPTION 'TEST 7 FAILED: CHECK did not reject invasiveness=7';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 7 OK: invasiveness=7 rejected';
+  END;
+END $$;
+
+-- Test 8: CHECK confidence_boost BETWEEN 0 AND 100 rejects -5
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+      VALUES ('verif-cb', '2020', 'V', 'F');
+    INSERT INTO components (slug, platform_id, name, kind, source_provenance)
+      SELECT 'verif-cb-c', id, 'c', 'sensor', 'TRAINING-CONFIRMED'
+      FROM platforms WHERE slug = 'verif-cb';
+    INSERT INTO test_actions (slug, component_id, description, scenario_required, observation_method, invasiveness, confidence_boost, source_provenance)
+      SELECT 'verif-cb-t', id, 't', 'idle', 'scan_tool_pid', 2, -5, 'TRAINING-CONFIRMED'
+      FROM components WHERE slug = 'verif-cb-c';
+    RAISE EXCEPTION 'TEST 8 FAILED: CHECK did not reject confidence_boost=-5';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 8 OK: confidence_boost=-5 rejected';
+  END;
+END $$;
+
+-- Test 9: CHECK cumulative_confidence BETWEEN 0 AND 100 rejects 150
+DO $$
+DECLARE
+  fake_vehicle_id UUID;
+  fake_symptom_id UUID;
+  fake_shop_id UUID;
+  fake_profile_id UUID;
+BEGIN
+  -- Setup minimum fixtures inside this DO block
+  SELECT id INTO fake_vehicle_id FROM vehicles LIMIT 1;
+  SELECT id INTO fake_shop_id FROM shops LIMIT 1;
+  SELECT id INTO fake_profile_id FROM profiles LIMIT 1;
+  INSERT INTO symptoms (slug, description, category) VALUES ('verif-cc-s', 't', 'dtc')
+    RETURNING id INTO fake_symptom_id;
+
+  BEGIN
+    INSERT INTO diagnostic_sessions (vehicle_id, symptom_id, shop_id, tech_id, cumulative_confidence)
+      VALUES (fake_vehicle_id, fake_symptom_id, fake_shop_id, fake_profile_id, 150);
+    RAISE EXCEPTION 'TEST 9 FAILED: CHECK did not reject cumulative_confidence=150';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 9 OK: cumulative_confidence=150 rejected';
+  END;
+
+  -- Clean up
+  DELETE FROM symptoms WHERE slug = 'verif-cc-s';
+END $$;
+
+-- Test 10: CHECK priority BETWEEN 1 AND 10 rejects 100
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+      VALUES ('verif-pri', '2020', 'V', 'F');
+    INSERT INTO components (slug, platform_id, name, kind, source_provenance)
+      SELECT 'verif-pri-c', id, 'c', 'sensor', 'TRAINING-CONFIRMED'
+      FROM platforms WHERE slug = 'verif-pri';
+    INSERT INTO test_actions (slug, component_id, description, scenario_required, observation_method, invasiveness, source_provenance)
+      SELECT 'verif-pri-t', id, 't', 'idle', 'scan_tool_pid', 2, 'TRAINING-CONFIRMED'
+      FROM components WHERE slug = 'verif-pri-c';
+    INSERT INTO symptoms (slug, description, category) VALUES ('verif-pri-s', 't', 'dtc');
+    INSERT INTO symptom_test_implications (symptom_id, test_action_id, priority, source_provenance)
+      SELECT s.id, t.id, 100, 'TRAINING-CONFIRMED'
+      FROM symptoms s, test_actions t
+      WHERE s.slug = 'verif-pri-s' AND t.slug = 'verif-pri-t';
+    RAISE EXCEPTION 'TEST 10 FAILED: CHECK did not reject priority=100';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 10 OK: priority=100 rejected';
+  END;
+END $$;
+
+-- Test 11: Retirement invariant — active row with replaced_by_id fails
+DO $$
+DECLARE
+  fact_a_id UUID;
+  fact_b_id UUID;
+BEGIN
+  INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+    VALUES ('verif-retire', '2020', 'V', 'F');
+  INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
+    SELECT 'verif-retire-a', id, 'A', 'TRAINING-CONFIRMED' FROM platforms WHERE slug = 'verif-retire'
+    RETURNING id INTO fact_a_id;
+  INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
+    SELECT 'verif-retire-b', id, 'B', 'FIELD-VERIFIED' FROM platforms WHERE slug = 'verif-retire'
+    RETURNING id INTO fact_b_id;
+
+  BEGIN
+    UPDATE architecture_facts SET replaced_by_id = fact_b_id WHERE id = fact_a_id;
+    RAISE EXCEPTION 'TEST 11 FAILED: retirement invariant did not block active row with replaced_by_id';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 11 OK: retirement invariant blocks active row with replaced_by_id';
+  END;
+
+  -- Clean up
+  DELETE FROM platforms WHERE slug = 'verif-retire';
+END $$;
+
+-- Test 12: Partial unique on slug blocks two active rows with same slug
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+      VALUES ('verif-punq', '2020', 'V', 'F');
+    INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
+      SELECT 'verif-punq-fact', id, 'first', 'TRAINING-CONFIRMED'
+      FROM platforms WHERE slug = 'verif-punq';
+    INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
+      SELECT 'verif-punq-fact', id, 'second', 'TRAINING-CONFIRMED'
+      FROM platforms WHERE slug = 'verif-punq';
+    RAISE EXCEPTION 'TEST 12 FAILED: partial unique did not block duplicate active slugs';
+  EXCEPTION
+    WHEN unique_violation THEN
+      RAISE NOTICE 'TEST 12 OK: partial unique blocks duplicate active slugs';
+  END;
+
+  DELETE FROM platforms WHERE slug = 'verif-punq';
+END $$;
+
+-- Test 13: Partial unique allows retirement pattern (one retired + one active same slug)
+BEGIN;
+INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+  VALUES ('verif-retpat', '2020', 'V', 'F');
+INSERT INTO architecture_facts (slug, platform_id, description, source_provenance, is_retired)
+  SELECT 'verif-retpat-fact', id, 'old', 'TRAINING-CONFIRMED', true
+  FROM platforms WHERE slug = 'verif-retpat';
+INSERT INTO architecture_facts (slug, platform_id, description, source_provenance, is_retired)
+  SELECT 'verif-retpat-fact', id, 'new', 'FIELD-VERIFIED', false
+  FROM platforms WHERE slug = 'verif-retpat';
+DO $$
+DECLARE
+  n INTEGER;
+BEGIN
+  SELECT count(*) INTO n FROM architecture_facts WHERE slug = 'verif-retpat-fact';
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'TEST 13 FAILED: expected 2 rows (one retired, one active), found %', n;
+  END IF;
+  RAISE NOTICE 'TEST 13 OK: retirement pattern allowed (retired + active same slug)';
+END $$;
+ROLLBACK;
+
+-- Test 14: Canonical ordering CHECK on platform_equivalents
+DO $$
+DECLARE
+  p_a UUID;
+  p_b UUID;
+  larger UUID;
+  smaller UUID;
+BEGIN
+  INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+    VALUES ('verif-eq-a', '2020', 'V', 'A') RETURNING id INTO p_a;
+  INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
+    VALUES ('verif-eq-b', '2020', 'V', 'B') RETURNING id INTO p_b;
+
+  -- Determine which UUID is larger
+  IF p_a > p_b THEN
+    larger := p_a;
+    smaller := p_b;
+  ELSE
+    larger := p_b;
+    smaller := p_a;
+  END IF;
+
+  -- Try inserting with WRONG ordering (larger as platform_a_id) — should fail
+  BEGIN
+    INSERT INTO platform_equivalents (platform_a_id, platform_b_id, system, verdict, source_provenance)
+      VALUES (larger, smaller, 'fuel', 'FULLY', 'TRAINING-CONFIRMED');
+    RAISE EXCEPTION 'TEST 14 FAILED: canonical ordering CHECK did not reject larger-first ordering';
+  EXCEPTION
+    WHEN check_violation THEN
+      RAISE NOTICE 'TEST 14 OK: canonical ordering CHECK blocks larger-first';
+  END;
+
+  -- Clean up (cascades to platform_equivalents if any)
+  DELETE FROM platforms WHERE slug IN ('verif-eq-a', 'verif-eq-b');
+END $$;
+
+\echo '=== All migration 0017 verification tests passed ==='
+```
+
+The file uses two assertion patterns:
+- `RAISE EXCEPTION` for unconditional failures (a test condition was wrong)
+- Inner `BEGIN...EXCEPTION WHEN ... THEN ...END` for tests where an INSERT is expected to fail — the catch silently swallows the expected exception, while the outer `RAISE EXCEPTION` fires only if the INSERT unexpectedly succeeded
+
+With `-v ON_ERROR_STOP=1`, psql exits non-zero on the first `RAISE EXCEPTION` and prints the diagnostic message, naming which test failed.
+
+- [ ] **Step 13: Commit**
 
 ```bash
-git add drizzle/migrations/0017_*.sql drizzle/migrations/meta/_journal.json
+git add drizzle/migrations/0017_*.sql drizzle/migrations/meta/_journal.json drizzle/tests/0017_schema_verification.sql
 git commit -m "$(cat <<'EOF'
-feat(db): generate migration 0017 for diagnostic orchestration schema
+feat(db): generate migration 0017 + checked-in schema verification
 
-drizzle-kit generated CREATE TABLE and ALTER TABLE statements, plus
+drizzle-kit generated CREATE TABLE / ALTER TABLE statements, plus
 hand-appended DDL for items drizzle-kit can't emit:
 - RLS policies on tech_outcomes and diagnostic_sessions (4 each)
 - 8 partial unique indexes (5 slug + 3 junction natural-identity)
@@ -1019,6 +1337,10 @@ hand-appended DDL for items drizzle-kit can't emit:
 - 4 numeric range CHECK constraints
 - 3 value-shape CHECK constraints
 - 1 DESC-ordered index replacement
+
+Plus a checked-in schema verification file
+(drizzle/tests/0017_schema_verification.sql) that exercises
+every constraint behavior as a reusable regression test.
 
 Spec: docs/superpowers/specs/2026-05-19-orchestration-schema-design.md
 Migration not yet applied; rehearses on vyntechs_rehearsal next.
@@ -1057,281 +1379,62 @@ psql -d vyntechs_rehearsal -v ON_ERROR_STOP=1 -f drizzle/migrations/0017_*.sql
 
 Expected: no errors. If any statement fails, the entire migration aborts (`-v ON_ERROR_STOP=1`). Fix and re-rehearse.
 
-- [ ] **Step 3: Verify all 12 tables exist**
+- [ ] **Step 3: Run the consolidated verification file**
 
 Run:
 
 ```bash
-psql -d vyntechs_rehearsal -c "\dt platforms architecture_facts components observable_properties symptoms test_actions branch_logic tech_outcomes diagnostic_sessions component_connections symptom_test_implications platform_equivalents"
+psql -d vyntechs_rehearsal -v ON_ERROR_STOP=1 -f drizzle/tests/0017_schema_verification.sql
 ```
 
-Expected: all 12 tables listed.
+Expected output: a series of `NOTICE: TEST N OK: ...` lines (one per test, 14 tests total), ending with `=== All migration 0017 verification tests passed ===`. Exit code 0.
 
-- [ ] **Step 4: Verify `vehicles.platform_id` column exists**
+If any test fails, psql exits non-zero with `ERROR: TEST N FAILED: ...` naming the failure. Investigate the migration, fix the issue in `drizzle/migrations/0017_*.sql` (or in the verification file if the test itself is buggy), and re-run. Do NOT proceed to Task 4 until this passes cleanly.
+
+What the verification file covers (see `drizzle/tests/0017_schema_verification.sql` for full SQL):
+- All 12 new tables exist
+- `vehicles.platform_id` column exists
+- RLS policies on `tech_outcomes` and `diagnostic_sessions` (4 each)
+- `tech_outcomes.session_id` FK has RESTRICT cascade type (catches the most-likely cascade-spec regression)
+- CASCADE behavior on `platforms → architecture_facts` actually fires when a parent is deleted
+- 4 numeric range CHECK constraints reject out-of-range values (invasiveness, confidence_boost, cumulative_confidence, priority)
+- Retirement invariant CHECK blocks setting `replaced_by_id` on an active row
+- Partial unique on slug blocks duplicate active rows
+- Partial unique allows the retirement pattern (one retired + one active with same slug)
+- `platform_equivalents` canonical-ordering CHECK rejects larger-first UUID ordering
+
+Why this is the verification surface: every behavioral guarantee the spec promises has a corresponding assertion in this file. Future migrations (e.g., 0019) that accidentally drop one of these constraints will be caught on the next rehearsal because the file is checked in and re-runnable.
+
+**Spot-check the per-table structure manually if anything looks off.** The consolidated file covers behavior; if you want to eyeball table shape, run:
 
 ```bash
-psql -d vyntechs_rehearsal -c "\d+ vehicles" | grep platform_id
+psql -d vyntechs_rehearsal -c "\d+ tech_outcomes"
+psql -d vyntechs_rehearsal -c "\d+ diagnostic_sessions"
+psql -d vyntechs_rehearsal -c "\d+ platforms"
 ```
 
-Expected: a line showing `platform_id | uuid | | | |` with a FK reference to platforms.
+Note: functional RLS testing (does `auth.uid()` actually scope correctly per-shop) happens in Task 4 against the live DB. Local Postgres has no Supabase auth context.
 
-- [ ] **Step 5: Verify RLS policies on `tech_outcomes` and `diagnostic_sessions`**
+- [ ] **Step 4: Document rehearsal results**
 
-```bash
-psql -d vyntechs_rehearsal -c "\d+ tech_outcomes" | grep -A 5 'Policies'
-psql -d vyntechs_rehearsal -c "\d+ diagnostic_sessions" | grep -A 5 'Policies'
-```
-
-Expected: each table lists 4 policies (insert_own_shop, update_own_shop, delete_own_shop, select_all).
-
-Note: functional RLS testing (does auth.uid() actually scope correctly) happens in Task 4 against the live DB.
-
-- [ ] **Step 6: Run FK cascade test — CASCADE behavior**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('test-platform-cascade', '2020', 'Test', 'TestFamily');
-
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
-  SELECT 'test-fact-cascade', id, 'test fact', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'test-platform-cascade';
-
--- Delete the platform; the fact should cascade
-DELETE FROM platforms WHERE slug = 'test-platform-cascade';
-
-SELECT count(*) AS remaining_facts FROM architecture_facts WHERE slug = 'test-fact-cascade';
--- Expected: 0
-ROLLBACK;
-EOF
-```
-
-Expected: `remaining_facts = 0`. Rolled back to leave DB clean.
-
-- [ ] **Step 7: Run FK cascade test — RESTRICT behavior on `tech_outcomes.session_id`**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
--- Set up minimal fixtures
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('test-platform-restrict', '2020', 'Test', 'TestFamily');
-INSERT INTO components (slug, platform_id, name, kind, source_provenance)
-  SELECT 'test-comp-restrict', id, 'Test Comp', 'sensor', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'test-platform-restrict';
-INSERT INTO symptoms (slug, description, category)
-  VALUES ('test-symptom-restrict', 'test', 'dtc');
-INSERT INTO test_actions (slug, component_id, description, scenario_required, observation_method, invasiveness, source_provenance)
-  SELECT 'test-action-restrict', id, 'test', 'idle', 'scan_tool_pid', 1, 'TRAINING-CONFIRMED'
-  FROM components WHERE slug = 'test-comp-restrict';
-
--- Create a session and an outcome attached to it
-INSERT INTO diagnostic_sessions (vehicle_id, symptom_id, shop_id, tech_id)
-  SELECT v.id, s.id, p.shop_id, p.id
-  FROM vehicles v, symptoms s, profiles p
-  WHERE s.slug = 'test-symptom-restrict'
-    AND p.shop_id IS NOT NULL
-  LIMIT 1
-  RETURNING id;
--- Capture the session id manually for the next insert (or use a CTE)
-
--- For brevity, assume the test runner adapts this. The critical assertion:
--- DELETE FROM diagnostic_sessions WHERE id = <session_with_outcomes>
--- Expected: ERROR — update or delete on table violates foreign key constraint
-ROLLBACK;
-EOF
-```
-
-Expected: the DELETE of a session with attached outcomes raises a foreign-key violation error.
-
-If you'd rather run this without fixtures, simply confirm the FK definition matches by:
-
-```bash
-psql -d vyntechs_rehearsal -c "
-  SELECT conname, confdeltype FROM pg_constraint
-  WHERE conrelid = 'tech_outcomes'::regclass AND contype = 'f';
-"
-```
-
-Expected: a row for the `session_id` FK with `confdeltype = 'r'` (RESTRICT).
-
-- [ ] **Step 8: Run CHECK constraint violation tests**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
--- Each of these should fail. Run individually inside transactions.
-
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('check-test-platform', '2020', 'Test', 'TestFamily');
-INSERT INTO components (slug, platform_id, name, kind, source_provenance)
-  SELECT 'check-test-comp', id, 'Test', 'sensor', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'check-test-platform';
-
--- Should fail: invasiveness out of range
-INSERT INTO test_actions (slug, component_id, description, scenario_required, observation_method, invasiveness, source_provenance)
-  SELECT 'check-bad-invasive', id, 'test', 'idle', 'scan_tool_pid', 7, 'TRAINING-CONFIRMED'
-  FROM components WHERE slug = 'check-test-comp';
--- Expected: ERROR — new row for relation "test_actions" violates check constraint "test_actions_invasiveness_range"
-
-ROLLBACK;
-EOF
-```
-
-Similarly run quick tests for:
-- `confidence_boost = -5` on test_actions → ERROR
-- `cumulative_confidence = 150` on diagnostic_sessions → ERROR
-- `priority = 100` on symptom_test_implications → ERROR
-
-All four should fail their respective CHECK constraints.
-
-- [ ] **Step 9: Run retirement invariant test**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('retirement-test-platform', '2020', 'Test', 'TestFamily');
-
--- Insert two facts
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
-  SELECT 'fact-a', id, 'fact A', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'retirement-test-platform';
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
-  SELECT 'fact-b', id, 'fact B', 'FIELD-VERIFIED'
-  FROM platforms WHERE slug = 'retirement-test-platform';
-
--- Try to set fact-a's replaced_by_id WITHOUT marking it retired — should fail
-UPDATE architecture_facts
-  SET replaced_by_id = (SELECT id FROM architecture_facts WHERE slug = 'fact-b')
-  WHERE slug = 'fact-a';
--- Expected: ERROR — new row violates check constraint "architecture_facts_retirement_invariant"
-
-ROLLBACK;
-EOF
-```
-
-Expected: CHECK constraint violation.
-
-- [ ] **Step 10: Run partial unique index tests**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('punique-test-platform', '2020', 'Test', 'TestFamily');
-
--- Insert two facts with same slug, both active — second should fail
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
-  SELECT 'punique-fact', id, 'first', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'punique-test-platform';
-
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance)
-  SELECT 'punique-fact', id, 'second', 'TRAINING-CONFIRMED'
-  FROM platforms WHERE slug = 'punique-test-platform';
--- Expected: ERROR — duplicate key value violates unique constraint "architecture_facts_slug_active_unique"
-
-ROLLBACK;
-EOF
-```
-
-Then verify that the partial constraint correctly ALLOWS the retirement pattern:
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('punique-test-platform-2', '2020', 'Test', 'TestFamily');
-
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance, is_retired)
-  SELECT 'retire-test-fact', id, 'old', 'TRAINING-CONFIRMED', true
-  FROM platforms WHERE slug = 'punique-test-platform-2';
-
-INSERT INTO architecture_facts (slug, platform_id, description, source_provenance, is_retired)
-  SELECT 'retire-test-fact', id, 'new', 'FIELD-VERIFIED', false
-  FROM platforms WHERE slug = 'punique-test-platform-2';
--- Expected: SUCCESS — partial unique only enforces among is_retired = false
-
-SELECT count(*) FROM architecture_facts WHERE slug = 'retire-test-fact';
--- Expected: 2
-
-ROLLBACK;
-EOF
-```
-
-Expected: two rows with same slug coexist when one is retired.
-
-- [ ] **Step 11: Verify the `platform_equivalents` canonical-ordering CHECK**
-
-```bash
-psql -d vyntechs_rehearsal <<'EOF'
-BEGIN;
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('eq-platform-a', '2020', 'Test', 'TestA');
-INSERT INTO platforms (slug, year_range, parent_make, parent_model_family)
-  VALUES ('eq-platform-b', '2020', 'Test', 'TestB');
-
--- Get the two UUIDs, sort by string comparison
-WITH ids AS (
-  SELECT
-    (SELECT id FROM platforms WHERE slug = 'eq-platform-a') AS a,
-    (SELECT id FROM platforms WHERE slug = 'eq-platform-b') AS b
-)
-SELECT
-  CASE WHEN a < b THEN 'a-first' ELSE 'b-first' END AS canonical_order,
-  a, b
-FROM ids;
-
--- Insert with WRONG ordering should fail
--- (depends on the actual UUID ordering; this is illustrative)
--- If 'b' < 'a', then INSERT (platform_a_id = a, platform_b_id = b, ...) violates CHECK
-INSERT INTO platform_equivalents (platform_a_id, platform_b_id, system, verdict, source_provenance)
-  SELECT
-    (SELECT id FROM platforms WHERE slug = 'eq-platform-a'),
-    (SELECT id FROM platforms WHERE slug = 'eq-platform-b'),
-    'fuel',
-    'FULLY',
-    'TRAINING-CONFIRMED';
--- May fail OR succeed depending on UUID ordering.
-
--- Insert with CORRECT canonical ordering should succeed.
-
-ROLLBACK;
-EOF
-```
-
-The point of this test is to verify the CHECK constraint is enforced; exact behavior depends on the random UUIDs generated. Adjust ordering and re-run if needed. Expected: at least one of the two insert directions (a→b or b→a) fails with the canonical_ordering CHECK violation.
-
-- [ ] **Step 12: Document rehearsal results**
-
-Create a brief note (NOT a committed file — just notes for Brandon's approval review):
+Capture a brief note for Brandon's Task 4 approval gate (NOT a committed file — pasted into the approval surface):
 
 ```
 Rehearsal log — 2026-05-19
 Migration: drizzle/migrations/0017_<name>.sql
+Verification file: drizzle/tests/0017_schema_verification.sql
 DB: vyntechs_rehearsal
 
 ✓ Migration applied without errors
-✓ All 12 tables present
-✓ vehicles.platform_id added
-✓ RLS policies attached to tech_outcomes and diagnostic_sessions (4 each)
-✓ Cascade test (platforms → architecture_facts): cascade fired correctly
-✓ RESTRICT test (tech_outcomes.session_id): FK definition confirms confdeltype = 'r'
-✓ CHECK constraints fired correctly:
-  - invasiveness = 7 → blocked
-  - confidence_boost = -5 → blocked
-  - cumulative_confidence = 150 → blocked
-  - priority = 100 → blocked
-✓ Retirement invariant: setting replaced_by_id on an active row → blocked
-✓ Partial unique on slug: two active rows with same slug → blocked
-✓ Partial unique allows retirement pattern: retired row + active row same slug → ok
-✓ platform_equivalents canonical-ordering CHECK: wrong ordering → blocked
+✓ Verification file passed (all 14 tests OK — see psql output)
+✓ Manual `\d+` spot-checks on tech_outcomes, diagnostic_sessions, platforms match the spec
 ```
 
-- [ ] **Step 13: No commit at end of Task 3**
+Paste the full psql output (the `NOTICE: TEST N OK: ...` lines) alongside this log. Brandon needs to see the test-by-test confirmation, not just a "✓ passed" summary.
 
-Task 3 changes nothing in the repo (only local DB state was exercised). Move to Task 4.
+- [ ] **Step 5: No commit at end of Task 3**
+
+Task 3 changes nothing in the repo (the verification file was already committed in Task 2; only local DB state was exercised here, and it rolled back). Move to Task 4.
 
 ---
 
@@ -1346,7 +1449,7 @@ Task 3 changes nothing in the repo (only local DB state was exercised). Move to 
 
 Show Brandon:
 1. The full migration file `drizzle/migrations/0017_*.sql` (or a summary if very long)
-2. The rehearsal log from Task 3 Step 12
+2. The rehearsal log from Task 3 Step 4 (including the full `psql` output showing each test's `NOTICE: TEST N OK: ...` line from the verification file)
 
 Wait for explicit approval before proceeding. Do NOT proceed to Step 2 without it.
 
@@ -1445,8 +1548,8 @@ Phase 2 (smallest-viable-test against live DB) is now unblocked.
 - [ ] All type exports covered (Task 1 Step 16).
 - [ ] Migration generation covered (Task 2 Step 1).
 - [ ] All hand-written DDL categories covered: RLS, partial unique on slug (5 tables), partial unique on junction tuples (3 tables), partial active-row indexes (5 tables), retirement invariant CHECK (8 tables), range CHECK (4 columns), value-shape CHECK (3 constraints), DESC index replacement (1).
-- [ ] All cascade test cases from spec §8 step 5 covered in Task 3.
-- [ ] All CHECK constraint test cases from spec §8 step 5 covered in Task 3.
+- [ ] Checked-in verification file `drizzle/tests/0017_schema_verification.sql` covered (Task 2 Step 12) — 14 assertion tests covering structure + behavior.
+- [ ] Task 3 runs the verification file against `vyntechs_rehearsal` (Task 3 Step 3); each test from spec §8 step 5 (cascade, CHECK, retirement invariant, partial unique, canonical ordering) is present in the verification file.
 - [ ] Per-op approval gate before live application (Task 4 Step 1).
 - [ ] `get_advisors` post-apply check (Task 4 Step 3).
 - [ ] Functional RLS verification path documented (Task 4 Step 4).
