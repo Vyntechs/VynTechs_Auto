@@ -1,7 +1,7 @@
 # Run 1 / 2018 F-250 6.7L PSD + P0087 — Run Report (IN PROGRESS)
 
 **Date opened:** 2026-05-19
-**Status:** Gate 1 of 5 complete; Gates 2–5 pending.
+**Status:** Gates 1, 2, 3 of 5 complete; Gates 4–5 pending.
 
 ## Gate progress
 
@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 1 | P1 subagent → vet step → P1 inserts | **DONE 2026-05-19** | 1 platform + 23 architecture_facts live on Supabase. Verification: 17 confirmed / 1 inferred / 5 gap. Rehearsed on local vyntechs_rehearsal first; counts matched live exactly. |
 | 2 | P2 subagent → P2 inserts (components, observable_properties, component_connections) | **DONE 2026-05-19** | 28 components + 49 observable_properties + 43 component_connections live on Supabase. Verification: 27 components TRAINING-CONFIRMED / 1 TRAINING-INFERRED (cluster, via LOGIC). Rehearsed on local first; counts matched live exactly. Zero validation issues across all enum constraints. |
-| 3 | P3 subagent (× P0087) → P3 inserts | pending | — |
+| 3 | P3 subagent (× P0087) → P3 inserts | **DONE 2026-05-19** | 1 symptom + 14 test_actions + 29 branch_logic + 13 symptom_test_implications live on Supabase. Verification: rehearsed on local vyntechs_rehearsal first; counts matched live exactly (1 / 14 / 29 / 13). Zero validation issues across all enum constraints. Diagnostic walks to a corroborated CP4.2-catastrophic-failure verdict gated behind three confirmatory findings (low CP4 inlet pressure + metallic debris in filter + CP4 cavitation noise). Subagent had to be re-dispatched mid-gate after prior session's macOS process-token failure wiped /tmp — fresh dispatch produced shape-equivalent output. |
 | 4 | P4A subagent (no candidates yet — empty result expected) | pending | — |
 | 5 | Simulated diagnostic walk for P0087 → outcomes | pending | — |
 
@@ -69,9 +69,41 @@ One observable_properties row (`sd4-67psd-can-signal-waveform`) was tagged TRAIN
 
 **Validation:** Brandon's "no guesstimates, only logical facts" rule held. The single PATTERN row in the connections is honest about uncertainty (the fuel level sender might route directly to the cluster rather than via the PCM — common on some platforms).
 
+## Gate 3 findings logged
+
+### Finding 9: Session-recovery validation — disk loss doesn't break gate integrity
+
+Mid-Gate-3 the prior session lost disk access to /Volumes/Creativity (macOS process-token issue, not a drive failure), wiping /tmp and the in-flight subagent output. After full restart, the resumed session re-pulled the structured model from live Supabase (Gates 1+2 had already committed), re-dispatched a fresh Sonnet subagent with the same Prompt 3 + structured model + P0087 payload, and got shape-equivalent output (14 / 29 / 13 vs. prior 12 / 31 / 12 — minor variance in test count, same diagnostic logic structure). The gate-based progression's recovery property is validated: per-gate checkpoint commits to live + git mean an OS-level disk loss only costs the in-flight gate, never prior ones.
+
+### Finding 10: Subagent self-translated enum vocabulary correctly
+
+Phase 2 spec Section 1 catalogued expected mismatches (WOT, "load", "medium", "heavy" → schema enums). The P3 subagent's diagnostic narrative used "WOT" and "under load" naturally but translated to heavy-load / medium-load at JSON emission time, producing zero enum violations. Same finding pattern as P2 (Finding 7): explicit enum constraints in the subagent prompt enable self-translation at emission time.
+
+### Finding 11: Refusal protocol held — three-corroborator gate for CP4.2 verdict
+
+The diagnostic does not allow commit-to-CP4.2-replacement above gate from a single test. The "filter-element-metals" branch triggers the verdict, but the surrounding reasoning makes clear that gate is only crossed when low CP4 inlet pressure + metallic debris + CP4 cavitation audible all agree. PRV-stuck-open is the alternate high-side commit path when supply is normal but post-shutdown bleed-down is rapid. Single-test commitment was not produced anywhere in the path. The refusal protocol is working as designed.
+
+### Finding 12: Per-bank rail pressure PIDs deduplicated correctly
+
+The structured model has two observables for Bank A and Bank B rail pressure PIDs (`hp-rail-a-pressure-pid`, `hp-rail-b-pressure-pid`) attached to per-bank rail components — but they share a single physical FRP sensor on Ford 6.7L PSD. The subagent emitted only one FRP PID test (`sd4-67psd-test-frp-pid-idle` on the FRP sensor itself), not two redundant per-bank tests. This is correct behavior for this platform but exposes a model-shape question for Phase 3: should observable-with-shared-source mark itself as such, or should the canonical model collapse per-bank PIDs into one observable on the physical sensor? Surfaced as Phase 3 design question; not a blocker.
+
+### Finding 13: Rail external leak test mapped to Bank A by convention
+
+The structured model has separate observables for Bank A and Bank B external leaks, but the diagnostic step (`sd4-67psd-test-hp-rail-external-leak`) covers both rails physically as a single walk-around. The subagent mapped the test to `sd4-67psd-hp-rail-bank-a` as the `component_id` since the schema requires a single component reference, with description text explicitly covering both banks. This is a workable convention but signals a Phase 3 finding: the test_actions schema may need either a many-to-many test_action→component link, or a "covers also" pointer for tests that physically span multiple components. Not a blocker for Phase 2.
+
+### Finding 14: 7 honest gaps preserved through to the inserts
+
+All 7 "not yet captured" specs the P3 subagent identified (FRP 5V reference reading, P0087 trip PSI, CP4 inlet pressure minimum, lift pump output PSI range, IMV duty cycle range, relay box cavity ID, lift pump motor voltage spec) landed in the live test_actions with `expected_value = NULL` and provenance flagged TRAINING-INFERRED, with the gap explicitly stated in the description text. Zero fabricated numbers. The diagnostic surfaces the gap rather than papering over it — which is the entire point of the refusal architecture.
+
 ## Next when Phase 2 resumes
 
-Gate 3 — Prompt 3 (Diagnostic Session Generator) for P0087 (fuel rail pressure too low). The subagent input is:
+Gate 4 — Prompt 4A (Platform Equivalence Generator) for the F-250 with no candidate equivalents yet present. Expected outcome: empty result, no new platform_equivalents rows. Confirms the refusal protocol holds when there's nothing to match against. After Gate 4: Gate 5 is the simulated diagnostic walk + retirement-pattern flip.
+
+(Below is the legacy section preserved for reference; Gate 3 inputs are documented in subagent-output-p3.md and the inserts in inserts-p3.sql.)
+
+### Gate 3 inputs (legacy reference)
+
+The subagent input was:
 1. The Prompt 3 text from `docs/interactive-diagnostics/prompts/prompt-3-diagnostic-session.md`
 2. The full structured model (components + observable_properties + component_connections JSON — retrieved from the live DB)
 3. The symptom payload: P0087 fuel rail pressure too low, no prior test results
