@@ -941,3 +941,14 @@ button { font: inherit; }
   width: 56px; height: 80px;
   display: block;
 }
+
+/* ---------- Responsive layout toggle — CachedOverview screen ----------
+   Mobile (< 1024 px): show .cov-app, hide .cov-desktop.
+   Desktop (≥ 1024 px): show .cov-desktop, hide .cov-app.
+   Both live in the DOM; the media query picks the visible one.        */
+@media (min-width: 1024px) {
+  .cov-app    { display: none; }
+}
+@media (max-width: 1023px) {
+  .cov-desktop { display: none; }
+}
