@@ -186,14 +186,17 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
             }}
           >
             <div>
-              <span style={{ color: 'var(--vt-fg-2)' }}>{tests.length}</span> ordered tests
+              <span style={{ color: 'var(--vt-fg-2)' }}>{tests.length}</span>{' '}
+              {tests.length === 1 ? 'ordered test' : 'ordered tests'}
             </div>
             <div>
-              <span style={{ color: 'var(--vt-fg-2)' }}>{uniqueMethods}</span> observation methods
+              <span style={{ color: 'var(--vt-fg-2)' }}>{uniqueMethods}</span>{' '}
+              {uniqueMethods === 1 ? 'observation method' : 'observation methods'}
             </div>
             {priorFixCount > 0 && (
               <div>
-                <span style={{ color: 'var(--vt-fg-2)' }}>{priorFixCount}</span> corpus matches
+                <span style={{ color: 'var(--vt-fg-2)' }}>{priorFixCount}</span>{' '}
+                {priorFixCount === 1 ? 'corpus match' : 'corpus matches'}
               </div>
             )}
             <div>
@@ -235,7 +238,7 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
                   letterSpacing: '0.06em',
                 }}
               >
-                {priorFixCount} prior fixes · cross-shop corpus
+                {priorFixCount} prior {priorFixCount === 1 ? 'fix' : 'fixes'} · cross-shop corpus
               </div>
             )}
           </div>
