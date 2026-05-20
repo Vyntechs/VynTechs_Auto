@@ -47,6 +47,8 @@ export async function createSessionForUser(opts: {
   userId: string
   body: unknown
   treeState: TreeState
+  cacheHitPlatformId?: string | null
+  cacheHitSymptomId?: string | null
 }): Promise<CreateSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -60,6 +62,8 @@ export async function createSessionForUser(opts: {
     techId: profile.id,
     intake: parsed.data,
     treeState: opts.treeState,
+    cacheHitPlatformId: opts.cacheHitPlatformId ?? null,
+    cacheHitSymptomId: opts.cacheHitSymptomId ?? null,
   })
   return { ok: true, id: session.id }
 }
