@@ -72,6 +72,7 @@ export default async function SessionPage({
 
     return (
       <CachedOverview
+        sessionId={session.id}
         diagnostic={diagnostic}
         vehicleName={formatVehicleName(session.intake)}
         vin={null}
