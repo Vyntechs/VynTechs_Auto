@@ -199,8 +199,12 @@ export async function loadCachedDiagnostic({
     )
   const priorFixCount = fixCountRow?.value ?? 0
 
-  // DTC display: uppercase slug when category is 'dtc', else null
-  const dtcDisplay = symptom.category === 'dtc' ? symptom.slug.toUpperCase() : null
+  // DTC display: just the leading DTC code (e.g. "P0087"), not the whole
+  // descriptive slug. Symptom slugs for dtc-category rows are prefixed with
+  // the code — `p0087-fuel-rail-pressure-too-low` → `P0087`.
+  const dtcMatch = symptom.slug.match(/^[pbcu][0-9]{4}/i)
+  const dtcDisplay =
+    symptom.category === 'dtc' && dtcMatch ? dtcMatch[0].toUpperCase() : null
 
   return {
     platform: {
