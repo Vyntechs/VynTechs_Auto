@@ -5,9 +5,9 @@ import {
   InvasivenessDots,
   SymptomHero,
   CachedInstantBadge,
-  CtaBar,
   ConfidenceGate,
 } from '@/components/vt'
+import { AbandonButton } from '@/components/screens/abandon-button'
 import type { CachedDiagnostic, CachedDiagnosticTest } from '@/lib/diagnostics/cached-lookup'
 import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
@@ -16,6 +16,7 @@ import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 // ---------------------------------------------------------------------------
 
 type Props = {
+  sessionId: string
   diagnostic: CachedDiagnostic
   vehicleName: string
   vin: string | null
@@ -67,21 +68,10 @@ function BrandSigil() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared CTA props — PR1 ships disabled; walkthrough arrives in PR2.
-// ---------------------------------------------------------------------------
-
-const CTA_PROPS = {
-  label: 'Start diagnosis',
-  disabled: true,
-  leadLeft: 'Test plan ready',
-  leadRight: 'Interactive walkthrough — coming in the next update',
-} as const
-
-// ---------------------------------------------------------------------------
 // Mobile layout — V1 Ledger (ScreenLedger from design package)
 // ---------------------------------------------------------------------------
 
-function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
+function MobileOverview({ sessionId, diagnostic, vehicleName, vin, mileage }: Props) {
   const { symptom, gateThreshold, priorFixCount, tests } = diagnostic
 
   const vinLine = [vin ? `VIN · ${vin}` : null, mileage !== null ? `${mileage.toLocaleString()} mi` : null]
@@ -90,6 +80,22 @@ function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
 
   return (
     <div className="cov-app">
+      {/* Back out — so the screen is never a dead end on mobile */}
+      <Link
+        href="/today"
+        style={{
+          display: 'block',
+          padding: '10px 16px 0',
+          fontFamily: 'var(--vt-font-mono)',
+          fontSize: 11,
+          letterSpacing: '0.08em',
+          color: 'var(--vt-fg-3)',
+          textDecoration: 'none',
+        }}
+      >
+        ← Sessions
+      </Link>
+
       {/* Vehicle strip with cached badge instead of timer */}
       <header className="vehicle-strip">
         <div>
@@ -119,7 +125,30 @@ function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
         ))}
       </div>
 
-      <CtaBar {...CTA_PROPS} />
+      {/* Footer: honest status note + a real way to take the case off the
+          queue. The step-by-step walkthrough lands in a later update. */}
+      <footer
+        style={{
+          borderTop: '0.5px solid var(--vt-rule)',
+          padding: '14px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: 'var(--vt-font-mono)',
+            fontSize: 9.5,
+            letterSpacing: '0.08em',
+            color: 'var(--vt-fg-3)',
+          }}
+        >
+          Read the test plan above and work it in the bay. The tap-through
+          walkthrough is coming in the next update.
+        </span>
+        <AbandonButton sessionId={sessionId} redirectTo="/today" />
+      </footer>
     </div>
   )
 }
@@ -128,7 +157,7 @@ function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
 // Desktop layout — DesktopOverview from design package (no fake identity data)
 // ---------------------------------------------------------------------------
 
-function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
+function DesktopOverview({ sessionId, diagnostic, vehicleName, vin, mileage }: Props) {
   const { symptom, gateThreshold, priorFixCount, tests } = diagnostic
   const gatePct = (Math.max(0, Math.min(1, gateThreshold)) * 100).toFixed(0)
 
@@ -325,16 +354,16 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
           ))}
         </div>
 
-        {/* CTA bar */}
+        {/* Footer bar: honest status note + a real way off the queue. */}
         <div className="cov-desktop__cta-bar">
           <div className="cov-desktop__topbar-meta">
             <span>Test plan ready</span>
             <span className="sep" />
             <span style={{ color: 'var(--vt-fg-2)', fontFamily: 'var(--vt-font-serif)', fontSize: 14, textTransform: 'none', letterSpacing: 0 }}>
-              Interactive walkthrough — coming in the next update
+              Work the plan in the bay — the tap-through walkthrough is coming in the next update
             </span>
           </div>
-          <CtaBar {...CTA_PROPS} />
+          <AbandonButton sessionId={sessionId} redirectTo="/today" />
         </div>
       </main>
     </div>
