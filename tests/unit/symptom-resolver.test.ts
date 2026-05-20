@@ -16,6 +16,12 @@ import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
 
 const PLATFORM_SLUG = 'ford-super-duty-4th-gen-67-psd'
 
+// Realistic descriptive slugs matching the live DB shape.
+const SLUG_P0087 = 'p0087-fuel-rail-pressure-too-low'
+const SLUG_P0088 = 'p0088-fuel-rail-pressure-too-high'
+const SLUG_NO_START = 'no-start-cranks-normally-fuel-system-suspect'
+const SLUG_P9999 = 'p9999-unknown-test-code'
+
 async function seedFixtures(db: TestDb) {
   // 1. Platform
   const [platform] = await db
@@ -33,14 +39,29 @@ async function seedFixtures(db: TestDb) {
   const [sympP0087, sympP0088, sympNoStart, sympP9999] = await db
     .insert(symptoms)
     .values([
-      { slug: 'p0087', description: 'Fuel rail pressure too low', category: 'dtc' },
-      { slug: 'p0088', description: 'Fuel rail pressure too high', category: 'dtc' },
       {
-        slug: 'no-start-cranks-normally-fuel-system-suspect',
-        description: 'Engine cranks normally but will not start — fuel system suspect',
+        slug: SLUG_P0087,
+        description:
+          'P0087 — Fuel rail pressure too low. Indicates HP fuel pump or regulator issue.',
+        category: 'dtc',
+      },
+      {
+        slug: SLUG_P0088,
+        description:
+          'P0088 — Fuel rail pressure too high. Indicates pressure-relief valve or regulator issue.',
+        category: 'dtc',
+      },
+      {
+        slug: SLUG_NO_START,
+        description:
+          'Engine cranks normally but will not start — fuel system suspect. No DTC set.',
         category: 'no-start',
       },
-      { slug: 'p9999', description: 'Unknown test code', category: 'dtc' },
+      {
+        slug: SLUG_P9999,
+        description: 'Unknown test code with no linked test actions on this platform.',
+        category: 'dtc',
+      },
     ])
     .returning({ id: symptoms.id, slug: symptoms.slug })
 
@@ -93,7 +114,7 @@ async function seedFixtures(db: TestDb) {
     ])
     .returning({ id: testActions.id })
 
-  // 5. symptom_test_implications — link the 3 real symptoms; p9999 is intentionally excluded
+  // 5. symptom_test_implications — link 3 real symptoms; p9999 is intentionally excluded
   await db.insert(symptomTestImplications).values([
     {
       symptomId: sympP0087.id,
@@ -136,41 +157,42 @@ describe('resolveSymptomSlug', () => {
   })
 
   it('chip slug wins over DTC and complaint text', async () => {
+    // selectedSymptomSlug is the full descriptive slug as stored in DB
     const result = await resolveSymptomSlug({
       db,
       platformSlug: PLATFORM_SLUG,
-      selectedSymptomSlug: 'p0087',
+      selectedSymptomSlug: SLUG_P0087,
       dtcCodes: ['P0088'],
       complaintText: 'truck cranks but will not start',
     })
     expect(result).not.toBeNull()
-    expect(result!.symptomSlug).toBe('p0087')
+    expect(result!.symptomSlug).toBe(SLUG_P0087)
     expect(result!.symptomId).toBeTypeOf('string')
     expect(result!.platformId).toBeTypeOf('string')
   })
 
-  it('falls back to DTC when no chip slug is provided', async () => {
+  it('DTC code prefix-matches the descriptive symptom slug', async () => {
+    // 'P0087' → matches 'p0087-fuel-rail-pressure-too-low' (startsWith 'p0087-')
     const result = await resolveSymptomSlug({
       db,
       platformSlug: PLATFORM_SLUG,
       dtcCodes: ['P0087'],
     })
     expect(result).not.toBeNull()
-    expect(result!.symptomSlug).toBe('p0087')
+    expect(result!.symptomSlug).toBe(SLUG_P0087)
     expect(result!.symptomId).toBeTypeOf('string')
     expect(result!.platformId).toBeTypeOf('string')
   })
 
-  it('normalizes DTC code to lowercase for slug lookup', async () => {
-    // Input is uppercase 'P0087'; the seeded symptom slug is lowercase 'p0087', so
-    // this test genuinely proves the resolver lowercases the input DTC before the DB lookup.
+  it('normalizes DTC code to lowercase for prefix match', async () => {
+    // Uppercase 'P0087' must be normalized before prefix comparison
     const result = await resolveSymptomSlug({
       db,
       platformSlug: PLATFORM_SLUG,
       dtcCodes: ['P0087'],
     })
     expect(result).not.toBeNull()
-    expect(result!.symptomSlug).toBe('p0087')
+    expect(result!.symptomSlug).toBe(SLUG_P0087)
   })
 
   it('matches complaint keyword for no-start when no chip or DTC', async () => {
@@ -180,7 +202,7 @@ describe('resolveSymptomSlug', () => {
       complaintText: 'truck cranks but will not start',
     })
     expect(result).not.toBeNull()
-    expect(result!.symptomSlug).toBe('no-start-cranks-normally-fuel-system-suspect')
+    expect(result!.symptomSlug).toBe(SLUG_NO_START)
     expect(result!.symptomId).toBeTypeOf('string')
     expect(result!.platformId).toBeTypeOf('string')
   })
@@ -195,6 +217,7 @@ describe('resolveSymptomSlug', () => {
   })
 
   it('returns null when DTC exists but has no symptom_test_implications for the platform', async () => {
+    // SLUG_P9999 has no implication rows — not reachable, must return null
     const result = await resolveSymptomSlug({
       db,
       platformSlug: PLATFORM_SLUG,
@@ -215,7 +238,7 @@ describe('resolveSymptomSlug', () => {
   it('returns null when the symptom_test_implication is retired (retired rows are not reachable)', async () => {
     // Seed a new symptom + test_action + component linked to the platform,
     // then mark the symptom_test_implication as isRetired = true.
-    // The resolver must NOT return this symptom slug — a retired implication breaks the join chain.
+    // The resolver must NOT return this symptom slug.
     const [platform] = await db
       .select({ id: platforms.id })
       .from(platforms)
@@ -224,8 +247,8 @@ describe('resolveSymptomSlug', () => {
     const [retiredSymptom] = await db
       .insert(symptoms)
       .values({
-        slug: 'p0193',
-        description: 'Fuel rail pressure sensor circuit high input',
+        slug: 'p0193-fuel-rail-pressure-sensor-circuit-high',
+        description: 'P0193 — Fuel rail pressure sensor circuit high input',
         category: 'dtc',
       })
       .returning({ id: symptoms.id })
@@ -271,5 +294,4 @@ describe('resolveSymptomSlug', () => {
     })
     expect(result).toBeNull()
   })
-
 })
