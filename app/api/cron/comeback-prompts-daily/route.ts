@@ -1,18 +1,18 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { surfaceDueFollowUps } from '@/lib/comeback/surface'
+import { authorizeCronRequest } from '@/lib/cron-auth'
 
-// Vercel Cron sends GETs with an Authorization: Bearer ${CRON_SECRET}
-// header when CRON_SECRET is set in the project env. We only enforce
-// the auth gate when the secret is configured — local dev (where the
-// env is unset) hits localhost only and stays open for ad-hoc testing.
+// Vercel Cron sends GETs with `Authorization: Bearer ${CRON_SECRET}`.
+// The secret is mandatory in production — see lib/cron-auth.ts.
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET
-  if (secret) {
-    const got = req.headers.get('authorization')
-    if (got !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: 'forbidden' }, { status: 403 })
-    }
+  const auth = authorizeCronRequest({
+    authorizationHeader: req.headers.get('authorization'),
+    secret: process.env.CRON_SECRET,
+    nodeEnv: process.env.NODE_ENV,
+  })
+  if (auth.kind === 'deny') {
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
   const result = await surfaceDueFollowUps(db)
