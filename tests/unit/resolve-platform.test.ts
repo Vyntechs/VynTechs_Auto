@@ -48,6 +48,12 @@ describe('resolvePlatformSlug', () => {
     ).toBe(PSD_67)
   })
 
+  it('is case-insensitive on model', () => {
+    expect(
+      resolvePlatformSlug({ year: 2018, make: 'Ford', model: 'f-250', engine: '6.7L PSD' }),
+    ).toBe(PSD_67)
+  })
+
   it('returns null for 2014 F-250 (before 4th gen)', () => {
     expect(
       resolvePlatformSlug({ year: 2014, make: 'Ford', model: 'F-250', engine: '6.7L PSD' }),
