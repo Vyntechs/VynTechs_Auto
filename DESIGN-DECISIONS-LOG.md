@@ -33,6 +33,25 @@ the prep/summary, the button is "let's go"). Applied as the `CtaBar` default lab
 "Start testing", "Begin pinpoint tests", or anything else, it's a one-word change —
 tell me and I'll swap it.
 
+### ✅ D3 — Added a new brand token `--vt-amber-600` (darker ignition)
+
+**Context:** The cached-overview CSS (from the Claude Design package) calls a color
+token `--vt-amber-600` for the main button's hover state — but that token was never
+defined; the amber scale stopped at `--vt-amber-500` (the canonical ignition amber).
+So the button's hover currently does nothing.
+
+**Decision I made for you:** Added `--vt-amber-600` as the next darker step on the
+existing amber scale — `oklch(73% 0.20 74)`, following the same lightness/chroma/hue
+progression as amber-200→500. A darker amber for a pressed/hover amber button.
+
+**Why not the other option:** An old spec doc cross-referenced amber-600 to
+`--vt-signal-600`, but signal-600 is the navy brand color — a navy hover on an amber
+button would look broken. Claude Design's CSS clearly *intended* an amber-600 to
+exist (they referenced it); they just didn't define it.
+
+**Easy to override:** One line in `app/globals.css`. If Claude Design wants a
+specific amber-600, swap the oklch value — nothing else depends on the exact shade.
+
 ### ❓ D2 — CtaBar sub-labels "Step 1 of plan" / "no commit" — need your read
 
 The CtaBar primitive also shows two small sub-labels above the button. The design
