@@ -6,4 +6,4 @@ ALTER TABLE "sessions"
   ADD COLUMN "cache_hit_platform_id" uuid REFERENCES "platforms"("id") ON DELETE SET NULL,
   ADD COLUMN "cache_hit_symptom_id" uuid REFERENCES "symptoms"("id") ON DELETE SET NULL;
 
-CREATE INDEX "sessions_cache_hit_symptom_id_idx" ON "sessions" ("cache_hit_symptom_id");
+CREATE INDEX "sessions_cache_hit_symptom_id_idx" ON "sessions" USING btree ("cache_hit_symptom_id");
