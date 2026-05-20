@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { platforms, symptoms, testActions, components, symptomTestImplications } from '@/lib/db/schema'
 
@@ -31,30 +31,6 @@ export async function resolveSymptomSlug(
 ): Promise<SymptomResolveResult | null> {
   const { db, platformSlug } = input
 
-  // Build a priority-ordered list of candidate slugs.
-  const candidates: string[] = []
-
-  if (input.selectedSymptomSlug) {
-    candidates.push(input.selectedSymptomSlug)
-  }
-
-  if (input.dtcCodes?.length) {
-    for (const dtc of input.dtcCodes) {
-      const slug = dtc.trim().toLowerCase()
-      if (slug && !candidates.includes(slug)) candidates.push(slug)
-    }
-  }
-
-  if (input.complaintText) {
-    for (const { pattern, slug } of COMPLAINT_PATTERNS) {
-      if (pattern.test(input.complaintText) && !candidates.includes(slug)) {
-        candidates.push(slug)
-      }
-    }
-  }
-
-  if (candidates.length === 0) return null
-
   // Resolve the platform row.
   const platform = await db.query.platforms.findFirst({
     where: eq(platforms.slug, platformSlug),
@@ -62,15 +38,8 @@ export async function resolveSymptomSlug(
   })
   if (!platform) return null
 
-  // Find which candidate slugs have at least one symptom_test_implication reachable
-  // for this platform. The linkage is:
-  //   symptoms → symptom_test_implications (symptomId)
-  //              → test_actions (testActionId)
-  //              → components (componentId)
-  // where components.platformId = platform.id
-  //
-  // symptom_test_implications has NO direct platformId column; the platform
-  // is encoded via testAction → component → platform.
+  // Load ALL reachable symptoms for this platform (no slug filter — platform has few symptoms).
+  // Linkage: symptoms → symptom_test_implications → test_actions → components → platform.id
   const rows = await db
     .select({ slug: symptoms.slug, id: symptoms.id })
     .from(symptoms)
@@ -79,7 +48,6 @@ export async function resolveSymptomSlug(
     .innerJoin(components, eq(components.id, testActions.componentId))
     .where(
       and(
-        inArray(symptoms.slug, candidates),
         eq(symptomTestImplications.isRetired, false),
         eq(testActions.isRetired, false),
         eq(components.isRetired, false),
@@ -90,13 +58,34 @@ export async function resolveSymptomSlug(
 
   if (rows.length === 0) return null
 
-  const reachableMap = new Map(rows.map((r) => [r.slug, r.id]))
+  // Priority order:
+  //   1. selectedSymptomSlug — exact slug match
+  //   2. dtcCodes — prefix match: slug === code OR slug.startsWith(code + '-')
+  //   3. complaintText patterns — exact slug match from COMPLAINT_PATTERNS
 
-  // Return the first candidate (highest priority) that is reachable.
-  for (const slug of candidates) {
-    const symptomId = reachableMap.get(slug)
-    if (symptomId !== undefined) {
-      return { symptomSlug: slug, symptomId, platformId: platform.id }
+  // 1. Chip selection (exact match)
+  if (input.selectedSymptomSlug) {
+    const match = rows.find((r) => r.slug === input.selectedSymptomSlug)
+    if (match) return { symptomSlug: match.slug, symptomId: match.id, platformId: platform.id }
+  }
+
+  // 2. DTC codes (prefix match against descriptive slugs)
+  if (input.dtcCodes?.length) {
+    for (const dtc of input.dtcCodes) {
+      const code = dtc.trim().toLowerCase()
+      if (!code) continue
+      const match = rows.find((r) => r.slug === code || r.slug.startsWith(code + '-'))
+      if (match) return { symptomSlug: match.slug, symptomId: match.id, platformId: platform.id }
+    }
+  }
+
+  // 3. Complaint-text keyword patterns (exact slug match)
+  if (input.complaintText) {
+    for (const { pattern, slug } of COMPLAINT_PATTERNS) {
+      if (pattern.test(input.complaintText)) {
+        const match = rows.find((r) => r.slug === slug)
+        if (match) return { symptomSlug: match.slug, symptomId: match.id, platformId: platform.id }
+      }
     }
   }
 
