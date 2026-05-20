@@ -20,7 +20,9 @@ export function SymptomHero({
       <h1 className="cov-symptom__name">{name}</h1>
       {priorFixCount > 0 && (
         <div className="cov-symptom__meta">
-          <span>{priorFixCount} prior fixes · cross-shop corpus</span>
+          <span>
+            {priorFixCount} prior {priorFixCount === 1 ? 'fix' : 'fixes'} · cross-shop corpus
+          </span>
         </div>
       )}
       <ConfidenceGate gate={gate} />
