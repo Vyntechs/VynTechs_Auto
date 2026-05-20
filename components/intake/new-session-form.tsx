@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { HairlineProgress } from '@/components/vt'
+import { CachedComplaintPicker } from './cached-complaint-picker'
 
 export function NewSessionForm() {
   const router = useRouter()
@@ -11,25 +12,38 @@ export function NewSessionForm() {
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
 
+  // Hoisted so the chip picker can react to vehicle changes
+  const [vehicleYear, setVehicleYear] = useState('')
+  const [vehicleMake, setVehicleMake] = useState('')
+  const [vehicleModel, setVehicleModel] = useState('')
+  const [vehicleEngine, setVehicleEngine] = useState('')
+  const [dtcCodes, setDtcCodes] = useState('')
+  const [selectedSymptomSlug, setSelectedSymptomSlug] = useState<string | null>(null)
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setOpenSessionId(null)
     setGenerating(true)
     const formData = new FormData(e.currentTarget)
-    const yearRaw = formData.get('vehicleYear')
     const mileageRaw = formData.get('mileage')
-    const engineRaw = String(formData.get('vehicleEngine') ?? '').trim()
     const payload: Record<string, unknown> = {
-      vehicleYear: Number(yearRaw),
-      vehicleMake: String(formData.get('vehicleMake') ?? '').trim(),
-      vehicleModel: String(formData.get('vehicleModel') ?? '').trim(),
+      vehicleYear: Number(vehicleYear),
+      vehicleMake: vehicleMake.trim(),
+      vehicleModel: vehicleModel.trim(),
       customerComplaint: String(formData.get('customerComplaint') ?? '').trim(),
     }
-    if (engineRaw) payload.vehicleEngine = engineRaw
+    if (vehicleEngine.trim()) payload.vehicleEngine = vehicleEngine.trim()
     if (mileageRaw && String(mileageRaw).trim()) {
       payload.mileage = Number(mileageRaw)
     }
+    // PR 1 additions
+    const dtcArray = dtcCodes
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => /^[A-Z][0-9A-Z]{4}$/i.test(s))
+    if (dtcArray.length > 0) payload.dtcCodes = dtcArray
+    if (selectedSymptomSlug) payload.selectedSymptomSlug = selectedSymptomSlug
 
     const res = await fetch('/api/sessions', {
       method: 'POST',
@@ -80,6 +94,8 @@ export function NewSessionForm() {
           disabled={generating}
           style={{ fontFamily: 'var(--vt-font-mono)' }}
           placeholder="2018"
+          value={vehicleYear}
+          onChange={(e) => setVehicleYear(e.target.value)}
         />
       </div>
 
@@ -93,6 +109,8 @@ export function NewSessionForm() {
           disabled={generating}
           autoCapitalize="words"
           placeholder="Ford"
+          value={vehicleMake}
+          onChange={(e) => setVehicleMake(e.target.value)}
         />
       </div>
 
@@ -106,6 +124,8 @@ export function NewSessionForm() {
           disabled={generating}
           autoCapitalize="words"
           placeholder="F-150"
+          value={vehicleModel}
+          onChange={(e) => setVehicleModel(e.target.value)}
         />
       </div>
 
@@ -117,6 +137,31 @@ export function NewSessionForm() {
           type="text"
           disabled={generating}
           placeholder="3.5L EcoBoost"
+          value={vehicleEngine}
+          onChange={(e) => setVehicleEngine(e.target.value)}
+        />
+      </div>
+
+      <CachedComplaintPicker
+        vehicleYear={vehicleYear}
+        vehicleMake={vehicleMake}
+        vehicleModel={vehicleModel}
+        vehicleEngine={vehicleEngine}
+        selectedSlug={selectedSymptomSlug}
+        onPick={setSelectedSymptomSlug}
+      />
+
+      <div className="field">
+        <label htmlFor="dtcCodes">DTC code(s) (optional)</label>
+        <input
+          id="dtcCodes"
+          name="dtcCodes"
+          type="text"
+          disabled={generating}
+          value={dtcCodes}
+          onChange={(e) => setDtcCodes(e.target.value)}
+          style={{ fontFamily: 'var(--vt-font-mono)' }}
+          placeholder="P0087, P0088"
         />
       </div>
 
