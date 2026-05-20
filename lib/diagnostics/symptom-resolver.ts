@@ -20,7 +20,15 @@ const COMPLAINT_PATTERNS: { pattern: RegExp; slug: string }[] = [
   },
 ]
 
-export async function resolveSymptomSlug(input: SymptomResolveInput): Promise<string | null> {
+export type SymptomResolveResult = {
+  symptomSlug: string
+  symptomId: string
+  platformId: string
+}
+
+export async function resolveSymptomSlug(
+  input: SymptomResolveInput,
+): Promise<SymptomResolveResult | null> {
   const { db, platformSlug } = input
 
   // Build a priority-ordered list of candidate slugs.
@@ -64,7 +72,7 @@ export async function resolveSymptomSlug(input: SymptomResolveInput): Promise<st
   // symptom_test_implications has NO direct platformId column; the platform
   // is encoded via testAction → component → platform.
   const rows = await db
-    .select({ slug: symptoms.slug })
+    .select({ slug: symptoms.slug, id: symptoms.id })
     .from(symptoms)
     .innerJoin(symptomTestImplications, eq(symptomTestImplications.symptomId, symptoms.id))
     .innerJoin(testActions, eq(testActions.id, symptomTestImplications.testActionId))
@@ -78,15 +86,18 @@ export async function resolveSymptomSlug(input: SymptomResolveInput): Promise<st
         eq(components.platformId, platform.id),
       ),
     )
-    .groupBy(symptoms.slug)
+    .groupBy(symptoms.slug, symptoms.id)
 
   if (rows.length === 0) return null
 
-  const reachable = new Set(rows.map((r) => r.slug))
+  const reachableMap = new Map(rows.map((r) => [r.slug, r.id]))
 
   // Return the first candidate (highest priority) that is reachable.
   for (const slug of candidates) {
-    if (reachable.has(slug)) return slug
+    const symptomId = reachableMap.get(slug)
+    if (symptomId !== undefined) {
+      return { symptomSlug: slug, symptomId, platformId: platform.id }
+    }
   }
 
   return null

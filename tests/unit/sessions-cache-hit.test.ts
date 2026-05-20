@@ -118,21 +118,11 @@ describe('POST /api/sessions — cache-hit shortcut', () => {
     const symptomId = 'symptom-uuid-def'
 
     resolvePlatformSlugMock.mockReturnValue('ford-super-duty-4th-gen-67-psd')
-    resolveSymptomSlugMock.mockResolvedValue('no-start-cranks-normally-fuel-system-suspect')
-
-    // db.query.platforms.findFirst and db.query.symptoms.findFirst are called on
-    // the module-level `db` object, which is mocked to `{}`. The route reads them
-    // via the injected db. We override the mock for this test to provide real
-    // findFirst behaviour via a fake db with query support.
-    const { db: dbMock } = await import('@/lib/db/client')
-    ;(dbMock as Record<string, unknown>).query = {
-      platforms: {
-        findFirst: vi.fn().mockResolvedValue({ id: platformId }),
-      },
-      symptoms: {
-        findFirst: vi.fn().mockResolvedValue({ id: symptomId }),
-      },
-    }
+    resolveSymptomSlugMock.mockResolvedValue({
+      symptomSlug: 'no-start-cranks-normally-fuel-system-suspect',
+      symptomId,
+      platformId,
+    })
 
     const res = await POST(makeRequest(cacheHitBody))
     expect(res.status).toBe(200)
@@ -170,7 +160,7 @@ describe('POST /api/sessions — cache-hit shortcut', () => {
     // createSessionForUser must not carry cache-hit ids
     expect(createSessionForUserMock).toHaveBeenCalledOnce()
     const opts = createSessionForUserMock.mock.calls[0][0]
-    expect(opts.cacheHitSymptomId == null).toBe(true)
+    expect(opts.cacheHitSymptomId).toBeNull()
     // treeState must be the AI-generated tree (non-empty nodes)
     expect(opts.treeState).toEqual(aiTree)
   })
