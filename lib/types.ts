@@ -24,6 +24,8 @@ export const intakeSchema = z.object({
   mileage: z.number().int().nonnegative().optional(),
   customerComplaint: z.string().min(5),
   ambientConditions: ambientConditionsSchema.optional(),
+  dtcCodes: z.array(z.string().trim().min(1).max(10)).max(10).optional(),
+  selectedSymptomSlug: z.string().trim().min(1).max(120).optional(),
 })
 
 export type IntakePayload = z.infer<typeof intakeSchema>

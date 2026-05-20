@@ -8,6 +8,7 @@ import {
 } from '@/lib/db/queries'
 import { createSessionForUser } from '@/lib/sessions'
 import type { TreeState } from '@/lib/ai/tree-engine'
+import { platforms, symptoms } from '@/lib/db/schema'
 
 const stubTree: TreeState = {
   nodes: [{ id: 'root', label: 'Initial scan', status: 'pending' }],
@@ -125,5 +126,45 @@ describe('createSessionForUser', () => {
       treeState: stubTree,
     })
     expect(result.ok).toBe(true)
+  })
+
+  it('persists cacheHitPlatformId and cacheHitSymptomId on the created session row', async () => {
+    const userId = crypto.randomUUID()
+    await ensureProfileAndShop(db, userId, 'tech@testshop.com')
+
+    // Seed FK targets so the INSERT satisfies the FK constraints
+    const [platform] = await db
+      .insert(platforms)
+      .values({
+        slug: 'ford-f250-test',
+        yearRange: '2011-2016',
+        parentMake: 'Ford',
+        parentModelFamily: 'F-250',
+      })
+      .returning()
+    const [symptom] = await db
+      .insert(symptoms)
+      .values({
+        slug: 'rough-idle-test',
+        description: 'Engine idles roughly at stop',
+        category: 'drivability',
+      })
+      .returning()
+
+    const result = await createSessionForUser({
+      db,
+      userId,
+      body: validIntake,
+      treeState: stubTree,
+      cacheHitPlatformId: platform.id,
+      cacheHitSymptomId: symptom.id,
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const fetched = await getSessionById(db, result.id)
+      expect(fetched?.cacheHitPlatformId).toBe(platform.id)
+      expect(fetched?.cacheHitSymptomId).toBe(symptom.id)
+    }
   })
 })
