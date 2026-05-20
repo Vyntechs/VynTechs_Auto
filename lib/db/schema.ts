@@ -537,6 +537,14 @@ export const sessions = pgTable('sessions', {
   intake: jsonb('intake').notNull().$type<IntakePayload>(),
   treeState: jsonb('tree_state').notNull().$type<TreeState>(),
   outcome: jsonb('outcome').$type<OutcomePayload>(),
+  cacheHitPlatformId: uuid('cache_hit_platform_id').references(
+    (): AnyPgColumn => platforms.id,
+    { onDelete: 'set null' },
+  ),
+  cacheHitSymptomId: uuid('cache_hit_symptom_id').references(
+    (): AnyPgColumn => symptoms.id,
+    { onDelete: 'set null' },
+  ),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
   curatorNote: text('curator_note'),
