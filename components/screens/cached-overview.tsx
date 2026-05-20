@@ -83,7 +83,7 @@ const CTA_PROPS = {
 function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
   const { symptom, gateThreshold, priorFixCount, tests } = diagnostic
 
-  const vinLine = [vin ? `VIN · ${vin}` : null, mileage ? `${mileage.toLocaleString()} mi` : null]
+  const vinLine = [vin ? `VIN · ${vin}` : null, mileage !== null ? `${mileage.toLocaleString()} mi` : null]
     .filter(Boolean)
     .join(' · ')
 
@@ -133,7 +133,7 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
 
   const uniqueMethods = new Set(tests.map((t) => t.observationMethod)).size
 
-  const vinLine = [vin ? `VIN · ${vin}` : null, mileage ? `${mileage.toLocaleString()} mi` : null]
+  const vinLine = [vin ? `VIN · ${vin}` : null, mileage !== null ? `${mileage.toLocaleString()} mi` : null]
     .filter(Boolean)
     .join(' · ')
 
