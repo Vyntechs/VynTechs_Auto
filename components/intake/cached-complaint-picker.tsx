@@ -45,15 +45,20 @@ export function CachedComplaintPicker({
         const res = await fetch(url.toString(), { signal: ctrl.signal })
         if (!res.ok) {
           setComplaints([])
+          setLoading(false)
           return
         }
         const body = await res.json()
         setComplaints(body.complaints ?? [])
       } catch (err) {
-        if ((err as Error).name !== 'AbortError') setComplaints([])
-      } finally {
+        // An aborted request was superseded by a newer one — leave the
+        // loading state to that newer request, don't clear it here.
+        if ((err as Error).name === 'AbortError') return
+        setComplaints([])
         setLoading(false)
+        return
       }
+      setLoading(false)
     }, 350)
     return () => clearTimeout(timer)
   }, [vehicleYear, vehicleMake, vehicleModel, vehicleEngine, onPick])
