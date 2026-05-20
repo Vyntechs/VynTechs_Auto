@@ -30,7 +30,7 @@ export async function resolveSymptomSlug(input: SymptomResolveInput): Promise<st
     candidates.push(input.selectedSymptomSlug)
   }
 
-  if (input.dtcCodes) {
+  if (input.dtcCodes?.length) {
     for (const dtc of input.dtcCodes) {
       const slug = dtc.trim().toLowerCase()
       if (slug && !candidates.includes(slug)) candidates.push(slug)
@@ -72,6 +72,9 @@ export async function resolveSymptomSlug(input: SymptomResolveInput): Promise<st
     .where(
       and(
         inArray(symptoms.slug, candidates),
+        eq(symptomTestImplications.isRetired, false),
+        eq(testActions.isRetired, false),
+        eq(components.isRetired, false),
         eq(components.platformId, platform.id),
       ),
     )
