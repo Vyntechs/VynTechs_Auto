@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   platforms,
@@ -155,10 +156,12 @@ describe('resolveSymptomSlug', () => {
   })
 
   it('normalizes DTC code to lowercase for slug lookup', async () => {
+    // Input is uppercase 'P0087'; the seeded symptom slug is lowercase 'p0087', so
+    // this test genuinely proves the resolver lowercases the input DTC before the DB lookup.
     const result = await resolveSymptomSlug({
       db,
       platformSlug: PLATFORM_SLUG,
-      dtcCodes: ['p0087'],
+      dtcCodes: ['P0087'],
     })
     expect(result).toBe('p0087')
   })
@@ -195,6 +198,66 @@ describe('resolveSymptomSlug', () => {
       db,
       platformSlug: 'nonexistent-platform',
       dtcCodes: ['P0087'],
+    })
+    expect(result).toBeNull()
+  })
+
+  it('returns null when the symptom_test_implication is retired (retired rows are not reachable)', async () => {
+    // Seed a new symptom + test_action + component linked to the platform,
+    // then mark the symptom_test_implication as isRetired = true.
+    // The resolver must NOT return this symptom slug — a retired implication breaks the join chain.
+    const [platform] = await db
+      .select({ id: platforms.id })
+      .from(platforms)
+      .where(eq(platforms.slug, PLATFORM_SLUG))
+
+    const [retiredSymptom] = await db
+      .insert(symptoms)
+      .values({
+        slug: 'p0193',
+        description: 'Fuel rail pressure sensor circuit high input',
+        category: 'dtc',
+      })
+      .returning({ id: symptoms.id })
+
+    const [retiredComponent] = await db
+      .insert(components)
+      .values({
+        slug: 'cp-frps-retired-test',
+        platformId: platform.id,
+        name: 'Fuel Rail Pressure Sensor (retired test)',
+        kind: 'sensor',
+        sourceProvenance: 'TRAINING-CONFIRMED',
+      })
+      .returning({ id: components.id })
+
+    const [retiredTestAction] = await db
+      .insert(testActions)
+      .values({
+        slug: 'ta-frps-p0193-retired',
+        componentId: retiredComponent.id,
+        description: 'Check FRPS signal voltage for P0193',
+        scenarioRequired: 'key-on',
+        observationMethod: 'electrical_measurement_at_pin',
+        invasiveness: 1,
+        confidenceBoost: 25,
+        sourceProvenance: 'TRAINING-CONFIRMED',
+      })
+      .returning({ id: testActions.id })
+
+    // Insert the implication with isRetired = true — this is the retired row.
+    await db.insert(symptomTestImplications).values({
+      symptomId: retiredSymptom.id,
+      testActionId: retiredTestAction.id,
+      priority: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+      isRetired: true,
+    })
+
+    const result = await resolveSymptomSlug({
+      db,
+      platformSlug: PLATFORM_SLUG,
+      dtcCodes: ['P0193'],
     })
     expect(result).toBeNull()
   })
