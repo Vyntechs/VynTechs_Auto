@@ -16,7 +16,31 @@ moved on. ❓ = Claude wants Brandon's explicit answer before it's locked.
 
 ## Decisions made on Brandon's behalf
 
-_(none yet — entries appended as work proceeds)_
+### ✅ D1 — Renamed "Start the walk" → "Start diagnosis" (W2/W4 CtaBar)
+
+**Context:** The cached-overview screen has a bottom button that takes the tech from
+the diagnosis summary into the step-by-step test procedure (the actual walkthrough
+ships in PR2). The plan + design package labeled this button "Start the walk."
+
+**Brandon's call (spoken 2026-05-19):** "start the walk is not a term that would be
+used in automotive software." Confirmed not real shop language.
+
+**Decision I made for you:** Renamed the button label to **"Start diagnosis"** across
+PR1 — plain, passes the 10-year-old test, reads naturally to a tech (the overview is
+the prep/summary, the button is "let's go"). Applied as the `CtaBar` default label.
+
+**Easy to override:** It's a single `label` prop default. If you'd rather have
+"Start testing", "Begin pinpoint tests", or anything else, it's a one-word change —
+tell me and I'll swap it.
+
+### ❓ D2 — CtaBar sub-labels "Step 1 of plan" / "no commit" — need your read
+
+The CtaBar primitive also shows two small sub-labels above the button. The design
+package defaults them to "Step 1 of plan" and "no commit". "no commit" is unclear —
+it may mean "you're not locked in yet" or relate to the engine's commit verdict.
+I left the plan defaults in the generic primitive for now; the REAL on-screen copy
+gets decided when the screen is built (W4). I'll propose plain wording there and log
+it — flagging now so you know it's coming.
 
 ---
 
