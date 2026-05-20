@@ -540,7 +540,7 @@ button { font: inherit; }
   color: var(--vt-fg-2);
   white-space: nowrap;
 }
-.method-chip i { font-size: 12px; color: var(--vt-fg-3); }
+.method-chip svg { font-size: 12px; color: var(--vt-fg-3); }
 
 /* ---------- Invasiveness — 5-dot scale ---------- */
 .inv-dots {
@@ -708,7 +708,7 @@ button { font: inherit; }
 }
 .cov-cta__btn:hover { background: var(--vt-amber-600); }
 .cov-cta__btn:active { box-shadow: var(--vt-shadow-inset-press); }
-.cov-cta__btn i { font-size: 18px; }
+.cov-cta__btn svg { font-size: 18px; }
 
 /* ---------- EMPTY STATE — first time we've seen this combo ---------- */
 .cov-empty {
