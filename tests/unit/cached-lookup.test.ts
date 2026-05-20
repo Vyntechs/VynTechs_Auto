@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   platforms,
@@ -375,9 +376,7 @@ describe('loadCachedDiagnostic', () => {
     const [sympRow] = await db
       .select({ id: symptoms.id })
       .from(symptoms)
-      .where(
-        (await import('drizzle-orm').then((m) => m.eq))(symptoms.slug, 'p0087'),
-      )
+      .where(eq(symptoms.slug, 'p0087'))
 
     await db.insert(diagnosticSessions).values({
       vehicleId: vehicle.id,
