@@ -96,4 +96,26 @@ actually wires it up — I didn't over-polish copy that doesn't render yet.
 
 ## Open questions for Brandon
 
-_(none yet)_
+### ❓ O1 — Visual + mobile screenshot validation still needs your eyes
+
+All 6 work items are code-complete and reviewed. Automated gates are green
+(tsc clean, 945/946 tests, final review = ready to merge). The one piece I
+did NOT do: Playwright screenshots of the cached-overview screen + intake form
+at 375 / 414 / 768 / 1024 / 1440px.
+
+**Why I stopped:** the dev server points at the live Supabase, and driving a
+full authenticated intake→cache-hit flow would write real session rows to
+production unattended — that crosses your "no unattended prod writes" rule. I
+didn't want to fake validation either.
+
+**To do it (you, or a session you green-light):** sign in → `/sessions/new` →
+2018 Ford F-250, 6.7L Power Stroke Diesel → pick a cached complaint chip (or
+type DTC P0087) → submit → should land instantly on the cached overview (no
+loading screen). Check it at the 5 widths, especially mobile 375-414px.
+
+### ❓ O2 — PR2 follow-up: gate the advance/close routes for cache-hit sessions
+
+Not a PR1 bug (not reachable — the overview CTA ships disabled). When PR2 wires
+the interactive walkthrough, the `advance`/`close` API routes need a one-line
+guard so a cache-hit session's empty-sentinel tree state can't be poked. Noted
+so it doesn't get lost.
