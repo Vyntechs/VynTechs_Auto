@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { createSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -22,13 +21,21 @@ import {
   getOpenSessionForTech,
   getProfileByUserId,
 } from '@/lib/db/queries'
-import { platforms, symptoms } from '@/lib/db/schema'
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
 import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
 
 // Initial tree generation + corpus + 6 web-retrieval adapters + grader.
 // Cap at 60s — same envelope as /api/intake/submit.
 export const maxDuration = 60
+
+// Empty-sentinel treeState for cache-hit sessions — nodes[] is empty so the
+// routing layer can distinguish "not generated yet" from "AI tree active".
+// Required fields are filled with neutral values per the real TreeState type.
+const CACHE_HIT_SENTINEL: TreeState = {
+  nodes: [],
+  currentNodeId: '',
+  message: '',
+}
 
 const ADAPTERS = [
   new NHTSAAdapter(),
@@ -91,7 +98,7 @@ export async function POST(req: Request) {
   })
 
   if (platformSlug) {
-    const symptomSlug = await resolveSymptomSlug({
+    const resolved = await resolveSymptomSlug({
       db,
       platformSlug,
       selectedSymptomSlug: parsed.data.selectedSymptomSlug,
@@ -99,29 +106,10 @@ export async function POST(req: Request) {
       complaintText: parsed.data.customerComplaint,
     })
 
-    if (symptomSlug) {
-      const platformRow = await db.query.platforms.findFirst({
-        where: eq(platforms.slug, platformSlug),
-        columns: { id: true },
-      })
-      const symptomRow = await db.query.symptoms.findFirst({
-        where: eq(symptoms.slug, symptomSlug),
-        columns: { id: true },
-      })
-      if (platformRow && symptomRow) {
-        cacheHitPlatformId = platformRow.id
-        cacheHitSymptomId = symptomRow.id
-      }
+    if (resolved) {
+      cacheHitPlatformId = resolved.platformId
+      cacheHitSymptomId = resolved.symptomId
     }
-  }
-
-  // Empty-sentinel treeState for cache-hit sessions — nodes[] is empty so the
-  // routing layer can distinguish "not generated yet" from "AI tree active".
-  // Required fields are filled with neutral values per the real TreeState type.
-  const CACHE_HIT_SENTINEL: TreeState = {
-    nodes: [],
-    currentNodeId: '',
-    message: '',
   }
 
   let treeState: TreeState

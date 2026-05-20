@@ -10,12 +10,14 @@ const activeTree: TreeState = {
 }
 
 function buildSession(
-  overrides: Partial<Pick<Session, 'id' | 'status' | 'treeState'>>,
-): Pick<Session, 'id' | 'status' | 'treeState'> {
+  overrides: Partial<Pick<Session, 'id' | 'status' | 'treeState' | 'cacheHitPlatformId' | 'cacheHitSymptomId'>>,
+): Pick<Session, 'id' | 'status' | 'treeState' | 'cacheHitPlatformId' | 'cacheHitSymptomId'> {
   return {
     id: 'sess-1',
     status: 'open',
     treeState: activeTree,
+    cacheHitPlatformId: null,
+    cacheHitSymptomId: null,
     ...overrides,
   }
 }

@@ -143,7 +143,10 @@ describe('resolveSymptomSlug', () => {
       dtcCodes: ['P0088'],
       complaintText: 'truck cranks but will not start',
     })
-    expect(result).toBe('p0087')
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe('p0087')
+    expect(result!.symptomId).toBeTypeOf('string')
+    expect(result!.platformId).toBeTypeOf('string')
   })
 
   it('falls back to DTC when no chip slug is provided', async () => {
@@ -152,7 +155,10 @@ describe('resolveSymptomSlug', () => {
       platformSlug: PLATFORM_SLUG,
       dtcCodes: ['P0087'],
     })
-    expect(result).toBe('p0087')
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe('p0087')
+    expect(result!.symptomId).toBeTypeOf('string')
+    expect(result!.platformId).toBeTypeOf('string')
   })
 
   it('normalizes DTC code to lowercase for slug lookup', async () => {
@@ -163,7 +169,8 @@ describe('resolveSymptomSlug', () => {
       platformSlug: PLATFORM_SLUG,
       dtcCodes: ['P0087'],
     })
-    expect(result).toBe('p0087')
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe('p0087')
   })
 
   it('matches complaint keyword for no-start when no chip or DTC', async () => {
@@ -172,7 +179,10 @@ describe('resolveSymptomSlug', () => {
       platformSlug: PLATFORM_SLUG,
       complaintText: 'truck cranks but will not start',
     })
-    expect(result).toBe('no-start-cranks-normally-fuel-system-suspect')
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe('no-start-cranks-normally-fuel-system-suspect')
+    expect(result!.symptomId).toBeTypeOf('string')
+    expect(result!.platformId).toBeTypeOf('string')
   })
 
   it('returns null when nothing matches any symptom', async () => {
@@ -261,4 +271,5 @@ describe('resolveSymptomSlug', () => {
     })
     expect(result).toBeNull()
   })
+
 })
