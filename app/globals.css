@@ -333,12 +333,6 @@ button { font: inherit; }
 }
 
 /* ============================================================
-   PR 1 — Cached Diagnostic Overview (Phase 3)
-   Ported verbatim from Claude Design package 2026-05-19.
-   Only adds new primitives; no foundation token changes.
-   ============================================================ */
-
-/* ============================================================
    PR 1 — Cached Diagnostic Overview
    Layered styles on top of the technician-phone kit.
    Only adds new primitives (test row, scenario/method chips,
@@ -708,6 +702,7 @@ button { font: inherit; }
 }
 .cov-cta__btn:hover { background: var(--vt-amber-600); }
 .cov-cta__btn:active { box-shadow: var(--vt-shadow-inset-press); }
+.cov-cta__btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .cov-cta__btn svg { font-size: 18px; }
 
 /* ---------- EMPTY STATE — first time we've seen this combo ---------- */

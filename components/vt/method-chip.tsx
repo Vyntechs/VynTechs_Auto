@@ -1,15 +1,13 @@
 import { Gauge, Eye, Ear, Wind, Ruler, Wrench, Circle } from '@phosphor-icons/react/dist/ssr'
-import type { FC } from 'react'
+import type { Icon } from '@phosphor-icons/react'
 
-type PhosphorIcon = FC<{ size?: number }>
-
-const METHOD_ICON: Record<string, PhosphorIcon> = {
-  PID: Gauge as PhosphorIcon,
-  VISUAL: Eye as PhosphorIcon,
-  AUDIBLE: Ear as PhosphorIcon,
-  SMELL: Wind as PhosphorIcon,
-  MEASUREMENT: Ruler as PhosphorIcon,
-  BENCH: Wrench as PhosphorIcon,
+const METHOD_ICON: Record<string, Icon> = {
+  PID: Gauge,
+  VISUAL: Eye,
+  AUDIBLE: Ear,
+  SMELL: Wind,
+  MEASUREMENT: Ruler,
+  BENCH: Wrench,
 }
 
 export function MethodChip({ method }: { method: string }) {
