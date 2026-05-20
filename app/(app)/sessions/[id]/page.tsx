@@ -6,10 +6,12 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { getSessionForUser } from '@/lib/sessions'
 import { routeForSession } from '@/lib/session-routing'
 import { ActiveSession } from '@/components/screens/active-session'
+import { CachedOverview } from '@/components/screens/cached-overview'
 import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
-import { sessionEvents } from '@/lib/db/schema'
+import { loadCachedDiagnostic } from '@/lib/diagnostics/cached-lookup'
+import { sessionEvents, platforms, symptoms } from '@/lib/db/schema'
 
 export default async function SessionPage({
   params,
@@ -42,6 +44,40 @@ export default async function SessionPage({
 
   if (route.kind === 'closed-summary') {
     return <ClosedCaseSummary session={session} />
+  }
+
+  if (route.kind === 'cached-overview') {
+    const platformRow = session.cacheHitPlatformId
+      ? await db.query.platforms.findFirst({
+          where: eq(platforms.id, session.cacheHitPlatformId),
+          columns: { slug: true },
+        })
+      : null
+
+    const symptomRow = session.cacheHitSymptomId
+      ? await db.query.symptoms.findFirst({
+          where: eq(symptoms.id, session.cacheHitSymptomId),
+          columns: { slug: true },
+        })
+      : null
+
+    if (!platformRow || !symptomRow) notFound()
+
+    const diagnostic = await loadCachedDiagnostic({
+      db,
+      platformSlug: platformRow.slug,
+      symptomSlug: symptomRow.slug,
+    })
+    if (!diagnostic) notFound()
+
+    return (
+      <CachedOverview
+        diagnostic={diagnostic}
+        vehicleName={formatVehicleName(session.intake)}
+        vin={null}
+        mileage={session.intake.mileage ?? null}
+      />
+    )
   }
 
   // Fetch session_events for the chat-thread render in RepairPhaseView.
