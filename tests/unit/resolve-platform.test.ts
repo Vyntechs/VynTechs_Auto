@@ -42,6 +42,22 @@ describe('resolvePlatformSlug', () => {
     }
   })
 
+  it('resolves the bare "6.7" engine a tech actually types (no "power stroke" wording)', () => {
+    for (const engine of ['6.7', '6.7L', '6.7l', ' 6.7 ', '6.7 diesel']) {
+      expect(
+        resolvePlatformSlug({ year: 2018, make: 'Ford', model: 'F-350', engine }),
+      ).toBe(PSD_67)
+    }
+  })
+
+  it('resolves the model with or without a hyphen or space', () => {
+    for (const model of ['F-350', 'F350', 'f350', 'f 350', 'F-250']) {
+      expect(
+        resolvePlatformSlug({ year: 2018, make: 'Ford', model, engine: '6.7' }),
+      ).toBe(PSD_67)
+    }
+  })
+
   it('is case-insensitive on make', () => {
     expect(
       resolvePlatformSlug({ year: 2018, make: 'ford', model: 'F-250', engine: '6.7L PSD' }),
