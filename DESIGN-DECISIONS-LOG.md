@@ -52,14 +52,45 @@ exist (they referenced it); they just didn't define it.
 **Easy to override:** One line in `app/globals.css`. If Claude Design wants a
 specific amber-600, swap the oklch value — nothing else depends on the exact shade.
 
-### ❓ D2 — CtaBar sub-labels "Step 1 of plan" / "no commit" — need your read
+### ✅ D2 (resolved) — Cached-overview CTA ships DISABLED with a "next update" sub-label
 
-The CtaBar primitive also shows two small sub-labels above the button. The design
-package defaults them to "Step 1 of plan" and "no commit". "no commit" is unclear —
-it may mean "you're not locked in yet" or relate to the engine's commit verdict.
-I left the plan defaults in the generic primitive for now; the REAL on-screen copy
-gets decided when the screen is built (W4). I'll propose plain wording there and log
-it — flagging now so you know it's coming.
+**Context:** The cached-overview screen ends in a bottom CTA bar. The button is meant
+to launch the step-by-step interactive walkthrough — but that walkthrough is built in
+PR2, not PR1. In PR1 the button has nowhere to go. The design package's default
+sub-labels were "Step 1 of plan" / "no commit" ("no commit" being unclear jargon).
+
+**Decision I made for you:** On the cached-overview screen, the CTA renders **disabled**
+(greyed, not clickable) with:
+- main label: "Start diagnosis"
+- sub-label: "Interactive walkthrough — coming in the next update"
+
+**Why this way:** A disabled button needs no fake click handler and no dead-end — it's
+honest about state. It uses the `:disabled` style added in W2. The real value of PR1
+is the instant overview itself (matched symptom + confidence gate + ranked test plan
+a tech can read and work from today); the button just isn't the payoff in PR1.
+Dropped "Step 1 of plan" / "no commit" — both implied an interactive flow that isn't
+live yet.
+
+**Easy to override:** When PR2 lands the walkthrough, the button goes live (enabled +
+real handler). If you'd rather PR1 ship it enabled-with-a-popup instead of disabled,
+that's a small change — say the word.
+
+### ✅ D4 — Empty-screen CTA: removed the word "AI"
+
+**Context:** The "no cached match" screen (CachedEmpty) has a button to kick off
+on-demand plan generation. The plan + design package labeled it "Generate a diagnostic
+with AI."
+
+**The rule it broke:** Your standing rule — never say "AI" in user-facing copy; the
+model is invisible plumbing.
+
+**Decision I made for you:** Renamed the button to **"Build a diagnostic plan."**
+(The sub-copy already reads naturally — "I can build a custom plan…" — no AI word.)
+
+**Note:** CachedEmpty is built in PR1 but NOT wired in (per your earlier call — a
+no-match just runs the normal flow). Its other copy ("tree generation", "corpus
+retrieval") is left as Claude Design wrote it; that screen gets revisited when PR4
+actually wires it up — I didn't over-polish copy that doesn't render yet.
 
 ---
 
