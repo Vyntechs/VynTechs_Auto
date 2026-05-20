@@ -39,7 +39,7 @@ function LedgerRow({ test }: { test: CachedDiagnosticTest }) {
         </div>
         {test.expectedReading !== null && (
           <div className="cov-row__expected">
-            <b>expect</b>
+            <b>expect</b>{' '}
             {test.expectedReading}
           </div>
         )}
@@ -114,8 +114,8 @@ function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
       </div>
 
       <div className="cov-list" style={{ flex: 1, overflowY: 'auto' }}>
-        {tests.map((t) => (
-          <LedgerRow key={t.priority} test={t} />
+        {tests.map((t, i) => (
+          <LedgerRow key={i} test={t} />
         ))}
       </div>
 
@@ -304,8 +304,8 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
             <span>Expect</span>
             <span style={{ textAlign: 'right' }}>Inv</span>
           </div>
-          {tests.map((t) => (
-            <div key={t.priority} className="cov-desktop__plan-row">
+          {tests.map((t, i) => (
+            <div key={i} className="cov-desktop__plan-row">
               <div className="prio">{String(t.priority).padStart(2, '0')}</div>
               <div className="name">{t.description}</div>
               <div className="scenario">
