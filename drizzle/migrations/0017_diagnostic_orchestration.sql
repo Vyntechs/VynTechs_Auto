@@ -325,160 +325,170 @@ CREATE INDEX "platform_equivalents_b_system_idx" ON "platform_equivalents" USING
 -- =========================================================================
 
 -- RLS: tech_outcomes
+--> statement-breakpoint
 ALTER TABLE tech_outcomes ENABLE ROW LEVEL SECURITY;
-
+--> statement-breakpoint
 CREATE POLICY tech_outcomes_insert_own_shop
   ON tech_outcomes FOR INSERT
   TO authenticated
   WITH CHECK (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY tech_outcomes_update_own_shop
   ON tech_outcomes FOR UPDATE
   TO authenticated
   USING (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY tech_outcomes_delete_own_shop
   ON tech_outcomes FOR DELETE
   TO authenticated
   USING (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY tech_outcomes_select_all
   ON tech_outcomes FOR SELECT
   TO authenticated
   USING (true);
 
 -- RLS: diagnostic_sessions
+--> statement-breakpoint
 ALTER TABLE diagnostic_sessions ENABLE ROW LEVEL SECURITY;
-
+--> statement-breakpoint
 CREATE POLICY diagnostic_sessions_insert_own_shop
   ON diagnostic_sessions FOR INSERT
   TO authenticated
   WITH CHECK (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY diagnostic_sessions_update_own_shop
   ON diagnostic_sessions FOR UPDATE
   TO authenticated
   USING (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY diagnostic_sessions_delete_own_shop
   ON diagnostic_sessions FOR DELETE
   TO authenticated
   USING (shop_id = (SELECT shop_id FROM profiles WHERE user_id = auth.uid()));
-
+--> statement-breakpoint
 CREATE POLICY diagnostic_sessions_select_all
   ON diagnostic_sessions FOR SELECT
   TO authenticated
   USING (true);
 
 -- Partial unique indexes on slug (active rows only) for fact-bearing node tables
+--> statement-breakpoint
 CREATE UNIQUE INDEX architecture_facts_slug_active_unique
   ON architecture_facts (slug) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX components_slug_active_unique
   ON components (slug) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX observable_properties_slug_active_unique
   ON observable_properties (slug) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX test_actions_slug_active_unique
   ON test_actions (slug) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX branch_logic_slug_active_unique
   ON branch_logic (slug) WHERE is_retired = false;
 
 -- Partial unique indexes on natural-identity tuples for junction tables
+--> statement-breakpoint
 CREATE UNIQUE INDEX component_connections_from_to_kind_active_unique
   ON component_connections (from_component_id, to_component_id, connection_kind)
   WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX symptom_test_implications_symptom_test_active_unique
   ON symptom_test_implications (symptom_id, test_action_id)
   WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE UNIQUE INDEX platform_equivalents_a_b_system_active_unique
   ON platform_equivalents (platform_a_id, platform_b_id, system)
   WHERE is_retired = false;
 
 -- Partial indexes for fast active-row scans (filtered by is_retired = false)
+--> statement-breakpoint
 CREATE INDEX architecture_facts_active_idx
   ON architecture_facts (platform_id) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE INDEX components_active_idx
   ON components (platform_id) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE INDEX observable_properties_active_idx
   ON observable_properties (component_id) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE INDEX test_actions_active_idx
   ON test_actions (component_id) WHERE is_retired = false;
-
+--> statement-breakpoint
 CREATE INDEX branch_logic_active_idx
   ON branch_logic (test_action_id) WHERE is_retired = false;
 
 -- Retirement invariant: a row with replaced_by_id set must be retired
+--> statement-breakpoint
 ALTER TABLE architecture_facts
   ADD CONSTRAINT architecture_facts_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE components
   ADD CONSTRAINT components_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE observable_properties
   ADD CONSTRAINT observable_properties_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE test_actions
   ADD CONSTRAINT test_actions_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE branch_logic
   ADD CONSTRAINT branch_logic_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE component_connections
   ADD CONSTRAINT component_connections_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE symptom_test_implications
   ADD CONSTRAINT symptom_test_implications_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
-
+--> statement-breakpoint
 ALTER TABLE platform_equivalents
   ADD CONSTRAINT platform_equivalents_retirement_invariant
   CHECK (replaced_by_id IS NULL OR is_retired = true);
 
 -- Numeric range constraints
+--> statement-breakpoint
 ALTER TABLE test_actions
   ADD CONSTRAINT test_actions_invasiveness_range
   CHECK (invasiveness BETWEEN 1 AND 5);
-
+--> statement-breakpoint
 ALTER TABLE test_actions
   ADD CONSTRAINT test_actions_confidence_boost_range
   CHECK (confidence_boost BETWEEN 0 AND 100);
-
+--> statement-breakpoint
 ALTER TABLE diagnostic_sessions
   ADD CONSTRAINT diagnostic_sessions_cumulative_confidence_range
   CHECK (cumulative_confidence BETWEEN 0 AND 100);
-
+--> statement-breakpoint
 ALTER TABLE symptom_test_implications
   ADD CONSTRAINT symptom_test_implications_priority_range
   CHECK (priority BETWEEN 1 AND 10);
 
 -- Value-shape constraints
+--> statement-breakpoint
 ALTER TABLE tech_outcomes
   ADD CONSTRAINT tech_outcomes_value_or_observation_required
   CHECK (measured_value IS NOT NULL OR measured_observation IS NOT NULL);
-
+--> statement-breakpoint
 ALTER TABLE component_connections
   ADD CONSTRAINT component_connections_no_self_loop
   CHECK (from_component_id <> to_component_id);
-
+--> statement-breakpoint
 ALTER TABLE platform_equivalents
   ADD CONSTRAINT platform_equivalents_canonical_ordering
   CHECK (platform_a_id < platform_b_id);
 
 -- Drop the ASC index drizzle-kit generated, replace with DESC for priority
+--> statement-breakpoint
 DROP INDEX IF EXISTS symptom_test_implications_symptom_priority_idx;
+--> statement-breakpoint
 CREATE INDEX symptom_test_implications_symptom_priority_idx
   ON symptom_test_implications (symptom_id, priority DESC);
