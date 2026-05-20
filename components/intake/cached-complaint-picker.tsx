@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
 type Complaint = { slug: string; description: string; category: string }
 
@@ -88,6 +89,7 @@ export function CachedComplaintPicker({
           <button
             key={c.slug}
             type="button"
+            title={c.description}
             onClick={() => onPick(selectedSlug === c.slug ? null : c.slug)}
             style={{
               padding: '6px 10px',
@@ -102,7 +104,7 @@ export function CachedComplaintPicker({
               transition: 'background 0.1s ease, color 0.1s ease',
             }}
           >
-            {c.description}
+            {symptomLabel(c.slug)}
           </button>
         ))}
       </div>

@@ -9,6 +9,7 @@ import {
   ConfidenceGate,
 } from '@/components/vt'
 import type { CachedDiagnostic, CachedDiagnosticTest } from '@/lib/diagnostics/cached-lookup'
+import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -100,7 +101,7 @@ function MobileOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
 
       <SymptomHero
         dtc={symptom.dtcDisplay}
-        name={symptom.description}
+        name={symptomLabel(symptom.slug)}
         gate={gateThreshold}
         priorFixCount={priorFixCount}
       />
@@ -223,7 +224,7 @@ function DesktopOverview({ diagnostic, vehicleName, vin, mileage }: Props) {
                 <span className="cov-symptom__dtc">{symptom.dtcDisplay}</span>
               )}
             </div>
-            <h1 className="cov-desktop__symptom">{symptom.description}</h1>
+            <h1 className="cov-desktop__symptom">{symptomLabel(symptom.slug)}</h1>
             {priorFixCount > 0 && (
               <div
                 style={{
