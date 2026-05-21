@@ -137,6 +137,7 @@ export const components = pgTable(
     electricalContract: text('electrical_contract'),
     location: text('location'),
     function: text('function'),
+    systems: text('systems').array().notNull().default([]),
     sourceProvenance: text('source_provenance', {
       enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
     }).notNull(),
@@ -209,6 +210,7 @@ export const symptoms = pgTable(
     category: text('category', {
       enum: ['dtc', 'performance', 'no-start', 'drivability', 'noise-vibration', 'electrical', 'other'],
     }).notNull(),
+    system: text('system'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
