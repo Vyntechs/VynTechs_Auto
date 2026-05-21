@@ -40,7 +40,7 @@ async function seedFixtures(db: TestDb) {
   const [cPcm, cFrp, cLiftPump, cRadiator] = await db
     .insert(components)
     .values([
-      { slug: 'c-pcm', platformId: platform.id, name: 'PCM', kind: 'module', systems: ['fuel'], sourceProvenance: 'TRAINING-CONFIRMED' },
+      { slug: 'c-pcm', platformId: platform.id, name: 'PCM', kind: 'module', systems: ['fuel', 'electrical'], sourceProvenance: 'TRAINING-CONFIRMED' },
       { slug: 'c-frp', platformId: platform.id, name: 'FRP Sensor', kind: 'sensor', location: 'Front of DS rail', function: 'Reports rail pressure', electricalContract: '3-wire analog', systems: ['fuel'], sourceProvenance: 'TRAINING-CONFIRMED' },
       { slug: 'c-lift-pump', platformId: platform.id, name: 'Lift Pump', kind: 'pump', systems: ['fuel'], sourceProvenance: 'TRAINING-CONFIRMED' },
       { slug: 'c-radiator', platformId: platform.id, name: 'Radiator', kind: 'mechanical', systems: ['cooling'], sourceProvenance: 'TRAINING-CONFIRMED' },
@@ -115,6 +115,31 @@ describe('loadSystemTopology', () => {
     const result = await loadSystemTopology({ db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087' })
     // 2 valid fuel-fuel connections; the fuel-cooling and retired ones excluded
     expect(result!.connections).toHaveLength(2)
+
+    const pcm = result!.components.find((c) => c.slug === 'c-pcm')!
+    const frp = result!.components.find((c) => c.slug === 'c-frp')!
+    const liftPump = result!.components.find((c) => c.slug === 'c-lift-pump')!
+
+    const frpConn = result!.connections.find((cn) => cn.toComponentId === frp.id)!
+    expect(frpConn.fromComponentId).toBe(pcm.id)
+    expect(frpConn.connectionKind).toBe('electrical-wire')
+    expect(frpConn.direction).toBe('bidirectional')
+    expect(frpConn.description).toBe('PCM reads FRP signal')
+
+    const liftPumpConn = result!.connections.find((cn) => cn.toComponentId === liftPump.id)!
+    expect(liftPumpConn.fromComponentId).toBe(pcm.id)
+    expect(liftPumpConn.connectionKind).toBe('electrical-wire')
+    expect(liftPumpConn.direction).toBe('unidirectional')
+    expect(liftPumpConn.description).toBe('PCM commands lift pump')
+  })
+
+  it('includes a component whose systems array contains the target system among others', async () => {
+    // The PCM fixture is tagged ['fuel', 'electrical'] — arrayContains must match
+    // on the presence of 'fuel', not exact array equality.
+    const result = await loadSystemTopology({ db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087' })
+    expect(result).not.toBeNull()
+    const slugs = result!.components.map((c) => c.slug)
+    expect(slugs).toContain('c-pcm')
   })
 
   it('attaches active observable properties to a component', async () => {
