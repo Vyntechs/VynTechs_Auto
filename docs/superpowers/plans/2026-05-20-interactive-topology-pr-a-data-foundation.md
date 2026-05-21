@@ -692,10 +692,11 @@ Via Supabase MCP `execute_sql`:
 
 ```sql
 SELECT count(*) AS fuel_components FROM components WHERE 'fuel' = ANY(systems);
+SELECT count(*) AS fuel_via_containment FROM components WHERE systems @> ARRAY['fuel'];
 SELECT slug, system FROM symptoms ORDER BY slug;
 ```
 
-Expected: `fuel_components` matches the confirmed list count; all three symptoms show `system = fuel`.
+Expected: `fuel_components` matches the confirmed list count; `fuel_via_containment` must equal it — this proves the `@>` containment operator that `loadSystemTopology` runs (via Drizzle `arrayContains`) behaves identically on live Postgres and on the PGlite test DB. All three symptoms show `system = fuel`.
 
 - [ ] **Step 6: Commit the data record**
 
@@ -723,3 +724,12 @@ git commit -m "chore(topology): record fuel-system tagging data step"
 ## Out of scope (→ PR-B, its own plan)
 
 The diagram canvas, auto-layout, the detail panel, the route-page swap, mobile, and live UI validation. PR-B is planned once PR-A has landed and the data layer is real.
+
+## PR-B follow-ups (from PR-A code review)
+
+Non-blocking findings from the Task 2 code-quality review. They are deliberately out of PR-A's scope — they belong with rendering/performance work — but PR-B's plan should pick them up:
+
+1. **Parallelize the loader's independent queries.** `loadSystemTopology` issues ~7 sequential reads; the connections / observable-properties / test-actions reads and the branch + implication reads are mutually independent and can run via `Promise.all`. Spec §1 makes "instant render" a design constraint — worth doing when render performance is in scope.
+2. **One-pass group-by in graph assembly.** Step 7 re-scans the child-row arrays with `.filter()` per component (O(C×OP), O(C×TA), O(TA×B)). Fine at ~22 components; degrades quadratically as the diesel-seeding fan-out grows systems. Replace with `Map`-based grouping.
+3. **Enum-type widening — make it a deliberate decision.** The `Topology*` types widen DB string-enums (`connectionKind`, `kind`, `direction`, `verdict`, …) to plain `string`. If PR-B's diagram switches styling on `connectionKind`/`kind` (D4), decide whether to re-export the schema enum types for exhaustiveness rather than a default branch.
+4. **Deterministic `branches` ordering.** `branchLogic` rows are fetched with no `orderBy`, so a test action's branches render in arbitrary order in the detail panel. Add an `orderBy` (e.g. by `verdict` or `slug`) when the panel is built.
