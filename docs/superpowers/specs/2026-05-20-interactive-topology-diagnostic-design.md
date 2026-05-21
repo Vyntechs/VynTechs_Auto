@@ -138,7 +138,8 @@ of the existing `cached-lookup.ts`. Given a platform slug + symptom slug:
 5. Load `observable_properties` for those components.
 6. Load `test_actions` + their `branch_logic` for those components; mark each
    with whether the current symptom implicates it (via
-   `symptom_test_implications`) — all are loaded, implicated ones sort first.
+   `symptom_test_implications`). All are loaded — the diagram panel uses the
+   flag to surface implicated tests first.
 7. Return a `SystemTopology`. Returns `null` when the platform/symptom is missing
    or no components are tagged for the system.
 
@@ -265,11 +266,13 @@ connection detail panels; provenance markers; pan/zoom; desktop **and** mobile
 Two small, independently reviewable PRs into `staging-interactive-diagnostics`:
 
 - **PR-A — Data foundation.** The migration (2 columns), the reviewed fuel
-  tagging, `loadSystemTopology` + `layoutTopology`, unit tests. No UI.
-  Done when: live DB has the columns + fuel tags; loader + layout are tested.
-- **PR-B — The diagnostic UI.** `<TopologyDiagnostic>`, `<TopologyDiagram>`,
-  `<TopologyDetailPanel>`, the route-page swap, mobile, live validation.
-  Done when: a cache hit renders the explorable diagram on desktop + phone.
+  tagging, `loadSystemTopology`, unit tests. No UI. Done when: live DB has the
+  columns + fuel tags; the loader is tested.
+- **PR-B — The diagnostic UI.** `layoutTopology`, `<TopologyDiagnostic>`,
+  `<TopologyDiagram>`, `<TopologyDetailPanel>`, the route-page swap, mobile,
+  live validation. (`layoutTopology` sits with PR-B — node sizing and spacing
+  are coupled to how nodes render.) Done when: a cache hit renders the
+  explorable diagram on desktop + phone.
 
 The implementation plan (superpowers `writing-plans`) finalises task-level
 breakdown and ordering.
