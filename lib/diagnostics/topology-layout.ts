@@ -60,5 +60,9 @@ export function layoutTopology(topology: SystemTopology): TopologyLayout {
   })
 
   const graph = g.graph()
-  return { nodes, width: graph.width ?? 0, height: graph.height ?? 0 }
+  // dagre returns -Infinity for width/height when the graph has no nodes;
+  // `??` does not catch that (it is a real number). Clamp to a finite value.
+  const finite = (v: number | undefined) =>
+    Number.isFinite(v) ? (v as number) : 0
+  return { nodes, width: finite(graph.width), height: finite(graph.height) }
 }
