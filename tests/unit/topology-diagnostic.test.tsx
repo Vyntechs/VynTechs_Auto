@@ -16,7 +16,10 @@ function component(id: string, name: string) {
 
 const topology: SystemTopology = {
   platform: { slug: 'ford-sd', name: 'Ford Super Duty (2017-2022)' },
-  symptom: { slug: 'p0087', description: 'Fuel rail pressure too low' },
+  symptom: {
+    slug: 'p0087-fuel-rail-pressure-too-low',
+    description: 'Fuel rail pressure too low',
+  },
   system: 'fuel',
   components: [component('a', 'PCM'), component('b', 'FRP Sensor')],
   connections: [],
@@ -26,7 +29,9 @@ describe('TopologyDiagnostic', () => {
   it('renders the vehicle + symptom header and an empty panel', () => {
     render(<TopologyDiagnostic topology={topology} layout={layoutTopology(topology)} vehicleName="2019 Ford F-250" />)
     expect(screen.getByText(/2019 Ford F-250/)).toBeInTheDocument()
-    expect(screen.getByText(/fuel rail pressure too low/i)).toBeInTheDocument()
+    expect(
+      screen.getByText('P0087 — Fuel Rail Pressure Too Low'),
+    ).toBeInTheDocument()
     expect(screen.getByText(/click any part or line/i)).toBeInTheDocument()
   })
 

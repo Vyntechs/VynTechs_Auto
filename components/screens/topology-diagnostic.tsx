@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import type { SystemTopology } from '@/lib/diagnostics/load-system-topology'
 import type { TopologyLayout } from '@/lib/diagnostics/topology-layout'
+import { formatSymptomTitle } from '@/components/topology/topology-format'
 import { TopologyDiagram } from '@/components/topology/topology-diagram'
 import {
   TopologyDetailPanel,
@@ -64,7 +65,9 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
         <div className="topo__eyebrow">
           Wiring topology · {topology.system} system
         </div>
-        <h1 className="topo__title">{topology.symptom.description}</h1>
+        <h1 className="topo__title">
+          {formatSymptomTitle(topology.symptom.slug)}
+        </h1>
         <div className="topo__vehicle">
           {vehicleName} · {topology.platform.name}
         </div>
