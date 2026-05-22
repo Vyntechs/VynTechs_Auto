@@ -90,6 +90,6 @@ describe('layoutTopology', () => {
 
   it('returns an empty layout for an empty component list', () => {
     const empty = { ...makeTopology(), components: [], connections: [] }
-    expect(layoutTopology(empty).nodes).toEqual([])
+    expect(layoutTopology(empty)).toEqual({ nodes: [], width: 0, height: 0 })
   })
 })
