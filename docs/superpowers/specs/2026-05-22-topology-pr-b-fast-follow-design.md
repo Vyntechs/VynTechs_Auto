@@ -80,14 +80,13 @@ is unreadable. The tech must manually zoom in before the diagram is usable.
 
 **Fix.** Make the opening view sit at a zoom where node text is legible.
 
-- On initial mount, fit the view with a `minZoom` floor so it cannot zoom out past a readable scale
-  (target ≈0.6, tuned during implementation against the live diagram). If the graph does not fully
+- Apply a `minZoom` floor through `fitViewOptions` so the fit cannot zoom out past a readable scale
+  (target ≈0.7, tuned during implementation against the live diagram). If the graph does not fully
   fit at the floor it opens centred and overflowing; the tech pans / zooms out to see the rest.
-- The canvas `minZoom` stays `0.2`, so manual zoom-out and the Controls "Fit View" button still
-  reach the full bird's-eye overview.
-- The mechanism (a floor applied to the initial fit only, vs. applied to the Fit View button too)
-  is an implementation-plan decision. The required behaviour: **opens readable; full overview still
-  reachable.**
+- This floor applies to both the initial view and the Controls "Fit View" button (they share
+  `fitViewOptions`). The canvas `minZoom` stays `0.2`, so a tech can still manually zoom out to the
+  full bird's-eye overview.
+- Required behaviour: **opens readable; full overview still reachable by manual zoom-out.**
 
 **Files:** `components/topology/topology-diagram.tsx`.
 
