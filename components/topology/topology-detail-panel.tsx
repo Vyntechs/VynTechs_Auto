@@ -19,6 +19,8 @@ type Props = {
   selection: TopologySelection
   /** Jump the panel to a component (used by connection-endpoint buttons). */
   onSelectComponent: (componentId: string) => void
+  /** Clear the selection — closes the panel (and the mobile bottom sheet). */
+  onClose: () => void
   /** Mobile: present as an open bottom sheet. */
   open?: boolean
 }
@@ -155,12 +157,27 @@ function ConnectionBody({
   )
 }
 
-export function TopologyDetailPanel({ selection, onSelectComponent, open }: Props) {
+export function TopologyDetailPanel({
+  selection,
+  onSelectComponent,
+  onClose,
+  open,
+}: Props) {
   return (
     <aside
       className={`topo-panel${open ? ' is-open' : ''}`}
       aria-live="polite"
     >
+      {selection.kind !== 'empty' && (
+        <button
+          type="button"
+          className="topo-panel__close"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      )}
       {selection.kind === 'empty' && (
         <div className="topo-panel__empty">
           Click any part or line to see what it is, where it is, and what to
