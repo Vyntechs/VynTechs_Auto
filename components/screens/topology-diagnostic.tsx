@@ -85,6 +85,7 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
       <TopologyDetailPanel
         selection={selection}
         onSelectComponent={setSelectedId}
+        onClose={() => setSelectedId(null)}
         open={selection.kind !== 'empty'}
       />
     </div>
