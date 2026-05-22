@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -6,11 +7,12 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { getSessionForUser } from '@/lib/sessions'
 import { routeForSession } from '@/lib/session-routing'
 import { ActiveSession } from '@/components/screens/active-session'
-import { CachedOverview } from '@/components/screens/cached-overview'
 import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
-import { loadCachedDiagnostic } from '@/lib/diagnostics/cached-lookup'
+import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
+import { layoutTopology } from '@/lib/diagnostics/topology-layout'
+import { TopologyDiagnostic } from '@/components/screens/topology-diagnostic'
 import { sessionEvents, platforms, symptoms } from '@/lib/db/schema'
 
 export default async function SessionPage({
@@ -63,20 +65,53 @@ export default async function SessionPage({
 
     if (!platformRow || !symptomRow) notFound()
 
-    const diagnostic = await loadCachedDiagnostic({
+    const topology = await loadSystemTopology({
       db,
       platformSlug: platformRow.slug,
       symptomSlug: symptomRow.slug,
     })
-    if (!diagnostic) notFound()
+
+    // Spec §10: a null topology (no system tagged, or no components) renders
+    // a clean empty state — never a 500, never notFound().
+    if (!topology) {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            minHeight: '100dvh',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            padding: '24px',
+            fontFamily: 'var(--vt-font-serif)',
+            fontSize: 'var(--vt-fs-18)',
+            color: 'var(--vt-fg-3)',
+          }}
+        >
+          A system diagram is not available for this vehicle yet.
+          <Link
+            href="/today"
+            style={{
+              fontFamily: 'var(--vt-font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              color: 'var(--vt-fg-3)',
+              textDecoration: 'none',
+            }}
+          >
+            ← Sessions
+          </Link>
+        </div>
+      )
+    }
 
     return (
-      <CachedOverview
-        sessionId={session.id}
-        diagnostic={diagnostic}
+      <TopologyDiagnostic
+        topology={topology}
+        layout={layoutTopology(topology)}
         vehicleName={formatVehicleName(session.intake)}
-        vin={null}
-        mileage={session.intake.mileage ?? null}
       />
     )
   }
