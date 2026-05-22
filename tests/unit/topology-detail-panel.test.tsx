@@ -113,7 +113,7 @@ describe('TopologyDetailPanel', () => {
       />,
     )
     expect(screen.getByText('PCM reads the FRP signal')).toBeInTheDocument()
-    expect(screen.getByText(/electrical-wire/i)).toBeInTheDocument()
+    expect(screen.getByText('Electrical wire')).toBeInTheDocument()
     // clicking an endpoint jumps back to that component
     fireEvent.click(screen.getByRole('button', { name: /FRP Sensor/i }))
     expect(onSelect).toHaveBeenCalledWith('frp')

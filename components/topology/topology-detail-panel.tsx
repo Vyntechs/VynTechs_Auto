@@ -2,6 +2,7 @@ import type {
   TopologyComponent,
   TopologyConnection,
 } from '@/lib/diagnostics/load-system-topology'
+import { formatConnectionKind } from '@/components/topology/topology-format'
 
 /** What the panel is currently showing. */
 export type TopologySelection =
@@ -129,7 +130,9 @@ function ConnectionBody({
   return (
     <>
       <div className="topo-panel__kind">connection</div>
-      <h2 className="topo-panel__title">{connection.connectionKind}</h2>
+      <h2 className="topo-panel__title">
+        {formatConnectionKind(connection.connectionKind)}
+      </h2>
       <Provenance value={connection.sourceProvenance} />
 
       <Row label="Description" value={field(connection.description)} />
