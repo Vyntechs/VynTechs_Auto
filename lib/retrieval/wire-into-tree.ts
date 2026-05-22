@@ -15,6 +15,27 @@ import type { AdvanceStreamEvent } from '@/lib/advance-stream-events'
 
 type UpdateTreeInput = Parameters<typeof updateTreeFn>[0]
 
+/**
+ * Wall-clock ceiling for the optional supporting-evidence phase (internet
+ * retrieval + AI grading + cross-shop corpus). The routes that call these
+ * wrappers run on a 60s serverless limit; the only mandatory step is the LLM
+ * tree call. When retrieval is slow — cold cache, a degraded upstream API —
+ * letting it block the whole request pushes past that limit and surfaces as a
+ * 504 at the edge. This ceiling makes the "never block on optional supporting
+ * evidence" contract real: if the evidence isn't ready in time, generation
+ * proceeds without it. A retried request then succeeds because each adapter
+ * caches its result as it completes, so the second run reads warm cache.
+ */
+const OPTIONAL_EVIDENCE_DEADLINE_MS = 20_000
+
+function withDeadline<T>(work: Promise<T>, fallback: T, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer))
+}
+
 export type BuildUpdateTreeWithRetrievalDeps = {
   db: AppDb
   adapters: RetrievalAdapter[]
@@ -125,7 +146,15 @@ export function buildUpdateTreeWithRetrieval(
         })()
       : Promise.resolve(undefined)
 
-    const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
+    const evidenceFallback: [RetrievalResult[], CorpusMatch[] | undefined] = [
+      [],
+      deps.retrieveCorpus ? [] : undefined,
+    ]
+    const [retrieval, corpus] = await withDeadline(
+      Promise.all([retrievalPromise, corpusPromise]),
+      evidenceFallback,
+      OPTIONAL_EVIDENCE_DEADLINE_MS,
+    )
 
     deps.onProgress?.({
       type: 'stage',
@@ -204,7 +233,15 @@ export function buildGenerateInitialTreeWithRetrieval(
         })()
       : Promise.resolve(undefined)
 
-    const [retrieval, corpus] = await Promise.all([retrievalPromise, corpusPromise])
+    const evidenceFallback: [RetrievalResult[], CorpusMatch[] | undefined] = [
+      [],
+      deps.retrieveCorpus ? [] : undefined,
+    ]
+    const [retrieval, corpus] = await withDeadline(
+      Promise.all([retrievalPromise, corpusPromise]),
+      evidenceFallback,
+      OPTIONAL_EVIDENCE_DEADLINE_MS,
+    )
 
     return deps.generateInitialTree(intake, corpus, retrieval)
   }

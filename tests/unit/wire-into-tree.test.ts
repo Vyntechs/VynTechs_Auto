@@ -370,6 +370,44 @@ describe('buildGenerateInitialTreeWithRetrieval', () => {
     expect(warnSpy).toHaveBeenCalledWith('intake corpus retrieval failed:', expect.any(Error))
   })
 
+  it('proceeds without evidence when the optional-evidence phase exceeds the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let capturedRetrieval: RetrievalResult[] | undefined
+      let capturedCorpus: CorpusMatch[] | undefined
+      const generateInitialTree = vi.fn(
+        async (_a: IntakePayload, c?: CorpusMatch[], r?: RetrievalResult[]) => {
+          capturedCorpus = c
+          capturedRetrieval = r
+          return initialTree
+        },
+      )
+
+      const wrapped = buildGenerateInitialTreeWithRetrieval({
+        db: {} as AppDb,
+        adapters: [],
+        generateInitialTree,
+        // Never resolves — simulates a stalled retrieval round (cold cache,
+        // degraded upstream API) that would otherwise block past the route's
+        // 60s serverless ceiling and surface as a 504.
+        runRetrieval: vi.fn(() => new Promise<RetrievalRun>(() => {})),
+        validateRetrievalResults: vi.fn(async () => [] as RetrievalResult[]),
+        retrieveCorpus: vi.fn(() => new Promise<CorpusMatch[]>(() => {})),
+      })
+
+      const pending = wrapped(intake)
+      await vi.advanceTimersByTimeAsync(20_000)
+      const result = await pending
+
+      expect(result).toBe(initialTree)
+      expect(capturedRetrieval).toEqual([])
+      expect(capturedCorpus).toEqual([])
+      expect(generateInitialTree).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('passes corpus=undefined to generateInitialTree when retrieveCorpus is not provided', async () => {
     let capturedCorpus: CorpusMatch[] | undefined
     const generateInitialTree = vi.fn(
