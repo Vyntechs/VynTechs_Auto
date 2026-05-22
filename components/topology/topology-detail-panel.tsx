@@ -139,7 +139,7 @@ function ConnectionBody({
       {[fromComponent, toComponent].map((c, i) =>
         c ? (
           <button
-            key={c.id}
+            key={`${i}-${c.id}`}
             type="button"
             className="topo-panel__link"
             onClick={() => onSelectComponent(c.id)}
