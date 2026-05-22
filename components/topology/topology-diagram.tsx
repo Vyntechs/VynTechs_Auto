@@ -19,6 +19,10 @@ import { TopologyNode } from './topology-node'
 
 const nodeTypes: NodeTypes = { topology: TopologyNode }
 
+/** Shared by the initial fit and the Controls "Fit View" button. The minZoom
+ *  floor keeps the diagram legible on open instead of fitting it tiny. */
+const FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: 0.7 }
+
 type Props = {
   topology: SystemTopology
   layout: TopologyLayout
@@ -84,13 +88,13 @@ export function TopologyDiagram({
         onEdgeClick={onEdgeClick}
         onPaneClick={onClearSelection}
         fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.7 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
         colorMode="light"
       >
         <Background />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} fitViewOptions={FIT_VIEW_OPTIONS} />
       </ReactFlow>
     </div>
   )
