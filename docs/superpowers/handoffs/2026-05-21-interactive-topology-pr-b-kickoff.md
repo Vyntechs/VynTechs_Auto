@@ -5,14 +5,14 @@
 
 ## Status — PR-A is done
 
-PR-A (data foundation) is complete and in review on branch `feat/interactive-topology-diagnostic`, PR'd into `staging-interactive-diagnostics`.
+PR-A (data foundation) is **merged** — PR #87, into `staging-interactive-diagnostics`.
 
 Delivered + verified:
 - Schema columns `components.systems` (text array) and `symptoms.system` (text) + migration `0019`.
 - `loadSystemTopology` loader + 9 unit tests (spec + code-quality reviewed via subagent-driven-development).
 - Live Supabase (`ynmtszuybeenjbigxdyl`): migration `0019` applied; 22 fuel components + 3 fuel symptoms tagged. All verified.
 
-**Do not redo PR-A.** Once PR-A merges into `staging-interactive-diagnostics`, cut the PR-B branch from `staging-interactive-diagnostics` so it includes the loader.
+**Do not redo PR-A.** The PR-B work branch `feat/interactive-topology-pr-b` is already cut from `staging-interactive-diagnostics` — the loader is in it.
 
 ## What PR-B is — the diagnostic UI
 
@@ -34,6 +34,14 @@ The explorable diagram itself. Spec §12 / §5.2–5.5:
 - PR-A plan — includes a **"PR-B follow-ups"** section (4 code-review items: parallelize the loader's queries, one-pass group-by assembly, enum-type-widening decision, deterministic branch ordering) to fold into PR-B's plan: `docs/superpowers/plans/2026-05-20-interactive-topology-pr-a-data-foundation.md`
 - Visual target — prototype HTML: `docs/superpowers/reference/vyntechs-fuel-system-prototype.html` (on branch `docs/interactive-topology-kickoff`, PR #84)
 
-## First step
+## Status — design + plan are done (2026-05-21)
 
-PR-B has no implementation plan yet. Phase 1: brainstorm the open items (rendering library; 8-injector visual treatment — spec §13), then write the PR-B implementation plan with `superpowers:writing-plans`, then execute via `superpowers:subagent-driven-development`.
+Brainstorm and planning are complete:
+- Spec §13 open items resolved — React Flow + dagre; 8 injectors render as separate nodes; mobile = fit-to-width + bottom-sheet panel. Spec updated and committed.
+- **Implementation plan written:** `docs/superpowers/plans/2026-05-21-interactive-topology-pr-b-diagram-ui.md` — 9 tasks.
+
+## Next step
+
+Execute the plan via `superpowers:subagent-driven-development` on branch `feat/interactive-topology-pr-b` — fresh subagent per task, review between tasks.
+
+Deferred by design (not gaps): the PR-A loader micro-optimizations (parallelize queries, one-pass group-by) — premature at 22 components; revisit when diesel-seeding scales the graph. They remain recorded in the PR-A plan's "PR-B follow-ups" section.

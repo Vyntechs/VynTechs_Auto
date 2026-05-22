@@ -1041,11 +1041,15 @@ function ComponentBody({ component }: { component: TopologyComponent }) {
                   expect: {t.expectedObservation}
                 </div>
               )}
-              {t.branches.map((b, i) => (
-                <div key={i}>
-                  {b.condition} → {b.verdict}: {b.nextAction}
-                </div>
-              ))}
+              {/* Branches sorted by condition — stable display order
+                  (PR-A code-review follow-up: branch_logic has no DB order). */}
+              {[...t.branches]
+                .sort((a, b) => a.condition.localeCompare(b.condition))
+                .map((b, i) => (
+                  <div key={i}>
+                    {b.condition} → {b.verdict}: {b.nextAction}
+                  </div>
+                ))}
             </div>
           ))}
         </>
