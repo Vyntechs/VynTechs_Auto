@@ -1,112 +1,111 @@
-# LinkedIn series — Prompting orchestration
+# LinkedIn series — How to build an AI that reasons
 
-Six short posts. Each one takes a real design decision from the prompting
-orchestration in this codebase and turns it into one idea worth reading.
+Six short posts on one topic: the architecture of an AI **reasoning engine** —
+a system built to solve problems, not just answer prompts. Chatbot vs. solver.
 
-How they were written:
-- **Content** is drawn strictly from real patterns in our production prompts —
-  not invented, not borrowed. No customer data, no code, no secret sauce.
-- **Product and domain are kept anonymous.** "A product I'm building," "an AI
-  system I work on." No company name, no industry.
-- **Voice** is meant to read like one builder talking, not a content account.
-  Uneven pacing, a clear point of view, no AI tells. Teaching, not selling.
+Framing:
+- **Fully general.** No product, no industry, no "I'm building." The subject is
+  the architecture itself.
+- **Concrete without being domain-specific.** The proof in each post is the
+  mechanics of the engine — how it narrows, when it stops, what it refuses to
+  do — not an example field.
+- **Voice** is one person who has clearly thought hard about this. Opinionated,
+  uneven, no AI tells. Teaching, not selling.
 
-Suggested cadence: one post every 3–5 days, in order. Lead generalist, get
-sharper. No hashtags needed; if you want them, 2–3 max at the very bottom.
-Drop the `[N/6]` tags if you'd rather they not read as a fixed series.
+Lineage worth knowing (useful in comments, not needed in the posts): the
+"general process + swappable domain" idea is the 1959 General Problem Solver
+and 1970s expert-system design. What's new is that LLMs finally make the
+general engine genuinely general. Key terms: *cost-aware inference / value of
+information* (post 2–3), *abductive reasoning* (post 2).
 
----
-
-## Post 1 — What the prompt forbids
-
-Most of our system prompt is telling the AI what *not* to do.
-
-I'm building an AI that guides experts through hard diagnostic work. Early on it had a habit. Every few steps it would ask the user to upload a photo or a document. Capture this. Scan that.
-
-Made sense to the model — more data, better answer. But the person using it has their hands full and is mid-task. Stopping to be a photographer is a real cost to them. And processing all of it costs us real money too.
-
-So we wrote a rule. Ask for an upload only when the user genuinely can't put the thing into words. A dense diagram. A screen full of readings. Everything else — trust their description and keep moving.
-
-The part that stuck with me: that one rule is longer than the section telling the model what its actual job is.
-
-A good prompt isn't a wish list of everything you'd like. It's mostly a list of the model's instincts you've decided to overrule.
+Suggested cadence: one post every 3–5 days, in order. No hashtags needed.
 
 ---
 
-## Post 2 — A number is a place to hide
+## Post 1 — Build a problem-solver, not a tool
 
-I won't let our AI tell me it's "80% confident."
+Most people building with AI right now are building tools. A tool does one task. You ask, it answers.
 
-When the model proposes a next step, it reports how sure it is. Normal enough.
+I think the more interesting thing to build is a problem-solver — and those are not the same object.
 
-But there's a rule sitting on top of that. If confidence drops below a threshold, a number isn't allowed to be the whole answer. The model has to write one sentence naming the specific thing it's unsure about. Not "moderate uncertainty." The actual gap, in plain words.
+A tool knows answers. A problem-solver knows how to *get* to one. How to move from a broken, half-understood state to a resolved one without wasting moves. The first is a lookup. The second is a process.
 
-Then it has to say what would close that gap — one question the user can answer right now.
+Here's why the difference matters. Every troubleshooting situation, in any field, has the same skeleton. A bad state. A goal state. A fog of possible causes in between. Strip the industry off a mechanic, a doctor, an engineer chasing a bug — and the shape of what they're doing is identical.
 
-Why go to the trouble? Because "80% confident" is useless to the person who has to act on it. It doesn't tell them what to do next. A named doubt does.
+So you don't have to build something good at one task. You can build the *process*, and point it at a task.
 
-If your AI is unsure, don't let it round that feeling off into a percentage. Make it say the doubt out loud, in a sentence somebody can actually act on.
-
----
-
-## Post 3 — Stop reaching for the chat box
-
-Our AI doesn't hold a conversation. It edits a structure.
-
-The easy way to build an assistant is a chat box. User types, model replies, repeat forever. We didn't do that.
-
-The model's output isn't a message. It's a structured map of the problem — steps, branches, each with a status. When the user reports what they found, the model doesn't write a paragraph back. It closes one branch, drops the dead ones, and lights up the next step.
-
-So the user sees a single instruction at a time. Underneath it, the model is quietly maintaining the whole map.
-
-Two things you get from this. The model can't wander off — it's editing a structure, not free-associating into a text box. And the user is never dumped with a wall of text to decode while they're busy.
-
-If you're building with these models, question the chat box. Sometimes the output you want isn't prose the model generates. It's state the model edits.
+That's a different ambition. And it quietly changes every design decision that comes after it.
 
 ---
 
-## Post 4 — A rule that lives only in a prompt isn't a rule
+## Post 2 — Every problem is a search through wrong answers
 
-We wrote a prompt that says "do not do X." Then we assumed it would fail anyway, and wrote code to catch it.
+Here's a frame that reorganized how I think about this.
 
-Our product has two phases. In the first, the AI helps work out what's wrong. Then that conclusion gets locked, and the tool switches to helping the user execute on it.
+Every problem is a search through a space of wrong answers.
 
-After the lock, the prompt is blunt: the conclusion is final. Do not revise it. Do not argue with it.
+When something is broken, the cause is one of many possible causes — and most of them are wrong. The job isn't "find the answer." It's *eliminate the wrong ones cheaply* until one is left standing.
 
-But we don't trust that prompt. A model can be talked out of almost anything by the right input. So the response is allowed to carry only two fields. Anything else the model tries to send back — including any attempt to reopen that locked conclusion — gets stripped by our server before it touches anything real.
+That reframes what a good problem-solver actually does. It isn't the one that knows the most. It's the one that asks the single question that cuts the space of possibilities in half. Then asks the next one.
 
-The prompt sets the intent. The code enforces it.
+A weak solver gathers everything it can, then thinks. A strong one thinks first — about which one piece of information is worth gathering next — and ignores the rest until that piece earns its place.
 
-A rule that lives only in a prompt isn't really a rule. It's a hope. If a boundary actually matters, it has to exist somewhere the model can't talk its way past.
-
----
-
-## Post 5 — Tell it who to believe
-
-We told our AI exactly who to believe. And in what order.
-
-When the model works a problem, it pulls from a few sources. A database of past cases. Material from the open internet. And notes written by the most experienced person on our side.
-
-We don't treat those as equal. The prompt lays out a trust order. Something one expert personally verified outranks a hundred cases that merely look similar. Statistical resemblance is a weak signal. Vetted, hands-on experience is a strong one.
-
-One more rule. When two sources disagree, the model isn't allowed to quietly pick a winner and move on. It has to surface the conflict — name both sides, say which one it's trusting, say why.
-
-Most AI mistakes I run into aren't the model being dumb. They're the model treating a weak source and a strong source as if they weighed the same.
-
-Give it a trust order. And make it show you the disagreements instead of burying them.
+If you're designing AI to reason, stop optimizing for how much it knows. Optimize for how fast it can rule things out.
 
 ---
 
-## Post 6 — Consensus is not truth
+## Post 3 — "Efficient" is a cost function, not a constant
 
-"Consensus is not truth." We had to write that into the prompt, close to word for word.
+Every problem-solver is trying to be efficient. But "efficient" might be the most misunderstood word in the room.
 
-When our AI learns from real-world sources, a lot of what it reads is confident and wrong. Popular answers that don't hold up.
+Efficient is not a universal quantity. It's a cost function. And that function changes completely depending on where you point the solver.
 
-So there's a rule. Don't trust agreement on its own. Trust agreement only after it survives a basic plausibility check. If a crowd of sources all swear by a fix that simply can't work — throw out the whole crowd, however large it is.
+In one setting the expensive thing is time. In another it's money. In another it's a move you can't undo. In another it's someone's safety. Same word — "efficient" — pointing at four different things.
 
-The model isn't counting votes. It's testing each claim against first principles and discarding the ones that can't be true, no matter how many people repeat them.
+This is the part that lets one engine work across domains. The reasoning core stays fixed: generate the possibilities, narrow them, act. What you swap, per field, is the definition of *expensive*. That single component is the whole difference between a solver that's good here and a solver that's good there.
 
-A pile of agreement isn't evidence. It's just a pile. Popularity and correctness are two different measurements, and a surprising number of AI products quietly treat them as one.
+Most AI products quietly hardcode one cost function and call it general intelligence. It isn't. It's one setting, frozen.
 
-If your system learns from a crowd, it needs a filter that isn't the crowd.
+---
+
+## Post 4 — The constraints are the product
+
+A problem-solver with no constraints is just a chatbot.
+
+I didn't believe that at first. I thought the intelligence was the valuable part — the reasoning, the knowledge. Build that well and the rest is detail.
+
+It's the other way around.
+
+An unconstrained reasoner will do the obvious thing every time. It'll gather every scrap of evidence it can reach, because more data feels safer. It'll hand over an answer the second it has one, because answering feels like helping. It'll treat every source as equally true. Every one of those instincts is wrong — and every one of them is the default.
+
+So the real work isn't adding intelligence. It's installing restraint. The moves it won't make. The evidence it won't waste. The answer it won't give until it has earned the right to.
+
+What a solver refuses to do is not a limitation on the product. It is the product.
+
+---
+
+## Post 5 — A confidence number is a place to hide
+
+Build a reasoning system and sooner or later it will tell you it's "80% confident." Don't accept that. A number is a place to hide.
+
+Confidence as a percentage feels rigorous. It isn't. It's a feeling compressed into a digit, and it tells the person who has to act on it nothing about what to do next.
+
+The fix is a rule. Below some threshold, a number is not an acceptable answer. The system has to name the *specific* thing it's unsure about — one sentence, plain words. And then say what would resolve it.
+
+"I'm not sure" is noise. "I can't tell whether these two symptoms started at the same time, and one question would settle it" is a next move.
+
+Uncertainty you can't act on is just anxiety. Make the doubt specific enough to do something with — or it wasn't worth surfacing at all.
+
+---
+
+## Post 6 — Knowing the edge of what it knows
+
+The hardest thing to build into a reasoning system is the ability to stop.
+
+There are two kinds of stopping. The first is easy: knowing it's done — the answer is found, quit. The second is the hard one. Knowing it has reached the edge of what it can actually know, and saying so out loud.
+
+A system that won't admit that edge will paper over the gap with something that sounds right. It'll borrow a pattern from a situation that only *looks* similar. It'll hand back a clean answer built partly on a guess, and never flag which part was the guess.
+
+So you build the honesty in as a rule. Reasoning from solid ground — fine. Extrapolating — then it has to say "this part is an educated guess, verify it." Out loud, in the answer.
+
+A solver that knows the edge of its own knowledge is worth ten that don't. Confidence is easy. Knowing where confidence ends is the whole game.
