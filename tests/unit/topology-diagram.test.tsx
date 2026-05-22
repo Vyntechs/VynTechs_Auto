@@ -59,4 +59,52 @@ describe('TopologyDiagram', () => {
     fireEvent.click(screen.getByText('PCM'))
     expect(onSelectComponent).toHaveBeenCalledWith('a')
   })
+
+  it('selects a node when Enter is pressed on it', () => {
+    const onSelectComponent = vi.fn()
+    render(
+      <TopologyDiagram
+        topology={topology}
+        layout={layoutTopology(topology)}
+        selectedId={null}
+        onSelectComponent={onSelectComponent}
+        onSelectConnection={vi.fn()}
+        onClearSelection={vi.fn()}
+      />,
+    )
+    fireEvent.keyDown(screen.getByText('PCM'), { key: 'Enter' })
+    expect(onSelectComponent).toHaveBeenCalledWith('a')
+  })
+
+  it('selects a node when Space is pressed on it', () => {
+    const onSelectComponent = vi.fn()
+    render(
+      <TopologyDiagram
+        topology={topology}
+        layout={layoutTopology(topology)}
+        selectedId={null}
+        onSelectComponent={onSelectComponent}
+        onSelectConnection={vi.fn()}
+        onClearSelection={vi.fn()}
+      />,
+    )
+    fireEvent.keyDown(screen.getByText('PCM'), { key: ' ' })
+    expect(onSelectComponent).toHaveBeenCalledWith('a')
+  })
+
+  it('clears the selection when Escape is pressed', () => {
+    const onClearSelection = vi.fn()
+    render(
+      <TopologyDiagram
+        topology={topology}
+        layout={layoutTopology(topology)}
+        selectedId={null}
+        onSelectComponent={vi.fn()}
+        onSelectConnection={vi.fn()}
+        onClearSelection={onClearSelection}
+      />,
+    )
+    fireEvent.keyDown(screen.getByText('PCM'), { key: 'Escape' })
+    expect(onClearSelection).toHaveBeenCalled()
+  })
 })

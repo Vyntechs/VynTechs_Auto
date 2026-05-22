@@ -57,13 +57,34 @@ const pcm: TopologyComponent = {
 
 describe('TopologyDetailPanel', () => {
   it('shows the empty-state prompt when nothing is selected', () => {
-    render(<TopologyDetailPanel selection={{ kind: 'empty' }} onSelectComponent={vi.fn()} />)
+    render(
+      <TopologyDetailPanel
+        selection={{ kind: 'empty' }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
     expect(screen.getByText(/click any part or line/i)).toBeInTheDocument()
+  })
+
+  it('shows no close button in the empty state', () => {
+    render(
+      <TopologyDetailPanel
+        selection={{ kind: 'empty' }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /close/i })).toBeNull()
   })
 
   it('renders a component name, location, and function', () => {
     render(
-      <TopologyDetailPanel selection={{ kind: 'component', component: frp }} onSelectComponent={vi.fn()} />,
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frp }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
     )
     expect(screen.getByText('FRP Sensor')).toBeInTheDocument()
     expect(screen.getByText('Front of DS rail')).toBeInTheDocument()
@@ -72,25 +93,36 @@ describe('TopologyDetailPanel', () => {
 
   it('soft-fails missing fields to an em dash, never crashes', () => {
     render(
-      <TopologyDetailPanel selection={{ kind: 'component', component: pcm }} onSelectComponent={vi.fn()} />,
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: pcm }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
     )
     expect(screen.getByText('PCM')).toBeInTheDocument()
-    // location + function + electrical contract all null -> dashes shown
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3)
   })
 
   it('orders symptom-implicated test actions before the rest', () => {
     render(
-      <TopologyDetailPanel selection={{ kind: 'component', component: frp }} onSelectComponent={vi.fn()} />,
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frp }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
     )
     const tests = screen.getAllByTestId('topo-test')
-    expect(tests[0]).toHaveTextContent('Check FRP at key-on') // implicated first
+    expect(tests[0]).toHaveTextContent('Check FRP at key-on')
     expect(tests[1]).toHaveTextContent('Check FRP at idle')
   })
 
   it('renders a GAP provenance marker as "needs field verification"', () => {
     render(
-      <TopologyDetailPanel selection={{ kind: 'component', component: pcm }} onSelectComponent={vi.fn()} />,
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: pcm }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
     )
     expect(screen.getByText(/needs field verification/i)).toBeInTheDocument()
   })
@@ -110,18 +142,35 @@ describe('TopologyDetailPanel', () => {
       <TopologyDetailPanel
         selection={{ kind: 'connection', connection, fromComponent: pcm, toComponent: frp }}
         onSelectComponent={onSelect}
+        onClose={vi.fn()}
       />,
     )
     expect(screen.getByText('PCM reads the FRP signal')).toBeInTheDocument()
-    expect(screen.getByText(/electrical-wire/i)).toBeInTheDocument()
-    // clicking an endpoint jumps back to that component
+    expect(screen.getByText('Electrical wire')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /FRP Sensor/i }))
     expect(onSelect).toHaveBeenCalledWith('frp')
   })
 
+  it('shows a close button that calls onClose when a part is selected', () => {
+    const onClose = vi.fn()
+    render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frp }}
+        onSelectComponent={vi.fn()}
+        onClose={onClose}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /close/i }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('never says the word "AI" anywhere in the panel', () => {
     const { container } = render(
-      <TopologyDetailPanel selection={{ kind: 'component', component: frp }} onSelectComponent={vi.fn()} />,
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frp }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
     )
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/)
   })

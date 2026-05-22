@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, type KeyboardEvent } from 'react'
 import {
   ReactFlow,
   Background,
@@ -19,6 +19,10 @@ import { TopologyNode } from './topology-node'
 
 const nodeTypes: NodeTypes = { topology: TopologyNode }
 
+/** Shared by the initial fit and the Controls "Fit View" button. The minZoom
+ *  floor keeps the diagram legible on open instead of fitting it tiny. */
+const FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: 0.7 }
+
 type Props = {
   topology: SystemTopology
   layout: TopologyLayout
@@ -30,8 +34,8 @@ type Props = {
 
 /**
  * The interactive pan/zoom canvas. Nodes are not draggable or connectable —
- * the layout is computed (Task 2), the tech only explores. Selection state
- * is owned by the parent (<TopologyDiagnostic>) and passed down.
+ * the layout is computed, the tech only explores. Selection state is owned by
+ * the parent (<TopologyDiagnostic>) and passed down.
  */
 export function TopologyDiagram({
   topology,
@@ -53,8 +57,26 @@ export function TopologyDiagram({
     onSelectConnection(edge.id)
   }
 
+  // Keyboard selection. React Flow makes nodes focusable but does not select
+  // them on Enter/Space. This handler catches the key event bubbling up from a
+  // focused node (React Flow stamps the component id onto `data-id`) and
+  // selects it; Escape clears the current selection.
+  const onCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      onClearSelection()
+      return
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    if (!(event.target instanceof HTMLElement)) return
+    const nodeEl = event.target.closest<HTMLElement>('.react-flow__node')
+    if (nodeEl?.dataset.id) {
+      event.preventDefault()
+      onSelectComponent(nodeEl.dataset.id)
+    }
+  }
+
   return (
-    <div className="topo__canvas">
+    <div className="topo__canvas" onKeyDown={onCanvasKeyDown}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -66,13 +88,13 @@ export function TopologyDiagram({
         onEdgeClick={onEdgeClick}
         onPaneClick={onClearSelection}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.2}
         proOptions={{ hideAttribution: true }}
         colorMode="light"
       >
         <Background />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} fitViewOptions={FIT_VIEW_OPTIONS} />
       </ReactFlow>
     </div>
   )
