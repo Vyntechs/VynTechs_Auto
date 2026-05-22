@@ -5,6 +5,7 @@
 .topo {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto 1fr;
   gap: var(--vt-space-6);
   align-items: stretch;
   height: 100dvh;
@@ -77,6 +78,9 @@
   font-family: var(--vt-font-serif);
   font-size: 15px;
   color: var(--vt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topo-node__kind {
   font-family: var(--vt-font-mono);
