@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -77,6 +78,8 @@ export default async function SessionPage({
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
             minHeight: '100dvh',
             alignItems: 'center',
             justifyContent: 'center',
@@ -88,6 +91,18 @@ export default async function SessionPage({
           }}
         >
           A system diagram is not available for this vehicle yet.
+          <Link
+            href="/today"
+            style={{
+              fontFamily: 'var(--vt-font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              color: 'var(--vt-fg-3)',
+              textDecoration: 'none',
+            }}
+          >
+            ← Sessions
+          </Link>
         </div>
       )
     }
