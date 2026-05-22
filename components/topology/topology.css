@@ -132,6 +132,27 @@
   border-radius: var(--vt-radius-2);
   overflow-y: auto;
 }
+.topo-panel__close {
+  position: sticky;
+  top: 0;
+  align-self: flex-end;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-1);
+  color: var(--vt-fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.topo-panel__close:hover {
+  background: var(--vt-bone-100);
+}
 .topo-panel__empty {
   margin: auto;
   text-align: center;
