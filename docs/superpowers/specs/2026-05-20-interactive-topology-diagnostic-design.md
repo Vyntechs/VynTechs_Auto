@@ -1,7 +1,7 @@
 # Interactive Wiring-Topology Diagnostic — Design Spec
 
 **Date:** 2026-05-20
-**Status:** Draft — awaiting Brandon's review
+**Status:** PR-A merged (#87); PR-B design resolved 2026-05-21
 **Feature branch:** `feat/interactive-topology-diagnostic` (cut from `staging-interactive-diagnostics`)
 **Supersedes:** the static cached-overview test-plan list shipped in Phase 3 PR1 — `components/screens/cached-overview.tsx`
 **Source brainstorm:** `docs/superpowers/handoffs/2026-05-20-interactive-topology-diagnostic-kickoff.md`
@@ -36,7 +36,7 @@ instantly. "Diagnostic efficiency" is a design constraint, not an afterthought.
 | D3 | **Auto-layout** at render — no stored coordinates | logged | Scales free to the diesel-seeding platforms |
 | D4 | Edges styled by **`connection_kind`** (electrical-wire / fluid-line / mechanical-linkage / can-bus / controlled_by / reports_to) | logged | Electrical *role* (5V/signal/PWM/ground) is not structured in the DB — deferred |
 | D5 | System grouping via a new **`components.systems` text-array** column | logged | A component belongs to many systems (PCM is in all of them) — array, not single enum |
-| D6 | Interactive **pan/zoom canvas**; exact rendering library chosen in the implementation plan | logged | Custom-styled nodes/edges either way, to keep the prototype's aesthetic |
+| D6 | Interactive **pan/zoom canvas** on **React Flow**; layered auto-layout via **dagre** | logged 2026-05-21 | Nodes/edges fully custom-rendered to keep the prototype's bone/serif aesthetic; see §5.2–5.3 |
 | D7 | **No AI in the load path** — pure structured reads | logged | Instant render; structured-first principle |
 
 ## 3. Prototype ↔ database: what exists, what's missing
@@ -99,8 +99,8 @@ System vocabulary reuses the existing `platform_equivalents.system` enum values
 
 **Data population (the tagging pass):**
 - Tag the fuel-system components — `UPDATE components SET systems = '{fuel}' …`
-  for the ~22 fuel parts + the PCM. The exact list is an **open item (§13)** —
-  Brandon eyeballs it before it touches the live database.
+  for the 22 fuel parts + the PCM. The exact list is recorded in
+  `drizzle/data/2026-05-20-fuel-system-tags.sql` (PR-A, Brandon-reviewed).
 - Backfill the 3 existing symptoms: `UPDATE symptoms SET system = 'fuel'` (all
   three — `p0087…`, `p0088…`, `no-start-cranks-normally…` — are fuel).
 - Tagging runs as a reviewed data step, same approval gate as the migration.
@@ -146,12 +146,15 @@ of the existing `cached-lookup.ts`. Given a platform slug + symptom slug:
 **5.2 `layoutTopology`** — `lib/diagnostics/topology-layout.ts`. A **pure
 function**: `SystemTopology → { nodes: Map<id,{x,y}>, edges: routed paths }`.
 Layered/hierarchical layout (the PCM as the controlling hub). Deterministic — the
-same topology always lays out the same way (so it's snapshot-testable). Library
-choice (e.g. dagre) is finalised in the implementation plan.
+same topology always lays out the same way (so it's snapshot-testable). Layout
+is computed with **dagre** — layered and deterministic.
 
 **5.3 `<TopologyDiagram>`** — the interactive canvas. Custom-styled nodes (per
 component `kind`) and edges (per `connection_kind`), pan + zoom, click handling,
-selection state. Keeps the prototype's bone/serif aesthetic.
+selection state. Built on **React Flow** (a client component) — it supplies
+pan/zoom, selection, keyboard, and touch handling; nodes and edges are fully
+custom-rendered to keep the prototype's bone/serif aesthetic. Layout (§5.2)
+runs server-side, so the browser receives an already-positioned diagram.
 
 **5.4 `<TopologyDetailPanel>`** — see §8.
 
@@ -163,8 +166,8 @@ panel. This is what the `cached-overview` route kind now renders.
 
 `lib/session-routing.ts` already routes a cache-hit session
 (`session.cacheHitSymptomId` set) to `{ kind: 'cached-overview' }`. **No routing
-change.** The only integration change: the session detail page, in its
-`cached-overview` branch, calls `loadSystemTopology` and renders
+change.** The only integration change: the session detail page —
+`app/(app)/sessions/[id]/page.tsx` — in its `cached-overview` branch, calls `loadSystemTopology` and renders
 `<TopologyDiagnostic>` instead of calling `loadCachedDiagnostic` and rendering
 `<CachedOverview>`.
 
@@ -188,8 +191,14 @@ this — they already accept the messy inputs techs type (`6.7`, `F350`).
 - **Interaction** — click a node or an edge → it selects, the panel fills.
   Click empty canvas → clear. Pan + zoom. Keyboard: focusable nodes/edges,
   Enter/Space to select, Escape to clear (the prototype already models this).
-- **8 injectors** — eight near-identical nodes; layout/visual handling
-  (cluster vs row) is an open item (§13), resolved at build time with a screenshot.
+- **8 injectors** — rendered as **eight separate, individually-clickable
+  nodes** (Brandon, 2026-05-21 — most literal to the data, within clean
+  auto-layout range). If they crowd the diagram, the build-time screenshot
+  check (§11) is the adjustment point.
+- **Mobile (375–414px)** — the diagram fits to screen width on load; the tech
+  pinch-zooms and pans to explore. The detail panel (§8) — a side column on
+  desktop — becomes a tap-to-open bottom sheet: see the system → tap a part →
+  read it → dismiss → tap the next.
 
 ## 8. The detail panel
 
@@ -277,20 +286,18 @@ Two small, independently reviewable PRs into `staging-interactive-diagnostics`:
 The implementation plan (superpowers `writing-plans`) finalises task-level
 breakdown and ordering.
 
-## 13. Open items
+## 13. Open items — resolved
 
-1. **Fuel component list** — the exact set tagged `systems = '{fuel}'`. Draft set
-   (~22 + PCM): `pcm`, `lift-pump`, `lift-pump-relay`, `fuel-tank`,
-   `fuel-filter-ws`, `fuel-level-sender`, `wif-sensor`, `cp4-pump`, `imv`,
-   `frp-sensor`, `hp-rail-bank-a`, `hp-rail-bank-b`, `injector-1`…`injector-8`,
-   `pressure-relief-valve`, `return-circuit`. The list should also carry the
-   ground and power-chain context the diagram needs to read coherently (e.g.
-   the prototype draws the lift-pump ground to chassis). **Brandon reviews this
-   list before the live-DB tagging runs.**
-2. **8-injector visual treatment** — row vs cluster vs collapsed group; decided
-   at build time against a real screenshot.
-3. **Session detail page path** — the exact server component holding the
-   `cached-overview` branch is confirmed when the implementation plan is written.
-4. **Empty/fallback behavior** — whether a non-fuel cached symptom (none exist
-   today) falls back to the old test-plan list or just shows the empty state;
-   default is the empty state.
+All four are closed — PR-A's merge plus the PR-B brainstorm (2026-05-21):
+
+1. **Fuel component list** — ✅ **Resolved (PR-A).** 22 fuel components +
+   3 fuel symptoms tagged on live Supabase; Brandon-confirmed and verified.
+   The auditable list is `drizzle/data/2026-05-20-fuel-system-tags.sql`.
+2. **8-injector visual treatment** — ✅ **Resolved.** Eight separate,
+   individually-clickable nodes (§7). The §11 build-time screenshot check
+   stays the adjustment point if they crowd the diagram.
+3. **Session detail page path** — ✅ **Resolved.** The `cached-overview`
+   branch is in `app/(app)/sessions/[id]/page.tsx`; the route swap replaces
+   its `loadCachedDiagnostic` + `<CachedOverview>` call (§6).
+4. **Empty/fallback behavior** — ✅ **Resolved.** A non-fuel cached symptom
+   (none exist today) shows the §10 empty state — not the old test-plan list.
