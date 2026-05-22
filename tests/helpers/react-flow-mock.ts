@@ -13,13 +13,8 @@ class DOMMatrixReadOnlyMock {
   constructor(_transform?: string) {}
 }
 
-if (!('ResizeObserver' in globalThis)) {
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    ResizeObserverMock
-} else {
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    ResizeObserverMock
-}
+;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+  ResizeObserverMock
 ;(globalThis as unknown as { DOMMatrixReadOnly: unknown }).DOMMatrixReadOnly =
   DOMMatrixReadOnlyMock
 
