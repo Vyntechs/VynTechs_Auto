@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, user-scalable=no">
+<title>Fuel system diagnostic · mobile · Vyntechs</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { background: var(--vt-bone-200); padding: 24px 0; }
+  .mobile-back {
+    display: block;
+    margin: 12px auto 0;
+    text-align: center;
+    font-family: var(--vt-font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--vt-fg-muted);
+    text-decoration: none;
+  }
+  /* Hero scale for the sheet, premium */
+  .sheet .panel__component { font-size: 42px; letter-spacing: -0.025em; }
+</style>
+</head>
+<body>
+
+<div class="mobile-frame">
+  <div class="mobile-frame__notch"></div>
+
+  <div class="mobile-shell">
+
+    <!-- Header -->
+    <header class="mobile-header">
+      <div>
+        <div class="shell__eyebrow">2017 F-350 · P0087</div>
+        <h1 class="shell__title">Fuel system</h1>
+      </div>
+      <div class="shell__counter">6 checked</div>
+    </header>
+
+    <!-- Compact topology — implicated done + active + faded context -->
+    <div class="mobile-canvas">
+      <svg viewBox="0 0 390 230" preserveAspectRatio="xMidYMid meet"
+           style="position:absolute;inset:0;width:100%;height:100%;" aria-hidden="true">
+        <defs>
+          <marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="arrow"></path>
+          </marker>
+        </defs>
+        <!-- Tank → Lift Pump -->
+        <path class="conn conn--fluid" marker-end="url(#ma)" d="M 96,38 L 130,38"></path>
+        <!-- Lift Pump → Filter (context) -->
+        <path class="conn conn--fluid conn--context" d="M 218,38 L 252,38"></path>
+        <!-- Relay → Lift Pump (electrical) -->
+        <path class="conn conn--elec" d="M 96,108 L 130,68"></path>
+        <!-- Rail A → PRV (active) -->
+        <path class="conn conn--fluid" marker-end="url(#ma)" d="M 96,168 L 130,168"></path>
+        <!-- PRV → return zone -->
+        <path class="conn conn--fluid conn--context" d="M 220,192 L 260,210"></path>
+      </svg>
+
+      <!-- Top row: Tank ✓, Lift Pump ✓, Filter (context) -->
+      <div class="node is-done" style="left: 12px; top: 18px;">
+        <span class="node__mark"></span>
+        <div class="node__name">Fuel Tank</div>
+      </div>
+      <div class="node is-done" style="left: 130px; top: 18px;">
+        <span class="node__mark"></span>
+        <div class="node__name">Lift Pump</div>
+      </div>
+      <div class="node is-context" style="left: 252px; top: 18px;">
+        <div class="node__name">Fuel Filter</div>
+      </div>
+
+      <!-- Second row: Relay ✓, WIF ✓, CP4.2 (context) -->
+      <div class="node is-done" style="left: 12px; top: 88px;">
+        <span class="node__mark"></span>
+        <div class="node__name">LP Relay</div>
+      </div>
+      <div class="node is-done" style="left: 130px; top: 88px;">
+        <span class="node__mark"></span>
+        <div class="node__name">WIF Sensor</div>
+      </div>
+      <div class="node is-context" style="left: 252px; top: 88px;">
+        <div class="node__name">CP4.2</div>
+      </div>
+
+      <!-- Third row: Rail A ✓, PRV ACTIVE, Rail B (context) -->
+      <div class="node node--mechanical is-done" style="left: 12px; top: 158px;">
+        <span class="node__mark"></span>
+        <div class="node__name">Rail Bank A</div>
+      </div>
+      <div class="node is-active" style="left: 130px; top: 152px;">
+        <div class="node__kind">Active</div>
+        <div class="node__name">Pressure Relief Valve</div>
+      </div>
+      <div class="node node--mechanical is-context" style="left: 264px; top: 158px; min-width: 70px;">
+        <div class="node__name">Rail B</div>
+      </div>
+    </div>
+
+    <!-- Active test sheet — the full focus -->
+    <div class="sheet">
+      <div class="sheet__handle"></div>
+
+      <div class="panel__content" id="panel-content">
+
+        <h2 class="panel__component">Rail Pressure Relief Valve</h2>
+        <div class="panel__test-type">Bleeddown PID · idle / key-off</div>
+
+        <p class="panel__prose">
+          Watch the FRP rail-pressure PID during a smooth key-off from idle.
+          A healthy sealed rail holds for tens of seconds. A stuck PRV
+          bleeds in two or three.
+        </p>
+
+        <div class="branches" role="group" aria-label="Choose what you observed">
+
+          <button class="branch branch--ok" type="button" data-verdict="ok">
+            <span class="branch__text">Gradual decay over many seconds.</span>
+            <span class="branch__verdict">Pass · rail holds</span>
+          </button>
+
+          <button class="branch branch--warn" type="button" data-verdict="warn">
+            <span class="branch__text">No bleed-down events at idle over an extended observation.</span>
+            <span class="branch__verdict">Flag · escalate to load test</span>
+          </button>
+
+          <button class="branch branch--fail" type="button" data-verdict="fail">
+            <span class="branch__text">Drops to near-zero in 2–3 seconds.</span>
+            <span class="branch__verdict">Fail · PRV stuck open</span>
+          </button>
+
+        </div>
+
+        <button class="escape" type="button" id="escape-btn">Can't run this →</button>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<a href="index.html" class="mobile-back">← All scenarios</a>
+
+<script>
+  // ===== Same press → commit → settle sequence as desktop =====
+  const NEXT_OK = {
+    component: "FRP Sensor",
+    type: "FRP PID at idle · scan tool · engine running",
+    prose: "Read the FRP rail pressure PID at warm idle. Plausible reading means redirect to load; near-zero confirms a real supply failure.",
+    branches: [
+      { v: "ok",   text: "Reads in the expected idle range (~4,000–6,000 PSI warm).", label: "Pass · idle pressure normal" },
+      { v: "warn", text: "Plausible at idle but the complaint only shows under load.", label: "Flag · proceed to load test" },
+      { v: "fail", text: "Reads near 0 PSI with the engine running.", label: "Fail · supply failure real" },
+    ],
+  };
+
+  const NEXT_FAIL_TERMINAL = {
+    isTerminal: true,
+    headline: "Replace the pressure relief valve.",
+    detail: "With a clean filter element and adequate CP4 inlet pressure, a rail that bleeds to near-zero in 2–3 seconds points to a stuck-open PRV. Targeted repair — no injector or pump replacement needed without metal contamination.",
+    trail: ["Fuel level confirmed", "No water in fuel", "Relay seated", "Lift pump running", "Rail A — no external leak", "PRV — bleed-down failed"],
+  };
+
+  function renderActive(state) {
+    return `
+      <h2 class="panel__component">${state.component}</h2>
+      <div class="panel__test-type">${state.type}</div>
+      <p class="panel__prose">${state.prose}</p>
+      <div class="branches" role="group">
+        ${state.branches.map(b => `
+          <button class="branch branch--${b.v}" type="button" data-verdict="${b.v}">
+            <span class="branch__text">${b.text}</span>
+            <span class="branch__verdict">${b.label}</span>
+          </button>
+        `).join("")}
+      </div>
+      <button class="escape" type="button" id="escape-btn">Can't run this →</button>
+    `;
+  }
+
+  function renderTerminal(state) {
+    return `
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--vt-font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--vt-fg-muted);">Diagnosis</div>
+        <h2 class="panel__component">${state.headline}</h2>
+        <p class="panel__prose" style="margin-top:4px;">${state.detail}</p>
+        <div style="margin-top:20px;border-top:1px solid var(--vt-bone-300);padding-top:16px;">
+          <div style="font-family:var(--vt-font-mono);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--vt-fg-muted);margin-bottom:8px;">What you ran</div>
+          ${state.trail.map(t => `<div style="font-family:var(--vt-font-sans);font-size:13px;color:var(--vt-fg-2);padding:2px 0;">${t}</div>`).join("")}
+        </div>
+        <div style="margin-top:20px;display:flex;gap:12px;">
+          <button class="branch" style="flex:1;padding:13px 14px;text-align:center;" type="button" onclick="location.reload()">
+            <span class="branch__text">Close case</span>
+          </button>
+          <button class="branch" style="flex:1;padding:13px 14px;text-align:center;" type="button" onclick="location.reload()">
+            <span class="branch__text">Hand to advisor</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function transitionPanel(nextHTML) {
+    const content = document.getElementById('panel-content');
+    content.classList.add('is-exiting');
+    setTimeout(() => {
+      content.innerHTML = nextHTML;
+      content.classList.remove('is-exiting');
+      content.classList.add('is-entering');
+      void content.offsetWidth;
+      content.classList.remove('is-entering');
+      content.classList.add('is-entered');
+      setTimeout(() => content.classList.remove('is-entered'), 320);
+      attach();
+    }, 160);
+  }
+
+  function attach() {
+    document.querySelectorAll('.branch').forEach(btn => {
+      btn.addEventListener('pointerdown', () => btn.classList.add('is-pressing'));
+      const release = () => btn.classList.remove('is-pressing');
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointerleave', release);
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.verdict;
+        if (!v) return;
+        setTimeout(() => {
+          if (v === 'fail') transitionPanel(renderTerminal(NEXT_FAIL_TERMINAL));
+          else transitionPanel(renderActive(NEXT_OK));
+        }, 120);
+      });
+    });
+    const esc = document.getElementById('escape-btn');
+    if (esc) {
+      esc.addEventListener('click', () => {
+        esc.style.color = 'var(--vt-fg)';
+        esc.textContent = "Skipped — picking next test →";
+        setTimeout(() => transitionPanel(renderActive(NEXT_OK)), 600);
+      });
+    }
+  }
+
+  attach();
+</script>
+
+</body>
+</html>
