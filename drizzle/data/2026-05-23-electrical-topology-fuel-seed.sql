@@ -30,10 +30,12 @@
 -- ============================================================
 
 INSERT INTO components (
-  slug, kind, systems, source_provenance, is_retired
+  slug, platform_id, name, kind, systems, source_provenance, is_retired
 ) VALUES
   (
     'sd4-67psd-frp-reg',
+    (SELECT id FROM platforms WHERE slug = 'ford-super-duty-4th-gen-67-psd'),
+    'FRP Regulator',
     'actuator',
     ARRAY['fuel'],
     'TRAINING-CONFIRMED',
@@ -41,6 +43,8 @@ INSERT INTO components (
   ),
   (
     'sd4-67psd-shared-5v',
+    (SELECT id FROM platforms WHERE slug = 'ford-super-duty-4th-gen-67-psd'),
+    'Shared 5V Reference Splice',
     'splice',
     ARRAY['fuel'],
     'TRAINING-CONFIRMED',
@@ -48,6 +52,8 @@ INSERT INTO components (
   ),
   (
     'sd4-67psd-shared-lref',
+    (SELECT id FROM platforms WHERE slug = 'ford-super-duty-4th-gen-67-psd'),
+    'Shared Low-Reference Splice',
     'splice',
     ARRAY['fuel'],
     'TRAINING-CONFIRMED',
