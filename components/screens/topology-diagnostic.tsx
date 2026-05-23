@@ -10,6 +10,7 @@ import {
   TopologyDetailPanel,
   type TopologySelection,
 } from '@/components/topology/topology-detail-panel'
+import type { TopologySelectionState } from '@/components/topology/topology-flow'
 
 type Props = {
   topology: SystemTopology
@@ -17,35 +18,73 @@ type Props = {
   vehicleName: string
 }
 
-/** Selection is tracked as a single id — component id OR connection id. */
+/** PR-C/B Task 6 — typed selection state. Pin selection joins component +
+ *  connection. Scenario state lifted in Task 10. */
+type SelectionState =
+  | { kind: 'empty' }
+  | { kind: 'component'; id: string }
+  | { kind: 'pin'; id: string }
+  | { kind: 'connection'; id: string }
+
 export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
 
   const componentById = useMemo(
     () => new Map(topology.components.map((c) => [c.id, c])),
     [topology],
   )
+  const pinById = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        pin: import('@/lib/diagnostics/load-system-topology').TopologyPin
+        component: import('@/lib/diagnostics/load-system-topology').TopologyComponent
+      }
+    >()
+    for (const c of topology.components) {
+      for (const p of c.pins) map.set(p.id, { pin: p, component: c })
+    }
+    return map
+  }, [topology])
   const connectionById = useMemo(
     () => new Map(topology.connections.map((c) => [c.id, c])),
     [topology],
   )
 
-  // Resolve the selected id into what the panel renders.
-  const selection: TopologySelection = useMemo(() => {
-    if (!selectedId) return { kind: 'empty' }
-    const component = componentById.get(selectedId)
-    if (component) return { kind: 'component', component }
-    const connection = connectionById.get(selectedId)
-    if (connection) {
-      return {
-        kind: 'connection',
-        connection,
-        fromComponent: componentById.get(connection.fromComponentId) ?? null,
-        toComponent: componentById.get(connection.toComponentId) ?? null,
-      }
+  // Panel selection (the shape the detail panel consumes — Task 7 extends
+  // this with a 'pin' kind).
+  const panelSelection: TopologySelection = useMemo(() => {
+    if (selection.kind === 'empty') return { kind: 'empty' }
+    if (selection.kind === 'component') {
+      const c = componentById.get(selection.id)
+      return c ? { kind: 'component', component: c } : { kind: 'empty' }
     }
+    if (selection.kind === 'connection') {
+      const conn = connectionById.get(selection.id)
+      return conn
+        ? {
+            kind: 'connection',
+            connection: conn,
+            fromComponent: componentById.get(conn.fromComponentId) ?? null,
+            toComponent: componentById.get(conn.toComponentId) ?? null,
+          }
+        : { kind: 'empty' }
+    }
+    // Pin selected — panel falls back to empty until Task 7 adds the pin variant.
     return { kind: 'empty' }
-  }, [selectedId, componentById, connectionById])
+  }, [selection, componentById, connectionById])
+
+  // Diagram selection (typed shape consumed by toFlowElements).
+  const diagramSelection: TopologySelectionState = useMemo(() => {
+    if (selection.kind === 'empty') {
+      return { kind: 'empty', activeScenarioSlug: null }
+    }
+    return {
+      kind: selection.kind,
+      id: selection.id,
+      activeScenarioSlug: null,
+    }
+  }, [selection])
 
   return (
     <div className="topo">
@@ -76,17 +115,17 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
       <TopologyDiagram
         topology={topology}
         layout={layout}
-        selectedId={selectedId}
-        onSelectComponent={setSelectedId}
-        onSelectConnection={setSelectedId}
-        onClearSelection={() => setSelectedId(null)}
+        selection={diagramSelection}
+        onSelectComponent={(id) => setSelection({ kind: 'component', id })}
+        onSelectPin={(id) => setSelection({ kind: 'pin', id })}
+        onClearSelection={() => setSelection({ kind: 'empty' })}
       />
 
       <TopologyDetailPanel
-        selection={selection}
-        onSelectComponent={setSelectedId}
-        onClose={() => setSelectedId(null)}
-        open={selection.kind !== 'empty'}
+        selection={panelSelection}
+        onSelectComponent={(id) => setSelection({ kind: 'component', id })}
+        onClose={() => setSelection({ kind: 'empty' })}
+        open={panelSelection.kind !== 'empty'}
       />
     </div>
   )

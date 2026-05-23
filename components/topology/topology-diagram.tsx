@@ -7,7 +7,7 @@ import {
   Controls,
   type NodeTypes,
   type NodeMouseHandler,
-  type EdgeMouseHandler,
+  type EdgeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import './topology.css'
@@ -20,8 +20,11 @@ import {
   type TopologySelectionState,
 } from './topology-flow'
 import { TopologyNode } from './topology-node'
+import { WireEdge } from './wire-edge'
+import { TopologySelectionProvider } from './topology-selection-context'
 
 const nodeTypes: NodeTypes = { topology: TopologyNode }
+const edgeTypes: EdgeTypes = { wire: WireEdge }
 
 /** Shared by the initial fit and the Controls "Fit View" button. The minZoom
  *  floor keeps the diagram legible on open instead of fitting it tiny. */
@@ -30,53 +33,41 @@ const FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: 0.7 }
 type Props = {
   topology: SystemTopology
   layout: TopologyLayout
-  selectedId: string | null
+  selection: TopologySelectionState
   onSelectComponent: (componentId: string) => void
-  onSelectConnection: (connectionId: string) => void
+  onSelectPin: (pinId: string) => void
   onClearSelection: () => void
 }
 
 /**
  * The interactive pan/zoom canvas. Nodes are not draggable or connectable —
  * the layout is computed, the tech only explores. Selection state is owned by
- * the parent (<TopologyDiagnostic>) and passed down.
+ * the parent (<TopologyDiagnostic>) and passed down. The custom node consumes
+ * pin / component click handlers via TopologySelectionContext.
  */
 export function TopologyDiagram({
   topology,
   layout,
-  selectedId,
+  selection,
   onSelectComponent,
-  onSelectConnection,
+  onSelectPin,
   onClearSelection,
 }: Props) {
-  // PR-C/B Task 5 transitional shim: maps the polymorphic selectedId prop to the
-  // new typed selection state. Replaced in Task 6 when topology-diagram takes
-  // the typed selection prop directly from <TopologyDiagnostic>.
-  const selection: TopologySelectionState = useMemo(() => {
-    if (!selectedId) return { kind: 'empty', activeScenarioSlug: null }
-    const isComponent = topology.components.some((c) => c.id === selectedId)
-    if (isComponent) {
-      return { kind: 'component', id: selectedId, activeScenarioSlug: null }
-    }
-    return { kind: 'connection', id: selectedId, activeScenarioSlug: null }
-  }, [selectedId, topology])
-
   const { nodes, edges } = useMemo(
     () => toFlowElements(topology, layout, selection),
     [topology, layout, selection],
   )
 
+  // Component clicks come through React Flow's onNodeClick (delegated at the
+  // React Flow root). Pin button clicks stopPropagation so React Flow's
+  // listener doesn't see them.
   const onNodeClick: NodeMouseHandler<TopologyFlowNode> = (_event, node) => {
     onSelectComponent(node.id)
   }
-  const onEdgeClick: EdgeMouseHandler = (_event, edge) => {
-    onSelectConnection(edge.id)
-  }
 
   // Keyboard selection. React Flow makes nodes focusable but does not select
-  // them on Enter/Space. This handler catches the key event bubbling up from a
-  // focused node (React Flow stamps the component id onto `data-id`) and
-  // selects it; Escape clears the current selection.
+  // them on Enter/Space — handle the bubble from a focused node. Pin buttons
+  // are native <button>s, so they get Enter/Space natively.
   const onCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       onClearSelection()
@@ -84,6 +75,9 @@ export function TopologyDiagram({
     }
     if (event.key !== 'Enter' && event.key !== ' ') return
     if (!(event.target instanceof HTMLElement)) return
+    // Don't double-fire if the focus is on a pin button (which already
+    // handles Enter/Space natively as a click).
+    if (event.target.closest('.topo-pin')) return
     const nodeEl = event.target.closest<HTMLElement>('.react-flow__node')
     if (nodeEl?.dataset.id) {
       event.preventDefault()
@@ -92,26 +86,34 @@ export function TopologyDiagram({
   }
 
   return (
-    <div className="topo__canvas" onKeyDown={onCanvasKeyDown}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        edgesFocusable
-        onNodeClick={onNodeClick}
-        onEdgeClick={onEdgeClick}
-        onPaneClick={onClearSelection}
-        fitView
-        fitViewOptions={FIT_VIEW_OPTIONS}
-        minZoom={0.2}
-        proOptions={{ hideAttribution: true }}
-        colorMode="light"
-      >
-        <Background />
-        <Controls showInteractive={false} fitViewOptions={FIT_VIEW_OPTIONS} />
-      </ReactFlow>
-    </div>
+    <TopologySelectionProvider
+      value={{
+        onSelectPin,
+        onSelectComponent,
+        onClear: onClearSelection,
+      }}
+    >
+      <div className="topo__canvas" onKeyDown={onCanvasKeyDown}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          edgesFocusable
+          onNodeClick={onNodeClick}
+          onPaneClick={onClearSelection}
+          fitView
+          fitViewOptions={FIT_VIEW_OPTIONS}
+          minZoom={0.2}
+          proOptions={{ hideAttribution: true }}
+          colorMode="light"
+        >
+          <Background />
+          <Controls showInteractive={false} fitViewOptions={FIT_VIEW_OPTIONS} />
+        </ReactFlow>
+      </div>
+    </TopologySelectionProvider>
   )
 }
