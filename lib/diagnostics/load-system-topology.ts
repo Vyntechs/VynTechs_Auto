@@ -10,6 +10,9 @@ import {
   branchLogic,
   symptomTestImplications,
   componentPins,
+  systemScenarios,
+  scenarioWireStates,
+  pinScenarioReadings,
 } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
@@ -55,6 +58,12 @@ export type TopologyPin = {
   sourceProvenance: string
 }
 
+export type TopologyWireState =
+  | 'off'
+  | 'steady-12v' | 'steady-5v' | 'steady-gnd'
+  | 'signal-rest' | 'signal-low' | 'signal-med' | 'signal-high' | 'signal-pegged'
+  | 'pwm-low' | 'pwm-med' | 'pwm-high' | 'pwm-max'
+
 export type TopologyScenario = {
   id: string
   slug: string
@@ -67,8 +76,8 @@ export type TopologyScenario = {
   isDefault: boolean
   displayOrder: number
   /** Map of pinId → wire-state class for this scenario. Missing pin → 'off'. */
-  pinStates: Record<string, string>
-  /** Map of pinId → "right now" reading text for this scenario. Missing → null. */
+  pinStates: Record<string, TopologyWireState>
+  /** Map of pinId → "right now" reading text for this scenario. Missing key → treat as null. */
   pinReadings: Record<string, string>
 }
 
@@ -332,7 +341,83 @@ export async function loadSystemTopology({
     : []
   const implicatedIds = new Set(implRows.map((r) => r.testActionId))
 
-  // 8. Assemble the graph
+  // 8. Scenarios for this (platform, system)
+  const scenarioRows = await db
+    .select({
+      id: systemScenarios.id,
+      slug: systemScenarios.slug,
+      label: systemScenarios.label,
+      sub: systemScenarios.sub,
+      kind: systemScenarios.kind,
+      keyPosition: systemScenarios.keyPosition,
+      engineState: systemScenarios.engineState,
+      loadLevel: systemScenarios.loadLevel,
+      isDefault: systemScenarios.isDefault,
+      displayOrder: systemScenarios.displayOrder,
+    })
+    .from(systemScenarios)
+    .where(
+      and(
+        eq(systemScenarios.platformId, platform.id),
+        eq(systemScenarios.system, system),
+        eq(systemScenarios.isRetired, false),
+      ),
+    )
+  const scenarioIds = scenarioRows.map((s) => s.id)
+
+  // Wire-state matrix for those scenarios
+  const wireStateRows = scenarioIds.length
+    ? await db
+        .select({
+          scenarioId: scenarioWireStates.scenarioId,
+          pinId: scenarioWireStates.pinId,
+          wireState: scenarioWireStates.wireState,
+        })
+        .from(scenarioWireStates)
+        .where(inArray(scenarioWireStates.scenarioId, scenarioIds))
+    : []
+
+  // Pin readings for those scenarios
+  const readingRows = scenarioIds.length
+    ? await db
+        .select({
+          pinId: pinScenarioReadings.pinId,
+          scenarioId: pinScenarioReadings.scenarioId,
+          reading: pinScenarioReadings.reading,
+        })
+        .from(pinScenarioReadings)
+        .where(inArray(pinScenarioReadings.scenarioId, scenarioIds))
+    : []
+
+  // 9. Assemble scenarios with their pin-state + reading maps
+  const assembledScenarios: TopologyScenario[] = scenarioRows
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .map((s) => {
+      const pinStates: Record<string, TopologyWireState> = {}
+      for (const ws of wireStateRows) {
+        if (ws.scenarioId === s.id) pinStates[ws.pinId] = ws.wireState
+      }
+      const pinReadings: Record<string, string> = {}
+      for (const r of readingRows) {
+        if (r.scenarioId === s.id) pinReadings[r.pinId] = r.reading
+      }
+      return {
+        id: s.id,
+        slug: s.slug,
+        label: s.label,
+        sub: s.sub,
+        kind: s.kind,
+        keyPosition: s.keyPosition,
+        engineState: s.engineState,
+        loadLevel: s.loadLevel,
+        isDefault: s.isDefault,
+        displayOrder: s.displayOrder,
+        pinStates,
+        pinReadings,
+      }
+    })
+
+  // 10. Assemble the graph
   const assembledComponents: TopologyComponent[] = componentRows.map((c) => ({
     id: c.id,
     slug: c.slug,
@@ -398,8 +483,7 @@ export async function loadSystemTopology({
     system,
     components: assembledComponents,
     connections: connectionRows,
-    // Scenarios + status populated in Tasks 8-9.
-    scenarios: [],
+    scenarios: assembledScenarios,
     dataStatus: null,
     lastScenarioSlug: null,
   }
