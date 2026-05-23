@@ -460,8 +460,8 @@ export const componentPins = pgTable(
     labelGap: text('label_gap'),
     sourceProvenance: text('source_provenance').notNull().default('TRAINING-CONFIRMED'),
     isRetired: boolean('is_retired').notNull().default(false),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('component_pins_component_id_idx').on(table.componentId),
@@ -486,8 +486,8 @@ export const systemScenarios = pgTable(
     isDefault: boolean('is_default').notNull().default(false),
     displayOrder: integer('display_order').notNull().default(0),
     isRetired: boolean('is_retired').notNull().default(false),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('system_scenarios_lookup_idx').on(table.platformId, table.system),
@@ -505,9 +505,9 @@ export const scenarioWireStates = pgTable(
       .references(() => componentPins.id, { onDelete: 'cascade' }),
     wireState: wireStateEnum('wire_state').notNull(),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.scenarioId, t.pinId] }),
-  }),
+  (t) => [
+    primaryKey({ columns: [t.scenarioId, t.pinId] }),
+  ],
 )
 
 export const pinScenarioReadings = pgTable(
@@ -521,9 +521,9 @@ export const pinScenarioReadings = pgTable(
       .references(() => systemScenarios.id, { onDelete: 'cascade' }),
     reading: text('reading').notNull(),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.pinId, t.scenarioId] }),
-  }),
+  (t) => [
+    primaryKey({ columns: [t.pinId, t.scenarioId] }),
+  ],
 )
 
 export const systemDataStatus = pgTable(
@@ -536,11 +536,11 @@ export const systemDataStatus = pgTable(
     capturedHeader: text('captured_header').notNull(),
     missingHeader: text('missing_header').notNull(),
     closingNote: text('closing_note').notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => ({
-    pk: primaryKey({ columns: [t.platformId, t.system] }),
-  }),
+  (t) => [
+    primaryKey({ columns: [t.platformId, t.system] }),
+  ],
 )
 
 export const symptomTestImplications = pgTable(
