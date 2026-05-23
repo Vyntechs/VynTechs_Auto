@@ -70,9 +70,19 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
           }
         : { kind: 'empty' }
     }
-    // Pin selected — panel falls back to empty until Task 7 adds the pin variant.
+    if (selection.kind === 'pin') {
+      const entry = pinById.get(selection.id)
+      return entry
+        ? {
+            kind: 'pin',
+            pin: entry.pin,
+            component: entry.component,
+            scenario: null, // Task 10 plumbs the active scenario
+          }
+        : { kind: 'empty' }
+    }
     return { kind: 'empty' }
-  }, [selection, componentById, connectionById])
+  }, [selection, componentById, connectionById, pinById])
 
   // Diagram selection (typed shape consumed by toFlowElements).
   const diagramSelection: TopologySelectionState = useMemo(() => {
@@ -124,6 +134,7 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
       <TopologyDetailPanel
         selection={panelSelection}
         onSelectComponent={(id) => setSelection({ kind: 'component', id })}
+        onSelectPin={(id) => setSelection({ kind: 'pin', id })}
         onClose={() => setSelection({ kind: 'empty' })}
         open={panelSelection.kind !== 'empty'}
       />
