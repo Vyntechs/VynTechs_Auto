@@ -39,6 +39,44 @@ export type TopologyTestAction = {
   branches: TopologyBranch[]
 }
 
+export type TopologyPin = {
+  id: string
+  slug: string
+  name: string
+  roleAbbreviation: string
+  pinNumber: string | null
+  edge: 'top' | 'right' | 'bottom' | 'left'
+  displayOrder: number
+  probeLocation: string
+  expectedReading: string
+  missingLogic: string
+  labelGap: string | null
+  sourceProvenance: string
+}
+
+export type TopologyScenario = {
+  id: string
+  slug: string
+  label: string
+  sub: string
+  kind: 'operation' | 'fault'
+  keyPosition: 'off' | 'on' | null
+  engineState: 'off' | 'running' | null
+  loadLevel: 'idle' | 'light' | 'medium' | 'heavy' | null
+  isDefault: boolean
+  displayOrder: number
+  /** Map of pinId → wire-state class for this scenario. Missing pin → 'off'. */
+  pinStates: Record<string, string>
+  /** Map of pinId → "right now" reading text for this scenario. Missing → null. */
+  pinReadings: Record<string, string>
+}
+
+export type TopologyDataStatus = {
+  capturedHeader: string
+  missingHeader: string
+  closingNote: string
+}
+
 export type TopologyComponent = {
   id: string
   slug: string
@@ -47,9 +85,18 @@ export type TopologyComponent = {
   location: string | null
   function: string | null
   electricalContract: string | null
+  // NEW prose fields (per spec §7.0):
+  subtitle: string | null
+  role: string | null
+  wireSummary: string | null
+  body: string | null
+  probingTactic: string | null
+  unknownNote: string | null
+  // existing children + new:
   sourceProvenance: string
   observableProperties: TopologyObservableProperty[]
   testActions: TopologyTestAction[]
+  pins: TopologyPin[]
 }
 
 export type TopologyConnection = {
@@ -60,6 +107,10 @@ export type TopologyConnection = {
   direction: string
   description: string | null
   sourceProvenance: string
+  // NEW (per spec §7.2):
+  electricalRole: 'signal' | '5v-ref' | 'low-ref' | 'pwm' | '12v' | 'ground' | null
+  fromPinId: string | null
+  toPinId: string | null
 }
 
 export type SystemTopology = {
@@ -68,6 +119,11 @@ export type SystemTopology = {
   system: string
   components: TopologyComponent[]
   connections: TopologyConnection[]
+  // NEW (per spec §7.3 + §7.6):
+  scenarios: TopologyScenario[]
+  dataStatus: TopologyDataStatus | null
+  /** Last-picked scenario slug for the session, if persisted; null otherwise. */
+  lastScenarioSlug: string | null
 }
 
 /** Human-readable platform name from the stored columns. */
@@ -248,6 +304,13 @@ export async function loadSystemTopology({
     location: c.location,
     function: c.function,
     electricalContract: c.electricalContract,
+    // Prose fields populated in Task 6; stubs satisfy type contract until then.
+    subtitle: null,
+    role: null,
+    wireSummary: null,
+    body: null,
+    probingTactic: null,
+    unknownNote: null,
     sourceProvenance: c.sourceProvenance,
     observableProperties: opRows
       .filter((op) => op.componentId === c.id)
@@ -274,6 +337,8 @@ export async function loadSystemTopology({
             nextAction: b.nextAction,
           })),
       })),
+    // Pins populated in Task 6; empty array is valid until then.
+    pins: [],
   }))
 
   return {
@@ -281,6 +346,16 @@ export async function loadSystemTopology({
     symptom: { slug: symptom.slug, description: symptom.description },
     system,
     components: assembledComponents,
-    connections: connectionRows,
+    // Map connections to include new fields; Tasks 7-9 will populate real values.
+    connections: connectionRows.map((conn) => ({
+      ...conn,
+      electricalRole: null,
+      fromPinId: null,
+      toPinId: null,
+    })),
+    // Scenarios + status populated in Tasks 8-9.
+    scenarios: [],
+    dataStatus: null,
+    lastScenarioSlug: null,
   }
 }

@@ -9,8 +9,10 @@ function component(id: string, name: string) {
   return {
     id, slug: id, name, kind: 'sensor',
     location: null, function: null, electricalContract: null,
+    subtitle: null, role: null, wireSummary: null, body: null,
+    probingTactic: null, unknownNote: null,
     sourceProvenance: 'TRAINING-CONFIRMED',
-    observableProperties: [], testActions: [],
+    observableProperties: [], testActions: [], pins: [],
   }
 }
 
@@ -24,8 +26,12 @@ const topology: SystemTopology = {
       id: 'e1', fromComponentId: 'a', toComponentId: 'b',
       connectionKind: 'electrical-wire', direction: 'unidirectional',
       description: null, sourceProvenance: 'TRAINING-CONFIRMED',
+      electricalRole: null, fromPinId: null, toPinId: null,
     },
   ],
+  scenarios: [],
+  dataStatus: null,
+  lastScenarioSlug: null,
 }
 
 describe('TopologyDiagram', () => {
