@@ -579,24 +579,40 @@
   .topo-footer { grid-template-columns: 1fr; gap: 24px; }
 }
 
-/* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
+/* ---- mobile baseline (spec 2026-05-23 §6 + D14) -------------------------
+   Stack everything single-column. Panel renders inline below the diagram
+   instead of as a bottom sheet (D14 — polished sheet deferred to Claude
+   Design's polish pass). On ≤414 px the empty-state panel is suppressed so
+   the footer renders directly below the canvas until the tech taps something.
+   ---------------------------------------------------------------------- */
 @media (max-width: 1023px) {
   .topo {
     grid-template-columns: 1fr;
-    height: 100dvh;
+    grid-template-rows: auto;
+    height: auto;
+    min-height: 100dvh;
   }
-  .topo__canvas { min-height: 0; }
+  .topo__canvas {
+    min-height: 60dvh;
+  }
   .topo-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    max-height: 72dvh;
-    border-radius: var(--vt-radius-3) var(--vt-radius-3) 0 0;
-    box-shadow: var(--vt-shadow-sheet);
-    transform: translateY(100%);
-    transition: transform var(--vt-dur-3) var(--vt-ease);
-    z-index: 20;
+    /* Drop the bottom-sheet positioning entirely — render inline. */
+    position: static;
+    transform: none;
+    max-height: none;
+    width: 100%;
+    border-radius: var(--vt-radius-2);
   }
-  .topo-panel.is-open { transform: translateY(0); }
+}
+
+@media (max-width: 414px) {
+  .topo {
+    padding: var(--vt-space-3);
+    gap: var(--vt-space-5);
+  }
+  .topo__canvas { min-height: 55dvh; }
+  /* Suppress the empty-state panel on phone-sized viewports so the footer
+     renders directly under the diagram until the tech taps something.
+     Once a selection lands, the panel re-renders without this class. */
+  .topo-panel.is-empty-mobile-hidden { display: none; }
 }
