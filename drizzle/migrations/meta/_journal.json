@@ -155,6 +155,13 @@
       "when": 1779328801033,
       "tag": "0019_component_systems",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1779555133328,
+      "tag": "0020_interactive_electrical_topology",
+      "breakpoints": true
     }
   ]
 }
