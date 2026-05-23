@@ -230,6 +230,64 @@
   text-align: left;
 }
 
+/* =============================================================================
+   Interactive wiring topology (spec 2026-05-23 §4.4)
+
+   The shipped .topo-edge--<connectionKind> palette stays for non-electrical
+   connections (fluid lines, mechanical linkages). The .wire palette below
+   replaces it for connections carrying an electricalRole; the custom
+   <WireEdge> component picks the right className.
+   ============================================================================= */
+
+.wire {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke-width var(--vt-dur-2) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
+}
+
+.wire--signal  { stroke: var(--role-signal); }
+.wire--5v-ref  { stroke: var(--role-5v-ref); }
+.wire--low-ref { stroke: var(--role-low-ref); }
+.wire--pwm     { stroke: var(--role-pwm); }
+.wire--12v     { stroke: var(--role-12v); }
+.wire--ground  { stroke: var(--role-ground); }
+
+.wire.off          { opacity: 0.16; animation: none !important; stroke-dasharray: 0; }
+.wire.steady-12v   { stroke-dasharray: 12 4; animation: flow 2.4s linear infinite; }
+.wire.steady-5v    { stroke-dasharray: 10 4; animation: flow 2.8s linear infinite; opacity: 0.92; }
+.wire.steady-gnd   { stroke-dasharray: 16 3; animation: flow 2.6s linear infinite; opacity: 0.85; }
+.wire.signal-rest  { stroke-dasharray: 6 8;  animation: flow 3.2s linear infinite; opacity: 0.55; }
+.wire.signal-low   { stroke-dasharray: 6 6;  animation: flow 2.4s linear infinite; opacity: 0.70; }
+.wire.signal-med   { stroke-dasharray: 6 5;  animation: flow 1.6s linear infinite; }
+.wire.signal-high  { stroke-dasharray: 6 4;  animation: flow 1.0s linear infinite; }
+.wire.signal-pegged{ stroke-dasharray: 6 3;  animation: flow 0.5s linear infinite; }
+.wire.pwm-low      { stroke-dasharray: 5 4;  animation: flow 1.5s linear infinite; opacity: 0.85; }
+.wire.pwm-med      { stroke-dasharray: 5 3;  animation: flow 0.85s linear infinite; }
+.wire.pwm-high     { stroke-dasharray: 4 2;  animation: flow 0.42s linear infinite; }
+.wire.pwm-max      { stroke-dasharray: 4 2;  animation: flow 0.22s linear infinite; }
+
+.wire.is-active {
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.wire.dim { opacity: 0.25; }
+
+@keyframes flow {
+  to { stroke-dashoffset: -16; }
+}
+
+/* Respect reduced-motion — disable the dash flow without losing the static
+   role color (the tech still gets to read the diagram). */
+@media (prefers-reduced-motion: reduce) {
+  .wire {
+    animation: none !important;
+  }
+}
+
 /* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
 @media (max-width: 1023px) {
   .topo {
