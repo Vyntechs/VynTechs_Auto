@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Diagnosis · F-350 6.7L PSD · P0087</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="running-head">
+  <span class="running-head__left">Vyntechs · Service Diagnostic</span>
+  <span class="running-head__center">F-350 · 6.7L PSD · P0087</span>
+  <span class="running-head__right">Diagnosis</span>
+</header>
+
+<main class="verdict-spread">
+
+  <!-- Left column: the trail of what was run -->
+  <aside class="verdict-trail" aria-label="What you ran">
+
+    <div class="verdict-trail__caption">What you ran · in order</div>
+
+    <div class="verdict-trail__list">
+
+      <div class="trail-item">
+        <span class="trail-item__num">01</span>
+        <span class="trail-item__name">Fuel Tank — level check</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+
+      <div class="trail-item">
+        <span class="trail-item__num">02</span>
+        <span class="trail-item__name">Water-in-Fuel — status PID</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+
+      <div class="trail-item">
+        <span class="trail-item__num">03</span>
+        <span class="trail-item__name">Lift Pump Relay — seating</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+
+      <div class="trail-item">
+        <span class="trail-item__num">04</span>
+        <span class="trail-item__name">Electric Lift Pump — status PID</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+
+      <div class="trail-item">
+        <span class="trail-item__num">05</span>
+        <span class="trail-item__name">HP Fuel Rail Bank A — external leak</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+
+      <div class="trail-item trail-item--fail">
+        <span class="trail-item__num">06</span>
+        <span class="trail-item__name">Pressure Relief Valve — bleed-down</span>
+        <span class="trail-item__verdict">Fail</span>
+      </div>
+
+    </div>
+
+    <p style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--ink-faint); margin-top: 28px; line-height: 1.7;">
+      Run on 2026-05-23 at 09:42 PT by Brandon. Six steps, twelve minutes.
+    </p>
+
+  </aside>
+
+  <!-- Right column: the verdict -->
+  <section class="verdict-column">
+
+    <div class="verdict-column__kicker">Diagnosis</div>
+
+    <h1 class="verdict-column__hero">Replace the rail<br>pressure relief valve.</h1>
+
+    <div class="verdict-column__sub">
+      <span>Targeted repair</span>
+      <span class="column__byline-bullet"></span>
+      <span>No CP4 or injector work required</span>
+    </div>
+
+    <p class="verdict-column__body">
+      With the filter element clean of metal and adequate CP4 inlet pressure
+      already confirmed, a rail that bleeds to near-zero in two to three
+      seconds points unambiguously to a stuck-open PRV. The fault is local
+      to the valve.
+    </p>
+
+    <p class="verdict-column__body">
+      This is a non-catastrophic, targeted repair. Pump and injectors are
+      sound — there's no metal contamination evidence to escalate the
+      scope. Replace the PRV per Ford WSM, clear the DTC, retest FRP PID
+      at idle and under medium load.
+    </p>
+
+    <div class="verdict-actions">
+      <a href="#" class="verdict-action">
+        <span>Close case</span>
+        <span class="verdict-action__arrow">→</span>
+      </a>
+      <a href="#" class="verdict-action" style="border-bottom-color: var(--ink-3); color: var(--ink-2);">
+        <span>Hand to advisor</span>
+        <span class="verdict-action__arrow">→</span>
+      </a>
+    </div>
+
+  </section>
+
+</main>
+
+</body>
+</html>

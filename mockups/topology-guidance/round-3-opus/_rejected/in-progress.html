@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Service Diagnostic · F-350 6.7L PSD · P0087</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Running head — like a book's running header -->
+<header class="running-head" aria-label="Diagnostic header">
+  <span class="running-head__left">Vyntechs · Service Diagnostic</span>
+  <span class="running-head__center">F-350 · 6.7L PSD · P0087</span>
+  <span class="running-head__right">06 Checked</span>
+</header>
+
+<main class="spread">
+
+  <!-- ============ PLATE — left column, the spatial schematic ============ -->
+  <section class="plate" aria-label="Fuel system schematic">
+
+    <div class="plate__caption">
+      <span class="plate__folio">Fig.&nbsp;1</span>
+      <span class="plate__title">Common-rail fuel system</span>
+      <span class="plate__rule"></span>
+      <span class="plate__hint">Tap any part to inspect</span>
+    </div>
+
+    <div class="plate__canvas">
+      <svg class="plate__svg" viewBox="0 0 620 680" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <defs>
+          <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="tip"></path>
+          </marker>
+          <marker id="tip-ctx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="tip tip--context"></path>
+          </marker>
+        </defs>
+
+        <!-- ===== Fuel flow — main vertical spine ===== -->
+        <!-- Tank → Lift Pump (fluid) -->
+        <path class="line line--fluid" d="M 186,76 V 110" marker-end="url(#tip)"/>
+        <!-- LP Relay → Lift Pump (electrical, T-route) -->
+        <path class="line line--elec" d="M 300,52 H 218 V 110"/>
+        <!-- Lift Pump → Filter (fluid) -->
+        <path class="line line--fluid" d="M 186,156 V 190" marker-end="url(#tip)"/>
+        <!-- Filter ↔ WIF (sub-component, thin tie) -->
+        <path class="line line--report line--context" d="M 252,212 H 300"/>
+        <!-- Filter → CP4.2 (fluid) -->
+        <path class="line line--fluid line--context" d="M 186,236 V 270" marker-end="url(#tip-ctx)"/>
+        <!-- CP4.2 ↔ IMV (sub-component, thin tie) -->
+        <path class="line line--elec line--context" d="M 252,292 H 300"/>
+
+        <!-- CP4.2 → Rail A (fluid, split-down-left) -->
+        <path class="line line--fluid line--context" d="M 186,316 V 350 H 116 V 380" marker-end="url(#tip-ctx)"/>
+        <!-- CP4.2 → Rail B (fluid, split-down-right) -->
+        <path class="line line--fluid line--context" d="M 186,316 V 350 H 366 V 380" marker-end="url(#tip-ctx)"/>
+
+        <!-- Rail A → PRV (active) — implicit mounting + flow -->
+        <path class="line line--fluid" d="M 116,426 V 460" marker-end="url(#tip)"/>
+        <!-- Rail A → Inj 1-4 (down-then-across) -->
+        <path class="line line--fluid line--context" d="M 116,426 V 446 H 80 V 540" marker-end="url(#tip-ctx)"/>
+        <!-- Rail B → Inj 5-8 -->
+        <path class="line line--fluid line--context" d="M 366,426 V 540" marker-end="url(#tip-ctx)"/>
+
+        <!-- PRV → Return (fluid, snake right and down) -->
+        <path class="line line--fluid" d="M 116,506 V 520 H 220 V 600" marker-end="url(#tip)"/>
+        <!-- Inj 1-4 → Return -->
+        <path class="line line--fluid line--context" d="M 80,586 V 610 H 200 V 620"/>
+        <!-- Inj 5-8 → Return -->
+        <path class="line line--fluid line--context" d="M 366,586 V 610 H 280 V 620"/>
+
+        <!-- Return → Tank (big loop fluid, on the left margin) -->
+        <path class="line line--fluid line--context" d="M 170,622 H 30 V 52 H 120" marker-end="url(#tip-ctx)"/>
+
+        <!-- FRP → PCM (reports, dashed thin) -->
+        <path class="line line--report" d="M 366,492 H 482 V 312"/>
+        <!-- PCM → IMV (controlled, dashed) -->
+        <path class="line line--elec line--context" d="M 482,292 H 432"/>
+        <!-- PCM → LP Relay (controlled, dashed) -->
+        <path class="line line--elec line--context" d="M 482,290 V 60 H 432"/>
+      </svg>
+
+      <!-- ===== Components positioned by fuel flow ===== -->
+
+      <!-- 01 Fuel Tank — top center, where fuel starts -->
+      <div class="mark done" style="left: 120px; top: 30px;" data-inspect-name="Fuel Tank" data-inspect-verdict="Pass" data-inspect-detail="Gauge above 1/4 — fuel level is adequate.">
+        <span class="mark__num">01</span>
+        <span class="mark__role">Tank</span>
+        <span class="mark__name">Fuel Tank</span>
+        <div class="mark__inspect"><strong>Fuel Tank</strong><em>01 · Pass</em><br>Gauge at 1/4 — fuel level is adequate.</div>
+      </div>
+
+      <!-- 03 Lift Pump Relay — top right, electrical control point -->
+      <div class="mark done" style="left: 300px; top: 30px;" data-inspect>
+        <span class="mark__num">03</span>
+        <span class="mark__role">Actuator · Relay</span>
+        <span class="mark__name">Lift Pump Relay</span>
+        <div class="mark__inspect"><strong>Lift Pump Relay</strong><em>03 · Pass</em><br>Fully seated, no corrosion observed.</div>
+      </div>
+
+      <!-- 04 Lift Pump — fuel flow downward -->
+      <div class="mark done" style="left: 120px; top: 110px;" data-inspect>
+        <span class="mark__num">04</span>
+        <span class="mark__role">Pump · Electric</span>
+        <span class="mark__name">Electric Lift Pump</span>
+        <div class="mark__inspect"><strong>Electric Lift Pump</strong><em>04 · Pass</em><br>Status PID commanded ON · audible at frame rail.</div>
+      </div>
+
+      <!-- 02 WIF Sensor — adjacent to filter -->
+      <div class="mark done" style="left: 300px; top: 190px;" data-inspect>
+        <span class="mark__num">02</span>
+        <span class="mark__role">Sensor · Water-in-Fuel</span>
+        <span class="mark__name">WIF Sensor</span>
+        <div class="mark__inspect"><strong>Water-in-Fuel Sensor</strong><em>02 · Pass</em><br>PID reads not-detected · WIF lamp off.</div>
+      </div>
+
+      <!-- Filter — context (not yet tested this run) -->
+      <div class="mark context" style="left: 120px; top: 190px;">
+        <span class="mark__role">Mechanical · Filter</span>
+        <span class="mark__name">Fuel Filter</span>
+      </div>
+
+      <!-- CP4.2 — context -->
+      <div class="mark context" style="left: 120px; top: 270px;">
+        <span class="mark__role">HP Pump</span>
+        <span class="mark__name">Bosch CP4.2</span>
+      </div>
+
+      <!-- IMV — context (sub of CP4) -->
+      <div class="mark context" style="left: 300px; top: 270px;">
+        <span class="mark__role">Valve · IMV</span>
+        <span class="mark__name">Inlet Metering</span>
+      </div>
+
+      <!-- 05 Rail Bank A — done -->
+      <div class="mark done" style="left: 50px; top: 380px;" data-inspect>
+        <span class="mark__num">05</span>
+        <span class="mark__role">HP Rail · Bank A</span>
+        <span class="mark__name">High-Pressure Rail</span>
+        <div class="mark__inspect"><strong>HP Rail · Bank A</strong><em>05 · Pass</em><br>No external fuel leak at rail fittings.</div>
+      </div>
+
+      <!-- Rail Bank B — context -->
+      <div class="mark context" style="left: 300px; top: 380px;">
+        <span class="mark__role">HP Rail · Bank B</span>
+        <span class="mark__name">High-Pressure Rail</span>
+      </div>
+
+      <!-- PRV — ACTIVE -->
+      <div class="mark active" style="left: 50px; top: 460px;">
+        <span class="mark__role">Valve · Pressure relief</span>
+        <span class="mark__name">Rail Pressure Relief Valve</span>
+      </div>
+
+      <!-- FRP Sensor — context (on Rail B side) -->
+      <div class="mark context" style="left: 300px; top: 460px;">
+        <span class="mark__role">Sensor · FRP</span>
+        <span class="mark__name">Rail Pressure Sensor</span>
+      </div>
+
+      <!-- Injectors 1-4 — context -->
+      <div class="mark context" style="left: 30px; top: 540px;">
+        <span class="mark__role">Actuators · ×4</span>
+        <span class="mark__name">Injectors 1–4</span>
+      </div>
+
+      <!-- Injectors 5-8 — context -->
+      <div class="mark context" style="left: 300px; top: 540px;">
+        <span class="mark__role">Actuators · ×4</span>
+        <span class="mark__name">Injectors 5–8</span>
+      </div>
+
+      <!-- Return Circuit — bottom, where everything ends up -->
+      <div class="mark context" style="left: 170px; top: 600px; min-width: 160px;">
+        <span class="mark__role">Mechanical · LP Return</span>
+        <span class="mark__name">Return Circuit</span>
+      </div>
+
+      <!-- PCM — sidebar control hub -->
+      <div class="mark context" style="left: 482px; top: 270px;">
+        <span class="mark__role">Module</span>
+        <span class="mark__name">PCM</span>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ============ COLUMN — right column, the active test ============== -->
+  <section class="column" aria-label="Active diagnostic step">
+    <div class="content">
+      <div class="content-stage" id="stage">
+
+        <div class="column__kicker">Active · Bleeddown decay</div>
+        <h1 class="column__hero">Rail Pressure<br>Relief Valve.</h1>
+        <div class="column__byline">
+          <span>FRP PID</span>
+          <span class="column__byline-bullet"></span>
+          <span>Idle &nbsp;→&nbsp; Key-off</span>
+          <span class="column__byline-bullet"></span>
+          <span>Scan tool</span>
+        </div>
+
+        <p class="column__body">
+          With the engine warm and idling, watch the FRP rail-pressure
+          PID on the scan tool during a smooth key-off. Track the decay
+          rate over the first ten seconds after shutdown.
+        </p>
+        <p class="column__body">
+          A healthy sealed rail holds pressure for tens of seconds. A
+          stuck-open relief valve bleeds the rail in two or three —
+          which mimics a CP4.2 failure under load and is the diagnosis
+          we're here to confirm or rule out.
+        </p>
+
+        <div class="column__sep" aria-hidden="true"></div>
+        <div class="column__prompt">What you saw</div>
+
+        <div class="choices" role="group" aria-label="Observations">
+
+          <button class="choice choice--ok" type="button" data-verdict="ok">
+            <span class="choice__mark" aria-hidden="true"></span>
+            <span class="choice__text">Gradual decay over many seconds.</span>
+            <span class="choice__verdict">Pass · rail holds pressure</span>
+          </button>
+
+          <button class="choice choice--ok" type="button" data-verdict="ok">
+            <span class="choice__mark" aria-hidden="true"></span>
+            <span class="choice__text">At idle, brief drops consistent with the PRV modulating normally.</span>
+            <span class="choice__verdict">Pass · PRV cycling</span>
+          </button>
+
+          <button class="choice choice--warn" type="button" data-verdict="warn">
+            <span class="choice__mark" aria-hidden="true"></span>
+            <span class="choice__text">No bleed-down events at idle over an extended observation.</span>
+            <span class="choice__verdict">Flag · escalate to medium load</span>
+          </button>
+
+          <button class="choice choice--warn" type="button" data-verdict="warn">
+            <span class="choice__mark" aria-hidden="true"></span>
+            <span class="choice__text">Pressure drops rapidly at idle or can't sustain the idle target.</span>
+            <span class="choice__verdict">Flag · check rail external leak</span>
+          </button>
+
+          <button class="choice choice--fail" type="button" data-verdict="fail">
+            <span class="choice__mark" aria-hidden="true"></span>
+            <span class="choice__text">FRP PID drops to near-zero within two to three seconds of key-off.</span>
+            <span class="choice__verdict">Fail · PRV stuck open</span>
+          </button>
+
+        </div>
+
+        <button class="aside" type="button" id="escape">Can't run this — note why →</button>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ----- Press → Commit → Settle sequence ---------------------------------
+  function attachChoiceHandlers() {
+    document.querySelectorAll('.choice').forEach(btn => {
+      btn.addEventListener('pointerdown', () => btn.classList.add('is-pressing'));
+      const release = () => btn.classList.remove('is-pressing');
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointerleave', release);
+      btn.addEventListener('click', () => {
+        const verdict = btn.dataset.verdict;
+        if (!verdict) return;
+        setTimeout(() => {
+          if (verdict === 'fail') {
+            window.location.href = 'diagnosis.html';
+          } else {
+            window.location.href = 'in-progress.html?next=frp';
+          }
+        }, 140);
+      });
+    });
+    const esc = document.getElementById('escape');
+    if (esc) {
+      esc.addEventListener('click', () => {
+        esc.textContent = 'Skipped · system selecting next →';
+        esc.style.color = 'var(--ink)';
+      });
+    }
+  }
+
+  // ----- Topology mark interactivity --------------------------------------
+  // Tap a mark to inspect it (shows what was recorded for done parts,
+  // shows part info for context parts).
+  function attachMarkHandlers() {
+    document.querySelectorAll('.mark').forEach(mark => {
+      if (mark.classList.contains('active')) return;
+      mark.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Close any other open inspect tooltips
+        document.querySelectorAll('.mark.is-inspecting').forEach(m => {
+          if (m !== mark) m.classList.remove('is-inspecting');
+        });
+        // Toggle this one
+        mark.classList.toggle('is-inspecting');
+        // Add a default tooltip for context marks that don't have one
+        if (mark.classList.contains('is-inspecting') && !mark.querySelector('.mark__inspect')) {
+          const name = mark.querySelector('.mark__name')?.textContent || 'Part';
+          const role = mark.querySelector('.mark__role')?.textContent || '';
+          const tip = document.createElement('div');
+          tip.className = 'mark__inspect';
+          tip.innerHTML = `<strong>${name}</strong><em>${role || 'Not tested yet'}</em><br>Part of the topology · not yet on the active path.`;
+          mark.appendChild(tip);
+        }
+      });
+    });
+    // Click anywhere else to close
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.mark.is-inspecting').forEach(m => m.classList.remove('is-inspecting'));
+    });
+  }
+
+  attachChoiceHandlers();
+  attachMarkHandlers();
+</script>
+
+</body>
+</html>
