@@ -13,6 +13,7 @@ import {
 import type { TopologySelectionState } from '@/components/topology/topology-flow'
 import { ScenarioBar } from '@/components/topology/scenario-bar'
 import { defaultScenarioSlug } from '@/components/topology/wire-state'
+import { CapturedMissingFooter } from '@/components/topology/captured-missing-footer'
 
 type Props = {
   topology: SystemTopology
@@ -189,6 +190,8 @@ export function TopologyDiagnostic({
         onClose={() => setSelection({ kind: 'empty' })}
         open={panelSelection.kind !== 'empty'}
       />
+
+      <CapturedMissingFooter topology={topology} />
     </div>
   )
 }

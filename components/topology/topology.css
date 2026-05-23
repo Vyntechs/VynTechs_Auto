@@ -515,6 +515,70 @@
 }
 .topo__readout.is-fault b { color: var(--role-12v); }
 
+/* Captured / Not captured footer (spec 2026-05-23 §4.7) ----------------- */
+.topo-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  padding-top: 28px;
+  border-top: 1px solid var(--vt-rule);
+  margin-top: 40px;
+  grid-column: 1 / -1;
+}
+.topo-footer__col {
+  min-width: 0;
+}
+.topo-footer__header {
+  font-family: var(--vt-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  margin-bottom: 12px;
+}
+.topo-footer__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.topo-footer__list li {
+  padding: 8px 0 8px 16px;
+  border-bottom: 1px solid var(--vt-rule);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg);
+  position: relative;
+}
+.topo-footer__list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.topo-footer__list--captured li::before {
+  background: var(--role-signal);
+}
+.topo-footer__list--missing li::before {
+  background: transparent;
+  border: 1.5px solid var(--vt-amber-500);
+}
+.topo-footer__closing-note {
+  background: var(--vt-bone-100);
+  border-left: 2px solid var(--vt-signal-500);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  line-height: 1.55;
+}
+
+@media (max-width: 414px) {
+  .topo-footer { grid-template-columns: 1fr; gap: 24px; }
+}
+
 /* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
 @media (max-width: 1023px) {
   .topo {
