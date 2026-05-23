@@ -25,12 +25,8 @@ const PLATFORM_SLUG = 'ford-super-duty-4th-gen-67-psd'
 
 // IDs captured during fixture setup for reuse in individual tests
 let testPlatformId: string
-let testFrpComponentId: string
-let testPcmComponentId: string
 let testPin1Id: string
 let testPin2Id: string
-let testOpScenarioId: string
-let testFaultScenarioId: string
 let testSessionId: string
 
 async function seedFixtures(db: TestDb) {
@@ -81,8 +77,6 @@ async function seedFixtures(db: TestDb) {
       { slug: 'c-retired-fuel', platformId: platform.id, name: 'Retired Fuel Part', kind: 'sensor', systems: ['fuel'], isRetired: true, sourceProvenance: 'TRAINING-CONFIRMED' },
     ])
     .returning({ id: components.id, slug: components.slug })
-  testPcmComponentId = cPcm.id
-  testFrpComponentId = cFrp.id
 
   // Connections: 2 valid fuel-fuel, 1 fuel-cooling (excluded), 1 retired (excluded)
   // The PCM→FRP connection is given an electricalRole + fromPinId set after pins are inserted
@@ -187,8 +181,6 @@ async function seedFixtures(db: TestDb) {
       },
     ])
     .returning({ id: systemScenarios.id })
-  testOpScenarioId = scOp.id
-  testFaultScenarioId = scFault.id
 
   // Wire-state rows: one per pin × per scenario (4 rows)
   await db.insert(scenarioWireStates).values([
