@@ -6,16 +6,23 @@
 -- 1. components — six new prose columns for the panel body
 -- ============================================================
 ALTER TABLE components ADD COLUMN subtitle text;
+--> statement-breakpoint
 ALTER TABLE components ADD COLUMN role text;
+--> statement-breakpoint
 ALTER TABLE components ADD COLUMN wire_summary text;
+--> statement-breakpoint
 ALTER TABLE components ADD COLUMN body text;
+--> statement-breakpoint
 ALTER TABLE components ADD COLUMN probing_tactic text;
+--> statement-breakpoint
 ALTER TABLE components ADD COLUMN unknown_note text;
+--> statement-breakpoint
 
 -- ============================================================
 -- 2. component_pins — new table; one row per pin per component
 -- ============================================================
 CREATE TYPE pin_edge AS ENUM ('top', 'right', 'bottom', 'left');
+--> statement-breakpoint
 
 CREATE TABLE component_pins (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,28 +40,41 @@ CREATE TABLE component_pins (
   source_provenance text NOT NULL DEFAULT 'TRAINING-CONFIRMED',
   is_retired boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (component_id, slug)
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+--> statement-breakpoint
+
+CREATE UNIQUE INDEX component_pins_component_slug_active_unique
+  ON component_pins (component_id, slug) WHERE is_retired = false;
+--> statement-breakpoint
 
 CREATE INDEX component_pins_component_id_idx ON component_pins(component_id) WHERE is_retired = false;
+--> statement-breakpoint
 
 -- ============================================================
 -- 3. component_connections — electrical role + pin endpoints
 -- ============================================================
 CREATE TYPE electrical_role AS ENUM ('signal', '5v-ref', 'low-ref', 'pwm', '12v', 'ground');
+--> statement-breakpoint
 
 ALTER TABLE component_connections ADD COLUMN electrical_role electrical_role;
+--> statement-breakpoint
 ALTER TABLE component_connections ADD COLUMN from_pin_id uuid REFERENCES component_pins(id) ON DELETE SET NULL;
+--> statement-breakpoint
 ALTER TABLE component_connections ADD COLUMN to_pin_id uuid REFERENCES component_pins(id) ON DELETE SET NULL;
+--> statement-breakpoint
 
 -- ============================================================
 -- 4. system_scenarios — operational + fault scenarios per (platform, system)
 -- ============================================================
 CREATE TYPE scenario_kind AS ENUM ('operation', 'fault');
+--> statement-breakpoint
 CREATE TYPE key_position AS ENUM ('off', 'on');
+--> statement-breakpoint
 CREATE TYPE engine_state AS ENUM ('off', 'running');
+--> statement-breakpoint
 CREATE TYPE load_level AS ENUM ('idle', 'light', 'medium', 'heavy');
+--> statement-breakpoint
 
 CREATE TABLE system_scenarios (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,17 +91,23 @@ CREATE TABLE system_scenarios (
   display_order integer NOT NULL DEFAULT 0,
   is_retired boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (platform_id, system, slug)
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+--> statement-breakpoint
+
+CREATE UNIQUE INDEX system_scenarios_platform_system_slug_active_unique
+  ON system_scenarios (platform_id, system, slug) WHERE is_retired = false;
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX system_scenarios_one_default_per_slice_idx
   ON system_scenarios(platform_id, system)
   WHERE is_default = true AND is_retired = false;
+--> statement-breakpoint
 
 CREATE INDEX system_scenarios_lookup_idx
   ON system_scenarios(platform_id, system)
   WHERE is_retired = false;
+--> statement-breakpoint
 
 -- ============================================================
 -- 5. scenario_wire_states — per-pin per-scenario wire animation state
@@ -92,6 +118,7 @@ CREATE TYPE wire_state AS ENUM (
   'signal-rest', 'signal-low', 'signal-med', 'signal-high', 'signal-pegged',
   'pwm-low', 'pwm-med', 'pwm-high', 'pwm-max'
 );
+--> statement-breakpoint
 
 CREATE TABLE scenario_wire_states (
   scenario_id uuid NOT NULL REFERENCES system_scenarios(id) ON DELETE CASCADE,
@@ -99,8 +126,7 @@ CREATE TABLE scenario_wire_states (
   wire_state wire_state NOT NULL,
   PRIMARY KEY (scenario_id, pin_id)
 );
-
-CREATE INDEX scenario_wire_states_scenario_idx ON scenario_wire_states(scenario_id);
+--> statement-breakpoint
 
 -- ============================================================
 -- 6. pin_scenario_readings — the "right now" reading per (pin, scenario)
@@ -111,8 +137,7 @@ CREATE TABLE pin_scenario_readings (
   reading text NOT NULL,
   PRIMARY KEY (pin_id, scenario_id)
 );
-
-CREATE INDEX pin_scenario_readings_pin_idx ON pin_scenario_readings(pin_id);
+--> statement-breakpoint
 
 -- ============================================================
 -- 7. system_data_status — captured/missing footer hybrid framing
@@ -127,6 +152,7 @@ CREATE TABLE system_data_status (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (platform_id, system)
 );
+--> statement-breakpoint
 
 -- ============================================================
 -- 8. sessions — persist the last-picked scenario per session
