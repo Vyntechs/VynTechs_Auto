@@ -1,5 +1,9 @@
 # Topology Guided Diagnostic — Claude Design Handoff
 
+> **⚠ SUPERSEDED — 2026-05-23 (afternoon).** This handoff was written before Brandon's hand-built prototype settled the macro visual direction. The framing changed from "guided diagnostic walk" (the wizard model below) to "interactive electrical topology" (the diagram-is-the-instrument model in his prototype). **Use the new handoff:** `docs/superpowers/handoffs/2026-05-23-claude-design-interactive-electrical-topology.md`. The doc below is preserved only for historical context; do not follow it.
+
+---
+
 **Date:** 2026-05-23
 **Branch:** `feat/topology-guided-walk` (the branch name predates the vocab rename; internally code says "walk," UI says "diagnostic")
 **From:** Claude Opus (engineering / planning lane) — handing off to Claude Design (visual lane)
