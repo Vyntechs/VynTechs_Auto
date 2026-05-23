@@ -288,6 +288,59 @@
   }
 }
 
+/* Pin rectangle + handle (spec 2026-05-23 §4.5) ---------------------- */
+.topo-pin-wrap {
+  pointer-events: none; /* handle is invisible; pin button takes the clicks */
+}
+.topo-pin-handle {
+  /* Override React Flow's default handle dot — make it the geometric anchor only */
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+.topo-pin {
+  pointer-events: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px; /* mobile hit-target floor per spec §6 */
+  min-height: 28px;
+  padding: 2px 4px;
+  background: var(--vt-bone-50);
+  border: 0.6px solid var(--vt-fg-2);
+  border-radius: 1.5px;
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+}
+.topo-pin:hover,
+.topo-pin:focus-visible {
+  background: var(--vt-amber-400);
+  outline: none;
+}
+.topo-pin.is-selected {
+  background: var(--vt-amber-500);
+  border-color: var(--vt-amber-500);
+  color: var(--vt-bone-50);
+}
+.topo-pin__role {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.topo-pin__num {
+  font-size: 7px;
+  opacity: 0.6;
+}
+
 /* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
 @media (max-width: 1023px) {
   .topo {
