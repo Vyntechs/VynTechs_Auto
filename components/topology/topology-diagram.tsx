@@ -14,7 +14,11 @@ import './topology.css'
 
 import type { SystemTopology } from '@/lib/diagnostics/load-system-topology'
 import type { TopologyLayout } from '@/lib/diagnostics/topology-layout'
-import { toFlowElements, type TopologyFlowNode } from './topology-flow'
+import {
+  toFlowElements,
+  type TopologyFlowNode,
+  type TopologySelectionState,
+} from './topology-flow'
 import { TopologyNode } from './topology-node'
 
 const nodeTypes: NodeTypes = { topology: TopologyNode }
@@ -45,9 +49,21 @@ export function TopologyDiagram({
   onSelectConnection,
   onClearSelection,
 }: Props) {
+  // PR-C/B Task 5 transitional shim: maps the polymorphic selectedId prop to the
+  // new typed selection state. Replaced in Task 6 when topology-diagram takes
+  // the typed selection prop directly from <TopologyDiagnostic>.
+  const selection: TopologySelectionState = useMemo(() => {
+    if (!selectedId) return { kind: 'empty', activeScenarioSlug: null }
+    const isComponent = topology.components.some((c) => c.id === selectedId)
+    if (isComponent) {
+      return { kind: 'component', id: selectedId, activeScenarioSlug: null }
+    }
+    return { kind: 'connection', id: selectedId, activeScenarioSlug: null }
+  }, [selectedId, topology])
+
   const { nodes, edges } = useMemo(
-    () => toFlowElements(topology, layout, selectedId),
-    [topology, layout, selectedId],
+    () => toFlowElements(topology, layout, selection),
+    [topology, layout, selection],
   )
 
   const onNodeClick: NodeMouseHandler<TopologyFlowNode> = (_event, node) => {
