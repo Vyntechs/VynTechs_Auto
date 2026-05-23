@@ -13,6 +13,8 @@ import {
   systemScenarios,
   scenarioWireStates,
   pinScenarioReadings,
+  systemDataStatus,
+  sessions,
 } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
@@ -166,10 +168,12 @@ export async function loadSystemTopology({
   db,
   platformSlug,
   symptomSlug,
+  sessionId,
 }: {
   db: AppDb
   platformSlug: string
   symptomSlug: string
+  sessionId?: string  // NEW — for restoring last-picked scenario
 }): Promise<SystemTopology | null> {
   // 1. Resolve platform
   const platform = await db.query.platforms.findFirst({
@@ -477,6 +481,36 @@ export async function loadSystemTopology({
       })),
   }))
 
+  // Captured/missing framing copy for this (platform, system)
+  const statusRow = await db.query.systemDataStatus.findFirst({
+    where: and(
+      eq(systemDataStatus.platformId, platform.id),
+      eq(systemDataStatus.system, system),
+    ),
+    columns: {
+      capturedHeader: true,
+      missingHeader: true,
+      closingNote: true,
+    },
+  })
+  const dataStatus: TopologyDataStatus | null = statusRow
+    ? {
+        capturedHeader: statusRow.capturedHeader,
+        missingHeader: statusRow.missingHeader,
+        closingNote: statusRow.closingNote,
+      }
+    : null
+
+  // Last-picked scenario for this session, if available
+  let lastScenarioSlug: string | null = null
+  if (sessionId) {
+    const sessionRow = await db.query.sessions.findFirst({
+      where: eq(sessions.id, sessionId),
+      columns: { lastScenarioSlug: true },
+    })
+    lastScenarioSlug = sessionRow?.lastScenarioSlug ?? null
+  }
+
   return {
     platform: { slug: platform.slug, name: buildPlatformName(platform) },
     symptom: { slug: symptom.slug, description: symptom.description },
@@ -484,7 +518,7 @@ export async function loadSystemTopology({
     components: assembledComponents,
     connections: connectionRows,
     scenarios: assembledScenarios,
-    dataStatus: null,
-    lastScenarioSlug: null,
+    dataStatus,
+    lastScenarioSlug,
   }
 }
