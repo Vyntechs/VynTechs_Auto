@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm'
 import {
   pgTable,
+  pgEnum,
   uuid,
   text,
   timestamp,
@@ -9,6 +10,7 @@ import {
   real,
   boolean,
   index,
+  primaryKey,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
@@ -16,6 +18,22 @@ import type { TreeState } from '../ai/tree-engine'
 export type { TreeState }
 
 export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
+
+// Enums for interactive electrical topology (migration 0020)
+export const pinEdgeEnum = pgEnum('pin_edge', ['top', 'right', 'bottom', 'left'])
+export const electricalRoleEnum = pgEnum('electrical_role', [
+  'signal', '5v-ref', 'low-ref', 'pwm', '12v', 'ground',
+])
+export const scenarioKindEnum = pgEnum('scenario_kind', ['operation', 'fault'])
+export const keyPositionEnum = pgEnum('key_position', ['off', 'on'])
+export const engineStateEnum = pgEnum('engine_state', ['off', 'running'])
+export const loadLevelEnum = pgEnum('load_level', ['idle', 'light', 'medium', 'heavy'])
+export const wireStateEnum = pgEnum('wire_state', [
+  'off',
+  'steady-12v', 'steady-5v', 'steady-gnd',
+  'signal-rest', 'signal-low', 'signal-med', 'signal-high', 'signal-pegged',
+  'pwm-low', 'pwm-med', 'pwm-high', 'pwm-max',
+])
 
 export const shops = pgTable('shops', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -138,6 +156,12 @@ export const components = pgTable(
     location: text('location'),
     function: text('function'),
     systems: text('systems').array().notNull().default([]),
+    subtitle: text('subtitle'),
+    role: text('role'),
+    wireSummary: text('wire_summary'),
+    body: text('body'),
+    probingTactic: text('probing_tactic'),
+    unknownNote: text('unknown_note'),
     sourceProvenance: text('source_provenance', {
       enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
     }).notNull(),
@@ -393,6 +417,9 @@ export const componentConnections = pgTable(
       enum: ['unidirectional', 'bidirectional'],
     }).notNull().default('unidirectional'),
     description: text('description'),
+    electricalRole: electricalRoleEnum('electrical_role'),
+    fromPinId: uuid('from_pin_id'),
+    toPinId: uuid('to_pin_id'),
     sourceProvenance: text('source_provenance', {
       enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
     }).notNull(),
@@ -411,6 +438,108 @@ export const componentConnections = pgTable(
     index('component_connections_from_idx').on(table.fromComponentId),
     index('component_connections_to_idx').on(table.toComponentId),
     index('component_connections_kind_idx').on(table.connectionKind),
+  ],
+)
+
+export const componentPins = pgTable(
+  'component_pins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .notNull()
+      .references(() => components.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    roleAbbreviation: text('role_abbreviation').notNull(),
+    pinNumber: text('pin_number'),
+    edge: pinEdgeEnum('edge').notNull(),
+    displayOrder: integer('display_order').notNull(),
+    probeLocation: text('probe_location').notNull(),
+    expectedReading: text('expected_reading').notNull(),
+    missingLogic: text('missing_logic').notNull(),
+    labelGap: text('label_gap'),
+    sourceProvenance: text('source_provenance').notNull().default('TRAINING-CONFIRMED'),
+    isRetired: boolean('is_retired').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('component_pins_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const systemScenarios = pgTable(
+  'system_scenarios',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .notNull()
+      .references(() => platforms.id, { onDelete: 'cascade' }),
+    system: text('system').notNull(),
+    label: text('label').notNull(),
+    sub: text('sub').notNull(),
+    kind: scenarioKindEnum('kind').notNull(),
+    keyPosition: keyPositionEnum('key_position'),
+    engineState: engineStateEnum('engine_state'),
+    loadLevel: loadLevelEnum('load_level'),
+    isDefault: boolean('is_default').notNull().default(false),
+    displayOrder: integer('display_order').notNull().default(0),
+    isRetired: boolean('is_retired').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('system_scenarios_lookup_idx').on(table.platformId, table.system),
+  ],
+)
+
+export const scenarioWireStates = pgTable(
+  'scenario_wire_states',
+  {
+    scenarioId: uuid('scenario_id')
+      .notNull()
+      .references(() => systemScenarios.id, { onDelete: 'cascade' }),
+    pinId: uuid('pin_id')
+      .notNull()
+      .references(() => componentPins.id, { onDelete: 'cascade' }),
+    wireState: wireStateEnum('wire_state').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scenarioId, t.pinId] }),
+  ],
+)
+
+export const pinScenarioReadings = pgTable(
+  'pin_scenario_readings',
+  {
+    pinId: uuid('pin_id')
+      .notNull()
+      .references(() => componentPins.id, { onDelete: 'cascade' }),
+    scenarioId: uuid('scenario_id')
+      .notNull()
+      .references(() => systemScenarios.id, { onDelete: 'cascade' }),
+    reading: text('reading').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pinId, t.scenarioId] }),
+  ],
+)
+
+export const systemDataStatus = pgTable(
+  'system_data_status',
+  {
+    platformId: uuid('platform_id')
+      .notNull()
+      .references(() => platforms.id, { onDelete: 'cascade' }),
+    system: text('system').notNull(),
+    capturedHeader: text('captured_header').notNull(),
+    missingHeader: text('missing_header').notNull(),
+    closingNote: text('closing_note').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.platformId, t.system] }),
   ],
 )
 
@@ -552,6 +681,7 @@ export const sessions = pgTable('sessions', {
   curatorNote: text('curator_note'),
   curatorOverrideAction: text('curator_override_action'),
   maxCorpusSimilarity: real('max_corpus_similarity'),
+  lastScenarioSlug: text('last_scenario_slug'),
 })
 
 export const sessionEvents = pgTable('session_events', {
@@ -724,6 +854,44 @@ export const componentsRelations = relations(components, ({ one, many }) => ({
   }),
   observableProperties: many(observableProperties),
   testActions: many(testActions),
+}))
+
+export const componentPinsRelations = relations(componentPins, ({ one }) => ({
+  component: one(components, {
+    fields: [componentPins.componentId],
+    references: [components.id],
+  }),
+}))
+
+export const systemScenariosRelations = relations(systemScenarios, ({ one, many }) => ({
+  platform: one(platforms, {
+    fields: [systemScenarios.platformId],
+    references: [platforms.id],
+  }),
+  wireStates: many(scenarioWireStates),
+  readings: many(pinScenarioReadings),
+}))
+
+export const scenarioWireStatesRelations = relations(scenarioWireStates, ({ one }) => ({
+  scenario: one(systemScenarios, {
+    fields: [scenarioWireStates.scenarioId],
+    references: [systemScenarios.id],
+  }),
+  pin: one(componentPins, {
+    fields: [scenarioWireStates.pinId],
+    references: [componentPins.id],
+  }),
+}))
+
+export const pinScenarioReadingsRelations = relations(pinScenarioReadings, ({ one }) => ({
+  pin: one(componentPins, {
+    fields: [pinScenarioReadings.pinId],
+    references: [componentPins.id],
+  }),
+  scenario: one(systemScenarios, {
+    fields: [pinScenarioReadings.scenarioId],
+    references: [systemScenarios.id],
+  }),
 }))
 
 export const observablePropertiesRelations = relations(observableProperties, ({ one }) => ({

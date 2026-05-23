@@ -9,6 +9,12 @@ import {
   testActions,
   branchLogic,
   symptomTestImplications,
+  componentPins,
+  systemScenarios,
+  scenarioWireStates,
+  pinScenarioReadings,
+  systemDataStatus,
+  sessions,
 } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
@@ -39,6 +45,50 @@ export type TopologyTestAction = {
   branches: TopologyBranch[]
 }
 
+export type TopologyPin = {
+  id: string
+  slug: string
+  name: string
+  roleAbbreviation: string
+  pinNumber: string | null
+  edge: 'top' | 'right' | 'bottom' | 'left'
+  displayOrder: number
+  probeLocation: string
+  expectedReading: string
+  missingLogic: string
+  labelGap: string | null
+  sourceProvenance: string
+}
+
+export type TopologyWireState =
+  | 'off'
+  | 'steady-12v' | 'steady-5v' | 'steady-gnd'
+  | 'signal-rest' | 'signal-low' | 'signal-med' | 'signal-high' | 'signal-pegged'
+  | 'pwm-low' | 'pwm-med' | 'pwm-high' | 'pwm-max'
+
+export type TopologyScenario = {
+  id: string
+  slug: string
+  label: string
+  sub: string
+  kind: 'operation' | 'fault'
+  keyPosition: 'off' | 'on' | null
+  engineState: 'off' | 'running' | null
+  loadLevel: 'idle' | 'light' | 'medium' | 'heavy' | null
+  isDefault: boolean
+  displayOrder: number
+  /** Map of pinId → wire-state class for this scenario. Missing pin → 'off'. */
+  pinStates: Record<string, TopologyWireState>
+  /** Map of pinId → "right now" reading text for this scenario. Missing key → treat as null. */
+  pinReadings: Record<string, string>
+}
+
+export type TopologyDataStatus = {
+  capturedHeader: string
+  missingHeader: string
+  closingNote: string
+}
+
 export type TopologyComponent = {
   id: string
   slug: string
@@ -47,9 +97,18 @@ export type TopologyComponent = {
   location: string | null
   function: string | null
   electricalContract: string | null
+  // NEW prose fields (per spec §7.0):
+  subtitle: string | null
+  role: string | null
+  wireSummary: string | null
+  body: string | null
+  probingTactic: string | null
+  unknownNote: string | null
+  // existing children + new:
   sourceProvenance: string
   observableProperties: TopologyObservableProperty[]
   testActions: TopologyTestAction[]
+  pins: TopologyPin[]
 }
 
 export type TopologyConnection = {
@@ -60,6 +119,10 @@ export type TopologyConnection = {
   direction: string
   description: string | null
   sourceProvenance: string
+  // NEW (per spec §7.2):
+  electricalRole: 'signal' | '5v-ref' | 'low-ref' | 'pwm' | '12v' | 'ground' | null
+  fromPinId: string | null
+  toPinId: string | null
 }
 
 export type SystemTopology = {
@@ -68,6 +131,11 @@ export type SystemTopology = {
   system: string
   components: TopologyComponent[]
   connections: TopologyConnection[]
+  // NEW (per spec §7.3 + §7.6):
+  scenarios: TopologyScenario[]
+  dataStatus: TopologyDataStatus | null
+  /** Last-picked scenario slug for the session, if persisted; null otherwise. */
+  lastScenarioSlug: string | null
 }
 
 /** Human-readable platform name from the stored columns. */
@@ -100,10 +168,12 @@ export async function loadSystemTopology({
   db,
   platformSlug,
   symptomSlug,
+  sessionId,
 }: {
   db: AppDb
   platformSlug: string
   symptomSlug: string
+  sessionId?: string  // NEW — for restoring last-picked scenario
 }): Promise<SystemTopology | null> {
   // 1. Resolve platform
   const platform = await db.query.platforms.findFirst({
@@ -137,6 +207,13 @@ export async function loadSystemTopology({
       location: components.location,
       function: components.function,
       electricalContract: components.electricalContract,
+      // NEW (from migration 0020):
+      subtitle: components.subtitle,
+      role: components.role,
+      wireSummary: components.wireSummary,
+      body: components.body,
+      probingTactic: components.probingTactic,
+      unknownNote: components.unknownNote,
       sourceProvenance: components.sourceProvenance,
     })
     .from(components)
@@ -160,6 +237,10 @@ export async function loadSystemTopology({
       direction: componentConnections.direction,
       description: componentConnections.description,
       sourceProvenance: componentConnections.sourceProvenance,
+      // NEW (from migration 0020):
+      electricalRole: componentConnections.electricalRole,
+      fromPinId: componentConnections.fromPinId,
+      toPinId: componentConnections.toPinId,
     })
     .from(componentConnections)
     .where(
@@ -186,7 +267,32 @@ export async function loadSystemTopology({
       ),
     )
 
-  // 6. Test actions for those components + their branch logic
+  // 6. Pins for the in-set components
+  const pinRows = await db
+    .select({
+      id: componentPins.id,
+      slug: componentPins.slug,
+      componentId: componentPins.componentId,
+      name: componentPins.name,
+      roleAbbreviation: componentPins.roleAbbreviation,
+      pinNumber: componentPins.pinNumber,
+      edge: componentPins.edge,
+      displayOrder: componentPins.displayOrder,
+      probeLocation: componentPins.probeLocation,
+      expectedReading: componentPins.expectedReading,
+      missingLogic: componentPins.missingLogic,
+      labelGap: componentPins.labelGap,
+      sourceProvenance: componentPins.sourceProvenance,
+    })
+    .from(componentPins)
+    .where(
+      and(
+        inArray(componentPins.componentId, componentIds),
+        eq(componentPins.isRetired, false),
+      ),
+    )
+
+  // 7. Test actions for those components + their branch logic
   const testActionRows = await db
     .select({
       id: testActions.id,
@@ -239,7 +345,83 @@ export async function loadSystemTopology({
     : []
   const implicatedIds = new Set(implRows.map((r) => r.testActionId))
 
-  // 7. Assemble the graph
+  // 8. Scenarios for this (platform, system)
+  const scenarioRows = await db
+    .select({
+      id: systemScenarios.id,
+      slug: systemScenarios.slug,
+      label: systemScenarios.label,
+      sub: systemScenarios.sub,
+      kind: systemScenarios.kind,
+      keyPosition: systemScenarios.keyPosition,
+      engineState: systemScenarios.engineState,
+      loadLevel: systemScenarios.loadLevel,
+      isDefault: systemScenarios.isDefault,
+      displayOrder: systemScenarios.displayOrder,
+    })
+    .from(systemScenarios)
+    .where(
+      and(
+        eq(systemScenarios.platformId, platform.id),
+        eq(systemScenarios.system, system),
+        eq(systemScenarios.isRetired, false),
+      ),
+    )
+  const scenarioIds = scenarioRows.map((s) => s.id)
+
+  // Wire-state matrix for those scenarios
+  const wireStateRows = scenarioIds.length
+    ? await db
+        .select({
+          scenarioId: scenarioWireStates.scenarioId,
+          pinId: scenarioWireStates.pinId,
+          wireState: scenarioWireStates.wireState,
+        })
+        .from(scenarioWireStates)
+        .where(inArray(scenarioWireStates.scenarioId, scenarioIds))
+    : []
+
+  // Pin readings for those scenarios
+  const readingRows = scenarioIds.length
+    ? await db
+        .select({
+          pinId: pinScenarioReadings.pinId,
+          scenarioId: pinScenarioReadings.scenarioId,
+          reading: pinScenarioReadings.reading,
+        })
+        .from(pinScenarioReadings)
+        .where(inArray(pinScenarioReadings.scenarioId, scenarioIds))
+    : []
+
+  // 9. Assemble scenarios with their pin-state + reading maps
+  const assembledScenarios: TopologyScenario[] = scenarioRows
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .map((s) => {
+      const pinStates: Record<string, TopologyWireState> = {}
+      for (const ws of wireStateRows) {
+        if (ws.scenarioId === s.id) pinStates[ws.pinId] = ws.wireState
+      }
+      const pinReadings: Record<string, string> = {}
+      for (const r of readingRows) {
+        if (r.scenarioId === s.id) pinReadings[r.pinId] = r.reading
+      }
+      return {
+        id: s.id,
+        slug: s.slug,
+        label: s.label,
+        sub: s.sub,
+        kind: s.kind,
+        keyPosition: s.keyPosition,
+        engineState: s.engineState,
+        loadLevel: s.loadLevel,
+        isDefault: s.isDefault,
+        displayOrder: s.displayOrder,
+        pinStates,
+        pinReadings,
+      }
+    })
+
+  // 10. Assemble the graph
   const assembledComponents: TopologyComponent[] = componentRows.map((c) => ({
     id: c.id,
     slug: c.slug,
@@ -248,6 +430,12 @@ export async function loadSystemTopology({
     location: c.location,
     function: c.function,
     electricalContract: c.electricalContract,
+    subtitle: c.subtitle,
+    role: c.role,
+    wireSummary: c.wireSummary,
+    body: c.body,
+    probingTactic: c.probingTactic,
+    unknownNote: c.unknownNote,
     sourceProvenance: c.sourceProvenance,
     observableProperties: opRows
       .filter((op) => op.componentId === c.id)
@@ -274,7 +462,54 @@ export async function loadSystemTopology({
             nextAction: b.nextAction,
           })),
       })),
+    pins: pinRows
+      .filter((p) => p.componentId === c.id)
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((p) => ({
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        roleAbbreviation: p.roleAbbreviation,
+        pinNumber: p.pinNumber,
+        edge: p.edge,
+        displayOrder: p.displayOrder,
+        probeLocation: p.probeLocation,
+        expectedReading: p.expectedReading,
+        missingLogic: p.missingLogic,
+        labelGap: p.labelGap,
+        sourceProvenance: p.sourceProvenance,
+      })),
   }))
+
+  // Captured/missing framing copy for this (platform, system)
+  const statusRow = await db.query.systemDataStatus.findFirst({
+    where: and(
+      eq(systemDataStatus.platformId, platform.id),
+      eq(systemDataStatus.system, system),
+    ),
+    columns: {
+      capturedHeader: true,
+      missingHeader: true,
+      closingNote: true,
+    },
+  })
+  const dataStatus: TopologyDataStatus | null = statusRow
+    ? {
+        capturedHeader: statusRow.capturedHeader,
+        missingHeader: statusRow.missingHeader,
+        closingNote: statusRow.closingNote,
+      }
+    : null
+
+  // Last-picked scenario for this session, if available
+  let lastScenarioSlug: string | null = null
+  if (sessionId) {
+    const sessionRow = await db.query.sessions.findFirst({
+      where: eq(sessions.id, sessionId),
+      columns: { lastScenarioSlug: true },
+    })
+    lastScenarioSlug = sessionRow?.lastScenarioSlug ?? null
+  }
 
   return {
     platform: { slug: platform.slug, name: buildPlatformName(platform) },
@@ -282,5 +517,8 @@ export async function loadSystemTopology({
     system,
     components: assembledComponents,
     connections: connectionRows,
+    scenarios: assembledScenarios,
+    dataStatus,
+    lastScenarioSlug,
   }
 }

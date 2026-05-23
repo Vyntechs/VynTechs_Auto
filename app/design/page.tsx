@@ -50,6 +50,7 @@ const fixtureSession: Session = {
   maxCorpusSimilarity: null,
   cacheHitPlatformId: null,
   cacheHitSymptomId: null,
+  lastScenarioSlug: null,
 }
 
 const closedSession: Session = {
