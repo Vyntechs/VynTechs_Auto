@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { SystemTopology } from '@/lib/diagnostics/load-system-topology'
 import type { TopologyLayout } from '@/lib/diagnostics/topology-layout'
 import { formatSymptomTitle } from '@/components/topology/topology-format'
@@ -11,23 +11,38 @@ import {
   type TopologySelection,
 } from '@/components/topology/topology-detail-panel'
 import type { TopologySelectionState } from '@/components/topology/topology-flow'
+import { ScenarioBar } from '@/components/topology/scenario-bar'
+import { defaultScenarioSlug } from '@/components/topology/wire-state'
 
 type Props = {
   topology: SystemTopology
   layout: TopologyLayout
   vehicleName: string
+  sessionId: string
 }
 
-/** PR-C/B Task 6 — typed selection state. Pin selection joins component +
- *  connection. Scenario state lifted in Task 10. */
 type SelectionState =
   | { kind: 'empty' }
   | { kind: 'component'; id: string }
   | { kind: 'pin'; id: string }
   | { kind: 'connection'; id: string }
 
-export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
+/**
+ * Owns scenario state + pin/component/connection selection. Scenario default
+ * on first load = lastScenarioSlug → isDefault scenario → first available.
+ * Scenario change is fire-and-forget POST to /api/sessions/:id/scenario; a
+ * failed write doesn't block the UI per the soft-fail rule.
+ */
+export function TopologyDiagnostic({
+  topology,
+  layout,
+  vehicleName,
+  sessionId,
+}: Props) {
   const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
+  const [activeScenarioSlug, setActiveScenarioSlug] = useState<string | null>(
+    () => defaultScenarioSlug(topology.scenarios, topology.lastScenarioSlug),
+  )
 
   const componentById = useMemo(
     () => new Map(topology.components.map((c) => [c.id, c])),
@@ -50,9 +65,12 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
     () => new Map(topology.connections.map((c) => [c.id, c])),
     [topology],
   )
+  const activeScenario = useMemo(
+    () =>
+      topology.scenarios.find((s) => s.slug === activeScenarioSlug) ?? null,
+    [topology, activeScenarioSlug],
+  )
 
-  // Panel selection (the shape the detail panel consumes — Task 7 extends
-  // this with a 'pin' kind).
   const panelSelection: TopologySelection = useMemo(() => {
     if (selection.kind === 'empty') return { kind: 'empty' }
     if (selection.kind === 'component') {
@@ -77,24 +95,41 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
             kind: 'pin',
             pin: entry.pin,
             component: entry.component,
-            scenario: null, // Task 10 plumbs the active scenario
+            scenario: activeScenario,
           }
         : { kind: 'empty' }
     }
     return { kind: 'empty' }
-  }, [selection, componentById, connectionById, pinById])
+  }, [selection, componentById, connectionById, pinById, activeScenario])
 
-  // Diagram selection (typed shape consumed by toFlowElements).
   const diagramSelection: TopologySelectionState = useMemo(() => {
     if (selection.kind === 'empty') {
-      return { kind: 'empty', activeScenarioSlug: null }
+      return { kind: 'empty', activeScenarioSlug }
     }
-    return {
-      kind: selection.kind,
-      id: selection.id,
-      activeScenarioSlug: null,
-    }
-  }, [selection])
+    return { kind: selection.kind, id: selection.id, activeScenarioSlug }
+  }, [selection, activeScenarioSlug])
+
+  const persistScenario = useCallback(
+    (slug: string) => {
+      void fetch(`/api/sessions/${sessionId}/scenario`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      }).catch(() => {
+        // Fire-and-forget: a failed persistence write must not block the UI.
+        // Reload will surface server state if the tech wants to re-sync.
+      })
+    },
+    [sessionId],
+  )
+
+  const handleScenarioChange = useCallback(
+    (slug: string) => {
+      setActiveScenarioSlug(slug)
+      persistScenario(slug)
+    },
+    [persistScenario],
+  )
 
   return (
     <div className="topo">
@@ -112,7 +147,7 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
           ← Sessions
         </Link>
         <div className="topo__eyebrow">
-          Wiring topology · {topology.system} system
+          Electrical topology · diagnostic-complete from theory
         </div>
         <h1 className="topo__title">
           {formatSymptomTitle(topology.symptom.slug)}
@@ -121,6 +156,22 @@ export function TopologyDiagnostic({ topology, layout, vehicleName }: Props) {
           {vehicleName} · {topology.platform.name}
         </div>
       </header>
+
+      {topology.scenarios.length > 0 && (
+        <ScenarioBar
+          scenarios={topology.scenarios}
+          activeSlug={activeScenarioSlug}
+          onScenarioChange={handleScenarioChange}
+        />
+      )}
+
+      {activeScenario && (
+        <div
+          className={`topo__readout${activeScenario.kind === 'fault' ? ' is-fault' : ''}`}
+        >
+          Now showing · <b>{activeScenario.label}</b> — {activeScenario.sub}
+        </div>
+      )}
 
       <TopologyDiagram
         topology={topology}
