@@ -224,6 +224,10 @@ export async function loadSystemTopology({
       direction: componentConnections.direction,
       description: componentConnections.description,
       sourceProvenance: componentConnections.sourceProvenance,
+      // NEW (from migration 0020):
+      electricalRole: componentConnections.electricalRole,
+      fromPinId: componentConnections.fromPinId,
+      toPinId: componentConnections.toPinId,
     })
     .from(componentConnections)
     .where(
@@ -393,13 +397,7 @@ export async function loadSystemTopology({
     symptom: { slug: symptom.slug, description: symptom.description },
     system,
     components: assembledComponents,
-    // Map connections to include new fields; Tasks 7-9 will populate real values.
-    connections: connectionRows.map((conn) => ({
-      ...conn,
-      electricalRole: null,
-      fromPinId: null,
-      toPinId: null,
-    })),
+    connections: connectionRows,
     // Scenarios + status populated in Tasks 8-9.
     scenarios: [],
     dataStatus: null,
