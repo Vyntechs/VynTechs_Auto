@@ -9,6 +9,7 @@ import {
   testActions,
   branchLogic,
   symptomTestImplications,
+  componentPins,
 } from '@/lib/db/schema'
 
 // ---------------------------------------------------------------------------
@@ -193,6 +194,13 @@ export async function loadSystemTopology({
       location: components.location,
       function: components.function,
       electricalContract: components.electricalContract,
+      // NEW (from migration 0020):
+      subtitle: components.subtitle,
+      role: components.role,
+      wireSummary: components.wireSummary,
+      body: components.body,
+      probingTactic: components.probingTactic,
+      unknownNote: components.unknownNote,
       sourceProvenance: components.sourceProvenance,
     })
     .from(components)
@@ -242,7 +250,32 @@ export async function loadSystemTopology({
       ),
     )
 
-  // 6. Test actions for those components + their branch logic
+  // 6. Pins for the in-set components
+  const pinRows = await db
+    .select({
+      id: componentPins.id,
+      slug: componentPins.slug,
+      componentId: componentPins.componentId,
+      name: componentPins.name,
+      roleAbbreviation: componentPins.roleAbbreviation,
+      pinNumber: componentPins.pinNumber,
+      edge: componentPins.edge,
+      displayOrder: componentPins.displayOrder,
+      probeLocation: componentPins.probeLocation,
+      expectedReading: componentPins.expectedReading,
+      missingLogic: componentPins.missingLogic,
+      labelGap: componentPins.labelGap,
+      sourceProvenance: componentPins.sourceProvenance,
+    })
+    .from(componentPins)
+    .where(
+      and(
+        inArray(componentPins.componentId, componentIds),
+        eq(componentPins.isRetired, false),
+      ),
+    )
+
+  // 7. Test actions for those components + their branch logic
   const testActionRows = await db
     .select({
       id: testActions.id,
@@ -295,7 +328,7 @@ export async function loadSystemTopology({
     : []
   const implicatedIds = new Set(implRows.map((r) => r.testActionId))
 
-  // 7. Assemble the graph
+  // 8. Assemble the graph
   const assembledComponents: TopologyComponent[] = componentRows.map((c) => ({
     id: c.id,
     slug: c.slug,
@@ -304,13 +337,12 @@ export async function loadSystemTopology({
     location: c.location,
     function: c.function,
     electricalContract: c.electricalContract,
-    // Prose fields populated in Task 6; stubs satisfy type contract until then.
-    subtitle: null,
-    role: null,
-    wireSummary: null,
-    body: null,
-    probingTactic: null,
-    unknownNote: null,
+    subtitle: c.subtitle,
+    role: c.role,
+    wireSummary: c.wireSummary,
+    body: c.body,
+    probingTactic: c.probingTactic,
+    unknownNote: c.unknownNote,
     sourceProvenance: c.sourceProvenance,
     observableProperties: opRows
       .filter((op) => op.componentId === c.id)
@@ -337,8 +369,23 @@ export async function loadSystemTopology({
             nextAction: b.nextAction,
           })),
       })),
-    // Pins populated in Task 6; empty array is valid until then.
-    pins: [],
+    pins: pinRows
+      .filter((p) => p.componentId === c.id)
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((p) => ({
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        roleAbbreviation: p.roleAbbreviation,
+        pinNumber: p.pinNumber,
+        edge: p.edge,
+        displayOrder: p.displayOrder,
+        probeLocation: p.probeLocation,
+        expectedReading: p.expectedReading,
+        missingLogic: p.missingLogic,
+        labelGap: p.labelGap,
+        sourceProvenance: p.sourceProvenance,
+      })),
   }))
 
   return {
