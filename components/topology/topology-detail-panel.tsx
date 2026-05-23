@@ -292,7 +292,7 @@ export function TopologyDetailPanel({
 }: Props) {
   return (
     <aside
-      className={`topo-panel${open ? ' is-open' : ''}`}
+      className={`topo-panel${open ? ' is-open' : ''}${selection.kind === 'empty' ? ' is-empty-mobile-hidden' : ''}`}
       aria-live="polite"
     >
       {selection.kind !== 'empty' && (
