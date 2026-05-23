@@ -442,6 +442,79 @@
   color: var(--vt-fg-2);
 }
 
+/* Scenario bar (spec 2026-05-23 §4.8) — compositional picker ----------- */
+.topo-scenario-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  margin-bottom: 12px;
+}
+.topo-scenario-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.topo-scenario-bar__group--fault { margin-left: auto; }
+.topo-scenario-bar__label {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  margin-right: 4px;
+}
+.topo-scenario-bar__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+  min-height: 32px;
+}
+.topo-scenario-bar__pill:hover { background: var(--vt-bone-100); }
+.topo-scenario-bar__pill.is-active {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+.topo-scenario-bar__pill--fault.is-active {
+  background: var(--role-12v);
+  border-color: var(--role-12v);
+  color: var(--vt-bone-50);
+}
+
+@media (max-width: 414px) {
+  .topo-scenario-bar { gap: 12px; padding: 10px 12px; }
+  .topo-scenario-bar__group--fault { margin-left: 0; flex-basis: 100%; }
+}
+
+/* Live readout under the picker — scenario label + sub copy --------- */
+.topo__readout {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  padding: 0 0 16px;
+  line-height: 1.55;
+}
+.topo__readout b {
+  color: var(--vt-amber-500);
+  font-weight: 600;
+}
+.topo__readout.is-fault b { color: var(--role-12v); }
+
 /* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
 @media (max-width: 1023px) {
   .topo {
