@@ -66,11 +66,11 @@ INSERT INTO components (
 --
 -- NEW connections needed for the 3 new components:
 --   pcm → frp-reg        controlled_by   (PCM drives FRP regulator via PWM)
---   frp-sensor → shared-5v  electrical-wire (5V ref line from splice to sensor)
+--   shared-5v → frp-sensor  electrical-wire (5V ref line from splice to sensor)
 --   frp-sensor → shared-lref electrical-wire (low-ref return from sensor to splice)
 --   pcm → shared-5v      electrical-wire  (PCM 5V supply feeds the splice)
 --   pcm → shared-lref    electrical-wire  (PCM low-ref sink receives from splice)
---   frp-reg → hp-rail-bank-a electrical-wire (regulator is on driver-side rail = bank-a)
+--   frp-reg → hp-rail-bank-a mechanical-linkage (regulator is bolted to back of driver-side rail = bank-a)
 -- ============================================================
 
 INSERT INTO component_connections (
@@ -167,6 +167,25 @@ FROM
 WHERE
   frp.slug = 'sd4-67psd-frp-sensor'
   AND slr.slug = 'sd4-67psd-shared-lref';
+
+INSERT INTO component_connections (
+  from_component_id, to_component_id, connection_kind, direction,
+  description, source_provenance, is_retired
+)
+SELECT
+  frp_reg.id,
+  rail_a.id,
+  'mechanical-linkage',
+  'unidirectional',
+  'FRP regulator is bolted to the back of the driver-side rail (bank-a) — physical mechanical mount that gives the regulator a port to vent rail pressure',
+  'TRAINING-CONFIRMED',
+  false
+FROM
+  components frp_reg,
+  components rail_a
+WHERE
+  frp_reg.slug = 'sd4-67psd-frp-reg'
+  AND rail_a.slug = 'sd4-67psd-hp-rail-bank-a';
 
 
 -- ============================================================
