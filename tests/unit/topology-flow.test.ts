@@ -12,9 +12,16 @@ function component(id: string, name: string, kind = 'sensor') {
     location: null,
     function: null,
     electricalContract: null,
+    subtitle: null,
+    role: null,
+    wireSummary: null,
+    body: null,
+    probingTactic: null,
+    unknownNote: null,
     sourceProvenance: 'TRAINING-CONFIRMED',
     observableProperties: [],
     testActions: [],
+    pins: [],
   }
 }
 
@@ -32,8 +39,14 @@ const topology: SystemTopology = {
       direction: 'unidirectional',
       description: 'PCM reads FRP',
       sourceProvenance: 'TRAINING-CONFIRMED',
+      electricalRole: null,
+      fromPinId: null,
+      toPinId: null,
     },
   ],
+  scenarios: [],
+  dataStatus: null,
+  lastScenarioSlug: null,
 }
 
 const layout: TopologyLayout = {

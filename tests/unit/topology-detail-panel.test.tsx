@@ -14,6 +14,12 @@ const frp: TopologyComponent = {
   location: 'Front of DS rail',
   function: 'Reports rail pressure',
   electricalContract: '3-wire analog',
+  subtitle: null,
+  role: null,
+  wireSummary: null,
+  body: null,
+  probingTactic: null,
+  unknownNote: null,
   sourceProvenance: 'TRAINING-CONFIRMED',
   observableProperties: [
     { slug: 'op1', description: 'Back-probe the signal pin', observationMethod: 'electrical_measurement_at_pin' },
@@ -40,6 +46,7 @@ const frp: TopologyComponent = {
       branches: [{ condition: 'Below range', verdict: 'fail', nextAction: 'Suspect supply' }],
     },
   ],
+  pins: [],
 }
 
 const pcm: TopologyComponent = {
@@ -50,9 +57,16 @@ const pcm: TopologyComponent = {
   location: null,
   function: null,
   electricalContract: null,
+  subtitle: null,
+  role: null,
+  wireSummary: null,
+  body: null,
+  probingTactic: null,
+  unknownNote: null,
   sourceProvenance: 'GAP',
   observableProperties: [],
   testActions: [],
+  pins: [],
 }
 
 describe('TopologyDetailPanel', () => {
@@ -136,6 +150,9 @@ describe('TopologyDetailPanel', () => {
       direction: 'bidirectional',
       description: 'PCM reads the FRP signal',
       sourceProvenance: 'TRAINING-CONFIRMED',
+      electricalRole: null,
+      fromPinId: null,
+      toPinId: null,
     }
     const onSelect = vi.fn()
     render(

@@ -9,8 +9,10 @@ function component(id: string, name: string) {
   return {
     id, slug: id, name, kind: 'sensor',
     location: 'somewhere', function: 'does a thing', electricalContract: null,
+    subtitle: null, role: null, wireSummary: null, body: null,
+    probingTactic: null, unknownNote: null,
     sourceProvenance: 'TRAINING-CONFIRMED',
-    observableProperties: [], testActions: [],
+    observableProperties: [], testActions: [], pins: [],
   }
 }
 
@@ -23,6 +25,9 @@ const topology: SystemTopology = {
   system: 'fuel',
   components: [component('a', 'PCM'), component('b', 'FRP Sensor')],
   connections: [],
+  scenarios: [],
+  dataStatus: null,
+  lastScenarioSlug: null,
 }
 
 describe('TopologyDiagnostic', () => {

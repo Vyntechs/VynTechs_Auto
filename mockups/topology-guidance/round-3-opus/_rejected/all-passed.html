@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>No fault found · F-350 6.7L PSD · P0087</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="running-head">
+  <span class="running-head__left">Vyntechs · Service Diagnostic</span>
+  <span class="running-head__center">F-350 · 6.7L PSD · P0087</span>
+  <span class="running-head__right">All checks clean</span>
+</header>
+
+<main class="verdict-spread">
+
+  <aside class="verdict-trail" aria-label="What you ran">
+
+    <div class="verdict-trail__caption">What you ran · all clean</div>
+
+    <div class="verdict-trail__list">
+      <div class="trail-item">
+        <span class="trail-item__num">01</span>
+        <span class="trail-item__name">Fuel Tank — level check</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">02</span>
+        <span class="trail-item__name">Water-in-Fuel — status PID</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">03</span>
+        <span class="trail-item__name">Lift Pump Relay — seating</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">04</span>
+        <span class="trail-item__name">Electric Lift Pump — status PID</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">05</span>
+        <span class="trail-item__name">HP Rail Bank A — external leak</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">06</span>
+        <span class="trail-item__name">Pressure Relief Valve — bleed-down</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">07</span>
+        <span class="trail-item__name">FRP Sensor — PID at idle</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">08</span>
+        <span class="trail-item__name">Inlet Metering Valve — duty cycle</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">09</span>
+        <span class="trail-item__name">CP4.2 — inlet pressure</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+      <div class="trail-item">
+        <span class="trail-item__num">10</span>
+        <span class="trail-item__name">Fuel Filter — element inspection</span>
+        <span class="trail-item__verdict">Pass</span>
+      </div>
+    </div>
+
+    <p style="font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--ink-faint); margin-top: 28px; line-height: 1.7;">
+      Run on 2026-05-23 at 09:42 PT by Brandon. Ten steps, forty-one minutes.
+    </p>
+
+  </aside>
+
+  <section class="verdict-column">
+
+    <div class="verdict-column__kicker" style="color: var(--ink-3);">No fault found · in this system</div>
+
+    <h1 class="verdict-column__hero">Fuel system<br>checks clean.</h1>
+
+    <div class="verdict-column__sub">
+      <span>P0087 not located in the fuel circuit</span>
+    </div>
+
+    <p class="verdict-column__body">
+      Every implicated test came back inside spec. With supply, control,
+      and rail integrity all confirmed, the fault is unlikely to be in
+      the fuel system as scoped here. Two paths from here.
+    </p>
+
+    <p class="verdict-column__body">
+      The first: residual suspects the structured model can't yet
+      confirm — marginal CP4.2 mechanical efficiency that only fails
+      under heavy load, or internal injector return leak bypassing the
+      rail. These need waveform capture or an injector return-quantity
+      test from the Ford WSM PCED.
+    </p>
+
+    <p class="verdict-column__body">
+      The second: a sensor or PCM-side fault generating a false P0087.
+      Cross-check the FRP signal voltage at the connector and the 5V
+      reference — that's the cheap split before any further invasive
+      work.
+    </p>
+
+    <div class="verdict-actions">
+      <a href="#" class="verdict-action">
+        <span>Open follow-up checks</span>
+        <span class="verdict-action__arrow">→</span>
+      </a>
+      <a href="#" class="verdict-action" style="border-bottom-color: var(--ink-3); color: var(--ink-2);">
+        <span>Hand to advisor</span>
+        <span class="verdict-action__arrow">→</span>
+      </a>
+    </div>
+
+  </section>
+
+</main>
+
+</body>
+</html>

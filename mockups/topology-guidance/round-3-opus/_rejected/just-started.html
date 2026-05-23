@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Service Diagnostic · F-350 6.7L PSD · P0087 · just opened</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="running-head">
+  <span class="running-head__left">Vyntechs · Service Diagnostic</span>
+  <span class="running-head__center">F-350 · 6.7L PSD · P0087</span>
+  <span class="running-head__right">Just opened</span>
+</header>
+
+<main class="spread">
+
+  <section class="plate" aria-label="Fuel system schematic">
+
+    <div class="plate__caption">
+      <span class="plate__folio">Fig.&nbsp;1</span>
+      <span class="plate__title">Common-rail fuel system</span>
+      <span class="plate__rule"></span>
+      <span class="plate__hint">Tap any part to inspect</span>
+    </div>
+
+    <div class="plate__canvas">
+      <svg class="plate__svg" viewBox="0 0 620 680" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <defs>
+          <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="tip"></path>
+          </marker>
+          <marker id="tip-ctx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="tip tip--context"></path>
+          </marker>
+        </defs>
+
+        <!-- Fuel flow — main vertical spine (all context except where Tank is active) -->
+        <path class="line line--fluid" d="M 186,76 V 110" marker-end="url(#tip)"/>
+        <path class="line line--elec line--context" d="M 300,52 H 218 V 110"/>
+        <path class="line line--fluid line--context" d="M 186,156 V 190" marker-end="url(#tip-ctx)"/>
+        <path class="line line--report line--context" d="M 252,212 H 300"/>
+        <path class="line line--fluid line--context" d="M 186,236 V 270" marker-end="url(#tip-ctx)"/>
+        <path class="line line--elec line--context" d="M 252,292 H 300"/>
+        <path class="line line--fluid line--context" d="M 186,316 V 350 H 116 V 380" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 186,316 V 350 H 366 V 380" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 116,426 V 460" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 116,426 V 446 H 80 V 540" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 366,426 V 540" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 116,506 V 520 H 220 V 600" marker-end="url(#tip-ctx)"/>
+        <path class="line line--fluid line--context" d="M 80,586 V 610 H 200 V 620"/>
+        <path class="line line--fluid line--context" d="M 366,586 V 610 H 280 V 620"/>
+        <path class="line line--fluid line--context" d="M 170,622 H 30 V 52 H 120" marker-end="url(#tip-ctx)"/>
+        <path class="line line--report line--context" d="M 366,492 H 482 V 312"/>
+        <path class="line line--elec line--context" d="M 482,292 H 432"/>
+        <path class="line line--elec line--context" d="M 482,290 V 60 H 432"/>
+      </svg>
+
+      <!-- ACTIVE: Fuel Tank — the first check -->
+      <div class="mark active" style="left: 120px; top: 30px;">
+        <span class="mark__role">Tank · First check</span>
+        <span class="mark__name">Fuel Tank</span>
+      </div>
+
+      <!-- Everything else is context until system surfaces it -->
+      <div class="mark context" style="left: 300px; top: 30px;">
+        <span class="mark__role">Actuator · Relay</span>
+        <span class="mark__name">Lift Pump Relay</span>
+      </div>
+      <div class="mark context" style="left: 120px; top: 110px;">
+        <span class="mark__role">Pump · Electric</span>
+        <span class="mark__name">Electric Lift Pump</span>
+      </div>
+      <div class="mark context" style="left: 300px; top: 190px;">
+        <span class="mark__role">Sensor · WIF</span>
+        <span class="mark__name">Water-in-Fuel</span>
+      </div>
+      <div class="mark context" style="left: 120px; top: 190px;">
+        <span class="mark__role">Mechanical · Filter</span>
+        <span class="mark__name">Fuel Filter</span>
+      </div>
+      <div class="mark context" style="left: 120px; top: 270px;">
+        <span class="mark__role">HP Pump</span>
+        <span class="mark__name">Bosch CP4.2</span>
+      </div>
+      <div class="mark context" style="left: 300px; top: 270px;">
+        <span class="mark__role">Valve · IMV</span>
+        <span class="mark__name">Inlet Metering</span>
+      </div>
+      <div class="mark context" style="left: 50px; top: 380px;">
+        <span class="mark__role">HP Rail · Bank A</span>
+        <span class="mark__name">High-Pressure Rail</span>
+      </div>
+      <div class="mark context" style="left: 300px; top: 380px;">
+        <span class="mark__role">HP Rail · Bank B</span>
+        <span class="mark__name">High-Pressure Rail</span>
+      </div>
+      <div class="mark context" style="left: 50px; top: 460px;">
+        <span class="mark__role">Valve · Pressure relief</span>
+        <span class="mark__name">Rail Pressure Relief Valve</span>
+      </div>
+      <div class="mark context" style="left: 300px; top: 460px;">
+        <span class="mark__role">Sensor · FRP</span>
+        <span class="mark__name">Rail Pressure Sensor</span>
+      </div>
+      <div class="mark context" style="left: 30px; top: 540px;">
+        <span class="mark__role">Actuators · ×4</span>
+        <span class="mark__name">Injectors 1–4</span>
+      </div>
+      <div class="mark context" style="left: 300px; top: 540px;">
+        <span class="mark__role">Actuators · ×4</span>
+        <span class="mark__name">Injectors 5–8</span>
+      </div>
+      <div class="mark context" style="left: 170px; top: 600px; min-width: 160px;">
+        <span class="mark__role">Mechanical · LP Return</span>
+        <span class="mark__name">Return Circuit</span>
+      </div>
+      <div class="mark context" style="left: 482px; top: 270px;">
+        <span class="mark__role">Module</span>
+        <span class="mark__name">PCM</span>
+      </div>
+    </div>
+
+  </section>
+
+  <section class="column" aria-label="Active diagnostic step">
+
+    <div class="column__kicker">First check · Tank</div>
+    <h1 class="column__hero">Fuel Tank.</h1>
+    <div class="column__byline">
+      <span>Gauge sweep</span>
+      <span class="column__byline-bullet"></span>
+      <span>Key-on, engine off</span>
+      <span class="column__byline-bullet"></span>
+      <span>Visual</span>
+    </div>
+
+    <p class="column__body">
+      Turn the key to <em>RUN</em> without cranking. Look at the cluster
+      fuel gauge. We start here because nothing else matters if the tank
+      is dry — cheap, decisive, and rules out the most common cause of a
+      false P0087 in seconds.
+    </p>
+
+    <div class="column__sep" aria-hidden="true"></div>
+    <div class="column__prompt">What you saw</div>
+
+    <div class="choices" role="group">
+
+      <button class="choice choice--ok" type="button" data-verdict="ok">
+        <span class="choice__mark" aria-hidden="true"></span>
+        <span class="choice__text">Gauge shows a quarter tank or more.</span>
+        <span class="choice__verdict">Pass · proceed to water-in-fuel check</span>
+      </button>
+
+      <button class="choice choice--ok" type="button" data-verdict="ok">
+        <span class="choice__mark" aria-hidden="true"></span>
+        <span class="choice__text">Gauge reads above empty, even if low.</span>
+        <span class="choice__verdict">Pass · proceed to water-in-fuel check</span>
+      </button>
+
+      <button class="choice choice--fail" type="button" data-verdict="fail">
+        <span class="choice__mark" aria-hidden="true"></span>
+        <span class="choice__text">Gauge at or below E — tank is empty or near-empty.</span>
+        <span class="choice__verdict">Fail · add fuel, prime, retest</span>
+      </button>
+
+    </div>
+
+    <button class="aside" type="button">Can't run this — note why →</button>
+
+  </section>
+
+</main>
+
+<script>
+  document.querySelectorAll('.choice').forEach(btn => {
+    btn.addEventListener('pointerdown', () => btn.classList.add('is-pressing'));
+    const release = () => btn.classList.remove('is-pressing');
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointerleave', release);
+    btn.addEventListener('click', () => setTimeout(() => location.href = 'in-progress.html', 140));
+  });
+</script>
+
+</body>
+</html>
