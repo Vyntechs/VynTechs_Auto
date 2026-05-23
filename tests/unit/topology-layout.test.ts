@@ -15,9 +15,16 @@ function component(id: string, name: string) {
     location: null,
     function: null,
     electricalContract: null,
+    subtitle: null,
+    role: null,
+    wireSummary: null,
+    body: null,
+    probingTactic: null,
+    unknownNote: null,
     sourceProvenance: 'TRAINING-CONFIRMED',
     observableProperties: [],
     testActions: [],
+    pins: [],
   }
 }
 
@@ -40,6 +47,9 @@ function makeTopology(): SystemTopology {
         direction: 'bidirectional',
         description: null,
         sourceProvenance: 'TRAINING-CONFIRMED',
+        electricalRole: null,
+        fromPinId: null,
+        toPinId: null,
       },
       {
         id: 'e2',
@@ -49,8 +59,14 @@ function makeTopology(): SystemTopology {
         direction: 'unidirectional',
         description: null,
         sourceProvenance: 'TRAINING-CONFIRMED',
+        electricalRole: null,
+        fromPinId: null,
+        toPinId: null,
       },
     ],
+    scenarios: [],
+    dataStatus: null,
+    lastScenarioSlug: null,
   }
 }
 
