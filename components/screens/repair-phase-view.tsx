@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { VehicleStrip, Module, Pill, CaptureBar } from '@/components/vt'
+import { VehicleStrip, Module, Pill } from '@/components/vt'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session, SessionEvent } from '@/lib/db/schema'
 import { AbandonButton } from './abandon-button'
@@ -153,7 +153,6 @@ export function RepairPhaseView({ session, events }: Props) {
           <AbandonButton sessionId={session.id} />
         </Module>
       </div>
-      <CaptureBar />
     </div>
   )
 }

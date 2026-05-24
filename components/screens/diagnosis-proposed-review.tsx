@@ -4,7 +4,6 @@ import {
   Pill,
   ConfidenceBlock,
   TreeRail,
-  CaptureBar,
 } from '@/components/vt'
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
@@ -169,7 +168,6 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
           <AbandonButton sessionId={session.id} />
         </Module>
       </div>
-      <CaptureBar />
     </div>
   )
 }
