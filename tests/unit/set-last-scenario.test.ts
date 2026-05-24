@@ -192,4 +192,22 @@ describe('setLastScenarioForSession', () => {
       expect(result.status).toBe(400)
     }
   })
+
+  // Without the UUID guard, Postgres rejects malformed input with "invalid
+  // input syntax for type uuid" and the scenario API route 500s. The guard
+  // turns it into a clean 404.
+  it.each([
+    'not-a-uuid',
+    '681de115-5de9-474e-9721-2%20%20%2063f65066e08',
+  ])('returns 404 (not throws) for malformed session id: %s', async (badId) => {
+    const profile = await db.query.profiles.findFirst({ where: (p, { eq }) => eq(p.id, testTechId) })
+    const result = await setLastScenarioForSession({
+      db: db as never,
+      userId: profile!.userId,
+      sessionId: badId,
+      slug: 'idle',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(404)
+  })
 })
