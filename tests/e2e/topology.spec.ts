@@ -49,6 +49,25 @@ test.describe('PR-C/B — Interactive electrical topology', () => {
     await expect(page.locator('.topo__readout')).toBeVisible()
   })
 
+  // Guards against the "canvas collapses to zero height" class of bug.
+  // The chrome around the diagram can all be visible while the diagram
+  // itself paints into a near-zero-height container — react-flow happily
+  // mounts nodes into a tiny clipped viewport, so checking node visibility
+  // alone is too lenient. We assert on the canvas container's measured
+  // height instead: any useful diagram needs at least ~300px of vertical
+  // real estate to show even a few components without scroll.
+  test('diagram canvas has usable height (not collapsed)', async ({ page }) => {
+    await page.goto(`/sessions/${TARGET_SESSION}`)
+    const canvas = page.locator('.topo__canvas')
+    await expect(canvas).toBeVisible()
+    const box = await canvas.boundingBox()
+    expect(box?.height ?? 0).toBeGreaterThan(300)
+    // A component node must also be visible inside that usable canvas.
+    await expect(page.locator('.topo-node').first()).toBeVisible({
+      timeout: 10_000,
+    })
+  })
+
   test('flipping the ignition control updates the readout', async ({ page }) => {
     await page.goto(`/sessions/${TARGET_SESSION}`)
     const readout = page.locator('.topo__readout')
@@ -75,6 +94,20 @@ test.describe('PR-C/B — Interactive electrical topology', () => {
     await expect(
       page.getByRole('group', { name: 'Scenario simulator' }),
     ).toBeVisible()
+
+    // Mobile uses a different CSS path than desktop (block layout instead
+    // of flex), and react-flow's height: 100% only resolves against a
+    // parent with explicit `height` — not just `min-height`. This
+    // assertion catches the class of bug where the mobile canvas has the
+    // right outer dimensions but react-flow paints into 0 height.
+    const canvas = page.locator('.topo__canvas')
+    await expect(canvas).toBeVisible()
+    const canvasBox = await canvas.boundingBox()
+    expect(canvasBox?.height ?? 0).toBeGreaterThan(300)
+    await expect(page.locator('.topo-node').first()).toBeVisible({
+      timeout: 10_000,
+    })
+
     expect(errors).toEqual([])
   })
 
