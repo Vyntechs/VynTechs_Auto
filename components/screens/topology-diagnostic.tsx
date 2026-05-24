@@ -174,14 +174,20 @@ export function TopologyDiagnostic({
         </div>
       )}
 
-      <TopologyDiagram
-        topology={topology}
-        layout={layout}
-        selection={diagramSelection}
-        onSelectComponent={(id) => setSelection({ kind: 'component', id })}
-        onSelectPin={(id) => setSelection({ kind: 'pin', id })}
-        onClearSelection={() => setSelection({ kind: 'empty' })}
-      />
+      <div className="topo__canvas-wrap">
+        <TopologyDiagram
+          topology={topology}
+          layout={layout}
+          selection={diagramSelection}
+          onSelectComponent={(id) => setSelection({ kind: 'component', id })}
+          onSelectPin={(id) => setSelection({ kind: 'pin', id })}
+          onClearSelection={() => setSelection({ kind: 'empty' })}
+        />
+        {/* Footer lives inside the canvas wrap so it can overlay the
+            diagram bottom (CSS: position absolute). On mobile the wrap
+            collapses to a flex column and the footer renders inline. */}
+        <CapturedMissingFooter topology={topology} />
+      </div>
 
       <TopologyDetailPanel
         selection={panelSelection}
@@ -190,8 +196,6 @@ export function TopologyDiagnostic({
         onClose={() => setSelection({ kind: 'empty' })}
         open={panelSelection.kind !== 'empty'}
       />
-
-      <CapturedMissingFooter topology={topology} />
     </div>
   )
 }
