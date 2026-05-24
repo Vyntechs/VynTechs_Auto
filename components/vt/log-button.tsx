@@ -9,7 +9,7 @@ export const DEFAULT_STAGES: LogButtonStage[] = [
   { label: 'Parsing photo · 3 frames', ms: 900 },
   { label: 'Updating retrieval ladder', ms: 900 },
   { label: 'Re-scoring confidence', ms: 800 },
-  { label: 'Promoting next step', ms: 700 },
+  { label: 'Advancing to next step', ms: 700 },
 ]
 
 export type LogButtonState = 'idle' | 'loading' | 'done'

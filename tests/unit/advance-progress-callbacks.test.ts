@@ -129,7 +129,7 @@ describe('advanceSession onProgress', () => {
     }))
   }
 
-  it('emits stage 0 (Recording observation) and stage 4 (Promoting next step)', async () => {
+  it('emits stage 0 (Recording observation) and stage 4 (Advancing to next step)', async () => {
     const { advanceSession } = await import('@/lib/sessions')
     const events: AdvanceStreamEvent[] = []
     const onProgress = (e: AdvanceStreamEvent) => events.push(e)
@@ -147,7 +147,7 @@ describe('advanceSession onProgress', () => {
     const stageEvents = events.filter((e) => e.type === 'stage')
     expect(stageEvents[0]).toMatchObject({ label: 'Recording observation' })
     expect(stageEvents[stageEvents.length - 1]).toMatchObject({
-      label: 'Promoting next step',
+      label: 'Advancing to next step',
     })
   })
 

@@ -120,7 +120,7 @@ export async function advanceSession(opts: {
   listArtifacts?: ListArtifactsFn
   /** Optional. Called as the function moves through narratable stages
    *  (`Recording observation`, `Parsing photo · N frames` when photos exist,
-   *  `Promoting next step`). The retrieval wrapper emits its own stages.
+   *  `Advancing to next step`). The retrieval wrapper emits its own stages.
    *  Default is no-op so the JSON `/advance` route and tests are unaffected. */
   onProgress?: (event: AdvanceStreamEvent) => void
 }): Promise<AdvanceSessionResult> {
@@ -236,7 +236,7 @@ export async function advanceSession(opts: {
   opts.onProgress?.({
     type: 'stage',
     idx: -1,
-    label: 'Promoting next step',
+    label: 'Advancing to next step',
   })
 
   await appendSessionEvent(opts.db, {
