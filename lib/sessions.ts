@@ -72,11 +72,21 @@ export type GetSessionResult =
   | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getSessionById>>> }
   | { ok: false; status: 400 | 404; error: string }
 
+// Bail out before any DB hit when a route param can't be a UUID.
+// Without this, Postgres throws "invalid input syntax for type uuid" and
+// Next.js surfaces it as a 500 instead of a clean 404. (Surfaced when a
+// session URL was URL-encoded with stray %20 characters mid-UUID.)
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function getSessionForUser(opts: {
   db: AppDb
   userId: string
   sessionId: string
 }): Promise<GetSessionResult> {
+  if (!UUID_RE.test(opts.sessionId)) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
   const session = await getSessionById(opts.db, opts.sessionId)
@@ -96,6 +106,9 @@ export async function setLastScenarioForSession(opts: {
   sessionId: string
   slug: string
 }): Promise<SetLastScenarioResult> {
+  if (!UUID_RE.test(opts.sessionId)) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
 
