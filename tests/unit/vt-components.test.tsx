@@ -7,7 +7,6 @@ import {
   Module,
   ConfidenceBlock,
   TreeRail,
-  CaptureBar,
   AppHeader,
   DtcChip,
   HairlineProgress,
@@ -108,16 +107,6 @@ describe('TreeRail', () => {
   it('numbers steps from 01', () => {
     render(<TreeRail steps={[{ label: 'first', status: 'active' }]} />)
     expect(screen.getByText('01')).toBeInTheDocument()
-  })
-})
-
-describe('CaptureBar', () => {
-  it('renders four labeled capture buttons', () => {
-    render(<CaptureBar />)
-    expect(screen.getByLabelText('Voice')).toBeInTheDocument()
-    expect(screen.getByLabelText('Photo')).toBeInTheDocument()
-    expect(screen.getByLabelText('Video')).toBeInTheDocument()
-    expect(screen.getByLabelText('Scan')).toBeInTheDocument()
   })
 })
 

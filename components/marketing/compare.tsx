@@ -45,8 +45,8 @@ const ROWS: CompareRow[] = [
     scantool: 'N/A.',
     us: (
       <em>
-        &ldquo;Smoke test the cold-side intercooler. Photograph any escape
-        locations.&rdquo;
+        &ldquo;Smoke test the cold-side intercooler at 5 psi. Note any
+        escape locations.&rdquo;
       </em>
     ),
   },
