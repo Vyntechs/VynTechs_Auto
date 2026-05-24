@@ -226,7 +226,7 @@ export default async function PrivacyPage() {
                   <a href="https://www.voyageai.com/privacy/">Voyage AI</a>
                 </td>
                 <td data-label="What it sees">
-                  Converts text into numerical vectors for similarity matching.
+                  Converts text into numbers for similarity matching.
                 </td>
               </tr>
               <tr>

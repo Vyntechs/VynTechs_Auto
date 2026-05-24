@@ -78,14 +78,14 @@ export async function POST(
         : []),
       { label: 'Updating retrieval ladder' },
       { label: 'Re-scoring confidence' },
-      { label: 'Promoting next step' },
+      { label: 'Advancing to next step' },
     ]
   } catch {
     plannedStages = [
       { label: 'Recording observation' },
       { label: 'Updating retrieval ladder' },
       { label: 'Re-scoring confidence' },
-      { label: 'Promoting next step' },
+      { label: 'Advancing to next step' },
     ]
   }
 

@@ -332,10 +332,10 @@ export function OutcomeCapture({
           onClick={handleSubmit}
         >
           {busy
-            ? 'Validating…'
+            ? 'Checking…'
             : attemptCount >= 1
-              ? 'Submit & close case (override AI)'
-              : 'Submit & close case'}
+              ? 'Send & close case (override AI)'
+              : 'Send & close case'}
         </button>
       </div>
     </div>

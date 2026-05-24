@@ -112,7 +112,7 @@ describe('POST /api/sessions/[id]/advance/stream', () => {
       opts.onProgress({
         type: 'stage',
         idx: -1,
-        label: 'Promoting next step',
+        label: 'Advancing to next step',
       })
       return {
         ok: true,
@@ -137,7 +137,7 @@ describe('POST /api/sessions/[id]/advance/stream', () => {
       'Recording observation',
       'Updating retrieval ladder',
       'Re-scoring confidence',
-      'Promoting next step',
+      'Advancing to next step',
     ])
 
     const stages = events.filter((e) => e.type === 'stage') as Array<
@@ -184,7 +184,7 @@ describe('POST /api/sessions/[id]/advance/stream', () => {
       opts.onProgress({
         type: 'stage',
         idx: -1,
-        label: 'Promoting next step',
+        label: 'Advancing to next step',
       })
       return { ok: true, tree: {} }
     })

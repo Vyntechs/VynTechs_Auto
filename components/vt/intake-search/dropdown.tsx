@@ -302,7 +302,7 @@ export function DropdownSlow({
         {prev && (prev.customers.length > 0 || prev.vehicles.length > 0) && (
           <>
             <GroupHead
-              label="Previous matches · stale"
+              label="Previous matches · old"
               count={`${prev.customers.length} customer${prev.customers.length === 1 ? '' : 's'} · ${prev.vehicles.length} vehicle${prev.vehicles.length === 1 ? '' : 's'}`}
             />
             {prev.customers.map((c) => (
