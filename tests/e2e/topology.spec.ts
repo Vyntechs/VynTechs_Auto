@@ -2,10 +2,12 @@ import { test, expect, type Page } from '@playwright/test'
 
 // PR-C/B validation walkthrough. Confirms the interactive electrical topology
 // page renders and responds to scenario controls without runtime errors. Runs
-// against the F-350 / P0087 session seeded for the topology feature.
+// against a clone of the F-350 / P0087 fixture owned by the dedicated e2e
+// user (see scripts/setup-e2e-user.mjs) — the original session stays owned
+// by Brandon for manual visual sign-off.
 //
 // Auth: project-level storageState (signed in as TEST_USER_EMAIL).
-const TARGET_SESSION = '681de115-5de9-474e-9721-263f65066e08'
+const TARGET_SESSION = '185b1a86-14b0-4832-89dc-3e95a3d62b86'
 
 // Attach a guard that fails the test if any uncaught browser error or HTTP
 // 500 lands during navigation. Without this, a JS runtime error or a server
