@@ -23,13 +23,23 @@ INSERT INTO platforms (
   '3rd gen'
 );
 
+-- system='high-pressure-oil-injection' so loadSystemTopology can match this
+-- symptom to the 6.0 PSD HPOP/HEUI components (the diagnosis-defining system
+-- for this case). Matches the existing 6.7L precedent which uses 'fuel'.
+-- KNOWN LIMITATION: this assumes the only platform with cranks-no-start is
+-- the 6.0 PSD case. If another platform's cranks-no-start arrives (e.g., a
+-- 6.7L electrical no-start), the symptom→system mapping will need to become
+-- per-platform (likely via a join table). Acceptable for now since this is
+-- the only seeded use.
 INSERT INTO symptoms (
   slug,
   description,
-  category
+  category,
+  system
 ) VALUES (
   'cranks-no-start',
   'Engine cranks normally but does not start or fire (cross-platform symptom; covers diesel HEUI no-fire conditions)',
-  'no-start'
+  'no-start',
+  'high-pressure-oil-injection'
 )
 ON CONFLICT (slug) DO NOTHING;

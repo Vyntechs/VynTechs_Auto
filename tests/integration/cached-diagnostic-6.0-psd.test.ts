@@ -12,12 +12,6 @@
  * it works for the 6.7L precedent — future sessions on this platform+symptom
  * will hit the cache and bypass the AI tree-engine entirely.
  *
- * NOTE on loadSystemTopology: the symptom's `system` column is null in the
- * production seed (batch 1 omits it for forward-compatibility). The loader
- * requires a non-null system to match components. This test sets the system
- * value in-place after applying the seed files — this is test infrastructure
- * only and does not affect what gets applied to production.
- *
  * NOTE on component count for topology: loadSystemTopology filters components
  * by systems array containing the symptom's system value. 9 of the 14 seeded
  * components are tagged for 'high-pressure-oil-injection'. The 5 others
@@ -48,13 +42,6 @@ beforeAll(async () => {
   await applySeedFile(db, `${SEED_DIR}/05-test-actions.sql`)
   await applySeedFile(db, `${SEED_DIR}/06-branch-logic.sql`)
   await applySeedFile(db, `${SEED_DIR}/07-symptom-test-implications.sql`)
-
-  // Set symptom.system so loadSystemTopology can match components by system.
-  // The production seed omits this column to allow broader reuse of the
-  // cranks-no-start symptom slug. Test infrastructure sets it explicitly.
-  await db.execute(sql`
-    UPDATE symptoms SET system = 'high-pressure-oil-injection' WHERE slug = ${SYMPTOM_SLUG}
-  `)
 }, 60_000)
 
 afterAll(async () => {
