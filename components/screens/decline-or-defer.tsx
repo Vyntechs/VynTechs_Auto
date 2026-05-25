@@ -308,7 +308,7 @@ export function DeclineOrDefer({
   photoAsk,
 }: Props) {
   const deficit = Math.round(gate - confidence)
-  const headline = confidenceGap ?? 'Confidence too low to commit to a high-risk repair.'
+  const headline = confidenceGap ?? 'Not confident enough to move forward on a risky repair.'
   const ts =
     tapeTimestamp ??
     new Date().toISOString().replace('T', ' · ').replace(/\.\d+Z$/, 'Z')
@@ -401,7 +401,7 @@ export function DeclineOrDefer({
                 textAlign: 'center',
               }}
             >
-              Answering this lets the AI commit to the next step. ~10 sec.
+              Answering this lets the AI lock in the next step. ~10 sec.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button

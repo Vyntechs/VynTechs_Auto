@@ -124,7 +124,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
               margin: '0 0 12px',
             }}
           >
-            Disagree with the diagnosis? Submit another observation and the AI will revise.
+            Disagree with the diagnosis? Send another finding and the AI will rethink it.
           </p>
           <ActiveStepForm
             sessionId={session.id}
@@ -152,7 +152,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
               margin: '0 0 12px',
             }}
           >
-            When you've reviewed the diagnosis and you're ready to do the repair, lock it in. The AI will switch to repair-coach mode — it can answer questions during the repair but won't revise the diagnosis.
+            When you've reviewed the diagnosis and you're ready to do the repair, lock it in. The AI will switch to repair mode — it can answer questions while you work but won't change the diagnosis.
           </p>
           <LockDiagnosisButton sessionId={session.id} />
           <p
