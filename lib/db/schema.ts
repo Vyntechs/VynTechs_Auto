@@ -493,3 +493,15 @@ export const whatsNewEntries = pgTable(
 
 export type WhatsNewEntry = typeof whatsNewEntries.$inferSelect
 export type NewWhatsNewEntry = typeof whatsNewEntries.$inferInsert
+
+// Fixed-window rate limit counter. One row per (key, current minute window).
+// See lib/rate-limit.ts for the upsert logic and intended usage.
+export const rateLimitBuckets = pgTable(
+  'rate_limit_buckets',
+  {
+    key: text('key').primaryKey(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (table) => [index('idx_rate_limit_buckets_window_start').on(table.windowStart)],
+)

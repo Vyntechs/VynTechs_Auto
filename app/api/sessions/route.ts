@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import { createSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { paywallReject } from '@/lib/auth-access'
+import { rateLimitReject } from '@/lib/rate-limit'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
@@ -51,6 +52,12 @@ export async function POST(req: Request) {
 
   const denied = await paywallReject(db, user.id)
   if (denied) return denied
+
+  // Cap creation rate. The full pipeline below burns Anthropic + Voyage +
+  // Tavily credits per call; without this an authenticated attacker in a
+  // tight loop can drain budgets. Real techs create 1–3 sessions/hour.
+  const limited = await rateLimitReject(db, `intake:${user.id}`, 10)
+  if (limited) return limited
 
   const body = await req.json().catch(() => null)
   const parsed = intakeSchema.safeParse(body)
