@@ -80,3 +80,6 @@ skills/
 
 # Visual brainstorming companion (skill: superpowers:brainstorming)
 .superpowers/
+
+# Per-task scratch notes (Task 0 pattern surveys, etc.)
+scratch/

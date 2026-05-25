@@ -235,6 +235,7 @@ describe('resolveSymptomSlug', () => {
     expect(result).toBeNull()
   })
 
+
   it('returns null when the symptom_test_implication is retired (retired rows are not reachable)', async () => {
     // Seed a new symptom + test_action + component linked to the platform,
     // then mark the symptom_test_implication as isRetired = true.
@@ -293,5 +294,174 @@ describe('resolveSymptomSlug', () => {
       dtcCodes: ['P0193'],
     })
     expect(result).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// cranks-no-start matcher (6.0L PSD cross-platform symptom slug)
+//
+// Design: COMPLAINT_PATTERNS is first-match-wins. The new 'cranks-no-start'
+// entry sits BEFORE 'no-start-cranks-normally-fuel-system-suspect' so generic
+// cranks-no-start complaints resolve to the cross-platform slug when the
+// platform has it seeded. On the 6.7L platform (no 'cranks-no-start' row),
+// rows.find() returns undefined, the guard short-circuits, and resolution
+// falls through to the fuel-system matcher — existing behavior preserved.
+// ---------------------------------------------------------------------------
+
+const PLATFORM_SLUG_60 = 'ford-super-duty-3rd-gen-60-psd'
+const SLUG_CRANKS_NO_START = 'cranks-no-start'
+const SLUG_FUEL_SYSTEM = 'no-start-cranks-normally-fuel-system-suspect'
+
+async function seed60Fixtures(db: TestDb) {
+  // Platform
+  const [platform] = await db
+    .insert(platforms)
+    .values({
+      slug: PLATFORM_SLUG_60,
+      yearRange: '2003-2007',
+      parentMake: 'Ford',
+      parentModelFamily: 'F-250',
+      generation: '3rd gen',
+    })
+    .returning({ id: platforms.id })
+
+  // Symptom: cranks-no-start (cross-platform)
+  const [sympCranksNoStart] = await db
+    .insert(symptoms)
+    .values({
+      slug: SLUG_CRANKS_NO_START,
+      description: 'Engine cranks normally but does not start or fire (cross-platform)',
+      category: 'no-start',
+    })
+    .returning({ id: symptoms.id, slug: symptoms.slug })
+
+  // Component (FK target for test_action)
+  const [component] = await db
+    .insert(components)
+    .values({
+      slug: 'hpop-60-psd',
+      platformId: platform.id,
+      name: 'High-Pressure Oil Pump (HPOP)',
+      kind: 'pump',
+      sourceProvenance: 'FIELD-VERIFIED',
+    })
+    .returning({ id: components.id })
+
+  // Test action
+  const [ta] = await db
+    .insert(testActions)
+    .values({
+      slug: 'ta-icp-check-60-psd',
+      componentId: component.id,
+      description: 'Check ICP voltage while cranking',
+      scenarioRequired: 'cranking',
+      observationMethod: 'scan_tool_pid',
+      invasiveness: 1,
+      confidenceBoost: 40,
+      sourceProvenance: 'FIELD-VERIFIED',
+    })
+    .returning({ id: testActions.id })
+
+  // Link symptom → test_action
+  await db.insert(symptomTestImplications).values({
+    symptomId: sympCranksNoStart.id,
+    testActionId: ta.id,
+    priority: 1,
+    sourceProvenance: 'FIELD-VERIFIED',
+  })
+
+  return { platformId: platform.id }
+}
+
+describe('resolveSymptomSlug — cranks-no-start matcher (6.0L platform)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+    await seed60Fixtures(db)
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it.each([
+    'cranks no start',
+    'Cranks No Start',
+    'CUSTOMER STATES CRANK NO START',
+    'cranks but no start',
+    "cranks but won't start",
+    'crank no fire',
+    'engine cranks but does not start',
+  ])('resolves %s → cranks-no-start', async (complaint) => {
+    // WHY: each of these is a real shop input for a no-fire diesel condition.
+    // Resolution to the cross-platform slug is the gate that routes to the
+    // cached 6.0 PSD diagnostic instead of the AI tree-engine.
+    const result = await resolveSymptomSlug({
+      db,
+      platformSlug: PLATFORM_SLUG_60,
+      complaintText: complaint,
+    })
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe(SLUG_CRANKS_NO_START)
+  })
+
+  it('does NOT resolve unrelated complaints to cranks-no-start', async () => {
+    for (const complaint of ['rough idle', 'misfire on cylinder 3', 'wipers stopped working']) {
+      const result = await resolveSymptomSlug({
+        db,
+        platformSlug: PLATFORM_SLUG_60,
+        complaintText: complaint,
+      })
+      // Either null (no match at all) or a different slug — never cranks-no-start
+      expect(result?.symptomSlug).not.toBe(SLUG_CRANKS_NO_START)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Verify the 6.7L fuel-system path survives the new matcher ordering.
+// The 6.7L platform has 'no-start-cranks-normally-fuel-system-suspect' seeded
+// but NOT 'cranks-no-start'. The new pattern fires first in COMPLAINT_PATTERNS,
+// but rows.find() comes back undefined, so resolution falls through to the
+// fuel-system slug — existing behavior unchanged.
+// ---------------------------------------------------------------------------
+
+describe('resolveSymptomSlug — 6.7L fuel-system path unaffected by cranks-no-start matcher', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+    await seedFixtures(db) // the existing 6.7L fixture, includes SLUG_NO_START
+  })
+
+  afterEach(async () => {
+    await close()
+  })
+
+  it('still resolves "cranks no start" to fuel-system slug on 6.7L platform (no cranks-no-start row)', async () => {
+    // WHY: The 6.7L platform has no 'cranks-no-start' symptom_test_implication.
+    // Even though the new pattern fires first in COMPLAINT_PATTERNS, rows.find()
+    // returns undefined for that slug, so the resolver falls through to the
+    // existing fuel-system entry — preserving PR1's existing routing.
+    const result = await resolveSymptomSlug({
+      db,
+      platformSlug: PLATFORM_SLUG,
+      complaintText: 'cranks no start',
+    })
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe(SLUG_NO_START)
+  })
+
+  it('still resolves "cranks no start, fuel pressure low" to fuel-system slug on 6.7L platform', async () => {
+    const result = await resolveSymptomSlug({
+      db,
+      platformSlug: PLATFORM_SLUG,
+      complaintText: 'cranks no start, fuel pressure low',
+    })
+    expect(result).not.toBeNull()
+    expect(result!.symptomSlug).toBe(SLUG_NO_START)
   })
 })
