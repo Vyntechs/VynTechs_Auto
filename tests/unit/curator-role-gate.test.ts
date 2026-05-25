@@ -11,6 +11,8 @@ const TECH_USER = '00000000-0000-0000-0000-000000000003'
 const TECH_PROFILE = '00000000-0000-0000-0000-000000000011'
 const OWNER_USER = '00000000-0000-0000-0000-000000000004'
 const OWNER_PROFILE = '00000000-0000-0000-0000-000000000012'
+const SIGNUP_USER = '00000000-0000-0000-0000-000000000005'
+const SIGNUP_PROFILE = '00000000-0000-0000-0000-000000000013'
 
 describe('guardCuratorRoute', () => {
   let db: TestDb
@@ -21,9 +23,12 @@ describe('guardCuratorRoute', () => {
     ;({ db, close } = await createTestDb())
     await db.insert(shops).values({ id: SHOP, name: 'Test Shop' })
     await db.insert(profiles).values([
-      { id: CURATOR_PROFILE, userId: CURATOR_USER, shopId: SHOP, role: 'curator' },
+      { id: CURATOR_PROFILE, userId: CURATOR_USER, shopId: SHOP, role: 'curator', isCurator: true },
       { id: TECH_PROFILE, userId: TECH_USER, shopId: SHOP, role: 'tech' },
-      { id: OWNER_PROFILE, userId: OWNER_USER, shopId: SHOP, role: 'owner' },
+      // Mac/Angel case: shop owner who has been explicitly granted curator access.
+      { id: OWNER_PROFILE, userId: OWNER_USER, shopId: SHOP, role: 'owner', isCurator: true },
+      // Self-service signup default: role='owner' on auto-created shop, no curator grant.
+      { id: SIGNUP_PROFILE, userId: SIGNUP_USER, shopId: SHOP, role: 'owner' },
     ])
     // Pin the founder email so isFounder() is deterministic across tests.
     prevFounderEmail = process.env.FOUNDER_EMAIL
@@ -62,15 +67,24 @@ describe('guardCuratorRoute', () => {
     expect(result).toEqual({ kind: 'allow' })
   })
 
-  it('allows authed owner who is NOT the founder (Mac case)', async () => {
-    // Admin (DB role 'owner') inherits curator access. Mac and Angel
-    // both run as Admins of their shops and curate alongside Brandon.
+  it('allows authed user with isCurator=true who is NOT the founder (Mac case)', async () => {
+    // Mac and Angel are shop owners who curate alongside Brandon. They keep
+    // access via the explicit is_curator flag on their profile.
     const result = await guardCuratorRoute(db, OWNER_USER, 'mac@example.test', '/curator/drift')
     expect(result).toEqual({ kind: 'allow' })
   })
 
+  it('redirects authed self-service signup (role=owner without is_curator) on /curator path', async () => {
+    // Every new self-service signup gets role='owner' on their auto-created
+    // shop. Without the explicit is_curator flag, they must NOT inherit any
+    // curator access — that was the prod bug this column closes.
+    const result = await guardCuratorRoute(db, SIGNUP_USER, 'newuser@example.test', '/curator/drift')
+    expect(result).toEqual({ kind: 'redirect', to: '/' })
+  })
+
   it('allows authed owner who IS the founder via FOUNDER_EMAIL', async () => {
-    const result = await guardCuratorRoute(db, OWNER_USER, 'founder@example.test', '/curator/drift')
+    // Founder gate is email-based and survives the is_curator flag being unset.
+    const result = await guardCuratorRoute(db, SIGNUP_USER, 'founder@example.test', '/curator/drift')
     expect(result).toEqual({ kind: 'allow' })
   })
 

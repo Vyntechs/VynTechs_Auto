@@ -141,6 +141,13 @@
       "when": 1778544000004,
       "tag": "0017_rate_limit_buckets",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1779571200000,
+      "tag": "0018_profile_is_curator_flag",
+      "breakpoints": true
     }
   ]
 }

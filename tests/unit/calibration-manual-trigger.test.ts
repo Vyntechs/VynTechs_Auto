@@ -3,12 +3,13 @@ import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
 import { triggerCalibrationAnalysis } from '@/lib/calibration/manual-trigger'
 
-async function seedProfile(db: TestDb, role: string) {
+async function seedProfile(db: TestDb, role: string, isCurator = false) {
   const shop = await createShop(db, { name: 'Test Shop' })
   return createProfile(db, {
     userId: crypto.randomUUID(),
     shopId: shop.id,
     role,
+    isCurator,
   })
 }
 
@@ -66,7 +67,7 @@ describe('triggerCalibrationAnalysis', () => {
   })
 
   it('runs the analysis and returns the result when the user is a curator', async () => {
-    const curator = await seedProfile(db, 'curator')
+    const curator = await seedProfile(db, 'curator', true)
     const result = await triggerCalibrationAnalysis({
       db,
       userId: curator.userId,
