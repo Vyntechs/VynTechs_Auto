@@ -548,3 +548,106 @@ describe('6.0 PSD seed — batch 6 (branch_logic)', () => {
     }
   })
 })
+
+describe('6.0 PSD seed — batch 7 (symptom_test_implications)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/01-platform-and-symptom.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/02-architecture-facts.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/03-components.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/04-observable-properties.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/05-test-actions.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/06-branch-logic.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/07-symptom-test-implications.sql')
+  })
+
+  afterAll(async () => {
+    await close()
+  })
+
+  // Amendment 4 sets the count to exactly 11 — one row per (symptom × test_action)
+  // pair. No free-text columns on this table; it is a pure priority-ranked junction.
+  it('seeds exactly 11 symptom_test_implications for cranks-no-start', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      WHERE s.slug = 'cranks-no-start' AND sti.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBe(11)
+  })
+
+  // DTC pull must be priority 1 — the cheapest, fastest first step.
+  it('pull-all-dtcs is ranked priority 1', async () => {
+    const result = await db.execute(sql`
+      SELECT sti.priority
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      JOIN test_actions ta ON ta.id = sti.test_action_id
+      WHERE s.slug = 'cranks-no-start'
+        AND ta.slug = 'sd3-60psd-test-pull-all-dtcs'
+        AND sti.is_retired = false
+    `)
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].priority).toBe(1)
+  })
+
+  // Cam/crank correlation is priority 11 — the most invasive, last-resort test.
+  it('cam-crank-correlation is ranked priority 11', async () => {
+    const result = await db.execute(sql`
+      SELECT sti.priority
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      JOIN test_actions ta ON ta.id = sti.test_action_id
+      WHERE s.slug = 'cranks-no-start'
+        AND ta.slug = 'sd3-60psd-test-cam-crank-correlation'
+        AND sti.is_retired = false
+    `)
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].priority).toBe(11)
+  })
+
+  // Priority values must be exactly 1 through 11 with no gaps and no duplicates.
+  // A gap or duplicate would break any UI that renders tests in ranked order.
+  it('priority values are exactly 1 through 11 with no gaps', async () => {
+    const result = await db.execute(sql`
+      SELECT sti.priority
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      WHERE s.slug = 'cranks-no-start' AND sti.is_retired = false
+      ORDER BY sti.priority
+    `)
+    const priorities = result.rows.map((r) => r.priority as number)
+    expect(priorities).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+  })
+
+  // All rows must have source_provenance = 'FIELD-VERIFIED' per plan spec.
+  it('all symptom_test_implications rows have source_provenance FIELD-VERIFIED', async () => {
+    const result = await db.execute(sql`
+      SELECT sti.priority, sti.source_provenance
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      WHERE s.slug = 'cranks-no-start' AND sti.is_retired = false
+    `)
+    for (const row of result.rows) {
+      expect(
+        row.source_provenance,
+        `priority ${row.priority} must be FIELD-VERIFIED`,
+      ).toBe('FIELD-VERIFIED')
+    }
+  })
+
+  // All rows must have is_retired = false — no retired rows should be seeded.
+  it('all symptom_test_implications rows have is_retired = false', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      WHERE s.slug = 'cranks-no-start' AND sti.is_retired = true
+    `)
+    expect(Number(result.rows[0].count)).toBe(0)
+  })
+})
