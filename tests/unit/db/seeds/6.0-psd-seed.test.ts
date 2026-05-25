@@ -28,14 +28,16 @@ describe('6.0 PSD seed — batch 1 (platform + symptom)', () => {
     })
   })
 
-  it('ensures cranks-no-start symptom exists with no-start category', async () => {
+  it('ensures cranks-no-start symptom exists with no-start category and HPOP system', async () => {
     const result = await db.execute(sql`
-      SELECT slug, category FROM symptoms WHERE slug = 'cranks-no-start'
+      SELECT slug, category, system FROM symptoms WHERE slug = 'cranks-no-start'
     `)
     expect(result.rows).toHaveLength(1)
     expect(result.rows[0]).toMatchObject({
       slug: 'cranks-no-start',
       category: 'no-start',
+      // system value drives loadSystemTopology's component matching
+      system: 'high-pressure-oil-injection',
     })
   })
 })
