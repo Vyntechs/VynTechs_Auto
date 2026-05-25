@@ -102,3 +102,80 @@ describe('6.0 PSD seed — batch 2 (architecture_facts)', () => {
     }
   })
 })
+
+describe('6.0 PSD seed — batch 3 (components)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/01-platform-and-symptom.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/02-architecture-facts.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/03-components.sql')
+  })
+
+  afterAll(async () => {
+    await close()
+  })
+
+  // Section 2 of the research input has 14 rows in its component table.
+  // Standpipes (front + rear) are ONE table row in Section 2, so we seed
+  // them as one component row (sd3-60psd-standpipes) to match the research
+  // input count. Total: 14 components.
+  it('seeds exactly 14 components for the 6.0 PSD platform', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM components c
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd' AND c.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBe(14)
+  })
+
+  // IPR valve and ICP sensor must be separate component rows — this is the
+  // critical distinction the original Angel session violated.
+  it('distinguishes IPR valve from ICP sensor as separate component rows', async () => {
+    const iprResult = await db.execute(sql`
+      SELECT slug FROM components
+      WHERE slug = 'sd3-60psd-ipr-valve'
+        AND platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+    `)
+    const icpResult = await db.execute(sql`
+      SELECT slug FROM components
+      WHERE slug = 'sd3-60psd-icp-sensor'
+        AND platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+    `)
+    expect(iprResult.rows).toHaveLength(1)
+    expect(icpResult.rows).toHaveLength(1)
+  })
+
+  // STC fitting body text must carry the year-split note (2004.5 / late-rail)
+  // so technicians know it only applies to late-rail trucks.
+  it('STC fitting body text mentions 2004.5 year split and late-rail', async () => {
+    const result = await db.execute(sql`
+      SELECT body FROM components
+      WHERE slug = 'sd3-60psd-stc-fitting'
+        AND platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+    `)
+    expect(result.rows).toHaveLength(1)
+    const body: string = result.rows[0].body as string
+    expect(body).toMatch(/2004\.5|late.?rail/i)
+  })
+
+  // Every component must have a non-null function and a non-empty systems array.
+  it('all components have non-null function and non-empty systems array', async () => {
+    const result = await db.execute(sql`
+      SELECT slug, "function", systems
+      FROM components
+      WHERE platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+        AND is_retired = false
+    `)
+    for (const row of result.rows) {
+      expect(row.function, `slug ${row.slug} must have function`).toBeTruthy()
+      expect(
+        (row.systems as string[]).length,
+        `slug ${row.slug} must have at least one system`,
+      ).toBeGreaterThan(0)
+    }
+  })
+})
