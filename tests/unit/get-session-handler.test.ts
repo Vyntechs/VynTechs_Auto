@@ -95,4 +95,20 @@ describe('getSessionForUser', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(404)
   })
+
+  // Without the UUID guard the DB rejects malformed input with "invalid input
+  // syntax for type uuid" which Next.js surfaces as a 500. The guard turns it
+  // into a clean 404 so a typo in a URL doesn't crash the page.
+  it.each([
+    'not-a-uuid',
+    '681de115-5de9-474e-9721-2%20%20%2063f65066e08',
+    '   ',
+    '',
+  ])('returns 404 (not throws) for malformed session id: %s', async (badId) => {
+    const userId = crypto.randomUUID()
+    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const result = await getSessionForUser({ db, userId, sessionId: badId })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(404)
+  })
 })

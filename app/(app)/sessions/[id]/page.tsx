@@ -69,6 +69,7 @@ export default async function SessionPage({
       db,
       platformSlug: platformRow.slug,
       symptomSlug: symptomRow.slug,
+      sessionId: session.id,
     })
 
     // Spec §10: a null topology (no system tagged, or no components) renders
@@ -112,6 +113,7 @@ export default async function SessionPage({
         topology={topology}
         layout={layoutTopology(topology)}
         vehicleName={formatVehicleName(session.intake)}
+        sessionId={session.id}
       />
     )
   }

@@ -2,10 +2,24 @@
    Tokens (--vt-*) are defined in app/globals.css. */
 
 /* ---- layout shell --------------------------------------------------- */
+/*
+   Named grid areas pin every region — without them, the canvas (1fr) gets
+   pushed into an implicit auto-sized row by the sibling scenario / readout /
+   panel / footer elements and collapses to ~54 px tall. Areas guarantee:
+   - header spans both columns at the top
+   - scenario bar + readout stack in col 1 at their natural heights
+   - canvas-wrap takes the remaining 1fr row, so React Flow has real space
+   - detail panel docks in col 2 and spans the lower rows
+*/
 .topo {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
+  grid-template-areas:
+    'header   header'
+    'scenario panel'
+    'readout  panel'
+    'canvas   panel';
   gap: var(--vt-space-6);
   align-items: stretch;
   height: 100dvh;
@@ -13,10 +27,27 @@
   background: var(--vt-bg);
 }
 .topo__header {
-  grid-column: 1 / -1;
+  grid-area: header;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.topo-scenario-bar { grid-area: scenario; }
+.topo__readout { grid-area: readout; }
+.topo__canvas-wrap { grid-area: canvas; }
+.topo-panel { grid-area: panel; }
+
+/* Canvas wrapper: provides the positioning context for the absolute
+   CapturedMissingFooter overlay and constrains the canvas to fill it. */
+.topo__canvas-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.topo__canvas-wrap > .topo__canvas {
+  flex: 1;
+  min-height: 0;
 }
 .topo__eyebrow {
   font-family: var(--vt-font-mono);
@@ -230,24 +261,510 @@
   text-align: left;
 }
 
-/* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
+/* =============================================================================
+   Interactive wiring topology (spec 2026-05-23 §4.4)
+
+   The shipped .topo-edge--<connectionKind> palette stays for non-electrical
+   connections (fluid lines, mechanical linkages). The .wire palette below
+   replaces it for connections carrying an electricalRole; the custom
+   <WireEdge> component picks the right className.
+   ============================================================================= */
+
+.wire {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke-width var(--vt-dur-2) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
+}
+
+.wire--signal  { stroke: var(--role-signal); }
+.wire--5v-ref  { stroke: var(--role-5v-ref); }
+.wire--low-ref { stroke: var(--role-low-ref); }
+.wire--pwm     { stroke: var(--role-pwm); }
+.wire--12v     { stroke: var(--role-12v); }
+.wire--ground  { stroke: var(--role-ground); }
+
+.wire.off          { opacity: 0.16; animation: none !important; stroke-dasharray: 0; }
+.wire.steady-12v   { stroke-dasharray: 12 4; animation: flow 2.4s linear infinite; }
+.wire.steady-5v    { stroke-dasharray: 10 4; animation: flow 2.8s linear infinite; opacity: 0.92; }
+.wire.steady-gnd   { stroke-dasharray: 16 3; animation: flow 2.6s linear infinite; opacity: 0.85; }
+.wire.signal-rest  { stroke-dasharray: 6 8;  animation: flow 3.2s linear infinite; opacity: 0.55; }
+.wire.signal-low   { stroke-dasharray: 6 6;  animation: flow 2.4s linear infinite; opacity: 0.70; }
+.wire.signal-med   { stroke-dasharray: 6 5;  animation: flow 1.6s linear infinite; }
+.wire.signal-high  { stroke-dasharray: 6 4;  animation: flow 1.0s linear infinite; }
+.wire.signal-pegged{ stroke-dasharray: 6 3;  animation: flow 0.5s linear infinite; }
+.wire.pwm-low      { stroke-dasharray: 5 4;  animation: flow 1.5s linear infinite; opacity: 0.85; }
+.wire.pwm-med      { stroke-dasharray: 5 3;  animation: flow 0.85s linear infinite; }
+.wire.pwm-high     { stroke-dasharray: 4 2;  animation: flow 0.42s linear infinite; }
+.wire.pwm-max      { stroke-dasharray: 4 2;  animation: flow 0.22s linear infinite; }
+
+.wire.is-active {
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.wire.dim { opacity: 0.25; }
+
+@keyframes flow {
+  to { stroke-dashoffset: -16; }
+}
+
+/* Respect reduced-motion — disable the dash flow without losing the static
+   role color (the tech still gets to read the diagram). */
+@media (prefers-reduced-motion: reduce) {
+  .wire {
+    animation: none !important;
+  }
+}
+
+/* Pin rectangle + handle (spec 2026-05-23 §4.5) ---------------------- */
+.topo-pin-wrap {
+  pointer-events: none; /* handle is invisible; pin button takes the clicks */
+}
+.topo-pin-handle {
+  /* Override React Flow's default handle dot — make it the geometric anchor only */
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+.topo-pin {
+  pointer-events: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px; /* mobile hit-target floor per spec §6 */
+  min-height: 28px;
+  padding: 2px 4px;
+  background: var(--vt-bone-50);
+  border: 0.6px solid var(--vt-fg-2);
+  border-radius: 1.5px;
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+}
+.topo-pin:hover,
+.topo-pin:focus-visible {
+  background: var(--vt-amber-400);
+  outline: none;
+}
+.topo-pin.is-selected {
+  background: var(--vt-amber-500);
+  border-color: var(--vt-amber-500);
+  color: var(--vt-bone-50);
+}
+.topo-pin__role {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.topo-pin__num {
+  font-size: 7px;
+  opacity: 0.6;
+}
+
+/* Pin panel + component pin list (spec 2026-05-23 §4.6) ----------------- */
+.topo-panel__subtitle {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  margin-bottom: 12px;
+}
+.topo-panel__rule {
+  height: 1px;
+  background: var(--vt-rule);
+  margin: 16px -20px;
+}
+.topo-panel__body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vt-fg);
+  margin: 6px 0 16px;
+}
+
+.topo-panel__right-now {
+  background: #1a1a1a;
+  color: var(--vt-bone-50);
+  padding: 12px 14px;
+  border-radius: 2px;
+  font-family: var(--vt-font-mono);
+  font-size: 12.5px;
+  margin: 8px 0 16px;
+}
+.topo-panel__right-now-label {
+  color: #e7c87a;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.topo-panel__right-now.is-fault {
+  background: #2d1818;
+  border-left: 3px solid var(--role-12v);
+}
+.topo-panel__right-now.is-fault .topo-panel__right-now-label {
+  color: var(--role-12v);
+}
+.topo-panel__right-now-missing { opacity: 0.6; }
+
+.topo-panel__expect {
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  padding: 10px 12px;
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  margin: 6px 0 16px;
+}
+.topo-panel__expect b { color: var(--vt-signal-500); }
+
+.topo-panel__alarm {
+  background: rgba(179, 77, 77, 0.06);
+  border-left: 2px solid var(--role-12v);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  margin: 6px 0 16px;
+}
+.topo-panel__alarm b { color: var(--role-12v); font-weight: 600; }
+
+.topo-panel__label-gap {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-3);
+  margin-top: 8px;
+}
+
+.topo-panel__pin-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+.topo-panel__pin-list-item {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vt-fg);
+}
+.topo-panel__pin-list-item:hover {
+  background: var(--vt-bone-100);
+  border-color: var(--vt-amber-500);
+}
+.topo-panel__pin-list-role {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-2);
+}
+
+/* Scenario bar (spec 2026-05-23 §4.8) — compositional picker ----------- */
+.topo-scenario-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  margin-bottom: 12px;
+}
+.topo-scenario-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.topo-scenario-bar__group--fault { margin-left: auto; }
+.topo-scenario-bar__label {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  margin-right: 4px;
+}
+.topo-scenario-bar__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+  min-height: 32px;
+}
+.topo-scenario-bar__pill:hover { background: var(--vt-bone-100); }
+.topo-scenario-bar__pill.is-active {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+.topo-scenario-bar__pill--fault.is-active {
+  background: var(--role-12v);
+  border-color: var(--role-12v);
+  color: var(--vt-bone-50);
+}
+
+@media (max-width: 414px) {
+  .topo-scenario-bar { gap: 12px; padding: 10px 12px; }
+  .topo-scenario-bar__group--fault { margin-left: 0; flex-basis: 100%; }
+}
+
+/* Live readout under the picker — scenario label + sub copy --------- */
+.topo__readout {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  padding: 0 0 16px;
+  line-height: 1.55;
+}
+.topo__readout b {
+  color: var(--vt-amber-500);
+  font-weight: 600;
+}
+.topo__readout.is-fault b { color: var(--role-12v); }
+
+/* Captured / Not captured footer (spec 2026-05-23 §4.7) -----------------
+   On desktop the footer overlays the bottom of the canvas as a thin click-
+   to-expand strip (per industry pattern — Autel Topology Map legend rail,
+   KiCad message panel) so it doesn't steal vertical space from the diagram.
+   Compact by default; expanded reveals the full two-column detail. The
+   wrapper .topo__canvas-wrap provides the positioning context. Mobile rules
+   below revert this to inline always-expanded rendering. */
+.topo-footer {
+  position: absolute;
+  left: var(--vt-space-3);
+  right: var(--vt-space-3);
+  bottom: var(--vt-space-3);
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  box-shadow: 0 4px 16px color-mix(in oklab, var(--vt-fg), transparent 90%);
+  pointer-events: auto;
+  max-height: calc(100% - var(--vt-space-6));
+  overflow: hidden;
+}
+.topo-footer.is-expanded {
+  overflow-y: auto;
+}
+.topo-footer__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 10px 18px;
+  background: transparent;
+  border: 0;
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg);
+  cursor: pointer;
+  text-align: left;
+}
+.topo-footer__toggle:hover { background: color-mix(in oklab, var(--vt-fg), transparent 96%); }
+.topo-footer__toggle:focus-visible {
+  outline: 2px solid var(--vt-signal-500);
+  outline-offset: -2px;
+}
+.topo-footer__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.topo-footer__count { font-weight: 500; }
+.topo-footer__count--captured { color: var(--vt-fg); }
+.topo-footer__count--captured::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--role-signal);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.topo-footer__count--missing { color: var(--vt-fg-2); }
+.topo-footer__count--missing::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--vt-amber-500);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.topo-footer__sep { color: var(--vt-fg-3); }
+.topo-footer__chevron {
+  font-size: 12px;
+  color: var(--vt-fg-3);
+  line-height: 1;
+}
+.topo-footer__detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  padding: 8px 20px 18px;
+  border-top: 1px solid var(--vt-rule);
+}
+.topo-footer__detail[hidden] { display: none; }
+.topo-footer__col {
+  min-width: 0;
+}
+.topo-footer__header {
+  font-family: var(--vt-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  margin-bottom: 12px;
+}
+.topo-footer__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.topo-footer__list li {
+  padding: 8px 0 8px 16px;
+  border-bottom: 1px solid var(--vt-rule);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg);
+  position: relative;
+}
+.topo-footer__list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.topo-footer__list--captured li::before {
+  background: var(--role-signal);
+}
+.topo-footer__list--missing li::before {
+  background: transparent;
+  border: 1.5px solid var(--vt-amber-500);
+}
+.topo-footer__closing-note {
+  background: var(--vt-bone-100);
+  border-left: 2px solid var(--vt-signal-500);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  line-height: 1.55;
+}
+
+/* ---- mobile baseline (spec 2026-05-23 §6 + D14) -------------------------
+   Stack everything single-column. Panel renders inline below the diagram
+   instead of as a bottom sheet (D14 — polished sheet deferred to Claude
+   Design's polish pass). On ≤414 px the empty-state panel is suppressed so
+   the footer renders directly below the canvas until the tech taps something.
+   ---------------------------------------------------------------------- */
 @media (max-width: 1023px) {
+  /* Drop the named-area grid entirely on mobile — children auto-flow into
+     a single column at their natural heights, which is what we want for
+     vertical stacking. */
   .topo {
     grid-template-columns: 1fr;
-    height: 100dvh;
+    grid-template-rows: none;
+    grid-template-areas: none;
+    height: auto;
+    min-height: 100dvh;
   }
-  .topo__canvas { min-height: 0; }
+  .topo__header,
+  .topo-scenario-bar,
+  .topo__readout,
+  .topo__canvas-wrap,
+  .topo-panel { grid-area: auto; }
+
+  .topo__canvas-wrap {
+    min-height: 60dvh;
+    display: block; /* let footer flow inline below canvas */
+  }
+  /* Explicit `height` (not just `min-height`) is required: react-flow's
+     inner div uses `height: 100%`, which resolves to 0 against a parent
+     that only has min-height. On desktop the flex sizing gives the canvas
+     a computed height, so the bug doesn't surface there. */
+  .topo__canvas-wrap > .topo__canvas {
+    height: 60dvh;
+    min-height: 60dvh;
+  }
   .topo-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    max-height: 72dvh;
-    border-radius: var(--vt-radius-3) var(--vt-radius-3) 0 0;
-    box-shadow: var(--vt-shadow-sheet);
-    transform: translateY(100%);
-    transition: transform var(--vt-dur-3) var(--vt-ease);
-    z-index: 20;
+    /* Drop the bottom-sheet positioning entirely — render inline. */
+    position: static;
+    transform: none;
+    max-height: none;
+    width: 100%;
+    border-radius: var(--vt-radius-2);
   }
-  .topo-panel.is-open { transform: translateY(0); }
+  /* Footer reverts from overlay → inline below the canvas, always
+     expanded; toggle button is suppressed since there's nothing to
+     collapse to. */
+  .topo-footer {
+    position: static;
+    margin-top: var(--vt-space-5);
+    max-height: none;
+    overflow: visible;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--vt-rule);
+    border-radius: 0;
+    padding: 28px 0 0;
+  }
+  .topo-footer__toggle { display: none; }
+  .topo-footer__detail,
+  .topo-footer__detail[hidden] {
+    display: grid;
+    padding: 0;
+    border-top: 0;
+  }
+}
+
+@media (max-width: 414px) {
+  .topo {
+    padding: var(--vt-space-3);
+    gap: var(--vt-space-5);
+  }
+  .topo__canvas-wrap { min-height: 55dvh; }
+  .topo__canvas-wrap > .topo__canvas { height: 55dvh; min-height: 55dvh; }
+  .topo-footer { grid-template-columns: 1fr; gap: 24px; }
+  /* Suppress the empty-state panel on phone-sized viewports so the footer
+     renders directly under the diagram until the tech taps something.
+     Once a selection lands, the panel re-renders without this class. */
+  .topo-panel.is-empty-mobile-hidden { display: none; }
 }

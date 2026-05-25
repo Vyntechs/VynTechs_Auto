@@ -4,6 +4,8 @@ import { TopologyDetailPanel } from '@/components/topology/topology-detail-panel
 import type {
   TopologyComponent,
   TopologyConnection,
+  TopologyPin,
+  TopologyScenario,
 } from '@/lib/diagnostics/load-system-topology'
 
 const frp: TopologyComponent = {
@@ -190,5 +192,255 @@ describe('TopologyDetailPanel', () => {
       />,
     )
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pin fixtures
+// ---------------------------------------------------------------------------
+
+const signalPin: TopologyPin = {
+  id: 'pin-1',
+  slug: 'frp-signal',
+  name: 'Signal',
+  roleAbbreviation: 'S',
+  pinNumber: null,
+  edge: 'top',
+  displayOrder: 0,
+  probeLocation: 'Back-probe the signal pin at FRP connector',
+  expectedReading: '0.5–4.5 <b>V</b>',
+  missingLogic: '<b>High</b> = circuit open',
+  labelGap: 'Wire color not captured',
+  sourceProvenance: 'TRAINING-CONFIRMED',
+}
+
+const frpWithPin: TopologyComponent = { ...frp, pins: [signalPin] }
+
+const idleScenario: TopologyScenario = {
+  id: 'scn-idle',
+  slug: 'idle',
+  label: 'Idle',
+  sub: 'sub',
+  kind: 'operation',
+  keyPosition: 'on',
+  engineState: 'running',
+  loadLevel: 'idle',
+  isDefault: true,
+  displayOrder: 0,
+  pinStates: {},
+  pinReadings: { 'pin-1': '<b>1.4 V</b> at idle pressure' },
+}
+
+const faultScenario: TopologyScenario = {
+  ...idleScenario,
+  id: 'scn-fault',
+  slug: 'fault-high',
+  label: 'Pegged high pressure',
+  kind: 'fault',
+  pinReadings: { 'pin-1': 'Pegged 4.9 V' },
+}
+
+// ---------------------------------------------------------------------------
+// Pin panel tests (PR-C/B)
+// ---------------------------------------------------------------------------
+
+describe('TopologyDetailPanel — pin selection (PR-C/B)', () => {
+  it('renders the pin variant with title, where-to-probe, right-now reading, expected, diagnostic, label gap', () => {
+    render(
+      <TopologyDetailPanel
+        selection={{
+          kind: 'pin',
+          pin: signalPin,
+          component: frpWithPin,
+          scenario: idleScenario,
+        }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/Pin · Signal/)).toBeInTheDocument()
+    expect(screen.getByText(/FRP Sensor · Signal/)).toBeInTheDocument()
+    expect(screen.getByText(/Back-probe the signal pin/i)).toBeInTheDocument()
+    // Right-now reading from scenario.pinReadings (bold "1.4 V")
+    expect(screen.getByText(/1\.4 V/i)).toBeInTheDocument()
+    // Expected range from pin.expectedReading (bold "V")
+    expect(screen.getByText(/0\.5/i)).toBeInTheDocument()
+    // Diagnostic if wrong (bold "High")
+    expect(screen.getByText(/circuit open/i)).toBeInTheDocument()
+    // Label gap
+    expect(screen.getByText(/Wire color not captured/i)).toBeInTheDocument()
+  })
+
+  it('shows "no live reading captured" placeholder when scenario lacks a pin reading', () => {
+    const noReadingScenario: TopologyScenario = { ...idleScenario, pinReadings: {} }
+    render(
+      <TopologyDetailPanel
+        selection={{
+          kind: 'pin',
+          pin: signalPin,
+          component: frpWithPin,
+          scenario: noReadingScenario,
+        }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByText(/no live reading captured for this scenario/i),
+    ).toBeInTheDocument()
+  })
+
+  it('applies is-fault class on the right-now box when scenario is a fault', () => {
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{
+          kind: 'pin',
+          pin: signalPin,
+          component: frpWithPin,
+          scenario: faultScenario,
+        }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      container.querySelector('.topo-panel__right-now.is-fault'),
+    ).not.toBeNull()
+  })
+
+  it('renders no scenario label when scenario is null (no-scenarios fallback)', () => {
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{
+          kind: 'pin',
+          pin: signalPin,
+          component: frpWithPin,
+          scenario: null,
+        }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      container.querySelector('.topo-panel__right-now-label'),
+    ).toBeNull()
+  })
+
+  it('withBoldOnly renders plain text and <b> spans from mixed markup', () => {
+    render(
+      <TopologyDetailPanel
+        selection={{
+          kind: 'pin',
+          pin: signalPin,
+          component: frpWithPin,
+          scenario: idleScenario,
+        }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    // pin.expectedReading = '0.5–4.5 <b>V</b>' — "V" should be in a <b> tag
+    // pin.missingLogic = '<b>High</b> = circuit open' — "High" should be in a <b> tag
+    const bTags = document.querySelectorAll('.topo-panel__expect b, .topo-panel__alarm b')
+    const bTexts = Array.from(bTags).map((el) => el.textContent)
+    // expectedReading has <b>V</b>, missingLogic has <b>High</b> plus a static "Diagnostic:" <b>
+    expect(bTexts).toContain('V')
+    expect(bTexts).toContain('High')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Component pin list tests (PR-C/B)
+// ---------------------------------------------------------------------------
+
+describe('TopologyDetailPanel — component pin list (PR-C/B)', () => {
+  it('renders a clickable pin list when component has pins and is not PCM/mechanical/splice', () => {
+    const onSelectPin = vi.fn()
+    render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frpWithPin }}
+        onSelectComponent={vi.fn()}
+        onSelectPin={onSelectPin}
+        onClose={vi.fn()}
+      />,
+    )
+    const pinListItem = screen.getByRole('button', { name: /signal/i })
+    fireEvent.click(pinListItem)
+    expect(onSelectPin).toHaveBeenCalledWith('pin-1')
+  })
+
+  it('suppresses the pin list for PCM', () => {
+    const pcmWithPin: TopologyComponent = {
+      ...pcm,
+      slug: 'pcm',
+      pins: [signalPin],
+    }
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: pcmWithPin }}
+        onSelectComponent={vi.fn()}
+        onSelectPin={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.topo-panel__pin-list')).toBeNull()
+  })
+
+  it('suppresses the pin list for mechanical components', () => {
+    const mechWithPin: TopologyComponent = {
+      ...frp,
+      kind: 'mechanical',
+      pins: [signalPin],
+    }
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: mechWithPin }}
+        onSelectComponent={vi.fn()}
+        onSelectPin={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.topo-panel__pin-list')).toBeNull()
+  })
+
+  it('suppresses the pin list for splice components', () => {
+    const spliceWithPin: TopologyComponent = {
+      ...frp,
+      slug: 'splice-1',
+      kind: 'splice',
+      pins: [signalPin],
+    }
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: spliceWithPin }}
+        onSelectComponent={vi.fn()}
+        onSelectPin={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.topo-panel__pin-list')).toBeNull()
+  })
+
+  it('suppresses the pin list when onSelectPin is not provided', () => {
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frpWithPin }}
+        onSelectComponent={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.topo-panel__pin-list')).toBeNull()
+  })
+
+  it('suppresses the pin list when the component has no pins', () => {
+    const { container } = render(
+      <TopologyDetailPanel
+        selection={{ kind: 'component', component: frp }}
+        onSelectComponent={vi.fn()}
+        onSelectPin={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.topo-panel__pin-list')).toBeNull()
   })
 })

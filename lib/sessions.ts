@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
 import type { AmbientConditions } from './types'
 import {
@@ -23,7 +23,7 @@ import type {
   DeclineLanguageInput,
 } from './gating/decline-language'
 import type { Artifact, NewArtifact } from './db/schema'
-import { sessionEvents } from './db/schema'
+import { sessionEvents, sessions, symptoms, systemScenarios } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
@@ -72,11 +72,21 @@ export type GetSessionResult =
   | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getSessionById>>> }
   | { ok: false; status: 400 | 404; error: string }
 
+// Bail out before any DB hit when a route param can't be a UUID.
+// Without this, Postgres throws "invalid input syntax for type uuid" and
+// Next.js surfaces it as a 500 instead of a clean 404. (Surfaced when a
+// session URL was URL-encoded with stray %20 characters mid-UUID.)
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function getSessionForUser(opts: {
   db: AppDb
   userId: string
   sessionId: string
 }): Promise<GetSessionResult> {
+  if (!UUID_RE.test(opts.sessionId)) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
   const session = await getSessionById(opts.db, opts.sessionId)
@@ -84,6 +94,66 @@ export async function getSessionForUser(opts: {
     return { ok: false, status: 404, error: 'not found' }
   }
   return { ok: true, session }
+}
+
+export type SetLastScenarioResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: string }
+
+export async function setLastScenarioForSession(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  slug: string
+}): Promise<SetLastScenarioResult> {
+  if (!UUID_RE.test(opts.sessionId)) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+
+  if (!opts.slug || typeof opts.slug !== 'string' || opts.slug.trim() === '') {
+    return { ok: false, status: 400, error: 'slug required' }
+  }
+
+  if (!session.cacheHitPlatformId || !session.cacheHitSymptomId) {
+    return { ok: false, status: 400, error: 'session has no cache-hit context' }
+  }
+
+  // Resolve the system from the cache-hit symptom
+  const symptom = await opts.db.query.symptoms.findFirst({
+    where: eq(symptoms.id, session.cacheHitSymptomId),
+    columns: { system: true },
+  })
+  if (!symptom?.system) {
+    return { ok: false, status: 400, error: 'symptom has no system' }
+  }
+
+  // Validate the slug refers to a real scenario for this (platform, system)
+  const scenario = await opts.db.query.systemScenarios.findFirst({
+    where: and(
+      eq(systemScenarios.platformId, session.cacheHitPlatformId),
+      eq(systemScenarios.system, symptom.system),
+      eq(systemScenarios.slug, opts.slug),
+      eq(systemScenarios.isRetired, false),
+    ),
+    columns: { id: true },
+  })
+  if (!scenario) {
+    return { ok: false, status: 400, error: `unknown scenario "${opts.slug}"` }
+  }
+
+  await opts.db
+    .update(sessions)
+    .set({ lastScenarioSlug: opts.slug })
+    .where(eq(sessions.id, opts.sessionId))
+
+  return { ok: true }
 }
 
 const advanceSchema = z.object({
