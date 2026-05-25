@@ -179,3 +179,84 @@ describe('6.0 PSD seed — batch 3 (components)', () => {
     }
   })
 })
+
+describe('6.0 PSD seed — batch 4 (observable_properties)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/01-platform-and-symptom.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/02-architecture-facts.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/03-components.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/04-observable-properties.sql')
+  })
+
+  afterAll(async () => {
+    await close()
+  })
+
+  // ≥20 observable properties tied to 6.0 PSD components
+  it('seeds ≥20 observable properties tied to 6.0 PSD components', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM observable_properties op
+      JOIN components c ON c.id = op.component_id
+      WHERE c.platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+        AND op.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(20)
+  })
+
+  // ICP voltage and ICP PSI actual must be distinct properties — they measure
+  // different things (raw sensor voltage vs PCM-computed pressure).
+  it('includes both sd3-60psd-icp-volts and sd3-60psd-icp-psi-actual as distinct properties', async () => {
+    const result = await db.execute(sql`
+      SELECT slug FROM observable_properties
+      WHERE slug IN ('sd3-60psd-icp-volts', 'sd3-60psd-icp-psi-actual')
+    `)
+    expect(result.rows).toHaveLength(2)
+  })
+
+  // Fuel pressure description must surface the unresolved Ford-vs-aftermarket
+  // disagreement so the tech knows this is a contested reading.
+  it('sd3-60psd-fuel-pressure-schrader description surfaces the unresolved cranking-pressure disagreement', async () => {
+    const result = await db.execute(sql`
+      SELECT description FROM observable_properties
+      WHERE slug = 'sd3-60psd-fuel-pressure-schrader'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const desc = result.rows[0].description as string
+    expect(desc).toMatch(/unresolved|disagree|45 psi.{0,30}10.{0,10}15|both .{0,30}documented/i)
+  })
+
+  // Glow plug current description must mention both the ~80 A per-bank initial
+  // inrush AND the per-plug steady-state current so techs know both numbers.
+  it('sd3-60psd-glow-plug-current-per-bank description mentions both 80 A bank and per-plug current', async () => {
+    const result = await db.execute(sql`
+      SELECT description FROM observable_properties
+      WHERE slug = 'sd3-60psd-glow-plug-current-per-bank'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const desc = result.rows[0].description as string
+    expect(desc).toMatch(/80\s*A/i)
+    expect(desc).toMatch(/10.{0,5}12\s*A|per.plug/i)
+  })
+
+  // All observable_properties rows must have required fields populated.
+  it('all observable_properties rows have required fields populated', async () => {
+    const result = await db.execute(sql`
+      SELECT op.slug, op.description, op.observation_method, op.source_provenance, op.is_retired
+      FROM observable_properties op
+      JOIN components c ON c.id = op.component_id
+      WHERE c.platform_id = (SELECT id FROM platforms WHERE slug = 'ford-super-duty-3rd-gen-60-psd')
+    `)
+    for (const row of result.rows) {
+      expect(row.slug, 'slug must be present').toBeTruthy()
+      expect(row.description, `${row.slug} description must be present`).toBeTruthy()
+      expect(row.observation_method, `${row.slug} observation_method must be present`).toBeTruthy()
+      expect(row.source_provenance, `${row.slug} source_provenance must be present`).toBeTruthy()
+      expect(row.is_retired, `${row.slug} is_retired must be false`).toBe(false)
+    }
+  })
+})
