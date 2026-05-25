@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Fuel system diagnostic · in progress · Vyntechs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- Header: eyebrow + title left, quiet counter right. No pills. No step counter. -->
+  <header class="shell__header">
+    <div>
+      <div class="shell__eyebrow">2017 F-350 6.7L Power Stroke · P0087</div>
+      <h1 class="shell__title">Fuel system diagnostic</h1>
+    </div>
+    <div class="shell__counter">6 checked</div>
+  </header>
+
+  <!-- =============== CANVAS — quiet topology ============================ -->
+  <section class="canvas" aria-label="Fuel system topology, in progress">
+    <svg class="canvas__svg" viewBox="0 0 920 620" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="arrow"></path>
+        </marker>
+        <marker id="arr-ctx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="arrow arrow--context"></path>
+        </marker>
+      </defs>
+
+      <!-- LP supply chain: Tank → Lift Pump → Filter -->
+      <path class="conn conn--fluid" marker-end="url(#arr)" d="M 220,85 C 280,85 320,85 360,85"></path>
+      <path class="conn conn--fluid" marker-end="url(#arr)" d="M 540,85 C 580,85 600,85 640,85"></path>
+      <!-- Relay → Lift Pump (electrical) -->
+      <path class="conn conn--elec" d="M 220,180 C 280,180 320,120 360,105"></path>
+      <!-- Filter → CP4.2 -->
+      <path class="conn conn--fluid conn--context" marker-end="url(#arr-ctx)" d="M 750,110 C 750,140 600,140 540,190"></path>
+      <!-- CP4.2 → Rail A -->
+      <path class="conn conn--fluid conn--context" marker-end="url(#arr-ctx)" d="M 440,220 C 380,250 280,260 280,310"></path>
+      <!-- CP4.2 → Rail B -->
+      <path class="conn conn--fluid conn--context" marker-end="url(#arr-ctx)" d="M 510,220 C 600,260 700,290 720,310"></path>
+      <!-- Rail A → PRV (active) -->
+      <path class="conn conn--fluid" marker-end="url(#arr)" d="M 360,335 C 400,335 420,335 440,335"></path>
+      <!-- PRV → Return -->
+      <path class="conn conn--fluid conn--context" marker-end="url(#arr-ctx)" d="M 510,365 C 490,400 460,450 440,495"></path>
+      <!-- Rails → Injectors -->
+      <path class="conn conn--fluid conn--context" d="M 250,365 L 220,470"></path>
+      <path class="conn conn--fluid conn--context" d="M 750,365 L 750,470"></path>
+      <!-- Return → Tank (loop) -->
+      <path class="conn conn--fluid conn--context" marker-end="url(#arr-ctx)"
+            d="M 380,530 C 100,560 30,300 60,150"></path>
+      <!-- FRP → PCM (reports) -->
+      <path class="conn conn--report" d="M 700,335 C 820,335 860,420 845,475"></path>
+      <!-- WIF on filter (just visual link) -->
+      <path class="conn conn--context" d="M 750,135 L 750,170"></path>
+    </svg>
+
+    <!-- ===== Top row: LP supply chain ===== -->
+    <!-- 1. Fuel Tank — DONE -->
+    <div class="node is-done" style="left: 40px; top: 50px;">
+      <span class="node__mark" aria-label="passed"></span>
+      <div class="node__kind">Mechanical</div>
+      <div class="node__name">Fuel Tank</div>
+    </div>
+
+    <!-- 3. Lift Pump Relay — DONE -->
+    <div class="node is-done" style="left: 360px; top: 50px;">
+      <span class="node__mark" aria-label="passed"></span>
+      <div class="node__kind">Actuator</div>
+      <div class="node__name">Lift Pump Relay</div>
+    </div>
+
+    <!-- 4. Lift Pump — DONE -->
+    <div class="node is-done" style="left: 360px; top: 145px;">
+      <span class="node__mark" aria-label="passed"></span>
+      <div class="node__kind">Pump</div>
+      <div class="node__name">Electric Lift Pump</div>
+    </div>
+
+    <!-- Fuel Filter — context (upcoming, no preview) -->
+    <div class="node is-context" style="left: 640px; top: 50px;">
+      <div class="node__kind">Mechanical</div>
+      <div class="node__name">Fuel Filter / Water Sep.</div>
+    </div>
+
+    <!-- 2. WIF Sensor — DONE -->
+    <div class="node is-done" style="left: 640px; top: 145px; min-width: 140px;">
+      <span class="node__mark" aria-label="passed"></span>
+      <div class="node__kind">Sensor</div>
+      <div class="node__name">Water-in-Fuel</div>
+    </div>
+
+    <!-- Fuel Level Sender — context -->
+    <div class="node is-context" style="left: 40px; top: 145px; min-width: 140px;">
+      <div class="node__kind">Sensor</div>
+      <div class="node__name">Fuel Level Sender</div>
+    </div>
+
+    <!-- CP4.2 — context -->
+    <div class="node is-context" style="left: 380px; top: 190px;">
+      <div class="node__kind">Pump · High pressure</div>
+      <div class="node__name">Bosch CP4.2 HP Pump</div>
+    </div>
+
+    <!-- IMV — context -->
+    <div class="node is-context" style="left: 640px; top: 250px; min-width: 140px;">
+      <div class="node__kind">Valve</div>
+      <div class="node__name">Inlet Metering Valve</div>
+    </div>
+
+    <!-- ===== Middle row: rail layer ===== -->
+    <!-- 5. HP Rail Bank A — DONE -->
+    <div class="node node--mechanical is-done" style="left: 100px; top: 310px;">
+      <span class="node__mark" aria-label="passed"></span>
+      <div class="node__kind">HP Fuel Rail</div>
+      <div class="node__name">Bank A</div>
+    </div>
+
+    <!-- 6. PRV — ACTIVE -->
+    <div class="node is-active" style="left: 440px; top: 305px;">
+      <div class="node__kind">Valve · Pressure relief</div>
+      <div class="node__name">Rail Pressure Relief Valve</div>
+    </div>
+
+    <!-- HP Rail Bank B — context -->
+    <div class="node node--mechanical is-context" style="left: 670px; top: 310px;">
+      <div class="node__kind">HP Fuel Rail</div>
+      <div class="node__name">Bank B</div>
+    </div>
+
+    <!-- FRP Sensor — context (upcoming, no preview) -->
+    <div class="node is-context" style="left: 660px; top: 405px; min-width: 140px;">
+      <div class="node__kind">Sensor</div>
+      <div class="node__name">FRP Sensor</div>
+    </div>
+
+    <!-- ===== Bottom row: injectors + return + PCM ===== -->
+    <div class="node is-context" style="left: 100px; top: 470px;">
+      <div class="node__kind">Actuators · ×4</div>
+      <div class="node__name">Injectors 1–4 (Bank A)</div>
+    </div>
+    <div class="node is-context" style="left: 660px; top: 470px;">
+      <div class="node__kind">Actuators · ×4</div>
+      <div class="node__name">Injectors 5–8 (Bank B)</div>
+    </div>
+    <div class="node node--mechanical is-context" style="left: 350px; top: 510px; min-width: 200px;">
+      <div class="node__kind">Mechanical · Return</div>
+      <div class="node__name">LP Return Circuit</div>
+    </div>
+    <div class="node is-context" style="left: 800px; top: 510px; min-width: 100px;">
+      <div class="node__kind">Module</div>
+      <div class="node__name">PCM</div>
+    </div>
+
+  </section>
+
+  <!-- =============== PANEL — the entire focus ========================== -->
+  <aside class="panel" aria-label="Active diagnostic step">
+
+    <div class="panel__content" id="panel-content">
+
+      <h2 class="panel__component">Rail Pressure Relief Valve</h2>
+      <div class="panel__test-type">Bleeddown PID · idle / key-off</div>
+
+      <p class="panel__prose">
+        With the engine running at idle, watch the FRP rail-pressure PID on
+        the scan tool during a smooth key-off. Track the decay rate over the
+        first ten seconds after shutdown.
+      </p>
+      <p class="panel__prose">
+        A healthy sealed rail holds pressure for tens of seconds. A stuck-open
+        relief valve bleeds the rail in two or three — which mimics a CP4.2
+        failure under load and is the diagnosis we're here to confirm or
+        rule out.
+      </p>
+
+      <div class="branches" role="group" aria-label="Choose what you observed">
+
+        <button class="branch branch--ok" type="button" data-verdict="ok">
+          <span class="branch__text">FRP PID shows gradual post-shutdown pressure decay over many seconds.</span>
+          <span class="branch__verdict">Pass · rail holds pressure</span>
+        </button>
+
+        <button class="branch branch--ok" type="button" data-verdict="ok">
+          <span class="branch__text">At idle, brief pressure drops appear consistent with the PRV modulating normally.</span>
+          <span class="branch__verdict">Pass · PRV cycling</span>
+        </button>
+
+        <button class="branch branch--warn" type="button" data-verdict="warn">
+          <span class="branch__text">No PRV bleed-down events visible at idle over an extended observation.</span>
+          <span class="branch__verdict">Flag · escalate to medium load</span>
+        </button>
+
+        <button class="branch branch--warn" type="button" data-verdict="warn">
+          <span class="branch__text">Pressure drops rapidly at idle or can't sustain above the idle target.</span>
+          <span class="branch__verdict">Flag · check rail external leak</span>
+        </button>
+
+        <button class="branch branch--fail" type="button" data-verdict="fail">
+          <span class="branch__text">FRP PID drops to near-zero within two to three seconds of key-off.</span>
+          <span class="branch__verdict">Fail · PRV stuck open</span>
+        </button>
+
+      </div>
+
+      <button class="escape" type="button" id="escape-btn">Can't run this →</button>
+
+    </div>
+
+  </aside>
+
+</div>
+
+<script>
+  // ===== Press → Commit → Settle motion sequence =====
+  // Real product writes outcome, derives next test, re-renders. Mockup pre-stages two next states.
+
+  const NEXT_OK = {
+    component: "FRP Sensor",
+    type: "FRP PID at idle · scan tool · engine running",
+    prose1: "With the engine warmed and idling, read the FRP rail pressure PID on the scan tool. We're separating a real pressure problem from a sensor false-zero.",
+    prose2: "A plausible idle reading that drops only under load redirects to the IMV and injector return branch. A reading near zero with the engine running confirms a real supply failure.",
+    branches: [
+      { v: "ok",   text: "FRP PID at idle reads in the expected normal range — about 4,000–6,000 PSI warm.", label: "Pass · idle pressure normal" },
+      { v: "warn", text: "Idle pressure is plausible but the complaint only shows up under load.", label: "Flag · proceed to load test" },
+      { v: "fail", text: "FRP PID reads near 0 PSI or implausibly low at idle with the engine running.", label: "Fail · supply failure real" },
+    ],
+  };
+
+  const NEXT_FAIL_TERMINAL = {
+    isTerminal: true,
+    headline: "Replace the pressure relief valve.",
+    detail: "With a clean filter element and adequate CP4 inlet pressure, a rail that bleeds to near-zero in two or three seconds points to a stuck-open PRV. Targeted, non-catastrophic repair — does not require injector or pump replacement when no metal contamination is present.",
+    trail: ["Fuel level confirmed", "No water in fuel", "Relay seated", "Lift pump running", "Rail A — no external leak", "PRV — bleed-down failed"],
+  };
+
+  function renderActive(state) {
+    return `
+      <h2 class="panel__component">${state.component}</h2>
+      <div class="panel__test-type">${state.type}</div>
+      <p class="panel__prose">${state.prose1}</p>
+      <p class="panel__prose">${state.prose2}</p>
+      <div class="branches" role="group" aria-label="Choose what you observed">
+        ${state.branches.map(b => `
+          <button class="branch branch--${b.v}" type="button" data-verdict="${b.v}">
+            <span class="branch__text">${b.text}</span>
+            <span class="branch__verdict">${b.label}</span>
+          </button>
+        `).join("")}
+      </div>
+      <button class="escape" type="button" id="escape-btn">Can't run this →</button>
+    `;
+  }
+
+  function renderTerminal(state) {
+    return `
+      <div style="display:flex;flex-direction:column;gap:20px;">
+        <div style="font-family:var(--vt-font-mono);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--vt-fg-muted);">Diagnosis</div>
+        <h2 class="panel__component" style="color:var(--vt-fg);">${state.headline}</h2>
+        <p class="panel__prose" style="margin-top:4px;">${state.detail}</p>
+        <div style="margin-top:28px;border-top:1px solid var(--vt-bone-300);padding-top:20px;">
+          <div style="font-family:var(--vt-font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--vt-fg-muted);margin-bottom:10px;">What you ran</div>
+          ${state.trail.map(t => `<div style="font-family:var(--vt-font-sans);font-size:14px;color:var(--vt-fg-2);padding:3px 0;">${t}</div>`).join("")}
+        </div>
+        <div style="margin-top:24px;display:flex;gap:18px;">
+          <button class="branch branch--ok" style="flex:1;padding:14px 18px;" type="button" onclick="location.reload()">
+            <span class="branch__text">Close case</span>
+          </button>
+          <button class="branch" style="flex:1;padding:14px 18px;" type="button" onclick="location.reload()">
+            <span class="branch__text">Hand to advisor</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function transitionPanel(nextHTML) {
+    const content = document.getElementById('panel-content');
+    content.classList.add('is-exiting');
+    setTimeout(() => {
+      content.innerHTML = nextHTML;
+      content.classList.remove('is-exiting');
+      content.classList.add('is-entering');
+      // Force reflow so the entering state paints before we trigger the entered state
+      void content.offsetWidth;
+      content.classList.remove('is-entering');
+      content.classList.add('is-entered');
+      setTimeout(() => content.classList.remove('is-entered'), 320);
+      attachBranchHandlers();
+    }, 160);
+  }
+
+  function attachBranchHandlers() {
+    document.querySelectorAll('.branch').forEach(btn => {
+      // Press feedback on pointerdown for immediate response
+      btn.addEventListener('pointerdown', () => btn.classList.add('is-pressing'));
+      const release = () => btn.classList.remove('is-pressing');
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointerleave', release);
+      // Commit + transition on click
+      btn.addEventListener('click', (e) => {
+        if (btn.classList.contains('is-terminal-action')) return;
+        const v = btn.dataset.verdict;
+        if (!v) return;
+        // After commit, advance
+        setTimeout(() => {
+          if (v === 'fail') {
+            transitionPanel(renderTerminal(NEXT_FAIL_TERMINAL));
+          } else {
+            transitionPanel(renderActive(NEXT_OK));
+          }
+        }, 120);
+      });
+    });
+
+    const esc = document.getElementById('escape-btn');
+    if (esc) {
+      esc.addEventListener('click', () => {
+        esc.style.color = 'var(--vt-fg)';
+        esc.textContent = "Skipped — system will pick the next test →";
+        setTimeout(() => transitionPanel(renderActive(NEXT_OK)), 600);
+      });
+    }
+  }
+
+  attachBranchHandlers();
+</script>
+
+</body>
+</html>

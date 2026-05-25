@@ -4,6 +4,7 @@ import { createSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { paywallReject } from '@/lib/auth-access'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
+import type { TreeState } from '@/lib/ai/tree-engine'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
 import { validateRetrievalResults } from '@/lib/retrieval/validator'
@@ -20,10 +21,21 @@ import {
   getOpenSessionForTech,
   getProfileByUserId,
 } from '@/lib/db/queries'
+import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
+import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
 
 // Initial tree generation + corpus + 6 web-retrieval adapters + grader.
 // Cap at 60s — same envelope as /api/intake/submit.
 export const maxDuration = 60
+
+// Empty-sentinel treeState for cache-hit sessions — nodes[] is empty so the
+// routing layer can distinguish "not generated yet" from "AI tree active".
+// Required fields are filled with neutral values per the real TreeState type.
+const CACHE_HIT_SENTINEL: TreeState = {
+  nodes: [],
+  currentNodeId: '',
+  message: '',
+}
 
 const ADAPTERS = [
   new NHTSAAdapter(),
@@ -74,21 +86,53 @@ export async function POST(req: Request) {
     }
   }
 
-  const generateInitialTreeWithRetrieval = buildGenerateInitialTreeWithRetrieval({
-    db,
-    adapters: ADAPTERS,
-    generateInitialTree,
-    runRetrieval,
-    validateRetrievalResults,
-    retrieveCorpus,
+  // Pre-flight cache check: resolve platform + symptom before spending AI budget.
+  let cacheHitPlatformId: string | null = null
+  let cacheHitSymptomId: string | null = null
+
+  const platformSlug = resolvePlatformSlug({
+    year: parsed.data.vehicleYear,
+    make: parsed.data.vehicleMake,
+    model: parsed.data.vehicleModel,
+    engine: parsed.data.vehicleEngine ?? '',
   })
 
-  let treeState
-  try {
-    treeState = await generateInitialTreeWithRetrieval(parsed.data)
-  } catch (err) {
-    console.error('tree generation failed:', err)
-    return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
+  if (platformSlug) {
+    const resolved = await resolveSymptomSlug({
+      db,
+      platformSlug,
+      selectedSymptomSlug: parsed.data.selectedSymptomSlug,
+      dtcCodes: parsed.data.dtcCodes,
+      complaintText: parsed.data.customerComplaint,
+    })
+
+    if (resolved) {
+      cacheHitPlatformId = resolved.platformId
+      cacheHitSymptomId = resolved.symptomId
+    }
+  }
+
+  let treeState: TreeState
+  if (cacheHitSymptomId) {
+    // Cache hit: skip AI entirely.
+    treeState = CACHE_HIT_SENTINEL
+  } else {
+    // Cache miss: run the existing AI tree generation unchanged.
+    const generateInitialTreeWithRetrieval = buildGenerateInitialTreeWithRetrieval({
+      db,
+      adapters: ADAPTERS,
+      generateInitialTree,
+      runRetrieval,
+      validateRetrievalResults,
+      retrieveCorpus,
+    })
+
+    try {
+      treeState = await generateInitialTreeWithRetrieval(parsed.data)
+    } catch (err) {
+      console.error('tree generation failed:', err)
+      return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
+    }
   }
 
   const result = await createSessionForUser({
@@ -96,6 +140,8 @@ export async function POST(req: Request) {
     userId: user.id,
     body: parsed.data,
     treeState,
+    cacheHitPlatformId,
+    cacheHitSymptomId,
   })
 
   if (!result.ok) {

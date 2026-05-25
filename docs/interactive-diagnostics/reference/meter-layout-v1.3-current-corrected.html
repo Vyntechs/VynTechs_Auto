@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>METER v1.3 · Current Draw (corrected) · Vyntechs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bone-50:#fbf8f0; --bone-100:#f5f0e0; --bone-200:#ede5d0; --bone-300:#d4cdb8;
+  --bone-400:#b8b09a; --bone-700:#6b6657; --bone-800:#4a4536;
+  --ink-900:#1a1a1a; --ink-700:#3a3a3a; --ink-500:#6b6657;
+  --amber-500:#c89a3e; --amber-300:#e2c47a;
+  --pass:#4ca866; --fail:#b34d4d;
+  --probe-red:#c44848; --probe-blk:#1a1a1a;
+  --role-pwr:#b34d4d;
+  --serif:"Instrument Serif",serif; --sans:"Inter Tight",sans-serif; --mono:"JetBrains Mono",monospace;
+  --dim:0.13; --ease:cubic-bezier(.4,0,.2,1); --dur:300ms;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bone-50);color:var(--ink-900);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.page{max-width:1280px;margin:0 auto;padding:24px}
+.head{padding-bottom:14px;border-bottom:1px solid var(--bone-300);margin-bottom:18px}
+.eyebrow{font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500;margin-bottom:4px}
+h1{font-family:var(--serif);font-size:28px;letter-spacing:-0.02em;line-height:1.05}
+.vehicle{font-family:var(--mono);font-size:12px;color:var(--ink-700);margin-top:4px}
+
+.step-banner{display:grid;grid-template-columns:auto 1fr auto auto;gap:18px;align-items:center;background:var(--bone-100);border:1px solid var(--bone-300);border-left:4px solid var(--amber-500);padding:14px 18px;border-radius:2px;margin-bottom:10px}
+.step-tag{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:0.14em;color:var(--amber-500);background:#fff5dc;padding:5px 9px;border-radius:2px;white-space:nowrap}
+.step-title{font-family:var(--serif);font-size:18px;color:var(--ink-900)}
+.condition-pill{display:flex;flex-direction:column;gap:2px;padding:8px 14px;background:var(--bone-50);border:1px solid var(--bone-300);border-radius:2px;min-width:200px;position:relative}
+.condition-pill.required{border-left:3px solid var(--pass);background:#f0f8f1}
+.condition-dot{position:absolute;top:10px;right:12px;width:8px;height:8px;border-radius:50%;background:var(--pass);box-shadow:0 0 0 3px rgba(76,168,102,0.18);animation:dotPulse 2s ease-in-out infinite}
+@keyframes dotPulse{0%,100%{box-shadow:0 0 0 3px rgba(76,168,102,0.18)}50%{box-shadow:0 0 0 6px rgba(76,168,102,0.08)}}
+.condition-label{font-family:var(--mono);font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500}
+.condition-value{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink-900)}
+.leverage-pill{display:flex;flex-direction:column;gap:2px;padding:8px 14px;background:var(--bone-50);border:1px solid var(--bone-300);border-radius:2px;min-width:220px;border-left:3px solid var(--amber-500)}
+.leverage-label{font-family:var(--mono);font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500}
+.leverage-value{font-family:var(--sans);font-size:13px;color:var(--ink-900)}
+.leverage-meta{font-family:var(--mono);font-size:10px;color:var(--ink-700);letter-spacing:0.04em}
+.leverage-meta b,.leverage-value b{color:var(--ink-900);font-weight:600}
+
+.routing-rationale{margin-bottom:16px;padding:10px 14px;background:#fff8e8;border:1px solid var(--amber-300);border-left:3px solid var(--amber-500);border-radius:2px;font-size:12px;color:var(--ink-700);font-family:var(--mono);letter-spacing:0.02em}
+.routing-rationale b{color:var(--ink-900)}
+.routing-rationale .pill{display:inline-block;background:var(--amber-500);color:var(--ink-900);padding:2px 7px;border-radius:2px;font-size:9.5px;font-weight:600;letter-spacing:0.1em;margin-right:8px;text-transform:uppercase}
+
+.canvas-wrap{background:linear-gradient(var(--bone-100),var(--bone-100)),repeating-linear-gradient(0deg,transparent 0,transparent 23px,rgba(107,102,87,0.06) 23px,rgba(107,102,87,0.06) 24px);background-blend-mode:multiply;border:1px solid var(--bone-300);border-radius:2px;padding:18px;position:relative}
+svg.diagram{display:block;width:100%;height:auto}
+
+.comp{transition:opacity var(--dur) var(--ease)}
+.comp.dim{opacity:var(--dim)}
+.comp-rect{fill:var(--bone-50);stroke:var(--ink-900);stroke-width:1.2;rx:2}
+.comp-rect.mech{fill:var(--bone-100);stroke:var(--bone-400);stroke-dasharray:4 3}
+.comp.target .comp-rect{stroke:var(--amber-500);stroke-width:2.5;filter:drop-shadow(0 0 8px rgba(200,154,62,0.4))}
+.comp-name{font-family:var(--serif);font-size:13px;fill:var(--ink-900);text-anchor:middle}
+.comp-name.mech{fill:var(--ink-500);font-style:italic}
+.comp-loc{font-family:var(--mono);font-size:9px;letter-spacing:0.06em;fill:var(--ink-500);text-anchor:middle;text-transform:uppercase}
+
+/* Wire break — clean rectangular gap in the middle of the wire run */
+.wire-break-gap{fill:var(--bone-100);stroke:var(--amber-500);stroke-width:1.5;stroke-dasharray:3 2;rx:3}
+.wire-break-label{font-family:var(--mono);font-size:8.5px;fill:var(--amber-500);text-anchor:middle;font-weight:600;letter-spacing:0.08em}
+.wire-break-tag{font-family:var(--mono);font-size:7px;fill:var(--amber-500);text-anchor:middle;letter-spacing:0.04em}
+
+.wire{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.wire.role-pwr{stroke:var(--role-pwr)}
+
+.probe-layer{pointer-events:none}
+@keyframes drop{0%{opacity:0;transform:translateY(-14px)}100%{opacity:1;transform:translateY(0)}}
+.probe-group{animation:drop 360ms var(--ease)}
+.probe-stem{stroke-width:2.6}
+.probe-tip{stroke-width:1.8}
+.probe-red .probe-stem,.probe-red .probe-tip{stroke:var(--probe-red)}
+.probe-red .probe-head{fill:var(--probe-red)}
+.probe-blk .probe-stem,.probe-blk .probe-tip{stroke:var(--probe-blk)}
+.probe-blk .probe-head{fill:var(--probe-blk)}
+.probe-label{font-family:var(--mono);font-size:10px;letter-spacing:0.1em;font-weight:500}
+.probe-label.red{fill:var(--probe-red)}
+.probe-label.blk{fill:var(--probe-blk)}
+.probe-side-tag{font-family:var(--mono);font-size:8.5px;font-weight:500;letter-spacing:0.06em}
+.probe-side-tag.red{fill:var(--probe-red)}
+.probe-side-tag.blk{fill:var(--probe-blk)}
+
+.lead{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;animation:drop 360ms var(--ease) 80ms backwards}
+.lead.red{stroke:var(--probe-red)}
+.lead.blk{stroke:var(--probe-blk)}
+
+.meter-group{animation:drop 420ms var(--ease) 120ms backwards}
+.meter-shadow{fill:rgba(0,0,0,0.18)}
+.meter-case{fill:#2a2a28;stroke:#0d0d0d;stroke-width:1.5;rx:6}
+.meter-brand{font-family:var(--sans);font-size:7.5px;font-weight:600;fill:#888;text-anchor:middle;letter-spacing:0.18em}
+.meter-model{font-family:var(--mono);font-size:6.5px;fill:#555;text-anchor:middle;letter-spacing:0.1em}
+.meter-screen{fill:#b8d4a8;stroke:#1a1a1a;stroke-width:0.8;rx:2}
+.meter-screen-shadow{fill:#1a1a1a;opacity:0.15}
+.meter-reading{font-family:var(--mono);font-weight:500;font-size:22px;fill:#0d2010;text-anchor:end;letter-spacing:0.02em}
+.meter-unit-display{font-family:var(--mono);font-weight:500;font-size:12px;fill:#0d2010;text-anchor:start;letter-spacing:0.08em}
+.meter-mode-label{font-family:var(--mono);font-size:7px;fill:#1a3010;text-anchor:start;letter-spacing:0.06em}
+
+.dial-track{fill:#0a0a0a;stroke:#2a2a28;stroke-width:0.6}
+.dial-inner{fill:#161614;stroke:#2a2a28;stroke-width:0.6}
+.dial-label{font-family:var(--mono);font-size:7.5px;font-weight:600;fill:#aaa;text-anchor:middle;dominant-baseline:central;letter-spacing:0.02em}
+.dial-label.target{fill:var(--amber-500);font-size:9px}
+.dial-tick{stroke:#666;stroke-width:0.8;fill:none}
+.dial-tick.target{stroke:var(--amber-500);stroke-width:1.5}
+
+.knob-body{fill:#1a1a1a;stroke:#0a0a0a;stroke-width:1.2}
+.knob-grip{fill:#2a2a28;stroke:#0a0a0a;stroke-width:0.6}
+.knob-pointer{fill:var(--amber-500);stroke:#a87f30;stroke-width:0.6}
+
+.jack{fill:#1a1a1a;stroke:#3a3a38;stroke-width:0.6}
+.jack-label{font-family:var(--mono);font-size:5.5px;fill:#888;text-anchor:middle;letter-spacing:0.05em}
+.jack-active{stroke:var(--amber-500);stroke-width:1.6}
+
+.range-bar-bg{fill:#0a1f10;stroke:#1a3010;stroke-width:0.5}
+.range-bar-fill{fill:#4ca866;opacity:0.55}
+.range-bar-target{fill:var(--amber-500)}
+.range-label{font-family:var(--mono);font-size:7px;fill:#1a3010;letter-spacing:0.04em}
+
+/* SOURCE PROVENANCE BADGE on meter screen */
+.provenance-badge{font-family:var(--mono);font-size:6.5px;font-weight:600;letter-spacing:0.1em;text-anchor:start}
+.provenance-badge.oem{fill:#4a8a4c}
+.provenance-badge.field{fill:#2d6a40}
+.provenance-badge.gap{fill:#b34d4d}
+.provenance-meta{font-family:var(--mono);font-size:6px;fill:#1a3010;letter-spacing:0.04em;text-anchor:start}
+
+.legend{display:flex;gap:18px;margin-top:14px;padding:10px 14px;background:var(--bone-100);border:1px solid var(--bone-300);border-radius:2px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--ink-700);letter-spacing:0.06em}
+.legend-item{display:flex;align-items:center;gap:6px}
+.legend-dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+.legend-dot.red{background:var(--probe-red)}.legend-dot.blk{background:var(--probe-blk)}.legend-dot.amb{background:var(--amber-500)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="eyebrow">METER Layout v1.3 · Current Draw (corrected) · with source provenance</div>
+    <h1>Lift pump current draw — fuse blow investigation</h1>
+    <div class="vehicle">2018 F-250 6.7L Power Stroke · fuse-blow case · specialty routing</div>
+  </div>
+
+  <div class="step-banner">
+    <div class="step-tag">METER · A═</div>
+    <div class="step-title">Inline ammeter at lift pump supply · expected 4–7 A at prime</div>
+    <div class="condition-pill required">
+      <div class="condition-dot"></div>
+      <div class="condition-label">REQUIRED CONDITION</div>
+      <div class="condition-value">Key on · engine off (prime cycle)</div>
+    </div>
+    <div class="leverage-pill">
+      <div class="leverage-label">LEVERAGE</div>
+      <div class="leverage-value"><b>Eliminates 3 of 5</b> remaining causes</div>
+      <div class="leverage-meta">Invasiveness <b>3/5</b> · Effort <b>medium</b></div>
+    </div>
+  </div>
+
+  <!-- Specialty routing rationale -->
+  <div class="routing-rationale">
+    <span class="pill">Specialty test</span>
+    Routed because the case payload includes <b>fuse keeps blowing (15 A circuit)</b>. Current draw is otherwise rare and not used as a default. Other applicable triggers: parasitic draw, dragging motor, alternator output verification, voltage-present-no-work confirmation.
+  </div>
+
+  <div class="canvas-wrap">
+    <svg class="diagram" viewBox="0 0 1100 580" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- LIFT PUMP RELAY -->
+      <g class="comp dim">
+        <rect class="comp-rect" x="80" y="60" width="160" height="58"/>
+        <text class="comp-name" x="160" y="84">Lift Pump Relay</text>
+        <text class="comp-loc" x="160" y="98">BCM fuse box</text>
+        <text class="comp-loc" x="160" y="111" font-style="italic">15A circuit</text>
+      </g>
+
+      <!-- LIFT PUMP (target) -->
+      <g class="comp target" id="comp-lift">
+        <rect class="comp-rect" x="80" y="380" width="180" height="74"/>
+        <text class="comp-name" x="170" y="406">Lift Pump</text>
+        <text class="comp-loc" x="170" y="422">inside tank · 2-wire</text>
+        <text class="comp-loc" x="170" y="438" font-style="italic">DC motor · supplies HP pump</text>
+      </g>
+
+      <!-- POWER WIRE: relay → break in middle → lift pump -->
+      <!-- Top segment: from relay bottom (160, 118) down to upstream break (160, 215) -->
+      <path class="wire role-pwr" d="M 160 118 L 160 215"/>
+      <!-- The break GAP — clearly in the middle of the wire run, not at a terminal -->
+      <rect class="wire-break-gap" x="135" y="215" width="50" height="50" rx="3"/>
+      <text class="wire-break-label" x="160" y="237">METER</text>
+      <text class="wire-break-label" x="160" y="251">INLINE</text>
+      <text class="wire-break-tag" x="160" y="280">circuit broken</text>
+      <!-- Bottom segment: from break (160, 265) down to lift pump top (160, 380) -->
+      <path class="wire role-pwr" d="M 160 265 L 160 380"/>
+
+      <!-- Side labels for upstream/downstream -->
+      <text class="probe-side-tag red" x="100" y="195" text-anchor="end">UPSTREAM →</text>
+      <text class="probe-side-tag blk" x="100" y="295" text-anchor="end">DOWNSTREAM →</text>
+      <text class="probe-side-tag red" style="fill:var(--ink-500);font-size:7.5px;letter-spacing:0.04em" x="100" y="208" text-anchor="end">from relay</text>
+      <text class="probe-side-tag blk" style="fill:var(--ink-500);font-size:7.5px;letter-spacing:0.04em" x="100" y="308" text-anchor="end">to pump</text>
+
+      <g class="probe-layer">
+
+        <!-- RED PROBE on UPSTREAM side of break (top edge) -->
+        <g class="probe-group probe-red">
+          <line class="probe-stem" x1="160" y1="180" x2="160" y2="213"/>
+          <circle class="probe-head" cx="160" cy="174" r="6"/>
+          <line class="probe-tip" x1="160" y1="213" x2="160" y2="216"/>
+          <text class="probe-label red" x="160" y="167" text-anchor="middle">RED</text>
+        </g>
+
+        <!-- BLACK PROBE on DOWNSTREAM side of break (bottom edge) -->
+        <g class="probe-group probe-blk">
+          <line class="probe-stem" x1="160" y1="300" x2="160" y2="267"/>
+          <circle class="probe-head" cx="160" cy="306" r="6"/>
+          <line class="probe-tip" x1="160" y1="267" x2="160" y2="264"/>
+          <text class="probe-label blk" x="160" y="320" text-anchor="middle">BLACK</text>
+        </g>
+
+        <!-- LEADS — to 10A jack (red) and COM (black) -->
+        <!-- 10A jack center: (540 + 281, 30 + 489) = (821, 519). Red probe head: (160, 174) -->
+        <path class="lead red" d="M 821 519 C 700 480, 450 360, 160 174"/>
+        <!-- COM jack center: (540 + 119, 30 + 489) = (659, 519). Black probe head: (160, 306) -->
+        <path class="lead blk" d="M 659 519 C 580 510, 380 440, 160 306"/>
+
+        <!-- METER — knob to A=, 10A + COM lit, source provenance badge on screen -->
+        <g class="meter-group" transform="translate(540, 30)">
+          <ellipse class="meter-shadow" cx="200" cy="510" rx="170" ry="14"/>
+          <rect class="meter-case" x="40" y="20" width="320" height="500" rx="14"/>
+          <text class="meter-brand" x="200" y="44">DIGITAL MULTIMETER</text>
+
+          <rect class="meter-screen" x="68" y="58" width="264" height="106"/>
+          <rect class="meter-screen-shadow" x="68" y="58" width="264" height="8"/>
+          <text class="meter-mode-label" x="78" y="78">A═ · 10 A RANGE</text>
+          <text class="meter-reading" x="266" y="116">5.4</text>
+          <text class="meter-unit-display" x="274" y="116">A</text>
+
+          <rect class="range-bar-bg" x="78" y="128" width="244" height="14" rx="1"/>
+          <rect class="range-bar-fill" x="176" y="129" width="73" height="12"/>
+          <rect class="range-bar-target" x="210" y="127" width="2" height="16"/>
+          <text class="range-label" x="78" y="153">0 A</text>
+          <text class="range-label" x="176" y="153">4</text>
+          <text class="range-label" x="249" y="153">7</text>
+          <text class="range-label" x="322" y="153" text-anchor="end">10 A</text>
+
+          <!-- SOURCE PROVENANCE BADGE — FIELD validated -->
+          <text class="provenance-badge field" x="78" y="164">FIELD n=23</text>
+          <text class="provenance-meta" x="138" y="164">· avg 5.2 A ± 0.6</text>
+
+          <!-- DIAL -->
+          <circle class="dial-track" cx="200" cy="320" r="140"/>
+          <circle class="dial-inner" cx="200" cy="320" r="118"/>
+
+          <text class="dial-label" x="200" y="190">OFF</text>
+          <line class="dial-tick" x1="200" y1="202" x2="200" y2="212"/>
+          <text class="dial-label" x="265" y="207">V~</text>
+          <line class="dial-tick" x1="250" y1="220" x2="258" y2="226"/>
+          <text class="dial-label" x="313" y="255">V═</text>
+          <line class="dial-tick" x1="289" y1="261" x2="298" y2="266"/>
+          <text class="dial-label" x="330" y="320">mV</text>
+          <line class="dial-tick" x1="306" y1="320" x2="316" y2="320"/>
+          <text class="dial-label" x="313" y="385">Ω</text>
+          <line class="dial-tick" x1="289" y1="379" x2="298" y2="374"/>
+          <text class="dial-label" x="265" y="433">▶|))</text>
+          <line class="dial-tick" x1="250" y1="420" x2="258" y2="414"/>
+          <text class="dial-label" x="200" y="450">Hz%</text>
+          <line class="dial-tick" x1="200" y1="438" x2="200" y2="428"/>
+          <text class="dial-label" x="135" y="433">⊣⊢</text>
+          <line class="dial-tick" x1="150" y1="420" x2="142" y2="414"/>
+          <text class="dial-label" x="87" y="385">°C</text>
+          <line class="dial-tick" x1="111" y1="379" x2="102" y2="374"/>
+          <text class="dial-label" x="70" y="320">A~</text>
+          <line class="dial-tick" x1="94" y1="320" x2="84" y2="320"/>
+          <!-- A= TARGET -->
+          <text class="dial-label target" x="87" y="255">A═</text>
+          <line class="dial-tick target" x1="111" y1="261" x2="102" y2="266"/>
+          <text class="dial-label" x="135" y="207">mA</text>
+          <line class="dial-tick" x1="150" y1="220" x2="142" y2="226"/>
+
+          <circle class="knob-body" cx="200" cy="320" r="52"/>
+          <circle class="knob-grip" cx="200" cy="320" r="44"/>
+          <line class="dial-tick" x1="200" y1="280" x2="200" y2="290" stroke-width="1"/>
+          <line class="dial-tick" x1="240" y1="320" x2="230" y2="320" stroke-width="1"/>
+          <line class="dial-tick" x1="200" y1="360" x2="200" y2="350" stroke-width="1"/>
+          <line class="dial-tick" x1="160" y1="320" x2="170" y2="320" stroke-width="1"/>
+
+          <!-- Pointer rotated to 300° (A=, upper-left) -->
+          <polygon class="knob-pointer" points="200,320 170,302 164,308" />
+          <circle cx="200" cy="320" r="5" fill="#3a3a38" stroke="#0a0a0a" stroke-width="0.6"/>
+
+          <!-- INPUT JACKS — 10A and COM LIT -->
+          <rect class="jack" x="78" y="478" width="22" height="22" rx="2"/>
+          <circle cx="89" cy="489" r="5.5" fill="#1a1a1a"/>
+          <text class="jack-label" x="89" y="512">VΩHz</text>
+
+          <rect class="jack jack-active" x="108" y="478" width="22" height="22" rx="2"/>
+          <circle cx="119" cy="489" r="5.5" fill="#1a1a1a" stroke="#888" stroke-width="0.4"/>
+          <text class="jack-label" x="119" y="512">COM</text>
+
+          <rect class="jack jack-active" x="270" y="478" width="22" height="22" rx="2"/>
+          <circle cx="281" cy="489" r="5.5" fill="#c44848"/>
+          <text class="jack-label" x="281" y="512">10 A</text>
+
+          <rect class="jack" x="300" y="478" width="22" height="22" rx="2"/>
+          <circle cx="311" cy="489" r="5.5" fill="#1a1a1a"/>
+          <text class="jack-label" x="311" y="512">mA</text>
+
+          <text class="meter-model" x="200" y="503">vyn-DMM-01</text>
+        </g>
+
+      </g>
+
+    </svg>
+
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot red"></span>Red → upstream (from relay)</div>
+      <div class="legend-item"><span class="legend-dot blk"></span>Black → downstream (to pump)</div>
+      <div class="legend-item"><span class="legend-dot amb"></span>Knob → A═ · 10 A jack</div>
+      <div class="legend-item">Expected: <b>4–7 A</b> · <b style="color:#2d6a40">FIELD n=23</b></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -7,9 +7,11 @@ import type { Session } from './db/schema'
  *
  * Order matters:
  *   1. Closed session → read-only summary (no more form-loop)
- *   2. No tree yet → loading screen
- *   3. Gate blocked → decline page
- *   4. Otherwise → active-session view (handles in-progress AND
+ *   2. Cache-hit session → cached-overview (must beat tree-generating so the
+ *      empty-sentinel treeState of cache-hit sessions doesn't route to loading)
+ *   3. No tree yet → loading screen
+ *   4. Gate blocked → decline page
+ *   5. Otherwise → active-session view (handles in-progress AND
  *      diagnosis-complete states; when treeState.done is true the
  *      active-session view renders the AI's root-cause summary, safety
  *      message, recommended repair, and expected post-repair signal — and
@@ -21,12 +23,16 @@ export type SessionRoute =
   | { kind: 'redirect'; to: string }
   | { kind: 'active-session' }
   | { kind: 'closed-summary' }
+  | { kind: 'cached-overview' }
 
 export function routeForSession(
-  session: Pick<Session, 'id' | 'status' | 'treeState'>,
+  session: Pick<Session, 'id' | 'status' | 'treeState' | 'cacheHitSymptomId' | 'cacheHitPlatformId'>,
 ): SessionRoute {
   if (session.status === 'closed') {
     return { kind: 'closed-summary' }
+  }
+  if (session.cacheHitSymptomId) {
+    return { kind: 'cached-overview' }
   }
   if (!session.treeState || session.treeState.nodes.length === 0) {
     return { kind: 'tree-generating' }

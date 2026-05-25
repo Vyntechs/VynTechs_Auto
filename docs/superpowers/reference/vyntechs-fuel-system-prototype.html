@@ -1,0 +1,1627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6.7L Power Stroke Fuel System · Wiring Topology Prototype · Vyntechs</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bone-50:  #fbf8f0;
+  --bone-100: #f5f0e0;
+  --bone-200: #ede5d0;
+  --bone-300: #d4cdb8;
+  --bone-400: #b8b09a;
+  --bone-700: #6b6657;
+  --bone-800: #4a4536;
+  --bone-900: #2d2920;
+
+  --ink-900: #1a1a1a;
+  --ink-700: #3a3a3a;
+  --ink-500: #6b6657;
+  --ink-300: #b8b3a5;
+
+  --signal-300: #b3c2e2;
+  --signal-500: #2d4a8a;
+  --signal-700: #1f3460;
+
+  --amber-500: #c89a3e;
+  --amber-300: #e2c47a;
+
+  /* Role-coded wire palette — NOT pretending to be real wire colors.
+     Each is semantic to its electrical role. */
+  --role-signal:    #4ca866; /* fresh green */
+  --role-5v-ref:    #c97842; /* burnt orange */
+  --role-low-ref:   #6b6657; /* graphite */
+  --role-pwm:       #b3a82e; /* chartreuse-mustard */
+  --role-12v:       #b34d4d; /* red-coral */
+  --role-ground:    #1a1a1a; /* black */
+
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans:  "Inter Tight", -apple-system, "SF Pro Text", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bone-50);
+  color: var(--ink-900);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ============================================================
+   PAGE LAYOUT
+   ============================================================ */
+.page {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+.page-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--bone-300);
+  margin-bottom: 32px;
+}
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+  margin-bottom: 14px;
+}
+.page-head h1 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 44px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--ink-900);
+  margin-bottom: 10px;
+}
+.vehicle {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-700);
+  letter-spacing: 0;
+}
+.vehicle .sep { color: var(--bone-400); margin: 0 8px; }
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  column-gap: 28px;
+  row-gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-700);
+  text-transform: uppercase;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.swatch {
+  width: 18px; height: 3px;
+  border-radius: 1px;
+}
+
+/* ============================================================
+   MAIN LAYOUT
+   ============================================================ */
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ============================================================
+   DIAGRAM CANVAS
+   ============================================================ */
+.canvas-wrap {
+  background:
+    linear-gradient(var(--bone-100), var(--bone-100)),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 23px,
+      rgba(107, 102, 87, 0.06) 23px,
+      rgba(107, 102, 87, 0.06) 24px
+    );
+  background-blend-mode: multiply;
+  border: 1px solid var(--bone-300);
+  border-radius: 2px;
+  padding: 24px;
+  position: relative;
+}
+.canvas-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--bone-200);
+}
+.canvas-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--ink-900);
+}
+.canvas-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.canvas-meta b { color: var(--amber-500); font-weight: 500; }
+
+svg.diagram { display: block; width: 100%; height: auto; background: transparent; }
+
+/* Component faceplates */
+.comp {
+  cursor: pointer;
+  transition: filter var(--dur) var(--ease);
+}
+.comp:hover .comp-rect,
+.comp:focus .comp-rect {
+  filter: drop-shadow(0 2px 6px rgba(45, 74, 138, 0.18));
+}
+.comp.is-selected .comp-rect {
+  stroke: var(--amber-500);
+  stroke-width: 2;
+}
+.comp.is-selected .comp-name { fill: var(--ink-900); }
+
+.comp-rect {
+  fill: var(--bone-50);
+  stroke: var(--ink-900);
+  stroke-width: 1.2;
+  rx: 2;
+  transition: stroke var(--dur) var(--ease), stroke-width var(--dur) var(--ease);
+}
+.comp-rect.is-mechanical {
+  fill: var(--bone-100);
+  stroke: var(--bone-400);
+  stroke-dasharray: 4 3;
+}
+.comp-rect.is-splice {
+  fill: var(--bone-200);
+  stroke: var(--ink-700);
+  rx: 8;
+}
+.comp-name {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  fill: var(--ink-900);
+  text-anchor: middle;
+}
+.comp-name.is-mechanical { fill: var(--ink-500); font-style: italic; }
+.comp-loc {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  fill: var(--ink-500);
+  text-anchor: middle;
+  text-transform: uppercase;
+}
+.comp-wires {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--bone-700);
+  text-anchor: middle;
+  letter-spacing: 0.04em;
+}
+
+/* Pin cavities */
+.pin { cursor: pointer; }
+.pin-rect {
+  fill: var(--bone-200);
+  stroke: var(--ink-700);
+  stroke-width: 0.6;
+  rx: 1.5;
+  transition: fill var(--dur) var(--ease), stroke var(--dur) var(--ease);
+}
+.pin:hover .pin-rect,
+.pin:focus .pin-rect { fill: var(--amber-300); }
+.pin.is-selected .pin-rect {
+  fill: var(--amber-500);
+  stroke: var(--amber-500);
+}
+.pin-num {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: var(--ink-500);
+  text-anchor: middle;
+  letter-spacing: 0;
+  user-select: none;
+}
+.pin.is-selected .pin-num { fill: var(--bone-50); }
+
+/* Wires */
+.wire {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transition: stroke-width var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.wire.is-active {
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.wire.dim { opacity: 0.25; }
+.wire-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  fill: var(--ink-700);
+  text-transform: uppercase;
+}
+
+/* Rail context (vertical strip behind FRP sensor + regulator) */
+.rail-context {
+  fill: var(--bone-200);
+  stroke: var(--bone-300);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.rail-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  fill: var(--bone-700);
+  text-anchor: middle;
+  text-transform: uppercase;
+}
+
+/* Missing-label badge inside diagram */
+.unknown-badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: var(--ink-500);
+  text-anchor: middle;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ============================================================
+   SIDE PANEL
+   ============================================================ */
+.panel {
+  background: var(--bone-100);
+  border: 1px solid var(--bone-300);
+  border-radius: 2px;
+  padding: 24px;
+  position: sticky;
+  top: 24px;
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+.panel-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  min-height: 420px;
+  color: var(--ink-500);
+  padding: 20px;
+}
+.panel-empty-icon {
+  width: 48px; height: 48px;
+  border: 1px dashed var(--bone-400);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--bone-400);
+  margin-bottom: 16px;
+}
+.panel-empty-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink-700);
+  margin-bottom: 8px;
+}
+.panel-empty-sub {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink-500);
+  max-width: 240px;
+}
+
+.panel-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber-500);
+  margin-bottom: 8px;
+}
+.panel-title {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink-900);
+  margin-bottom: 4px;
+}
+.panel-subtitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-700);
+  margin-bottom: 16px;
+}
+.panel-rule {
+  height: 1px;
+  background: var(--bone-300);
+  margin: 16px -24px;
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bone-200);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.kv-row:last-child { border-bottom: 0; }
+.kv-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+  padding-top: 2px;
+}
+.kv-value {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink-900);
+}
+.kv-value.is-mono { font-family: var(--font-mono); font-size: 12.5px; }
+
+.panel-block {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  color: var(--ink-700);
+  line-height: 1.55;
+  margin-top: 14px;
+}
+.panel-block h4 {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-900);
+  margin-bottom: 6px;
+}
+
+.expect {
+  background: var(--bone-50);
+  border: 1px solid var(--bone-300);
+  padding: 10px 12px;
+  border-radius: 2px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-900);
+}
+.expect b { color: var(--signal-500); font-weight: 500; }
+
+.alarm {
+  background: rgba(179, 77, 77, 0.06);
+  border-left: 2px solid var(--role-12v);
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--ink-700);
+  line-height: 1.5;
+}
+.alarm b { color: var(--role-12v); font-weight: 600; }
+
+.pin-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 10px;
+}
+.pin-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bone-50);
+  border: 1px solid var(--bone-200);
+  border-radius: 2px;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.pin-list li:hover {
+  border-color: var(--amber-500);
+  background: var(--bone-100);
+}
+.pin-list .pin-list-role {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+  padding: 2px 6px;
+  border: 1px solid var(--bone-300);
+  border-radius: 2px;
+}
+
+.unknown-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-500);
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* ============================================================
+   FOOTER — what's known vs. still missing
+   ============================================================ */
+.footer {
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid var(--bone-300);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+.footer h3 {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-900);
+  margin-bottom: 10px;
+}
+.footer h3 .count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-500);
+  margin-left: 8px;
+  letter-spacing: 0.04em;
+}
+.footer ul { list-style: none; padding: 0; }
+.footer li {
+  padding: 6px 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink-700);
+  border-bottom: 1px solid var(--bone-200);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.footer li:last-child { border-bottom: 0; }
+.tick {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--role-signal);
+  flex-shrink: 0;
+}
+.gap-mark {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--amber-500);
+  flex-shrink: 0;
+}
+.footer-note {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--bone-100);
+  border-left: 2px solid var(--signal-500);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--ink-700);
+  line-height: 1.55;
+}
+
+/* ============================================================
+   SCENARIO BAR — operational + fault simulation controls
+   ============================================================ */
+.scenario-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  align-items: center;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  background: var(--bone-50);
+  border: 1px solid var(--bone-300);
+  border-radius: 2px;
+}
+.scenario-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scenario-group-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+  margin-right: 6px;
+}
+.scenario-pill {
+  background: transparent;
+  border: 1px solid var(--bone-300);
+  color: var(--ink-700);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.scenario-pill:hover { border-color: var(--signal-500); color: var(--signal-500); }
+.scenario-pill:focus-visible { outline: 2px solid var(--signal-500); outline-offset: 2px; }
+.scenario-pill.is-active {
+  background: var(--ink-900);
+  border-color: var(--ink-900);
+  color: var(--bone-50);
+}
+.scenario-pill.is-fault.is-active {
+  background: var(--role-12v);
+  border-color: var(--role-12v);
+}
+
+/* ============================================================
+   WIRE ANIMATION STATES — power-flow visualization
+   pulse frequency ∝ activity / PWM duty cycle
+   ============================================================ */
+.wire {
+  stroke-dasharray: 0;
+  transition: opacity var(--dur) var(--ease), stroke-width var(--dur) var(--ease);
+}
+.wire.off { opacity: 0.16; animation: none !important; stroke-dasharray: 0; }
+
+.wire.steady-12v   { stroke-dasharray: 12 4; animation: flow 2.4s linear infinite; }
+.wire.steady-5v    { stroke-dasharray: 10 4; animation: flow 2.8s linear infinite; opacity: 0.92; }
+.wire.steady-gnd   { stroke-dasharray: 16 3; animation: flow 2.6s linear infinite; opacity: 0.85; }
+
+.wire.signal-rest  { stroke-dasharray: 6 8;  animation: flow 3.2s linear infinite; opacity: 0.55; }
+.wire.signal-low   { stroke-dasharray: 6 6;  animation: flow 2.4s linear infinite; opacity: 0.7; }
+.wire.signal-med   { stroke-dasharray: 6 5;  animation: flow 1.6s linear infinite; }
+.wire.signal-high  { stroke-dasharray: 6 4;  animation: flow 1.0s linear infinite; }
+.wire.signal-pegged{ stroke-dasharray: 6 3;  animation: flow 0.5s linear infinite; }
+
+.wire.pwm-low      { stroke-dasharray: 5 4;  animation: flow 1.5s linear infinite; opacity: 0.85; }
+.wire.pwm-med      { stroke-dasharray: 5 3;  animation: flow 0.85s linear infinite; }
+.wire.pwm-high     { stroke-dasharray: 4 2;  animation: flow 0.42s linear infinite; }
+.wire.pwm-max      { stroke-dasharray: 4 2;  animation: flow 0.22s linear infinite; }
+
+@keyframes flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -16; }
+}
+
+.canvas-meta.is-live { color: var(--ink-900); }
+.canvas-meta.is-live b { color: var(--signal-500); }
+.canvas-meta.is-fault b { color: var(--role-12v); }
+
+/* "Right now" scenario callout in the pin/component panel */
+.right-now {
+  background: var(--ink-900);
+  color: var(--bone-50);
+  padding: 12px 14px;
+  border-radius: 2px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.right-now .label {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber-300);
+  margin-bottom: 4px;
+}
+.right-now.is-fault { background: #2d1818; border-left: 3px solid var(--role-12v); }
+.right-now.is-fault .label { color: var(--role-12v); }
+
+@media (max-width: 1080px) {
+  .main { grid-template-columns: 1fr; }
+  .panel { position: static; }
+  .legend { grid-template-columns: 1fr 1fr 1fr; }
+  .scenario-bar { gap: 10px 16px; }
+}
+</style>
+</head>
+
+<body>
+<div class="page">
+
+  <!-- ============================================================
+       HEADER
+       ============================================================ -->
+  <header class="page-head">
+    <div>
+      <div class="eyebrow">Wiring Topology · Diagnostic-Complete From Theory</div>
+      <h1>6.7L Power Stroke Fuel System</h1>
+      <div class="vehicle">
+        <span>2017–2019 Ford F-250 / F-350 Super Duty</span>
+        <span class="sep">·</span>
+        <span>6.7L Power Stroke Diesel</span>
+      </div>
+    </div>
+
+    <div class="legend" aria-label="Wire role legend">
+      <span class="legend-item"><span class="swatch" style="background:var(--role-signal)"></span> Signal</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--role-5v-ref)"></span> 5V Ref</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--role-low-ref)"></span> Low Ref</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--role-pwm)"></span> PWM Control</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--role-12v)"></span> 12V</span>
+      <span class="legend-item"><span class="swatch" style="background:var(--role-ground)"></span> Ground</span>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       MAIN: DIAGRAM + PANEL
+       ============================================================ -->
+  <div class="main">
+
+    <!-- DIAGRAM -->
+    <div class="canvas-wrap">
+
+      <!-- Scenario controls — choose what state to simulate -->
+      <div class="scenario-bar" role="toolbar" aria-label="Simulation scenarios">
+        <div class="scenario-group">
+          <span class="scenario-group-label">Operation</span>
+          <button type="button" class="scenario-pill" data-scenario="key-off">Key off</button>
+          <button type="button" class="scenario-pill" data-scenario="key-on">Key on · engine off</button>
+          <button type="button" class="scenario-pill is-active" data-scenario="idle">Idle</button>
+          <button type="button" class="scenario-pill" data-scenario="light-load">Light load</button>
+          <button type="button" class="scenario-pill" data-scenario="medium-load">Medium load</button>
+          <button type="button" class="scenario-pill" data-scenario="heavy-load">Heavy load</button>
+        </div>
+        <div class="scenario-group">
+          <span class="scenario-group-label">Fault sim</span>
+          <button type="button" class="scenario-pill is-fault" data-scenario="fault-high">Pegged high pressure</button>
+          <button type="button" class="scenario-pill is-fault" data-scenario="fault-low">No pressure</button>
+        </div>
+      </div>
+
+      <div class="canvas-head">
+        <span class="canvas-title">Electrical topology</span>
+        <span class="canvas-meta is-live" id="scenarioReadout">Now showing · <b>Engine Idle</b> — lift pump steady, both PWM regulators at moderate duty, FRP reading idle pressure</span>
+      </div>
+
+      <svg class="diagram" viewBox="0 0 900 760" xmlns="http://www.w3.org/2000/svg" aria-label="Interactive wiring topology diagram">
+
+        <!-- ============================================================
+             RAIL CONTEXT (background shapes, behind components)
+             ============================================================ -->
+        <g aria-hidden="true">
+          <!-- Driver-side rail strip -->
+          <rect class="rail-context" x="565" y="250" width="80" height="320"/>
+          <text class="rail-label" x="605" y="244">DS RAIL</text>
+          <text class="rail-label" x="605" y="586" style="font-size:8.5px">front ↑    back ↓</text>
+
+          <!-- Passenger-side rail (mechanical only) -->
+          <rect class="rail-context" x="780" y="250" width="60" height="320" style="opacity:0.55"/>
+          <text class="rail-label" x="810" y="244" style="font-size:9px">PS RAIL</text>
+          <text class="rail-label" x="810" y="412" style="font-size:8px; opacity:0.7">mechanical</text>
+          <text class="rail-label" x="810" y="424" style="font-size:8px; opacity:0.7">only</text>
+        </g>
+
+        <!-- ============================================================
+             WIRES (drawn before components so components overlap them at endpoints)
+             ============================================================ -->
+        <g class="wires">
+
+          <!-- 1. PCM → Lift Pump 12V (red) -->
+          <path id="w-lp-12v" class="wire" stroke="var(--role-12v)" data-pin="lp-12v"
+                d="M 300,140 L 300,180 L 110,180 L 110,612"/>
+
+          <!-- 2. Lift Pump GND → Chassis ground (black) -->
+          <path id="w-lp-gnd" class="wire" stroke="var(--role-ground)" data-pin="lp-gnd"
+                d="M 170,692 L 170,720"/>
+
+          <!-- 3. PCM → VCV pin A (chartreuse PWM) -->
+          <path id="w-vcv-a" class="wire" stroke="var(--role-pwm)" data-pin="vcv-a"
+                d="M 350,140 L 350,400 L 350,430"/>
+
+          <!-- 4. PCM → VCV pin B (chartreuse PWM) -->
+          <path id="w-vcv-b" class="wire" stroke="var(--role-pwm)" data-pin="vcv-b"
+                d="M 390,140 L 390,400 L 390,430"/>
+
+          <!-- 5. PCM → FRP Signal (green) -->
+          <path id="w-frp-signal" class="wire" stroke="var(--role-signal)" data-pin="frp-signal"
+                d="M 470,140 L 470,200 L 605,200 L 605,300"/>
+
+          <!-- 6. PCM → Shared 5V splice → FRP 5V (burnt orange) -->
+          <path id="w-frp-5v" class="wire" stroke="var(--role-5v-ref)" data-pin="frp-5v"
+                d="M 530,140 L 530,170 L 542,182"/>
+          <path class="wire" stroke="var(--role-5v-ref)" data-pin="frp-5v"
+                d="M 542,200 L 542,225 L 585,225 L 585,300"/>
+
+          <!-- 7. FRP Low Ref → Shared splice → PCM (gray) -->
+          <path id="w-frp-lref" class="wire" stroke="var(--role-low-ref)" data-pin="frp-lref"
+                d="M 625,300 L 625,225 L 600,225 L 600,200"/>
+          <path class="wire" stroke="var(--role-low-ref)" data-pin="frp-lref"
+                d="M 580,200 L 580,140 L 580,140"/>
+
+          <!-- 8. PCM → FRP Regulator pin A (chartreuse PWM) -->
+          <path id="w-reg-a" class="wire" stroke="var(--role-pwm)" data-pin="reg-a"
+                d="M 640,140 L 640,180 L 720,180 L 720,460 L 595,460 L 595,490"/>
+
+          <!-- 9. PCM → FRP Regulator pin B (chartreuse PWM) -->
+          <path id="w-reg-b" class="wire" stroke="var(--role-pwm)" data-pin="reg-b"
+                d="M 680,140 L 680,200 L 740,200 L 740,475 L 615,475 L 615,490"/>
+
+        </g>
+
+        <!-- Wire labels -->
+        <g class="wire-labels" aria-hidden="true">
+          <text class="wire-label" x="115" y="395" text-anchor="end">12V</text>
+          <text class="wire-label" x="135" y="708" text-anchor="start">GND</text>
+          <text class="wire-label" x="333" y="280" text-anchor="end">PWM</text>
+          <text class="wire-label" x="408" y="280" text-anchor="start">PWM</text>
+          <text class="wire-label" x="500" y="195" text-anchor="start">SIGNAL</text>
+          <text class="wire-label" x="513" y="170" text-anchor="end">5V</text>
+          <text class="wire-label" x="638" y="170" text-anchor="start">LOW REF</text>
+          <text class="wire-label" x="730" y="330" text-anchor="start">PWM A</text>
+          <text class="wire-label" x="750" y="345" text-anchor="start">PWM B</text>
+        </g>
+
+        <!-- ============================================================
+             SHARED SPLICES
+             ============================================================ -->
+        <g class="comp comp-splice" data-id="shared-5v" tabindex="0" role="button" aria-label="Shared 5V Splice">
+          <rect class="comp-rect is-splice" x="528" y="180" width="28" height="22"/>
+          <text class="pin-num" x="542" y="195">5V</text>
+        </g>
+        <g class="comp comp-splice" data-id="shared-lref" tabindex="0" role="button" aria-label="Shared Low-Reference Splice">
+          <rect class="comp-rect is-splice" x="588" y="180" width="28" height="22"/>
+          <text class="pin-num" x="602" y="195">LR</text>
+        </g>
+
+        <!-- ============================================================
+             PCM
+             ============================================================ -->
+        <g class="comp" data-id="pcm" tabindex="0" role="button" aria-label="PCM (Powertrain Control Module)">
+          <rect class="comp-rect" x="230" y="40" width="500" height="100"/>
+          <text class="comp-name" x="480" y="68">PCM</text>
+          <text class="comp-loc" x="480" y="84">passenger-side firewall · below windshield · engine bay</text>
+          <text class="comp-wires" x="480" y="100">9 wires in this system · pin numbers not yet captured</text>
+
+          <!-- Pin slots along bottom edge -->
+          <g class="pin" data-id="pcm-out-lp-12v" tabindex="0" role="button" aria-label="PCM output to lift pump 12V">
+            <rect class="pin-rect" x="290" y="120" width="20" height="20"/>
+            <text class="pin-num" x="300" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-vcv-a" tabindex="0" role="button" aria-label="PCM output to volume control valve, pin A">
+            <rect class="pin-rect" x="340" y="120" width="20" height="20"/>
+            <text class="pin-num" x="350" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-vcv-b" tabindex="0" role="button" aria-label="PCM output to volume control valve, pin B">
+            <rect class="pin-rect" x="380" y="120" width="20" height="20"/>
+            <text class="pin-num" x="390" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-frp-signal" tabindex="0" role="button" aria-label="PCM input from FRP sensor signal">
+            <rect class="pin-rect" x="460" y="120" width="20" height="20"/>
+            <text class="pin-num" x="470" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-frp-5v" tabindex="0" role="button" aria-label="PCM 5V reference output">
+            <rect class="pin-rect" x="520" y="120" width="20" height="20"/>
+            <text class="pin-num" x="530" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-frp-lref" tabindex="0" role="button" aria-label="PCM low-reference return">
+            <rect class="pin-rect" x="570" y="120" width="20" height="20"/>
+            <text class="pin-num" x="580" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-reg-a" tabindex="0" role="button" aria-label="PCM output to FRP regulator, pin A">
+            <rect class="pin-rect" x="630" y="120" width="20" height="20"/>
+            <text class="pin-num" x="640" y="134">—</text>
+          </g>
+          <g class="pin" data-id="pcm-out-reg-b" tabindex="0" role="button" aria-label="PCM output to FRP regulator, pin B">
+            <rect class="pin-rect" x="670" y="120" width="20" height="20"/>
+            <text class="pin-num" x="680" y="134">—</text>
+          </g>
+        </g>
+
+        <!-- ============================================================
+             LIFT PUMP
+             ============================================================ -->
+        <g class="comp" data-id="lift-pump" tabindex="0" role="button" aria-label="Lift Pump in tank">
+          <rect class="comp-rect" x="50" y="612" width="240" height="80"/>
+          <text class="comp-name" x="170" y="640">Lift Pump</text>
+          <text class="comp-loc" x="170" y="656">inside fuel tank · 2-wire electric</text>
+          <text class="comp-wires" x="170" y="672">power + ground</text>
+
+          <g class="pin" data-id="lp-12v" tabindex="0" role="button" aria-label="Lift pump 12V power pin">
+            <rect class="pin-rect" x="100" y="612" width="20" height="16"/>
+            <text class="pin-num" x="110" y="624">12V</text>
+          </g>
+          <g class="pin" data-id="lp-gnd" tabindex="0" role="button" aria-label="Lift pump ground pin">
+            <rect class="pin-rect" x="160" y="692" width="20" height="16"/>
+            <text class="pin-num" x="170" y="704">GND</text>
+          </g>
+        </g>
+
+        <!-- Chassis ground stud -->
+        <g aria-hidden="true">
+          <rect class="comp-rect is-splice" x="155" y="720" width="30" height="14"/>
+          <text class="pin-num" x="170" y="731" style="fill: var(--ink-700)">⏚</text>
+          <text class="comp-loc" x="170" y="750">chassis</text>
+        </g>
+
+        <!-- ============================================================
+             HIGH-PRESSURE PUMP (mechanical)
+             ============================================================ -->
+        <g class="comp" data-id="hp-pump" tabindex="0" role="button" aria-label="High-pressure pump (mechanical)">
+          <rect class="comp-rect is-mechanical" x="280" y="500" width="200" height="100"/>
+          <text class="comp-name is-mechanical" x="380" y="540">HP Pump</text>
+          <text class="comp-loc" x="380" y="556">front of engine · cam-driven</text>
+          <text class="comp-wires" x="380" y="582" style="font-style: italic">mechanical only · no electrical wires</text>
+        </g>
+
+        <!-- ============================================================
+             VOLUME CONTROL VALVE (electrical, on HP pump)
+             ============================================================ -->
+        <g class="comp" data-id="vcv" tabindex="0" role="button" aria-label="Fuel Volume Control Valve">
+          <rect class="comp-rect" x="295" y="430" width="170" height="70"/>
+          <text class="comp-name" x="380" y="456">Volume Control Valve</text>
+          <text class="comp-loc" x="380" y="472">top of HP pump · 2-wire PWM</text>
+
+          <g class="pin" data-id="vcv-a" tabindex="0" role="button" aria-label="Volume control valve pin A">
+            <rect class="pin-rect" x="340" y="430" width="20" height="16"/>
+            <text class="pin-num" x="350" y="442">A</text>
+          </g>
+          <g class="pin" data-id="vcv-b" tabindex="0" role="button" aria-label="Volume control valve pin B">
+            <rect class="pin-rect" x="380" y="430" width="20" height="16"/>
+            <text class="pin-num" x="390" y="442">B</text>
+          </g>
+        </g>
+
+        <!-- ============================================================
+             FRP SENSOR
+             ============================================================ -->
+        <g class="comp" data-id="frp-sensor" tabindex="0" role="button" aria-label="Fuel Rail Pressure Sensor">
+          <rect class="comp-rect" x="490" y="300" width="240" height="80"/>
+          <text class="comp-name" x="610" y="328">FRP Sensor</text>
+          <text class="comp-loc" x="610" y="344">front of DS rail · 3-wire</text>
+          <text class="comp-wires" x="610" y="360">signal + 5V ref + low ref</text>
+
+          <g class="pin" data-id="frp-signal" tabindex="0" role="button" aria-label="FRP sensor signal pin">
+            <rect class="pin-rect" x="595" y="300" width="20" height="16"/>
+            <text class="pin-num" x="605" y="312">S</text>
+          </g>
+          <g class="pin" data-id="frp-5v" tabindex="0" role="button" aria-label="FRP sensor 5V reference pin">
+            <rect class="pin-rect" x="575" y="300" width="20" height="16"/>
+            <text class="pin-num" x="585" y="312">5V</text>
+          </g>
+          <g class="pin" data-id="frp-lref" tabindex="0" role="button" aria-label="FRP sensor low reference pin">
+            <rect class="pin-rect" x="615" y="300" width="20" height="16"/>
+            <text class="pin-num" x="625" y="312">LR</text>
+          </g>
+        </g>
+
+        <!-- ============================================================
+             FRP REGULATOR
+             ============================================================ -->
+        <g class="comp" data-id="frp-reg" tabindex="0" role="button" aria-label="Fuel Rail Pressure Regulator">
+          <rect class="comp-rect" x="490" y="490" width="240" height="70"/>
+          <text class="comp-name" x="610" y="518">FRP Regulator</text>
+          <text class="comp-loc" x="610" y="534">back of DS rail · 2-wire PWM</text>
+
+          <g class="pin" data-id="reg-a" tabindex="0" role="button" aria-label="FRP regulator pin A">
+            <rect class="pin-rect" x="585" y="490" width="20" height="16"/>
+            <text class="pin-num" x="595" y="502">A</text>
+          </g>
+          <g class="pin" data-id="reg-b" tabindex="0" role="button" aria-label="FRP regulator pin B">
+            <rect class="pin-rect" x="605" y="490" width="20" height="16"/>
+            <text class="pin-num" x="615" y="502">B</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <!-- ============================================================
+         SIDE PANEL
+         ============================================================ -->
+    <aside class="panel" id="panel" aria-live="polite">
+      <div class="panel-empty">
+        <div class="panel-empty-icon">⌖</div>
+        <div class="panel-empty-title">Click anything on the diagram</div>
+        <div class="panel-empty-sub">Each component, pin, and shared splice carries its location, role, expected reading, and what an abnormal reading means.</div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ============================================================
+       FOOTER — KNOWN vs MISSING
+       ============================================================ -->
+  <div class="footer">
+    <div>
+      <h3>Captured from theory <span class="count">enough to diagnose</span></h3>
+      <ul>
+        <li><span class="tick">●</span> All 5 electrical components — PCM, lift pump, volume control valve, FRP sensor, FRP regulator</li>
+        <li><span class="tick">●</span> Wire counts and roles for each component (3-wire sensor, 2-wire regulators, 2-wire pump)</li>
+        <li><span class="tick">●</span> Physical locations of each component on the truck</li>
+        <li><span class="tick">●</span> Shared splices for sensor 5V REF and LOW REF (sharing is canonical; specific siblings on the splice are labels)</li>
+        <li><span class="tick">●</span> PCM is the control authority for every electrical wire in this system</li>
+        <li><span class="tick">●</span> Mechanical context: HP pump is cam-driven, passenger rail is electrically passive</li>
+        <li><span class="tick">●</span> Diagnostic expectations for every pin: what to expect when probing, what wrong readings mean</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Labels not yet captured <span class="count">make probing faster, not possible</span></h3>
+      <ul>
+        <li><span class="gap-mark">○</span> Wire colors for every wire</li>
+        <li><span class="gap-mark">○</span> Pin numbers at every connector (PCM cavities, sensor cavities, regulator cavities)</li>
+        <li><span class="gap-mark">○</span> The specific other sensors sharing the 5V REF and LOW REF splices</li>
+        <li><span class="gap-mark">○</span> Fuse and relay identifiers in the lift pump power chain (only checked when a reading is missing — conditional branch)</li>
+        <li><span class="gap-mark">○</span> Exact convention for the 2-wire PWM regulators (switched-12V + PWM-ground OR two PCM wires) — both arrangements probe the same way</li>
+      </ul>
+      <div class="footer-note">
+        Each gap above closes one at a time as techs encounter the information in the bay — paste, save, label appears on the diagram. The diagram itself doesn't wait for completion to be useful.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   DATA MODEL — every component and pin's diagnostic content.
+   Sourced from the theory of operation Brandon wrote for the
+   6.7L Power Stroke fuel system. Plain-English shop floor copy.
+   ============================================================ */
+const DATA = {
+  // ---------- COMPONENTS ----------
+  pcm: {
+    kind: 'Module',
+    title: 'PCM',
+    subtitle: 'Powertrain Control Module',
+    location: 'Passenger side of the firewall, right below the bottom of the passenger-side windshield, in the engine bay',
+    role: 'Controller — every electrical wire in this system terminates here',
+    wires: '9 wires routed into this system (4 of which go to two PWM regulators, 3 go to the FRP sensor, 2 go to the lift pump)',
+    body: 'PCM drives the lift pump command, modulates the two PWM regulators (volume control valve on the HP pump, and the FRP pressure regulator at the back of the rail), supplies 5V reference to the sensors, and reads the FRP sensor signal. PCM modulates duty cycle on regulator drivers — duty cycle commanded determines milliamps through each coil.',
+    test: 'Probing tactic: PCM connector itself is rarely the failure. Probe at the COMPONENT end first (sensor or regulator side), and only walk back to PCM if the wire between them tests open.',
+    unknown: 'PCM connector IDs and cavity numbers for each wire — not yet captured.',
+  },
+  'lift-pump': {
+    kind: 'Pump',
+    title: 'Lift Pump',
+    subtitle: 'Low-Pressure Electric Lift Pump',
+    location: 'Inside the fuel tank',
+    role: 'Pulls fuel through the tank-mounted 10-micron filter/water separator and pushes it forward to the engine-mounted 4-micron filter, then on to the high-pressure pump. Target supply pressure: roughly 55 psi at idle.',
+    wires: '2 wires — one power, one ground',
+    body: 'Two-wire electric pump in the tank. PCM commands it on. There is typically a fuel pump driver module or a relay sitting upstream between PCM and the pump\'s power wire — those are conditional branches that only get tested when probing shows the power wire isn\'t getting 12V on command.',
+  },
+  vcv: {
+    kind: 'Solenoid',
+    title: 'Volume Control Valve',
+    subtitle: 'Metering Unit · on the high-pressure pump',
+    location: 'Top of the high-pressure pump, at the front of the engine',
+    role: 'PCM-modulated solenoid that meters fuel into the high-pressure pumping chambers. Sets the upstream side of rail pressure (the FRP regulator sets the downstream side).',
+    wires: '2 wires, both go to PCM, PWM-modulated',
+    body: 'PCM controls the milliamps through this coil by modulating duty cycle. Whether one side is switched 12V and the other is PCM-modulated ground (or both wires connect directly to PCM internal drivers) varies by design — for diagnostic purposes both wires should show PCM activity when commanded.',
+    test: 'Back-probe either pin while engine is running. PWM signal should be present and change with load and commanded rail pressure.',
+  },
+  'frp-sensor': {
+    kind: 'Sensor',
+    title: 'FRP Sensor',
+    subtitle: 'Fuel Rail Pressure Sensor',
+    location: 'Front of the driver-side fuel rail',
+    role: 'Reports actual rail pressure to PCM so the PWM control loop can hit its target.',
+    wires: '3 wires — SIGNAL, 5V REF (shared), LOW REF (shared)',
+    body: '3-wire sensor at the front of the driver-side fuel rail. Signal wire goes direct to PCM. The 5V reference and low reference each route through shared splices with other sensors on the way to/from PCM. Which other sensors share those splices is a label that gets filled in over time — but the SHARING is canonical. A failed shared 5V or low-ref splice will pull down every sensor on that bus.',
+  },
+  'frp-reg': {
+    kind: 'Solenoid',
+    title: 'FRP Regulator',
+    subtitle: 'Fuel Rail Pressure Control Valve',
+    location: 'Back of the driver-side fuel rail',
+    role: 'PCM-modulated solenoid that trims return flow out of the rail. Sets the downstream side of rail pressure.',
+    wires: '2 wires, both go to PCM, PWM-modulated',
+    body: 'Works in tandem with the volume control valve on the HP pump. Volume control sets how much fuel enters the high-pressure side; this regulator sets how much returns. Together they hold the rail at the target pressure PCM commands.',
+    test: 'Back-probe either pin while engine running. PWM should be present and modulate with commanded pressure.',
+  },
+  'hp-pump': {
+    kind: 'Mechanical',
+    title: 'High-Pressure Pump',
+    subtitle: 'Gear-Driven from the Camshaft',
+    location: 'Front of the engine',
+    role: 'Generates the rail pressure that feeds the injectors. Driven mechanically — no electrical input of its own.',
+    wires: 'None — the volume control valve mounted on top is the only electrical interface',
+    body: 'The HP pump itself is mechanical: gear-driven off the camshaft, internal cam profile drives two main pistons. The fuel volume control valve sits on top and is what regulates how much fuel actually gets pressurized — that\'s the electrical lever PCM has on this pump. Checked with mechanical pressure tests, not by probing wires.',
+  },
+  'passenger-rail': {
+    kind: 'Mechanical',
+    title: 'Passenger-Side Rail',
+    subtitle: 'Mechanical fuel routing only',
+    location: 'Passenger cylinder bank',
+    role: 'Distributes fuel to the passenger-side injectors.',
+    wires: 'None — no electrical components on this rail in this system',
+    body: 'The passenger-side rail has no electrical components in this fuel system. All electrical diagnostic on the rails happens on the driver-side rail (FRP sensor at the front, FRP regulator at the back).',
+  },
+  'shared-5v': {
+    kind: 'Splice',
+    title: 'Shared 5V Reference Splice',
+    subtitle: 'Multiple sensors share PCM\'s 5V supply through this junction',
+    location: 'Physical splice location not yet captured',
+    role: 'Common 5V reference distribution from PCM to multiple sensors',
+    wires: 'PCM\'s 5V output enters; multiple sensor 5V REF wires (FRP sensor + others) leave',
+    body: 'When several sensors on the same vehicle all report "5V REF dead" or similar voltage-reference faults at once, suspect this splice or PCM\'s 5V supply itself rather than each sensor independently.',
+    unknown: 'Which OTHER sensors share this 5V reference on this vehicle — not yet captured (this gets filled in as you build out other sensor topologies in the system).',
+  },
+  'shared-lref': {
+    kind: 'Splice',
+    title: 'Shared Low-Reference Splice',
+    subtitle: 'Sensor return path back to PCM',
+    location: 'Physical splice location not yet captured',
+    role: 'Common return / "sensor ground" path back to PCM',
+    wires: 'Multiple sensor LOW REF wires converge; one return wire to PCM',
+    body: 'Sensor low-reference is a precise return path through PCM\'s analog ground — NOT chassis ground. When several sensors read biased high at once, suspect this splice or PCM\'s low-reference circuit.',
+    unknown: 'Which OTHER sensors share this low-reference splice — not yet captured.',
+  },
+
+  // ---------- PINS (referenced by id; carry diagnostic-probe content) ----------
+  pins: {
+    'lp-12v': {
+      title: 'Lift Pump · 12V Power',
+      role: '12V',
+      probe: 'Back-probe the power wire at the lift pump connector under the truck near the tank',
+      expect: '<b>12V</b> when commanded by PCM (key-on prime, cranking, or running)',
+      missing: 'Reading <b>0V when commanded</b> → expand the conditional branch and probe upstream: fuel pump relay, fuse, and any fuel pump driver module. Reading <b>12V but pump silent</b> → ground side broken, OR pump motor seized.',
+      labelGap: 'Wire color, connector pin number, prime duration, and upstream relay/fuse identifiers — not yet captured.',
+    },
+    'lp-gnd': {
+      title: 'Lift Pump · Ground',
+      role: 'Ground',
+      probe: 'Resistance check from the ground wire at the lift pump connector to chassis ground',
+      expect: '<b>&lt; 0.5 Ω</b> continuity to chassis',
+      missing: 'Open or high resistance → broken ground wire between the pump and the chassis stud, OR corroded ground point.',
+      labelGap: 'Wire color and the exact chassis stud location — not yet captured.',
+    },
+    'vcv-a': {
+      title: 'Volume Control Valve · Pin A',
+      role: 'PWM Control',
+      probe: 'Back-probe pin A at the volume control valve connector on top of the HP pump',
+      expect: 'PWM activity when engine running. <b>Duty cycle varies with engine load</b> and the rail pressure PCM is commanding.',
+      missing: 'Flat at 12V or flat at 0V → wire broken between PCM and this pin, OR PCM driver issue (rare). Cross-check the other pin (B) to localize.',
+      labelGap: 'Wire color and pin number — not yet captured.',
+    },
+    'vcv-b': {
+      title: 'Volume Control Valve · Pin B',
+      role: 'PWM Control',
+      probe: 'Back-probe pin B at the volume control valve connector',
+      expect: 'PWM activity when engine running, complementary or inverse of pin A depending on the wiring convention',
+      missing: 'Same diagnostic logic as pin A. If A shows PWM and B is dead, the wire to B is the failure.',
+      labelGap: 'Wire color and pin number — not yet captured.',
+    },
+    'frp-signal': {
+      title: 'FRP Sensor · Signal',
+      role: 'Signal',
+      probe: 'Back-probe the signal pin at the FRP sensor connector (front of DS rail)',
+      expect: 'Analog voltage between <b>0V and 5V</b>, proportional to rail pressure. Low at rest, climbs as the rail pressurizes. Exact voltage curve for this sensor — not yet captured.',
+      missing: '<b>Stuck at 0V</b> → signal shorted to ground, OR sensor failed, OR the 5V reference is dead (check the 5V pin next). <b>Stuck at 5V</b> → signal wire open, OR shorted to 5V. <b>Reads correctly but a pressure DTC is set</b> → sensor is reading reality; the issue is the regulator or volume control valve, not the sensor.',
+      labelGap: 'Wire color, sensor pin number, and the exact voltage-to-pressure curve for this sensor — not yet captured.',
+    },
+    'frp-5v': {
+      title: 'FRP Sensor · 5V Reference',
+      role: '5V Ref',
+      probe: 'Back-probe the 5V REF pin at the FRP sensor connector',
+      expect: '<b>~5V key-on</b>',
+      missing: '0V → PCM\'s 5V supply dead, OR the shared 5V splice broken, OR the wire open. If multiple sensors share this 5V (typical), they\'ll all fail together — check another 5V-using sensor to localize whether it\'s the shared splice or just this wire.',
+      labelGap: 'Wire color and sensor pin number — not yet captured.',
+    },
+    'frp-lref': {
+      title: 'FRP Sensor · Low Reference',
+      role: 'Low Ref',
+      probe: 'Back-probe the LOW REF pin at the FRP sensor connector',
+      expect: '<b>~0V</b> — sensor\'s analog return through PCM via the shared low-ref splice',
+      missing: 'Reading above 0V → bad return path through the shared splice, OR shared splice open, OR PCM low-ref ground broken. Other sensors on the same low-ref will read biased high at the same time.',
+      labelGap: 'Wire color and sensor pin number — not yet captured.',
+    },
+    'reg-a': {
+      title: 'FRP Regulator · Pin A',
+      role: 'PWM Control',
+      probe: 'Back-probe pin A at the FRP regulator connector (back of DS rail)',
+      expect: 'PWM activity when engine running. <b>Duty cycle varies with rail-pressure target</b>.',
+      missing: 'Flat → wire broken between PCM and this pin, OR PCM driver issue. Cross-check pin B.',
+      labelGap: 'Wire color and pin number — not yet captured.',
+    },
+    'reg-b': {
+      title: 'FRP Regulator · Pin B',
+      role: 'PWM Control',
+      probe: 'Back-probe pin B at the FRP regulator connector',
+      expect: 'PWM activity when engine running, complementary to pin A',
+      missing: 'Same logic as pin A.',
+      labelGap: 'Wire color and pin number — not yet captured.',
+    },
+
+    // PCM-side pins resolve to the same logical wire (just framed from the PCM end)
+    'pcm-out-lp-12v':   { title: 'PCM · Lift Pump Power Output', role: '12V', probe: 'Back-probe at PCM connector', expect: '<b>12V on command</b> from PCM (typically routed through a relay or driver module on the way out)', missing: 'Same diagnostic as the lift pump 12V pin — see lift pump for the full chain.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-vcv-a':    { title: 'PCM · Volume Control Output A', role: 'PWM Control', probe: 'Back-probe at PCM connector', expect: 'PWM signal sent to volume control valve pin A', missing: 'No PWM here means PCM is not commanding the valve — coolant temp at startup, fuel demand, or DTC limits may suppress output.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-vcv-b':    { title: 'PCM · Volume Control Output B', role: 'PWM Control', probe: 'Back-probe at PCM connector', expect: 'PWM signal sent to volume control valve pin B', missing: 'Same as A.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-frp-signal':{ title: 'PCM · FRP Signal Input', role: 'Signal', probe: 'Back-probe at PCM connector', expect: 'Mirrors what the sensor sends — see FRP sensor signal pin for ranges', missing: 'If sensor pin reads correctly but PCM pin reads 0V → wire open between them. If both read 0V → sensor or 5V REF issue.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-frp-5v':   { title: 'PCM · 5V Reference Output', role: '5V Ref', probe: 'Back-probe at PCM connector', expect: '<b>~5V key-on</b> — feeds the shared sensor 5V splice', missing: 'Dead at PCM → PCM 5V driver fault. Live at PCM but dead at sensor → wire broken or splice failed.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-frp-lref': { title: 'PCM · Low-Reference Return', role: 'Low Ref', probe: 'Back-probe at PCM connector', expect: '<b>~0V</b> sink for the shared sensor low-ref bus', missing: 'High reading here → PCM low-ref ground compromised, OR a downstream short pulling the bus high.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-reg-a':    { title: 'PCM · FRP Regulator Output A', role: 'PWM Control', probe: 'Back-probe at PCM connector', expect: 'PWM signal sent to regulator pin A', missing: 'No PWM → PCM not commanding regulator. Check FRP sensor signal sanity first — PCM may be reading correct pressure and not commanding adjustment.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+    'pcm-out-reg-b':    { title: 'PCM · FRP Regulator Output B', role: 'PWM Control', probe: 'Back-probe at PCM connector', expect: 'PWM signal sent to regulator pin B', missing: 'Same as A.', labelGap: 'PCM connector ID and cavity number — not yet captured.' },
+  },
+};
+
+/* ============================================================
+   SCENARIO STATE MATRIX
+   Each scenario maps pin IDs to wire animation states.
+   Animation pulse rate approximates duty cycle / activity level.
+   ============================================================ */
+const SCENARIOS = {
+  'key-off': {
+    label: 'Key Off',
+    sub: 'Vehicle asleep — no power anywhere in this system',
+    pinStates: {
+      'lp-12v':'off','lp-gnd':'off',
+      'vcv-a':'off','vcv-b':'off',
+      'frp-signal':'off','frp-5v':'off','frp-lref':'off',
+      'reg-a':'off','reg-b':'off',
+    },
+  },
+  'key-on': {
+    label: 'Key On · Engine Off',
+    sub: 'PCM awake, 5V reference hot, sensors reading rest pressure. Lift pump primes briefly then stops.',
+    pinStates: {
+      'lp-12v':'pwm-low','lp-gnd':'pwm-low',
+      'vcv-a':'off','vcv-b':'off',
+      'frp-signal':'signal-rest','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'off','reg-b':'off',
+    },
+  },
+  'idle': {
+    label: 'Engine Idle',
+    sub: 'Lift pump steady, both PWM regulators at moderate duty, FRP reading idle rail pressure',
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-med','vcv-b':'pwm-med',
+      'frp-signal':'signal-med','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-med','reg-b':'pwm-med',
+    },
+  },
+  'light-load': {
+    label: 'Light Load',
+    sub: 'Cruising / light throttle — slight bump in PWM duty above idle',
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-med','vcv-b':'pwm-med',
+      'frp-signal':'signal-med','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-med','reg-b':'pwm-med',
+    },
+  },
+  'medium-load': {
+    label: 'Medium Load',
+    sub: 'Towing or moderate acceleration — higher PWM duty, rising rail pressure',
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-high','vcv-b':'pwm-high',
+      'frp-signal':'signal-high','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-high','reg-b':'pwm-high',
+    },
+  },
+  'heavy-load': {
+    label: 'Heavy Load',
+    sub: 'WOT or heavy tow — peak duty cycles, peak rail pressure',
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-max','vcv-b':'pwm-max',
+      'frp-signal':'signal-high','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-max','reg-b':'pwm-max',
+    },
+  },
+  'fault-high': {
+    label: 'Fault Sim: Pegged High Pressure',
+    sub: 'FRP signal stuck high — PCM cutting volume control AND opening regulator to bleed pressure off the rail',
+    isFault: true,
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-low','vcv-b':'pwm-low',
+      'frp-signal':'signal-pegged','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-max','reg-b':'pwm-max',
+    },
+  },
+  'fault-low': {
+    label: 'Fault Sim: No Rail Pressure',
+    sub: 'FRP signal flat low — PCM commanding max volume in AND closing return to try to build pressure',
+    isFault: true,
+    pinStates: {
+      'lp-12v':'steady-12v','lp-gnd':'steady-gnd',
+      'vcv-a':'pwm-max','vcv-b':'pwm-max',
+      'frp-signal':'signal-low','frp-5v':'steady-5v','frp-lref':'steady-5v',
+      'reg-a':'pwm-low','reg-b':'pwm-low',
+    },
+  },
+};
+
+/* Per-pin per-scenario "right now" readings, surfaced in the side panel
+   whenever a pin is selected. */
+const PIN_READINGS = {
+  'lp-12v': {
+    'key-off':'0V — PCM not commanding pump',
+    'key-on':'12V briefly during prime, then 0V',
+    'idle':'12V steady',
+    'light-load':'12V steady',
+    'medium-load':'12V steady',
+    'heavy-load':'12V steady',
+    'fault-high':'12V steady (pump runs regardless of pressure fault)',
+    'fault-low':'12V steady — if pump is actually silent, suspect ground or pump motor',
+  },
+  'lp-gnd': {
+    'key-off':'Continuity to chassis (resistance check valid any time)',
+    'key-on':'Continuity to chassis',
+    'idle':'Continuity to chassis · sinking pump current',
+    'light-load':'Continuity to chassis',
+    'medium-load':'Continuity to chassis',
+    'heavy-load':'Continuity to chassis',
+    'fault-high':'Continuity to chassis',
+    'fault-low':'Continuity to chassis',
+  },
+  'vcv-a': {
+    'key-off':'0V',
+    'key-on':'0V (PCM not yet commanding)',
+    'idle':'PWM · moderate duty (metering fuel for idle rail pressure)',
+    'light-load':'PWM · moderate duty',
+    'medium-load':'PWM · high duty',
+    'heavy-load':'PWM · near max duty',
+    'fault-high':'PWM · LOW duty — PCM cutting volume to try to bring pressure down',
+    'fault-low':'PWM · MAX duty — PCM trying to build pressure',
+  },
+  'vcv-b': {
+    'key-off':'0V','key-on':'0V',
+    'idle':'PWM activity, complementary to pin A',
+    'light-load':'PWM activity',
+    'medium-load':'PWM activity',
+    'heavy-load':'PWM near max',
+    'fault-high':'PWM · low duty (matching pin A)',
+    'fault-low':'PWM · max duty (matching pin A)',
+  },
+  'frp-signal': {
+    'key-off':'0V (sensor not powered)',
+    'key-on':'Low voltage representing rest rail pressure',
+    'idle':'Idle-pressure voltage',
+    'light-load':'Slightly above idle',
+    'medium-load':'Mid-range voltage',
+    'heavy-load':'Near-max voltage',
+    'fault-high':'Pegged near 5V — this is what the fault is showing',
+    'fault-low':'Flat low even while cranking — this is what the fault is showing',
+  },
+  'frp-5v': {
+    'key-off':'0V (PCM 5V supply off)',
+    'key-on':'~5V steady',
+    'idle':'~5V steady',
+    'light-load':'~5V steady',
+    'medium-load':'~5V steady',
+    'heavy-load':'~5V steady',
+    'fault-high':'~5V steady (5V supply is not the issue here)',
+    'fault-low':'~5V — but verify here first: if 0V, the "no pressure" fault is actually a 5V REF failure, not a rail problem',
+  },
+  'frp-lref': {
+    'key-off':'No return active',
+    'key-on':'~0V',
+    'idle':'~0V',
+    'light-load':'~0V',
+    'medium-load':'~0V',
+    'heavy-load':'~0V',
+    'fault-high':'~0V',
+    'fault-low':'~0V — verify: if biased high, the FRP signal fault is actually a low-ref splice failure',
+  },
+  'reg-a': {
+    'key-off':'0V','key-on':'0V',
+    'idle':'PWM · moderate duty (trimming return for idle pressure)',
+    'light-load':'PWM · moderate duty',
+    'medium-load':'PWM · high duty',
+    'heavy-load':'PWM · near max duty',
+    'fault-high':'PWM · MAX duty — PCM opening return to bleed off rail pressure',
+    'fault-low':'PWM · low duty — PCM closing return to hold what pressure exists',
+  },
+  'reg-b': {
+    'key-off':'0V','key-on':'0V',
+    'idle':'PWM activity, complementary to pin A',
+    'light-load':'PWM activity',
+    'medium-load':'PWM activity',
+    'heavy-load':'PWM near max',
+    'fault-high':'PWM · max (matching pin A)',
+    'fault-low':'PWM · low (matching pin A)',
+  },
+};
+
+let currentScenario = 'idle';
+
+const WIRE_STATE_CLASSES = ['off','steady-12v','steady-5v','steady-gnd','signal-rest','signal-low','signal-med','signal-high','signal-pegged','pwm-low','pwm-med','pwm-high','pwm-max'];
+
+function applyScenario(id) {
+  const s = SCENARIOS[id];
+  if (!s) return;
+  currentScenario = id;
+
+  document.querySelectorAll('.wire').forEach(w => {
+    const pin = w.getAttribute('data-pin');
+    const state = (pin && s.pinStates[pin]) ? s.pinStates[pin] : 'off';
+    WIRE_STATE_CLASSES.forEach(c => w.classList.remove(c));
+    w.classList.add(state);
+  });
+
+  document.querySelectorAll('.scenario-pill').forEach(p => {
+    p.classList.toggle('is-active', p.getAttribute('data-scenario') === id);
+  });
+
+  const readout = document.getElementById('scenarioReadout');
+  if (readout) {
+    readout.innerHTML = `Now showing · <b>${escapeHtml(s.label)}</b> — ${escapeHtml(s.sub)}`;
+    readout.classList.toggle('is-fault', !!s.isFault);
+  }
+
+  // Refresh the selected pin/component so the "right now" reading updates
+  const selPin = document.querySelector('.pin.is-selected');
+  const selComp = document.querySelector('.comp.is-selected');
+  if (selPin) renderPin(selPin.getAttribute('data-id'));
+  else if (selComp) renderComponent(selComp.getAttribute('data-id'));
+}
+
+/* ============================================================
+   INTERACTIVITY
+   ============================================================ */
+const panel = document.getElementById('panel');
+const svg = document.querySelector('svg.diagram');
+
+function clearSelection() {
+  document.querySelectorAll('.comp.is-selected, .pin.is-selected').forEach(n => n.classList.remove('is-selected'));
+  document.querySelectorAll('.wire.is-active, .wire.dim').forEach(w => w.classList.remove('is-active', 'dim'));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderComponent(id) {
+  const d = DATA[id];
+  if (!d) return;
+  const kvRows = [
+    ['Kind', d.kind],
+    ['Location', d.location],
+    ['Wires', d.wires],
+    ['Role', d.role],
+  ].map(([k, v]) => `
+    <div class="kv-row">
+      <div class="kv-label">${escapeHtml(k)}</div>
+      <div class="kv-value">${escapeHtml(v || '')}</div>
+    </div>
+  `).join('');
+
+  const pinList = (id !== 'pcm' && DATA[id].kind !== 'Mechanical' && DATA[id].kind !== 'Splice')
+    ? `
+      <div class="panel-block">
+        <h4>Pins on this component</h4>
+        <ul class="pin-list">
+          ${pinsForComponent(id).map(p => `
+            <li data-pin-jump="${p.id}">
+              <span>${escapeHtml(p.label)}</span>
+              <span class="pin-list-role">${escapeHtml(p.role)}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </div>` : '';
+
+  panel.innerHTML = `
+    <div class="panel-kind">${escapeHtml(d.kind)}</div>
+    <h2 class="panel-title">${escapeHtml(d.title)}</h2>
+    <div class="panel-subtitle">${escapeHtml(d.subtitle)}</div>
+    <div class="panel-rule"></div>
+    ${kvRows}
+    <div class="panel-block">${escapeHtml(d.body)}</div>
+    ${d.test ? `<div class="panel-block"><h4>Probing tactic</h4>${escapeHtml(d.test)}</div>` : ''}
+    ${pinList}
+    ${d.unknown ? `<div class="unknown-note">${escapeHtml(d.unknown)}</div>` : ''}
+  `;
+
+  // Bind pin-jump
+  panel.querySelectorAll('[data-pin-jump]').forEach(li => {
+    li.addEventListener('click', () => {
+      const pinId = li.getAttribute('data-pin-jump');
+      const pinNode = document.querySelector(`.pin[data-id="${pinId}"]`);
+      if (pinNode) selectPin(pinId, pinNode);
+    });
+  });
+}
+
+function pinsForComponent(compId) {
+  const map = {
+    'lift-pump': [
+      { id: 'lp-12v', label: '12V Power', role: '12V' },
+      { id: 'lp-gnd', label: 'Ground',    role: 'Ground' },
+    ],
+    'vcv': [
+      { id: 'vcv-a', label: 'Pin A', role: 'PWM' },
+      { id: 'vcv-b', label: 'Pin B', role: 'PWM' },
+    ],
+    'frp-sensor': [
+      { id: 'frp-signal', label: 'Signal',    role: 'Signal' },
+      { id: 'frp-5v',     label: '5V Ref',    role: '5V Ref' },
+      { id: 'frp-lref',   label: 'Low Ref',   role: 'Low Ref' },
+    ],
+    'frp-reg': [
+      { id: 'reg-a', label: 'Pin A', role: 'PWM' },
+      { id: 'reg-b', label: 'Pin B', role: 'PWM' },
+    ],
+  };
+  return map[compId] || [];
+}
+
+function renderPin(id) {
+  const p = DATA.pins[id];
+  if (!p) return;
+
+  const liveReading = PIN_READINGS[id] && PIN_READINGS[id][currentScenario];
+  const s = SCENARIOS[currentScenario];
+  const rightNowBlock = liveReading ? `
+    <div class="panel-block">
+      <h4>Right now</h4>
+      <div class="right-now${s && s.isFault ? ' is-fault' : ''}">
+        <span class="label">${escapeHtml(s ? s.label : '')}</span>
+        ${escapeHtml(liveReading)}
+      </div>
+    </div>
+  ` : '';
+
+  panel.innerHTML = `
+    <div class="panel-kind">Pin · ${escapeHtml(p.role)}</div>
+    <h2 class="panel-title">${escapeHtml(p.title)}</h2>
+    <div class="panel-subtitle">click another to compare · click the diagram background to clear</div>
+    <div class="panel-rule"></div>
+
+    <div class="panel-block">
+      <h4>Where to probe</h4>
+      ${escapeHtml(p.probe)}
+    </div>
+
+    ${rightNowBlock}
+
+    <div class="panel-block">
+      <h4>Expected range (overall)</h4>
+      <div class="expect">${p.expect}</div>
+    </div>
+
+    <div class="panel-block">
+      <h4>If the reading is wrong</h4>
+      <div class="alarm"><b>Diagnostic:</b> ${p.missing}</div>
+    </div>
+
+    <div class="unknown-note">${escapeHtml(p.labelGap)}</div>
+  `;
+}
+
+function highlightWiresForPin(pinId) {
+  document.querySelectorAll('.wire').forEach(w => {
+    if (w.getAttribute('data-pin') === pinId) {
+      w.classList.add('is-active');
+    } else {
+      w.classList.add('dim');
+    }
+  });
+}
+
+function selectComponent(id, node) {
+  clearSelection();
+  node.classList.add('is-selected');
+  renderComponent(id);
+}
+
+function selectPin(id, node) {
+  clearSelection();
+  node.classList.add('is-selected');
+  highlightWiresForPin(id);
+  renderPin(id);
+}
+
+/* Event delegation on the SVG */
+svg.addEventListener('click', (e) => {
+  const pinEl = e.target.closest('.pin');
+  if (pinEl) {
+    e.stopPropagation();
+    selectPin(pinEl.getAttribute('data-id'), pinEl);
+    return;
+  }
+  const compEl = e.target.closest('.comp');
+  if (compEl) {
+    selectComponent(compEl.getAttribute('data-id'), compEl);
+    return;
+  }
+});
+
+/* Click outside to clear */
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('svg.diagram') && !e.target.closest('.panel')) {
+    clearSelection();
+    panel.innerHTML = `
+      <div class="panel-empty">
+        <div class="panel-empty-icon">⌖</div>
+        <div class="panel-empty-title">Click anything on the diagram</div>
+        <div class="panel-empty-sub">Each component, pin, and shared splice carries its location, role, expected reading, and what an abnormal reading means.</div>
+      </div>
+    `;
+  }
+});
+
+/* Keyboard activation */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    const a = document.activeElement;
+    if (a && a.matches('.comp, .pin')) {
+      e.preventDefault();
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+  }
+  if (e.key === 'Escape') {
+    clearSelection();
+    panel.innerHTML = `
+      <div class="panel-empty">
+        <div class="panel-empty-icon">⌖</div>
+        <div class="panel-empty-title">Click anything on the diagram</div>
+        <div class="panel-empty-sub">Each component, pin, and shared splice carries its location, role, expected reading, and what an abnormal reading means.</div>
+      </div>
+    `;
+  }
+});
+
+/* Scenario pill click handlers */
+document.querySelectorAll('.scenario-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    const id = pill.getAttribute('data-scenario');
+    if (id) applyScenario(id);
+  });
+});
+
+/* Initialize with the default scenario so wires animate on first load */
+applyScenario('idle');
+</script>
+
+</body>
+</html>

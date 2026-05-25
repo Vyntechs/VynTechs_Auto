@@ -1,0 +1,1442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnostic Sessions · 6.7L Power Stroke HP Fuel · Vyntechs</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bone-50:  #fbf8f0;
+  --bone-100: #f5f0e0;
+  --bone-200: #ede5d0;
+  --bone-300: #d4cdb8;
+  --bone-400: #b8b09a;
+  --bone-700: #6b6657;
+  --bone-800: #4a4536;
+  --bone-900: #2d2920;
+  --ink-900: #1a1a1a;
+  --ink-700: #3a3a3a;
+  --ink-500: #6b6657;
+  --amber-500: #c89a3e;
+  --amber-300: #e2c47a;
+  --gate-fail: #b34d4d;
+  --gate-pass: #4ca866;
+  --gate-warn: #c89a3e;
+  --probe-red: #c44848;
+  --probe-blk: #1a1a1a;
+  --role-signal:    #4ca866;
+  --role-5v-ref:    #c97842;
+  --role-low-ref:   #6b6657;
+  --role-pwm:       #b3a82e;
+  --flow-lp:        #4a7caa;
+  --flow-hp:        #2d4a8a;
+  --flow-return:    #8a6a3a;
+  --flow-leakoff:   #aa6644;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans:  "Inter Tight", -apple-system, ui-sans-serif, system-ui, sans-serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 220ms;
+  --dim: 0.12;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bone-50);
+  color: var(--ink-900);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 1340px; margin: 0 auto; padding: 24px 24px 80px; }
+
+/* HEADER */
+.head { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; padding-bottom: 16px; border-bottom: 1px solid var(--bone-300); margin-bottom: 16px; }
+.eyebrow { font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); margin-bottom: 6px; }
+.head h1 { font-family: var(--font-serif); font-size: 30px; line-height: 1.05; letter-spacing: -0.02em; margin-bottom: 4px; }
+.vehicle { font-family: var(--font-mono); font-size: 12px; color: var(--ink-700); }
+.vehicle .sep { color: var(--bone-400); margin: 0 8px; }
+
+/* CONCERN SELECTOR */
+.concerns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.concern-pill {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 10px 14px;
+  background: var(--bone-100);
+  border: 1px solid var(--bone-300);
+  border-radius: 2px;
+  cursor: pointer;
+  color: var(--ink-700);
+  transition: all var(--dur) var(--ease);
+}
+.concern-pill:hover { border-color: var(--ink-700); }
+.concern-pill.selected { background: var(--ink-900); color: var(--bone-50); border-color: var(--ink-900); }
+
+/* GATE */
+.gate { background: var(--bone-100); border: 1px solid var(--bone-300); border-radius: 2px; padding: 12px 16px; min-width: 280px; }
+.gate-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.gate-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); font-family: var(--font-mono); }
+.gate-value { font-family: var(--font-serif); font-size: 22px; color: var(--gate-fail); transition: color 400ms var(--ease); }
+.gate-value.warn { color: var(--gate-warn); }
+.gate-value.pass { color: var(--gate-pass); }
+.gate-bar { height: 4px; background: var(--bone-200); border-radius: 2px; position: relative; overflow: hidden; }
+.gate-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--gate-fail); transition: width 500ms var(--ease), background 400ms var(--ease); }
+.gate-bar-fill.warn { background: var(--gate-warn); }
+.gate-bar-fill.pass { background: var(--gate-pass); }
+.gate-bar-threshold { position: absolute; left: 95%; top: -2px; bottom: -2px; width: 2px; background: var(--ink-700); }
+.gate-status { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gate-fail); margin-top: 6px; transition: color 400ms var(--ease); }
+.gate-status.warn { color: var(--gate-warn); }
+.gate-status.pass { color: var(--gate-pass); }
+
+/* CONCERN BANNER */
+.banner { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; background: #fffaf0; border: 1px solid var(--amber-300); border-left: 4px solid var(--amber-500); border-radius: 2px; padding: 12px 16px; margin-bottom: 16px; }
+.banner-code { font-family: var(--font-mono); font-weight: 500; font-size: 12px; letter-spacing: 0.1em; color: var(--amber-500); }
+.banner-text { color: var(--ink-700); font-size: 13px; }
+.banner-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); }
+
+/* MAIN */
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 460px; gap: 20px; align-items: start; }
+@media (max-width: 960px) { .main { grid-template-columns: 1fr; } }
+
+/* SCENARIOS */
+.scenarios { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.scenario-pill { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 10px; border: 1px solid var(--bone-300); background: var(--bone-100); border-radius: 20px; color: var(--ink-500); opacity: 0.45; transition: all var(--dur) var(--ease); }
+.scenario-pill.required { opacity: 1; border-color: var(--amber-500); background: #fff5dc; color: var(--bone-800); box-shadow: 0 0 0 2px rgba(200, 154, 62, 0.18); }
+
+/* DIAGRAM */
+.canvas-wrap { background: linear-gradient(var(--bone-100), var(--bone-100)), repeating-linear-gradient(0deg, transparent 0, transparent 23px, rgba(107, 102, 87, 0.06) 23px, rgba(107, 102, 87, 0.06) 24px); background-blend-mode: multiply; border: 1px solid var(--bone-300); border-radius: 2px; padding: 16px; }
+.canvas-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--bone-200); }
+.canvas-title { font-family: var(--font-serif); font-size: 17px; }
+.canvas-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-500); }
+.canvas-meta b { color: var(--amber-500); font-weight: 500; }
+svg.diagram { display: block; width: 100%; height: auto; }
+
+.comp { transition: opacity var(--dur) var(--ease); }
+.comp.dim { opacity: var(--dim); }
+.comp-rect { fill: var(--bone-50); stroke: var(--ink-900); stroke-width: 1.2; rx: 2; transition: stroke var(--dur) var(--ease), stroke-width var(--dur) var(--ease); }
+.comp-rect.mech { fill: var(--bone-100); stroke: var(--bone-400); stroke-dasharray: 4 3; }
+.comp-rect.inferred { fill: var(--bone-100); stroke: var(--bone-400); stroke-dasharray: 2 4; }
+.comp-rect.tank { fill: #f5f0e0; stroke: var(--ink-700); stroke-width: 1.5; rx: 8; }
+.comp.target .comp-rect { stroke: var(--amber-500); stroke-width: 2.5; filter: drop-shadow(0 0 8px rgba(200, 154, 62, 0.4)); }
+.comp-name { font-family: var(--font-serif); font-size: 13px; fill: var(--ink-900); text-anchor: middle; }
+.comp-name.mech, .comp-name.inferred { fill: var(--ink-500); font-style: italic; }
+.comp-loc { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; fill: var(--ink-500); text-anchor: middle; text-transform: uppercase; }
+.comp-role { font-family: var(--font-mono); font-size: 9px; fill: var(--bone-700); text-anchor: middle; letter-spacing: 0.04em; }
+
+.pin-rect { fill: var(--bone-200); stroke: var(--ink-700); stroke-width: 0.6; rx: 1.5; transition: fill var(--dur) var(--ease); }
+.pin.probe-pin .pin-rect { fill: var(--amber-500); stroke: var(--amber-500); }
+.pin-num { font-family: var(--font-mono); font-size: 8.5px; fill: var(--ink-500); text-anchor: middle; user-select: none; }
+.pin.probe-pin .pin-num { fill: var(--bone-50); }
+
+/* ELECTRICAL WIRES */
+.wire { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: opacity var(--dur) var(--ease); }
+.wire.dim { opacity: var(--dim); }
+.wire.role-signal  { stroke: var(--role-signal); }
+.wire.role-5v-ref  { stroke: var(--role-5v-ref); }
+.wire.role-low-ref { stroke: var(--role-low-ref); stroke-dasharray: 3 3; }
+.wire.role-pwm     { stroke: var(--role-pwm); }
+.wire.role-mech    { stroke: var(--bone-400); stroke-dasharray: 1 4; stroke-width: 2.5; }
+.wire.active { stroke-width: 3.5; opacity: 1; }
+@keyframes pwmPulse { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -24; } }
+.wire.active.anim-pwm { stroke-dasharray: 6 4; animation: pwmPulse 0.55s linear infinite; filter: drop-shadow(0 0 4px var(--role-pwm)); }
+.wire.active.anim-5v { filter: drop-shadow(0 0 5px var(--role-5v-ref)); }
+@keyframes signalBreathe { 0%, 100% { stroke-width: 2.5; } 50% { stroke-width: 4; } }
+.wire.active.anim-signal { animation: signalBreathe 1.6s ease-in-out infinite; filter: drop-shadow(0 0 4px var(--role-signal)); }
+
+/* FUEL FLOW LINES */
+.flow { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; transition: opacity var(--dur) var(--ease); }
+.flow.dim { opacity: var(--dim); }
+.flow.role-lp      { stroke: var(--flow-lp); opacity: 0.55; }
+.flow.role-hp      { stroke: var(--flow-hp); opacity: 0.65; stroke-width: 5; }
+.flow.role-return  { stroke: var(--flow-return); opacity: 0.45; stroke-dasharray: 8 4; }
+.flow.role-leakoff { stroke: var(--flow-leakoff); opacity: 0.45; stroke-dasharray: 5 4; stroke-width: 3; }
+.flow.active { opacity: 1; }
+@keyframes flowChase { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -36; } }
+.flow.active.anim-flow {
+  stroke-dasharray: 12 6;
+  animation: flowChase 1.4s linear infinite;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+/* PROBE / METER / GAUGE OVERLAYS */
+.probe-layer { pointer-events: none; }
+@keyframes probeDrop { 0% { opacity: 0; transform: translateY(-12px); } 100% { opacity: 1; transform: translateY(0); } }
+.probe { animation: probeDrop 320ms var(--ease); }
+.probe-stem { stroke-width: 2.5; }
+.probe-tip  { stroke-width: 1.5; }
+.probe-red  .probe-stem, .probe-red .probe-tip { stroke: var(--probe-red); }
+.probe-red  .probe-head { fill: var(--probe-red); }
+.probe-blk  .probe-stem, .probe-blk .probe-tip { stroke: var(--probe-blk); }
+.probe-blk  .probe-head { fill: var(--probe-blk); }
+.meter { animation: probeDrop 380ms var(--ease) 120ms backwards; }
+.meter-body { fill: var(--ink-900); stroke: var(--ink-700); rx: 4; }
+.meter-screen { fill: #c4d8a8; }
+.meter-mode { font-family: var(--font-mono); font-size: 9px; fill: var(--bone-50); letter-spacing: 0.08em; text-anchor: middle; }
+.meter-reading { font-family: var(--font-mono); font-weight: 500; font-size: 13px; fill: var(--ink-900); text-anchor: middle; }
+.meter-unit { font-family: var(--font-mono); font-size: 9px; fill: var(--ink-700); text-anchor: middle; }
+.meter-wave { stroke: var(--ink-900); stroke-width: 1.2; fill: none; }
+.chassis-gnd-mark { font-family: var(--font-mono); font-size: 9px; fill: var(--ink-500); text-anchor: middle; letter-spacing: 0.08em; }
+
+/* PRESSURE GAUGE */
+.gauge { animation: probeDrop 380ms var(--ease); }
+.gauge-body { fill: var(--ink-900); stroke: var(--bone-400); stroke-width: 1; }
+.gauge-face { fill: var(--bone-50); }
+.gauge-label { font-family: var(--font-mono); font-size: 8px; fill: var(--ink-700); text-anchor: middle; letter-spacing: 0.06em; }
+.gauge-value { font-family: var(--font-mono); font-weight: 500; font-size: 13px; fill: var(--ink-900); text-anchor: middle; }
+.gauge-unit { font-family: var(--font-mono); font-size: 8px; fill: var(--ink-500); text-anchor: middle; }
+.gauge-tap { font-family: var(--font-mono); font-size: 8px; fill: var(--amber-500); text-anchor: middle; letter-spacing: 0.06em; }
+
+/* BEAKER (for flow rate / leak-off measurement) */
+.beaker { animation: probeDrop 380ms var(--ease); }
+.beaker-body { fill: var(--bone-50); stroke: var(--ink-700); stroke-width: 1.2; }
+.beaker-fill { fill: var(--flow-leakoff); opacity: 0.5; }
+.beaker-label { font-family: var(--font-mono); font-size: 8px; fill: var(--ink-700); text-anchor: middle; letter-spacing: 0.06em; }
+.beaker-value { font-family: var(--font-mono); font-weight: 500; font-size: 11px; fill: var(--ink-900); text-anchor: middle; }
+
+/* SCAN-TOOL PID OVERLAY */
+.pid-overlay { animation: probeDrop 320ms var(--ease); }
+.pid-bg { fill: #1a1a1a; stroke: var(--ink-700); rx: 3; }
+.pid-label { font-family: var(--font-mono); font-size: 9px; fill: var(--bone-400); letter-spacing: 0.08em; text-anchor: start; }
+.pid-value-big { font-family: var(--font-mono); font-weight: 500; font-size: 14px; fill: var(--bone-50); text-anchor: start; }
+
+/* SIDE PANEL */
+.panel { background: var(--bone-50); border: 1px solid var(--bone-300); border-radius: 2px; padding: 18px; font-size: 13px; line-height: 1.5; }
+.panel-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); margin-bottom: 8px; }
+.panel-title { font-family: var(--font-serif); font-size: 17px; line-height: 1.15; margin-bottom: 12px; }
+
+/* STEP */
+.step { border-top: 1px solid var(--bone-200); padding: 11px 0; transition: background var(--dur) var(--ease); }
+.step:first-of-type { border-top: none; padding-top: 4px; }
+.step.active { background: var(--bone-100); margin: 0 -18px; padding: 12px 18px; border-radius: 2px; }
+.step.done { opacity: 0.85; }
+.step.pending { opacity: 0.55; }
+.step-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; cursor: pointer; }
+.step-num { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-500); }
+.step.active .step-num { color: var(--amber-500); font-weight: 500; }
+.step-tag { display: inline-block; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 2px; margin-left: 6px; text-transform: uppercase; }
+.step-tag.elec { background: rgba(76, 168, 102, 0.16); color: #2d6a40; }
+.step-tag.mech { background: rgba(74, 124, 170, 0.16); color: #2d4a6a; }
+.step-tag.synth { background: rgba(200, 154, 62, 0.18); color: #6b4d18; }
+.step-conf { font-family: var(--font-mono); font-size: 10px; color: var(--ink-500); }
+.step-conf.added { color: var(--gate-pass); }
+.step-title { font-family: var(--font-serif); font-size: 16px; line-height: 1.2; margin: 4px 0 5px; }
+.step-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--ink-700); margin-bottom: 6px; }
+.step-meta b { color: var(--ink-900); font-weight: 500; }
+.gap-tag { display: inline-block; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; background: var(--bone-200); color: var(--bone-800); padding: 1px 6px; border-radius: 2px; margin-left: 4px; }
+.step-body { display: none; }
+.step.active .step-body { display: block; }
+.expected-block { background: var(--bone-50); border: 1px solid var(--bone-300); border-radius: 2px; padding: 9px 11px; margin: 8px 0; font-size: 12px; }
+.expected-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.expected-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); }
+.expected-v { color: var(--ink-900); font-family: var(--font-mono); font-size: 11px; text-align: right; }
+
+/* ENTRY */
+.entry-block { margin-top: 10px; padding: 11px 13px; background: #fff; border: 1px solid var(--bone-300); border-left: 3px solid var(--amber-500); border-radius: 2px; }
+.entry-prompt { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bone-800); margin-bottom: 9px; }
+.entry-row { display: grid; gap: 9px; margin-bottom: 9px; }
+.entry-row.dual { grid-template-columns: 1fr 1fr; }
+.entry-field { position: relative; }
+.entry-field label { display: block; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-500); margin-bottom: 4px; }
+.entry-field input { width: 100%; padding: 9px 36px 9px 12px; font-family: var(--font-mono); font-size: 15px; font-weight: 500; background: var(--bone-50); border: 1px solid var(--bone-400); border-radius: 2px; color: var(--ink-900); transition: border var(--dur) var(--ease); }
+.entry-field input:focus { outline: none; border-color: var(--amber-500); }
+.entry-field .unit { position: absolute; right: 12px; bottom: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-500); pointer-events: none; }
+.entry-options { display: grid; gap: 5px; }
+.entry-option { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center; padding: 9px 11px; background: var(--bone-50); border: 1px solid var(--bone-300); border-radius: 2px; cursor: pointer; font-size: 12.5px; transition: all var(--dur) var(--ease); }
+.entry-option:hover { border-color: var(--amber-500); background: #fffaee; }
+.entry-option .radio { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--bone-400); background: var(--bone-50); }
+.entry-option.selected { border-color: var(--amber-500); background: #fff5dc; }
+.entry-option.selected .radio { background: var(--amber-500); border-color: var(--amber-500); box-shadow: inset 0 0 0 3px var(--bone-50); }
+.entry-submit { font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; padding: 10px 16px; border: none; background: var(--ink-900); color: var(--bone-50); border-radius: 2px; cursor: pointer; width: 100%; transition: background var(--dur) var(--ease); }
+.entry-submit:hover { background: var(--bone-900); }
+.entry-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* VERDICT */
+.verdict { margin-top: 8px; padding: 10px 12px; border-radius: 2px; font-size: 12.5px; display: none; line-height: 1.5; }
+.step.done .verdict { display: block; }
+.verdict.ok      { background: rgba(76, 168, 102, 0.1);  border-left: 3px solid var(--gate-pass); }
+.verdict.warn    { background: rgba(200, 154, 62, 0.1);  border-left: 3px solid var(--gate-warn); }
+.verdict.fail    { background: rgba(179, 77, 77, 0.1);   border-left: 3px solid var(--gate-fail); }
+.verdict.impossible { background: #2a1a1a; border-left: 3px solid var(--gate-fail); color: var(--bone-50); }
+.verdict-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.verdict-glyph { font-weight: 600; font-size: 14px; }
+.verdict.ok .verdict-glyph      { color: var(--gate-pass); }
+.verdict.warn .verdict-glyph    { color: var(--gate-warn); }
+.verdict.fail .verdict-glyph    { color: var(--gate-fail); }
+.verdict.impossible .verdict-glyph { color: var(--gate-fail); }
+.verdict-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-700); }
+.verdict.impossible .verdict-label { color: var(--bone-400); }
+.verdict-reading { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-700); margin-bottom: 4px; }
+.verdict.impossible .verdict-reading { color: var(--bone-200); }
+.verdict-conclusion { color: var(--ink-900); font-size: 12.5px; }
+.verdict.impossible .verdict-conclusion { color: var(--bone-50); font-weight: 500; }
+
+/* COMMIT */
+.commit { margin-top: 18px; padding: 14px 16px; background: #fdf3f3; border: 1px solid #e5b5b5; border-left: 4px solid var(--gate-fail); border-radius: 2px; transition: all 500ms var(--ease); }
+.commit.warn { background: #fff8e8; border-color: #e2c47a; border-left-color: var(--gate-warn); }
+.commit.pass { background: #f0f8f1; border-color: #b8d8c0; border-left-color: var(--gate-pass); }
+.commit-title { font-family: var(--font-serif); font-size: 16px; color: var(--gate-fail); margin-bottom: 4px; transition: color 400ms var(--ease); }
+.commit.warn .commit-title { color: var(--gate-warn); }
+.commit.pass .commit-title { color: var(--gate-pass); }
+.commit-sub { font-size: 12px; color: var(--ink-700); margin-bottom: 10px; }
+.commit-list { list-style: none; padding: 0; margin: 0; }
+.commit-list li { padding: 5px 0; padding-left: 16px; position: relative; font-size: 12px; color: var(--ink-900); border-top: 1px dotted var(--bone-300); }
+.commit-list li:first-child { border-top: none; }
+.commit-list li::before { content: "×"; position: absolute; left: 0; top: 5px; color: var(--gate-fail); font-weight: 600; }
+.commit.pass .commit-list li::before { content: "→"; color: var(--gate-pass); }
+.commit-foot { margin-top: 11px; padding-top: 9px; border-top: 1px solid #e5b5b5; font-size: 11px; color: var(--ink-700); }
+.commit-foot strong { color: var(--ink-900); }
+
+.controls { display: flex; gap: 8px; margin-top: 14px; }
+.btn { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 14px; border: 1px solid var(--ink-700); background: var(--bone-50); color: var(--ink-900); border-radius: 2px; cursor: pointer; transition: all var(--dur) var(--ease); }
+.btn:hover { background: var(--ink-900); color: var(--bone-50); }
+.btn.ghost { border-color: var(--bone-400); color: var(--ink-500); }
+.btn.ghost:hover { background: var(--bone-200); color: var(--ink-900); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div>
+      <div class="eyebrow">Diagnostic Sessions · High-Pressure Fuel System</div>
+      <h1 id="concernTitle">Select a customer concern</h1>
+      <div class="vehicle">
+        2017–2019 Ford F-250/F-350<span class="sep">·</span>6.7L Power Stroke
+      </div>
+    </div>
+    <div class="gate">
+      <div class="gate-row"><span class="gate-label">Confidence</span><span class="gate-value" id="gateVal">0%</span></div>
+      <div class="gate-bar">
+        <div class="gate-bar-fill" id="gateFill"></div>
+        <div class="gate-bar-threshold"></div>
+      </div>
+      <div class="gate-status" id="gateStatus">▼ 95.0 below gate · commit refused</div>
+    </div>
+  </div>
+
+  <!-- CONCERN SELECTOR -->
+  <div class="concerns" id="concernPills"></div>
+
+  <!-- CONCERN BANNER -->
+  <div class="banner" id="banner">
+    <div class="banner-code" id="bannerCode">CONCERN</div>
+    <div class="banner-text" id="bannerText">Select a concern above to begin a diagnostic session.</div>
+    <div class="banner-meta" id="bannerMeta">—</div>
+  </div>
+
+  <div class="main">
+
+    <div class="canvas-wrap">
+      <div class="canvas-head">
+        <div class="canvas-title">High-pressure fuel system · scoped per step</div>
+        <div class="canvas-meta">role-coded · pin numbers <b>not yet captured</b> · wire colors <b>not yet captured</b></div>
+      </div>
+
+      <div class="scenarios" id="scenarios">
+        <span class="scenario-pill" data-scn="key-off">Key Off</span>
+        <span class="scenario-pill" data-scn="key-on">Key On / Engine Off</span>
+        <span class="scenario-pill" data-scn="cranking">Cranking</span>
+        <span class="scenario-pill" data-scn="idle">Idle</span>
+        <span class="scenario-pill" data-scn="medium">Medium Load</span>
+        <span class="scenario-pill" data-scn="hot-soak">Hot Soak</span>
+      </div>
+
+      <svg class="diagram" viewBox="0 0 900 760" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- ============================================================
+             COMPONENTS
+             ============================================================ -->
+
+        <!-- PCM -->
+        <g class="comp" id="comp-pcm" data-comp="pcm">
+          <rect class="comp-rect" x="280" y="30" width="420" height="86"/>
+          <text class="comp-name" x="490" y="58">PCM</text>
+          <text class="comp-loc" x="490" y="74">right firewall · top · engine bay</text>
+          <text class="comp-role" x="490" y="92">controlling module</text>
+          <g class="pin" id="pin-pcm-vcv-a"><rect class="pin-rect" x="320" y="100" width="16" height="14"/><text class="pin-num" x="328" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-vcv-b"><rect class="pin-rect" x="346" y="100" width="16" height="14"/><text class="pin-num" x="354" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-frp-sig"><rect class="pin-rect" x="440" y="100" width="16" height="14"/><text class="pin-num" x="448" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-frp-5v"><rect class="pin-rect" x="466" y="100" width="16" height="14"/><text class="pin-num" x="474" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-frp-lref"><rect class="pin-rect" x="492" y="100" width="16" height="14"/><text class="pin-num" x="500" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-reg-a"><rect class="pin-rect" x="620" y="100" width="16" height="14"/><text class="pin-num" x="628" y="111">—</text></g>
+          <g class="pin" id="pin-pcm-reg-b"><rect class="pin-rect" x="646" y="100" width="16" height="14"/><text class="pin-num" x="654" y="111">—</text></g>
+        </g>
+
+        <!-- VCV -->
+        <g class="comp" id="comp-vcv" data-comp="vcv">
+          <rect class="comp-rect" x="280" y="180" width="120" height="58"/>
+          <text class="comp-name" x="340" y="204">VCV</text>
+          <text class="comp-loc" x="340" y="218">top of HP pump</text>
+          <text class="comp-role" x="340" y="231">2-wire PWM</text>
+          <g class="pin" id="pin-vcv-a"><rect class="pin-rect" x="305" y="170" width="16" height="14"/><text class="pin-num" x="313" y="181">A</text></g>
+          <g class="pin" id="pin-vcv-b"><rect class="pin-rect" x="359" y="170" width="16" height="14"/><text class="pin-num" x="367" y="181">B</text></g>
+        </g>
+
+        <!-- HP PUMP (mechanical) -->
+        <g class="comp" id="comp-hp" data-comp="hp">
+          <rect class="comp-rect mech" x="260" y="270" width="160" height="86"/>
+          <text class="comp-name mech" x="340" y="298">HP Pump</text>
+          <text class="comp-loc" x="340" y="314">front of engine · cam-driven</text>
+          <text class="comp-role" x="340" y="332">CP4.2 · mechanical</text>
+          <text x="340" y="348" font-family="JetBrains Mono" font-size="8" fill="var(--ink-500)" text-anchor="middle">inlet ← LP · outlet → rail</text>
+        </g>
+
+        <!-- FUEL RAIL band -->
+        <g class="comp" id="comp-rail" data-comp="rail">
+          <rect class="comp-rect" x="460" y="200" width="380" height="34"/>
+          <text x="650" y="221" text-anchor="middle" font-family="Instrument Serif" font-size="14">Fuel Rail · Driver Side</text>
+        </g>
+
+        <!-- FRP SENSOR -->
+        <g class="comp" id="comp-frp" data-comp="frp">
+          <rect class="comp-rect" x="470" y="260" width="130" height="58"/>
+          <text class="comp-name" x="535" y="284">FRP Sensor</text>
+          <text class="comp-loc" x="535" y="298">front DS rail</text>
+          <text class="comp-role" x="535" y="311">3-wire analog</text>
+          <g class="pin" id="pin-frp-sig"><rect class="pin-rect" x="488" y="250" width="16" height="14"/><text class="pin-num" x="496" y="261">S</text></g>
+          <g class="pin" id="pin-frp-5v"><rect class="pin-rect" x="524" y="250" width="16" height="14"/><text class="pin-num" x="532" y="261">5V</text></g>
+          <g class="pin" id="pin-frp-lref"><rect class="pin-rect" x="560" y="250" width="16" height="14"/><text class="pin-num" x="568" y="261">LR</text></g>
+        </g>
+
+        <!-- FRP REGULATOR -->
+        <g class="comp" id="comp-reg" data-comp="reg">
+          <rect class="comp-rect" x="700" y="260" width="130" height="58"/>
+          <text class="comp-name" x="765" y="284">FRP Regulator</text>
+          <text class="comp-loc" x="765" y="298">back DS rail</text>
+          <text class="comp-role" x="765" y="311">2-wire PWM</text>
+          <g class="pin" id="pin-reg-a"><rect class="pin-rect" x="722" y="250" width="16" height="14"/><text class="pin-num" x="730" y="261">A</text></g>
+          <g class="pin" id="pin-reg-b"><rect class="pin-rect" x="776" y="250" width="16" height="14"/><text class="pin-num" x="784" y="261">B</text></g>
+        </g>
+
+        <!-- INJECTORS (inferred) -->
+        <g class="comp" id="comp-inj" data-comp="inj">
+          <rect class="comp-rect inferred" x="460" y="360" width="380" height="56"/>
+          <text class="comp-name inferred" x="650" y="384">Injectors (×8)</text>
+          <text class="comp-loc" x="650" y="398">not in structured model</text>
+          <text class="comp-role" x="650" y="411">inferred · capture in next intake pass</text>
+        </g>
+
+        <!-- FUEL FILTER (primary on chassis frame) -->
+        <g class="comp" id="comp-filter" data-comp="filter">
+          <rect class="comp-rect mech" x="220" y="440" width="170" height="62"/>
+          <text class="comp-name mech" x="305" y="464">Fuel Filter</text>
+          <text class="comp-loc" x="305" y="478">chassis · water separator</text>
+          <text class="comp-role" x="305" y="492">mechanical · serviceable</text>
+        </g>
+
+        <!-- FUEL TANK -->
+        <g class="comp" id="comp-tank" data-comp="tank">
+          <rect class="comp-rect tank" x="40" y="560" width="220" height="160"/>
+          <text class="comp-name mech" x="150" y="588">Fuel Tank</text>
+          <text class="comp-loc" x="150" y="604">under bed</text>
+        </g>
+
+        <!-- LIFT PUMP (inside tank) -->
+        <g class="comp" id="comp-lift" data-comp="lift">
+          <rect class="comp-rect" x="70" y="630" width="170" height="64"/>
+          <text class="comp-name" x="155" y="654">Lift Pump</text>
+          <text class="comp-loc" x="155" y="668">inside tank · 2-wire</text>
+          <text class="comp-role" x="155" y="682">supplies HP pump</text>
+        </g>
+
+        <!-- CHASSIS GND MARKER -->
+        <g id="chassis-gnd">
+          <rect x="820" y="710" width="36" height="14" fill="var(--bone-200)" stroke="var(--ink-700)" stroke-width="0.6"/>
+          <text class="chassis-gnd-mark" x="838" y="720">⏚ GND</text>
+        </g>
+
+        <!-- ============================================================
+             FUEL FLOW PATHS
+             ============================================================ -->
+
+        <!-- LP supply: lift pump → out of tank → up → over to filter → through filter → over → up to HP pump inlet -->
+        <path class="flow role-lp" id="flow-lp-supply" data-flow="lp-supply"
+              d="M 155 630
+                 L 155 555
+                 L 220 555
+                 L 220 471
+                 L 390 471
+                 L 390 320
+                 L 340 320"/>
+
+        <!-- HP delivery: HP pump outlet → up to rail -->
+        <path class="flow role-hp" id="flow-hp-rail" data-flow="hp-rail"
+              d="M 360 270
+                 L 360 200
+                 L 460 200"/>
+
+        <!-- Rail → Injectors (single representative line) -->
+        <path class="flow role-hp" id="flow-rail-inj" data-flow="rail-inj"
+              d="M 650 234
+                 L 650 360"/>
+
+        <!-- Regulator return: reg → return to tank -->
+        <path class="flow role-return" id="flow-reg-return" data-flow="reg-return"
+              d="M 830 290
+                 L 870 290
+                 L 870 700
+                 L 260 700"/>
+
+        <!-- Injector leak-off return: inj → leak-off → tank -->
+        <path class="flow role-leakoff" id="flow-inj-leakoff" data-flow="inj-leakoff"
+              d="M 460 388
+                 L 270 388
+                 L 270 720
+                 L 260 720"/>
+
+        <!-- ============================================================
+             ELECTRICAL WIRES
+             ============================================================ -->
+        <path class="wire role-pwm" id="w-vcv-a" d="M 328 114 L 328 145 L 313 145 L 313 170"/>
+        <path class="wire role-pwm" id="w-vcv-b" d="M 354 114 L 354 155 L 367 155 L 367 170"/>
+        <path class="wire role-signal"  id="w-frp-sig"  d="M 448 114 L 448 240 L 496 240 L 496 250"/>
+        <path class="wire role-5v-ref"  id="w-frp-5v"   d="M 474 114 L 474 245 L 532 245 L 532 250"/>
+        <path class="wire role-low-ref" id="w-frp-lref" d="M 500 114 L 500 248 L 568 248 L 568 250"/>
+        <path class="wire role-pwm" id="w-reg-a" d="M 628 114 L 628 240 L 730 240 L 730 250"/>
+        <path class="wire role-pwm" id="w-reg-b" d="M 654 114 L 654 245 L 784 245 L 784 250"/>
+
+        <!-- PROBE / METER / GAUGE OVERLAY LAYER -->
+        <g class="probe-layer" id="probeLayer"></g>
+      </svg>
+    </div>
+
+    <div class="panel">
+      <div class="panel-eyebrow" id="panelEyebrow">Pick a concern to begin</div>
+      <div class="panel-title" id="panelTitle">The diagnostic path will load here once you select a concern.</div>
+      <div id="stepList"></div>
+
+      <div class="commit" id="commitPanel" style="display:none">
+        <div class="commit-title" id="commitTitle">Commit refused</div>
+        <div class="commit-sub" id="commitSub"></div>
+        <ul class="commit-list" id="commitList"></ul>
+        <div class="commit-foot" id="commitFoot"></div>
+      </div>
+
+      <div class="controls" id="controlsRow" style="display:none">
+        <button class="btn" id="btnReset">Reset session</button>
+        <button class="btn ghost" id="btnAuto">Auto-run demo</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+
+/* =========================================================================
+   CONCERNS — full diagnostic paths
+   ========================================================================= */
+
+const CONCERNS = [
+  /* ====== Concern 1: P0087 — Fuel Rail Pressure Too Low ====== */
+  {
+    id: 'p0087',
+    pillLabel: 'P0087 — FRP Too Low',
+    title: 'P0087 — Fuel Rail Pressure Too Low',
+    bannerCode: 'DTC P0087',
+    bannerText: 'Fuel rail pressure has fallen below the PCM-commanded threshold. Customer reports loss of power and possible no-start at idle.',
+    bannerMeta: 'performance · scope 8 components',
+    steps: [
+      {
+        id: 's1', kind: 'elec', title: 'Scan tool — commanded vs actual rail pressure',
+        scope: { comps: ['pcm','frp','rail'], wires: ['w-frp-sig','w-frp-5v','w-frp-lref'], flows: [] },
+        target: { comp: 'pcm', pin: null, probeMode: 'pid' },
+        scenarioRequired: 'idle', scenarioLabel: 'idle → medium load sweep',
+        sourceCite: 'PCM telemetry · standard scan tool function',
+        wireAnim: { 'w-frp-sig': 'anim-signal', 'w-frp-5v': 'anim-5v' },
+        expectedDisplay: 'Actual within ~5% of commanded',
+        confidence: 20,
+        input: { type: 'dual', prompt: 'Read commanded and actual FRP from scan tool at idle.',
+          fields: [
+            { key: 'commanded', label: 'Commanded', unit: 'PSI', placeholder: 'e.g. 8400', preset: '8400' },
+            { key: 'actual',    label: 'Actual',    unit: 'PSI', placeholder: 'e.g. 5200', preset: '5200' },
+          ]},
+        grade: (v) => {
+          const cmd = parseFloat(v.commanded), act = parseFloat(v.actual);
+          if (isNaN(cmd) || isNaN(act)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric values required.' };
+          if (cmd <= 0 || act < 0 || cmd > 40000 || act > 40000) return { verdict: 'impossible', label: 'Out of range', conclusion: 'Re-verify units (PSI vs MPa vs bar). Common rail ceiling ~36k PSI.' };
+          const pct = ((act - cmd) / cmd) * 100;
+          const reading = `Commanded ${cmd.toLocaleString()} PSI · Actual ${act.toLocaleString()} PSI`;
+          if (Math.abs(pct) <= 5) return { verdict: 'ok', label: 'Within tolerance', reading, conclusion: `Actual within ±5% of commanded (Δ ${pct.toFixed(1)}%). DTC may be intermittent — pull freeze frame.`, conf: 20 };
+          if (pct < -5) return { verdict: 'fail', label: 'Under-pressure direction locked', reading, conclusion: `Actual ${Math.abs(pct).toFixed(1)}% below commanded. Branch: UNDER-pressure. Continue to supply-side test first (cheapest leverage).`, conf: 20, branch: 'under' };
+          return { verdict: 'fail', label: 'Over-pressure direction locked', reading, conclusion: `Actual ${pct.toFixed(1)}% above commanded. Branch: OVER-pressure.`, conf: 20, branch: 'over' };
+        },
+      },
+      {
+        id: 's2', kind: 'mech', title: 'Lift pump prime pressure at HP pump inlet',
+        scope: { comps: ['tank','lift','filter','hp'], wires: [], flows: ['flow-lp-supply'] },
+        target: { gauge: { x: 290, y: 320, label: 'TEST POINT' } },
+        scenarioRequired: 'key-on', scenarioLabel: 'key-on engine off (prime cycle)',
+        sourceCite: '2-wire lift pump output [LOGIC] · expected ~55–65 PSI captured for this app',
+        expectedDisplay: '55–65 PSI at HP pump inlet',
+        confidence: 15,
+        input: { type: 'numeric', prompt: 'Tee a pressure gauge into the supply line at the HP pump inlet. Cycle key-on for prime. Read peak prime pressure.',
+          fields: [{ key: 'psi', label: 'Prime pressure', unit: 'PSI', placeholder: 'e.g. 60', preset: '60' }]},
+        grade: (v) => {
+          const p = parseFloat(v.psi);
+          if (isNaN(p)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric pressure required.' };
+          if (p < 0 || p > 200) return { verdict: 'impossible', label: 'Out of physical range', reading: `${p} PSI`, conclusion: 'Lift pump output cannot exceed ~120 PSI — re-verify gauge connection and units.' };
+          const reading = `${p} PSI at HP pump inlet during prime`;
+          if (p >= 55 && p <= 70) return { verdict: 'ok', label: 'Supply pressure normal', reading, conclusion: 'Lift pump and filter supply confirmed.', conf: 15 };
+          if (p >= 40 && p < 55) return { verdict: 'warn', label: 'Supply marginal', reading, conclusion: 'Possible filter restriction or lift pump beginning to fail. Note and continue.', conf: 7 };
+          if (p < 40) return { verdict: 'fail', label: 'Supply pressure low', reading, conclusion: 'Supply pressure significantly below spec. Suspect lift pump output failure, filter restriction, or supply line. Investigate filter restriction next (cheaper test before pump R&R).', conf: 0 };
+          return { verdict: 'warn', label: 'Supply pressure high', reading, conclusion: 'Above expected range — possible return restriction. Continue.', conf: 5 };
+        },
+      },
+      {
+        id: 's3', kind: 'mech', title: 'Fuel filter restriction check',
+        scope: { comps: ['filter','tank','lift'], wires: [], flows: ['flow-lp-supply'] },
+        target: { gauge: { x: 305, y: 440, label: 'ΔP ACROSS' } },
+        scenarioRequired: 'idle', scenarioLabel: 'idle (or cranking if no-start)',
+        sourceCite: 'Filter restriction first principles [LAW] · expected ΔP < 5 PSI captured',
+        expectedDisplay: 'ΔP < 5 PSI across filter (clean filter)',
+        confidence: 10,
+        input: { type: 'observation', prompt: 'Visual inspection plus ΔP measurement if equipped. Pick the observation that matches.',
+          options: [
+            { key: 'clean',     label: 'Filter clean, no water present, no observed restriction', preset: true },
+            { key: 'sediment',  label: 'Visible sediment or water in filter bowl' },
+            { key: 'collapsed', label: 'Filter element visibly collapsed or saturated' },
+            { key: 'no-access', label: 'Cannot access filter at this point — defer' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'clean')     return { verdict: 'ok', label: 'Filter not restricted', reading: 'No restriction observed', conclusion: 'Fuel filter eliminated as cause.', conf: 10 };
+          if (c === 'sediment')  return { verdict: 'warn', label: 'Filter contamination', reading: 'Sediment or water observed', conclusion: 'Service filter and verify water-in-fuel sensor before continuing. May not be the root cause but must be resolved.', conf: 4 };
+          if (c === 'collapsed') return { verdict: 'fail', label: 'Filter restricted', reading: 'Element collapsed/saturated', conclusion: 'Replace filter and re-test S2 prime pressure before continuing. Filter restriction confirmed as a cause; verify it is the SOLE cause.', conf: 0 };
+          return { verdict: 'warn', label: 'Filter not tested', conclusion: 'Defer · revisit after other steps.', conf: 0 };
+        },
+      },
+      {
+        id: 's4', kind: 'elec', title: 'FRP sensor signal voltage',
+        scope: { comps: ['pcm','frp','rail'], wires: ['w-frp-sig'], flows: [] },
+        target: { comp: 'frp', pin: 'pin-frp-sig', probeMode: 'standard' },
+        scenarioRequired: 'idle', scenarioLabel: 'idle',
+        sourceCite: '3-wire sensor electrical contract [LOGIC]',
+        wireAnim: { 'w-frp-sig': 'anim-signal' },
+        expectedDisplay: '~2.8 V at idle (tracks scan tool)',
+        confidence: 10, meterMode: 'DC V', meterPreset: { value: '2.8', unit: 'V' },
+        input: { type: 'numeric', prompt: 'Back-probe FRP signal pin. Black on chassis ground.',
+          fields: [{ key: 'volts', label: 'Reading', unit: 'V', placeholder: 'e.g. 2.8', preset: '2.78' }]},
+        grade: (v) => {
+          const x = parseFloat(v.volts);
+          if (isNaN(x)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric reading required.' };
+          const r = `${x.toFixed(2)} V at signal pin`;
+          if (x > 5.25) return { verdict: 'impossible', label: 'Electrically impossible', reading: r, conclusion: 'Sensor signal cannot exceed 5V supply. Re-verify probe placement — possibly on the 12V circuit.' };
+          if (x < -0.2) return { verdict: 'impossible', label: 'Polarity error', reading: r, conclusion: 'Negative reading impossible with correct probe orientation. Reverse leads.' };
+          const dev = Math.abs(x - 2.8);
+          if (dev <= 0.3) return { verdict: 'ok', label: 'Sensor accuracy confirmed', reading: r, conclusion: 'FRP sensor eliminated as cause.', conf: 10 };
+          if (dev <= 0.6) return { verdict: 'warn', label: 'Slightly off', reading: r, conclusion: `Deviates by ${dev.toFixed(2)}V — possible drift. Note and continue.`, conf: 5 };
+          return { verdict: 'fail', label: 'Sensor reading suspect', reading: r, conclusion: 'Verify low-ref splice before condemning sensor.', conf: 0 };
+        },
+      },
+      {
+        id: 's5', kind: 'elec', title: 'VCV pin A — PWM activity',
+        scope: { comps: ['pcm','vcv','hp'], wires: ['w-vcv-a'], flows: [] },
+        target: { comp: 'vcv', pin: 'pin-vcv-a', probeMode: 'standard' },
+        scenarioRequired: 'medium', scenarioLabel: 'idle → medium load sweep',
+        sourceCite: '2-wire PWM control [LOGIC]',
+        wireAnim: { 'w-vcv-a': 'anim-pwm' },
+        expectedDisplay: 'PWM varying with engine load',
+        confidence: 10, meterMode: 'Hz / %', meterPreset: { value: '42', unit: '%', wave: true },
+        input: { type: 'observation', prompt: 'Back-probe VCV pin A. Observe with engine running, sweep idle → medium.',
+          options: [
+            { key: 'varying', label: 'PWM present, duty varies with engine load', preset: true },
+            { key: 'stuck',   label: 'PWM present but duty stuck' },
+            { key: 'flat-12', label: 'Flat at battery voltage — no PWM' },
+            { key: 'flat-0',  label: 'Flat at 0V — no PWM' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'varying') return { verdict: 'ok', label: 'VCV commanded normally', reading: 'PWM varying with load', conclusion: 'VCV electrical side eliminated.', conf: 10 };
+          if (c === 'stuck')   return { verdict: 'warn', label: 'VCV duty stuck', conclusion: 'Possible PCM strategy fault. Note.', conf: 5 };
+          if (c === 'flat-12') return { verdict: 'fail', label: 'No PWM command (high)', conclusion: 'Inspect harness for short to power.', conf: 0 };
+          return { verdict: 'fail', label: 'No PWM command (low)', conclusion: 'Wire open or PCM driver fault.', conf: 0 };
+        },
+      },
+      {
+        id: 's6', kind: 'elec', title: 'FRP Regulator pin A — PWM activity',
+        scope: { comps: ['pcm','reg','rail'], wires: ['w-reg-a'], flows: [] },
+        target: { comp: 'reg', pin: 'pin-reg-a', probeMode: 'standard' },
+        scenarioRequired: 'medium', scenarioLabel: 'idle → medium load',
+        sourceCite: '2-wire PWM control [LOGIC]',
+        wireAnim: { 'w-reg-a': 'anim-pwm' },
+        expectedDisplay: 'PWM varying with rail pressure target',
+        confidence: 10, meterMode: 'Hz / %', meterPreset: { value: '55', unit: '%', wave: true },
+        input: { type: 'observation', prompt: 'Back-probe regulator pin A.',
+          options: [
+            { key: 'varying', label: 'PWM present, duty varies with load', preset: true },
+            { key: 'stuck',   label: 'PWM present but stuck' },
+            { key: 'flat-12', label: 'Flat at battery voltage' },
+            { key: 'flat-0',  label: 'Flat at 0V' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'varying') return { verdict: 'ok', label: 'Regulator commanded normally', conclusion: 'Regulator electrical side eliminated.', conf: 10 };
+          if (c === 'stuck')   return { verdict: 'warn', label: 'Duty stuck', conclusion: 'Possible PCM strategy fault.', conf: 5 };
+          return { verdict: 'fail', label: 'No PWM command', conclusion: 'Inspect harness first.', conf: 0 };
+        },
+      },
+      {
+        id: 's7', kind: 'mech', title: 'Injector leak-off (return flow) test',
+        scope: { comps: ['inj','rail','tank'], wires: [], flows: ['flow-inj-leakoff','flow-rail-inj'] },
+        target: { beaker: { x: 240, y: 720, label: 'ML/MIN @ IDLE' } },
+        scenarioRequired: 'idle', scenarioLabel: 'engine at idle, hot',
+        sourceCite: 'Inferred component · CP4-era injector leak-off pattern [PATTERN] — confirm',
+        expectedDisplay: '<50 mL/min average · no outlier cylinder >2× the others',
+        confidence: 20,
+        input: { type: 'numeric', prompt: 'Cap return lines individually or use leak-off test kit. Collect 60-second flow at idle, hot. Enter highest cylinder reading.',
+          fields: [{ key: 'mlmin', label: 'Highest cylinder', unit: 'mL/min', placeholder: 'e.g. 40', preset: '38' }]},
+        grade: (v) => {
+          const m = parseFloat(v.mlmin);
+          if (isNaN(m)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric flow required.' };
+          if (m < 0 || m > 500) return { verdict: 'impossible', label: 'Out of range', conclusion: 'Re-verify measurement.' };
+          const r = `${m} mL/min on the highest cylinder`;
+          if (m < 50) return { verdict: 'ok', label: 'Leak-off normal', reading: r, conclusion: 'No excessive internal leakage. Injectors NOT bleeding rail pressure.', conf: 20 };
+          if (m < 100) return { verdict: 'warn', label: 'Elevated leak-off', reading: r, conclusion: 'Above spec, below failure. Note and re-test at temperature. Possible early-stage injector wear.', conf: 8 };
+          return { verdict: 'fail', label: 'Excessive injector leak-off', reading: r, conclusion: 'Injectors bleeding off rail pressure faster than pump can replace. Likely root cause of low rail pressure. Identify which cylinder(s) before commit.', conf: 0 };
+        },
+      },
+      {
+        id: 's8', kind: 'synth', title: 'Verification & decision',
+        scope: { comps: [], wires: [], flows: [] },
+        scenarioRequired: null, scenarioLabel: 'no probe · synthesis',
+        sourceCite: 'Synthesis of S1–S7 [LOGIC]',
+        expectedDisplay: 'Commit allowed only if a single failure mode is isolated',
+        confidence: 5, isVerification: true,
+        input: { type: 'confirm', prompt: 'Run synthesis on the diagnostic state.', label: 'Run synthesis' },
+        grade: (v, state) => {
+          const r = state.results;
+          const required = ['s1','s2','s3','s4','s5','s6','s7'];
+          if (!required.every(id => r[id])) return { verdict: 'impossible', label: 'Sweep incomplete', conclusion: 'Earlier steps still need entries.' };
+          const failingMech = ['s2','s3','s7'].filter(id => r[id].verdict === 'fail');
+          const failingElec = ['s4','s5','s6'].filter(id => r[id].verdict === 'fail');
+          const allClean = ['s2','s3','s4','s5','s6','s7'].every(id => r[id].verdict === 'ok');
+          if (failingMech.length === 1 && failingElec.length === 0) {
+            const id = failingMech[0];
+            const label = { s2: 'lift pump supply', s3: 'fuel filter restriction', s7: 'injector internal leak' }[id];
+            return { verdict: 'ok', label: 'Single failure isolated', reading: `Failing step: ${id.toUpperCase()} (${label})`, conclusion: `One mechanical fault identified, all other tests clean. Commit allowed for: ${label}.`, conf: 5, commitGoodFor: label };
+          }
+          if (allClean) return { verdict: 'warn', label: 'All tests clean — DTC may be intermittent', conclusion: 'No fault reproduced. Pull freeze-frame, replicate conditions, re-test S1.', conf: 0 };
+          return { verdict: 'warn', label: 'Multiple anomalies — commit refused', conclusion: 'More than one branch shows deviation. Resolve the cheapest one first and re-run downstream tests.', conf: 0 };
+        },
+      },
+    ],
+  },
+
+  /* ====== Concern 2: No-start, cranks normally ====== */
+  {
+    id: 'nostart',
+    pillLabel: 'No-start, cranks normal',
+    title: 'No-start, cranks normally, no smoke',
+    bannerCode: 'CUSTOMER CONCERN',
+    bannerText: 'Engine cranks at normal RPM but does not start. No exhaust smoke observed during cranking. Customer reports it happened suddenly.',
+    bannerMeta: 'no DTC required · scope 7 components',
+    steps: [
+      {
+        id: 'n1', kind: 'mech', title: 'Listen for lift pump prime at key-on',
+        scope: { comps: ['lift','tank'], wires: [], flows: ['flow-lp-supply'] },
+        target: { gauge: { x: 155, y: 600, label: 'AUDIBLE PRIME' } },
+        scenarioRequired: 'key-on', scenarioLabel: 'key-on engine off',
+        sourceCite: '2-wire lift pump [LOGIC] · prime cycle behavior [PATTERN]',
+        expectedDisplay: 'Audible pump prime for 2–5 seconds at key-on',
+        confidence: 10,
+        input: { type: 'observation', prompt: 'Cycle key to ON. Listen near fuel tank for lift pump priming.',
+          options: [
+            { key: 'audible',  label: 'Pump prime audible, normal duration', preset: true },
+            { key: 'short',    label: 'Pump prime audible but very short (<1 sec)' },
+            { key: 'silent',   label: 'No audible pump prime' },
+            { key: 'continuous', label: 'Pump runs continuously (does not stop)' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'audible')    return { verdict: 'ok', label: 'Lift pump priming', conclusion: 'Pump receiving command and operating audibly. Verify pressure next.', conf: 10 };
+          if (c === 'short')      return { verdict: 'warn', label: 'Short prime', conclusion: 'Pump receiving command but possibly weak — verify pressure.', conf: 5 };
+          if (c === 'silent')     return { verdict: 'fail', label: 'No prime', conclusion: 'No audible pump operation. Could be pump electrical (relay, fuse, harness), pump motor failure, or pump command not being issued. Check power-side first.', conf: 0 };
+          return { verdict: 'warn', label: 'Continuous run', conclusion: 'Pump not cycling off — PCM logic or relay stuck. Note but continue.', conf: 5 };
+        },
+      },
+      {
+        id: 'n2', kind: 'mech', title: 'Lift pump prime pressure at HP pump inlet',
+        scope: { comps: ['tank','lift','filter','hp'], wires: [], flows: ['flow-lp-supply'] },
+        target: { gauge: { x: 290, y: 320, label: 'PRIME PSI' } },
+        scenarioRequired: 'key-on', scenarioLabel: 'key-on (multiple prime cycles if needed)',
+        sourceCite: '2-wire lift pump output [LOGIC] · expected ~55–65 PSI [PATTERN]',
+        expectedDisplay: '55–65 PSI at HP pump inlet during prime',
+        confidence: 20,
+        input: { type: 'numeric', prompt: 'Tee a pressure gauge into the supply line at the HP pump inlet. Cycle key-on. Read peak prime pressure.',
+          fields: [{ key: 'psi', label: 'Prime pressure', unit: 'PSI', placeholder: 'e.g. 60', preset: '8' }]},
+        grade: (v) => {
+          const p = parseFloat(v.psi);
+          if (isNaN(p)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric pressure required.' };
+          if (p < 0 || p > 200) return { verdict: 'impossible', label: 'Out of range', conclusion: 'Re-verify gauge connection.' };
+          const r = `${p} PSI at HP pump inlet`;
+          if (p >= 55 && p <= 70) return { verdict: 'ok', label: 'Supply pressure normal', reading: r, conclusion: 'Lift pump and supply confirmed.', conf: 20 };
+          if (p >= 40 && p < 55) return { verdict: 'warn', label: 'Supply marginal', reading: r, conclusion: 'Filter restriction or lift pump weakening. Note.', conf: 8 };
+          if (p < 40 && p > 5)   return { verdict: 'fail', label: 'Supply pressure low', reading: r, conclusion: 'Significantly below spec. Investigate filter restriction OR lift pump output. Check filter first (cheaper).', conf: 0 };
+          if (p <= 5)            return { verdict: 'fail', label: 'No supply pressure', reading: r, conclusion: 'HP pump is being starved. Lift pump output dead OR major restriction OR severed supply line. Strongest single suspect for no-start.', conf: 0, failureSuspect: 'supply' };
+          return { verdict: 'warn', label: 'Supply pressure high', reading: r, conclusion: 'Above expected.', conf: 5 };
+        },
+      },
+      {
+        id: 'n3', kind: 'elec', title: 'Scan tool — rail pressure during cranking',
+        scope: { comps: ['pcm','frp','rail'], wires: ['w-frp-sig'], flows: [] },
+        target: { comp: 'pcm', pin: null, probeMode: 'pid' },
+        scenarioRequired: 'cranking', scenarioLabel: 'cranking',
+        sourceCite: 'PCM telemetry · injection requires ~3,000 PSI minimum [PATTERN — confirm spec]',
+        wireAnim: { 'w-frp-sig': 'anim-signal' },
+        expectedDisplay: 'Rail must reach ~3,000 PSI to fire injectors',
+        confidence: 15,
+        input: { type: 'numeric', prompt: 'Crank engine while monitoring rail pressure PID. Capture peak.',
+          fields: [{ key: 'peak', label: 'Peak rail pressure during crank', unit: 'PSI', placeholder: 'e.g. 6000', preset: '900' }]},
+        grade: (v) => {
+          const p = parseFloat(v.peak);
+          if (isNaN(p)) return { verdict: 'impossible', label: 'Invalid input', conclusion: 'Numeric value required.' };
+          if (p < 0 || p > 40000) return { verdict: 'impossible', label: 'Out of range', conclusion: 'Verify units.' };
+          const r = `${p.toLocaleString()} PSI peak during cranking`;
+          if (p >= 3000) return { verdict: 'ok', label: 'Rail building adequately', reading: r, conclusion: 'Rail reaches firing threshold — fault is downstream (injectors, ignition timing, sync, or fuel quality).', conf: 15 };
+          if (p >= 1000) return { verdict: 'warn', label: 'Rail building but insufficient', reading: r, conclusion: 'Below firing threshold. HP pump producing some pressure but not enough — supply or pump capacity issue. Cross-check with N2.', conf: 7 };
+          return { verdict: 'fail', label: 'Rail not building', reading: r, conclusion: 'HP pump unable to build pressure. Supply starved (most likely if N2 also failed), or HP pump mechanically failed, or major rail leak.', conf: 0, failureSuspect: 'rail-build' };
+        },
+      },
+      {
+        id: 'n4', kind: 'elec', title: 'VCV pin A — PWM activity during cranking',
+        scope: { comps: ['pcm','vcv','hp'], wires: ['w-vcv-a'], flows: [] },
+        target: { comp: 'vcv', pin: 'pin-vcv-a', probeMode: 'standard' },
+        scenarioRequired: 'cranking', scenarioLabel: 'cranking',
+        sourceCite: '2-wire PWM control [LOGIC]',
+        wireAnim: { 'w-vcv-a': 'anim-pwm' },
+        expectedDisplay: 'PWM activity during cranking — high duty for max fuel demand',
+        confidence: 10, meterMode: 'Hz / %', meterPreset: { value: '85', unit: '%', wave: true },
+        input: { type: 'observation', prompt: 'Back-probe VCV pin A. Crank engine.',
+          options: [
+            { key: 'high-duty', label: 'PWM active with high duty cycle (~80%+)', preset: true },
+            { key: 'low-duty',  label: 'PWM active but low duty' },
+            { key: 'flat-12',   label: 'Flat at battery voltage' },
+            { key: 'flat-0',    label: 'Flat at 0V' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'high-duty') return { verdict: 'ok', label: 'VCV being commanded for max fuel', conclusion: 'PCM commanding VCV to max fuel delivery during crank. VCV electrical side confirmed.', conf: 10 };
+          if (c === 'low-duty')  return { verdict: 'warn', label: 'VCV low duty during crank', conclusion: 'PCM not commanding full fuel delivery — possible inhibit logic active (low coolant temp protection, RPM sync issue, immobilizer).', conf: 4 };
+          return { verdict: 'fail', label: 'No VCV PWM during crank', conclusion: 'PCM not commanding VCV — wire open, PCM driver fault, or PCM not seeing cranking.', conf: 0 };
+        },
+      },
+      {
+        id: 'n5', kind: 'mech', title: 'Fuel filter restriction check',
+        scope: { comps: ['filter','tank','lift'], wires: [], flows: ['flow-lp-supply'] },
+        target: { gauge: { x: 305, y: 440, label: 'INSPECT' } },
+        scenarioRequired: 'key-on', scenarioLabel: 'inspection',
+        sourceCite: 'Filter restriction first principles [LAW]',
+        expectedDisplay: 'Clean filter · no water in fuel · no debris',
+        confidence: 10,
+        input: { type: 'observation', prompt: 'Inspect fuel filter visually. Drain water separator. Check water-in-fuel indicator.',
+          options: [
+            { key: 'clean',     label: 'Filter clean, no water, no restriction', preset: true },
+            { key: 'water',     label: 'Water in fuel separator' },
+            { key: 'restricted', label: 'Visible restriction or collapsed element' },
+            { key: 'recent',    label: 'Recently serviced, suspect contamination from fill-up' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'clean') return { verdict: 'ok', label: 'Filter clean', conclusion: 'Fuel filter not the cause.', conf: 10 };
+          if (c === 'water') return { verdict: 'fail', label: 'Water contamination', conclusion: 'Drain separator, inspect tank, replace filter, attempt restart. Address before proceeding.', conf: 0, failureSuspect: 'water' };
+          if (c === 'restricted') return { verdict: 'fail', label: 'Restricted filter', conclusion: 'Replace filter, re-test N2 supply pressure.', conf: 0, failureSuspect: 'filter' };
+          return { verdict: 'warn', label: 'Possible contaminated fuel', conclusion: 'Sample tank fuel and test. May explain pump failure or starvation.', conf: 3 };
+        },
+      },
+      {
+        id: 'n6', kind: 'mech', title: 'Injector leak-off (return flow) test',
+        scope: { comps: ['inj','rail','tank'], wires: [], flows: ['flow-inj-leakoff'] },
+        target: { beaker: { x: 240, y: 720, label: 'ML/MIN' } },
+        scenarioRequired: 'cranking', scenarioLabel: 'cranking (sustained)',
+        sourceCite: 'Inferred component · injector leak path [PATTERN — confirm]',
+        expectedDisplay: 'Minimal flow during cranking · uniform across cylinders',
+        confidence: 15,
+        input: { type: 'observation', prompt: 'Cap return lines individually. Crank for 15 seconds. Observe flow pattern.',
+          options: [
+            { key: 'minimal',  label: 'Minimal flow, uniform across cylinders', preset: true },
+            { key: 'one-high', label: 'One or two cylinders show much higher flow than others' },
+            { key: 'all-high', label: 'All cylinders show high flow' },
+            { key: 'no-test',  label: 'Unable to perform — defer' },
+          ]},
+        grade: (v) => {
+          const c = v.choice;
+          if (c === 'minimal')  return { verdict: 'ok', label: 'Leak-off normal', conclusion: 'Injectors holding rail pressure during crank.', conf: 15 };
+          if (c === 'one-high') return { verdict: 'fail', label: 'Localized injector leak', conclusion: 'One injector bleeding rail pressure faster than pump replaces. Identify cylinder before commit.', conf: 0, failureSuspect: 'injector-single' };
+          if (c === 'all-high') return { verdict: 'fail', label: 'System-wide leak-off', conclusion: 'All injectors leaking — possible HP pump failure causing debris contamination (classic CP4 failure mode).', conf: 0, failureSuspect: 'cp4-debris' };
+          return { verdict: 'warn', label: 'Test deferred', conclusion: 'Cannot conclude without leak-off test.', conf: 0 };
+        },
+      },
+      {
+        id: 'n7', kind: 'synth', title: 'Verification & decision',
+        scope: { comps: [], wires: [], flows: [] },
+        scenarioRequired: null, scenarioLabel: 'synthesis',
+        sourceCite: 'Synthesis of N1–N6 [LOGIC]',
+        expectedDisplay: 'Identify single isolated failure mode',
+        confidence: 10, isVerification: true,
+        input: { type: 'confirm', prompt: 'Run synthesis.', label: 'Run synthesis' },
+        grade: (v, state) => {
+          const r = state.results;
+          const req = ['n1','n2','n3','n4','n5','n6'];
+          if (!req.every(id => r[id])) return { verdict: 'impossible', label: 'Sweep incomplete', conclusion: 'Earlier steps still need entries.' };
+          const suspects = req.map(id => r[id].failureSuspect).filter(Boolean);
+          if (suspects.length === 0) {
+            const anyWarn = req.some(id => r[id].verdict === 'warn');
+            if (anyWarn) return { verdict: 'warn', label: 'No single failure isolated', conclusion: 'No definitive fault. Re-test under different conditions (cold soak, after sit time).', conf: 0 };
+            return { verdict: 'warn', label: 'All tests clean — concern not reproduced', conclusion: 'Vehicle starts during testing. Pull freeze-frame, ask customer for trigger conditions, defer.', conf: 0 };
+          }
+          if (suspects.length === 1) {
+            const s = suspects[0];
+            const labels = { supply: 'lift pump output / supply path', 'rail-build': 'HP pump or supply starvation', water: 'water in fuel', filter: 'restricted fuel filter', 'injector-single': 'single injector internal leak', 'cp4-debris': 'CP4 HP pump failure with downstream debris contamination — major repair' };
+            return { verdict: 'ok', label: 'Single failure isolated', reading: `Suspect: ${labels[s]}`, conclusion: `Commit allowed for: ${labels[s]}.`, conf: 10, commitGoodFor: labels[s] };
+          }
+          return { verdict: 'warn', label: 'Multiple anomalies — commit refused', conclusion: 'More than one branch shows fault. Address cheapest first, re-run downstream tests.', conf: 0 };
+        },
+      },
+    ],
+  },
+];
+
+/* =========================================================================
+   STATE
+   ========================================================================= */
+let activeConcern = null;
+const state = { current: 0, results: {}, confidence: 0 };
+
+const stepListEl  = document.getElementById('stepList');
+const concernPills = document.getElementById('concernPills');
+
+/* =========================================================================
+   CONCERN SELECTOR
+   ========================================================================= */
+function renderConcerns() {
+  concernPills.innerHTML = CONCERNS.map(c => `
+    <div class="concern-pill ${activeConcern && activeConcern.id === c.id ? 'selected' : ''}" data-concern="${c.id}">${c.pillLabel}</div>
+  `).join('');
+  concernPills.querySelectorAll('.concern-pill').forEach(p => {
+    p.addEventListener('click', () => selectConcern(p.getAttribute('data-concern')));
+  });
+}
+
+function selectConcern(id) {
+  const c = CONCERNS.find(x => x.id === id);
+  if (!c) return;
+  activeConcern = c;
+  state.current = 0;
+  state.results = {};
+  state.confidence = 0;
+  document.getElementById('concernTitle').textContent = c.title;
+  document.getElementById('bannerCode').textContent = c.bannerCode;
+  document.getElementById('bannerText').textContent = c.bannerText;
+  document.getElementById('bannerMeta').textContent = c.bannerMeta;
+  document.getElementById('panelEyebrow').textContent = `Diagnostic Path · ${c.steps.length} steps`;
+  document.getElementById('panelTitle').textContent = `Each step shows what to probe, the scenario to run, and the expected reading. Enter what you measured — the system grades it.`;
+  document.getElementById('commitPanel').style.display = 'block';
+  document.getElementById('controlsRow').style.display = 'flex';
+  renderConcerns();
+  renderStepList();
+  renderDiagramForStep(0);
+  updateGate();
+}
+
+/* =========================================================================
+   STEP LIST
+   ========================================================================= */
+function renderStepList() {
+  if (!activeConcern) { stepListEl.innerHTML = ''; return; }
+  const STEPS = activeConcern.steps;
+  stepListEl.innerHTML = STEPS.map((s, idx) => {
+    const isActive = idx === state.current;
+    const isDone = !!state.results[s.id];
+    const isPending = idx > state.current && !isDone;
+    const result = state.results[s.id];
+    const cls = isActive ? 'active' : (isDone ? 'done' : (isPending ? 'pending' : ''));
+    const confLabel = isDone ? `+${result.conf ?? 0}%` : `+${s.confidence}%`;
+    const confCls = isDone ? 'added' : '';
+    const kindTag = s.kind === 'elec' ? 'ELECTRICAL' : s.kind === 'mech' ? 'MECHANICAL' : 'SYNTHESIS';
+    return `
+      <div class="step ${cls}" data-step="${idx}">
+        <div class="step-head" onclick="activateStep(${idx})">
+          <span class="step-num">STEP ${String(idx+1).padStart(2,'0')}${isActive ? ' · ACTIVE' : isDone ? ' · DONE' : ''}<span class="step-tag ${s.kind}">${kindTag}</span></span>
+          <span class="step-conf ${confCls}">${confLabel}</span>
+        </div>
+        <div class="step-title">${s.title}</div>
+        <div class="step-meta">
+          <span><b>Probe:</b> ${probeLabel(s)}</span>
+          <span><b>Scenario:</b> ${s.scenarioLabel}</span>
+        </div>
+        <div class="step-body">
+          <div class="expected-block">
+            ${s.meterMode ? `<div class="expected-row"><span class="expected-k">Meter mode</span><span class="expected-v">${s.meterMode}</span></div>` : ''}
+            <div class="expected-row"><span class="expected-k">Expected</span><span class="expected-v">${s.expectedDisplay}</span></div>
+            <div class="expected-row"><span class="expected-k">Source</span><span class="expected-v">${s.sourceCite}</span></div>
+          </div>
+          ${!isDone ? renderEntry(s) : ''}
+        </div>
+        ${isDone ? renderVerdict(result) : ''}
+      </div>
+    `;
+  }).join('');
+  bindEntryHandlers();
+}
+
+function probeLabel(s) {
+  if (s.target && s.target.probeMode === 'pid') return 'scan tool PID · no physical probe';
+  if (s.target && s.target.gauge) return `${s.target.gauge.label} · pressure gauge at test point`;
+  if (s.target && s.target.beaker) return `${s.target.beaker.label} · measurement at injector return`;
+  if (s.target && s.target.pin) return pinLabel(s.target.pin);
+  return 'no probe — synthesis';
+}
+function pinLabel(pinId) {
+  return {
+    'pin-frp-sig':  'FRP signal pin (front DS rail)',
+    'pin-frp-5v':   'FRP 5V ref pin',
+    'pin-frp-lref': 'FRP low-ref pin',
+    'pin-vcv-a':    'VCV pin A (top of HP pump)',
+    'pin-vcv-b':    'VCV pin B',
+    'pin-reg-a':    'Regulator pin A (back DS rail)',
+    'pin-reg-b':    'Regulator pin B',
+  }[pinId] || pinId;
+}
+
+/* =========================================================================
+   ENTRY UI
+   ========================================================================= */
+function renderEntry(s) {
+  const input = s.input;
+  if (!input) return '';
+  if (input.type === 'numeric' || input.type === 'dual') {
+    return `
+      <div class="entry-block">
+        <div class="entry-prompt">${input.prompt}</div>
+        <div class="entry-row ${input.type === 'dual' ? 'dual' : ''}">
+          ${input.fields.map(f => `
+            <div class="entry-field">
+              <label>${f.label}</label>
+              <input type="text" inputmode="decimal" id="entry-${s.id}-${f.key}" placeholder="${f.placeholder}" />
+              <span class="unit">${f.unit}</span>
+            </div>
+          `).join('')}
+        </div>
+        <button class="entry-submit" id="submit-${s.id}">Submit reading</button>
+      </div>`;
+  }
+  if (input.type === 'observation') {
+    return `
+      <div class="entry-block">
+        <div class="entry-prompt">${input.prompt}</div>
+        <div class="entry-options" id="opts-${s.id}">
+          ${input.options.map(o => `
+            <div class="entry-option" data-choice="${o.key}">
+              <div class="radio"></div>
+              <div>${o.label}</div>
+            </div>
+          `).join('')}
+        </div>
+        <button class="entry-submit" id="submit-${s.id}" disabled>Submit observation</button>
+      </div>`;
+  }
+  if (input.type === 'confirm') {
+    return `
+      <div class="entry-block">
+        <div class="entry-prompt">${input.prompt}</div>
+        <button class="entry-submit" id="submit-${s.id}">${input.label}</button>
+      </div>`;
+  }
+  return '';
+}
+
+function bindEntryHandlers() {
+  const STEPS = activeConcern.steps;
+  const step = STEPS[state.current];
+  if (!step || state.results[step.id]) return;
+  if (step.input.type === 'observation') {
+    document.querySelectorAll(`#opts-${step.id} .entry-option`).forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll(`#opts-${step.id} .entry-option`).forEach(x => x.classList.remove('selected'));
+        el.classList.add('selected');
+        document.getElementById(`submit-${step.id}`).disabled = false;
+      });
+    });
+  }
+  const btn = document.getElementById(`submit-${step.id}`);
+  if (btn) btn.addEventListener('click', () => submitReading(step.id));
+}
+
+/* =========================================================================
+   VERDICT
+   ========================================================================= */
+function renderVerdict(result) {
+  if (!result) return '';
+  const g = result.verdict === 'ok' ? '✓' : result.verdict === 'warn' ? '⚠' : result.verdict === 'impossible' ? '⛔' : '✗';
+  return `
+    <div class="verdict ${result.verdict}">
+      <div class="verdict-head">
+        <span class="verdict-glyph">${g}</span>
+        <span class="verdict-label">${result.label}</span>
+      </div>
+      ${result.reading ? `<div class="verdict-reading">${result.reading}</div>` : ''}
+      <div class="verdict-conclusion">${result.conclusion}</div>
+    </div>`;
+}
+
+/* =========================================================================
+   SUBMIT READING
+   ========================================================================= */
+function submitReading(stepId) {
+  const STEPS = activeConcern.steps;
+  const step = STEPS.find(s => s.id === stepId);
+  if (!step) return;
+  const vals = {};
+  if (step.input.type === 'numeric' || step.input.type === 'dual') {
+    step.input.fields.forEach(f => {
+      const el = document.getElementById(`entry-${step.id}-${f.key}`);
+      vals[f.key] = el ? el.value.trim() : '';
+    });
+  } else if (step.input.type === 'observation') {
+    const sel = document.querySelector(`#opts-${step.id} .entry-option.selected`);
+    vals.choice = sel ? sel.getAttribute('data-choice') : null;
+  } else if (step.input.type === 'confirm') {
+    vals.confirm = true;
+  }
+  const result = step.grade(vals, state);
+  if (result.verdict === 'impossible') { showImpossibility(stepId, result); return; }
+  state.results[stepId] = result;
+  if (result.conf) state.confidence += result.conf;
+  updateGate();
+  const idx = STEPS.findIndex(s => s.id === stepId);
+  renderStepList();
+  renderDiagramForStep(state.current);
+  if (idx < STEPS.length - 1) {
+    setTimeout(() => activateStep(idx + 1), 400);
+  } else {
+    renderCommit();
+  }
+}
+
+function showImpossibility(stepId, result) {
+  const STEPS = activeConcern.steps;
+  const stepIdx = STEPS.findIndex(s => s.id === stepId);
+  const stepEl = document.querySelector(`.step[data-step="${stepIdx}"]`);
+  if (!stepEl) return;
+  stepEl.querySelectorAll('.verdict.impossible').forEach(el => el.remove());
+  const banner = document.createElement('div');
+  banner.className = 'verdict impossible';
+  banner.innerHTML = `
+    <div class="verdict-head">
+      <span class="verdict-glyph">⛔</span>
+      <span class="verdict-label">${result.label}</span>
+    </div>
+    ${result.reading ? `<div class="verdict-reading">${result.reading}</div>` : ''}
+    <div class="verdict-conclusion">${result.conclusion}</div>`;
+  const entry = stepEl.querySelector('.entry-block');
+  if (entry) entry.parentNode.insertBefore(banner, entry);
+}
+
+/* =========================================================================
+   DIAGRAM RENDER + GREY-OUT
+   ========================================================================= */
+function clearDiagramOverlay() {
+  document.getElementById('probeLayer').innerHTML = '';
+  document.querySelectorAll('.comp').forEach(c => { c.classList.remove('target','dim'); });
+  document.querySelectorAll('.pin').forEach(p => p.classList.remove('probe-pin'));
+  document.querySelectorAll('.wire').forEach(w => { w.classList.remove('active','dim','anim-pwm','anim-5v','anim-signal'); });
+  document.querySelectorAll('.flow').forEach(f => { f.classList.remove('active','dim','anim-flow'); });
+  document.querySelectorAll('.scenario-pill').forEach(p => p.classList.remove('required'));
+}
+
+function renderDiagramForStep(stepIdx) {
+  clearDiagramOverlay();
+  if (!activeConcern) return;
+  const step = activeConcern.steps[stepIdx];
+  if (!step) return;
+
+  if (step.scenarioRequired) {
+    document.querySelector(`.scenario-pill[data-scn="${step.scenarioRequired}"]`)?.classList.add('required');
+  }
+
+  if (step.isVerification) {
+    // Show everything brightened
+    return;
+  }
+
+  const scope = step.scope || { comps: [], wires: [], flows: [] };
+  // Dim everything first
+  document.querySelectorAll('.comp').forEach(c => c.classList.add('dim'));
+  document.querySelectorAll('.wire').forEach(w => w.classList.add('dim'));
+  document.querySelectorAll('.flow').forEach(f => f.classList.add('dim'));
+
+  // Un-dim scope items
+  (scope.comps || []).forEach(id => {
+    const el = document.getElementById('comp-' + id);
+    if (el) el.classList.remove('dim');
+  });
+  (scope.wires || []).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove('dim');
+      el.classList.add('active');
+      const anim = (step.wireAnim || {})[id];
+      if (anim) el.classList.add(anim);
+    }
+  });
+  (scope.flows || []).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove('dim');
+      el.classList.add('active','anim-flow');
+    }
+  });
+
+  // Target component outlined
+  if (step.target && step.target.comp) {
+    const tgt = document.getElementById('comp-' + step.target.comp);
+    if (tgt) { tgt.classList.remove('dim'); tgt.classList.add('target'); }
+  }
+
+  // Probe / gauge / beaker / PID overlay
+  if (step.target) {
+    if (step.target.probeMode === 'pid') drawPIDOverlay(step);
+    else if (step.target.probeMode === 'standard' && step.target.pin) drawProbes(step);
+    else if (step.target.gauge) drawGauge(step);
+    else if (step.target.beaker) drawBeaker(step);
+  }
+}
+
+function getPinPosition(pinId) {
+  const pin = document.getElementById(pinId);
+  if (!pin) return null;
+  const rect = pin.querySelector('rect');
+  if (!rect) return null;
+  const x = parseFloat(rect.getAttribute('x')) + parseFloat(rect.getAttribute('width'))/2;
+  const y = parseFloat(rect.getAttribute('y'));
+  return { x, y };
+}
+
+function drawProbes(step) {
+  const layer = document.getElementById('probeLayer');
+  const pin = document.getElementById(step.target.pin);
+  if (pin) pin.classList.add('probe-pin');
+  const tPos = getPinPosition(step.target.pin);
+  if (!tPos) return;
+  const gnd = { x: 838, y: 710 };
+  const redX = tPos.x;
+  const redY = tPos.y - 38;
+  layer.innerHTML = `
+    <g class="probe probe-red">
+      <line class="probe-stem" x1="${redX}" y1="${redY}" x2="${redX}" y2="${tPos.y - 4}"/>
+      <circle class="probe-head" cx="${redX}" cy="${redY - 6}" r="6"/>
+      <line class="probe-tip" x1="${redX}" y1="${tPos.y - 4}" x2="${redX}" y2="${tPos.y - 1}"/>
+      <text x="${redX}" y="${redY - 12}" font-family="JetBrains Mono" font-size="9" fill="var(--probe-red)" text-anchor="middle" letter-spacing="0.08em">RED</text>
+    </g>
+    <g class="probe probe-blk">
+      <line class="probe-stem" x1="${gnd.x}" y1="${gnd.y - 30}" x2="${gnd.x}" y2="${gnd.y - 2}"/>
+      <circle class="probe-head" cx="${gnd.x}" cy="${gnd.y - 36}" r="6"/>
+      <line class="probe-tip" x1="${gnd.x}" y1="${gnd.y - 2}" x2="${gnd.x}" y2="${gnd.y + 1}"/>
+      <text x="${gnd.x}" y="${gnd.y - 42}" font-family="JetBrains Mono" font-size="9" fill="var(--probe-blk)" text-anchor="middle" letter-spacing="0.08em">BLK</text>
+    </g>
+    ${drawMeter(step, redX, redY)}`;
+}
+
+function drawMeter(step, anchorX, anchorY) {
+  if (!step.meterMode) return '';
+  const mx = anchorX > 500 ? anchorX - 100 : anchorX + 20;
+  const my = Math.max(anchorY - 80, 20);
+  const r = step.meterPreset || { value: '—', unit: '', wave: false };
+  let wave = '';
+  if (r.wave) {
+    const wx = mx + 12, wy = my + 56;
+    let d = `M ${wx} ${wy}`;
+    for (let i = 0; i < 4; i++) d += ` h 5 v -8 h 4 v 8 h 4`;
+    wave = `<path class="meter-wave" d="${d}"/>`;
+  }
+  return `
+    <g class="meter">
+      <rect class="meter-body" x="${mx}" y="${my}" width="90" height="64"/>
+      <rect class="meter-screen" x="${mx + 6}" y="${my + 6}" width="78" height="38" rx="2"/>
+      <text class="meter-mode" x="${mx + 45}" y="${my + 18}">${step.meterMode}</text>
+      <text class="meter-reading" x="${mx + 45}" y="${my + 36}">${r.value}</text>
+      <text class="meter-unit" x="${mx + 45}" y="${my + 60}">${r.unit}</text>
+      ${wave}
+    </g>`;
+}
+
+function drawPIDOverlay(step) {
+  const layer = document.getElementById('probeLayer');
+  layer.innerHTML = `
+    <g class="pid-overlay">
+      <rect class="pid-bg" x="710" y="30" width="170" height="86"/>
+      <text class="pid-label"     x="720" y="46">SCAN TOOL · LIVE PID</text>
+      <text class="pid-label"     x="720" y="64">FUEL RAIL PRESSURE</text>
+      <text class="pid-value-big" x="720" y="84">Enter readings</text>
+      <text class="pid-value-big" x="720" y="106">→ in side panel</text>
+    </g>`;
+}
+
+function drawGauge(step) {
+  const layer = document.getElementById('probeLayer');
+  const g = step.target.gauge;
+  layer.innerHTML = `
+    <g class="gauge">
+      <circle class="gauge-body" cx="${g.x}" cy="${g.y}" r="34"/>
+      <circle class="gauge-face" cx="${g.x}" cy="${g.y}" r="29"/>
+      <text class="gauge-label" x="${g.x}" y="${g.y - 12}">PSI</text>
+      <text class="gauge-value" x="${g.x}" y="${g.y + 4}">—</text>
+      <text class="gauge-unit"  x="${g.x}" y="${g.y + 18}">enter →</text>
+      <text class="gauge-tap"   x="${g.x}" y="${g.y + 46}">${g.label}</text>
+    </g>`;
+}
+
+function drawBeaker(step) {
+  const layer = document.getElementById('probeLayer');
+  const b = step.target.beaker;
+  layer.innerHTML = `
+    <g class="beaker">
+      <rect class="beaker-body" x="${b.x - 22}" y="${b.y - 16}" width="44" height="48" rx="2"/>
+      <rect class="beaker-fill" x="${b.x - 19}" y="${b.y + 4}" width="38" height="24" rx="1"/>
+      <text class="beaker-label" x="${b.x}" y="${b.y - 22}">${b.label}</text>
+      <text class="beaker-value" x="${b.x}" y="${b.y + 44}">enter →</text>
+    </g>`;
+}
+
+/* =========================================================================
+   GATE / COMMIT
+   ========================================================================= */
+function activateStep(idx) {
+  if (!activeConcern) return;
+  if (idx < 0 || idx >= activeConcern.steps.length) return;
+  state.current = idx;
+  renderStepList();
+  renderDiagramForStep(idx);
+  setTimeout(() => {
+    const el = stepListEl.querySelector(`.step[data-step="${idx}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 50);
+}
+
+function updateGate() {
+  const v = Math.min(state.confidence, 100);
+  document.getElementById('gateVal').textContent = v + '%';
+  const fill = document.getElementById('gateFill');
+  fill.style.width = v + '%';
+  const status = document.getElementById('gateStatus');
+  fill.classList.remove('warn','pass');
+  status.classList.remove('warn','pass');
+  document.getElementById('gateVal').classList.remove('warn','pass');
+  if (v >= 95) {
+    fill.classList.add('pass'); status.classList.add('pass'); document.getElementById('gateVal').classList.add('pass');
+    status.textContent = '▲ above gate · commit allowed';
+  } else if (v >= 70) {
+    fill.classList.add('warn'); status.classList.add('warn'); document.getElementById('gateVal').classList.add('warn');
+    status.textContent = '▼ ' + (95 - v).toFixed(1) + ' below gate · commit refused';
+  } else {
+    status.textContent = '▼ ' + (95 - v).toFixed(1) + ' below gate · commit refused';
+  }
+  renderCommit();
+}
+
+function renderCommit() {
+  if (!activeConcern) return;
+  const panel = document.getElementById('commitPanel');
+  const title = document.getElementById('commitTitle');
+  const sub = document.getElementById('commitSub');
+  const list = document.getElementById('commitList');
+  const foot = document.getElementById('commitFoot');
+  panel.classList.remove('warn','pass');
+
+  const STEPS = activeConcern.steps;
+  const completed = Object.keys(state.results).length;
+  const synthStep = STEPS[STEPS.length - 1];
+  const synthResult = state.results[synthStep.id];
+
+  if (synthResult && synthResult.commitGoodFor) {
+    panel.classList.add('pass');
+    title.textContent = 'Commit allowed';
+    sub.innerHTML = `Single failure isolated through evidence chain.`;
+    list.innerHTML = `<li style="border:none">Repair confirmed for: <b>${synthResult.commitGoodFor}</b></li>`;
+    foot.innerHTML = `<strong>Evidence chain:</strong> all completed steps cited inline above. After repair, re-run S1 to verify.`;
+    return;
+  }
+
+  if (synthResult && synthResult.verdict === 'warn') {
+    panel.classList.add('warn');
+    title.textContent = 'Commit refused — diagnostic incomplete';
+    sub.innerHTML = synthResult.conclusion;
+    list.innerHTML = `
+      <li>Replace any individual component without isolating</li>
+      <li>Teardown of fuel system without confirming a specific suspect</li>
+    `;
+    foot.innerHTML = `<strong>What changes the answer:</strong> Reproduce concern conditions, gather pending evidence, or run additional mechanical tests not in this scope.`;
+    return;
+  }
+
+  title.textContent = 'Commit refused';
+  if (completed === 0) {
+    sub.textContent = 'No evidence gathered. The following are NOT recommended:';
+    foot.innerHTML = '<strong>What changes the answer:</strong> Run the diagnostic path. Each reading adjusts confidence.';
+  } else {
+    sub.textContent = `${completed} of ${STEPS.length} steps complete · ${state.confidence}% confidence.`;
+    foot.innerHTML = '<strong>What changes the answer:</strong> Complete remaining steps and let synthesis isolate a single failure.';
+  }
+  list.innerHTML = `<li>Replace any component without isolated evidence</li><li>Teardown of fuel system</li><li>Speculative parts ordering</li>`;
+}
+
+function resetSession() {
+  if (!activeConcern) return;
+  state.current = 0;
+  state.results = {};
+  state.confidence = 0;
+  updateGate();
+  renderStepList();
+  renderDiagramForStep(0);
+}
+
+async function autoRun() {
+  if (!activeConcern) return;
+  resetSession();
+  const STEPS = activeConcern.steps;
+  for (let i = 0; i < STEPS.length; i++) {
+    activateStep(i);
+    await sleep(900);
+    const step = STEPS[i];
+    if (step.input.type === 'numeric' || step.input.type === 'dual') {
+      step.input.fields.forEach(f => {
+        const el = document.getElementById(`entry-${step.id}-${f.key}`);
+        if (el && f.preset) el.value = f.preset;
+      });
+      await sleep(500);
+    } else if (step.input.type === 'observation') {
+      const preset = step.input.options.find(o => o.preset);
+      if (preset) {
+        const optEl = document.querySelector(`#opts-${step.id} .entry-option[data-choice="${preset.key}"]`);
+        if (optEl) {
+          optEl.classList.add('selected');
+          document.getElementById(`submit-${step.id}`).disabled = false;
+        }
+      }
+      await sleep(500);
+    }
+    submitReading(step.id);
+    await sleep(900);
+  }
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+document.getElementById('btnReset').addEventListener('click', resetSession);
+document.getElementById('btnAuto').addEventListener('click', autoRun);
+
+/* BOOT */
+renderConcerns();
+// auto-load first concern
+selectConcern(CONCERNS[0].id);
+</script>
+</body>
+</html>

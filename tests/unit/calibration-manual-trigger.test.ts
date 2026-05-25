@@ -83,18 +83,16 @@ describe('triggerCalibrationAnalysis', () => {
     }
   })
 
-  it('returns 403 when the user is an owner who is NOT the founder', async () => {
-    // PR 6 tightening: role==='owner' alone no longer grants curator access.
+  it('runs the analysis when the user is an Admin who is NOT the founder (Mac case)', async () => {
+    // Admin (DB role 'owner') inherits curator access. Mac and Angel
+    // both run as Admins of their shops and curate alongside Brandon.
     const owner = await seedProfile(db, 'owner')
     const result = await triggerCalibrationAnalysis({
       db,
       userId: owner.userId,
       userEmail: 'mac@example.test',
     })
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.status).toBe(403)
-    }
+    expect(result.ok).toBe(true)
   })
 
   it('runs the analysis when the user is the founder via FOUNDER_EMAIL', async () => {

@@ -1,0 +1,253 @@
+/* Interactive wiring-topology diagnostic — PR-B.
+   Tokens (--vt-*) are defined in app/globals.css. */
+
+/* ---- layout shell --------------------------------------------------- */
+.topo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto 1fr;
+  gap: var(--vt-space-6);
+  align-items: stretch;
+  height: 100dvh;
+  padding: var(--vt-space-5);
+  background: var(--vt-bg);
+}
+.topo__header {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.topo__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo__title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-32);
+  color: var(--vt-fg);
+}
+.topo__vehicle {
+  font-family: var(--vt-font-mono);
+  font-size: 13px;
+  color: var(--vt-fg-2);
+}
+
+/* ---- canvas --------------------------------------------------------- */
+.topo__canvas {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-100);
+  overflow: hidden;
+}
+.topo__canvas .react-flow__attribution { display: none; }
+
+/* ---- node ----------------------------------------------------------- */
+.topo-node {
+  width: 210px;
+  height: 86px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--vt-bone-50);
+  border: 1.4px solid var(--vt-fg);
+  border-radius: var(--vt-radius-1);
+  cursor: pointer;
+  transition: box-shadow var(--vt-dur-2) var(--vt-ease);
+}
+.topo-node:hover { box-shadow: var(--vt-shadow-pop); }
+.topo-node.is-selected {
+  border-color: var(--vt-amber-500);
+  border-width: 2px;
+}
+.topo-node--mechanical {
+  background: var(--vt-bone-100);
+  border-style: dashed;
+  border-color: var(--vt-bone-400);
+}
+.topo-node--splice,
+.topo-node--connector { border-radius: var(--vt-radius-3); }
+.topo-node__name {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  color: var(--vt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topo-node__kind {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo-node__loc {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  color: var(--vt-fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topo-node__gap {
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+}
+/* connection handles exist for React Flow edge routing — keep them invisible */
+.topo-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- edges (connection_kind palette, spec D4) ----------------------- */
+.topo-edge .react-flow__edge-path { stroke-width: 2; }
+.topo-edge.is-selected .react-flow__edge-path { stroke-width: 3.5; }
+.topo-edge--electrical-wire .react-flow__edge-path { stroke: var(--vt-elem-voltage); }
+.topo-edge--fluid-line .react-flow__edge-path { stroke: var(--vt-elem-fuel); }
+.topo-edge--mechanical-linkage .react-flow__edge-path { stroke: var(--vt-elem-mech); }
+.topo-edge--can-bus .react-flow__edge-path { stroke: var(--vt-signal-500); }
+.topo-edge--lin-bus .react-flow__edge-path { stroke: var(--vt-signal-600); }
+.topo-edge--controlled_by .react-flow__edge-path { stroke: var(--vt-graphite-600); }
+.topo-edge--reports_to .react-flow__edge-path { stroke: var(--vt-graphite-500); }
+
+/* ---- detail panel --------------------------------------------------- */
+.topo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-3);
+  padding: var(--vt-space-5);
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-2);
+  overflow-y: auto;
+}
+.topo-panel__close {
+  position: sticky;
+  top: 0;
+  align-self: flex-end;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-1);
+  color: var(--vt-fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.topo-panel__close:hover {
+  background: var(--vt-bone-100);
+}
+.topo-panel__empty {
+  margin: auto;
+  text-align: center;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+}
+.topo-panel__kind {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+}
+.topo-panel__title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-24);
+  color: var(--vt-fg);
+}
+.topo-panel__row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vt-rule);
+  font-size: 13px;
+}
+.topo-panel__row-label {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo-panel__section-title {
+  font-family: var(--vt-font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  margin-top: var(--vt-space-2);
+}
+.topo-panel__probe,
+.topo-panel__test {
+  padding: 8px 10px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-size: 12.5px;
+}
+.topo-panel__test.is-implicated { border-color: var(--vt-amber-400); }
+.topo-panel__provenance {
+  align-self: flex-start;
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  color: var(--vt-fg-3);
+}
+.topo-panel__provenance[data-provenance='GAP'] {
+  color: var(--vt-amber-600);
+  border-color: var(--vt-amber-400);
+}
+.topo-panel__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vt-signal-600);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* ---- mobile: stack; panel becomes a tap-to-open sheet --------------- */
+@media (max-width: 1023px) {
+  .topo {
+    grid-template-columns: 1fr;
+    height: 100dvh;
+  }
+  .topo__canvas { min-height: 0; }
+  .topo-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 72dvh;
+    border-radius: var(--vt-radius-3) var(--vt-radius-3) 0 0;
+    box-shadow: var(--vt-shadow-sheet);
+    transform: translateY(100%);
+    transition: transform var(--vt-dur-3) var(--vt-ease);
+    z-index: 20;
+  }
+  .topo-panel.is-open { transform: translateY(0); }
+}

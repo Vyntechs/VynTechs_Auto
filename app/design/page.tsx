@@ -48,6 +48,9 @@ const fixtureSession: Session = {
   curatorNote: null,
   curatorOverrideAction: null,
   maxCorpusSimilarity: null,
+  cacheHitPlatformId: null,
+  cacheHitSymptomId: null,
+  lastScenarioSlug: null,
 }
 
 const closedSession: Session = {

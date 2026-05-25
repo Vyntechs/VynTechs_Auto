@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VISUAL Layout v1 · Vyntechs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bone-50:#fbf8f0; --bone-100:#f5f0e0; --bone-200:#ede5d0; --bone-300:#d4cdb8;
+  --bone-400:#b8b09a; --bone-700:#6b6657; --bone-800:#4a4536;
+  --ink-900:#1a1a1a; --ink-700:#3a3a3a; --ink-500:#6b6657;
+  --amber-500:#c89a3e; --amber-300:#e2c47a;
+  --pass:#4ca866; --fail:#b34d4d; --warn:#c89a3e;
+  --flow-lp:#4a7caa;
+  --serif:"Instrument Serif",serif; --sans:"Inter Tight",sans-serif; --mono:"JetBrains Mono",monospace;
+  --dim:0.13; --ease:cubic-bezier(.4,0,.2,1); --dur:300ms;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bone-50);color:var(--ink-900);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.page{max-width:1280px;margin:0 auto;padding:24px}
+.head{padding-bottom:14px;border-bottom:1px solid var(--bone-300);margin-bottom:14px}
+.eyebrow{font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500;margin-bottom:4px}
+h1{font-family:var(--serif);font-size:28px;letter-spacing:-0.02em;line-height:1.05}
+.vehicle{font-family:var(--mono);font-size:12px;color:var(--ink-700);margin-top:4px}
+
+.step-banner{display:grid;grid-template-columns:auto 1fr auto auto;gap:18px;align-items:center;background:var(--bone-100);border:1px solid var(--bone-300);border-left:4px solid var(--amber-500);padding:14px 18px;border-radius:2px;margin-bottom:16px}
+.step-tag{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:0.14em;color:var(--amber-500);background:#fff5dc;padding:5px 9px;border-radius:2px;white-space:nowrap}
+.step-title{font-family:var(--serif);font-size:18px;color:var(--ink-900)}
+.condition-pill{display:flex;flex-direction:column;gap:2px;padding:8px 14px;background:var(--bone-50);border:1px solid var(--bone-300);border-radius:2px;min-width:200px;position:relative}
+.condition-pill.required{border-left:3px solid var(--pass);background:#f0f8f1}
+.condition-dot{position:absolute;top:10px;right:12px;width:8px;height:8px;border-radius:50%;background:var(--pass);box-shadow:0 0 0 3px rgba(76,168,102,0.18);animation:dotPulse 2s ease-in-out infinite}
+@keyframes dotPulse{0%,100%{box-shadow:0 0 0 3px rgba(76,168,102,0.18)}50%{box-shadow:0 0 0 6px rgba(76,168,102,0.08)}}
+.condition-label{font-family:var(--mono);font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500}
+.condition-value{font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink-900)}
+.leverage-pill{display:flex;flex-direction:column;gap:2px;padding:8px 14px;background:var(--bone-50);border:1px solid var(--bone-300);border-radius:2px;min-width:220px;border-left:3px solid var(--amber-500)}
+.leverage-label{font-family:var(--mono);font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-500);font-weight:500}
+.leverage-value{font-family:var(--sans);font-size:13px;color:var(--ink-900)}
+.leverage-meta{font-family:var(--mono);font-size:10px;color:var(--ink-700);letter-spacing:0.04em}
+.leverage-meta b,.leverage-value b{color:var(--ink-900);font-weight:600}
+
+.main{display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start}
+@media (max-width:1020px){.main{grid-template-columns:1fr}}
+
+.canvas-wrap{background:linear-gradient(var(--bone-100),var(--bone-100)),repeating-linear-gradient(0deg,transparent 0,transparent 23px,rgba(107,102,87,0.06) 23px,rgba(107,102,87,0.06) 24px);background-blend-mode:multiply;border:1px solid var(--bone-300);border-radius:2px;padding:18px}
+svg.diagram{display:block;width:100%;height:auto}
+
+.comp{transition:opacity var(--dur) var(--ease)}
+.comp.dim{opacity:var(--dim)}
+.comp-rect{fill:var(--bone-50);stroke:var(--ink-900);stroke-width:1.2;rx:2}
+.comp-rect.mech{fill:var(--bone-100);stroke:var(--bone-400);stroke-dasharray:4 3}
+.comp-rect.tank{fill:#f5f0e0;stroke:var(--ink-700);stroke-width:1.5;rx:8}
+.comp.target .comp-rect{stroke:var(--amber-500);stroke-width:2.5;filter:drop-shadow(0 0 8px rgba(200,154,62,0.45))}
+.comp-name{font-family:var(--serif);font-size:13px;fill:var(--ink-900);text-anchor:middle}
+.comp-name.mech{fill:var(--ink-500);font-style:italic}
+.comp-loc{font-family:var(--mono);font-size:9px;letter-spacing:0.06em;fill:var(--ink-500);text-anchor:middle;text-transform:uppercase}
+
+.flow{fill:none;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;transition:opacity var(--dur) var(--ease)}
+.flow.dim{opacity:var(--dim)}
+.flow.role-lp{stroke:var(--flow-lp);opacity:0.55}
+
+/* CALLOUT — pulsing ring + leader line to checklist item */
+@keyframes calloutPulse{0%,100%{r:18}50%{r:23}}
+.callout-ring{fill:none;stroke:var(--amber-500);stroke-width:2.5;animation:calloutPulse 1.6s ease-in-out infinite}
+.callout-dot{fill:var(--amber-500);stroke:var(--bone-50);stroke-width:1.5}
+.callout-leader{fill:none;stroke:var(--amber-500);stroke-width:2;stroke-dasharray:4 4;opacity:0.7;transition:all var(--dur) var(--ease)}
+.callout-label{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:0.08em;fill:var(--amber-500);text-anchor:middle}
+.callout-sublabel{font-family:var(--mono);font-size:8px;fill:var(--ink-500);text-anchor:middle;letter-spacing:0.04em}
+
+/* ZOOM DETAIL — magnified view of the inspection area showing what to look for */
+.zoom-frame{fill:#fff;stroke:var(--amber-500);stroke-width:2;rx:4;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.16))}
+.zoom-label{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:0.1em;fill:var(--ink-500);text-anchor:start;text-transform:uppercase}
+.zoom-title{font-family:var(--serif);font-size:14px;fill:var(--ink-900);text-anchor:start}
+.zoom-pointer{fill:var(--amber-500)}
+.zoom-pointer-label{font-family:var(--mono);font-size:9.5px;font-weight:600;fill:var(--ink-900);text-anchor:start}
+
+/* CHECKLIST PANEL */
+.checklist-panel{background:var(--bone-50);border:1px solid var(--bone-300);border-radius:2px;padding:0;overflow:hidden}
+.checklist-head{padding:14px 18px;border-bottom:1px solid var(--bone-300);background:var(--bone-100)}
+.checklist-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--ink-500);font-weight:500;margin-bottom:4px}
+.checklist-component{font-family:var(--serif);font-size:17px;color:var(--ink-900)}
+.checklist-progress{font-family:var(--mono);font-size:10px;color:var(--ink-500);margin-top:4px;letter-spacing:0.04em}
+
+.check-item{padding:14px 18px;border-bottom:1px solid var(--bone-200);transition:background var(--dur) var(--ease);cursor:pointer;position:relative}
+.check-item:last-child{border-bottom:none}
+.check-item:hover{background:var(--bone-100)}
+.check-item.active{background:#fff5dc;border-left:3px solid var(--amber-500)}
+.check-item.done.yes{background:#f0f8f1;border-left:3px solid var(--pass)}
+.check-item.done.no{background:#fdf3f3;border-left:3px solid var(--fail)}
+
+.check-question{font-size:14px;font-weight:500;color:var(--ink-900);margin-bottom:8px;line-height:1.35}
+.check-sub{font-family:var(--mono);font-size:10.5px;color:var(--ink-500);letter-spacing:0.04em;margin-bottom:10px}
+.check-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.check-btn{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:8px 0;border:1.5px solid var(--bone-400);background:var(--bone-50);color:var(--ink-700);border-radius:2px;cursor:pointer;transition:all var(--dur) var(--ease)}
+.check-btn.yes:hover{border-color:var(--pass);background:#f0f8f1;color:#2d6a40}
+.check-btn.no:hover{border-color:var(--fail);background:#fdf3f3;color:#8a3030}
+.check-btn.selected.yes{border-color:var(--pass);background:var(--pass);color:#fff}
+.check-btn.selected.no{border-color:var(--fail);background:var(--fail);color:#fff}
+
+.check-implication{margin-top:9px;padding:8px 11px;background:rgba(200,154,62,0.08);border-left:2px solid var(--amber-500);font-size:11.5px;color:var(--ink-700);line-height:1.4;display:none}
+.check-item.active .check-implication{display:block}
+.check-implication b{color:var(--ink-900)}
+
+.check-status{position:absolute;top:14px;right:18px;font-family:var(--mono);font-size:9px;letter-spacing:0.1em;font-weight:600;text-transform:uppercase;color:var(--ink-500)}
+.check-item.done.yes .check-status{color:var(--pass)}
+.check-item.done.no .check-status{color:var(--fail)}
+.check-item.active .check-status{color:var(--amber-500)}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div class="eyebrow">VISUAL Layout v1 · Checklist inspection</div>
+    <h1>Fuel filter / water separator inspection</h1>
+    <div class="vehicle">2018 F-250 6.7L Power Stroke · P0087 diagnostic, step 04</div>
+  </div>
+
+  <div class="step-banner">
+    <div class="step-tag">VISUAL · CHECKLIST</div>
+    <div class="step-title">Inspect fuel filter housing · 6 objective observations</div>
+    <div class="condition-pill required">
+      <div class="condition-dot"></div>
+      <div class="condition-label">REQUIRED CONDITION</div>
+      <div class="condition-value">Key off · engine cool</div>
+    </div>
+    <div class="leverage-pill">
+      <div class="leverage-label">LEVERAGE</div>
+      <div class="leverage-value"><b>Eliminates 3 of 6</b> remaining causes</div>
+      <div class="leverage-meta">Invasiveness <b>1/5</b> · Effort <b>low</b></div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="canvas-wrap">
+      <svg class="diagram" viewBox="0 0 700 580" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- FUEL TANK -->
+        <g class="comp dim">
+          <rect class="comp-rect tank" x="20" y="430" width="200" height="130"/>
+          <text class="comp-name mech" x="120" y="458">Fuel Tank</text>
+          <text class="comp-loc" x="120" y="474">under bed</text>
+        </g>
+
+        <!-- LIFT PUMP -->
+        <g class="comp dim">
+          <rect class="comp-rect" x="40" y="488" width="160" height="56"/>
+          <text class="comp-name" x="120" y="510">Lift Pump</text>
+          <text class="comp-loc" x="120" y="524">inside tank</text>
+        </g>
+
+        <!-- FUEL FILTER (TARGET) -->
+        <g class="comp target" id="comp-filter">
+          <rect class="comp-rect mech" x="250" y="200" width="200" height="120"/>
+          <text class="comp-name mech" x="350" y="226">Fuel Filter</text>
+          <text class="comp-loc" x="350" y="242">chassis · water separator</text>
+          <text class="comp-loc" x="350" y="256" font-style="italic">primary filtration · serviceable</text>
+          <!-- visual elements suggesting the filter housing -->
+          <rect x="290" y="266" width="120" height="44" fill="#e8dec8" stroke="#8a7a4a" stroke-width="1" rx="3"/>
+          <text x="350" y="288" text-anchor="middle" font-family="JetBrains Mono" font-size="8" fill="#6b5a30" letter-spacing="0.06em">FILTER HOUSING</text>
+          <text x="350" y="302" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#8a7a4a">drain valve · water-in-fuel sensor</text>
+        </g>
+
+        <!-- HP PUMP -->
+        <g class="comp dim">
+          <rect class="comp-rect mech" x="250" y="60" width="200" height="74"/>
+          <text class="comp-name mech" x="350" y="86">HP Pump</text>
+          <text class="comp-loc" x="350" y="102">front of engine</text>
+        </g>
+
+        <!-- LP supply flow -->
+        <path class="flow role-lp dim"
+              d="M 120 488
+                 L 120 420
+                 L 250 420
+                 L 250 290
+                 L 250 260
+                 L 280 260"/>
+        <path class="flow role-lp dim"
+              d="M 420 260
+                 L 450 260
+                 L 450 134"/>
+
+        <!-- CALLOUT — pulsing ring on the filter housing -->
+        <g id="callout" class="callout">
+          <circle class="callout-ring" cx="350" cy="287" r="20"/>
+          <circle class="callout-dot" cx="350" cy="287" r="6"/>
+          <text class="callout-label" x="350" y="343">INSPECT HERE</text>
+          <text class="callout-sublabel" x="350" y="356">fuel filter housing · drain bowl</text>
+        </g>
+
+        <!-- ZOOM DETAIL — magnified inspection area on the right side of the canvas -->
+        <g id="zoomDetail">
+          <!-- leader from callout to zoom box -->
+          <path class="callout-leader" d="M 370 287 C 450 287, 500 200, 540 180"/>
+
+          <!-- frame -->
+          <rect class="zoom-frame" x="475" y="60" width="200" height="240" rx="4"/>
+
+          <text class="zoom-label" x="488" y="80">ZOOM · DRAIN BOWL</text>
+          <text class="zoom-title" x="488" y="100">What to look for</text>
+
+          <!-- A schematic of the drain bowl with labeled inspection points -->
+          <!-- bowl shape -->
+          <path d="M 510 130 L 640 130 L 630 250 Q 575 270 520 250 Z"
+                fill="#f0e8d0" stroke="#8a7a4a" stroke-width="1.2"/>
+          <!-- water layer at bottom (this is what to look for) -->
+          <path d="M 525 230 Q 575 240 625 230 L 628 250 Q 575 270 522 250 Z"
+                fill="#a8c4e0" opacity="0.6"/>
+          <text x="575" y="248" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="#1a3a5a" letter-spacing="0.04em">water layer</text>
+
+          <!-- drain valve at bottom -->
+          <rect x="570" y="263" width="10" height="14" fill="#8a7a4a" stroke="#5a4a20"/>
+          <text x="575" y="289" text-anchor="middle" font-family="JetBrains Mono" font-size="7" fill="var(--ink-500)" letter-spacing="0.04em">drain</text>
+
+          <!-- pointers to specific things to check -->
+          <!-- pointer 1: water level -->
+          <polygon class="zoom-pointer" points="497,238 510,235 510,242"/>
+          <text class="zoom-pointer-label" x="488" y="240" text-anchor="end">1</text>
+
+          <!-- pointer 2: sediment -->
+          <polygon class="zoom-pointer" points="650,205 638,205 638,212"/>
+          <text class="zoom-pointer-label" x="657" y="210">2</text>
+
+          <!-- pointer 3: housing crack -->
+          <polygon class="zoom-pointer" points="650,145 638,148 638,141"/>
+          <text class="zoom-pointer-label" x="657" y="150">3</text>
+        </g>
+
+      </svg>
+    </div>
+
+    <!-- CHECKLIST PANEL -->
+    <div class="checklist-panel">
+      <div class="checklist-head">
+        <div class="checklist-eyebrow">OBSERVATION CHECKLIST</div>
+        <div class="checklist-component">Fuel filter housing</div>
+        <div class="checklist-progress">6 items · 0 complete</div>
+      </div>
+
+      <div class="check-item active" data-item="1">
+        <div class="check-status">▶ ACTIVE</div>
+        <div class="check-question">Is there a visible water layer in the bottom of the drain bowl?</div>
+        <div class="check-sub">point ① · water sits below fuel due to density</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If yes:</b> drain bowl, check water-in-fuel sensor, sample tank fuel for contamination. Likely root cause of supply-side fuel issues.<br>
+          <b>If no:</b> water contamination eliminated.
+        </div>
+      </div>
+
+      <div class="check-item" data-item="2">
+        <div class="check-status">PENDING</div>
+        <div class="check-question">Is sediment or debris visible in the drain bowl?</div>
+        <div class="check-sub">point ② · particulates settled on bowl walls or bottom</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If yes:</b> filter element likely loaded; service filter and inspect tank for source of contamination.<br>
+          <b>If no:</b> upstream contamination unlikely.
+        </div>
+      </div>
+
+      <div class="check-item" data-item="3">
+        <div class="check-status">PENDING</div>
+        <div class="check-question">Are there visible cracks, weeping, or fuel stains on the housing?</div>
+        <div class="check-sub">point ③ · external inspection · housing integrity</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If yes:</b> air ingestion suspected; housing must be replaced before continuing supply diagnosis.<br>
+          <b>If no:</b> housing integrity confirmed.
+        </div>
+      </div>
+
+      <div class="check-item" data-item="4">
+        <div class="check-status">PENDING</div>
+        <div class="check-question">Is the water-in-fuel sensor connector fully seated and dry?</div>
+        <div class="check-sub">underside of housing · connector inspection</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If no:</b> reseat connector and verify sensor signal before continuing.
+        </div>
+      </div>
+
+      <div class="check-item" data-item="5">
+        <div class="check-status">PENDING</div>
+        <div class="check-question">Is the filter element saturated, collapsed, or visibly degraded when removed?</div>
+        <div class="check-sub">requires removal · pop top off housing</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If yes:</b> filter restriction confirmed. Replace filter, prime, retest prime pressure.<br>
+          <b>If no:</b> filter restriction eliminated as cause.
+        </div>
+      </div>
+
+      <div class="check-item" data-item="6">
+        <div class="check-status">PENDING</div>
+        <div class="check-question">Are the supply and return lines firmly seated with no visible weeping?</div>
+        <div class="check-sub">housing inlet/outlet connections · quick-connect fittings</div>
+        <div class="check-buttons">
+          <button class="check-btn yes">Yes</button>
+          <button class="check-btn no">No</button>
+        </div>
+        <div class="check-implication">
+          <b>If no:</b> seat firmly with audible click and verify no fuel weeping under prime pressure.
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const items = document.querySelectorAll('.check-item');
+let activeIdx = 0;
+
+items.forEach((item, idx) => {
+  const yesBtn = item.querySelector('.check-btn.yes');
+  const noBtn = item.querySelector('.check-btn.no');
+
+  yesBtn.addEventListener('click', () => commit(idx, 'yes'));
+  noBtn.addEventListener('click', () => commit(idx, 'no'));
+});
+
+function commit(idx, answer) {
+  const item = items[idx];
+  item.classList.remove('active');
+  item.classList.add('done', answer);
+  const statusEl = item.querySelector('.check-status');
+  statusEl.textContent = answer === 'yes' ? '✓ YES' : '✗ NO';
+
+  const yesBtn = item.querySelector('.check-btn.yes');
+  const noBtn = item.querySelector('.check-btn.no');
+  yesBtn.classList.toggle('selected', answer === 'yes');
+  noBtn.classList.toggle('selected', answer === 'no');
+
+  // Advance to next pending item
+  for (let i = idx + 1; i < items.length; i++) {
+    if (!items[i].classList.contains('done')) {
+      items[i].classList.add('active');
+      items[i].querySelector('.check-status').textContent = '▶ ACTIVE';
+      activeIdx = i;
+      items[i].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      break;
+    }
+  }
+
+  // Update progress
+  const done = document.querySelectorAll('.check-item.done').length;
+  document.querySelector('.checklist-progress').textContent = `6 items · ${done} complete`;
+}
+</script>
+</body>
+</html>
