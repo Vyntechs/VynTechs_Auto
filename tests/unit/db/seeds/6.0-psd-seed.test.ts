@@ -260,3 +260,119 @@ describe('6.0 PSD seed — batch 4 (observable_properties)', () => {
     }
   })
 })
+
+describe('6.0 PSD seed — batch 5 (test_actions)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/01-platform-and-symptom.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/02-architecture-facts.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/03-components.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/04-observable-properties.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/05-test-actions.sql')
+  })
+
+  afterAll(async () => {
+    await close()
+  })
+
+  // 11 canonical cranks-no-start tests must be seeded — no more, no less.
+  // test_actions link to the platform via component_id → components.platform_id.
+  it('seeds exactly 11 test_actions linked to the 6.0 PSD platform', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM test_actions ta
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+        AND ta.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBe(11)
+  })
+
+  // ICP sensor unplug test must explicitly call out "NOT the IPR" — the original
+  // Angel session inversion happened because this distinction was not stated.
+  it('sd3-60psd-test-icp-sensor-unplug description includes "NOT the IPR"', async () => {
+    const result = await db.execute(sql`
+      SELECT description FROM test_actions
+      WHERE slug = 'sd3-60psd-test-icp-sensor-unplug'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const desc = result.rows[0].description as string
+    expect(desc).toMatch(/NOT.+IPR/i)
+  })
+
+  // IPR default 15% must be stated — so techs know unplugging the IPR (not the
+  // ICP sensor) forces the valve fully open and kills rail pressure.
+  it('sd3-60psd-test-icp-sensor-unplug description mentions IPR default 15%', async () => {
+    const result = await db.execute(sql`
+      SELECT description FROM test_actions
+      WHERE slug = 'sd3-60psd-test-icp-sensor-unplug'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const desc = result.rows[0].description as string
+    expect(desc).toMatch(/15%.{0,60}(open|bleed)|default.{0,20}15%/i)
+  })
+
+  // Fuel pressure expected_observation must surface the UNRESOLVED disagreement
+  // between Ford service info (≥45 psi all conditions) and aftermarket sources
+  // (10–15 psi during cranking documented as normal).
+  it('sd3-60psd-test-low-pressure-fuel expected_observation surfaces the unresolved cranking-pressure disagreement', async () => {
+    const result = await db.execute(sql`
+      SELECT expected_observation FROM test_actions
+      WHERE slug = 'sd3-60psd-test-low-pressure-fuel'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const obs = result.rows[0].expected_observation as string
+    expect(obs).toMatch(/unresolved|disagree|10.{0,10}15.*psi|45 psi.{0,30}10/i)
+  })
+
+  // Air/puff test must explicitly state turbo removal is NOT required —
+  // the fabricated valley-access procedure was the direct trigger for this PR.
+  it('sd3-60psd-test-air-puff description explicitly states turbo removal is NOT required', async () => {
+    const result = await db.execute(sql`
+      SELECT description FROM test_actions
+      WHERE slug = 'sd3-60psd-test-air-puff'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const desc = result.rows[0].description as string
+    expect(desc).toMatch(/turbo.{0,30}(NOT required|not required)/i)
+  })
+
+  // No test_actions rows may have NULL scenario_required (schema enforces NOT
+  // NULL but an explicit assertion catches any INSERT that slipped through).
+  it('all test_actions have non-null scenario_required', async () => {
+    const result = await db.execute(sql`
+      SELECT ta.slug FROM test_actions ta
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+        AND ta.scenario_required IS NULL
+    `)
+    expect(result.rows).toHaveLength(0)
+  })
+
+  // All required fields must be populated across every test_action row.
+  it('all test_actions have required fields populated', async () => {
+    const result = await db.execute(sql`
+      SELECT ta.slug, ta.description, ta.scenario_required, ta.observation_method,
+             ta.invasiveness, ta.confidence_boost, ta.source_provenance, ta.is_retired
+      FROM test_actions ta
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+    `)
+    expect(result.rows).toHaveLength(11)
+    for (const row of result.rows) {
+      expect(row.slug, 'slug must be present').toBeTruthy()
+      expect(row.description, `${row.slug} description must be present`).toBeTruthy()
+      expect(row.scenario_required, `${row.slug} scenario_required must be present`).toBeTruthy()
+      expect(row.observation_method, `${row.slug} observation_method must be present`).toBeTruthy()
+      expect(typeof row.invasiveness === 'number', `${row.slug} invasiveness must be a number`).toBe(true)
+      expect(row.source_provenance, `${row.slug} source_provenance must be present`).toBeTruthy()
+      expect(row.is_retired, `${row.slug} is_retired must be false`).toBe(false)
+    }
+  })
+})
