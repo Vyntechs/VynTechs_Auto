@@ -33,7 +33,7 @@ export default async function TodayPage() {
       inProgress={inProgress}
       closedToday={closedToday}
       dueFollowUps={dueFollowUps}
-      canCurate={canCurate(ctx.profile.role, ctx.user.email)}
+      canCurate={canCurate(ctx.profile.isCurator, ctx.user.email)}
       canWriteCounterOrder={ctx.profile.role === 'owner'}
     />
   )

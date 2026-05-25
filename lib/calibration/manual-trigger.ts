@@ -28,7 +28,7 @@ export async function triggerCalibrationAnalysis(input: {
     .from(profiles)
     .where(eq(profiles.userId, input.userId))
     .limit(1)
-  if (!canCurate(profile?.role, input.userEmail)) {
+  if (!canCurate(profile?.isCurator, input.userEmail)) {
     return { ok: false, status: 403, error: 'forbidden' }
   }
   const result = await runCalibrationAnalysis(input.db)
