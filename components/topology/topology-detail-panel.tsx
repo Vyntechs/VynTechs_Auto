@@ -1,6 +1,9 @@
+import { Fragment, type ReactNode } from 'react'
 import type {
   TopologyComponent,
   TopologyConnection,
+  TopologyPin,
+  TopologyScenario,
 } from '@/lib/diagnostics/load-system-topology'
 import { formatConnectionKind } from '@/components/topology/topology-format'
 
@@ -14,11 +17,19 @@ export type TopologySelection =
       fromComponent: TopologyComponent | null
       toComponent: TopologyComponent | null
     }
+  | {
+      kind: 'pin'
+      pin: TopologyPin
+      component: TopologyComponent
+      scenario: TopologyScenario | null
+    }
 
 type Props = {
   selection: TopologySelection
   /** Jump the panel to a component (used by connection-endpoint buttons). */
   onSelectComponent: (componentId: string) => void
+  /** Jump the panel to a pin (used by the component pin list). */
+  onSelectPin?: (pinId: string) => void
   /** Clear the selection — closes the panel (and the mobile bottom sheet). */
   onClose: () => void
   /** Mobile: present as an open bottom sheet. */
@@ -28,6 +39,24 @@ type Props = {
 /** Missing display values soft-fail to an em dash — never crash the page. */
 function field(value: string | null): string {
   return value && value.trim() !== '' ? value : '—'
+}
+
+/** Renders text with limited inline markup: only <b> is re-enabled. Anything
+ *  else stays as plain text. Spec §7.8 — preserves the prototype's emphasis
+ *  pattern without a full Markdown layer. */
+function withBoldOnly(text: string): ReactNode {
+  const parts: ReactNode[] = []
+  const regex = /<b>(.*?)<\/b>/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let key = 0
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    parts.push(<b key={key++}>{match[1]}</b>)
+    lastIndex = regex.lastIndex
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return parts.length === 1 ? parts[0] : <Fragment>{parts}</Fragment>
 }
 
 const PROVENANCE_LABEL: Record<string, string> = {
@@ -54,12 +83,26 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ComponentBody({ component }: { component: TopologyComponent }) {
+function ComponentBody({
+  component,
+  onSelectPin,
+}: {
+  component: TopologyComponent
+  onSelectPin?: (pinId: string) => void
+}) {
   // Spec §8: symptom-implicated test actions surface first.
   const tests = [...component.testActions].sort(
     (a, b) =>
       Number(b.implicatedByCurrentSymptom) - Number(a.implicatedByCurrentSymptom),
   )
+
+  const showPinList =
+    component.pins.length > 0 &&
+    component.slug !== 'pcm' &&
+    component.kind !== 'mechanical' &&
+    component.kind !== 'splice' &&
+    onSelectPin
+
   return (
     <>
       <div className="topo-panel__kind">{component.kind}</div>
@@ -114,6 +157,28 @@ function ComponentBody({ component }: { component: TopologyComponent }) {
           ))}
         </>
       )}
+
+      {showPinList && (
+        <>
+          <div className="topo-panel__section-title">Pins on this component</div>
+          <ul className="topo-panel__pin-list">
+            {component.pins.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className="topo-panel__pin-list-item"
+                  onClick={() => onSelectPin(p.id)}
+                >
+                  <span>{p.name}</span>
+                  <span className="topo-panel__pin-list-role">
+                    {p.roleAbbreviation}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   )
 }
@@ -157,15 +222,77 @@ function ConnectionBody({
   )
 }
 
+function PinBody({
+  pin,
+  component,
+  scenario,
+}: {
+  pin: TopologyPin
+  component: TopologyComponent
+  scenario: TopologyScenario | null
+}) {
+  const reading = scenario ? scenario.pinReadings[pin.id] : undefined
+  const isFault = scenario?.kind === 'fault'
+
+  return (
+    <>
+      <div className="topo-panel__kind">Pin · {pin.name}</div>
+      <h2 className="topo-panel__title">
+        {component.name} · {pin.name}
+      </h2>
+      <div className="topo-panel__subtitle">
+        click another to compare · click the diagram background to clear
+      </div>
+      <div className="topo-panel__rule" />
+
+      <div className="topo-panel__section-title">Where to probe</div>
+      <div className="topo-panel__body">{field(pin.probeLocation)}</div>
+
+      <div className="topo-panel__section-title">Right now</div>
+      <div
+        className={`topo-panel__right-now${isFault ? ' is-fault' : ''}`}
+      >
+        {scenario && (
+          <div className="topo-panel__right-now-label">{scenario.label}</div>
+        )}
+        {reading ? (
+          <div>{withBoldOnly(reading)}</div>
+        ) : (
+          <div className="topo-panel__right-now-missing">
+            <em>no live reading captured for this scenario yet</em>
+          </div>
+        )}
+      </div>
+
+      <div className="topo-panel__section-title">Expected range (overall)</div>
+      <div className="topo-panel__expect">
+        {withBoldOnly(field(pin.expectedReading))}
+      </div>
+
+      <div className="topo-panel__section-title">If the reading is wrong</div>
+      <div className="topo-panel__alarm">
+        <b>Diagnostic:</b> {withBoldOnly(field(pin.missingLogic))}
+      </div>
+
+      {pin.labelGap && (
+        <div className="topo-panel__label-gap">
+          <em>{pin.labelGap}</em>
+        </div>
+      )}
+    </>
+  )
+}
+
 export function TopologyDetailPanel({
   selection,
   onSelectComponent,
+  onSelectPin,
   onClose,
   open,
 }: Props) {
   return (
     <aside
-      className={`topo-panel${open ? ' is-open' : ''}`}
+      className={`topo-panel${open ? ' is-open' : ''}${selection.kind === 'empty' ? ' is-empty-mobile-hidden' : ''}`}
       aria-live="polite"
     >
       {selection.kind !== 'empty' && (
@@ -185,7 +312,7 @@ export function TopologyDetailPanel({
         </div>
       )}
       {selection.kind === 'component' && (
-        <ComponentBody component={selection.component} />
+        <ComponentBody component={selection.component} onSelectPin={onSelectPin} />
       )}
       {selection.kind === 'connection' && (
         <ConnectionBody
@@ -193,6 +320,13 @@ export function TopologyDetailPanel({
           fromComponent={selection.fromComponent}
           toComponent={selection.toComponent}
           onSelectComponent={onSelectComponent}
+        />
+      )}
+      {selection.kind === 'pin' && (
+        <PinBody
+          pin={selection.pin}
+          component={selection.component}
+          scenario={selection.scenario}
         />
       )}
     </aside>

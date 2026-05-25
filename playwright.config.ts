@@ -27,6 +27,14 @@ export default defineConfig({
       },
       testMatch: /curator\.spec\.ts/,
     },
+    {
+      name: 'topology',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: STORAGE_STATE_PATH,
+      },
+      testMatch: /topology\.spec\.ts/,
+    },
   ],
   webServer: {
     command: 'pnpm dev',
