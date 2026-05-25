@@ -46,7 +46,7 @@ describe('OutcomeCapture (wired)', () => {
   it('disables submit when no sessionId is provided (design-preview mode)', () => {
     render(<OutcomeCapture {...baseProps} />)
     fillSpecificRootCause()
-    expect(screen.getByRole('button', { name: /submit & close/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /send & close/i })).toBeDisabled()
   })
 
   it('POSTs the structured payload to /api/sessions/[id]/close on submit', async () => {
@@ -67,7 +67,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/oem/i), {
       target: { value: 'BL3Z-9C915-A' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
@@ -104,7 +104,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/Pin\/connector ID, please/i)).toBeInTheDocument(),
@@ -127,7 +127,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/action type/i), {
       target: { value: 'no_fix' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
@@ -162,7 +162,7 @@ describe('OutcomeCapture (wired)', () => {
       target: { value: 'Vacuum line' },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
     await waitFor(() =>
       expect(screen.getByText(/Add the bolt location/i)).toBeInTheDocument(),
     )
@@ -196,7 +196,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string)
@@ -235,7 +235,7 @@ describe('OutcomeCapture (wired)', () => {
     })
     // toggle "test drive" off
     fireEvent.click(screen.getByRole('switch', { name: /test drive/i }))
-    fireEvent.click(screen.getByRole('button', { name: /submit & close/i }))
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
