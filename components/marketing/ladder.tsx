@@ -62,9 +62,9 @@ export function Ladder() {
             <div>
               <div className="vm-rung-title">Asks you</div>
               <div className="vm-rung-desc">
-                When evidence is thin, it asks for one specific observation or
-                photo. Capped at 3 asks — past that, it&rsquo;s
-                Decline-or-Defer, not a guess.
+                When evidence is thin, it asks for one specific observation.
+                Capped at 3 asks — past that, it&rsquo;s Decline-or-Defer, not
+                a guess.
               </div>
             </div>
             <div className="vm-rung-meta">

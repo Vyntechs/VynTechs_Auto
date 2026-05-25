@@ -6,7 +6,6 @@ import {
   Risk,
   ConfidenceBlock,
   TreeRail,
-  CaptureBar,
 } from '@/components/vt'
 import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@/lib/format'
 import type { Session, SessionEvent } from '@/lib/db/schema'
@@ -187,7 +186,6 @@ export function ActiveSession({ session, events = [] }: Props) {
           <AbandonButton sessionId={session.id} />
         </Module>
       </div>
-      <CaptureBar />
     </div>
   )
 }

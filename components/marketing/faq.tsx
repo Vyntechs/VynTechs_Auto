@@ -25,7 +25,7 @@ const FAQS = [
   },
   {
     q: 'What scan tools does it integrate with?',
-    a: 'None directly. There’s no cable connection to Autel, Snap-on, Launch, or any other scan tool today. You describe what the scan tool shows in plain text, and the assistant works from that. Photographing a wiring diagram is supported. Direct scan-tool capture is on the roadmap.',
+    a: 'None directly. There’s no cable connection to Autel, Snap-on, Launch, or any other scan tool today. You describe what the scan tool shows in plain text, and the assistant works from that. Direct scan-tool capture is on the roadmap.',
   },
   {
     q: 'Where does my data live?',

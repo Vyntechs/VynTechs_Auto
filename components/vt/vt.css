@@ -354,34 +354,6 @@
 .confidence-bar .filled { background: var(--vt-bone-900); }
 .confidence-bar .empty { background: var(--vt-bone-300); }
 
-/* ====== Capture toolbar (phone bottom) ====== */
-.capture-bar {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-top: 0.5px solid var(--vt-rule);
-  background: var(--vt-bone-50);
-}
-.capture-bar button {
-  background: transparent;
-  border: 0;
-  padding: 14px 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  color: var(--vt-fg-2);
-  cursor: pointer;
-  font-family: var(--vt-font-mono);
-  font-size: 9px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  border-right: 0.5px solid var(--vt-rule);
-  min-height: 44px;
-}
-.capture-bar button:last-child { border-right: 0; }
-.capture-bar button:hover { color: var(--vt-fg); background: var(--vt-bone-100); }
-.capture-bar button.primary { color: var(--vt-signal-500); }
-
 /* ====== Tree rail ====== */
 .tree-rail {
   display: flex;
