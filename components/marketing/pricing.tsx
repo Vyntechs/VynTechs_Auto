@@ -14,10 +14,6 @@ const INCLUSIONS = [
     sub: 'Default 95% threshold. Below-gate destructive actions are refused — not warned, not greyed out, gone.',
   },
   {
-    title: 'Photo capture for wiring diagrams',
-    sub: 'Upload a wiring-diagram photo and the AI pulls pinouts, color codes, and connector callouts into the session.',
-  },
-  {
     title: 'Today queue',
     sub: 'Your morning bay schedule — in-progress sessions, closed today, follow-ups due. Built for the shop floor.',
   },

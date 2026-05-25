@@ -17,7 +17,7 @@ const SCRIPT_ROWS: Row[] = [
     time: '08:14:05',
     kind: 'OBS',
     cls: 'k-obs',
-    html: 'Tech: photo captured. <em>3 frames, lower-clamp seam.</em>',
+    html: 'Tech: <em>visible weep at lower-clamp seam, oily film on pipe.</em>',
   },
   {
     time: '08:14:07',
@@ -35,7 +35,7 @@ const SCRIPT_ROWS: Row[] = [
     time: '08:14:11',
     kind: 'STEP',
     cls: 'k-step',
-    html: '<em>Step 04 ·</em> Smoke test cold-side @ 5 psi. Photograph escape locations.',
+    html: '<em>Step 04 ·</em> Smoke test cold-side @ 5 psi. Note any escape locations.',
   },
   {
     time: '08:14:48',

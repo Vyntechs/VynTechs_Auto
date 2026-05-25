@@ -3,9 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DotsThree } from '@phosphor-icons/react/dist/ssr'
-import { PhotoCapture } from '@/components/session/photo-capture'
-import { AudioCapture } from '@/components/session/audio-capture'
-import { VideoCapture } from '@/components/session/video-capture'
 import { AmbientConditionsCapture } from '@/components/session/ambient-conditions-capture'
 import { LogButton, DEFAULT_STAGES } from '@/components/vt/log-button'
 import { useAdvanceStream } from '@/lib/use-advance-stream'
@@ -66,42 +63,13 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
 
   return (
     <form onSubmit={onSubmit}>
-      {requestedArtifact && (
+      {requestedArtifact?.kind === 'ambient_conditions' && (
         <div style={{ marginBottom: 12 }}>
-          {(requestedArtifact.kind === 'photo' ||
-            requestedArtifact.kind === 'scan_screen' ||
-            requestedArtifact.kind === 'wiring_diagram') && (
-            <PhotoCapture
-              sessionId={sessionId}
-              nodeId={nodeId}
-              kind={requestedArtifact.kind}
-              label={requestedArtifact.prompt}
-              onUploaded={() => router.refresh()}
-            />
-          )}
-          {requestedArtifact.kind === 'audio' && (
-            <AudioCapture
-              sessionId={sessionId}
-              nodeId={nodeId}
-              prompt={requestedArtifact.prompt}
-              onUploaded={() => router.refresh()}
-            />
-          )}
-          {requestedArtifact.kind === 'video' && (
-            <VideoCapture
-              sessionId={sessionId}
-              nodeId={nodeId}
-              label={requestedArtifact.prompt}
-              onUploaded={() => router.refresh()}
-            />
-          )}
-          {requestedArtifact.kind === 'ambient_conditions' && (
-            <AmbientConditionsCapture
-              sessionId={sessionId}
-              prompt={requestedArtifact.prompt}
-              onCaptured={() => router.refresh()}
-            />
-          )}
+          <AmbientConditionsCapture
+            sessionId={sessionId}
+            prompt={requestedArtifact.prompt}
+            onCaptured={() => router.refresh()}
+          />
         </div>
       )}
       <label htmlFor={`obs-${sessionId}`} className="vt-sr-only">
