@@ -28,11 +28,11 @@ export async function guardCuratorRoute(
   }
 
   const [profile] = await db
-    .select({ role: profiles.role })
+    .select({ isCurator: profiles.isCurator })
     .from(profiles)
     .where(eq(profiles.userId, userId))
     .limit(1)
 
-  if (!canCurate(profile?.role, userEmail)) return { kind: 'redirect', to: '/' }
+  if (!canCurate(profile?.isCurator, userEmail)) return { kind: 'redirect', to: '/' }
   return { kind: 'allow' }
 }

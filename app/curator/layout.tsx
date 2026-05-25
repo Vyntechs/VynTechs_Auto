@@ -17,11 +17,11 @@ export default async function CuratorLayout({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/sign-in')
   const [profile] = await db
-    .select({ id: profiles.id, role: profiles.role })
+    .select({ id: profiles.id, isCurator: profiles.isCurator })
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
-  if (!canCurate(profile?.role, user.email)) redirect('/')
+  if (!canCurate(profile?.isCurator, user.email)) redirect('/')
 
   return (
     <div className="vt-curator-shell">

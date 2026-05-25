@@ -22,12 +22,12 @@ export async function requireCurator(): Promise<
   }
 
   const [profile] = await db
-    .select({ id: profiles.id, role: profiles.role })
+    .select({ id: profiles.id, isCurator: profiles.isCurator })
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
 
-  if (!profile || !canCurate(profile.role, user.email)) {
+  if (!profile || !canCurate(profile.isCurator, user.email)) {
     return {
       kind: 'forbidden',
       response: NextResponse.json({ error: 'forbidden' }, { status: 403 }),
