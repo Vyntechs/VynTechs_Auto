@@ -162,13 +162,6 @@
       "when": 1779555133328,
       "tag": "0020_interactive_electrical_topology",
       "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1779641533328,
-      "tag": "0021_widen_priority_range",
-      "breakpoints": true
     }
   ]
 }

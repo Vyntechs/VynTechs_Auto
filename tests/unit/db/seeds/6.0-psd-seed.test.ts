@@ -595,24 +595,46 @@ describe('6.0 PSD seed — batch 7 (symptom_test_implications)', () => {
     expect(result.rows[0].priority).toBe(1)
   })
 
-  // Cam/crank correlation is priority 11 — the most invasive, last-resort test.
-  it('cam-crank-correlation is ranked priority 11', async () => {
+  // Compression is the most invasive last-resort test (requires pulling
+  // injectors) → priority 10, the bottom of the existing 6.7L convention's
+  // 1-10 range.
+  it('compression is ranked priority 10 (the most invasive last-resort)', async () => {
     const result = await db.execute(sql`
       SELECT sti.priority
       FROM symptom_test_implications sti
       JOIN symptoms s ON s.id = sti.symptom_id
       JOIN test_actions ta ON ta.id = sti.test_action_id
       WHERE s.slug = 'cranks-no-start'
-        AND ta.slug = 'sd3-60psd-test-cam-crank-correlation'
+        AND ta.slug = 'sd3-60psd-test-compression'
         AND sti.is_retired = false
     `)
     expect(result.rows).toHaveLength(1)
-    expect(result.rows[0].priority).toBe(11)
+    expect(result.rows[0].priority).toBe(10)
   })
 
-  // Priority values must be exactly 1 through 11 with no gaps and no duplicates.
-  // A gap or duplicate would break any UI that renders tests in ranked order.
-  it('priority values are exactly 1 through 11 with no gaps', async () => {
+  // ICP live read and IPR duty cycle are co-ranked at priority 4 because both
+  // are read in the same scan-tool session. This matches the 6.7L convention
+  // (multiple tests at the same priority for tied diagnostic depth) and avoids
+  // a schema CHECK constraint that caps priority at 10.
+  it('icp-live-read and ipr-duty-cycle are co-ranked at priority 4', async () => {
+    const result = await db.execute(sql`
+      SELECT ta.slug, sti.priority
+      FROM symptom_test_implications sti
+      JOIN symptoms s ON s.id = sti.symptom_id
+      JOIN test_actions ta ON ta.id = sti.test_action_id
+      WHERE s.slug = 'cranks-no-start'
+        AND ta.slug IN ('sd3-60psd-test-icp-live-read', 'sd3-60psd-test-ipr-duty-cycle')
+        AND sti.is_retired = false
+      ORDER BY ta.slug
+    `)
+    expect(result.rows).toHaveLength(2)
+    expect(result.rows[0].priority).toBe(4)
+    expect(result.rows[1].priority).toBe(4)
+  })
+
+  // Priority distribution: 11 rows across priorities 1-10, with priority 4
+  // appearing twice (the ICP/IPR tie). No gaps in 1..10.
+  it('priority values cover 1-10 contiguously with a single tie at priority 4', async () => {
     const result = await db.execute(sql`
       SELECT sti.priority
       FROM symptom_test_implications sti
@@ -621,7 +643,7 @@ describe('6.0 PSD seed — batch 7 (symptom_test_implications)', () => {
       ORDER BY sti.priority
     `)
     const priorities = result.rows.map((r) => r.priority as number)
-    expect(priorities).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    expect(priorities).toEqual([1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10])
   })
 
   // All rows must have source_provenance = 'FIELD-VERIFIED' per plan spec.
