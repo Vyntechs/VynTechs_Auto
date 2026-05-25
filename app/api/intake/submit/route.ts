@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { paywallReject } from '@/lib/auth-access'
+import { rateLimitReject } from '@/lib/rate-limit'
 import { requireUserAndProfile } from '@/lib/auth'
 import { createSessionFromIntake } from '@/lib/intake/session'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
@@ -86,6 +87,11 @@ export async function POST(req: Request) {
 
   const denied = await paywallReject(db, ctx.user.id)
   if (denied) return denied
+
+  // Cap creation rate — same key as /api/sessions so an attacker can't
+  // double their burn by alternating between the two intake endpoints.
+  const limited = await rateLimitReject(db, `intake:${ctx.user.id}`, 10)
+  if (limited) return limited
 
   if (!ctx.profile.shopId) {
     return NextResponse.json({ error: 'no_shop' }, { status: 403 })
