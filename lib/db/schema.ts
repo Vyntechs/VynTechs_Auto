@@ -29,6 +29,7 @@ export const profiles = pgTable('profiles', {
   fullName: text('full_name'),
   role: text('role').default('tech').notNull(),
   isComp: boolean('is_comp').default(false).notNull(),
+  isCurator: boolean('is_curator').default(false).notNull(),
   lastSeenWhatsNewAt: timestamp('last_seen_whats_new_at', { withTimezone: true }),
   deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

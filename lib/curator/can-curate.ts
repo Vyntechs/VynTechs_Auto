@@ -1,16 +1,18 @@
 import { isFounder } from '@/lib/auth'
 
-// Curator gate. Admin (DB role `'owner'`) inherits curator access by
-// design: today the curator team is the three people who all worked at
-// the same original shop (Brandon as founder, plus the two Admins).
-// Any future shop-level Admin will also inherit curator unless we
-// switch to an explicit allowlist or an additive `is_curator` flag.
+// Curator gate. Two ways to qualify:
+//   1) the founder, matched via FOUNDER_EMAIL — defense in depth that
+//      survives a missing profile row or an unset is_curator flag.
+//   2) any profile with the explicit is_curator flag set true.
 //
-// Founder (Brandon) matches via FOUNDER_EMAIL even if the profile row
-// is missing or has a non-curator role.
+// The DB `role` column is intentionally NOT considered. role='owner' is
+// auto-assigned to every new self-service signup on its auto-created
+// shop, so reading role as a curator signal would (and previously did)
+// hand platform-wide curator access to every signup. Promotion to
+// is_curator is a manual founder action.
 export function canCurate(
-  role: string | null | undefined,
+  isCurator: boolean | null | undefined,
   email: string | null | undefined,
 ): boolean {
-  return role === 'curator' || role === 'owner' || isFounder(email)
+  return isCurator === true || isFounder(email)
 }
