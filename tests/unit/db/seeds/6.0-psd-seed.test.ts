@@ -376,3 +376,175 @@ describe('6.0 PSD seed — batch 5 (test_actions)', () => {
     }
   })
 })
+
+describe('6.0 PSD seed — batch 6 (branch_logic)', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/01-platform-and-symptom.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/02-architecture-facts.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/03-components.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/04-observable-properties.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/05-test-actions.sql')
+    await applySeedFile(db, 'drizzle/data/2026-05-24-6.0-psd-cranks-no-start/06-branch-logic.sql')
+  })
+
+  afterAll(async () => {
+    await close()
+  })
+
+  // Amendment 4: ~34 total rows (>=25 decision-tree edges + 9 pattern entry points).
+  // Allow >=30 for headroom in case some Section 4 edges were collapsed.
+  it('seeds >=30 branch_logic rows tied to 6.0 PSD test_actions', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+        AND bl.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(30)
+  })
+
+  // FACT-CHECK CORRECTION: Pattern 1 (hot-restart progressively worse) must name
+  // injector top O-rings as the #1 candidate — NOT STC fitting. The research input
+  // Section 5 row 1 incorrectly listed STC as #1; the plan header and Amendment 4
+  // both correct this. The injector mention must precede any STC mention.
+  it('Pattern-1 hot-restart row leads with injector O-rings as #1 (fact-check correction)', async () => {
+    const result = await db.execute(sql`
+      SELECT next_action FROM branch_logic
+      WHERE slug = 'sd3-60psd-branch-pattern-hot-restart-progressively-worse'
+    `)
+    expect(result.rows).toHaveLength(1)
+    const nextAction = result.rows[0].next_action as string
+    // Must match injector O-rings pattern
+    expect(nextAction).toMatch(/injector.{0,20}o.?ring/i)
+    // Injector mention must appear BEFORE any STC mention
+    const injectorIdx = nextAction.search(/injector/i)
+    const stcIdx = nextAction.search(/stc/i)
+    // If STC appears at all, injector must come first
+    if (stcIdx !== -1) {
+      expect(injectorIdx).toBeLessThan(stcIdx)
+    }
+  })
+
+  // All branch_logic rows must have non-null next_action (schema enforces NOT NULL
+  // but explicit assertion catches any INSERT slip-through).
+  it('all branch_logic rows have non-null next_action', async () => {
+    const result = await db.execute(sql`
+      SELECT bl.slug FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+        AND bl.next_action IS NULL
+    `)
+    expect(result.rows).toHaveLength(0)
+  })
+
+  // All verdict values must be in the allowed enum (Postgres enforces, but explicit
+  // assertion catches any test-level regressions from data changes).
+  it('all branch_logic rows have non-null verdict in the valid enum set', async () => {
+    const result = await db.execute(sql`
+      SELECT bl.slug, bl.verdict FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+    `)
+    const validVerdicts = new Set(['ok', 'warn', 'fail', 'impossible'])
+    for (const row of result.rows) {
+      expect(row.verdict, `${row.slug} must have a valid verdict`).toBeTruthy()
+      expect(
+        validVerdicts.has(row.verdict as string),
+        `${row.slug} verdict "${row.verdict}" is not in enum`,
+      ).toBe(true)
+    }
+  })
+
+  // The FICM low-voltage branch must exist and terminate with FICM power supply
+  // diagnosis. This is a primary no-start path the tree must route correctly.
+  it('FICM voltage low branch has verdict=fail and mentions FICM power supply', async () => {
+    const result = await db.execute(sql`
+      SELECT verdict, next_action FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      WHERE ta.slug = 'sd3-60psd-test-ficm-voltage'
+        AND bl.condition ILIKE '%< 45%'
+        AND bl.is_retired = false
+    `)
+    expect(result.rows.length).toBeGreaterThanOrEqual(1)
+    expect(result.rows[0].verdict).toBe('fail')
+    expect(result.rows[0].next_action).toMatch(/ficm.{0,30}(power supply|rebuild|replace|failed)/i)
+  })
+
+  // ICP healthy branch must route somewhere — the ok path must not be terminal.
+  it('ICP live read ok branch has routes_to_test_action_id populated', async () => {
+    const result = await db.execute(sql`
+      SELECT bl.verdict, bl.routes_to_test_action_id, ta2.slug AS routes_to_slug
+      FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      LEFT JOIN test_actions ta2 ON ta2.id = bl.routes_to_test_action_id
+      WHERE ta.slug = 'sd3-60psd-test-icp-live-read'
+        AND bl.verdict = 'ok'
+        AND bl.is_retired = false
+    `)
+    expect(result.rows.length).toBeGreaterThanOrEqual(1)
+    // The ok branch from ICP must route somewhere (not be terminal)
+    expect(result.rows[0].routes_to_test_action_id).not.toBeNull()
+  })
+
+  // 9 failure pattern rows must exist hanging off the pull-all-dtcs test action.
+  // Pattern rows use inference_class = 'PATTERN' to distinguish them from the
+  // decision-tree edges (inference_class = 'LOGIC') that also anchor off the same
+  // test action (e.g., the DTC-routing edges A1-A6).
+  it('seeds exactly 9 failure-pattern branch_logic rows off pull-all-dtcs (inference_class=PATTERN)', async () => {
+    const result = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      WHERE ta.slug = 'sd3-60psd-test-pull-all-dtcs'
+        AND bl.inference_class = 'PATTERN'
+        AND bl.is_retired = false
+    `)
+    expect(Number(result.rows[0].count)).toBe(9)
+  })
+
+  // All pattern rows must have reasoning text — Amendment 4 stores pattern
+  // narrative in reasoning since symptom_test_implications has no free-text column.
+  it('all 9 pattern branch_logic rows (inference_class=PATTERN) have non-null reasoning', async () => {
+    const result = await db.execute(sql`
+      SELECT bl.slug, bl.reasoning FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      WHERE ta.slug = 'sd3-60psd-test-pull-all-dtcs'
+        AND bl.inference_class = 'PATTERN'
+        AND bl.is_retired = false
+        AND bl.reasoning IS NULL
+    `)
+    expect(result.rows).toHaveLength(0)
+  })
+
+  // All required fields must be populated across every branch_logic row.
+  it('all branch_logic rows have required fields populated', async () => {
+    const result = await db.execute(sql`
+      SELECT bl.slug, bl.condition, bl.verdict, bl.next_action,
+             bl.source_provenance, bl.is_retired
+      FROM branch_logic bl
+      JOIN test_actions ta ON ta.id = bl.test_action_id
+      JOIN components c ON c.id = ta.component_id
+      JOIN platforms p ON p.id = c.platform_id
+      WHERE p.slug = 'ford-super-duty-3rd-gen-60-psd'
+    `)
+    for (const row of result.rows) {
+      expect(row.slug, 'slug must be present').toBeTruthy()
+      expect(row.condition, `${row.slug} condition must be present`).toBeTruthy()
+      expect(row.verdict, `${row.slug} verdict must be present`).toBeTruthy()
+      expect(row.next_action, `${row.slug} next_action must be present`).toBeTruthy()
+      expect(row.source_provenance, `${row.slug} source_provenance must be present`).toBeTruthy()
+      expect(row.is_retired, `${row.slug} is_retired must be false`).toBe(false)
+    }
+  })
+})
