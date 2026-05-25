@@ -104,6 +104,15 @@
   --vt-status-closed:    oklch(74% 0.10  170);
   --vt-status-comeback:  oklch(70% 0.16  50);
 
+  /* Wire-role palette (spec 2026-05-23 §4.3) — semantic to electrical function,
+     NOT real wire colors which the tech already knows from the WSM. */
+  --role-signal:    #4ca866; /* fresh green — sensor signal */
+  --role-5v-ref:    #c97842; /* burnt orange — PCM 5V reference */
+  --role-low-ref:   #6b6657; /* graphite — sensor analog ground */
+  --role-pwm:       #b3a82e; /* chartreuse mustard — PCM PWM drive */
+  --role-12v:       #b34d4d; /* red coral — power supply */
+  --role-ground:    #1a1a1a; /* black — chassis ground */
+
   /* ===========================================================
      COLOR — SEMANTIC TOKENS (BONE is the canonical default)
      Off-manilla paper. No pure white. Graphite ink only.
