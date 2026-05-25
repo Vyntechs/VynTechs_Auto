@@ -27,6 +27,15 @@ export default defineConfig({
       },
       testMatch: /curator\.spec\.ts/,
     },
+    {
+      // Rehearsal-DB specs: requires VYNTECHS_E2E_REHEARSAL_DB=true and a dev
+      // server backed by vyntechs_rehearsal with seed batches 1-7 applied.
+      // The spec guards itself with test.describe.skip when the env var is unset,
+      // so this project is harmless in CI (all tests skip cleanly).
+      name: 'rehearsal-db',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /6\.0-psd-cranks-no-start-cache-hit\.spec\.ts/,
+    },
   ],
   webServer: {
     command: 'pnpm dev',
