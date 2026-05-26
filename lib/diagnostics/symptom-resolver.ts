@@ -11,24 +11,9 @@ export type SymptomResolveInput = {
 }
 
 // Keyword patterns for free-text complaint -> symptom slug.
-// Resolution is first-match-wins per platform: rows.find() short-circuits if
-// the matched slug isn't seeded for the given platform, so the resolver falls
-// through to the next pattern. This means 'cranks-no-start' must come FIRST:
-// on a platform that has it seeded (e.g. 6.0L PSD) it resolves immediately;
-// on a platform that doesn't (e.g. 6.7L fuel-system), rows.find() returns
-// undefined, the guard is skipped, and the fuel-system entry fires instead.
+// PR 1 only covers the one drivability symptom we have cached.
 const COMPLAINT_PATTERNS: { pattern: RegExp; slug: string }[] = [
   {
-    // Generic cranks-but-no-fire: covers crank/cranks + no-start/no-fire variants.
-    // "crank no fire" and "engine cranks but does not start" are real shop inputs
-    // not caught by the narrower fuel-system pattern below.
-    pattern:
-      /crank(s|ing)?\s+(but\s+)?(no.?start|no.?fire|won.?t\s+start|will\s+not\s+start|does\s+not\s+start)|no.?start.*crank|won.?t\s+start.*crank/i,
-    slug: 'cranks-no-start',
-  },
-  {
-    // 6.7L fuel-system specific. Remains unchanged — resolves only when the
-    // platform has this slug seeded (i.e. the 6.7L Ford Super Duty row).
     pattern:
       /no.?start.*crank|crank.*no.?start|won.?t start.*crank|cranks?\s+but\s+(won.?t|will not)\s+start/i,
     slug: 'no-start-cranks-normally-fuel-system-suspect',
