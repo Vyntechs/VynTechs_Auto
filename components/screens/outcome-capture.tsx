@@ -321,13 +321,10 @@ export function OutcomeCapture({
           background: 'var(--vt-bone-50)',
         }}
       >
-        <button type="button" className="btn btn-ghost" style={{ flex: 1 }} disabled>
-          Save draft
-        </button>
         <button
           type="button"
           className="btn btn-primary"
-          style={{ flex: 2 }}
+          style={{ flex: 1 }}
           disabled={!canSubmit}
           onClick={handleSubmit}
         >
