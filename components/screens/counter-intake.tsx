@@ -55,7 +55,6 @@ export function CounterIntake({
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [vin, setVin] = useState('')
-  const [scanned, setScanned] = useState(false)
   const [year, setYear] = useState('')
   const [make, setMake] = useState('')
   const [model, setModel] = useState('')
@@ -138,7 +137,7 @@ export function CounterIntake({
           customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
           vehicle: {
             vin: vin.trim(),
-            vinScanned: scanned,
+            vinScanned: false,
             year: year.trim(),
             make: make.trim(),
             model: model.trim(),
@@ -304,25 +303,15 @@ export function CounterIntake({
                     hint="VIN auto-fills year, make, model. Verify the engine."
                   >
                     <Field label="VIN" htmlFor="ci-vin">
-                      <div className="vt-field__compound">
-                        <Input
-                          id="ci-vin"
-                          name="vin"
-                          mono
-                          maxLength={17}
-                          value={vin}
-                          onChange={handleVinChange}
-                          placeholder="17 characters"
-                        />
-                        <button
-                          type="button"
-                          className={`vt-field__scan-btn${scanned ? ' vt-field__scan-btn--scanned' : ''}`}
-                          onClick={() => setScanned((s) => !s)}
-                          aria-pressed={scanned}
-                        >
-                          {scanned ? '◎ Scanned' : 'Scan with camera'}
-                        </button>
-                      </div>
+                      <Input
+                        id="ci-vin"
+                        name="vin"
+                        mono
+                        maxLength={17}
+                        value={vin}
+                        onChange={handleVinChange}
+                        placeholder="17 characters"
+                      />
                     </Field>
                     <FormRow>
                       <Field label="Year" htmlFor="ci-year">
@@ -461,7 +450,7 @@ export function CounterIntake({
               )}
 
               <FormFooter
-                meta={busy ? 'Submitting…' : 'Auto-saved · last keystroke just now'}
+                meta={busy ? 'Submitting…' : ''}
                 actions={
                   <>
                     <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>
