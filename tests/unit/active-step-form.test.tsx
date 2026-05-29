@@ -130,4 +130,14 @@ describe('ActiveStepForm — log-button integration', () => {
     render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
     expect(screen.getByRole('alert')).toHaveTextContent('tree update failed')
   })
+
+  // 2026-05-29 trust sweep: the "More options" (…) button next to Log had no
+  // onClick — a dead control. Every dead affordance taxes trust in the live
+  // ones. docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
+  it('does not render a dead "More options" button', () => {
+    render(<ActiveStepForm sessionId="s1" nodeId="n1" />)
+    expect(
+      screen.queryByRole('button', { name: /more options/i }),
+    ).not.toBeInTheDocument()
+  })
 })
