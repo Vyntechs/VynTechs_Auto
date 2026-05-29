@@ -27,6 +27,8 @@ export default async function DeclinePage({
   }
 
   const riskClass = gate.riskClass === 'zero' ? 'low' : gate.riskClass
+  const confidencePct = Math.round(gate.confidence * 100)
+  const thresholdPct = Math.round(gate.threshold * 100)
 
   return (
     <DeclineOrDeferLive
@@ -36,6 +38,8 @@ export default async function DeclinePage({
       timer={formatElapsed(new Date(session.createdAt))}
       gap={gate.gap ?? 'Confidence below threshold for proposed action.'}
       confidenceGap={gate.confidenceGap}
+      confidence={confidencePct}
+      gate={thresholdPct}
       whatWouldClose={gate.whatWouldClose}
       riskClass={riskClass}
       optionKeys={gate.options ?? ['gather_more_low_risk', 'defer']}
