@@ -152,3 +152,55 @@ describe('TodayHome', () => {
     expect(screen.queryByRole('link', { name: /reviewer/i })).toBeNull()
   })
 })
+
+// 2026-05-29 trust sweep: every active row stamped a hardcoded "Risk · Low"
+// (so two different jobs looked identical — the computer clearly didn't know
+// one from the other) and showed a "step N / M" road-ahead count. Show the
+// REAL risk class or none, and never preview the road ahead.
+// docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.3, §3.4)
+describe('TodayHome — honest risk + no road-ahead (trust sweep)', () => {
+  const gatedSession: Session = {
+    ...baseSession,
+    id: '00000000-0000-0000-0000-000000000002',
+    treeState: {
+      ...baseSession.treeState,
+      gateDecision: {
+        allow: false,
+        riskClass: 'destructive',
+        threshold: 0.9,
+        confidence: 0.5,
+        rationale: 'high-risk action below threshold',
+      },
+    },
+  } as unknown as Session
+
+  const steppedSession: Session = {
+    ...baseSession,
+    id: '00000000-0000-0000-0000-000000000004',
+    treeState: {
+      ...baseSession.treeState,
+      nodes: [
+        { id: 'n1', label: 'Check battery voltage', status: 'active' },
+        { id: 'n2', label: 'Check FICM', status: 'pending' },
+      ],
+      currentNodeId: 'n1',
+    },
+  } as unknown as Session
+
+  it('does not stamp a fabricated "Risk · Low" on an active row with no gate decision', () => {
+    render(<TodayHome techName="Brandon" inProgress={[baseSession]} closedToday={[]} />)
+    expect(screen.queryByText(/Risk · Low/i)).toBeNull()
+  })
+
+  it('shows the real risk class when the session has a gate decision', () => {
+    render(<TodayHome techName="Brandon" inProgress={[gatedSession]} closedToday={[]} />)
+    expect(screen.getByText(/Risk · Destructive/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Risk · Low/i)).toBeNull()
+  })
+
+  it('does not show a "step N / M" road-ahead count on rows', () => {
+    render(<TodayHome techName="Brandon" inProgress={[steppedSession]} closedToday={[]} />)
+    expect(screen.queryByText(/step\s*\d+\s*\/\s*\d+/i)).toBeNull()
+    expect(screen.queryByText(/\d+\s*steps/i)).toBeNull()
+  })
+})
