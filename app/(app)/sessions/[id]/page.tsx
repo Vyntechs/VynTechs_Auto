@@ -29,10 +29,7 @@ export default async function SessionPage({
 
   if (route.kind === 'tree-generating') {
     return (
-      <TreeGenerating
-        vehicle={formatVehicleName(session.intake)}
-        elapsed={`T+0:0${Math.min(9, Math.floor((Date.now() - new Date(session.createdAt).getTime()) / 1000))}`}
-      />
+      <TreeGenerating vehicle={formatVehicleName(session.intake)} />
     )
   }
 
