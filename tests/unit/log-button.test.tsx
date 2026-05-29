@@ -45,26 +45,48 @@ describe('LogButton', () => {
     expect(btn).toHaveTextContent(DEFAULT_STAGES[0].label)
   })
 
-  it('cycles to next stage label after first stage duration elapses', async () => {
-    render(<LogButton state="loading" />)
-    expect(screen.getByRole('button')).toHaveTextContent(DEFAULT_STAGES[0].label)
+  it('cycles to the next stage label after the first stage duration elapses', async () => {
+    const stages = [
+      { label: 'First step', ms: 600 },
+      { label: 'Second step', ms: 600 },
+    ]
+    render(<LogButton state="loading" stages={stages} />)
+    expect(screen.getByRole('button')).toHaveTextContent('First step')
 
     await act(async () => {
-      vi.advanceTimersByTime(DEFAULT_STAGES[0].ms + 50)
+      vi.advanceTimersByTime(650)
     })
 
-    expect(screen.getByRole('button')).toHaveTextContent(DEFAULT_STAGES[1].label)
+    expect(screen.getByRole('button')).toHaveTextContent('Second step')
   })
 
-  it('pins to specific stage when freezeStage is set, regardless of timer', async () => {
-    render(<LogButton state="loading" freezeStage={3} />)
-    expect(screen.getByRole('button')).toHaveTextContent(DEFAULT_STAGES[3].label)
+  it('pins to a specific stage when freezeStage is set, regardless of timer', async () => {
+    const stages = [
+      { label: 'S0', ms: 600 },
+      { label: 'S1', ms: 600 },
+      { label: 'S2', ms: 600 },
+      { label: 'S3', ms: 600 },
+    ]
+    render(<LogButton state="loading" freezeStage={3} stages={stages} />)
+    expect(screen.getByRole('button')).toHaveTextContent('S3')
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
 
-    expect(screen.getByRole('button')).toHaveTextContent(DEFAULT_STAGES[3].label)
+    expect(screen.getByRole('button')).toHaveTextContent('S3')
+  })
+
+  // 2026-05-29 trust sweep: the default narration cycled fabricated work claims
+  // ("Parsing photo · 3 frames", "Re-scoring confidence") on a fixed timer
+  // regardless of what actually happened. Real server-streamed stages still
+  // narrate; the no-real-stages fallback is now a single honest stage.
+  // docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
+  it('default narration carries no fabricated work claims', () => {
+    const labels = DEFAULT_STAGES.map((s) => s.label).join(' · ')
+    expect(labels).not.toMatch(/parsing photo/i)
+    expect(labels).not.toMatch(/re-scoring confidence/i)
+    expect(labels).not.toMatch(/retrieval ladder/i)
   })
 
   it('renders done face with check and "Logged · advancing" label', () => {
