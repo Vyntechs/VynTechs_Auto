@@ -3,23 +3,23 @@ type PricingProps = { isSignedIn: boolean }
 const INCLUSIONS = [
   {
     title: 'Unlimited diagnostic sessions',
-    sub: 'No per-session caps, no per-VIN caps. Every active session, every observation, every commit-or-decline.',
+    sub: 'No per-session caps, no per-VIN caps. Every session, every observation, every call.',
   },
   {
-    title: 'Three-rung retrieval',
-    sub: 'Your shop corpus + the open web for that exact car + tech-assist when evidence is thin. Every claim cited inline.',
+    title: 'Works from how the system works',
+    sub: 'It reasons about your specific vehicle from how the system actually operates, and won’t guess when it’s unsure.',
   },
   {
-    title: 'Confidence-gated commit',
-    sub: 'Default 95% threshold. Below-gate destructive actions are refused — not warned, not greyed out, gone.',
+    title: 'Refuses risky work it can’t back',
+    sub: 'Default 95% line. Below it, the destructive action isn’t greyed out. It’s gone.',
   },
   {
     title: 'Today queue',
-    sub: 'Your morning bay schedule — in-progress sessions, closed today, follow-ups due. Built for the shop floor.',
+    sub: 'Your morning bay schedule: what’s in progress, what closed today, what’s due. Built for the shop floor.',
   },
   {
     title: 'Per-vehicle history',
-    sub: 'Every prior session for a VIN shows up automatically the next time it comes through your bay.',
+    sub: 'Every session you close is saved to that vehicle’s record, so it’s there next time it’s in your bay.',
   },
 ]
 
@@ -38,9 +38,10 @@ export function Pricing({ isSignedIn }: PricingProps) {
             One plan. <em>Per technician.</em> No bundles, no seat-haggling.
           </h2>
           <p className="vm-section-lede">
-            We don&rsquo;t sell shop tiers. We don&rsquo;t sell platinum
-            bay-fleet packs. We sell one thing: an account, for one technician,
-            for one month. Scale it by hiring; cancel it when you don&rsquo;t.
+            We don&rsquo;t sell shop tiers or platinum bay-fleet packs. One
+            account, one tech, one month. The price is close to what it costs
+            to run this well. Enough to keep the lights on, not what we could
+            get away with. Scale it by hiring; cancel it when you don&rsquo;t.
           </p>
         </div>
       </div>
@@ -55,8 +56,9 @@ export function Pricing({ isSignedIn }: PricingProps) {
             Vyntechs <em>Bay</em>
           </h3>
           <p className="vm-price-desc">
-            A single technician seat. Full retrieval, full confidence gating,
-            full session history. Cancel anytime; your sessions stay yours.
+            A single technician seat. The full diagnostic, the full confidence
+            line, your full session history. Cancel anytime; your sessions stay
+            yours.
           </p>
 
           <div className="vm-price-tag">
@@ -112,7 +114,8 @@ export function Pricing({ isSignedIn }: PricingProps) {
         <div className="vm-price-fine-cell">
           <div className="vm-price-fine-h">If you cancel</div>
           <div className="vm-price-fine-b">
-            Your sessions and shop corpus stay yours. You can come back anytime.
+            Your sessions and your shop history stay yours. You can come back
+            anytime.
           </div>
         </div>
         <div className="vm-price-fine-cell">

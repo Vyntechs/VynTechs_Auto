@@ -7,20 +7,20 @@ export function Why() {
         </div>
         <div>
           <h2 className="vm-section-title">
-            I built this for my own bay.
+            I built this for my own work.
             <br />
             <em>Sharing it because it works.</em>
           </h2>
           <p className="vm-section-lede">
-            Every diagnostic AI I&rsquo;d tried would happily make something up
-            to keep me moving — a procedure that doesn&rsquo;t apply to my
-            build year, a TSB number that doesn&rsquo;t exist, a pinout pulled
-            from thin air. The cost isn&rsquo;t a wrong sentence. It&rsquo;s
-            eight wasted hours, a torn-down assembly, a comeback. So I wrote
-            one that refuses. It cites everything, gates every destructive
-            action behind a confidence threshold, and tells me what evidence
-            is still missing. After running on my own work long enough to
-            trust it, I&rsquo;m opening it up.
+            I got tired of guessing. The information that tells you how a
+            system really works is hard to come by and priced like it. So
+            every diagnostic tool I tried would rather make something up than
+            admit it didn&rsquo;t know. A procedure that doesn&rsquo;t fit my
+            build year. A spec pulled from thin air. That&rsquo;s not a wrong
+            sentence. It&rsquo;s eight wasted hours, a torn-down assembly, a
+            comeback I eat. So I built one that works from how the system
+            actually works, and shuts up when it isn&rsquo;t sure. I ran it on
+            my own trucks until I trusted it. Now I&rsquo;m opening it up.
           </p>
         </div>
       </div>

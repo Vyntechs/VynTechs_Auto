@@ -3,37 +3,36 @@ const FAQS = [
     q: 'Does it actually refuse, or just nag me with a warning?',
     a: (
       <>
-        It refuses. Below the gate, the destructive-action button is gone — not
+        It refuses. Below the line, the destructive-action button is gone — not
         greyed out, not behind a confirm modal. <em>Gone.</em> You&rsquo;ll see
-        what evidence is missing and what observation would unlock the action.
-        No way around it short of changing the gate threshold (which is
-        logged).
+        what&rsquo;s missing and what reading would unlock the action. No way
+        around it short of changing the threshold (which is logged).
       </>
     ),
   },
   {
-    q: 'What if my shop doesn’t have a corpus yet?',
-    a: 'You start with Rungs 1 and 2 only — the open web for your car, and the assistant asking you for observations. Every session you close becomes a Rung-0 entry for the next. Self-retrieval gets useful once your closed-session count gets into the hundreds.',
+    q: 'Does it need my shop’s history to be useful?',
+    a: 'No. It works from how the system operates from day one. The work you close just makes it sharper over time.',
   },
   {
     q: 'Why no shop or enterprise tier?',
     a: 'Because seat-haggling rewards the wrong thing. One tech, one account, $100/month. If your shop has eight techs, that’s eight accounts at $800. If two of them quit, that’s $200 less. Honest math, no salesperson.',
   },
   {
-    q: 'Does the AI ever take over the diagnosis?',
-    a: 'Never. Vyntechs surfaces, cites, and gates — it doesn’t decide. Every commit is your name, your timestamp, your call.',
+    q: 'Does it ever make the call for me?',
+    a: 'Never. It shows you the next step and the reasoning; the call is yours. Every call is your name, your timestamp.',
   },
   {
     q: 'What scan tools does it integrate with?',
-    a: 'None directly. There’s no cable connection to Autel, Snap-on, Launch, or any other scan tool today. You describe what the scan tool shows in plain text, and the assistant works from that. Direct scan-tool capture is on the roadmap.',
+    a: 'None directly. No cable to Autel, Snap-on, Launch, or anything else today. You tell it what the scan tool shows, or snap a photo of the screen. Direct capture’s on the list.',
   },
   {
     q: 'Where does my data live?',
-    a: 'US data center, encrypted at rest, never sold, never used to train models outside your shop. Formal compliance certifications (SOC 2, etc.) are not yet completed — we’re straight about that. If you need a signed DPA before you subscribe, ask.',
+    a: 'US data center, encrypted at rest, never sold. Formal compliance certifications (SOC 2, etc.) aren’t done yet — we’re straight about that. If you need a signed DPA before you subscribe, ask.',
   },
   {
     q: 'Will it work for European, JDM, or fleet diesel?',
-    a: 'It depends on what’s on the open web for your make. Domestic and Toyota / Honda / Nissan tend to have rich coverage; lower-volume makes can be thin. The AI tells you when its sources are sparse rather than guessing.',
+    a: 'Depends on the vehicle. It’s strongest where a system is well understood; on thinner ground it tells you it’s reasoning from general principles instead of pretending it’s sure. Domestic and the big Japanese makes are solid.',
   },
   {
     q: 'What does “still in beta” mean?',

@@ -3,18 +3,18 @@ export function Gate() {
     <section className="vm-section" style={{ paddingTop: 0 }}>
       <div className="vm-section-head">
         <div className="vm-section-num">
-          <b>§ 02</b>How it commits
+          <b>§ 02</b>How it knows when to call it
         </div>
         <div>
           <h2 className="vm-section-title">
-            A finding either crosses the gate, or it doesn&rsquo;t.{' '}
+            It either clears the line, or it doesn&rsquo;t.{' '}
             <em>No middle ground.</em>
           </h2>
           <p className="vm-section-lede">
-            Above the threshold, Vyntechs surfaces a precise next step with
-            the source it&rsquo;s pulling from. Below it, the assistant tells
-            you exactly what evidence is missing — and refuses to recommend a
-            destructive action.
+            Above the line, you get a precise next step and the reason for it.
+            Below it, it tells you exactly what&rsquo;s missing, and
+            won&rsquo;t recommend tearing into anything it can&rsquo;t stand
+            behind.
           </p>
         </div>
       </div>
@@ -23,7 +23,7 @@ export function Gate() {
         <div className="vm-card amber">
           <div className="vm-card-eyebrow">
             <span>
-              <b>Above gate</b> &middot; committed
+              <b>Above the line</b> &middot; clear to call
             </span>
             <span>P0299 &middot; turbocharger underboost</span>
           </div>
@@ -85,7 +85,7 @@ export function Gate() {
                 87.0<small>%</small>
               </div>
               <div className="vm-conf-line">
-                ▲ 12.3 above gate &middot; committable
+                ▲ 12.3 above the line &middot; clear to call
               </div>
             </div>
           </div>
@@ -97,16 +97,16 @@ export function Gate() {
           </p>
           <div className="vm-card-meta">
             <div className="vm-card-meta-cell">
-              <div className="vm-card-meta-num">14</div>
-              <div className="vm-card-meta-lab">corpus matches</div>
-            </div>
-            <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">3.6 psi</div>
               <div className="vm-card-meta-lab">leak rate observed</div>
             </div>
             <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">42 min</div>
-              <div className="vm-card-meta-lab">time to commit</div>
+              <div className="vm-card-meta-lab">time to call</div>
+            </div>
+            <div className="vm-card-meta-cell">
+              <div className="vm-card-meta-num">1 clamp</div>
+              <div className="vm-card-meta-lab">the fix</div>
             </div>
           </div>
         </div>
@@ -114,7 +114,7 @@ export function Gate() {
         <div className="vm-card red">
           <div className="vm-card-eyebrow">
             <span>
-              <b>Below gate</b> &middot; declined
+              <b>Below the line</b> &middot; won&rsquo;t call it
             </span>
             <span>P0420 &middot; catalyst efficiency</span>
           </div>
@@ -179,29 +179,28 @@ export function Gate() {
                 43.4<small>%</small>
               </div>
               <div className="vm-conf-line">
-                ▼ 31.6 below gate &middot; cannot commit
+                ▼ 31.6 below the line &middot; won&rsquo;t call it
               </div>
             </div>
           </div>
           <p className="vm-card-finding">
             <em>
-              &ldquo;Cat replacement not authorized. Need post-cat O₂ readings
-              under warm cruise; ambient temp data missing for 9 of 12 corpus
-              matches.&rdquo;
+              &ldquo;Cat replacement not on the table yet. Need post-cat O₂
+              under warm cruise; that reading&rsquo;s missing.&rdquo;
             </em>
           </p>
           <div className="vm-card-meta">
             <div className="vm-card-meta-cell">
-              <div className="vm-card-meta-num">12</div>
-              <div className="vm-card-meta-lab">corpus matches</div>
-            </div>
-            <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">— —</div>
-              <div className="vm-card-meta-lab">post-cat o₂ data</div>
+              <div className="vm-card-meta-lab">post-cat O₂ missing</div>
             </div>
             <div className="vm-card-meta-cell">
               <div className="vm-card-meta-num">refused</div>
               <div className="vm-card-meta-lab">destructive action</div>
+            </div>
+            <div className="vm-card-meta-cell">
+              <div className="vm-card-meta-num">43<small>%</small></div>
+              <div className="vm-card-meta-lab">below the line</div>
             </div>
           </div>
         </div>
