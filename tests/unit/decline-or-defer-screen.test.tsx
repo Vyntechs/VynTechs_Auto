@@ -472,3 +472,90 @@ describe('DeclineOrDeferLive (wired)', () => {
     expect(screen.getByRole('button', { name: /^no$/i })).toBeInTheDocument()
   })
 })
+
+// 2026-05-29 trust sweep: the gate screen was shipping the /design gallery's
+// BMW example data as live defaults — a real tech on a Ford saw a fabricated
+// "WHERE I LOOKED" ledger, a curator named MARCUS T., a placeholder 73/100
+// confidence, and a "BLOCK 7B-3" plate. No fabricated data may reach a real
+// tech: the component shows real data when given it, and honest nothing when
+// not. See docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.1).
+describe('DeclineOrDefer — no fabricated data reaches a real tech (trust)', () => {
+  it('presentational: omits the "WHERE I LOOKED" ledger when no tapeBody is given', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="2007 Ford F-250 — 6.0L Power Stroke"
+        vehicleVin="Session · abc12345"
+        timer="1:12"
+        gap="g"
+        options={[
+          { number: 1, title: 'Gather more low-risk data', description: 'a' },
+          { number: 3, title: 'Defer for curator review', description: 'c', emphasized: true },
+        ]}
+      />,
+    )
+    expect(screen.queryByText(/K-CAN wire colors/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/past_cases/i)).not.toBeInTheDocument()
+  })
+
+  it('presentational: shows no fabricated curator name/vehicle on the defer spoke unless provided', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="2007 Ford F-250 — 6.0L Power Stroke"
+        vehicleVin="Session · abc12345"
+        timer="1:12"
+        gap="g"
+        options={[
+          { number: 1, title: 'Gather more low-risk data', description: 'a' },
+          { number: 3, title: 'Defer for curator review', description: 'c', emphasized: true },
+        ]}
+      />,
+    )
+    expect(screen.queryByText(/MARCUS T\./i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/BMW N-SERIES CURATOR/i)).not.toBeInTheDocument()
+  })
+
+  it('presentational: renders no fabricated confidence number when confidence is absent', () => {
+    const { container } = render(
+      <DeclineOrDefer
+        vehicleName="2007 Ford F-250 — 6.0L Power Stroke"
+        vehicleVin="Session · abc12345"
+        timer="1:12"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+      />,
+    )
+    const num = container.querySelector('.dod-cluster__num')
+    expect(num?.textContent ?? '').not.toContain('73')
+  })
+
+  it('presentational: omits the fabricated block/queue engraved plate by default', () => {
+    render(
+      <DeclineOrDefer
+        vehicleName="2007 Ford F-250 — 6.0L Power Stroke"
+        vehicleVin="Session · abc12345"
+        timer="1:12"
+        gap="g"
+        options={[{ number: 1, title: 'A', description: 'a' }]}
+      />,
+    )
+    expect(screen.queryByText(/BLOCK 7B-3/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/TECHS QUEUED/i)).not.toBeInTheDocument()
+  })
+
+  it('live wrapper: never renders fabricated curator / sources / plate on a real session', () => {
+    render(<DeclineOrDeferLive {...baseProps} confidence={80} gate={95} />)
+    expect(screen.queryByText(/MARCUS T\./i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/BMW N-SERIES CURATOR/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/K-CAN wire colors/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/BLOCK 7B-3/i)).not.toBeInTheDocument()
+  })
+
+  it('live wrapper: shows the real confidence reading from the gate, not the 73 placeholder', () => {
+    const { container } = render(
+      <DeclineOrDeferLive {...baseProps} confidence={80} gate={95} />,
+    )
+    const num = container.querySelector('.dod-cluster__num')
+    expect(num?.textContent ?? '').toContain('80')
+    expect(num?.textContent ?? '').not.toContain('73')
+  })
+})

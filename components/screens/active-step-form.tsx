@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { DotsThree } from '@phosphor-icons/react/dist/ssr'
 import { AmbientConditionsCapture } from '@/components/session/ambient-conditions-capture'
 import { LogButton, DEFAULT_STAGES } from '@/components/vt/log-button'
 import { useAdvanceStream } from '@/lib/use-advance-stream'
@@ -111,27 +110,15 @@ export function ActiveStepForm({ sessionId, nodeId, requestedArtifact }: Props) 
           {state.error}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <LogButton
-            type="submit"
-            state={buttonState}
-            freezeStage={state.stageIdx}
-            stages={stages}
-            disabled={state.isLoading || !observation.trim()}
-            label="Log observation"
-            variant="graphite"
-          />
-        </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          aria-label="More options"
-          disabled={state.isLoading}
-        >
-          <DotsThree size={16} aria-hidden="true" />
-        </button>
-      </div>
+      <LogButton
+        type="submit"
+        state={buttonState}
+        freezeStage={state.stageIdx}
+        stages={stages}
+        disabled={state.isLoading || !observation.trim()}
+        label="Log observation"
+        variant="graphite"
+      />
     </form>
   )
 }

@@ -16,18 +16,18 @@ type Props = {
   vehicleName: string
   vehicleVin: string
   timer: string
-  /** Eyebrow class label, e.g. "DESTRUCTIVE CLASS · K-CAN SPLICE" */
+  /** Eyebrow class label, e.g. "Gating · destructive class". */
   riskLabel?: string
   gap: string
   confidenceGap?: string
-  /** 0-100 numeric confidence reading. Defaults to 73 (design preview value). */
+  /** 0-100 numeric confidence reading. If omitted, the dial is not shown. */
   confidence?: number
-  /** 0-100 gate threshold. Defaults to 85. */
+  /** 0-100 gate threshold. Shown with the dial when confidence is provided. */
   gate?: number
   options: Option[]
-  /** Engraved-plate footer copy. Falls back to a generic format if not given. */
+  /** Engraved-plate footer copy. Defaults to a minimal "SESSION · {timer}" line. */
   engravedPlate?: string
-  /** Pre-formatted printer-tape body. If omitted, a default ledger is rendered. */
+  /** Real retrieval provenance for the WHERE I LOOKED panel. If omitted, the panel is not shown. */
   tapeBody?: string
   /** Tape header right-side timestamp. Defaults to current ISO Z. */
   tapeTimestamp?: string
@@ -52,27 +52,10 @@ type Props = {
   photoAsk?: { prompt: string; onSnap: () => void; busy?: boolean }
 }
 
-const DEFAULT_TAPE_BODY = `  QUERIES   SOURCE              MATCH        STATUS
-─ 5         past_cases         ─ 0/5         miss
-─ 3         forums             ─ 2 conflict  ambig
-─ 0         service_bulletins  ─ ∅           none
-
-  CONCLUSION:  same model year & build K-CAN wire colors
-               not retrievable at required confidence`
-
-const SPOKE_META: Record<SpokeReason, { bearing: string; meta: string[] }> = {
-  gather: {
-    bearing: 'NW · LOW EFFORT',
-    meta: ['+5 MIN', 'RAISES CONFIDENCE ~12 PTS', 'CLEARS GATE'],
-  },
-  decline: {
-    bearing: 'E · EXIT',
-    meta: ['CLOSES SESSION', 'NO LEARNING'],
-  },
-  defer: {
-    bearing: 'SE · RECOMMENDED',
-    meta: ['ROUTES TO MARCUS T.', 'BMW N-SERIES CURATOR'],
-  },
+const SPOKE_META: Record<SpokeReason, { bearing: string }> = {
+  gather: { bearing: 'NW · LOW EFFORT' },
+  decline: { bearing: 'E · EXIT' },
+  defer: { bearing: 'SE · RECOMMENDED' },
 }
 
 function inferReason(opt: Option): SpokeReason {
@@ -291,11 +274,11 @@ export function DeclineOrDefer({
   vehicleName,
   vehicleVin,
   timer,
-  riskLabel = 'DESTRUCTIVE CLASS · K-CAN SPLICE',
+  riskLabel = 'GATING',
   gap,
   confidenceGap,
-  confidence = 73,
-  gate = 85,
+  confidence,
+  gate,
   options,
   engravedPlate,
   tapeBody,
@@ -307,14 +290,15 @@ export function DeclineOrDefer({
   confirmAsk,
   photoAsk,
 }: Props) {
-  const deficit = Math.round(gate - confidence)
+  const deficit =
+    typeof confidence === 'number' && typeof gate === 'number'
+      ? Math.round(gate - confidence)
+      : 0
   const headline = confidenceGap ?? 'Not confident enough to move forward on a risky repair.'
   const ts =
     tapeTimestamp ??
     new Date().toISOString().replace('T', ' · ').replace(/\.\d+Z$/, 'Z')
-  const plate =
-    engravedPlate ??
-    `SESSION ${timer} · BLOCK 7B-3 · TECHS QUEUED 3 · SHOP HISTORY +1`
+  const plate = engravedPlate ?? `SESSION · ${timer}`
 
   return (
     <div className="app">
@@ -331,19 +315,23 @@ export function DeclineOrDefer({
             <span aria-hidden="true">⏵ </span>
             {riskLabel}
           </span>
-          <Dial confidence={confidence} gate={gate} />
-          <div className="dod-cluster">
-            <div className="dod-cluster__num">
-              {confidence}
-              <span className="dod-cluster__den">/100</span>
-            </div>
-            <div className="dod-cluster__label">CONFIDENCE</div>
-            {deficit > 0 && (
-              <div className="dod-cluster__deficit">
-                <span>−{deficit}</span> BELOW THRESHOLD
+          {typeof confidence === 'number' && typeof gate === 'number' && (
+            <>
+              <Dial confidence={confidence} gate={gate} />
+              <div className="dod-cluster">
+                <div className="dod-cluster__num">
+                  {confidence}
+                  <span className="dod-cluster__den">/100</span>
+                </div>
+                <div className="dod-cluster__label">CONFIDENCE</div>
+                {deficit > 0 && (
+                  <div className="dod-cluster__deficit">
+                    <span>−{deficit}</span> BELOW THRESHOLD
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <h2 className="dod-headline">{headline}</h2>
@@ -482,14 +470,16 @@ export function DeclineOrDefer({
           </p>
         )}
 
-        {/* TAPE — diagnostic printout, dyno-tape feel */}
-        <div className="dod-tape">
-          <div className="dod-tape__header">
-            <span>WHERE I LOOKED</span>
-            <span>{ts}</span>
+        {/* TAPE — real retrieval provenance; shown only when we actually have it */}
+        {tapeBody && (
+          <div className="dod-tape">
+            <div className="dod-tape__header">
+              <span>WHERE I LOOKED</span>
+              <span>{ts}</span>
+            </div>
+            <pre className="dod-tape__body">{tapeBody}</pre>
           </div>
-          <pre className="dod-tape__body">{tapeBody ?? DEFAULT_TAPE_BODY}</pre>
-        </div>
+        )}
 
         {/* COMPASS — three forward paths as spokes */}
         <div className="dod-compass">
@@ -501,7 +491,7 @@ export function DeclineOrDefer({
             const cfg = SPOKE_META[reason]
             const isPending = pending === opt.number
             const isDisabled = pending !== null
-            const meta = opt.meta ?? cfg.meta
+            const meta = opt.meta ?? []
             return (
               <button
                 key={opt.number}
