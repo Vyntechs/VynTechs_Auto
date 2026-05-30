@@ -8,12 +8,12 @@ export function FinalCTA({ isSignedIn }: FinalCTAProps) {
       <div className="vm-cta">
         <div>
           <h2 className="vm-cta-h">
-            Stop guessing. <em>Start gating.</em>
+            Stop guessing.
           </h2>
           <p className="vm-cta-p">
             $100 per technician, per month. One account, one path in, no
             salesperson on the other side. Bring one stubborn vehicle. If it
-            doesn&rsquo;t change how you commit work, cancel — your sessions
+            doesn&rsquo;t change how you work, cancel — your sessions
             stay yours, always.
           </p>
         </div>

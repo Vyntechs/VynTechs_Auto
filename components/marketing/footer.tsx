@@ -26,8 +26,8 @@ export function Footer({ isSignedIn }: FooterProps) {
               margin: '16px 0 0',
             }}
           >
-            A diagnostic co-pilot for working technicians. Built in one bay, by
-            a working tech, and shared because it works.
+            A diagnostic for working technicians. Built in the bay, by a
+            working tech, and shared because it works.
           </p>
         </div>
         <div>
@@ -35,9 +35,6 @@ export function Footer({ isSignedIn }: FooterProps) {
           <ul>
             <li>
               <a href="/#how">How it works</a>
-            </li>
-            <li>
-              <a href="/#product">Surfaces</a>
             </li>
             <li>
               <a href="/#pricing">Pricing</a>

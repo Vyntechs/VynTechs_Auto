@@ -9,35 +9,34 @@ type CompareRow = {
 
 const ROWS: CompareRow[] = [
   {
-    subj: 'Refusal at low confidence',
-    chatbot:
-      'None. Confidently invents torque specs, TSB numbers, wiring pinouts.',
-    scantool: 'N/A. Returns a DTC definition; no diagnostic stance.',
-    us: 'Hard refusal below 95% gate. Tells you which evidence is missing.',
+    subj: 'Refuses at low confidence',
+    chatbot: 'None. Confidently invents specs, procedures, pinouts.',
+    scantool: 'N/A. Returns a code definition, no stance.',
+    us: 'Won’t recommend destructive work below the confidence line. Tells you what’s missing.',
   },
   {
-    subj: 'Cites sources',
-    chatbot: 'Sometimes. Often hallucinated, often dead links.',
-    scantool: 'OEM only, no shop context.',
-    us: 'Every claim. Corpus row, TSB number, forum thread URL.',
+    subj: 'Makes things up',
+    chatbot: 'Freely. A wrong spec costs you a torn-down assembly.',
+    scantool: 'N/A.',
+    us: 'Won’t state what it can’t stand behind. Says so when it’s unsure.',
   },
   {
-    subj: 'Learns from your shop',
+    subj: 'Learns from real work',
     chatbot: 'No. State resets per chat.',
     scantool: 'No. Static lookup tables.',
-    us: 'Yes. Every closed session feeds back into the corpus for next time.',
+    us: 'Every closed case sharpens it for the next tech.',
   },
   {
-    subj: 'Asks for evidence',
-    chatbot: 'Rarely. Will guess and hope.',
+    subj: 'Asks before it assumes',
+    chatbot: 'Rarely. Guesses and hopes.',
     scantool: 'No. Reads what the tool returns.',
-    us: 'Yes. When evidence is thin, asks for a specific observation. Capped at 3.',
+    us: 'When it’s short on what it needs, it asks you for one specific check. Three, max.',
   },
   {
     subj: 'Built for the bay',
     chatbot: 'Desktop-first chat UI. Glove-hostile.',
     scantool: 'Bench tool, not shop-floor.',
-    us: 'Phone-first. Thumb-reach UI. Bone-paper readability in shop lighting.',
+    us: 'Phone-first. Thumb-reach. Readable in shop light.',
   },
   {
     subj: 'Voice match',
@@ -45,8 +44,8 @@ const ROWS: CompareRow[] = [
     scantool: 'N/A.',
     us: (
       <em>
-        &ldquo;Smoke test the cold-side intercooler at 5 psi. Note any
-        escape locations.&rdquo;
+        &ldquo;Smoke test the cold-side intercooler at 5 psi. Note where it
+        escapes.&rdquo;
       </em>
     ),
   },
@@ -74,10 +73,9 @@ export function Compare() {
             What we deliberately aren&rsquo;t.
           </h2>
           <p className="vm-section-lede">
-            Most &ldquo;AI for the trades&rdquo; tools are wrappers around a
-            general model with a wrench-shaped icon, or stale DTC lookup
-            tables. Here&rsquo;s how we measure against what techs actually
-            replace.
+            Most diagnostic &ldquo;assistants&rdquo; are a general chatbot with
+            a wrench-shaped icon, or a stale code-lookup table. Here&rsquo;s how
+            we measure against what techs actually replace.
           </p>
         </div>
       </div>
