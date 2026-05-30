@@ -53,6 +53,8 @@ export function DeclineOrDeferLive(props: {
   whatWouldClose?: string | WhatWouldClose
   riskClass: RiskClass
   optionKeys: GateOption[]
+  confidence?: number
+  gate?: number
 }) {
   const router = useRouter()
   const [pending, setPending] = useState<1 | 2 | 3 | null>(null)
@@ -209,6 +211,8 @@ export function DeclineOrDeferLive(props: {
         riskLabel={riskLabel}
         gap={props.gap}
         confidenceGap={props.confidenceGap}
+        confidence={props.confidence}
+        gate={props.gate}
         options={options}
         onSelectOption={handleSelect}
         pending={pending}

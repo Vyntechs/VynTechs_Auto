@@ -49,6 +49,15 @@ describe('OutcomeCapture (wired)', () => {
     expect(screen.getByRole('button', { name: /send & close/i })).toBeDisabled()
   })
 
+  // 2026-05-29 trust sweep: the footer carried a permanently-disabled "Save
+  // draft" button (no onClick, no draft persistence) — a dead control that
+  // tells the tech the rest of the app might be fake too. Removed.
+  // docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
+  it('does not render a dead "Save draft" button', () => {
+    render(<OutcomeCapture {...baseProps} />)
+    expect(screen.queryByRole('button', { name: /save draft/i })).not.toBeInTheDocument()
+  })
+
   it('POSTs the structured payload to /api/sessions/[id]/close on submit', async () => {
     vi.stubGlobal(
       'fetch',

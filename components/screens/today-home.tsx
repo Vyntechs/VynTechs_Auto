@@ -184,12 +184,10 @@ function SessionRow({
   isFirst?: boolean
   isLast?: boolean
 }) {
-  const stepCount = session.treeState.nodes.length
-  const stepIndex = session.treeState.nodes.findIndex(
-    (n) => n.id === session.treeState.currentNodeId,
-  )
-  const stepLabel =
-    stepIndex >= 0 && stepCount > 0 ? `step ${stepIndex + 1} / ${stepCount}` : `${stepCount} steps`
+  // Real risk class for this job, if a gate decision exists yet. Never a
+  // hardcoded "low" — two different jobs must not look identical (trust sweep
+  // 2026-05-29). No step "N / M" road-ahead count, per the cognitive-load rule.
+  const riskLevel = session.treeState.gateDecision?.riskClass
 
   const rowStyle: React.CSSProperties = {
     textDecoration: 'none',
@@ -221,12 +219,9 @@ function SessionRow({
         )}
       </div>
       <div className="queue-complaint">{session.intake.customerComplaint}</div>
-      {kind === 'active' && (
+      {kind === 'active' && riskLevel && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-          <Risk level="low" />
-          <span className="queue-time" style={{ marginLeft: 'auto' }}>
-            {stepLabel}
-          </span>
+          <Risk level={riskLevel} />
         </div>
       )}
       {kind === 'closed' && (

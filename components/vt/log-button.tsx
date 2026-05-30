@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 export type LogButtonStage = { label: string; ms: number }
 
+// Fallback narration, used only when the server hasn't streamed real stage
+// updates yet. A single honest label — never a fabricated sequence of work
+// ("parsing photo · 3 frames", "re-scoring confidence") that may not be
+// happening. Real server-streamed stages narrate the actual work.
 export const DEFAULT_STAGES: LogButtonStage[] = [
-  { label: 'Recording observation', ms: 600 },
-  { label: 'Parsing photo · 3 frames', ms: 900 },
-  { label: 'Updating retrieval ladder', ms: 900 },
-  { label: 'Re-scoring confidence', ms: 800 },
-  { label: 'Advancing to next step', ms: 700 },
+  { label: 'Logging…', ms: 800 },
 ]
 
 export type LogButtonState = 'idle' | 'loading' | 'done'

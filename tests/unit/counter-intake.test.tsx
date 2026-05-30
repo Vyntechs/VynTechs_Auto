@@ -50,13 +50,21 @@ describe('CounterIntake', () => {
     expect(vin.value).toBe('WBA3A5C50EJF12345')
   })
 
-  it('toggles VIN scan state when the scan button is clicked', () => {
+  // 2026-05-29 trust sweep: the "Scan with camera" button never scanned — it
+  // flipped a boolean that was then sent as vinScanned, letting the form claim
+  // a camera VIN scan that never happened. The "Auto-saved" footer likewise
+  // claimed persistence the form does not have. Both fakes removed.
+  // docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
+  it('does not render a fake "Scan with camera" button (no real camera scan exists)', () => {
     render(<CounterIntake userEmail="test@example.com" />)
-    // /scan/i would also match the disabled "Scan VIN/plate" placeholder in
-    // the new PredictiveIntakeSearch bar; narrow to the form's scan toggle.
-    const scanBtn = screen.getByRole('button', { name: /scan with camera/i })
-    fireEvent.click(scanBtn)
-    expect(scanBtn).toHaveTextContent(/scanned/i)
+    expect(
+      screen.queryByRole('button', { name: /scan with camera/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('does not claim the form is auto-saved (no draft persistence exists)', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    expect(screen.queryByText(/auto-saved/i)).not.toBeInTheDocument()
   })
 
   it('disables submit when required fields are empty', () => {
