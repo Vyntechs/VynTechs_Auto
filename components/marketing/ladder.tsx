@@ -3,74 +3,73 @@ export function Ladder() {
     <section className="vm-section" id="how">
       <div className="vm-section-head">
         <div className="vm-section-num">
-          <b>§ 01</b>How it thinks
+          <b>§ 01</b>How it works
         </div>
         <div>
           <h2 className="vm-section-title">
-            A three-rung ladder, not a chatbot. Every claim is{' '}
-            <em>cited</em>, every commit is <em>gated</em>.
+            How the system works.{' '}
+            <em>Not how the dealer labeled it.</em>
           </h2>
           <p className="vm-section-lede">
-            The model climbs from your shop&rsquo;s own history → the open web
-            for that exact vehicle → asking you for a specific observation. It
-            stops where the evidence stops. No fabricated TSBs, no invented
-            torque specs.
+            Give it the vehicle and the complaint. It reasons about how that
+            system actually operates on your truck: what each part does, how
+            it all connects, what should happen when it&rsquo;s working right.
+            It won&rsquo;t assume your vehicle works like a different one, and
+            it won&rsquo;t state a number it can&rsquo;t stand behind. Where
+            it&rsquo;s short on something, it says so and asks you.
           </p>
         </div>
       </div>
 
       <div className="vm-ladder-wrap">
         <div className="vm-ladder">
-          <div className="vm-ladder-h">Retrieval ladder · live</div>
+          <div className="vm-ladder-h">How it works</div>
 
           <div className="vm-rung resolved">
-            <div className="vm-rung-node">0</div>
+            <div className="vm-rung-node">1</div>
             <div>
-              <div className="vm-rung-title">Your shop&rsquo;s history</div>
+              <div className="vm-rung-title">Works from how the system works</div>
               <div className="vm-rung-desc">
-                Every closed session from your bay. Per-VIN, per-DTC, per-tech
-                outcomes. Confidence decays when comebacks happen.
+                Starts from how that system actually operates on your vehicle.
+                Not a copied manual, not a borrowed procedure.
               </div>
             </div>
             <div className="vm-rung-meta">
-              <b>14</b> matches
+              how it
               <br />
-              resolved &middot; 220 ms
+              works
             </div>
           </div>
 
           <div className="vm-rung active">
-            <div className="vm-rung-node">1</div>
+            <div className="vm-rung-node">2</div>
             <div>
-              <div className="vm-rung-title">
-                The open web for that car
-              </div>
+              <div className="vm-rung-title">Reasons about your truck</div>
               <div className="vm-rung-desc">
-                OEM TSBs, manufacturer recalls, NHTSA bulletins, forum threads,
-                technician videos. Every source cited inline with a link back.
+                Won&rsquo;t assume your vehicle works like a different one. The
+                thinking is specific to what&rsquo;s in front of you.
               </div>
             </div>
             <div className="vm-rung-meta">
-              <b>9</b> matches
+              your
               <br />
-              active &middot; sweeping
+              vehicle
             </div>
           </div>
 
           <div className="vm-rung">
-            <div className="vm-rung-node">2</div>
+            <div className="vm-rung-node">3</div>
             <div>
-              <div className="vm-rung-title">Asks you</div>
+              <div className="vm-rung-title">Asks when it&rsquo;s short</div>
               <div className="vm-rung-desc">
-                When evidence is thin, it asks for one specific observation.
-                Capped at 3 asks — past that, it&rsquo;s Decline-or-Defer, not
-                a guess.
+                Needs something it doesn&rsquo;t have, it asks you for one
+                specific check. Three, max. Then it defers instead of guessing.
               </div>
             </div>
             <div className="vm-rung-meta">
-              pending
+              3 max
               <br />
-              gated
+              then defers
             </div>
           </div>
         </div>
@@ -79,9 +78,9 @@ export function Ladder() {
           <div className="vm-ladder-stat">
             <div className="vm-ladder-stat-n">3</div>
             <div className="vm-ladder-stat-l">
-              retrieval rungs, every claim cited
+              asks, then it defers instead of guessing
             </div>
-            <div className="vm-ladder-stat-s">no black box</div>
+            <div className="vm-ladder-stat-s">capped</div>
           </div>
           <div
             className="vm-ladder-stat"
@@ -91,7 +90,7 @@ export function Ladder() {
               95<small>%</small>
             </div>
             <div className="vm-ladder-stat-l">
-              gate threshold before destructive work is unlocked
+              confidence line before risky work unlocks
             </div>
             <div className="vm-ladder-stat-s">configurable</div>
           </div>
@@ -100,7 +99,7 @@ export function Ladder() {
             style={{ borderColor: 'oklch(62% 0.22 25)' }}
           >
             <div className="vm-ladder-stat-n">0</div>
-            <div className="vm-ladder-stat-l">guesses below the gate</div>
+            <div className="vm-ladder-stat-l">specs it&rsquo;ll make up</div>
             <div className="vm-ladder-stat-s">hard refusal</div>
           </div>
         </div>
