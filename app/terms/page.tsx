@@ -1,4 +1,4 @@
-import { getServerSupabase } from '@/lib/supabase-server'
+import { getOptionalUser } from '@/lib/supabase-server'
 import { Nav } from '@/components/marketing/nav'
 import { Footer } from '@/components/marketing/footer'
 import '@/components/marketing/marketing.css'
@@ -14,10 +14,7 @@ export const metadata = {
 }
 
 export default async function TermsPage() {
-  const supabase = await getServerSupabase()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getOptionalUser()
   const isSignedIn = !!user
 
   return (
