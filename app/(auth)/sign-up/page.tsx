@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { getServerSupabase } from '@/lib/supabase-server'
+import { getOptionalUser } from '@/lib/supabase-server'
 import { getProfileByUserId } from '@/lib/db/queries'
 import { stripeCustomers } from '@/lib/db/schema'
 import { SignUpForm } from './sign-up-form'
@@ -15,10 +15,7 @@ import { SignUpForm } from './sign-up-form'
  *  single `checkAccess` call. Until then we inline the check here so the
  *  page can't trap a returning customer on the new-signup CTA. */
 async function detourSignedInUser(): Promise<string | null> {
-  const supabase = await getServerSupabase()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getOptionalUser()
   if (!user) return null
 
   const profile = await getProfileByUserId(db, user.id)

@@ -10,16 +10,18 @@ export function Hero({ isSignedIn }: HeroProps) {
       <div className="vm-hero-lead">
         <div className="vm-hero-eyebrow vm-eyebrow">
           <span className="vm-dot" />
-          Built in one bay &middot; still in beta
+          Still in beta &middot; onboarding by invite
         </div>
         <h1 className="vm-hero-title">
-          The diagnostic that knows when <em>not</em> to commit.
+          Knows how the system works. Won&rsquo;t guess when it
+          doesn&rsquo;t.
         </h1>
         <p className="vm-hero-sub">
-          A working technician built this for his own bay because nothing else
-          would say <em>&ldquo;I don&rsquo;t know yet.&rdquo;</em> It surfaces
-          the next step, cites every claim, and refuses destructive work below a
-          confidence gate. Sharing it now because it works.
+          Built by a working tech who got tired of guessing. It works from how
+          your vehicle&rsquo;s system actually works, not a copied manual, so it
+          reasons about your truck and not some other one. When it isn&rsquo;t
+          sure, it says so, tells you what to check, and won&rsquo;t green-light
+          tearing into something it can&rsquo;t stand behind.
         </p>
         <div className="vm-hero-cta">
           <a href={ctaHref} className="vm-btn">
@@ -34,18 +36,22 @@ export function Hero({ isSignedIn }: HeroProps) {
         </div>
         <div className="vm-hero-meta">
           <div className="vm-hero-meta-cell">
-            <div className="vm-hero-meta-num">3</div>
-            <div className="vm-hero-meta-lab">retrieval rungs, all cited</div>
-          </div>
-          <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">
               95<small>%</small>
             </div>
-            <div className="vm-hero-meta-lab">default commit gate</div>
+            <div className="vm-hero-meta-lab">
+              confidence line before it&rsquo;ll OK risky work
+            </div>
+          </div>
+          <div className="vm-hero-meta-cell">
+            <div className="vm-hero-meta-num">3</div>
+            <div className="vm-hero-meta-lab">
+              questions max before it defers, not guesses
+            </div>
           </div>
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">0</div>
-            <div className="vm-hero-meta-lab">guesses below the gate</div>
+            <div className="vm-hero-meta-lab">specs it&rsquo;ll make up</div>
           </div>
         </div>
       </div>

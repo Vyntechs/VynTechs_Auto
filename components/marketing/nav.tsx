@@ -18,11 +18,10 @@ export function Nav({ isSignedIn }: NavProps) {
             priority
           />
           <span className="vm-brand-bar" />
-          <span className="vm-brand-tag">Diagnostic Co-pilot</span>
+          <span className="vm-brand-tag">Built for working techs</span>
         </a>
         <div className="vm-nav-links">
           <a href="/#how">How it works</a>
-          <a href="/#product">Surfaces</a>
           <a href="/#pricing">Pricing</a>
           <a href="/#compare">Compare</a>
           <a href="/#faq">FAQ</a>

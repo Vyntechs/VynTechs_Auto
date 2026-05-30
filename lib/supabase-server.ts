@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import type { User } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 
 export async function getServerSupabase() {
@@ -21,4 +22,22 @@ export async function getServerSupabase() {
       },
     },
   )
+}
+
+/**
+ * The signed-in user, or null — never throws.
+ *
+ * Public pages (landing, privacy, terms, sign-up) call this only to choose
+ * cosmetic state (which CTA to show). A stale or invalid auth cookie makes
+ * Supabase's getUser() throw ("Invalid Refresh Token"), which would 500 the
+ * whole page. Cosmetic state must soft-fail to signed-out, never crash.
+ */
+export async function getOptionalUser(): Promise<User | null> {
+  try {
+    const supabase = await getServerSupabase()
+    const { data } = await supabase.auth.getUser()
+    return data.user ?? null
+  } catch {
+    return null
+  }
 }
