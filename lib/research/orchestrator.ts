@@ -57,13 +57,14 @@ export async function startResearchRun(
 export async function findRecentResearchRun(
   args: { platformSlug: string; symptomSlug: string; withinDays?: number },
   db: AppDb = defaultDb,
-): Promise<{ id: string; completedAt: Date; flowVersionId?: string } | null> {
+): Promise<{ id: string; completedAt: Date; flowId?: string; flowVersionId?: string } | null> {
   const days = args.withinDays ?? 90
   const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000)
   const [row] = await db
     .select({
       id: researchRuns.id,
       completedAt: researchRuns.completedAt,
+      flowId: researchRuns.flowId,
       flowVersionId: flowVersions.id, // a draft version referencing this run, if any
     })
     .from(researchRuns)
@@ -79,7 +80,12 @@ export async function findRecentResearchRun(
     .orderBy(desc(researchRuns.completedAt))
     .limit(1)
   if (!row || !row.completedAt) return null
-  return { id: row.id, completedAt: row.completedAt, flowVersionId: row.flowVersionId ?? undefined }
+  return {
+    id: row.id,
+    completedAt: row.completedAt,
+    flowId: row.flowId ?? undefined,
+    flowVersionId: row.flowVersionId ?? undefined,
+  }
 }
 
 /**
