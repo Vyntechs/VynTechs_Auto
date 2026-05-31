@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   pgTable,
+  pgEnum,
   uuid,
   text,
   timestamp,
@@ -9,8 +11,10 @@ import {
   real,
   boolean,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
+import type { Flow } from '../flows/types'
 
 export type { TreeState }
 
@@ -506,3 +510,158 @@ export const rateLimitBuckets = pgTable(
   },
   (table) => [index('idx_rate_limit_buckets_window_start').on(table.windowStart)],
 )
+
+// ===== Curator + flow authoring (PR-N1) =====
+//
+// Architecture: spec §6 of docs/superpowers/specs/2026-05-26-6.0-psd-cranks-no-start-flow-design.md
+// Schema pressure-test: docs/superpowers/research/2026-05-26-curator/agent-01-schema-patterns.md
+//
+// SLUG REALIGNMENT (2026-05-30): flows + research_runs key on platform_slug /
+// symptom_slug TEXT, NOT uuid FKs to platforms(id)/symptoms(id). main has no
+// platforms/symptoms tables in this schema; the PGlite test DB applies only the
+// main-line migrations, so a FK to platforms would fail the whole suite at
+// migrate time. Referential integrity moves to authoring/publish time (PR-N2).
+//
+// Conventions:
+//  - flow_versions is immutable after publish; "edit" creates a new draft row.
+//  - Exactly one row per flow_id may have state='published' (partial unique index).
+//  - flow_outcomes rows are NEVER deleted (ON DELETE RESTRICT); they are the moat.
+//  - body_schema_version lets future Flow-type evolutions live alongside pinned
+//    in-flight sessions.
+
+export const flowVersionState = pgEnum('flow_version_state', [
+  'draft',
+  'published',
+  'archived',
+])
+
+export const flowOutcomeKind = pgEnum('flow_outcome_kind', [
+  'confirmed_fix',
+  'returned_comeback',
+  'misdiagnosis',
+  'inconclusive',
+  'abandoned',
+])
+
+export const researchRunStatus = pgEnum('research_run_status', [
+  'running',
+  'completed',
+  'failed',
+  'partial',
+])
+
+export const flows = pgTable(
+  'flows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    // SLUG REALIGNMENT: TEXT, not uuid FK. e.g. 'ford-super-duty-3rd-gen-60-psd'
+    platformSlug: text('platform_slug').notNull(),
+    symptomSlug: text('symptom_slug').notNull(), // e.g. 'cranks-no-start'
+    displayTitle: text('display_title').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    isRetired: boolean('is_retired').notNull().default(false),
+  },
+  (t) => ({
+    // One active (platform_slug, symptom_slug) pair at a time — retired excluded.
+    // Replaces the spec's UNIQUE(platform_id, symptom_id) WHERE is_retired=false.
+    activePairUniq: uniqueIndex('flows_active_platform_symptom_uniq')
+      .on(t.platformSlug, t.symptomSlug)
+      .where(sql`is_retired = false`),
+  }),
+)
+
+export const flowVersions = pgTable(
+  'flow_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    flowId: uuid('flow_id')
+      .notNull()
+      .references(() => flows.id),
+    versionNumber: integer('version_number').notNull(),
+    state: flowVersionState('state').notNull(),
+    // The Flow body (lib/flows/types.ts). Draft bodies are partial but stored
+    // in the same column; $type<Flow> documents the published-body shape.
+    body: jsonb('body').$type<Flow>().notNull(),
+    // Lets the Flow shape evolve without breaking version-pinned in-flight
+    // sessions. Bump when lib/flows/types.ts Flow changes non-additively.
+    bodySchemaVersion: text('body_schema_version').notNull().default('1.0'),
+    authoredBy: uuid('authored_by')
+      .notNull()
+      .references(() => profiles.id),
+    authoredAt: timestamp('authored_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    publishedBy: uuid('published_by').references(() => profiles.id),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    archivedBy: uuid('archived_by').references(() => profiles.id),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    changeNote: text('change_note').notNull(),
+    // Plain uuid — NO .references() here. The FK to research_runs is added by
+    // the migration's trailing ALTER (research_runs is declared AFTER this
+    // table; a Drizzle reference would force a circular declaration order).
+    researchRunId: uuid('research_run_id'),
+    // Self-FK — type the callback return as AnyPgColumn for the self-reference.
+    forkedFromVersionId: uuid('forked_from_version_id').references(
+      (): AnyPgColumn => flowVersions.id,
+    ),
+  },
+  (t) => ({
+    versionUniq: uniqueIndex('flow_versions_flow_version_uniq').on(
+      t.flowId,
+      t.versionNumber,
+    ),
+    onePublishedPerFlow: uniqueIndex('flow_versions_one_published_per_flow')
+      .on(t.flowId)
+      .where(sql`state = 'published'`),
+  }),
+)
+
+export const flowOutcomes = pgTable(
+  'flow_outcomes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'restrict' }),
+    flowVersionId: uuid('flow_version_id')
+      .notNull()
+      .references(() => flowVersions.id, { onDelete: 'restrict' }),
+    outcome: flowOutcomeKind('outcome').notNull(),
+    outcomeNote: text('outcome_note'),
+    taggedBy: uuid('tagged_by')
+      .notNull()
+      .references(() => profiles.id),
+    taggedAt: timestamp('tagged_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // One outcome per (session, version) — prevents double-counting in metrics.
+    sessionVersionUniq: uniqueIndex('flow_outcomes_session_version_uniq').on(
+      t.sessionId,
+      t.flowVersionId,
+    ),
+  }),
+)
+
+export const researchRuns = pgTable('research_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  flowId: uuid('flow_id').references(() => flows.id), // null for first-time research
+  // SLUG REALIGNMENT: TEXT, not uuid FK.
+  platformSlug: text('platform_slug').notNull(),
+  symptomSlug: text('symptom_slug').notNull(),
+  status: researchRunStatus('status').notNull().default('running'),
+  errorMessage: text('error_message'),
+  agentOutputs: jsonb('agent_outputs').$type<unknown[]>().notNull().default([]),
+  synthesisMd: text('synthesis_md').notNull().default(''),
+  startedAt: timestamp('started_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  initiatedBy: uuid('initiated_by')
+    .notNull()
+    .references(() => profiles.id),
+})
