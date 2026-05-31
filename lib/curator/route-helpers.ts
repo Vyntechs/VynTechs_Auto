@@ -36,3 +36,18 @@ export async function requireCurator(): Promise<
 
   return { kind: 'ok', profileId: profile.id }
 }
+
+/**
+ * Server-action helper: returns the curator's profileId, or throws if the
+ * caller is not an authenticated curator. Thin wrapper over requireCurator()
+ * so server actions (which can't return a NextResponse) get a value-or-throw
+ * API. Gating itself is unchanged: requireCurator() keys on profiles.is_curator
+ * via canCurate (migration 0018, PR #95) — NOT role.
+ */
+export async function requireCuratorProfile(): Promise<{ id: string }> {
+  const result = await requireCurator()
+  if (result.kind === 'forbidden') {
+    throw new Error('Forbidden: curator access required')
+  }
+  return { id: result.profileId }
+}
