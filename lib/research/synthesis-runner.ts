@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { anthropic, MODEL } from '@/lib/ai/client'
-import type { Conflict, Flow } from '@/lib/flows/types'
+import type { Citation, Conflict, Flow, Step } from '@/lib/flows/types'
 import type { SynthesisInput, SynthesisOutput } from './types'
 
 /**
@@ -128,11 +128,20 @@ export async function runSynthesis(input: SynthesisInput): Promise<SynthesisOutp
   })
   const conflicts = extractJsonArray<Conflict>(conflictsResp)
 
-  const synthesisMd = buildSynthesisMd(input, citedBody, conflicts)
+  // Anti-fabrication enforcement (not prompt-only): the synthesis layer must never emit a
+  // citation URL that no agent actually fetched in this run (types.ts invariant +
+  // feedback_research_not_training). Strip any citation — in steps OR conflict sides —
+  // whose sourceUrl is absent from the agents' fetched URLs. The draft is human-reviewed,
+  // so dropping a hallucinated citation is safer than failing the whole expensive run.
+  const allowedUrls = collectAgentUrls(input.agents)
+  const cleanBody = stripUnknownCitations(citedBody, allowedUrls)
+  const cleanConflicts = stripUnknownConflictCitations(conflicts, allowedUrls)
+
+  const synthesisMd = buildSynthesisMd(input, cleanBody, cleanConflicts)
 
   return {
-    draftBody: citedBody,
-    conflicts,
+    draftBody: cleanBody,
+    conflicts: cleanConflicts,
     synthesisMd,
     tokenUsage: {
       inputTokens:
@@ -171,6 +180,35 @@ function lastTextBlock(resp: Anthropic.Messages.Message): string | null {
   const blocks = Array.isArray(resp.content) ? resp.content : []
   const block = [...blocks].reverse().find((b) => b.type === 'text')
   return block && block.type === 'text' ? block.text : null
+}
+
+/** Every URL the agents actually fetched this run (finding sources + visited URLs). */
+function collectAgentUrls(agents: SynthesisInput['agents']): Set<string> {
+  const urls = new Set<string>()
+  for (const a of agents) {
+    for (const f of a.findings) for (const s of f.sources) if (s.url) urls.add(s.url)
+    for (const u of a.visitedUrls) if (u) urls.add(u)
+  }
+  return urls
+}
+
+const keepKnown = (cites: Citation[] | undefined, allowed: Set<string>): Citation[] | undefined =>
+  cites?.filter((c) => allowed.has(c.sourceUrl))
+
+function stripUnknownCitations(body: Flow, allowed: Set<string>): Flow {
+  if (!body?.steps) return body
+  const steps: Record<string, Step> = {}
+  for (const [id, step] of Object.entries(body.steps)) {
+    steps[id] = { ...step, citations: keepKnown(step.citations, allowed) }
+  }
+  return { ...body, steps }
+}
+
+function stripUnknownConflictCitations(conflicts: Conflict[], allowed: Set<string>): Conflict[] {
+  return conflicts.map((c) => ({
+    ...c,
+    sides: c.sides.map((s) => ({ ...s, citations: s.citations.filter((cit) => allowed.has(cit.sourceUrl)) })),
+  }))
 }
 
 function buildSynthesisMd(input: SynthesisInput, body: Flow, conflicts: Conflict[]): string {
