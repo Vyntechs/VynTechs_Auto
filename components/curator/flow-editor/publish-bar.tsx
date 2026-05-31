@@ -4,13 +4,14 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useFlowEditor } from './flow-editor-provider'
 import { saveDraft, publishDraft } from '@/app/curator/flows/actions'
-import { validateFlowForPublish } from '@/lib/curator/flow-validation'
+import { describePublishIssues } from '@/lib/curator/flow-publish-issues'
 
 export function PublishBar() {
   const { flowId, flowVersionId, body, changeNote, setChangeNote, markSaved, dirty } = useFlowEditor()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [errors, setErrors] = useState<string[]>([])
+  const [issues, setIssues] = useState<string[]>([])
+  const [showIssues, setShowIssues] = useState(false)
   const [savedAt, setSavedAt] = useState<string | null>(null)
 
   const onSave = () => {
@@ -18,62 +19,78 @@ export function PublishBar() {
       try {
         await saveDraft({ flowVersionId, body, changeNote })
         markSaved()
-        setSavedAt(new Date().toLocaleTimeString())
-        setErrors([])
+        setSavedAt(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))
+        setIssues([])
       } catch (e) {
-        setErrors([e instanceof Error ? e.message : 'Save failed'])
+        setIssues([e instanceof Error ? e.message : 'Could not save.'])
+        setShowIssues(true)
       }
     })
   }
 
   const onPublish = () => {
-    const localValidation = validateFlowForPublish(body)
-    if (!localValidation.ok) {
-      setErrors(localValidation.errors)
-      return
-    }
-    if (!changeNote.trim()) {
-      setErrors(['Add a change note before publishing.'])
+    const found = describePublishIssues(body)
+    if (!changeNote.trim()) found.push('Add a short note saying what this version is, then publish.')
+    if (found.length > 0) {
+      setIssues(found)
+      setShowIssues(true)
       return
     }
     startTransition(async () => {
       try {
-        // Persist the current on-screen body BEFORE publishing, so Publish ships
-        // exactly what the curator sees (not the last "Save draft" snapshot) and
-        // the server re-validates the same body the client just validated.
         await saveDraft({ flowVersionId, body, changeNote })
         markSaved()
         const result = await publishDraft({ flowVersionId, changeNote })
         if (result.ok) {
-          setErrors([])
+          setIssues([])
           router.push(`/curator/flows/${flowId}`)
         } else {
-          setErrors(result.errors)
+          setIssues(result.errors)
+          setShowIssues(true)
         }
       } catch (e) {
-        setErrors([e instanceof Error ? e.message : 'Publish failed'])
+        setIssues([e instanceof Error ? e.message : 'Could not publish.'])
+        setShowIssues(true)
       }
     })
   }
 
   return (
-    <footer className="vt-publish-bar">
-      <input
-        className="vt-publish-bar-changenote"
-        placeholder="Change note (required for publish)"
-        value={changeNote}
-        onChange={(e) => setChangeNote(e.target.value)}
-      />
-      <button onClick={onSave} disabled={!dirty || pending} className="vt-btn vt-btn-secondary">
-        {pending ? 'Saving…' : 'Save draft'}
-      </button>
-      <button onClick={onPublish} disabled={pending} className="vt-btn vt-btn-primary">Publish</button>
-      {savedAt && <span className="vt-publish-bar-saved">Saved {savedAt}</span>}
-      {errors.length > 0 && (
-        <ul className="vt-publish-bar-errors">
-          {errors.map((e, i) => <li key={i}>{e}</li>)}
-        </ul>
+    <footer className="vt-publishbar">
+      {showIssues && issues.length > 0 && (
+        <div className="vt-publishbar__issues">
+          <div className="vt-publishbar__issues-head">
+            <span>Fix these before publishing</span>
+            <button type="button" onClick={() => setShowIssues(false)} aria-label="Dismiss">✕</button>
+          </div>
+          <ul>
+            {issues.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
       )}
+      <div className="vt-publishbar__row">
+        <div className="vt-publishbar__note">
+          <label className="vt-field__label" htmlFor="pb-note">Why this version (needed to publish)</label>
+          <input
+            id="pb-note"
+            className="vt-field__input"
+            placeholder="e.g. First draft from research — added fuel-pressure branch"
+            value={changeNote}
+            onChange={(e) => setChangeNote(e.target.value)}
+          />
+        </div>
+        <div className="vt-publishbar__actions">
+          <span className="vt-publishbar__state">
+            {dirty ? 'Unsaved changes' : savedAt ? `Saved ${savedAt}` : 'Saved'}
+          </span>
+          <button type="button" onClick={onSave} disabled={!dirty || pending} className="vt-btn">
+            {pending ? 'Saving…' : 'Save draft'}
+          </button>
+          <button type="button" onClick={onPublish} disabled={pending} className="vt-btn vt-btn--accent">
+            Publish
+          </button>
+        </div>
+      </div>
     </footer>
   )
 }
