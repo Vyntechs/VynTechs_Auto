@@ -1058,6 +1058,31 @@
   /* Sources pane hides on phones in N2; PR-N7 re-introduces it as a drawer. */
 }
 
+/* Detail pane + citation rows: the form controls had no layout rules, so the
+ * <label>s flowed inline and the Question/excerpt textareas overlapped the row
+ * above. Stack each label over its field, and stack citation fields. */
+.vt-detail-pane > label {
+  display: block;
+  margin-bottom: 14px;
+}
+.vt-detail-pane > label input,
+.vt-detail-pane > label textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+.vt-detail-pane textarea { min-height: 64px; }
+.vt-citation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--vt-border);
+}
+.vt-citation-row input,
+.vt-citation-row textarea { width: 100%; }
+
 /* Founder-notes list page — mobile-friendly card layout when narrow. */
 .vt-founder-notes-table { width: 100%; border-collapse: collapse; }
 .vt-founder-notes-table th, .vt-founder-notes-table td { padding: 8px 6px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--vt-border); font-size: 14px; }

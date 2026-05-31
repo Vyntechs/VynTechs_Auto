@@ -24,8 +24,21 @@ export function validateFlowForPublish(body: Flow): Result {
         errors.push(`question step "${stepId}" has zero answers`)
       }
       for (const a of step.answers) {
-        if ('next' in a && a.next && !stepIds.has(a.next)) {
-          errors.push(`answer "${a.id}" in step "${stepId}" points to non-existent step "${a.next}"`)
+        // Answer is a compile-time union (next XOR finding), but `body` is a raw
+        // `as Flow` cast off JSONB — re-enforce the invariant at runtime so a
+        // "stuck" answer (empty next, no finding) or an incomplete FINDING can
+        // never publish. next:'' is the single-step "+ Answer" default.
+        const next = 'next' in a ? a.next : undefined
+        const finding = 'finding' in a ? a.finding : undefined
+        const hasNext = typeof next === 'string' && next.trim().length > 0
+        if (typeof next === 'string' && next.trim().length > 0 && !stepIds.has(next)) {
+          errors.push(`answer "${a.id}" in step "${stepId}" points to non-existent step "${next}"`)
+        }
+        if (!hasNext && !finding) {
+          errors.push(`answer "${a.id}" in step "${stepId}" leads nowhere — give it a next step or a FINDING`)
+        }
+        if (finding && (finding.verdict.trim().length === 0 || finding.action.trim().length === 0)) {
+          errors.push(`answer "${a.id}" in step "${stepId}" has a FINDING missing its verdict or action`)
         }
       }
     } else if (step.kind === 'procedure') {

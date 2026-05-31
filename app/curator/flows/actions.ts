@@ -73,7 +73,9 @@ export async function createFlow(args: {
         state: 'draft',
         body: emptyBody,
         authoredBy: profile.id,
-        changeNote: 'initial draft',
+        // Start blank so the publish gate's change-note requirement is real on
+        // the first publish (a seeded note would auto-satisfy it).
+        changeNote: '',
       })
       .returning({ id: flowVersions.id })
 
