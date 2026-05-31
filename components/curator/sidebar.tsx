@@ -12,6 +12,7 @@ export const CURATOR_NAV = [
   { href: '/curator/corpus',        label: 'Solved cases' },
   { href: '/curator/founder-notes', label: 'Founder notes' },
   { href: '/curator/calibration',   label: 'Calibrator' },
+  { href: '/curator/flows',         label: 'Flows' },
 ]
 
 export function CuratorSidebar() {
