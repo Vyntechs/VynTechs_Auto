@@ -21,15 +21,21 @@
 -- three NEW enums. Touches ZERO existing tables. Does NOT reference
 -- platforms/symptoms at all.
 --
+-- NOTE: the statements below are separated by Drizzle breakpoint markers so the
+-- PGlite test migrator (drizzle-orm/pglite/migrator) runs each chunk as ONE
+-- query — PGlite rejects multi-statement queries. Postgres apply_migration
+-- ignores those marker comment lines, so prod-apply is unaffected. (Do not write
+-- the literal marker token inside a comment; the migrator splits on it.)
+--
 -- Pre-apply rehearsal (required):
 --   1. psql -d vyntechs_rehearsal -v ON_ERROR_STOP=1 -f drizzle/migrations/0019_curator_flows_schema.sql
 --   2. BEGIN ... <this file> ... ROLLBACK on prod via Supabase MCP execute_sql
 -- Apply path (Brandon-gated, per feedback_no_dangerous_prod_ops):
 --   Supabase MCP apply_migration name=0019_curator_flows_schema, body = this file.
 
-CREATE TYPE flow_version_state AS ENUM ('draft', 'published', 'archived');
-CREATE TYPE flow_outcome_kind  AS ENUM ('confirmed_fix', 'returned_comeback', 'misdiagnosis', 'inconclusive', 'abandoned');
-CREATE TYPE research_run_status AS ENUM ('running', 'completed', 'failed', 'partial');
+CREATE TYPE flow_version_state AS ENUM ('draft', 'published', 'archived');--> statement-breakpoint
+CREATE TYPE flow_outcome_kind  AS ENUM ('confirmed_fix', 'returned_comeback', 'misdiagnosis', 'inconclusive', 'abandoned');--> statement-breakpoint
+CREATE TYPE research_run_status AS ENUM ('running', 'completed', 'failed', 'partial');--> statement-breakpoint
 
 -- ---- flows -----------------------------------------------------------------
 -- Stable identifier for an authored (platform, symptom) case. Keyed on slug
@@ -44,12 +50,12 @@ CREATE TABLE flows (
   display_title   text NOT NULL,                        -- '2003-2007 F-250 6.0 PSD — Cranks-No-Start'
   created_at      timestamptz NOT NULL DEFAULT now(),
   is_retired      boolean NOT NULL DEFAULT false        -- last-ditch kill switch
-);
+);--> statement-breakpoint
 
 -- One active (platform_slug, symptom_slug) pair at a time — retired excluded.
 -- Replaces the spec's UNIQUE(platform_id, symptom_id) WHERE is_retired=false.
 CREATE UNIQUE INDEX flows_active_platform_symptom_uniq
-  ON flows (platform_slug, symptom_slug) WHERE is_retired = false;
+  ON flows (platform_slug, symptom_slug) WHERE is_retired = false;--> statement-breakpoint
 
 -- ---- flow_versions ---------------------------------------------------------
 -- Immutable per version. State: draft -> published -> archived. Never modified
@@ -70,14 +76,14 @@ CREATE TABLE flow_versions (
   change_note             text NOT NULL,                -- mandatory human-readable change desc
   research_run_id         uuid,                         -- FK added after research_runs exists (below)
   forked_from_version_id  uuid REFERENCES flow_versions(id)
-);
+);--> statement-breakpoint
 
 CREATE UNIQUE INDEX flow_versions_flow_version_uniq
-  ON flow_versions (flow_id, version_number);
+  ON flow_versions (flow_id, version_number);--> statement-breakpoint
 
 -- Exactly one published row per flow (the safe-serving guarantee).
 CREATE UNIQUE INDEX flow_versions_one_published_per_flow
-  ON flow_versions (flow_id) WHERE state = 'published';
+  ON flow_versions (flow_id) WHERE state = 'published';--> statement-breakpoint
 
 -- ---- flow_outcomes ---------------------------------------------------------
 -- One row per session that ran a published flow version. NEVER deleted
@@ -90,11 +96,11 @@ CREATE TABLE flow_outcomes (
   outcome_note      text,
   tagged_by         uuid NOT NULL REFERENCES profiles(id),
   tagged_at         timestamptz NOT NULL DEFAULT now()
-);
+);--> statement-breakpoint
 
 -- One outcome per (session, version) — prevents double-counting in metrics.
 CREATE UNIQUE INDEX flow_outcomes_session_version_uniq
-  ON flow_outcomes (session_id, flow_version_id);
+  ON flow_outcomes (session_id, flow_version_id);--> statement-breakpoint
 
 -- ---- research_runs ---------------------------------------------------------
 -- Provenance of the parallel-subagent dispatch that pre-filled a draft.
@@ -112,7 +118,7 @@ CREATE TABLE research_runs (
   started_at      timestamptz NOT NULL DEFAULT now(),
   completed_at    timestamptz,
   initiated_by    uuid NOT NULL REFERENCES profiles(id)
-);
+);--> statement-breakpoint
 
 -- Backfill the FK from flow_versions.research_run_id once research_runs exists.
 ALTER TABLE flow_versions
