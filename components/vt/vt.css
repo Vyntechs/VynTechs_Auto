@@ -1035,6 +1035,29 @@
   .vt-corpus-list-actions { margin-left: 0; }
 }
 
+/* Curator flow editor — three-pane grid (tree | detail | sources) that
+ * collapses to two panes on tablets and a single stacked column on phones.
+ * Per feedback_mobile_validation: must work at 375–414px (no horizontal
+ * scroll, all panes reachable). Sources pane hides below 1024px in N2;
+ * PR-N7 re-introduces it as a drawer. */
+.vt-flow-editor-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  gap: 16px;
+  min-height: 600px;
+}
+
+@media (max-width: 1024px) {
+  .vt-flow-editor-grid { grid-template-columns: 280px 1fr; }
+  .vt-flow-editor-sources { display: none; }
+}
+
+@media (max-width: 640px) {
+  .vt-flow-editor-grid { grid-template-columns: 1fr; }
+  .vt-flow-editor-tree { max-height: 240px; overflow-y: auto; }
+  /* Sources pane hides on phones in N2; PR-N7 re-introduces it as a drawer. */
+}
+
 /* Founder-notes list page — mobile-friendly card layout when narrow. */
 .vt-founder-notes-table { width: 100%; border-collapse: collapse; }
 .vt-founder-notes-table th, .vt-founder-notes-table td { padding: 8px 6px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--vt-border); font-size: 14px; }
