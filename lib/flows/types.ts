@@ -68,6 +68,12 @@ export type QuestionStep = {
   of: number
   title: string
   question: string
+  /**
+   * Optional note shown alongside the step (e.g. a condition recorded when a
+   * curator resolves a source conflict as "keep both" — "use the TSB spec for
+   * 2003–2004, the manual otherwise"). Symmetric with ProcedureStep.note.
+   */
+  note?: string
   /** Optional animation hint for the wizard's contextual diagram (V2.0 chrome). */
   animation?: StepAnimation
   /** Inline source attribution supporting this step's claims. */
