@@ -148,6 +148,13 @@
       "when": 1779571200000,
       "tag": "0018_profile_is_curator_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780187680571,
+      "tag": "0019_curator_flows_schema",
+      "breakpoints": true
     }
   ]
 }
