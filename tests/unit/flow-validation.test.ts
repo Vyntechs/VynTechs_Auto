@@ -50,6 +50,34 @@ describe('validateFlowForPublish', () => {
     if (!r.ok) expect(r.errors.some((e) => e.includes('"ghost"'))).toBe(true)
   })
 
+  it('fails when an answer leads nowhere (empty next, no finding — the single-step "+ Answer" default)', () => {
+    const f = minimal({
+      steps: {
+        'step-1': {
+          kind: 'question', n: 1, of: 1, title: 't', question: 'q',
+          answers: [{ id: 'a1', label: 'Yes', next: '' }],
+        },
+      },
+    })
+    const r = validateFlowForPublish(f)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errors.some((e) => e.includes('"a1"') && /nowhere|next step or a finding/i.test(e))).toBe(true)
+  })
+
+  it('fails when a FINDING is missing its verdict or action (the editor default before the curator fills it)', () => {
+    const f = minimal({
+      steps: {
+        'step-1': {
+          kind: 'question', n: 1, of: 1, title: 't', question: 'q',
+          answers: [{ id: 'a1', label: 'Yes', finding: { verdict: '', action: '', severity: 'fixable' } }],
+        },
+      },
+    })
+    const r = validateFlowForPublish(f)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errors.some((e) => e.includes('"a1"') && /verdict|action/i.test(e))).toBe(true)
+  })
+
   it('fails when a question step has zero answers', () => {
     const f = minimal({
       steps: { 'step-1': { kind: 'question', n: 1, of: 1, title: 't', question: 'q', answers: [] } },

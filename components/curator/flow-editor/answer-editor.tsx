@@ -9,11 +9,18 @@ export function AnswerEditor({ stepId, answers }: { stepId: string; answers: Ans
 
   const addAnswer = () =>
     applyMutation((b) =>
-      FlowEditorMutations.addAnswer(b, stepId, {
-        id: `a${answers.length + 1}`,
-        label: '',
-        next: otherStepIds[0] ?? '',
-      } as Answer),
+      // With another step to branch to, default to it; otherwise default to a
+      // FINDING (the only sensible terminal on a single-step flow). This keeps
+      // the answer-target <select> matched to a real option and surfaces the
+      // verdict/action fields, instead of a stuck next:'' that shows "→ FINDING"
+      // with no finding behind it.
+      FlowEditorMutations.addAnswer(
+        b,
+        stepId,
+        (otherStepIds[0]
+          ? { id: `a${answers.length + 1}`, label: '', next: otherStepIds[0] }
+          : { id: `a${answers.length + 1}`, label: '', finding: { verdict: '', action: '', severity: 'fixable' } }) as Answer,
+      ),
     )
 
   return (
