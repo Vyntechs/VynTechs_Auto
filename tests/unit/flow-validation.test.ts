@@ -113,6 +113,22 @@ describe('validateFlowForPublish', () => {
     if (!r.ok) expect(r.errors.some((e) => e.toLowerCase().includes('excerpt'))).toBe(true)
   })
 
+  it('fails when a step has an unresolved source conflict (curator must settle it first)', () => {
+    const f = minimal()
+    f.steps['step-1'].conflicts = [
+      {
+        description: 'Sources disagree on the spec.',
+        sides: [
+          { stance: 'A', citations: [] },
+          { stance: 'B', citations: [] },
+        ],
+      },
+    ]
+    const r = validateFlowForPublish(f)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errors.some((e) => e.toLowerCase().includes('conflict'))).toBe(true)
+  })
+
   it('allows a citation with grade=unverified to skip the excerpt requirement', () => {
     const f = minimal({
       steps: {
