@@ -30,7 +30,7 @@ export function AnswerEditor({ stepId, answers }: { stepId: string; answers: Ans
             onChange={(e) => applyMutation((b) => FlowEditorMutations.updateAnswer(b, stepId, a.id, { label: e.target.value }))}
           />
           <select
-            value={'next' in a ? a.next : '__finding'}
+            value={a.next ?? '__finding'}
             onChange={(e) => {
               const val = e.target.value
               if (val === '__finding') {

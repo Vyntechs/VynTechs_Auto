@@ -37,12 +37,21 @@ export function PublishBar() {
       return
     }
     startTransition(async () => {
-      const result = await publishDraft({ flowVersionId, changeNote })
-      if (result.ok) {
-        setErrors([])
-        router.push(`/curator/flows/${flowId}`)
-      } else {
-        setErrors(result.errors)
+      try {
+        // Persist the current on-screen body BEFORE publishing, so Publish ships
+        // exactly what the curator sees (not the last "Save draft" snapshot) and
+        // the server re-validates the same body the client just validated.
+        await saveDraft({ flowVersionId, body, changeNote })
+        markSaved()
+        const result = await publishDraft({ flowVersionId, changeNote })
+        if (result.ok) {
+          setErrors([])
+          router.push(`/curator/flows/${flowId}`)
+        } else {
+          setErrors(result.errors)
+        }
+      } catch (e) {
+        setErrors([e instanceof Error ? e.message : 'Publish failed'])
       }
     })
   }
