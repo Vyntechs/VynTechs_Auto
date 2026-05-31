@@ -1,60 +1,53 @@
-# PR-N3 — Research Pipeline (curator/flow program)
+# Curator console — visual + UX pass
 
-**Branch:** `feat/curator-pr-n3-research-pipeline` off `origin/staging-curator` (N1 #100 + N2 #101 present). **PR target: `staging-curator`.**
-**Plan:** `docs/superpowers/plans/2026-05-30-curator-realigned/pr-n3-research-pipeline.md` (lives in main checkout).
-**Re-plans: 0/3**
+Branch: `feat/curator-console-design` (from `origin/staging-curator`) → PR back into `staging-curator`.
+Handoff: docs/superpowers/handoffs/2026-05-31-curator-console-design-handoff.md (main worktree, uncommitted).
+Re-plans: 0/3
 
-## Pre-flight (DONE during exploration)
-- [x] N1+N2 deps verified on staging-curator (slug-catalog, flow-versions, slug-keyed schema, new-flow-form)
-- [x] All import contracts verified verbatim (requireCurator union, anthropic/MODEL/cachedSystem, createTestDb, nextVersionFor(tx))
-- [x] SDK 0.92.0 has typed `WebSearchTool20250305` + `WebSearchToolResultBlock` → no `as never` cast needed
-- [x] Clean baseline: 136 files / 1005 tests pass
-- [ ] (Brandon-gated, Task 8) Vercel plan tier supports 800s Functions + ANTHROPIC_API_KEY on prod
+## Direction (decided)
+- Console was raw because it **bypassed an existing curator-grade kit** (`components/vt/desktop/` + `v2.css`/`v2-instruments.css`). Primary move = wire screens onto that kit + a few net-new primitives. NOT a from-scratch look.
+- Every screen gets a self-explaining header (eyebrow + serif title + italic what/why subtitle).
+- Tree = master step-LIST + detail panel (NOT a drag-canvas — breaks on mobile, reads as "circuits"). Mobile = drill-down.
+- Brand settles on one word: **"Curator"**.
 
-## Plan corrections (in-lane, decided)
-- Use Next 16 `after()` from `next/server` for the background pipeline (plan's bare `void` would be killed on Vercel). No new dependency.
-- `startResearchRun` does insert + returns `{runId}` only; route schedules `after(() => executePipeline(...))`. Keeps orchestrator pure/testable.
-- Use real SDK `WebSearchTool20250305` type instead of `as never`.
+## Scope decisions (Brandon, 2026-05-31)
+- **Editor = look + clarity ONLY.** Do NOT add: add-procedure, delete-step, set-start, type-toggle, autosave, editors for currently-uneditable fields (expectedSignal/confidence). Flag as fast-follow.
+- **Conflicts = full arbitration.** Named two sides + quotes; keep-A / keep-B / keep-both-with-note; **block publish on unresolved**. (The one approved new capability.)
+- Legacy screens: shell coherence + kill worst jargon (raw-JSON textareas, `Max similarity 0.42`, stepId leaks). Not a full redesign.
 
-## Tasks
-- [x] Task 1 — `lib/research/types.ts` (slug-keyed types) + commit
-- [x] Task 2 — 3 persona prompts + `tests/unit/research-personas.test.ts` (TDD, 4 pass) + commit
-- [x] Task 3 — `lib/research/subagent-runner.ts` (web_search + 3-retry; real SDK type) + commit
-- [x] Task 4 — `lib/research/synthesis-runner.ts` (3-pass) + `tests/unit/research-synthesis.test.ts` (TDD, 1 pass) + commit
-- [x] Task 5 — `lib/research/orchestrator.ts` (slug-keyed fan-out, draft version, prior-run reuse) + `tests/unit/research-orchestrator.test.ts` (TDD, 4 pass) + commit
-- [x] Task 6 — API routes start + [runId] (requireCurator-gated, `after()` dispatch) + commit
-- [x] Task 7 — UI: new-flow-form button + research-progress.tsx + /researching page + prior-run reuse + commit
-- [x] Verify — full `pnpm test` green (139 files / 1014 tests, +9 mine) + `tsc` 0 errors
-- [~] Adversarial multi-agent review (4 dims → verify) — IN PROGRESS
-- [ ] **STOP → hand Task 8 (real ~$2-3 dispatch) to Brandon**; then Task 9 PR → staging-curator
+## Net-new primitives needed
+1. Lifecycle status dot (draft=amber / published=signal-navy / changed) — from real `currentVersionState`.
+2. Branching step-list row (start marker, question/procedure type, answer→branch / answer→finding summaries, orphan warning, citation count, conflict dot).
+3. Evidence/citation card (title, source, fetchedAt, real excerpt, evidence grade as worded label).
+4. Conflict-arbitration card (two named sides + quotes + keep-A/B/both + note).
+5. Finding/verdict card (verdict + action + severity glyph + expectedSignal/confidence display).
+6. List-row primitive (dot + title + subtitle + meta + action; stacks on mobile) — replaces bespoke tables.
+7. Per-agent multi-track progress rows (real polled status + activity line + "X of N complete" + elapsed).
 
-## Task 8 pre-flight (read-only, for Brandon's gate)
-- ANTHROPIC_API_KEY on prod: effectively confirmed (live AI features already depend on it).
-- Vercel plan tier (need Pro/Ent for 800s Functions; Hobby=60s too short): Brandon to confirm at dashboard.
-- after() viability for minutes-long work: under adversarial review (vercel-runtime dimension).
+## Build checklist
+- [x] Read kit API (index.tsx) + v2.css + v2-instruments.css
+- [x] Shell: nav grouping (triage vs library), MainHeader, brand "Curator", mobile drawer (new CuratorShell)
+- [x] Flows list: kit rows + status pills + self-explaining header + guided empty/create (real lifecycle status via fixed query)
+- [x] Flow detail: no stepId leaks, finding action/severity, clean body summary, surface conflicts, kraft change note, back link, plain CTAs, draft-aware
+- [x] New-flow form: distinct "Research this case first" vs "Write it myself" choice cards + honest ~3–6 min; reuse callout; duplicate-pair pre-submit guard
+- [x] Research progress: named per-worker tracks (real status), activity line, X-of-N, real elapsed, static range, fixed error dead-end (link to editor), no-run state
+- [x] Flow editor: kit two-pane, step LIST (no react-arborist, no stepId leaks), labeled branch-vs-finding ("Go to: title" / "End the diagnosis here"), plain finding fields, evidence cards w/ worded grade, styled publish bar, plain-English publish issues, mobile drill-down
+- [x] Conflict arbitration (approved new capability): named sides + quotes + keep-A/B/both+note; publish-block in flow-validation
+- [x] Legacy: shell coherence (all 7 in new grouped shell) + restored padding (one rule); FULL legacy polish deferred (see fast-follows)
+- [x] Validate every priority screen desktop (1440) + mobile (390) in-browser
+- [ ] Checkpoint Brandon (final before/after) → PR into staging-curator
 
-## Review
-**Code complete (Tasks 1–7), all committed. Full suite: 139 files / 1015 tests pass. tsc: 0 errors.**
+## Review (2026-05-31)
+- Root finding: console was raw because it bypassed an existing curator-grade kit. Primary work = wire screens onto kit + ~7 net-new primitives (status pill, step-list row, evidence card, conflict-arbitration card, finding presentation, list row, per-agent progress tracks).
+- Verification: `tsc --noEmit` clean; full unit suite **1016 passed / 139 files** (incl. new conflict publish-block test); every priority screen screenshotted desktop + mobile and judged as a user.
+- Data model: added optional `note?` to QuestionStep (symmetric w/ ProcedureStep) — the home for "keep both with a condition note". Additive, non-breaking (jsonb), forward-compatible.
 
-3 plan bugs caught + fixed during build:
-1. Circular-import TDZ in personas → hoisted clause to a leaf module.
-2. Vercel would kill `void executePipeline()` → split insert from work; route fires it via Next `after()`.
-3. Dead reuse-button (unreachable prior-run prompt) → check-first form flow (POST without flowId first).
+## Flagged fast-follows (NOT in this pass)
+- Editor capability (Brandon: clarity-only): add-procedure-step, delete-step, set-start-step, question↔procedure toggle, editors for `expectedSignal`/`confidence`, autosave + unsaved-tab guard.
+- Legacy content polish: MainHeaders + table→list-row restyle for the 7 review screens; kill raw-JSON textareas (corpus/founder-note forms) + `Max similarity 0.42` / treeState `<pre>` jargon.
+- Research progress live view validated by logic only (no paid run triggered) — the no-run + error states are screenshotted; the live polling view uses the same real fields.
 
-Adversarial multi-agent review (4 dims → verify): 10 raw → 2 confirmed (both medium, anti-fabrication).
-`after()` runtime + correctness + cost dimensions: 0 confirmed (after() cleared by 2 independent agents).
-- FIXED (Finding 2, N3 scope): synthesis citation provenance was prompt-only → now code-enforced
-  (strip any citation whose sourceUrl no agent fetched). +1 unit test.
-- FLAGGED, not fixed (Finding 1, N2 scope): `validateFlowForPublish` doesn't excerpt-check
-  conflict-side citations. Real but out of N3 scope, unreachable via N3's automated pipeline
-  (orchestrator never merges conflicts into step.conflicts). Follow-up for N2/N7.
-
-Plan corrections applied: `after()` (no new dep), real SDK `WebSearchTool20250305` (no `as never`),
-check-first form, citation provenance enforcement.
-
-## Skipped/Failed
-- **Task 8 (one real ~$2–3 Anthropic dispatch against prod): NOT RUN — Brandon-gated** (spends money).
-  Pre-reqs to confirm first: Vercel plan = Pro/Enterprise (800s Functions; Hobby's 60s kills any approach);
-  ANTHROPIC_API_KEY on prod (effectively confirmed — live AI features already use it).
-- **Task 9 (push branch + open PR → staging-curator): NOT DONE** — awaiting completion decision.
-- Lint: repo has no standalone eslint binary/config (lint runs via `next build`); tsc + tests are the gate.
+Skipped/Failed:
+- Did NOT run a local `next build` (relied on tsc + 1016 tests + dev-compiled curator routes; the production build runs on the Vercel preview deploy).
+- Live research-progress polling UI not screenshotted with a real run (would cost a real ~$2–3 run, Brandon-gated). Validated via code + no-run/error states.
+- Full legacy content polish intentionally deferred (handoff scoped legacy as lower-urgency).

@@ -55,6 +55,12 @@ export function validateFlowForPublish(body: Flow): Result {
         errors.push(`step "${stepId}": citation for ${c.sourceUrl} requires non-empty excerpt (grade=${c.evidenceGrade})`)
       }
     }
+
+    // Unresolved source conflicts block publish — the curator must settle each
+    // disagreement (keep a side, or keep both with a condition note) first.
+    if ((step.conflicts ?? []).length > 0) {
+      errors.push(`step "${stepId}" has an unresolved source conflict — settle it before publishing`)
+    }
   }
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors }

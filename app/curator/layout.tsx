@@ -4,7 +4,7 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { db } from '@/lib/db/client'
 import { profiles } from '@/lib/db/schema'
 import { canCurate } from '@/lib/curator/can-curate'
-import { CuratorSidebar } from '@/components/curator/sidebar'
+import { CuratorShell } from '@/components/curator/curator-shell'
 
 export const metadata = { title: 'Vyntechs Curator' }
 
@@ -17,18 +17,15 @@ export default async function CuratorLayout({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/sign-in')
   const [profile] = await db
-    .select({ id: profiles.id, isCurator: profiles.isCurator })
+    .select({ id: profiles.id, isCurator: profiles.isCurator, fullName: profiles.fullName })
     .from(profiles)
     .where(eq(profiles.userId, user.id))
     .limit(1)
   if (!canCurate(profile?.isCurator, user.email)) redirect('/')
 
-  return (
-    <div className="vt-curator-shell">
-      <div className="vt-curator-grid">
-        <CuratorSidebar />
-        <main className="vt-curator-main">{children}</main>
-      </div>
-    </div>
-  )
+  // Real display name for the top-bar avatar — name first, email as the
+  // honest fallback, never a fabricated placeholder.
+  const userName = profile?.fullName?.trim() || user.email || 'Curator'
+
+  return <CuratorShell userName={userName}>{children}</CuratorShell>
 }

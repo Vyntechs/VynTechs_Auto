@@ -4,9 +4,17 @@ import { and, eq, desc } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { flows, flowVersions } from '@/lib/db/schema'
 import { platformDisplayName, symptomDisplayName } from '@/lib/curator/slug-catalog'
+import { MainHeader } from '@/components/vt/desktop'
+import { FlowStatusPill, type FlowStatus } from '@/components/curator/flow-status-pill'
+import { FlowBodySummary } from '@/components/curator/flow-body-summary'
 import { cloneFromPublished } from '../actions'
+import type { Flow } from '@/lib/flows/types'
 
 export const metadata = { title: 'Curator — Flow detail' }
+
+function fmtDate(d: Date | null): string {
+  return d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+}
 
 export default async function FlowDetailPage({ params }: { params: Promise<{ flowId: string }> }) {
   const { flowId } = await params
@@ -29,6 +37,13 @@ export default async function FlowDetailPage({ params }: { params: Promise<{ flo
     .where(and(eq(flowVersions.flowId, flowId), eq(flowVersions.state, 'published')))
     .limit(1)
 
+  const [latestDraft] = await db
+    .select()
+    .from(flowVersions)
+    .where(and(eq(flowVersions.flowId, flowId), eq(flowVersions.state, 'draft')))
+    .orderBy(desc(flowVersions.versionNumber))
+    .limit(1)
+
   const archives = await db
     .select({
       id: flowVersions.id,
@@ -40,6 +55,12 @@ export default async function FlowDetailPage({ params }: { params: Promise<{ flo
     .where(and(eq(flowVersions.flowId, flowId), eq(flowVersions.state, 'archived')))
     .orderBy(desc(flowVersions.versionNumber))
 
+  // Real lifecycle state (mirrors the list).
+  let status: FlowStatus = 'empty'
+  if (published && latestDraft && latestDraft.versionNumber > published.versionNumber) status = 'changed'
+  else if (published) status = 'published'
+  else if (latestDraft) status = 'draft'
+
   const cloneAction = async () => {
     'use server'
     const { flowVersionId } = await cloneFromPublished({ flowId })
@@ -47,73 +68,95 @@ export default async function FlowDetailPage({ params }: { params: Promise<{ flo
     redirect(`/curator/flows/${flowId}/edit?versionId=${flowVersionId}`)
   }
 
+  const vehicleLine = `${platformDisplayName(flow.platformSlug)} · ${symptomDisplayName(flow.symptomSlug)}`
+
+  // What the curator sees + can act on, per state.
+  const liveVersion = published ?? latestDraft
+
   return (
-    <div className="vt-curator-page">
-      <header>
-        <h1>{flow.displayTitle}</h1>
-        <p>{platformDisplayName(flow.platformSlug)} · {symptomDisplayName(flow.symptomSlug)}</p>
-      </header>
+    <>
+      <MainHeader
+        eyebrowSlot={
+          <Link href="/curator/flows" className="vt-curator-backlink">← Flows</Link>
+        }
+        title={flow.displayTitle}
+        sub={vehicleLine}
+        actions={<FlowStatusPill status={status} />}
+      />
+      <div className="vt-main__body vt-flow-detail">
+        {/* State + primary action */}
+        <section className="vt-flow-detail__state">
+          {published ? (
+            <>
+              <div className="vt-flow-detail__state-head">
+                <span className="vt-eyebrow">Live for techs · v{published.versionNumber}</span>
+                <span className="vt-flow-detail__state-date">Published {fmtDate(published.publishedAt)}</span>
+              </div>
+              {status === 'changed' && (
+                <p className="vt-flow-detail__note-line">
+                  A newer draft (v{latestDraft!.versionNumber}) is in progress — techs still see v{published.versionNumber} until you publish it.
+                </p>
+              )}
+            </>
+          ) : latestDraft ? (
+            <div className="vt-flow-detail__state-head">
+              <span className="vt-eyebrow">Draft · not yet live</span>
+              <span className="vt-flow-detail__state-date">Last edited {fmtDate(latestDraft.authoredAt)}</span>
+            </div>
+          ) : (
+            <p className="vt-flow-detail__note-line">This flow has no content yet.</p>
+          )}
 
-      {published ? (
-        <section className="vt-flow-published">
-          <h2>Current published (v{published.versionNumber})</h2>
-          <p className="vt-flow-changenote"><em>{published.changeNote}</em></p>
-          {/* N2 renders the real stored body as a readable structured summary.
-              The polished tree read-view is PR-N7 scope. This is NOT placeholder
-              content — it shows the actual published steps/answers/citations. */}
-          <FlowBodySummary body={published.body as import('@/lib/flows/types').Flow} />
-          <form action={cloneAction}>
-            <button type="submit" className="vt-btn vt-btn-primary">Edit (clone new draft)</button>
-          </form>
+          <div className="vt-flow-detail__actions">
+            {status === 'changed' ? (
+              <Link href={`/curator/flows/${flowId}/edit`} className="vt-btn vt-btn--accent">Continue editing draft</Link>
+            ) : published ? (
+              <form action={cloneAction}>
+                <button type="submit" className="vt-btn vt-btn--accent">Make changes</button>
+                <span className="vt-flow-detail__action-hint">
+                  The live version stays frozen — your changes start a fresh draft.
+                </span>
+              </form>
+            ) : latestDraft ? (
+              <Link href={`/curator/flows/${flowId}/edit`} className="vt-btn vt-btn--accent">Continue editing draft</Link>
+            ) : (
+              <Link href={`/curator/flows/${flowId}/edit`} className="vt-btn vt-btn--accent">Start building</Link>
+            )}
+          </div>
         </section>
-      ) : (
-        <section>
-          <p>No published version yet.</p>
-          <Link href={`/curator/flows/${flowId}/edit`} className="vt-btn vt-btn-primary">Open draft editor</Link>
-        </section>
-      )}
 
-      {archives.length > 0 && (
-        <section className="vt-flow-archives">
-          <h2>Archive history</h2>
-          <ul>
-            {archives.map((a) => (
-              <li key={a.id}>
-                v{a.versionNumber} · archived {a.archivedAt ? new Date(a.archivedAt).toISOString().slice(0, 10) : '—'} · "{a.changeNote}"
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  )
-}
+        {/* The change note for whichever version we're showing */}
+        {liveVersion?.changeNote && (
+          <div className="vt-writer-note vt-flow-detail__changenote">
+            <div className="vt-writer-note__label">Why this version exists</div>
+            <p className="vt-flow-detail__changenote-text">{liveVersion.changeNote}</p>
+          </div>
+        )}
 
-// Real-data read view of a published body. Lists each step, its question/
-// instructions, answers (with their branch target or finding), and citation
-// count. NOT a JSON dump and NOT fabricated — it walks the actual stored Flow.
-function FlowBodySummary({ body }: { body: import('@/lib/flows/types').Flow }) {
-  const entries = Object.entries(body.steps)
-  return (
-    <ol className="vt-flow-body-summary">
-      {entries.map(([id, step]) => (
-        <li key={id} className={id === body.startStepId ? 'vt-flow-step vt-flow-step--start' : 'vt-flow-step'}>
-          <strong>{id}{id === body.startStepId ? ' (start)' : ''}: {step.title || '(untitled)'}</strong>
-          <p>{step.kind === 'question' ? step.question : step.instructions}</p>
-          {step.kind === 'question' && (
-            <ul>
-              {step.answers.map((a) => (
-                <li key={a.id}>
-                  {a.label} → {a.next ? a.next : `FINDING: ${a.finding?.verdict ?? ''}`}
+        {/* The actual steps — a clean read of the real stored body */}
+        {liveVersion && (
+          <section className="vt-flow-detail__steps">
+            <div className="vt-eyebrow vt-flow-detail__steps-label">The steps a tech walks through</div>
+            <FlowBodySummary body={liveVersion.body as Flow} />
+          </section>
+        )}
+
+        {/* Past published versions */}
+        {archives.length > 0 && (
+          <section className="vt-flow-detail__history">
+            <div className="vt-eyebrow vt-flow-detail__steps-label">Earlier published versions</div>
+            <ul className="vt-flow-history">
+              {archives.map((a) => (
+                <li key={a.id} className="vt-flow-history__row">
+                  <span className="vt-flow-history__ver">v{a.versionNumber}</span>
+                  <span className="vt-flow-history__note">{a.changeNote || '—'}</span>
+                  <span className="vt-flow-history__date">{fmtDate(a.archivedAt)}</span>
                 </li>
               ))}
             </ul>
-          )}
-          {(step.citations?.length ?? 0) > 0 && (
-            <p className="vt-flow-step-cites">{step.citations!.length} citation(s)</p>
-          )}
-        </li>
-      ))}
-    </ol>
+          </section>
+        )}
+      </div>
+    </>
   )
 }
