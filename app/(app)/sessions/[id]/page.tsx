@@ -10,6 +10,10 @@ import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
 import { sessionEvents } from '@/lib/db/schema'
+import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
+import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
+import { getPublishedFlowFor, getFlowVersionById } from '@/lib/flows/lookup'
+import { CuratorGuidedWizard } from '@/components/screens/curator-guided-wizard'
 
 export default async function SessionPage({
   params,
@@ -39,6 +43,58 @@ export default async function SessionPage({
 
   if (route.kind === 'closed-summary') {
     return <ClosedCaseSummary session={session} />
+  }
+
+  // ---- Curator-guided wizard branch (active-session only) -------------------
+  // Only intercept when the session is NOT already locked into repair. Once locked,
+  // fall through to ActiveSession, which renders RepairPhaseView for phase==='repairing'.
+  const alreadyLocked =
+    session.treeState.phase === 'repairing' || Boolean(session.treeState.diagnosisLockedAt)
+
+  if (!alreadyLocked) {
+    // Resolve (platform_slug, symptom_slug) from the session's intake — pure, no DB.
+    const platformSlug = resolvePlatformSlug({
+      year: session.intake.vehicleYear,
+      make: session.intake.vehicleMake,
+      model: session.intake.vehicleModel,
+      engine: session.intake.vehicleEngine ?? '',
+    })
+    const symptomSlug = resolveSymptomSlug({ complaintText: session.intake.customerComplaint })
+
+    if (platformSlug && symptomSlug) {
+      let flowLookup: Awaited<ReturnType<typeof getPublishedFlowFor>> = null
+      let newerVersionAvailable = false
+
+      if (session.wizardState?.flowVersionId) {
+        // Version-PIN: a session keeps the version it started on. Both reads are
+        // independent indexed point-lookups — run them together so this hot path
+        // (every returning wizard session) stays a single round-trip.
+        const [pinned, current] = await Promise.all([
+          getFlowVersionById(db, { flowVersionId: session.wizardState.flowVersionId }),
+          getPublishedFlowFor(db, { platformSlug, symptomSlug }),
+        ])
+        flowLookup = pinned
+        newerVersionAvailable = Boolean(current && current.flowVersionId !== session.wizardState.flowVersionId)
+      } else {
+        // First entry: pin the currently-published version (if any).
+        flowLookup = await getPublishedFlowFor(db, { platformSlug, symptomSlug })
+      }
+
+      // null flowLookup = uncovered case, or the pinned version was deleted — fall
+      // through to ActiveSession silently (the existing AI path serves it unchanged).
+      if (flowLookup) {
+        return (
+          <CuratorGuidedWizard
+            sessionId={session.id}
+            flowVersionId={flowLookup.flowVersionId}
+            versionNumber={flowLookup.versionNumber}
+            body={flowLookup.body}
+            initialState={session.wizardState ?? null}
+            newerVersionAvailable={newerVersionAvailable}
+          />
+        )
+      }
+    }
   }
 
   // Fetch session_events for the chat-thread render in RepairPhaseView.
