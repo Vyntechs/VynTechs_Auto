@@ -54,7 +54,19 @@ export function CuratorGuidedWizard({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(next),
-    }).catch((e) => setError('Your progress could not be saved — ' + (e instanceof Error ? e.message : 'save failed')))
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          // 409 = the session was locked elsewhere or the version pin no longer matches;
+          // the local state has diverged from the server. Tell the tech to reload.
+          setError(
+            res.status === 409
+              ? 'This session can no longer be edited here — reload to continue.'
+              : 'Your progress could not be saved.',
+          )
+        }
+      })
+      .catch((e) => setError('Your progress could not be saved — ' + (e instanceof Error ? e.message : 'save failed')))
   }
 
   const onAnswer = (answerId: string) => {

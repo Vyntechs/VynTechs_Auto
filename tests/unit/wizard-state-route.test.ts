@@ -165,6 +165,88 @@ describe('POST /api/sessions/[id]/wizard-state', () => {
     expect(setSpy).not.toHaveBeenCalled()
   })
 
+  it('returns 409 with version pin mismatch when the posted flowVersionId differs from the session-pinned one', async () => {
+    // Session already has a pinned version ('pinned-A'); client posts a different one ('different-B').
+    // The route must reject before reaching getFlowVersionById or db.update (spec §3.2).
+    const PINNED_VERSION = 'pinned-A'
+    const DIFFERENT_VERSION = 'different-B'
+    getSessionMock.mockResolvedValue({
+      ok: true as const,
+      session: {
+        treeState: {
+          nodes: [{ id: 'root', label: 'pull DTCs', status: 'active' }],
+          currentNodeId: 'root',
+          message: 'go',
+          phase: 'diagnosing',
+          diagnosisLockedAt: null,
+        },
+        wizardState: {
+          flowVersionId: PINNED_VERSION,
+          stepId: 's1',
+          history: [],
+          finding: null,
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof getSessionForUser>>)
+    const body = postedState({ flowVersionId: DIFFERENT_VERSION, stepId: 'q1' })
+    const res = await POST(makeReq(body), { params })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'version pin mismatch' })
+    // The guard must short-circuit before the flow lookup and the db write.
+    expect(getFlowMock).not.toHaveBeenCalled()
+    expect(setSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns 200 on the happy path when the posted flowVersionId matches the session-pinned one', async () => {
+    // Matching version: not a mismatch, must pass through normally.
+    getSessionMock.mockResolvedValue({
+      ok: true as const,
+      session: {
+        treeState: {
+          nodes: [{ id: 'root', label: 'pull DTCs', status: 'active' }],
+          currentNodeId: 'root',
+          message: 'go',
+          phase: 'diagnosing',
+          diagnosisLockedAt: null,
+        },
+        wizardState: {
+          flowVersionId: FLOW_VERSION_ID,
+          stepId: 'q1',
+          history: [],
+          finding: null,
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof getSessionForUser>>)
+    const body = postedState({ stepId: 'q1' })
+    const res = await POST(makeReq(body), { params })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(setSpy).toHaveBeenCalledTimes(1)
+    expect(setSpy).toHaveBeenCalledWith({ wizardState: body })
+  })
+
+  it('returns 200 on first save when the session has no prior wizardState (null)', async () => {
+    // wizardState is null: no pinned version yet, so no mismatch check applies.
+    getSessionMock.mockResolvedValue({
+      ok: true as const,
+      session: {
+        treeState: {
+          nodes: [{ id: 'root', label: 'pull DTCs', status: 'active' }],
+          currentNodeId: 'root',
+          message: 'go',
+          phase: 'diagnosing',
+          diagnosisLockedAt: null,
+        },
+        wizardState: null,
+      },
+    } as unknown as Awaited<ReturnType<typeof getSessionForUser>>)
+    const body = postedState({ stepId: 'q1' })
+    const res = await POST(makeReq(body), { params })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(setSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('returns 400 unknown flow version when the pinned version is missing', async () => {
     getFlowMock.mockResolvedValue(null)
     const res = await POST(makeReq(postedState()), { params })
