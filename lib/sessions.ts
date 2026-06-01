@@ -859,16 +859,25 @@ export type LockDiagnosisFromWizardResult =
  * tree nodes (#98: nothing rendered downstream is invented). Clears sessions.wizardState.
  * Inserts exactly one 'wizard_lock_in' session_event. Idempotent: the already-locked
  * guard rejects a second call BEFORE any insert, so no duplicate event is written.
+ *
+ * Unlike lockDiagnosisForUser, this path does NOT require treeState.done — the wizard's
+ * terminal Finding is itself the readiness signal (the wizard bypasses the AI tree).
+ * Ownership failures (no profile / not the session's tech) intentionally collapse into a
+ * single 404 'not found' so the response never leaks whether a profile or session exists;
+ * this is why the result type omits the peers' 400 'no profile'.
  */
 export async function lockDiagnosisFromWizard(opts: {
   db: AppDb
   userId: string
   sessionId: string
   finding: Finding
+  // Forwarded from the route's lock-in payload; unused here in N4. Reserved for the
+  // PR-N5 audit/outcome work, kept in the signature so the route call site stays flat.
   history: WizardState['history']
   flowVersionId: string
 }): Promise<LockDiagnosisFromWizardResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
+  // Uniform 404 (not the peers' 400 'no profile') — see JSDoc: don't leak existence.
   if (!profile) return { ok: false, status: 404, error: 'not found' }
 
   const session = await getSessionById(opts.db, opts.sessionId)
