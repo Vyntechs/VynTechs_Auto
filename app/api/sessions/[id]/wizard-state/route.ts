@@ -30,6 +30,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: 'session already locked' }, { status: 409 })
   }
 
+  // Version-pin invariant (spec §3.2): once a session pins a flow version it never
+  // changes mid-session. Reject a save that tries to switch to a different version.
+  if (
+    session.wizardState?.flowVersionId &&
+    session.wizardState.flowVersionId !== body.flowVersionId
+  ) {
+    return NextResponse.json({ error: 'version pin mismatch' }, { status: 409 })
+  }
+
   const flowLookup = await getFlowVersionById(db, { flowVersionId: body.flowVersionId })
   if (!flowLookup) return NextResponse.json({ error: 'unknown flow version' }, { status: 400 })
   if (!flowLookup.body.steps[body.stepId]) {
