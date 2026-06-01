@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
-import type { Flow } from '../flows/types'
+import type { Flow, WizardState } from '../flows/types'
 
 export type { TreeState }
 
@@ -121,6 +121,7 @@ export const sessions = pgTable('sessions', {
   curatorNote: text('curator_note'),
   curatorOverrideAction: text('curator_override_action'),
   maxCorpusSimilarity: real('max_corpus_similarity'),
+  wizardState: jsonb('wizard_state').$type<WizardState | null>(),
 })
 
 export const sessionEvents = pgTable('session_events', {
@@ -137,6 +138,7 @@ export const sessionEvents = pgTable('session_events', {
       'close',
       'repair_observation',
       'repair_guidance',
+      'wizard_lock_in',
     ],
   }).notNull(),
   observationText: text('observation_text'),
