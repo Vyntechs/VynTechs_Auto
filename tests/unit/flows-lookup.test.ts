@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import { flows, flowVersions, profiles } from '@/lib/db/schema'
 import { getPublishedFlowFor, getFlowVersionById } from '@/lib/flows/lookup'
+import type { Flow } from '@/lib/flows/types'
 
 let db: TestDb
 let close: (() => Promise<void>) | undefined
@@ -16,7 +17,7 @@ afterEach(async () => {
   close = undefined
 })
 
-const body = {
+const body: Flow = {
   startStepId: 's1',
   steps: {
     s1: { kind: 'question', n: 1, of: 1, title: 't', question: 'q', answers: [{ id: 'a1', label: 'x', finding: { verdict: 'v', action: 'a', severity: 'fixable' } }] },
@@ -30,7 +31,7 @@ describe('getPublishedFlowFor', () => {
   })
 
   it('returns the published version when one exists (slug-keyed, no platforms/symptoms tables)', async () => {
-    const [profile] = await db.insert(profiles).values({ email: 'test@vyntechs.com', userId: crypto.randomUUID() }).returning({ id: profiles.id })
+    const [profile] = await db.insert(profiles).values({ userId: crypto.randomUUID() }).returning({ id: profiles.id })
     const [flow] = await db.insert(flows).values({
       slug: 'sd3-60psd-cranks-no-start',
       platformSlug: 'ford-super-duty-3rd-gen-60-psd',
@@ -58,7 +59,7 @@ describe('getPublishedFlowFor', () => {
   })
 
   it('ignores draft + archived versions; returns only published', async () => {
-    const [profile] = await db.insert(profiles).values({ email: 'test@vyntechs.com', userId: crypto.randomUUID() }).returning({ id: profiles.id })
+    const [profile] = await db.insert(profiles).values({ userId: crypto.randomUUID() }).returning({ id: profiles.id })
     const [flow] = await db.insert(flows).values({
       slug: 'p2-s2',
       platformSlug: 'ford-super-duty-4th-gen-67-psd',
@@ -78,7 +79,7 @@ describe('getPublishedFlowFor', () => {
   })
 
   it('ignores retired flows', async () => {
-    const [profile] = await db.insert(profiles).values({ email: 'test@vyntechs.com', userId: crypto.randomUUID() }).returning({ id: profiles.id })
+    const [profile] = await db.insert(profiles).values({ userId: crypto.randomUUID() }).returning({ id: profiles.id })
     const [flow] = await db.insert(flows).values({
       slug: 'retired',
       platformSlug: 'ford-super-duty-3rd-gen-60-psd',
@@ -96,7 +97,7 @@ describe('getPublishedFlowFor', () => {
 
 describe('getFlowVersionById', () => {
   it('returns the version row regardless of state', async () => {
-    const [profile] = await db.insert(profiles).values({ email: 'v@vyntechs.com', userId: crypto.randomUUID() }).returning({ id: profiles.id })
+    const [profile] = await db.insert(profiles).values({ userId: crypto.randomUUID() }).returning({ id: profiles.id })
     const [flow] = await db.insert(flows).values({
       slug: 'fvb-test',
       platformSlug: 'test-platform',
@@ -121,7 +122,7 @@ describe('getFlowVersionById', () => {
   })
 
   it('returns a draft version (no state filter)', async () => {
-    const [profile] = await db.insert(profiles).values({ email: 'draft@vyntechs.com', userId: crypto.randomUUID() }).returning({ id: profiles.id })
+    const [profile] = await db.insert(profiles).values({ userId: crypto.randomUUID() }).returning({ id: profiles.id })
     const [flow] = await db.insert(flows).values({
       slug: 'fvb-draft-test',
       platformSlug: 'test-platform',
