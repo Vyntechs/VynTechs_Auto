@@ -170,6 +170,9 @@ export const sessionEvents = pgTable('session_events', {
         recommendedReferral?: string
       }
     }
+    /** Stashes the pinned flow_version a wizard lock-in handed off from, so
+     *  PR-N5's stale-outcomes cron can read ai_response->'wizardLockIn'->>'flowVersionId'. */
+    wizardLockIn?: { flowVersionId: string }
   }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
