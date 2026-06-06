@@ -31,7 +31,7 @@ Author a Workflow (ultracode is on) with these phases. The Figma BUILD is intera
    - *"Felt value" per interaction* — what makes each view/click/tap/read feel satisfying and trustworthy (incl. provenance honesty, see-source).
 2. **Phase: Synthesize → 2–3 coherent DIRECTIONS** — distinct, named, each a complete take (not a feature list). Adversarially check each against the spine + guardrail.
 3. **Phase: Brandon reacts & picks** — present the directions concretely (mockups/screens), he points at one (+ grafts).
-4. **Phase: Build in Figma** — interactive, main thread. **Load the Figma skills FIRST** (`figma-use` before any `use_figma`; `figma-generate-design` for screens; `figma-generate-library`/tokens for theming). Verify Figma auth at the very start (`whoami`) — if it needs Brandon's interactive auth, do that before promising a build.
+4. **Phase: Build in Figma** — interactive, main thread. **Load the Figma skills FIRST** (`figma-use` before any `use_figma`; `figma-generate-design` for screens; `figma-generate-library`/tokens for theming). Figma is **already connected** (verified 2026-06-06 as Brandon's pro team, `brandon@vyntechs.com`) — a quick `whoami` to confirm it's still live, then build (no interactive auth expected).
 5. **Phase: Implement + refine** — translate the chosen direction into code (the canvas first as spearhead), then refine per-interaction with Brandon. Propagate the visual language outward only after the canvas proves it.
 
 ## Sequencing (don't boil the ocean)
@@ -52,6 +52,6 @@ Author a Workflow (ultracode is on) with these phases. The Figma BUILD is intera
 - Figma: https://www.figma.com/design/2yV1UfK9asjRnMoJds0eNG?node-id=2-2 (Brandon's earlier premium-look direction).
 
 ## First 3 moves for the next session
-1. Read this kickoff + the design brief. Verify Figma auth (`whoami`) — flag to Brandon if interactive auth is needed.
+1. Read this kickoff + the design brief. Quick `whoami` to confirm Figma's still connected (it was, as Brandon's pro team) — proceed unless it's dropped.
 2. Launch the Panel workflow (Phase 1–2) → bring Brandon 2–3 concrete directions.
 3. Only after he picks: build in Figma, then implement the canvas. Refine with him.
