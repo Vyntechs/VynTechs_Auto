@@ -53,8 +53,10 @@ The interactive diagnostic diagram is currently **one boxed element inside a doc
    - *(Data source note: pins/wires/location already exist per-component in the data model — `componentPins` + `components.location`; the Operational Theori snippet draws from the component's own prose — `components.function`/`role`/`wireSummary`/`body` — NOT the architecture-facts theory rows. See the principle note below.)*
 4. **Curator-only completeness.** The "X captured / Y still missing" data-status is for **curator-access roles only** — hidden from technicians and owners. (All users with curator access see it; no one else.)
 
-### ⚠️ Principle check (carried from a standing decision — confirm, don't trip it)
-Brandon previously set: *"theory of operation is a SOURCE that feeds the canonical topology + diagnostic engine — it must NEVER render as a side panel on a wiring/diagnostic surface."* The per-part **Operational Theori** above is consistent with that **only if** it is the tight, on-tap, single-part snippet drawn from the component's own prose (`function`/`role`) — NOT a persistent theory panel and NOT a dump of the architecture-facts theory rows. Keep it on-demand, one-part, every-word-counts. If it grows into a standing panel, it violates the principle.
+### Principle check — RESOLVED (pull, not push)
+Brandon previously set: *"theory of operation is a SOURCE that feeds the canonical topology + diagnostic engine — it must NEVER render as a side panel on a wiring/diagnostic surface."* This is **not** violated, and here's the reasoning Brandon gave that settles it: **a tap is the tech declaring intent** — "I'm looking at this part, tell me about it." The detail is *pulled* by the tech, never *pushed* at them. Clutter = uninvited; this only ever appears because they asked. The rule still binds in one way: it must stay **on-tap, one-part, every-word-counts** — if it ever becomes a standing/persistent panel (pushed, not pulled) or a dump of the architecture-facts theory rows, it crosses back into violation.
+
+**Refinement (what leads on tap is step-aware):** the tap pulls up the part, but *which* of its facts leads should match where the tech is in the walk. Mid-test on the lift pump's 12V feed → lead with the reading for *that* test; the connector/wires/Operational Theori are present but secondary. Same tap, answer ordered by the moment.
 
 ---
 
