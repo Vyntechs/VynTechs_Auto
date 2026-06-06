@@ -12,6 +12,7 @@ import {
   boolean,
   index,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 import type { Flow, WizardState } from '../flows/types'
@@ -122,6 +123,9 @@ export const sessions = pgTable('sessions', {
   curatorOverrideAction: text('curator_override_action'),
   maxCorpusSimilarity: real('max_corpus_similarity'),
   wizardState: jsonb('wizard_state').$type<WizardState | null>(),
+  // Added by migration 0023 (interactive electrical topology). Tracks the
+  // last scenario the tech picked, so the topology loader can restore it.
+  lastScenarioSlug: text('last_scenario_slug'),
 })
 
 export const sessionEvents = pgTable('session_events', {
@@ -670,3 +674,540 @@ export const researchRuns = pgTable('research_runs', {
     .notNull()
     .references(() => profiles.id),
 })
+
+// ============================================================================
+// DIAGNOSTIC / TOPOLOGY TABLES (PR0 — co-located from feat/6.0-psd-cranks-no-start-seed)
+//
+// Additive only. These mirror the diagnostic data model that already lives in
+// prod (all tables present, with data). They back the auto-draw topology loader
+// (lib/diagnostics/load-system-topology.ts) and the cached-lookup gate
+// (lib/diagnostics/cached-lookup.ts). The PGlite unit DB builds them from
+// migrations 0021–0023; the defs here register them for the Drizzle query API.
+//
+// Convention note: the curator/research line keys flows + research_runs on
+// platform_slug / symptom_slug TEXT (NOT FK). That convention is untouched —
+// the curator tables above add NO FKs to platforms/symptoms. These diagnostic
+// tables use the seed line's UUID-FK relationships among themselves.
+// ============================================================================
+
+export const pinEdgeEnum = pgEnum('pin_edge', ['top', 'right', 'bottom', 'left'])
+export const electricalRoleEnum = pgEnum('electrical_role', [
+  'signal', '5v-ref', 'low-ref', 'pwm', '12v', 'ground',
+])
+export const scenarioKindEnum = pgEnum('scenario_kind', ['operation', 'fault'])
+export const keyPositionEnum = pgEnum('key_position', ['off', 'on'])
+export const engineStateEnum = pgEnum('engine_state', ['off', 'running'])
+export const loadLevelEnum = pgEnum('load_level', ['idle', 'light', 'medium', 'heavy'])
+export const wireStateEnum = pgEnum('wire_state', [
+  'off',
+  'steady-12v', 'steady-5v', 'steady-gnd',
+  'signal-rest', 'signal-low', 'signal-med', 'signal-high', 'signal-pegged',
+  'pwm-low', 'pwm-med', 'pwm-high', 'pwm-max',
+])
+
+export const platforms = pgTable(
+  'platforms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    yearRange: text('year_range').notNull(),
+    parentMake: text('parent_make').notNull(),
+    parentModelFamily: text('parent_model_family').notNull(),
+    generation: text('generation'),
+    parentPlatformId: uuid('parent_platform_id').references(
+      (): AnyPgColumn => platforms.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('platforms_parent_platform_id_idx').on(table.parentPlatformId),
+  ],
+)
+
+export const architectureFacts = pgTable(
+  'architecture_facts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    fieldVerifyRequired: boolean('field_verify_required').notNull().default(false),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => architectureFacts.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('architecture_facts_platform_id_idx').on(table.platformId),
+  ],
+)
+
+export const components = pgTable(
+  'components',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: text('name').notNull(),
+    kind: text('kind', {
+      enum: ['sensor', 'actuator', 'pump', 'valve', 'module', 'mechanical', 'splice', 'connector'],
+    }).notNull(),
+    electricalContract: text('electrical_contract'),
+    location: text('location'),
+    function: text('function'),
+    systems: text('systems').array().notNull().default([]),
+    subtitle: text('subtitle'),
+    role: text('role'),
+    wireSummary: text('wire_summary'),
+    body: text('body'),
+    probingTactic: text('probing_tactic'),
+    unknownNote: text('unknown_note'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => components.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('components_platform_id_idx').on(table.platformId),
+  ],
+)
+
+export const observableProperties = pgTable(
+  'observable_properties',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    observationMethod: text('observation_method', {
+      enum: [
+        'scan_tool_pid',
+        'pressure_test_with_gauge',
+        'electrical_measurement_at_pin',
+        'waveform_capture',
+        'direct_visual_internal',
+        'direct_visual_external',
+        'audible',
+        'touch',
+        'smell',
+      ],
+    }).notNull(),
+    housingOpacityStatus: text('housing_opacity_status', {
+      enum: ['opaque', 'transparent', 'removable', 'unknown'],
+    }),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => observableProperties.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('observable_properties_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const symptoms = pgTable(
+  'symptoms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull().unique(),
+    description: text('description').notNull(),
+    category: text('category', {
+      enum: ['dtc', 'performance', 'no-start', 'drivability', 'noise-vibration', 'electrical', 'other'],
+    }).notNull(),
+    system: text('system'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('symptoms_category_idx').on(table.category),
+  ],
+)
+
+export const testActions = pgTable(
+  'test_actions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    description: text('description').notNull(),
+    scenarioRequired: text('scenario_required', {
+      enum: ['key-off', 'key-on', 'cranking', 'idle', 'medium-load', 'heavy-load', 'hot-soak', 'none'],
+    }).notNull(),
+    observationMethod: text('observation_method', {
+      enum: [
+        'scan_tool_pid',
+        'pressure_test_with_gauge',
+        'electrical_measurement_at_pin',
+        'waveform_capture',
+        'direct_visual_internal',
+        'direct_visual_external',
+        'audible',
+        'touch',
+        'smell',
+      ],
+    }).notNull(),
+    meterMode: text('meter_mode'),
+    expectedValue: real('expected_value'),
+    expectedUnit: text('expected_unit'),
+    expectedTolerance: real('expected_tolerance'),
+    expectedObservation: text('expected_observation'),
+    invasiveness: integer('invasiveness').notNull(),
+    confidenceBoost: real('confidence_boost').notNull().default(0),
+    sourceCitation: text('source_citation'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => testActions.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('test_actions_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const branchLogic = pgTable(
+  'branch_logic',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    testActionId: uuid('test_action_id')
+      .references(() => testActions.id, { onDelete: 'cascade' })
+      .notNull(),
+    condition: text('condition').notNull(),
+    verdict: text('verdict', {
+      enum: ['ok', 'warn', 'fail', 'impossible'],
+    }).notNull(),
+    nextAction: text('next_action').notNull(),
+    routesToTestActionId: uuid('routes_to_test_action_id').references(
+      () => testActions.id,
+      { onDelete: 'set null' },
+    ),
+    reasoning: text('reasoning'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => branchLogic.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('branch_logic_test_action_id_idx').on(table.testActionId),
+    index('branch_logic_routes_to_idx').on(table.routesToTestActionId),
+  ],
+)
+
+// diagnostic_sessions + (the migration-created tech_outcomes) back the
+// cached-lookup "prior fix count" gate. cached-lookup.ts queries
+// diagnostic_sessions directly, so it must be registered here.
+export const diagnosticSessions = pgTable(
+  'diagnostic_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    vehicleId: uuid('vehicle_id')
+      .references(() => vehicles.id, { onDelete: 'restrict' })
+      .notNull(),
+    symptomId: uuid('symptom_id')
+      .references(() => symptoms.id, { onDelete: 'restrict' })
+      .notNull(),
+    shopId: uuid('shop_id')
+      .references(() => shops.id, { onDelete: 'cascade' })
+      .notNull(),
+    techId: uuid('tech_id')
+      .references(() => profiles.id, { onDelete: 'restrict' })
+      .notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    finalVerdict: text('final_verdict', {
+      enum: ['commit-allowed', 'commit-refused', 'incomplete'],
+    }),
+    resolvedComponentId: uuid('resolved_component_id').references(
+      () => components.id,
+      { onDelete: 'set null' },
+    ),
+    cumulativeConfidence: real('cumulative_confidence').notNull().default(0),
+  },
+  (table) => [
+    index('diagnostic_sessions_vehicle_id_idx').on(table.vehicleId),
+    index('diagnostic_sessions_symptom_id_idx').on(table.symptomId),
+    index('diagnostic_sessions_shop_id_idx').on(table.shopId),
+    index('diagnostic_sessions_started_at_idx').on(table.startedAt),
+  ],
+)
+
+export const componentConnections = pgTable(
+  'component_connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fromComponentId: uuid('from_component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    toComponentId: uuid('to_component_id')
+      .references(() => components.id, { onDelete: 'cascade' })
+      .notNull(),
+    connectionKind: text('connection_kind', {
+      enum: ['electrical-wire', 'fluid-line', 'mechanical-linkage', 'can-bus', 'lin-bus', 'reports_to', 'controlled_by'],
+    }).notNull(),
+    direction: text('direction', {
+      enum: ['unidirectional', 'bidirectional'],
+    }).notNull().default('unidirectional'),
+    description: text('description'),
+    electricalRole: electricalRoleEnum('electrical_role'),
+    fromPinId: uuid('from_pin_id'),
+    toPinId: uuid('to_pin_id'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => componentConnections.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('component_connections_from_idx').on(table.fromComponentId),
+    index('component_connections_to_idx').on(table.toComponentId),
+    index('component_connections_kind_idx').on(table.connectionKind),
+  ],
+)
+
+export const componentPins = pgTable(
+  'component_pins',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    componentId: uuid('component_id')
+      .notNull()
+      .references(() => components.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    roleAbbreviation: text('role_abbreviation').notNull(),
+    pinNumber: text('pin_number'),
+    edge: pinEdgeEnum('edge').notNull(),
+    displayOrder: integer('display_order').notNull(),
+    probeLocation: text('probe_location').notNull(),
+    expectedReading: text('expected_reading').notNull(),
+    missingLogic: text('missing_logic').notNull(),
+    labelGap: text('label_gap'),
+    sourceProvenance: text('source_provenance').notNull().default('TRAINING-CONFIRMED'),
+    isRetired: boolean('is_retired').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('component_pins_component_id_idx').on(table.componentId),
+  ],
+)
+
+export const systemScenarios = pgTable(
+  'system_scenarios',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').notNull(),
+    platformId: uuid('platform_id')
+      .notNull()
+      .references(() => platforms.id, { onDelete: 'cascade' }),
+    system: text('system').notNull(),
+    label: text('label').notNull(),
+    sub: text('sub').notNull(),
+    kind: scenarioKindEnum('kind').notNull(),
+    keyPosition: keyPositionEnum('key_position'),
+    engineState: engineStateEnum('engine_state'),
+    loadLevel: loadLevelEnum('load_level'),
+    isDefault: boolean('is_default').notNull().default(false),
+    displayOrder: integer('display_order').notNull().default(0),
+    isRetired: boolean('is_retired').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('system_scenarios_lookup_idx').on(table.platformId, table.system),
+  ],
+)
+
+export const scenarioWireStates = pgTable(
+  'scenario_wire_states',
+  {
+    scenarioId: uuid('scenario_id')
+      .notNull()
+      .references(() => systemScenarios.id, { onDelete: 'cascade' }),
+    pinId: uuid('pin_id')
+      .notNull()
+      .references(() => componentPins.id, { onDelete: 'cascade' }),
+    wireState: wireStateEnum('wire_state').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scenarioId, t.pinId] }),
+  ],
+)
+
+export const pinScenarioReadings = pgTable(
+  'pin_scenario_readings',
+  {
+    pinId: uuid('pin_id')
+      .notNull()
+      .references(() => componentPins.id, { onDelete: 'cascade' }),
+    scenarioId: uuid('scenario_id')
+      .notNull()
+      .references(() => systemScenarios.id, { onDelete: 'cascade' }),
+    reading: text('reading').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.pinId, t.scenarioId] }),
+  ],
+)
+
+export const systemDataStatus = pgTable(
+  'system_data_status',
+  {
+    platformId: uuid('platform_id')
+      .notNull()
+      .references(() => platforms.id, { onDelete: 'cascade' }),
+    system: text('system').notNull(),
+    capturedHeader: text('captured_header').notNull(),
+    missingHeader: text('missing_header').notNull(),
+    closingNote: text('closing_note').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.platformId, t.system] }),
+  ],
+)
+
+export const symptomTestImplications = pgTable(
+  'symptom_test_implications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    symptomId: uuid('symptom_id')
+      .references(() => symptoms.id, { onDelete: 'cascade' })
+      .notNull(),
+    testActionId: uuid('test_action_id')
+      .references(() => testActions.id, { onDelete: 'cascade' })
+      .notNull(),
+    priority: integer('priority').notNull(),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    inferenceClass: text('inference_class', {
+      enum: ['LAW', 'LOGIC', 'PATTERN'],
+    }),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => symptomTestImplications.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('symptom_test_implications_symptom_priority_idx').on(
+      table.symptomId,
+      table.priority,
+    ),
+    index('symptom_test_implications_test_action_id_idx').on(table.testActionId),
+  ],
+)
+
+export const platformEquivalents = pgTable(
+  'platform_equivalents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    platformAId: uuid('platform_a_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    platformBId: uuid('platform_b_id')
+      .references(() => platforms.id, { onDelete: 'cascade' })
+      .notNull(),
+    system: text('system', {
+      enum: [
+        'fuel',
+        'fuel-injection',
+        'air-induction',
+        'aftertreatment',
+        'turbo',
+        'egr',
+        'cooling',
+        'electrical',
+        'transmission',
+        'driveline',
+        'hvac',
+        'brakes',
+        'steering',
+        'engine-mechanical',
+      ],
+    }).notNull(),
+    verdict: text('verdict', {
+      enum: ['FULLY', 'PARTIALLY', 'NOT', 'INSUFFICIENT'],
+    }).notNull(),
+    verdictReasoning: text('verdict_reasoning'),
+    sourceProvenance: text('source_provenance', {
+      enum: ['TRAINING-CONFIRMED', 'TRAINING-INFERRED', 'FIELD-VERIFIED', 'GAP'],
+    }).notNull(),
+    isRetired: boolean('is_retired').notNull().default(false),
+    replacedById: uuid('replaced_by_id').references(
+      (): AnyPgColumn => platformEquivalents.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('platform_equivalents_a_system_idx').on(table.platformAId, table.system),
+    index('platform_equivalents_b_system_idx').on(table.platformBId, table.system),
+  ],
+)
