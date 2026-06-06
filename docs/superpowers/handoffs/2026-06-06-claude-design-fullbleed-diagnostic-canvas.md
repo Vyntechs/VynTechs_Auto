@@ -40,11 +40,21 @@ The interactive diagnostic diagram is currently **one boxed element inside a doc
 - **See it live:** `PORT=3210 pnpm dev` → `/curator/topology?symptom=p0087-fuel-rail-pressure-too-low` (also `...?symptom=no-start-cranks-normally-fuel-system-suspect`). Reusable screenshot tool: `node .design-shots/sheet.mjs`.
 - **Figma (Brandon's earlier premium-look direction):** https://www.figma.com/design/2yV1UfK9asjRnMoJds0eNG?node-id=2-2
 
-## Open detail questions to resolve WITH Brandon (don't guess)
-- **What is "a step" in tech terms?** One test action? One component under inspection? One branch of the walk? (This anchors the focus unit.)
-- **During a probe, what single piece of context is non-negotiably on-screen?** (Likely the expected-vs-actual reading for the selected part — confirm.)
-- **What does "recede" mean for the rest of the map** — dimmed-but-present (keep orientation) vs. hidden (max focus)? Trade-off: orientation vs. zero-noise.
-- **Curator vs. tech deltas:** what does the curator need on-canvas that the tech must NOT see (and vice versa)?
+## Resolved with Brandon (content/behavior — his calls; the *look* is still yours)
+1. **The focus unit is the step/test.** The canvas shows **only the data needed for that specific step/test**, contextually — nothing more. (Not "a part" or "a neighborhood" as the unit — it's *what this step/test requires*.)
+2. **Recede = fade, not vanish.** As the walk progresses, irrelevant parts fade to a faint background (the tech keeps their place in the whole truck); they don't disappear.
+3. **Tap a part → a concise, part-specific detail surface.** When the tech taps a part, show the data that pertains to *that part*. For the fuel-pressure regulator, e.g. (illustrative, not exhaustive):
+   - the **connector**
+   - **how many wires / pins** (e.g. "10")
+   - **what each wire does**
+   - **location**
+   - a short **"Operational Theori"** — a tight theory-of-operation snippet. **"Operational Theori" is the intended label, spelled with an `i` on purpose — do NOT autocorrect to "Theory."**
+   - **Hard content rule: short and concise — every word must count for the tech.** No filler. This is the only place prose appears, and it earns its space or it's cut.
+   - *(Data source note: pins/wires/location already exist per-component in the data model — `componentPins` + `components.location`; the Operational Theori snippet draws from the component's own prose — `components.function`/`role`/`wireSummary`/`body` — NOT the architecture-facts theory rows. See the principle note below.)*
+4. **Curator-only completeness.** The "X captured / Y still missing" data-status is for **curator-access roles only** — hidden from technicians and owners. (All users with curator access see it; no one else.)
+
+### ⚠️ Principle check (carried from a standing decision — confirm, don't trip it)
+Brandon previously set: *"theory of operation is a SOURCE that feeds the canonical topology + diagnostic engine — it must NEVER render as a side panel on a wiring/diagnostic surface."* The per-part **Operational Theori** above is consistent with that **only if** it is the tight, on-tap, single-part snippet drawn from the component's own prose (`function`/`role`) — NOT a persistent theory panel and NOT a dump of the architecture-facts theory rows. Keep it on-demand, one-part, every-word-counts. If it grows into a standing panel, it violates the principle.
 
 ---
 
