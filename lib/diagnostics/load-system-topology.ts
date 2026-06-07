@@ -331,6 +331,11 @@ export async function loadSystemTopology({
       observationMethod: testActions.observationMethod,
       expectedObservation: testActions.expectedObservation,
       invasiveness: testActions.invasiveness,
+      meterMode: testActions.meterMode,
+      expectedValue: testActions.expectedValue,
+      expectedUnit: testActions.expectedUnit,
+      expectedTolerance: testActions.expectedTolerance,
+      stepKind: testActions.stepKind,
     })
     .from(testActions)
     .where(
@@ -348,6 +353,8 @@ export async function loadSystemTopology({
           condition: branchLogic.condition,
           verdict: branchLogic.verdict,
           nextAction: branchLogic.nextAction,
+          routesToTestActionId: branchLogic.routesToTestActionId,
+          reasoning: branchLogic.reasoning,
         })
         .from(branchLogic)
         .where(
@@ -358,10 +365,15 @@ export async function loadSystemTopology({
         )
     : []
 
-  // Which of those test actions does the CURRENT symptom implicate?
+  // Which of those test actions does the CURRENT symptom implicate, and at what
+  // priority? A Map (testActionId -> priority) carries the rank so the engine
+  // can order steps; non-implicated actions get priority: null.
   const implRows = testActionIds.length
     ? await db
-        .select({ testActionId: symptomTestImplications.testActionId })
+        .select({
+          testActionId: symptomTestImplications.testActionId,
+          priority: symptomTestImplications.priority,
+        })
         .from(symptomTestImplications)
         .where(
           and(
@@ -371,7 +383,9 @@ export async function loadSystemTopology({
           ),
         )
     : []
-  const implicatedIds = new Set(implRows.map((r) => r.testActionId))
+  const implicatedPriorities = new Map<string, number>(
+    implRows.map((r) => [r.testActionId, r.priority]),
+  )
 
   // 8. Scenarios for this (platform, system)
   const scenarioRows = await db
@@ -416,6 +430,7 @@ export async function loadSystemTopology({
           pinId: pinScenarioReadings.pinId,
           scenarioId: pinScenarioReadings.scenarioId,
           reading: pinScenarioReadings.reading,
+          isOutOfRange: pinScenarioReadings.isOutOfRange,
         })
         .from(pinScenarioReadings)
         .where(inArray(pinScenarioReadings.scenarioId, scenarioIds))
@@ -430,8 +445,12 @@ export async function loadSystemTopology({
         if (ws.scenarioId === s.id) pinStates[ws.pinId] = ws.wireState
       }
       const pinReadings: Record<string, string> = {}
+      const isOutOfRange: Record<string, boolean> = {}
       for (const r of readingRows) {
-        if (r.scenarioId === s.id) pinReadings[r.pinId] = r.reading
+        if (r.scenarioId === s.id) {
+          pinReadings[r.pinId] = r.reading
+          if (r.isOutOfRange !== null) isOutOfRange[r.pinId] = r.isOutOfRange
+        }
       }
       return {
         id: s.id,
@@ -446,6 +465,7 @@ export async function loadSystemTopology({
         displayOrder: s.displayOrder,
         pinStates,
         pinReadings,
+        isOutOfRange,
       }
     })
 
@@ -481,13 +501,21 @@ export async function loadSystemTopology({
         observationMethod: t.observationMethod,
         expectedObservation: t.expectedObservation,
         invasiveness: t.invasiveness,
-        implicatedByCurrentSymptom: implicatedIds.has(t.id),
+        implicatedByCurrentSymptom: implicatedPriorities.has(t.id),
+        meterMode: (t.meterMode as MeterMode | null) ?? null,
+        expectedValue: t.expectedValue,
+        expectedUnit: t.expectedUnit,
+        expectedTolerance: t.expectedTolerance,
+        stepKind: t.stepKind,
+        priority: implicatedPriorities.get(t.id) ?? null,
         branches: branchRows
           .filter((b) => b.testActionId === t.id)
           .map((b) => ({
             condition: b.condition,
             verdict: b.verdict,
             nextAction: b.nextAction,
+            routesToTestActionId: b.routesToTestActionId,
+            reasoning: b.reasoning,
           })),
       })),
     pins: pinRows

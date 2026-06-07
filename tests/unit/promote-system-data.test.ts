@@ -7,6 +7,14 @@ import {
   components,
   componentConnections,
   observableProperties,
+  testActions,
+  testActions as testActionsT,
+  branchLogic,
+  symptomTestImplications,
+  componentPins,
+  systemScenarios,
+  pinScenarioReadings,
+  pinScenarioReadings as pinScenarioReadingsT,
 } from '@/lib/db/schema'
 import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
 import {
@@ -496,5 +504,241 @@ describe('promoteSystemDataDraft — provenance + lifecycle fidelity', () => {
     expect(topo).not.toBeNull()
     expect(topo!.components.map((c) => c.slug).sort()).toEqual(['intake-throttle', 'maf-sensor'])
     expect(topo!.connections).toHaveLength(1)
+  })
+})
+
+describe('migration 0024 — additive diagram columns', () => {
+  it('exposes test_actions.step_kind and pin_scenario_readings.is_out_of_range as nullable', async () => {
+    // A bare select of the new columns proves the migration created them and
+    // schema.ts declares them. No rows needed — an empty result is success.
+    const steps = await db
+      .select({ stepKind: testActions.stepKind })
+      .from(testActions)
+    expect(steps).toEqual([])
+
+    const flags = await db
+      .select({ isOutOfRange: pinScenarioReadings.isOutOfRange })
+      .from(pinScenarioReadings)
+    expect(flags).toEqual([])
+  })
+})
+
+describe('loadSystemTopology — surfaces meter + branch fields additively', () => {
+  it('round-trips meterMode/expectedValue/expectedUnit/expectedTolerance/stepKind and branch routesToTestActionId/reasoning', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [ta] = await db.insert(testActionsT).values({
+      slug: 'measure-rail-pressure',
+      componentId: rail.id,
+      description: 'Read fuel rail pressure PID',
+      scenarioRequired: 'idle',
+      observationMethod: 'pressure_test_with_gauge',
+      meterMode: 'pressure',
+      expectedValue: 5000,
+      expectedUnit: 'psi',
+      expectedTolerance: 300,
+      stepKind: 'pressure-flow',
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: testActionsT.id })
+
+    await db.insert(branchLogic).values({
+      slug: 'rail-pressure-low-branch',
+      testActionId: ta.id,
+      condition: 'pressure below spec',
+      verdict: 'fail',
+      nextAction: 'inspect the lift pump supply',
+      routesToTestActionId: ta.id,
+      reasoning: 'low rail pressure points upstream',
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    const topo = await loadSystemTopology({
+      db,
+      platformSlug: PLATFORM_SLUG,
+      symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const action = topo!.components
+      .find((c) => c.slug === 'fuel-rail')!
+      .testActions.find((t) => t.slug === 'measure-rail-pressure')!
+
+    expect(action.meterMode).toBe('pressure')
+    expect(action.expectedValue).toBe(5000)
+    expect(action.expectedUnit).toBe('psi')
+    expect(action.expectedTolerance).toBe(300)
+    expect(action.stepKind).toBe('pressure-flow')
+
+    const branch = action.branches[0]
+    expect(branch.routesToTestActionId).toBe(ta.id)
+    expect(branch.reasoning).toBe('low rail pressure points upstream')
+    // existing keys untouched:
+    expect(branch.verdict).toBe('fail')
+    expect(branch.condition).toBe('pressure below spec')
+    expect(branch.nextAction).toBe('inspect the lift pump supply')
+  })
+
+  it('defaults the new test-action fields to null when the DB row leaves them empty', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+    await db.insert(testActionsT).values({
+      slug: 'look-at-rail',
+      componentId: rail.id,
+      description: 'Visual check',
+      scenarioRequired: 'none',
+      observationMethod: 'direct_visual_external',
+      // invasiveness has a DB CHECK (BETWEEN 1 AND 5) from migration 0021; the
+      // plan draft used 0 which violates it. 1 (least-invasive) keeps the test's
+      // intent — these are the NEW meter fields defaulting to null — intact.
+      invasiveness: 1,
+      sourceProvenance: 'GAP',
+    })
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const action = topo!.components
+      .find((c) => c.slug === 'fuel-rail')!
+      .testActions.find((t) => t.slug === 'look-at-rail')!
+    expect(action.meterMode).toBeNull()
+    expect(action.expectedValue).toBeNull()
+    expect(action.expectedUnit).toBeNull()
+    expect(action.expectedTolerance).toBeNull()
+    expect(action.stepKind).toBeNull()
+  })
+})
+
+describe('loadSystemTopology — surfaces symptom-test-implication priority', () => {
+  it('sets priority from symptom_test_implications for implicated actions and null otherwise', async () => {
+    const platformId = await seedPlatform()
+    const [symptomRow] = await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    }).returning({ id: symptoms.id })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [implicated] = await db.insert(testActionsT).values({
+      slug: 'measure-rail-pressure',
+      componentId: rail.id,
+      description: 'Read fuel rail pressure',
+      scenarioRequired: 'idle',
+      observationMethod: 'pressure_test_with_gauge',
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: testActionsT.id })
+
+    await db.insert(testActionsT).values({
+      slug: 'unrelated-visual',
+      componentId: rail.id,
+      description: 'Visual check (not in this symptom plan)',
+      scenarioRequired: 'none',
+      observationMethod: 'direct_visual_external',
+      // invasiveness has a DB CHECK (BETWEEN 1 AND 5) from migration 0021.
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    await db.insert(symptomTestImplications).values({
+      symptomId: symptomRow.id,
+      testActionId: implicated.id,
+      priority: 7,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const actions = topo!.components.find((c) => c.slug === 'fuel-rail')!.testActions
+    const impl = actions.find((t) => t.slug === 'measure-rail-pressure')!
+    const non = actions.find((t) => t.slug === 'unrelated-visual')!
+
+    expect(impl.implicatedByCurrentSymptom).toBe(true)
+    expect(impl.priority).toBe(7)
+    expect(non.implicatedByCurrentSymptom).toBe(false)
+    expect(non.priority).toBeNull()
+  })
+})
+
+describe('loadSystemTopology — isOutOfRange sibling map', () => {
+  it('flags an out-of-range pin reading without disturbing the pinReadings string map', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [pinHot] = await db.insert(componentPins).values({
+      slug: 'rail-sensor-sig', componentId: rail.id, name: 'FRP signal',
+      roleAbbreviation: 'SIG', edge: 'right', displayOrder: 0,
+      probeLocation: 'connector pin 2', expectedReading: '0.5-4.5V',
+      missingLogic: 'no signal => open', sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: componentPins.id })
+
+    const [pinOk] = await db.insert(componentPins).values({
+      slug: 'rail-sensor-ref', componentId: rail.id, name: 'FRP 5V ref',
+      roleAbbreviation: 'REF', edge: 'left', displayOrder: 1,
+      probeLocation: 'connector pin 1', expectedReading: '5V',
+      missingLogic: 'no ref => open', sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: componentPins.id })
+
+    const [scn] = await db.insert(systemScenarios).values({
+      slug: 'idle', platformId, system: 'fuel', label: 'Idle', sub: 'engine running',
+      kind: 'operation', keyPosition: 'on', engineState: 'running', loadLevel: 'idle',
+      isDefault: true, displayOrder: 0,
+    }).returning({ id: systemScenarios.id })
+
+    await db.insert(pinScenarioReadingsT).values([
+      { pinId: pinHot.id, scenarioId: scn.id, reading: '0.2V (low)', isOutOfRange: true },
+      { pinId: pinOk.id, scenarioId: scn.id, reading: '5.0V', isOutOfRange: false },
+    ])
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const scenario = topo!.scenarios.find((s) => s.slug === 'idle')!
+
+    // pinReadings string map unchanged:
+    expect(scenario.pinReadings[pinHot.id]).toBe('0.2V (low)')
+    expect(scenario.pinReadings[pinOk.id]).toBe('5.0V')
+
+    // sibling map: only the truthy flag is present as true; false stays false;
+    // a pin with no reading row is absent (neutral by absence).
+    expect(scenario.isOutOfRange![pinHot.id]).toBe(true)
+    expect(scenario.isOutOfRange![pinOk.id]).toBe(false)
+    expect(scenario.isOutOfRange!['no-such-pin']).toBeUndefined()
   })
 })
