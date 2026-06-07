@@ -522,3 +522,109 @@ describe('migration 0024 — additive diagram columns', () => {
     expect(flags).toEqual([])
   })
 })
+
+describe('loadSystemTopology — surfaces meter + branch fields additively', () => {
+  it('round-trips meterMode/expectedValue/expectedUnit/expectedTolerance/stepKind and branch routesToTestActionId/reasoning', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [ta] = await db.insert(testActionsT).values({
+      slug: 'measure-rail-pressure',
+      componentId: rail.id,
+      description: 'Read fuel rail pressure PID',
+      scenarioRequired: 'idle',
+      observationMethod: 'pressure_test_with_gauge',
+      meterMode: 'pressure',
+      expectedValue: 5000,
+      expectedUnit: 'psi',
+      expectedTolerance: 300,
+      stepKind: 'pressure-flow',
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: testActionsT.id })
+
+    await db.insert(branchLogic).values({
+      slug: 'rail-pressure-low-branch',
+      testActionId: ta.id,
+      condition: 'pressure below spec',
+      verdict: 'fail',
+      nextAction: 'inspect the lift pump supply',
+      routesToTestActionId: ta.id,
+      reasoning: 'low rail pressure points upstream',
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    const topo = await loadSystemTopology({
+      db,
+      platformSlug: PLATFORM_SLUG,
+      symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const action = topo!.components
+      .find((c) => c.slug === 'fuel-rail')!
+      .testActions.find((t) => t.slug === 'measure-rail-pressure')!
+
+    expect(action.meterMode).toBe('pressure')
+    expect(action.expectedValue).toBe(5000)
+    expect(action.expectedUnit).toBe('psi')
+    expect(action.expectedTolerance).toBe(300)
+    expect(action.stepKind).toBe('pressure-flow')
+
+    const branch = action.branches[0]
+    expect(branch.routesToTestActionId).toBe(ta.id)
+    expect(branch.reasoning).toBe('low rail pressure points upstream')
+    // existing keys untouched:
+    expect(branch.verdict).toBe('fail')
+    expect(branch.condition).toBe('pressure below spec')
+    expect(branch.nextAction).toBe('inspect the lift pump supply')
+  })
+
+  it('defaults the new test-action fields to null when the DB row leaves them empty', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+    await db.insert(testActionsT).values({
+      slug: 'look-at-rail',
+      componentId: rail.id,
+      description: 'Visual check',
+      scenarioRequired: 'none',
+      observationMethod: 'direct_visual_external',
+      // invasiveness has a DB CHECK (BETWEEN 1 AND 5) from migration 0021; the
+      // plan draft used 0 which violates it. 1 (least-invasive) keeps the test's
+      // intent — these are the NEW meter fields defaulting to null — intact.
+      invasiveness: 1,
+      sourceProvenance: 'GAP',
+    })
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const action = topo!.components
+      .find((c) => c.slug === 'fuel-rail')!
+      .testActions.find((t) => t.slug === 'look-at-rail')!
+    expect(action.meterMode).toBeNull()
+    expect(action.expectedValue).toBeNull()
+    expect(action.expectedUnit).toBeNull()
+    expect(action.expectedTolerance).toBeNull()
+    expect(action.stepKind).toBeNull()
+  })
+})
