@@ -430,6 +430,7 @@ export async function loadSystemTopology({
           pinId: pinScenarioReadings.pinId,
           scenarioId: pinScenarioReadings.scenarioId,
           reading: pinScenarioReadings.reading,
+          isOutOfRange: pinScenarioReadings.isOutOfRange,
         })
         .from(pinScenarioReadings)
         .where(inArray(pinScenarioReadings.scenarioId, scenarioIds))
@@ -444,8 +445,12 @@ export async function loadSystemTopology({
         if (ws.scenarioId === s.id) pinStates[ws.pinId] = ws.wireState
       }
       const pinReadings: Record<string, string> = {}
+      const isOutOfRange: Record<string, boolean> = {}
       for (const r of readingRows) {
-        if (r.scenarioId === s.id) pinReadings[r.pinId] = r.reading
+        if (r.scenarioId === s.id) {
+          pinReadings[r.pinId] = r.reading
+          if (r.isOutOfRange !== null) isOutOfRange[r.pinId] = r.isOutOfRange
+        }
       }
       return {
         id: s.id,
@@ -460,6 +465,7 @@ export async function loadSystemTopology({
         displayOrder: s.displayOrder,
         pinStates,
         pinReadings,
+        isOutOfRange,
       }
     })
 
