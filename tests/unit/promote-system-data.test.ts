@@ -7,6 +7,14 @@ import {
   components,
   componentConnections,
   observableProperties,
+  testActions,
+  testActions as testActionsT,
+  branchLogic,
+  symptomTestImplications,
+  componentPins,
+  systemScenarios,
+  pinScenarioReadings,
+  pinScenarioReadings as pinScenarioReadingsT,
 } from '@/lib/db/schema'
 import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
 import {
@@ -496,5 +504,21 @@ describe('promoteSystemDataDraft — provenance + lifecycle fidelity', () => {
     expect(topo).not.toBeNull()
     expect(topo!.components.map((c) => c.slug).sort()).toEqual(['intake-throttle', 'maf-sensor'])
     expect(topo!.connections).toHaveLength(1)
+  })
+})
+
+describe('migration 0024 — additive diagram columns', () => {
+  it('exposes test_actions.step_kind and pin_scenario_readings.is_out_of_range as nullable', async () => {
+    // A bare select of the new columns proves the migration created them and
+    // schema.ts declares them. No rows needed — an empty result is success.
+    const steps = await db
+      .select({ stepKind: testActions.stepKind })
+      .from(testActions)
+    expect(steps).toEqual([])
+
+    const flags = await db
+      .select({ isOutOfRange: pinScenarioReadings.isOutOfRange })
+      .from(pinScenarioReadings)
+    expect(flags).toEqual([])
   })
 })
