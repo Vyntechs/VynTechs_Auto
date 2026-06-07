@@ -768,3 +768,90 @@
      Once a selection lands, the panel re-renders without this class. */
   .topo-panel.is-empty-mobile-hidden { display: none; }
 }
+
+/* ---- assembled diagram (T6 swap) -----------------------------------------
+   The assembled scene replaces the xyflow dot-canvas as the DEFAULT view. The
+   .topo-node / .topo-edge / .react-flow__* / .wire* rules above are RETAINED:
+   they style the whole-system escape view (Brandon override — the button drops
+   into the existing full faded-system browser). T4's per-shape templates own
+   their internal geometry via their own stable root classes; .topo__assembled
+   is only the host frame. */
+.topo__assembled {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-100);
+  overflow: hidden;
+}
+
+/* Whole-system escape control — sits over the canvas top-right, above the
+   captured/missing footer's bottom strip so the two never collide. */
+.topo__whole-system {
+  position: absolute;
+  top: var(--vt-space-3);
+  right: var(--vt-space-3);
+  z-index: 2;
+  min-height: 32px;
+  padding: 6px 12px;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  cursor: pointer;
+}
+.topo__whole-system:hover { background: var(--vt-bone-100); }
+.topo__whole-system[aria-pressed='true'] {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+
+/* Honest zero-step state — "no test plan captured for this code yet". The
+   universal needs-field-check degrade, not an error: quiet graphite, no red. */
+.topo__no-plan {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vt-space-2);
+  text-align: center;
+  padding: var(--vt-space-6);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-100);
+}
+.topo__no-plan-title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+  color: var(--vt-fg);
+}
+.topo__no-plan-sub {
+  max-width: 42ch;
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--vt-fg-3);
+}
+
+/* Mobile: the assembled host + zero-step state get a tall-enough min-height so
+   the device-under-test stays visible above T5's bottom sheet. T5 owns the
+   sheet detents; this only sizes the host frame. */
+@media (max-width: 1023px) {
+  .topo__assembled,
+  .topo__no-plan { min-height: 60dvh; }
+}
+@media (max-width: 414px) {
+  .topo__assembled,
+  .topo__no-plan { min-height: 55dvh; }
+}
