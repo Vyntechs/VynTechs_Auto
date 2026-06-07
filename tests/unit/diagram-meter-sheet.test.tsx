@@ -6,6 +6,8 @@ import {
   type MeterSheetDetent,
 } from '@/components/diagram-kit/meter-sheet'
 import type { ResolvedScene } from '@/lib/diagnostics/diagram/slot-interface'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 describe('nextDetent — tap-to-toggle (Brandon override: no drag)', () => {
   it('toggles peek <-> expanded on a tap', () => {
@@ -93,5 +95,25 @@ describe('MeterSheet — verdict signal passes through untouched (C3 owns the ve
     const sheet = screen.getByTestId('meter-sheet')
     expect(sheet).not.toHaveAttribute('data-verdict')
     expect(sheet.className).not.toMatch(/fault|fail|out-of-range|red/i)
+  })
+})
+
+describe('diagram-mobile.css — sheet detent contract', () => {
+  const css = readFileSync(
+    resolve(process.cwd(), 'components/diagram-kit/diagram-mobile.css'),
+    'utf8',
+  )
+
+  it('drives detents off [data-detent] with translateY (no JS height math)', () => {
+    expect(css).toMatch(/\[data-detent='dismissed'\][^{]*\{[^}]*translateY\(100%\)/s)
+    expect(css).toMatch(/\[data-detent='expanded'\][^{]*\{[^}]*translateY\(0\)/s)
+  })
+
+  it('honors env(safe-area-inset-bottom)', () => {
+    expect(css).toContain('env(safe-area-inset-bottom)')
+  })
+
+  it('gates the sheet transition on prefers-reduced-motion', () => {
+    expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
   })
 })
