@@ -1,10 +1,22 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type {
   SystemTopology,
   TopologyTestAction,
   TopologyComponent,
+  TopologyBranch,
 } from '@/lib/diagnostics/load-system-topology'
-import { buildStepSequence } from '@/lib/diagnostics/diagram/step-sequence'
+import {
+  buildStepSequence,
+  stepReducerInit,
+  stepReducer,
+  selectCurrentStep,
+  stepKeyOf,
+  resolveFork,
+  type StepSequenceState,
+  type ForkResolution,
+} from '@/lib/diagnostics/diagram/step-sequence'
 
 // ---------------------------------------------------------------------------
 // Synthetic fixtures. scene-data.json is parts-only (no test_actions /
@@ -104,5 +116,146 @@ describe('buildStepSequence', () => {
     expect(fuel.map((s) => s.priority)).toEqual([1, 2])
     expect(elec.map((s) => s.priority)).toEqual([1, 2])
     expect(def.map((s) => s.priority)).toEqual([1, 2])
+  })
+})
+
+describe('stepReducer', () => {
+  const seq = buildStepSequence(
+    topologyWith([
+      action({ slug: 'one', priority: 1 }),
+      action({ slug: 'two', priority: 2 }),
+      action({ slug: 'three', priority: 3 }),
+    ]),
+  )
+
+  it('starts at the first step', () => {
+    const s = stepReducerInit(seq)
+    expect(s.index).toBe(0)
+    expect(selectCurrentStep(s)?.slug).toBe('one')
+  })
+
+  it('advances and goes back, clamping at the ends', () => {
+    let s: StepSequenceState = stepReducerInit(seq)
+    s = stepReducer(s, { type: 'advance' })
+    expect(selectCurrentStep(s)?.slug).toBe('two')
+    s = stepReducer(s, { type: 'advance' })
+    s = stepReducer(s, { type: 'advance' }) // past the end -> clamp at last
+    expect(selectCurrentStep(s)?.slug).toBe('three')
+    s = stepReducer(s, { type: 'back' })
+    s = stepReducer(s, { type: 'back' })
+    s = stepReducer(s, { type: 'back' }) // before the start -> clamp at 0
+    expect(selectCurrentStep(s)?.slug).toBe('one')
+  })
+
+  it('goTo jumps to a step by its stable key; an unknown key is a no-op', () => {
+    let s = stepReducerInit(seq)
+    s = stepReducer(s, { type: 'goTo', stepKey: stepKeyOf(seq[2]) })
+    expect(selectCurrentStep(s)?.slug).toBe('three')
+    s = stepReducer(s, { type: 'goTo', stepKey: 'nonexistent-key' })
+    expect(selectCurrentStep(s)?.slug).toBe('three') // unchanged
+  })
+
+  it('an empty sequence yields no current step and survives every action (no throw)', () => {
+    let s = stepReducerInit([])
+    expect(selectCurrentStep(s)).toBeNull()
+    s = stepReducer(s, { type: 'advance' })
+    s = stepReducer(s, { type: 'back' })
+    s = stepReducer(s, { type: 'goTo', stepKey: 'whatever' })
+    expect(selectCurrentStep(s)).toBeNull()
+    expect(s.index).toBe(0)
+  })
+})
+
+function branch(over: Partial<TopologyBranch> & { verdict: string }): TopologyBranch {
+  return {
+    condition: over.condition ?? 'if reading X',
+    verdict: over.verdict,
+    nextAction: over.nextAction ?? 'do the next thing in words',
+    routesToTestActionId: over.routesToTestActionId ?? null,
+    reasoning: over.reasoning ?? null,
+  }
+}
+
+describe('resolveFork', () => {
+  it('routes by the matching verdict branch when routesToTestActionId is present', () => {
+    const step = action({
+      slug: 'forky',
+      branches: [
+        branch({ verdict: 'pass', routesToTestActionId: 'ta-good', reasoning: 'all clear' }),
+        branch({ verdict: 'fail', routesToTestActionId: 'ta-bad', reasoning: 'open circuit' }),
+      ],
+    })
+    const r = resolveFork(step, 'fail')
+    expect(r.kind).toBe('route')
+    if (r.kind === 'route') {
+      expect(r.toTestActionId).toBe('ta-bad')
+      expect(r.reasoning).toBe('open circuit')
+    }
+  })
+
+  it('degrades to words-only when the matched branch has no routesToTestActionId', () => {
+    const step = action({
+      slug: 'words-only',
+      branches: [
+        branch({ verdict: 'fail', routesToTestActionId: null, nextAction: 'check the harness for chafing' }),
+      ],
+    })
+    const r = resolveFork(step, 'fail')
+    expect(r.kind).toBe('words')
+    if (r.kind === 'words') {
+      expect(r.nextActionText).toBe('check the harness for chafing')
+    }
+  })
+
+  it('degrades to words-only when routesToTestActionId is undefined (optional C1 field absent)', () => {
+    // The C1 fork fields are OPTIONAL (string | null | undefined). An absent id
+    // must degrade exactly like an explicit null — never be treated as a route.
+    const step = action({
+      slug: 'undef-route',
+      branches: [{ condition: 'c', verdict: 'fail', nextAction: 'inspect connector' } as TopologyBranch],
+    })
+    const r = resolveFork(step, 'fail')
+    expect(r.kind).toBe('words')
+    if (r.kind === 'words') {
+      expect(r.nextActionText).toBe('inspect connector')
+    }
+  })
+
+  it('returns kind "none" when no branch matches the verdict (terminal step)', () => {
+    const step = action({
+      slug: 'terminal',
+      branches: [branch({ verdict: 'pass', routesToTestActionId: 'ta-x' })],
+    })
+    expect(resolveFork(step, 'fail')).toEqual<ForkResolution>({ kind: 'none' })
+  })
+
+  it('returns kind "none" for a step with zero branches (no fork at all)', () => {
+    const step = action({ slug: 'flat', branches: [] })
+    expect(resolveFork(step, 'neutral')).toEqual<ForkResolution>({ kind: 'none' })
+  })
+})
+
+describe('step-sequence purity', () => {
+  const src = readFileSync(
+    resolve(process.cwd(), 'lib/diagnostics/diagram/step-sequence.ts'),
+    'utf8',
+  )
+
+  it('imports nothing from React, the DOM, the network, or any AI client', () => {
+    expect(src).not.toMatch(/from ['"]react['"]/)
+    expect(src).not.toMatch(/from ['"]next\//)
+    expect(src).not.toMatch(/\bfetch\(/)
+    expect(src).not.toMatch(/anthropic|openai|@\/lib\/ai/i)
+  })
+
+  it('contains no "AI" word and no "step N of M" framing', () => {
+    expect(src).not.toMatch(/\bAI\b/)
+    expect(src).not.toMatch(/step\s+\d*\s*of\s*\d/i)
+    expect(src.toLowerCase()).not.toContain('step of')
+  })
+
+  it('only imports types from the C1 loader module (consumes C1, not C2/C3)', () => {
+    expect(src).toMatch(/from ['"]@\/lib\/diagnostics\/load-system-topology['"]/)
+    expect(src).not.toMatch(/diagram-kit|slot-interface|show-rule|slot-resolver/)
   })
 })
