@@ -1,0 +1,138 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]: ‹
+    - generic [ref=e5]: ·
+    - generic [ref=e6]: 2018 Ford F-250
+    - generic [ref=e7]: P0087
+    - button "▣ Engine Idle ▾" [ref=e154] [cursor=pointer]:
+      - generic [ref=e9]: ▣
+      - generic [ref=e10]: Engine Idle
+      - generic [ref=e11]: ▾
+  - generic [ref=e12]:
+    - generic [ref=e14]:
+      - img
+      - img
+      - img
+      - generic:
+        - generic [ref=e17] [cursor=pointer]: Fuel Tank
+        - generic [ref=e19] [cursor=pointer]:
+          - generic [ref=e20]: Electric Lift Pump
+          - generic [ref=e21]:
+            - generic [ref=e22]: 12V
+            - generic [ref=e24]: GND
+        - generic [ref=e28] [cursor=pointer]: Primary Fuel Filter
+        - generic:
+          - generic:
+            - generic: Bosch CP4.2 HP Pump
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank A
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank B
+        - generic [ref=e40] [cursor=pointer]: Lift Pump Relay
+        - generic [ref=e43] [cursor=pointer]: Chassis Ground
+        - generic:
+          - generic:
+            - generic: PCM
+        - generic:
+          - generic:
+            - generic: 5V Reference Splice
+        - generic:
+          - generic:
+            - generic: Low-Reference Splice
+        - generic:
+          - generic:
+            - generic: Inlet Metering Valve
+        - generic:
+          - generic:
+            - generic: Volume Control Valve
+        - generic:
+          - generic:
+            - generic: FRP Regulator
+        - generic:
+          - generic:
+            - generic: Water-in-Fuel Sensor
+        - generic [ref=e66] [cursor=pointer]:
+          - generic [ref=e67]: why we're here
+          - generic [ref=e68]: FRP Sensor
+          - generic [ref=e69]:
+            - generic [ref=e70]: SIG
+            - generic [ref=e72]: 5V
+            - generic [ref=e74]: LREF
+        - generic:
+          - generic:
+            - generic: Fuel Level Sender
+        - generic:
+          - generic:
+            - generic: Pressure Relief Valve
+        - generic:
+          - generic:
+            - generic: Passive Return Circuit
+        - generic:
+          - generic:
+            - generic: Injector 1
+        - generic:
+          - generic:
+            - generic: Injector 2
+        - generic:
+          - generic:
+            - generic: Injector 3
+        - generic:
+          - generic:
+            - generic: Injector 4
+        - generic:
+          - generic:
+            - generic: Injector 5
+        - generic:
+          - generic:
+            - generic: Injector 6
+        - generic:
+          - generic:
+            - generic: Injector 7
+        - generic:
+          - generic:
+            - generic: Injector 8
+    - generic:
+      - generic: Now · Engine Idle
+      - generic: Probe
+    - generic [ref=e110]:
+      - generic [ref=e111]:
+        - generic [ref=e112]: LIFT PUMP · 12V POWER
+        - generic [ref=e113]: PROBE
+        - button "✕" [ref=e114] [cursor=pointer]
+      - generic [ref=e115]: whereBack-probe the power wire at the lift pump connector under the truck near the tank.
+      - generic [ref=e116]:
+        - generic [ref=e117]:
+          - generic [ref=e118]: Expect
+          - generic [ref=e120]: 12V
+        - generic [ref=e121]:
+          - generic [ref=e122]: Now · Engine Idle
+          - generic [ref=e123]: 12V steady
+          - generic [ref=e124] [cursor=pointer]:
+            - generic [ref=e125]: from theory
+            - generic [ref=e126]: · why?
+        - generic [ref=e128]:
+          - generic [ref=e129]: ◐
+          - generic [ref=e130]: in range
+      - generic [ref=e131]: Drafted from how this system works on the 6.7 Power Stroke — not yet verified against a wiring diagram for this exact truck.
+      - generic [ref=e133] [cursor=pointer]:
+        - generic [ref=e134]: connector · 2 wires · ground · Operational Theori
+        - generic [ref=e136]: ▾
+      - generic [ref=e137]:
+        - generic [ref=e155]:
+          - generic [ref=e156]: Connector
+          - generic [ref=e157]: 2 wires — one power, one ground
+        - generic [ref=e158]:
+          - generic [ref=e159]: This pin
+          - generic [ref=e160]: 12V power feed, switched by the relay
+        - generic [ref=e161]:
+          - generic [ref=e162]: Needs field check
+          - generic [ref=e163]: Wire color · connector pin number · prime duration · upstream relay/fuse IDs — not yet captured
+        - generic [ref=e164]:
+          - generic [ref=e165]: Operational Theori
+          - generic [ref=e166]: Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command.
+    - generic [ref=e150]:
+      - button "◂ back" [ref=e151] [cursor=pointer]
+      - button "▸ next test" [active] [ref=e152] [cursor=pointer]
+      - button "⌖ whole system" [ref=e153] [cursor=pointer]

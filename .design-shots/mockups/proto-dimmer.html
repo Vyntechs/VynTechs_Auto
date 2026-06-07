@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vyntechs · The Dimmer — P0087 · 6.7L Power Stroke</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --vt-bone-50:oklch(98.5% .008 80); --vt-bone-100:oklch(96% .010 80); --vt-bone-200:oklch(92% .012 80);
+  --vt-bone-300:oklch(86% .013 80); --vt-bone-400:oklch(76% .014 80); --vt-bone-500:oklch(64% .014 75);
+  --vt-bone-600:oklch(50% .014 70); --vt-bone-700:oklch(38% .013 65); --vt-bone-800:oklch(26% .012 60);
+  --vt-bone-900:oklch(18% .010 55);
+  --vt-signal-300:oklch(78% .10 240); --vt-signal-400:oklch(62% .15 245);
+  --vt-signal-500:oklch(50% .18 248); --vt-signal-600:oklch(42% .17 250);  /* brand navy */
+  --vt-risk-high:oklch(72% .19 55);    /* amber caution = "needs field check" */
+  --vt-elem-voltage:oklch(86% .20 108);/* electrical/voltage wire */
+  --vt-elem-fuel:oklch(78% .19 140);   /* fuel/flow */
+  --vt-elem-spark:oklch(82% .20 62);   /* warm */
+  --vt-bg:var(--vt-bone-50); --vt-fg:var(--vt-bone-900); --vt-fg-2:var(--vt-bone-800); --vt-fg-3:var(--vt-bone-700);
+  --vt-rule:var(--vt-bone-300); --vt-rule-strong:var(--vt-bone-400);
+  --vt-font-serif:"Instrument Serif",ui-serif,Georgia,serif;
+  --vt-font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --vt-font-sans:"Inter Tight",-apple-system,system-ui,sans-serif;
+
+  /* ---- The Dimmer working tokens -------------------------------------- */
+  /* wire role colors — the app's --role-* are undefined; defined here */
+  --role-12v:    oklch(62% .20 30);            /* warm red — power = hot */
+  --role-ground: var(--vt-bone-700);           /* graphite — return = neutral */
+  --role-fluid:  oklch(58% .07 150);           /* muted fuel-green */
+  --role-signal: var(--vt-signal-400);         /* navy family */
+  --role-5v:     var(--vt-signal-300);
+  --role-pwm:    oklch(70% .12 300);           /* desat violet */
+  --role-mech:   var(--vt-bone-500);
+
+  --vt-recede: .18;          /* desktop faded blueprint floor */
+  --vt-recede-peek: .58;     /* a faded part the tech taps lifts to this */
+  --vt-accent-bg: oklch(50% .18 248 / .10);
+
+  --ease-instrument: cubic-bezier(.4,0,.2,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --dur-1: 80ms; --dur-2: 160ms; --dur-3: 280ms;
+}
+
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{ margin:0; height:100%; }
+body{
+  font-family:var(--vt-font-sans);
+  color:var(--vt-fg);
+  background:var(--vt-bg);
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+.tnum{ font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
+
+/* the app's faint graph-paper canvas ground */
+.paper-ground{
+  background-color:var(--vt-bg);
+  background-image:
+    repeating-linear-gradient(0deg,transparent 0 23px,oklch(40% .012 70 / .022) 23px 24px),
+    repeating-linear-gradient(90deg,transparent 0 23px,oklch(40% .012 70 / .022) 23px 24px);
+}
+
+/* ======================================================================
+   APP SHELL — the diagram IS the workspace, full-bleed
+   ====================================================================== */
+.app{ position:fixed; inset:0; display:flex; flex-direction:column; }
+
+/* thin recessed mono orientation ribbon — dim, never a serif page title */
+.ribbon{
+  flex:none;
+  display:flex; align-items:center; gap:14px;
+  height:38px; padding:0 16px;
+  background:color-mix(in oklab, var(--vt-bone-100), transparent 18%);
+  border-bottom:.5px solid var(--vt-rule);
+  font-family:var(--vt-font-mono); font-size:11px; letter-spacing:.12em;
+  color:var(--vt-fg-3); text-transform:uppercase;
+  -webkit-backdrop-filter:saturate(1.2) blur(6px); backdrop-filter:saturate(1.2) blur(6px);
+  position:relative; z-index:40;
+}
+.ribbon__brand{ color:var(--vt-fg-2); display:inline-flex; align-items:center; gap:7px; }
+.ribbon__brand::before{ content:""; width:7px; height:7px; border-radius:50%; background:var(--vt-signal-500); }
+.ribbon__spacer{ flex:1; }
+.ribbon__vehicle{ color:var(--vt-fg-2); }
+.ribbon__code{ color:var(--vt-fg); letter-spacing:.16em; }
+.ribbon__dot{ color:var(--vt-rule-strong); }
+
+/* scenario reading line — low-contrast, inline under the ribbon, within canvas */
+.scenario{
+  position:absolute; top:38px; left:0; right:0; z-index:30;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:8px 16px;
+  font-family:var(--vt-font-mono); font-size:11.5px; color:var(--vt-fg-3);
+  pointer-events:none;
+}
+.scenario__now{ letter-spacing:.1em; text-transform:uppercase; color:var(--vt-bone-500); }
+.scenario__pick{
+  pointer-events:auto;
+  display:inline-flex; align-items:center; gap:6px;
+  padding:3px 9px; border:.5px solid var(--vt-rule); border-radius:var(--vt-radius-2,4px);
+  background:color-mix(in oklab, var(--vt-bone-50), transparent 10%);
+  color:var(--vt-fg-2); font:inherit; cursor:pointer; min-height:30px;
+  transition:border-color var(--dur-2) var(--ease-instrument), background var(--dur-2) var(--ease-instrument);
+}
+.scenario__pick:hover{ border-color:var(--vt-rule-strong); }
+.scenario__pick .caret{ color:var(--vt-fg-3); font-size:9px; }
+.scenario__sub{ color:var(--vt-bone-500); }
+.scenario__sub b{ color:var(--vt-fg-2); font-weight:500; }
+
+/* in-canvas scenario picker (pulled, not standing) */
+.scenmenu{
+  position:absolute; top:62px; left:16px; z-index:60;
+  width:280px; max-width:calc(100vw - 32px);
+  background:var(--vt-bone-50); border:.5px solid var(--vt-rule-strong);
+  border-radius:var(--vt-radius-3,6px);
+  box-shadow:0 18px 48px -16px oklch(40% .04 70 / .34);
+  padding:6px; opacity:0; transform:translateY(-4px) scale(.99);
+  pointer-events:none;
+  transition:opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+.scenmenu.is-open{ opacity:1; transform:none; pointer-events:auto; }
+.scenmenu__row{
+  display:flex; align-items:baseline; gap:10px; width:100%;
+  padding:8px 10px; min-height:40px; text-align:left;
+  background:none; border:0; border-radius:var(--vt-radius-2,4px);
+  font-family:var(--vt-font-mono); font-size:12px; color:var(--vt-fg);
+  cursor:pointer;
+}
+.scenmenu__row:hover{ background:var(--vt-bone-100); }
+.scenmenu__row.is-active{ background:var(--vt-accent-bg); }
+.scenmenu__row.is-active .scenmenu__name{ color:var(--vt-signal-600); }
+.scenmenu__name{ flex:none; }
+.scenmenu__row--fault .scenmenu__name{ color:var(--role-12v); }
+.scenmenu__sub{ flex:1; font-size:10px; color:var(--vt-fg-3); line-height:1.4; }
+
+/* ======================================================================
+   CANVAS — fixed sheet; nothing pans, nothing zooms
+   ====================================================================== */
+.canvas{ position:relative; flex:1; min-height:0; overflow:hidden; }
+.sheet{
+  position:absolute; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  width:1180px; height:760px;
+}
+/* the SVG that carries every wire + fluid line + leader line */
+.wires{ position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.wire{
+  fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round;
+  opacity:1;
+  transition:opacity var(--dur-3) var(--ease-instrument), stroke-width var(--dur-2) var(--ease-instrument);
+}
+.wire--12v{ stroke:var(--role-12v); }
+.wire--ground{ stroke:var(--role-ground); }
+.wire--fluid{ stroke:var(--role-fluid); stroke-dasharray:none; }
+.wire--signal{ stroke:var(--role-signal); }
+.wire--5v{ stroke:var(--role-5v); }
+.wire--pwm{ stroke:var(--role-pwm); }
+.wire--mech{ stroke:var(--role-mech); stroke-dasharray:2 4; }
+.wire--casing{ stroke:var(--vt-bone-50); stroke-width:5; opacity:0; }
+
+/* receded wires freeze + drop to the blueprint floor */
+.wire.is-recede{ opacity:.16; animation:none !important; stroke-width:1.2; }
+.wire--casing.is-recede{ opacity:0; }
+
+/* the focused active feed wire: casing + glow + marching current */
+.wire.is-active{ stroke-width:3; filter:drop-shadow(0 0 5px currentColor); }
+.wire.is-active.wire--casing{ opacity:1; filter:none; }
+.wire.flow{ stroke-dasharray:11 5; animation:flow 2.4s linear infinite; }
+.wire.flow-pwm{ stroke-dasharray:5 4; animation:flow 1.5s linear infinite; }
+@keyframes flow{ to{ stroke-dashoffset:-16; } }
+
+/* leader line connecting the detail card to the tapped pin */
+.leader{ stroke:var(--vt-signal-500); stroke-width:1; fill:none; opacity:0;
+  transition:opacity var(--dur-2) var(--ease-out); }
+.leader.is-on{ opacity:.85; }
+.leader__dot{ fill:var(--vt-signal-500); opacity:0; transition:opacity var(--dur-2) var(--ease-out); }
+.leader__dot.is-on{ opacity:1; }
+
+/* ---- NODES — engraved instrument faceplates ------------------------- */
+.node{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  min-width:120px; max-width:200px;
+  padding:8px 11px 9px;
+  background:var(--vt-bone-50);
+  border:.5px solid var(--vt-rule-strong);
+  border-radius:var(--vt-radius-2,4px);
+  cursor:pointer;
+  opacity:1;
+  transition:opacity var(--dur-3) var(--ease-instrument),
+             box-shadow var(--dur-2) var(--ease-instrument),
+             border-color var(--dur-2) var(--ease-instrument),
+             transform var(--dur-1) var(--ease-out);
+  z-index:5;
+}
+.node:hover{ box-shadow:0 2px 10px -4px oklch(40% .04 70 / .3); }
+.node__name{
+  font-family:var(--vt-font-serif); font-size:16px; line-height:1.04;
+  color:var(--vt-fg); letter-spacing:.002em;
+}
+.node__kind{
+  font-family:var(--vt-font-mono); font-size:8.5px; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--vt-fg-3); margin-top:3px;
+}
+.node__loc{
+  font-family:var(--vt-font-mono); font-size:8.5px; color:var(--vt-bone-500);
+  margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* provenance ink-weight — ORTHOGONAL to recede (recede = opacity; provenance = stroke + name color) */
+.node--inferred .node__name{ color:var(--vt-bone-700); }      /* TRAINING-INFERRED: lighter ink */
+.node--inferred{ border-color:var(--vt-bone-400); }
+.node--confirmed{ }                                            /* TRAINING-CONFIRMED: normal ink, mid plate */
+.node--verified{ border-color:var(--vt-fg-2); border-width:.75px; } /* FIELD-VERIFIED: boldest plate (none in this scene) */
+.node--gap{ border-style:dashed; border-color:var(--vt-risk-high); } /* GAP: hairline dashed amber */
+
+/* the calm faded blueprint — luminance only, layout frozen */
+.node.is-recede{ opacity:var(--vt-recede); }
+.node.is-peek{ opacity:var(--vt-recede-peek); }
+
+/* the part the tech declared intent on — navy ink halo, slight confident lift */
+.node.is-active{
+  border-color:var(--vt-signal-500);
+  box-shadow:0 0 0 3px var(--vt-accent-bg), 0 6px 18px -8px oklch(50% .18 248 / .4);
+  transform:translate(-50%,-50%) scale(1.02);
+  z-index:9;
+}
+
+/* the FRP sensor — the "why we're here" anchor, faded but labeled */
+.node--anchor .node__why{
+  font-family:var(--vt-font-mono); font-size:8px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--vt-signal-500); margin-top:4px;
+}
+
+/* ---- PINS — role-colored tappable chips ----------------------------- */
+.pins{ display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+.pin{
+  display:inline-flex; align-items:center; gap:4px;
+  min-height:24px; padding:3px 7px;
+  border:.5px solid var(--vt-rule-strong); border-radius:3px;
+  background:var(--vt-bone-100);
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.04em;
+  color:var(--vt-fg-2); cursor:pointer; line-height:1;
+  transition:background var(--dur-1) var(--ease-instrument), border-color var(--dur-1) var(--ease-instrument);
+}
+.pin::before{ content:""; width:7px; height:7px; border-radius:2px; flex:none; }
+.pin--12v::before{ background:var(--role-12v); }
+.pin--gnd::before{ background:var(--role-ground); }
+.pin--sig::before{ background:var(--role-signal); }
+.pin:hover{ border-color:var(--vt-signal-400); background:var(--vt-bone-50); }
+.pin.is-active{
+  border-color:var(--vt-signal-500); background:var(--vt-accent-bg); color:var(--vt-signal-600);
+}
+.pin__role{ font-weight:600; }
+
+/* fluid source / ground terminals — quieter mechanical plates */
+.node--term{ border-radius:var(--vt-radius-3,6px); }
+.node--term .node__name{ font-size:14px; }
+
+/* ======================================================================
+   DETAIL CARD — part-anchored, fixed canvas edge, leads with the reading
+   ====================================================================== */
+.card{
+  position:absolute; z-index:50;
+  width:336px; max-width:calc(100vw - 32px);
+  background:var(--vt-bone-50);
+  border:.5px solid var(--vt-rule-strong);
+  border-radius:var(--vt-radius-3,6px);
+  box-shadow:0 24px 60px -18px oklch(40% .04 70 / .34);
+  padding:0; overflow:hidden;
+  opacity:0; transform:translateY(6px) scale(.99); pointer-events:none;
+  transition:opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+.card.is-open{ opacity:1; transform:none; pointer-events:auto; }
+.card__head{
+  display:flex; align-items:flex-start; gap:10px;
+  padding:13px 15px 11px; border-bottom:.5px solid var(--vt-rule);
+}
+.card__head-main{ flex:1; min-width:0; }
+.card__eyebrow{
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--vt-fg-3); margin-bottom:3px;
+}
+.card__title{ font-family:var(--vt-font-serif); font-size:21px; line-height:1.04; color:var(--vt-fg); }
+.card__close{
+  flex:none; width:26px; height:26px; display:flex; align-items:center; justify-content:center;
+  border:.5px solid var(--vt-rule); border-radius:var(--vt-radius-2,4px);
+  background:var(--vt-bone-100); color:var(--vt-fg-3); cursor:pointer; font-size:13px; line-height:1;
+}
+.card__close:hover{ background:var(--vt-bone-200); }
+.card__body{ padding:13px 15px 15px; }
+
+/* the instrument reading — the lead, the largest type */
+.reading{
+  background:var(--vt-bone-100);
+  border:.5px solid var(--vt-rule); border-left:2px solid var(--vt-signal-500);
+  border-radius:var(--vt-radius-2,4px);
+  padding:11px 13px; margin-bottom:11px;
+}
+.reading__label{
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--vt-fg-3); margin-bottom:6px;
+  display:flex; justify-content:space-between; align-items:baseline;
+}
+.reading__scenario{ color:var(--vt-bone-500); letter-spacing:.08em; }
+.reading__now{
+  font-family:var(--vt-font-mono); font-size:17px; line-height:1.18; color:var(--vt-fg);
+  margin-bottom:8px;
+}
+.reading__expect{
+  font-family:var(--vt-font-mono); font-size:11.5px; line-height:1.4; color:var(--vt-fg-2);
+  padding-top:7px; border-top:.5px solid var(--vt-rule);
+}
+.reading__expect .k{
+  font-size:8.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--vt-fg-3);
+  display:block; margin-bottom:2px;
+}
+.reading__expect b{ color:var(--vt-signal-600); font-weight:500; }
+
+/* the one action */
+.probe{
+  display:flex; gap:9px; margin-bottom:12px; padding:1px 1px 0;
+}
+.probe__k{
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--vt-signal-600); flex:none; padding-top:1px;
+}
+.probe__t{ font-size:12.5px; line-height:1.45; color:var(--vt-fg); }
+
+/* provenance caption — IS the see-source link; quiet, no badge */
+.prov{
+  font-family:var(--vt-font-mono); font-size:10px; letter-spacing:.04em;
+  color:var(--vt-fg-3); cursor:pointer; background:none; border:0; padding:5px 0 0;
+  display:inline-flex; align-items:center; gap:6px; text-align:left;
+}
+.prov::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--vt-fg-3); flex:none; }
+.prov--theory::before{ background:var(--vt-bone-500); }
+.prov--verified{ color:var(--vt-signal-600); }
+.prov--verified::before{ background:var(--vt-signal-500); }
+.prov__why{ color:var(--vt-signal-500); text-decoration:underline; text-underline-offset:2px; }
+.prov.is-open .prov__why::after{ content:" ·"; }
+.prov-detail{
+  display:none; margin:7px 0 0; padding:9px 11px;
+  background:var(--vt-accent-bg); border-radius:var(--vt-radius-2,4px);
+  font-size:11.5px; line-height:1.5; color:var(--vt-fg-2);
+}
+.prov-detail.is-open{ display:block; }
+
+/* amber "needs field check" — the honest unknown, the only raised-salience state */
+.amber{
+  margin-top:12px; padding:9px 11px;
+  background:oklch(72% .19 55 / .07);
+  border-left:2px solid var(--vt-risk-high);
+  border-radius:var(--vt-radius-2,4px);
+}
+.amber__k{
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase;
+  color:oklch(56% .15 55); margin-bottom:4px;
+}
+.amber__t{ font-family:var(--vt-font-mono); font-size:11px; line-height:1.5; color:var(--vt-fg-2); }
+
+/* below-the-fold secondary — connector / wires / Operational Theori (pulled on further tap) */
+.more{
+  margin-top:13px; border-top:.5px solid var(--vt-rule); padding-top:11px;
+}
+.more__toggle{
+  width:100%; display:flex; align-items:center; justify-content:space-between;
+  background:none; border:0; padding:0; cursor:pointer;
+  font-family:var(--vt-font-mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--vt-fg-3); min-height:30px;
+}
+.more__toggle .caret{ transition:transform var(--dur-2) var(--ease-instrument); }
+.more.is-open .more__toggle .caret{ transform:rotate(90deg); }
+.more__body{ display:none; padding-top:9px; }
+.more.is-open .more__body{ display:block; }
+.more__row{ display:grid; grid-template-columns:74px 1fr; gap:9px; padding:6px 0; border-bottom:.5px solid var(--vt-rule); }
+.more__k{ font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--vt-fg-3); padding-top:2px; }
+.more__v{ font-size:12px; line-height:1.45; color:var(--vt-fg-2); }
+.more__theori{ margin-top:10px; }
+.more__theori-k{
+  font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--vt-fg-3); margin-bottom:5px;
+}
+.more__theori-t{ font-family:var(--vt-font-serif); font-size:15.5px; line-height:1.32; color:var(--vt-fg); }
+
+/* the failure tree — stays COLLAPSED, only revealed when reading is out of range */
+.iftree{ margin-top:11px; padding:9px 11px; background:var(--vt-bone-100); border:.5px solid var(--vt-rule); border-radius:var(--vt-radius-2,4px); }
+.iftree__k{ font-family:var(--vt-font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--vt-fg-3); margin-bottom:5px; }
+.iftree__t{ font-family:var(--vt-font-mono); font-size:11px; line-height:1.55; color:var(--vt-fg-2); }
+
+/* ======================================================================
+   PROTOTYPE CONTROLS — clearly a demo affordance, thin bottom-left chips
+   ====================================================================== */
+.controls{
+  position:absolute; left:14px; bottom:14px; z-index:55;
+  display:flex; align-items:center; gap:6px;
+  padding:5px; background:color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  border:.5px solid var(--vt-rule-strong); border-radius:var(--vt-radius-pill,999px);
+  box-shadow:0 6px 20px -10px oklch(40% .04 70 / .3);
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+}
+.ctrl{
+  display:inline-flex; align-items:center; gap:6px;
+  min-height:34px; padding:0 13px;
+  border:0; border-radius:var(--vt-radius-pill,999px);
+  background:transparent; color:var(--vt-fg-2);
+  font-family:var(--vt-font-mono); font-size:11px; letter-spacing:.03em;
+  cursor:pointer; white-space:nowrap;
+  transition:background var(--dur-1) var(--ease-instrument), color var(--dur-1) var(--ease-instrument);
+}
+.ctrl:hover{ background:var(--vt-bone-100); color:var(--vt-fg); }
+.ctrl:disabled{ opacity:.4; cursor:default; }
+.ctrl--primary{ background:var(--vt-signal-500); color:var(--vt-bone-50); }
+.ctrl--primary:hover{ background:var(--vt-signal-600); color:var(--vt-bone-50); }
+.ctrl__sym{ font-size:12px; }
+.ctrl-sep{ width:.5px; align-self:stretch; margin:5px 1px; background:var(--vt-rule-strong); }
+.ctrl-demo{
+  font-family:var(--vt-font-mono); font-size:8.5px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--vt-fg-3); padding:0 8px 0 4px;
+}
+
+/* recenter / back-to-step — load-bearing because the camera never auto-moves */
+.recenter{
+  position:absolute; right:14px; bottom:14px; z-index:55;
+  display:inline-flex; align-items:center; gap:7px;
+  min-height:34px; padding:0 13px;
+  background:color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  border:.5px solid var(--vt-rule-strong); border-radius:var(--vt-radius-pill,999px);
+  box-shadow:0 6px 20px -10px oklch(40% .04 70 / .3);
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+  color:var(--vt-fg-2); font-family:var(--vt-font-mono); font-size:11px; letter-spacing:.03em;
+  cursor:pointer;
+  opacity:0; transform:translateY(4px); pointer-events:none;
+  transition:opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out), background var(--dur-1) var(--ease-instrument);
+}
+.recenter.is-on{ opacity:1; transform:none; pointer-events:auto; }
+.recenter:hover{ background:var(--vt-bone-100); color:var(--vt-fg); }
+
+/* curator-only completeness — tiny, explicitly labeled, OFF by default for techs */
+.curator{
+  position:absolute; right:14px; top:60px; z-index:35;
+  display:none; align-items:center; gap:8px;
+  padding:5px 10px; border:.5px dashed var(--vt-rule-strong); border-radius:var(--vt-radius-2,4px);
+  background:color-mix(in oklab, var(--vt-bone-50), transparent 12%);
+  font-family:var(--vt-font-mono); font-size:9.5px; letter-spacing:.04em; color:var(--vt-fg-3);
+}
+.curator.is-on{ display:inline-flex; }
+.curator__tag{ font-size:8px; letter-spacing:.14em; text-transform:uppercase; color:var(--vt-signal-500); }
+.curator__c b{ color:var(--vt-fg-2); font-weight:500; }
+.curator__m b{ color:oklch(56% .15 55); font-weight:500; }
+.curator__sep{ color:var(--vt-rule-strong); }
+
+/* ======================================================================
+   MOBILE — single column, bottom sheet (peek, no scrim), canvas live above
+   ====================================================================== */
+@media (max-width:430px){
+  :root{ --vt-recede:.13; }
+  .sheet{ width:760px; height:640px; transform:translate(-50%,-50%) scale(.52); }
+  .scenario{ font-size:11px; padding:7px 13px; }
+  .scenario__sub{ display:none; }       /* keep the line tight on phone */
+  .scenmenu{ left:13px; right:13px; width:auto; top:58px; }
+  .curator{ top:auto; }
+
+  /* faded nodes drop their location/kind captions to fight clutter on phone */
+  .node.is-recede .node__kind,
+  .node.is-recede .node__loc{ display:none; }
+
+  /* detail becomes a non-modal bottom sheet — peek; canvas stays live above */
+  .card{
+    position:fixed; left:0; right:0; bottom:0; top:auto;
+    width:100%; max-width:none;
+    border-radius:14px 14px 0 0;
+    border-bottom:0;
+    box-shadow:0 -16px 44px -16px oklch(40% .04 70 / .34);
+    transform:translateY(100%);
+    transition:transform var(--dur-3) var(--ease-out);
+    max-height:62dvh; overflow-y:auto;
+    padding-bottom:max(16px, env(safe-area-inset-bottom));
+  }
+  .card.is-open{ transform:translateY(0); }
+  .card::before{
+    content:""; position:sticky; top:0; display:block;
+    width:36px; height:4px; margin:8px auto 2px;
+    background:var(--vt-rule-strong); border-radius:2px;
+  }
+  .card__head{ padding-top:6px; }
+  .pin{ min-height:44px; padding:0 12px; font-size:10px; }   /* >=44px touch target */
+  .pins{ gap:7px; }
+  .ctrl{ min-height:40px; }
+  .recenter{ min-height:40px; }
+  .controls{ left:10px; bottom:10px; }
+  .recenter{ right:10px; bottom:10px; }
+  /* leader line is meaningless once the card is a bottom sheet — hide it on phone */
+  .leader, .leader__dot{ display:none; }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .wire.flow, .wire.flow-pwm{ animation:none !important; }
+  .node, .card, .wire, .recenter, .scenmenu{ transition-duration:.01ms !important; }
+  .node.is-active{ transform:translate(-50%,-50%) !important; } /* drop the confident scale */
+}
+</style>
+</head>
+<body class="paper-ground">
+<div class="app">
+
+  <!-- thin recessed orientation ribbon -->
+  <div class="ribbon">
+    <span class="ribbon__brand">Vyntechs</span>
+    <span class="ribbon__spacer"></span>
+    <span class="ribbon__vehicle">2018 Ford F-250 · 6.7L Power Stroke</span>
+    <span class="ribbon__dot">·</span>
+    <span class="ribbon__code">P0087</span>
+  </div>
+
+  <div class="canvas" id="canvas">
+
+    <!-- scenario reading line — inline, low-contrast, within the canvas -->
+    <div class="scenario">
+      <span class="scenario__now">now showing</span>
+      <button class="scenario__pick" id="scenPick" aria-haspopup="true">
+        <span id="scenLabel">Key On · Engine Off</span><span class="caret">▾</span>
+      </button>
+      <span class="scenario__sub" id="scenSub">· <b>lift pump primes briefly, then stops</b></span>
+    </div>
+
+    <!-- scenario picker (pulled) -->
+    <div class="scenmenu" id="scenMenu"></div>
+
+    <!-- curator-only completeness (off for techs) -->
+    <div class="curator" id="curator">
+      <span class="curator__tag">curator</span>
+      <span class="curator__c"><b>25</b> parts mapped</span>
+      <span class="curator__sep">·</span>
+      <span class="curator__m"><b>4</b> need field check</span>
+    </div>
+
+    <!-- the fixed sheet: every wire + every node, drawn once -->
+    <div class="sheet" id="sheet">
+      <svg class="wires" id="wires" viewBox="0 0 1180 760" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="nodes"></div>
+    </div>
+
+    <!-- part-anchored detail card -->
+    <div class="card" id="card" role="dialog" aria-modal="false"></div>
+
+    <!-- prototype drive controls -->
+    <div class="controls">
+      <span class="ctrl-demo">demo</span>
+      <button class="ctrl" id="btnBack" title="previous test"><span class="ctrl__sym">◂</span> back</button>
+      <button class="ctrl ctrl--primary" id="btnNext" title="next test"><span class="ctrl__sym">▸</span> next test</button>
+      <span class="ctrl-sep"></span>
+      <button class="ctrl" id="btnWhole" title="bring all lights up"><span class="ctrl__sym">⌖</span> whole system</button>
+    </div>
+
+    <!-- recenter — load-bearing: nothing auto-moves -->
+    <button class="recenter" id="recenter"><span class="ctrl__sym">⌖</span> back to step</button>
+
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ----------------------------------------------------------------------
+   SCENE — the real 6.7 Power Stroke fuel system, placed once on a fixed
+   sheet. Positions are blueprint coordinates (in the 1180x760 viewBox).
+   The camera NEVER moves; steps only re-resolve which parts hold ink.
+---------------------------------------------------------------------- */
+
+// node geometry: id -> {x,y,name,kind,loc,prov,cls,why,term}
+const NODES = {
+  // ---- FOCUS NEIGHBORHOOD (driver-side frame rail, lower-left) ----
+  tank:    {x:120, y:470, name:"Fuel Tank", kind:"source · mechanical", loc:"under cab / frame", prov:"confirmed", term:true},
+  lift:    {x:340, y:470, name:"Electric Lift Pump", kind:"pump · low-pressure", loc:"driver-side frame rail", prov:"confirmed",
+            pins:[{id:"lp-12v",role:"12V",label:"12V Power",cls:"12v"},{id:"lp-gnd",role:"GND",label:"Ground",cls:"gnd"}]},
+  relay:   {x:340, y:300, name:"Lift Pump Relay", kind:"relay · BJB", loc:"battery junction box", prov:"confirmed"},
+  filter:  {x:560, y:470, name:"Primary Fuel Filter", kind:"filter · water sep.", loc:"DS frame rail", prov:"confirmed"},
+  gnd:     {x:340, y:618, name:"Chassis Ground", kind:"ground stud", loc:"frame", prov:"confirmed", term:true},
+  // ---- the symptom anchor, downstream, faded but labeled ----
+  frp:     {x:830, y:300, name:"FRP Sensor", kind:"sensor · 3-wire", loc:"front of DS rail", prov:"confirmed", why:"why we're here · P0087", anchor:true,
+            pins:[{id:"frp-signal",role:"SIG",label:"Signal",cls:"sig"},{id:"frp-5v",role:"5V",label:"5V Ref",cls:"sig"},{id:"frp-lref",role:"LREF",label:"Low Ref",cls:"sig"}]},
+
+  // ---- FADED BACKDROP — the dense real system, blueprint at the edges ----
+  pcm:     {x:600, y:90,  name:"PCM", kind:"module · controller", loc:"passenger firewall", prov:"confirmed"},
+  cp4:     {x:770, y:470, name:"Bosch CP4.2 HP Pump", kind:"pump · gear-driven", loc:"front of engine", prov:"confirmed"},
+  imv:     {x:770, y:360, name:"Inlet Metering Valve", kind:"valve · PWM", loc:"in CP4.2 body", prov:"confirmed"},
+  reg:     {x:1010,y:360, name:"FRP Regulator", kind:"actuator · PWM", loc:"back of DS rail", prov:"confirmed"},
+  vcv:     {x:900, y:470, name:"Volume Control Valve", kind:"valve · PWM", loc:"on HP pump", prov:"confirmed"},
+  railA:   {x:940, y:230, name:"HP Fuel Rail · Bank A", kind:"rail · driver side", loc:"one cylinder bank", prov:"confirmed"},
+  railB:   {x:1080,y:230, name:"HP Fuel Rail · Bank B", kind:"rail · passenger", loc:"opposite bank", prov:"confirmed"},
+  inj1:    {x:880, y:120, name:"Injector · Cyl 1", kind:"actuator", loc:"cyl 1", prov:"confirmed"},
+  inj2:    {x:950, y:120, name:"Injector · Cyl 2", kind:"actuator", loc:"cyl 2", prov:"confirmed"},
+  inj3:    {x:1020,y:120, name:"Injector · Cyl 3", kind:"actuator", loc:"cyl 3", prov:"confirmed"},
+  inj4:    {x:1090,y:120, name:"Injector · Cyl 4", kind:"actuator", loc:"cyl 4", prov:"confirmed"},
+  inj5:    {x:880, y:165, name:"Injector · Cyl 5", kind:"actuator", loc:"cyl 5", prov:"confirmed"},
+  inj6:    {x:950, y:165, name:"Injector · Cyl 6", kind:"actuator", loc:"cyl 6", prov:"confirmed"},
+  inj7:    {x:1020,y:165, name:"Injector · Cyl 7", kind:"actuator", loc:"cyl 7", prov:"confirmed"},
+  inj8:    {x:1090,y:165, name:"Injector · Cyl 8", kind:"actuator", loc:"cyl 8", prov:"confirmed"},
+  ref5v:   {x:600, y:200, name:"Shared 5V Ref Splice", kind:"splice", loc:"sensor bus", prov:"confirmed"},
+  lref:    {x:430, y:160, name:"Shared Low-Ref Splice", kind:"splice", loc:"sensor return", prov:"confirmed"},
+  level:   {x:120, y:580, name:"Fuel Level Sender", kind:"sensor", loc:"in tank", prov:"confirmed"},
+  wif:     {x:560, y:580, name:"Water-in-Fuel Sensor", kind:"sensor", loc:"in filter housing", prov:"confirmed"},
+  relief:  {x:1080,y:470, name:"Pressure Relief Valve", kind:"valve · passive", loc:"on HP rail", prov:"confirmed"},
+  ret:     {x:300, y:680, name:"Passive Return Circuit", kind:"mechanical", loc:"injectors → tank", prov:"inferred"},
+};
+
+// wires: from -> to (node ids or "node@pin"), role class, fluid?
+// "role" maps to the wire color; "kind" influences flow animation
+const WIRES = [
+  // focus electrical
+  {id:"w-relay-12v", from:"relay", to:"lift@lp-12v", role:"12v", flow:"flow"},
+  {id:"w-lift-gnd",  from:"lift@lp-gnd", to:"gnd", role:"ground"},
+  {id:"w-pcm-relay", from:"pcm", to:"relay", role:"signal"},
+  // focus fluid
+  {id:"w-tank-lift", from:"tank", to:"lift", role:"fluid"},
+  {id:"w-lift-filt", from:"lift", to:"filter", role:"fluid"},
+  {id:"w-filt-cp4",  from:"filter", to:"cp4", role:"fluid"},
+  // symptom anchor signal
+  {id:"w-frp-pcm",   from:"frp@frp-signal", to:"pcm", role:"signal"},
+  {id:"w-5v-frp",    from:"ref5v", to:"frp@frp-5v", role:"5v"},
+  {id:"w-frp-lref",  from:"frp@frp-lref", to:"lref", role:"signal"},
+  {id:"w-pcm-5v",    from:"pcm", to:"ref5v", role:"5v"},
+  {id:"w-lref-pcm",  from:"lref", to:"pcm", role:"signal"},
+
+  // ---- faded backdrop wiring (frozen blueprint) ----
+  {id:"w-cp4-railA", from:"cp4", to:"railA", role:"fluid"},
+  {id:"w-cp4-railB", from:"cp4", to:"railB", role:"fluid"},
+  {id:"w-pcm-imv",   from:"pcm", to:"imv", role:"pwm"},
+  {id:"w-imv-cp4",   from:"imv", to:"cp4", role:"mech"},
+  {id:"w-pcm-reg",   from:"pcm", to:"reg", role:"pwm"},
+  {id:"w-reg-railA", from:"reg", to:"railA", role:"mech"},
+  {id:"w-pcm-vcv",   from:"pcm", to:"vcv", role:"pwm"},
+  {id:"w-railA-i1",  from:"railA", to:"inj1", role:"fluid"},
+  {id:"w-railA-i2",  from:"railA", to:"inj2", role:"fluid"},
+  {id:"w-railA-i3",  from:"railA", to:"inj3", role:"fluid"},
+  {id:"w-railA-i4",  from:"railA", to:"inj4", role:"fluid"},
+  {id:"w-railB-i5",  from:"railB", to:"inj5", role:"fluid"},
+  {id:"w-railB-i6",  from:"railB", to:"inj6", role:"fluid"},
+  {id:"w-railB-i7",  from:"railB", to:"inj7", role:"fluid"},
+  {id:"w-railB-i8",  from:"railB", to:"inj8", role:"fluid"},
+  {id:"w-pcm-i1",    from:"pcm", to:"inj1", role:"signal"},
+  {id:"w-pcm-i8",    from:"pcm", to:"inj8", role:"signal"},
+  {id:"w-level-pcm", from:"level", to:"pcm", role:"signal"},
+  {id:"w-wif-pcm",   from:"wif", to:"pcm", role:"signal"},
+  {id:"w-relief-ret",from:"relief", to:"ret", role:"fluid"},
+  {id:"w-ret-tank",  from:"ret", to:"tank", role:"fluid"},
+  {id:"w-railB-relief", from:"railB", to:"relief", role:"fluid"},
+];
+
+/* ----------------------------------------------------------------------
+   SCENARIOS — the eight real ones; lift-pump 12V reading per scenario
+---------------------------------------------------------------------- */
+const SCENARIOS = [
+  {slug:"key-off", label:"Key Off", sub:"vehicle asleep — no power anywhere", lp12v:"0V — PCM not commanding pump", flow:false, fault:false},
+  {slug:"key-on", label:"Key On · Engine Off", sub:"lift pump primes briefly, then stops", lp12v:"12V briefly during prime, then 0V", flow:"prime", fault:false},
+  {slug:"idle", label:"Engine Idle", sub:"lift pump steady, FRP at idle pressure", lp12v:"12V steady", flow:true, fault:false},
+  {slug:"light-load", label:"Light Load", sub:"cruising / light throttle", lp12v:"12V steady", flow:true, fault:false},
+  {slug:"medium-load", label:"Medium Load", sub:"towing / moderate accel", lp12v:"12V steady", flow:true, fault:false},
+  {slug:"heavy-load", label:"Heavy Load", sub:"WOT / heavy tow — peak duty", lp12v:"12V steady", flow:true, fault:false},
+  {slug:"fault-high", label:"Fault Sim: Pegged High", sub:"FRP signal stuck high", lp12v:"12V steady (pump runs regardless of pressure fault)", flow:true, fault:true},
+  {slug:"fault-low", label:"Fault Sim: No Rail Pressure", sub:"FRP signal flat low", lp12v:"12V steady — if pump silent, suspect ground or motor", flow:true, fault:true},
+];
+let scenarioIdx = 1; // Key On · Engine Off
+
+/* ----------------------------------------------------------------------
+   DETAIL CONTENT — the real strings, ordered step-aware
+---------------------------------------------------------------------- */
+const PART_DETAIL = {
+  "lift@lp-12v": {
+    eyebrow:"Electric Lift Pump · 12V Power", title:"12V Power", anchorNode:"lift", pinId:"lp-12v",
+    expect:"<b>12V</b> when commanded by PCM (key-on prime, cranking, or running)",
+    probe:"Back-probe the power wire at the lift pump connector under the truck near the tank.",
+    prov:"theory", provLabel:"from theory",
+    provWhy:"Two-wire electric pump in the tank; a power feed switched by the lift pump relay is the canonical 6.7 layout. A field check confirms wire color, the connector pin number, and the upstream relay/fuse IDs.",
+    amber:"Wire color · connector pin number · prime duration · upstream relay/fuse IDs — not yet captured",
+    iftree:"0V when commanded → probe upstream: fuel pump relay, fuse, driver module.  12V but pump silent → ground side broken or pump seized.",
+    connector:"2 wires — one power, one ground", wires:"power feed (this pin) + ground return",
+    location:"driver-side frame rail, at the tank-mounted connector",
+    theori:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command."
+  },
+  "lift@lp-gnd": {
+    eyebrow:"Electric Lift Pump · Ground", title:"Ground", anchorNode:"lift", pinId:"lp-gnd",
+    nowOverride:"Continuity to chassis", expect:"<b>&lt; 0.5 Ω</b> continuity to chassis",
+    probe:"Resistance check from the ground wire at the lift pump connector to chassis ground.",
+    prov:"theory", provLabel:"from theory",
+    provWhy:"An electric pump returns through a chassis stud near the tank — standard. A field check confirms the wire color and the exact stud location.",
+    amber:"Wire color · exact chassis stud location — not yet captured",
+    iftree:"Open or high resistance → broken ground wire between the pump and the chassis stud, OR corroded ground point.",
+    connector:"2 wires — one power, one ground", wires:"ground return (this pin) + power feed",
+    location:"runs to a chassis stud near the tank",
+    theori:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command."
+  },
+  "lift": {
+    eyebrow:"Component", title:"Electric Lift Pump", anchorNode:"lift",
+    role:"Pulls fuel through the tank filter/water separator and pushes it forward to the engine filter, then to the high-pressure pump. Target supply ~55 psi at idle.",
+    prov:"theory", provLabel:"from theory",
+    provWhy:"The low-pressure stage of every 6.7 fuel system is a two-wire in-tank pump. A field check captures the electrical specifics for this exact truck.",
+    amber:"voltage, current draw, connector type — not yet captured",
+    connector:"2 wires — one power, one ground", wires:"one power, one ground",
+    location:"driver-side frame rail",
+    theori:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command."
+  },
+  "frp@frp-signal": {
+    eyebrow:"FRP Sensor · Signal", title:"FRP · Signal", anchorNode:"frp", pinId:"frp-signal",
+    nowOverride:"Low voltage representing rest rail pressure", expect:"Analog <b>0–5V</b> proportional to rail pressure — low at rest, climbs as the rail pressurizes",
+    probe:"Back-probe the signal pin at the FRP sensor connector (front of DS rail).",
+    prov:"theory", provLabel:"from theory",
+    provWhy:"3-wire analog rail-pressure sensor reporting straight to PCM is canonical. The exact voltage-to-pressure curve is the field-check item.",
+    amber:"Wire color · sensor pin number · exact voltage-to-pressure curve — not yet captured",
+    connector:"3 wires — signal, 5V ref (shared), low ref (shared)", wires:"signal (this pin), 5V reference, low reference",
+    location:"front of the driver-side fuel rail",
+    theori:"Reports actual rail pressure to PCM so the PWM control loop can hit its target. The 5V and low reference each route through shared splices — a failed shared splice pulls down every sensor on that bus."
+  }
+};
+
+/* ----------------------------------------------------------------------
+   STEPS — only the focus set changes; the sheet never moves.
+   stepType drives content ordering; no "step N of M" ever shown.
+---------------------------------------------------------------------- */
+const STEPS = [
+  {
+    id:"probe-12v", type:"probe",
+    focusNodes:["tank","lift","relay","filter","gnd","frp"],
+    focusWires:["w-relay-12v","w-lift-gnd","w-pcm-relay","w-tank-lift","w-lift-filt","w-filt-cp4","w-frp-pcm","w-5v-frp","w-frp-lref","w-pcm-5v","w-lref-pcm"],
+    activeWires:["w-relay-12v"],
+    autoOpen:"lift@lp-12v", activePin:"lift@lp-12v"
+  },
+  {
+    id:"probe-gnd", type:"probe",
+    focusNodes:["lift","gnd","filter","frp"],
+    focusWires:["w-lift-gnd","w-tank-lift","w-lift-filt"],
+    activeWires:["w-lift-gnd"],
+    autoOpen:"lift@lp-gnd", activePin:"lift@lp-gnd"
+  }
+];
+let stepIdx = 0;
+let wholeSystem = false;
+
+/* ----------------------------------------------------------------------
+   RENDER
+---------------------------------------------------------------------- */
+const nodesEl = document.getElementById("nodes");
+const wiresEl = document.getElementById("wires");
+const cardEl  = document.getElementById("card");
+const sheetEl = document.getElementById("sheet");
+
+function nodeCenter(id){ const n = NODES[id]; return {x:n.x, y:n.y}; }
+// resolve a wire endpoint "node" or "node@pin" to a point near the node edge
+function endpoint(ref){
+  const [nid] = ref.split("@");
+  return nodeCenter(nid);
+}
+
+// ---- draw wires (once) ----
+function drawWires(){
+  let svg = "";
+  // casings first (under), then wires
+  WIRES.forEach(w=>{
+    const a = endpoint(w.from), b = endpoint(w.to);
+    // gentle orthogonal-ish curve: vertical-biased control points read as harness routing
+    const mx = (a.x+b.x)/2;
+    const d = `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
+    svg += `<path class="wire wire--casing" data-wid="${w.id}-casing" d="${d}"></path>`;
+  });
+  WIRES.forEach(w=>{
+    const a = endpoint(w.from), b = endpoint(w.to);
+    const mx = (a.x+b.x)/2;
+    const d = `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
+    svg += `<path class="wire wire--${w.role}" data-wid="${w.id}" d="${d}"></path>`;
+  });
+  // leader line group (drawn last, on top)
+  svg += `<path class="leader" id="leader" d=""></path><circle class="leader__dot" id="leaderDot" r="3"></circle>`;
+  wiresEl.innerHTML = svg;
+}
+
+// ---- draw nodes (once) ----
+function drawNodes(){
+  let html = "";
+  for(const id in NODES){
+    const n = NODES[id];
+    const provCls = n.prov ? `node--${n.prov}` : "";
+    const anchorCls = n.anchor ? "node--anchor" : "";
+    const termCls = n.term ? "node--term" : "";
+    let pins = "";
+    if(n.pins){
+      pins = `<div class="pins">` + n.pins.map(p=>
+        `<button class="pin pin--${p.cls}" data-pin="${id}@${p.id}"><span class="pin__role">${p.role}</span></button>`
+      ).join("") + `</div>`;
+    }
+    const why = n.why ? `<div class="node__why">${n.why}</div>` : "";
+    html += `<div class="node ${provCls} ${anchorCls} ${termCls}" id="node-${id}" data-node="${id}"
+                  style="left:${n.x}px; top:${n.y}px;">
+        <div class="node__name">${n.name}</div>
+        <div class="node__kind">${n.kind}</div>
+        <div class="node__loc">${n.loc}</div>
+        ${why}${pins}
+      </div>`;
+  }
+  nodesEl.innerHTML = html;
+}
+
+/* ----------------------------------------------------------------------
+   THE DIMMER — re-resolve which parts hold ink. Nothing moves.
+---------------------------------------------------------------------- */
+let openPartKey = null;
+let peekNode = null;
+
+function applyFocus(){
+  const step = STEPS[stepIdx];
+  const focusN = new Set(step.focusNodes);
+  const focusW = new Set(step.focusWires);
+  const activeW = new Set(step.activeWires);
+  const sc = SCENARIOS[scenarioIdx];
+
+  // nodes
+  for(const id in NODES){
+    const el = document.getElementById("node-"+id);
+    const lit = wholeSystem || focusN.has(id);
+    el.classList.toggle("is-recede", !lit);
+    if(peekNode !== id) el.classList.remove("is-peek");
+  }
+  // wires
+  WIRES.forEach(w=>{
+    const path = wiresEl.querySelector(`[data-wid="${w.id}"]`);
+    const casing = wiresEl.querySelector(`[data-wid="${w.id}-casing"]`);
+    const lit = wholeSystem || focusW.has(w.id);
+    const isActive = !wholeSystem && activeW.has(w.id);
+    path.classList.toggle("is-recede", !lit);
+    path.classList.toggle("is-active", isActive);
+    casing.classList.toggle("is-recede", !lit);
+    casing.classList.toggle("is-active", isActive);
+    // current flow only on the active feed, only when the scenario powers it
+    path.classList.remove("flow","flow-pwm");
+    if(isActive && sc.flow){
+      path.classList.add(w.role==="pwm" ? "flow-pwm" : "flow");
+    }
+  });
+}
+
+/* ----------------------------------------------------------------------
+   DETAIL CARD — part-anchored, leads with the step-relevant reading
+---------------------------------------------------------------------- */
+function liftPumpNow(){ return SCENARIOS[scenarioIdx].lp12v; }
+
+function buildCard(key){
+  const d = PART_DETAIL[key];
+  if(!d) return "";
+  const step = STEPS[stepIdx];
+  const isReadingLead = (step.type === "probe") && (d.pinId);
+  const sc = SCENARIOS[scenarioIdx];
+
+  // the NOW value — for the 12V pin it is scenario-bound; others use override
+  let nowVal = d.nowOverride || "";
+  if(key === "lift@lp-12v") nowVal = liftPumpNow();
+
+  const provClass = d.prov === "verified" ? "prov--verified" : (d.prov==="theory" ? "prov--theory" : "");
+  let html = `
+    <div class="card__head">
+      <div class="card__head-main">
+        <div class="card__eyebrow">${d.eyebrow}</div>
+        <div class="card__title">${d.title}</div>
+      </div>
+      <button class="card__close" id="cardClose" aria-label="dismiss">✕</button>
+    </div>
+    <div class="card__body">`;
+
+  // LEAD: the reading, when mid-probe on a pin
+  if(isReadingLead && nowVal){
+    html += `
+      <div class="reading">
+        <div class="reading__label"><span>right now</span><span class="reading__scenario tnum">${sc.label}</span></div>
+        <div class="reading__now tnum">${nowVal}</div>
+        <div class="reading__expect"><span class="k">should read</span>${d.expect}</div>
+      </div>
+      <div class="probe"><span class="probe__k">probe</span><span class="probe__t">${d.probe}</span></div>`;
+  } else {
+    // ORIENT/LOCATE-style lead (component tapped, or non-probe step): role then location
+    if(d.role){ html += `<div class="probe" style="margin-bottom:11px"><span class="probe__t">${d.role}</span></div>`; }
+    if(d.probe){ html += `<div class="probe"><span class="probe__k">probe</span><span class="probe__t">${d.probe}</span></div>`; }
+  }
+
+  // provenance caption — IS the see-source link
+  html += `<button class="prov ${provClass}" data-prov><span class="prov__label">${d.provLabel}</span> · <span class="prov__why">why?</span></button>`;
+  if(d.provWhy){ html += `<div class="prov-detail" data-prov-detail>${d.provWhy}</div>`; }
+
+  // amber honest-unknown — needs field check
+  if(d.amber){
+    html += `<div class="amber"><div class="amber__k">needs field check</div><div class="amber__t">${d.amber}</div></div>`;
+  }
+
+  // failure tree — COLLAPSED, behind a tap; never pre-loaded on a passing probe
+  if(d.iftree){
+    html += `<div class="more" data-iftree>
+        <button class="more__toggle" data-iftree-toggle><span>if the reading is wrong</span><span class="caret">›</span></button>
+        <div class="more__body"><div class="iftree"><div class="iftree__t tnum">${d.iftree}</div></div></div>
+      </div>`;
+  }
+
+  // secondary architecture — connector / wires / location / Operational Theori (below the fold)
+  html += `<div class="more" data-more>
+      <button class="more__toggle" data-more-toggle><span>connector · wires · Operational Theori</span><span class="caret">›</span></button>
+      <div class="more__body">`;
+  if(d.connector){ html += `<div class="more__row"><div class="more__k">connector</div><div class="more__v">${d.connector}</div></div>`; }
+  if(d.wires){ html += `<div class="more__row"><div class="more__k">wires</div><div class="more__v">${d.wires}</div></div>`; }
+  if(d.location){ html += `<div class="more__row"><div class="more__k">location</div><div class="more__v">${d.location}</div></div>`; }
+  if(d.theori){ html += `<div class="more__theori"><div class="more__theori-k">Operational Theori</div><div class="more__theori-t">${d.theori}</div></div>`; }
+  html += `</div></div>`;
+
+  html += `</div>`;
+  return html;
+}
+
+// MOBILE: a one-time settle that lifts the fixed sheet so the active part
+// lands in the live band above the bottom sheet — NOT a pan-during-work; it
+// re-centres only on card open / step entry (the same camera discipline).
+const MOBILE_SCALE = 0.52;
+function frameFocusMobile(nodeId){
+  const n = NODES[nodeId];
+  if(!n) return;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  // target screen spot: 24% down, horizontally centred
+  const targetY = vh * 0.24, targetX = vw * 0.5;
+  // node position within the sheet (viewBox), scaled to screen px
+  const nodeScreenX = (n.x - 590) * MOBILE_SCALE; // 590 = half of 1180 viewBox
+  const nodeScreenY = (n.y - 380) * MOBILE_SCALE; // 380 = half of 760 viewBox
+  // canvas centre (the sheet's translate(-50%,-50%) origin) is mid-canvas
+  const canvas = document.getElementById("canvas").getBoundingClientRect();
+  const cx = canvas.left + canvas.width/2, cy = canvas.top + canvas.height/2;
+  const dx = targetX - (cx + nodeScreenX);
+  const dy = targetY - (cy + nodeScreenY);
+  sheetEl.style.transition = "transform var(--dur-3) var(--ease-instrument)";
+  sheetEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${MOBILE_SCALE})`;
+}
+function resetSheetTransform(){
+  const isMobile = window.matchMedia("(max-width:430px)").matches;
+  sheetEl.style.transition = "transform var(--dur-3) var(--ease-instrument)";
+  sheetEl.style.transform = isMobile
+    ? `translate(-50%,-50%) scale(${MOBILE_SCALE})`
+    : "translate(-50%,-50%)";
+}
+
+function positionCard(key){
+  const d = PART_DETAIL[key];
+  if(!d) return;
+  const isMobile = window.matchMedia("(max-width:430px)").matches;
+  if(isMobile){
+    // bottom sheet handles its own placement via CSS; frame the worked part
+    // into the live band ABOVE the sheet so the truck stays under the hand.
+    frameFocusMobile(d.anchorNode);
+    drawLeader(null);
+    return;
+  }
+  const anchorEl = document.getElementById("node-"+d.anchorNode);
+  const canvasRect = document.getElementById("canvas").getBoundingClientRect();
+  const aRect = anchorEl.getBoundingClientRect();
+  const cardW = 336;
+  const gap = 28;
+
+  // anchor to a STABLE side: prefer right of the part; flip left if it would clip
+  let left = aRect.right - canvasRect.left + gap;
+  if(left + cardW > canvasRect.width - 14){
+    left = aRect.left - canvasRect.left - cardW - gap;
+  }
+  left = Math.max(14, left);
+  // vertical: align near the part top, clamp into the canvas
+  let top = aRect.top - canvasRect.top - 10;
+  const cardH = cardEl.offsetHeight || 360;
+  top = Math.max(86, Math.min(top, canvasRect.height - cardH - 70));
+
+  cardEl.style.left = left + "px";
+  cardEl.style.top = top + "px";
+  cardEl.style.right = "auto"; cardEl.style.bottom = "auto";
+
+  // leader line from card edge to the tapped pin/part
+  requestAnimationFrame(()=> drawLeader(key));
+}
+
+function drawLeader(key){
+  const leader = document.getElementById("leader");
+  const dot = document.getElementById("leaderDot");
+  if(!key){ leader.classList.remove("is-on"); dot.classList.remove("is-on"); return; }
+  const d = PART_DETAIL[key];
+  // target = the pin chip if present, else the node
+  let targetEl;
+  if(d.pinId){ targetEl = nodesEl.querySelector(`[data-pin="${d.anchorNode}@${d.pinId}"]`); }
+  if(!targetEl){ targetEl = document.getElementById("node-"+d.anchorNode); }
+  const sheetRect = sheetEl.getBoundingClientRect();
+  const tRect = targetEl.getBoundingClientRect();
+  const cRect = cardEl.getBoundingClientRect();
+  // scale: viewBox 1180x760 mapped onto sheetRect
+  const sx = 1180 / sheetRect.width, sy = 760 / sheetRect.height;
+  const tx = (tRect.left + tRect.width/2 - sheetRect.left) * sx;
+  const ty = (tRect.top + tRect.height/2 - sheetRect.top) * sy;
+  // card-side anchor: midpoint of card edge nearest the target, in viewBox space
+  const cardMidY = cRect.top + Math.min(cRect.height/2, 60);
+  const cardSide = (cRect.left > tRect.left) ? cRect.left : cRect.right;
+  const cx = (cardSide - sheetRect.left) * sx;
+  const cy = (cardMidY - sheetRect.top) * sy;
+  const mx = (tx+cx)/2;
+  leader.setAttribute("d", `M ${cx} ${cy} C ${mx} ${cy}, ${mx} ${ty}, ${tx} ${ty}`);
+  dot.setAttribute("cx", tx); dot.setAttribute("cy", ty);
+  leader.classList.add("is-on"); dot.classList.add("is-on");
+}
+
+function openCard(key, viaPin){
+  // clear previous active marks
+  nodesEl.querySelectorAll(".pin.is-active").forEach(p=>p.classList.remove("is-active"));
+  nodesEl.querySelectorAll(".node.is-active").forEach(n=>n.classList.remove("is-active"));
+
+  const d = PART_DETAIL[key];
+  if(!d){ return; }
+  openPartKey = key;
+  cardEl.innerHTML = buildCard(key);
+
+  // mark the part the tech declared intent on
+  const node = document.getElementById("node-"+d.anchorNode);
+  node.classList.add("is-active");
+  if(d.pinId){
+    const pinEl = nodesEl.querySelector(`[data-pin="${d.anchorNode}@${d.pinId}"]`);
+    if(pinEl) pinEl.classList.add("is-active");
+  }
+
+  // if a FADED part was tapped, peek it up from the recede floor (don't disturb the mask)
+  const step = STEPS[stepIdx];
+  const lit = wholeSystem || step.focusNodes.includes(d.anchorNode);
+  peekNode = null;
+  if(!lit){ node.classList.add("is-peek"); peekNode = d.anchorNode; }
+
+  cardEl.classList.add("is-open");
+  wireCardEvents();
+  positionCard(key);
+}
+
+function closeCard(){
+  cardEl.classList.remove("is-open");
+  resetSheetTransform();
+  drawLeader(null);
+  nodesEl.querySelectorAll(".pin.is-active").forEach(p=>p.classList.remove("is-active"));
+  nodesEl.querySelectorAll(".node.is-active").forEach(n=>n.classList.remove("is-active"));
+  if(peekNode){ const n = document.getElementById("node-"+peekNode); if(n) n.classList.remove("is-peek"); peekNode=null; }
+  openPartKey = null;
+}
+
+function wireCardEvents(){
+  cardEl.querySelector("#cardClose").addEventListener("click", (e)=>{ e.stopPropagation(); closeCard(); });
+  // provenance see-source toggle
+  const prov = cardEl.querySelector("[data-prov]");
+  const provD = cardEl.querySelector("[data-prov-detail]");
+  if(prov && provD){
+    prov.addEventListener("click",(e)=>{ e.stopPropagation();
+      const on = provD.classList.toggle("is-open"); prov.classList.toggle("is-open", on);
+      if(openPartKey) requestAnimationFrame(()=>positionCard(openPartKey));
+    });
+  }
+  // secondary expand
+  const more = cardEl.querySelector("[data-more]");
+  if(more){ more.querySelector("[data-more-toggle]").addEventListener("click",(e)=>{ e.stopPropagation();
+    more.classList.toggle("is-open"); if(openPartKey) requestAnimationFrame(()=>positionCard(openPartKey)); }); }
+  // failure tree expand
+  const ift = cardEl.querySelector("[data-iftree]");
+  if(ift){ ift.querySelector("[data-iftree-toggle]").addEventListener("click",(e)=>{ e.stopPropagation();
+    ift.classList.toggle("is-open"); if(openPartKey) requestAnimationFrame(()=>positionCard(openPartKey)); }); }
+}
+
+/* ----------------------------------------------------------------------
+   STEP CHANGE — re-resolve the light, settle, keep focus stable
+---------------------------------------------------------------------- */
+function goToStep(i){
+  stepIdx = Math.max(0, Math.min(STEPS.length-1, i));
+  wholeSystem = false;
+  applyFocus();
+  updateRecenter();
+  const step = STEPS[stepIdx];
+  // the step's signature: open its lead detail (the reading for this test)
+  if(step.autoOpen){
+    openCard(step.autoOpen, true);
+  } else {
+    closeCard();
+  }
+  syncControls();
+}
+
+function showWholeSystem(){
+  wholeSystem = true;
+  applyFocus();
+  closeCard();
+  resetSheetTransform();
+  updateRecenter();
+}
+
+function backToStep(){
+  wholeSystem = false;
+  applyFocus();
+  const step = STEPS[stepIdx];
+  if(step.autoOpen) openCard(step.autoOpen, true);
+  updateRecenter();
+}
+
+function updateRecenter(){
+  // recenter is load-bearing: show it whenever the view is OFF the step focus
+  // (whole-system on, OR a faded part is being peeked / card open off-step)
+  const rc = document.getElementById("recenter");
+  const offStep = wholeSystem || (peekNode !== null);
+  rc.classList.toggle("is-on", offStep);
+}
+
+function syncControls(){
+  document.getElementById("btnBack").disabled = (stepIdx === 0);
+  document.getElementById("btnNext").disabled = (stepIdx === STEPS.length-1);
+}
+
+/* ----------------------------------------------------------------------
+   SCENARIO PICKER
+---------------------------------------------------------------------- */
+function buildScenMenu(){
+  const m = document.getElementById("scenMenu");
+  m.innerHTML = SCENARIOS.map((s,i)=>
+    `<button class="scenmenu__row ${i===scenarioIdx?'is-active':''} ${s.fault?'scenmenu__row--fault':''}" data-scen="${i}">
+       <span class="scenmenu__name tnum">${s.label}</span>
+       <span class="scenmenu__sub">${s.sub}</span>
+     </button>`).join("");
+  m.querySelectorAll("[data-scen]").forEach(b=>{
+    b.addEventListener("click",(e)=>{ e.stopPropagation(); setScenario(parseInt(b.dataset.scen,10)); closeScenMenu(); });
+  });
+}
+function setScenario(i){
+  scenarioIdx = i;
+  const s = SCENARIOS[i];
+  document.getElementById("scenLabel").textContent = s.label;
+  document.getElementById("scenSub").innerHTML = `· <b>${s.sub}</b>`;
+  applyFocus(); // only wire-flow + readings re-render; the mask is keyed to the step, not the scenario
+  // if the card is open, refresh the reading in place (no re-dim)
+  if(openPartKey){ const k = openPartKey; const node = document.getElementById("node-"+PART_DETAIL[k].anchorNode);
+    cardEl.innerHTML = buildCard(k); wireCardEvents();
+    node.classList.add("is-active");
+    if(PART_DETAIL[k].pinId){ const pe = nodesEl.querySelector(`[data-pin="${PART_DETAIL[k].anchorNode}@${PART_DETAIL[k].pinId}"]`); if(pe) pe.classList.add("is-active"); }
+    positionCard(k);
+  }
+}
+function openScenMenu(){ buildScenMenu(); document.getElementById("scenMenu").classList.add("is-open"); }
+function closeScenMenu(){ document.getElementById("scenMenu").classList.remove("is-open"); }
+
+/* ----------------------------------------------------------------------
+   WIRE UP
+---------------------------------------------------------------------- */
+function init(){
+  drawWires();
+  drawNodes();
+
+  // tap a pin → pull its detail
+  nodesEl.addEventListener("click",(e)=>{
+    const pinBtn = e.target.closest(".pin");
+    if(pinBtn){ e.stopPropagation();
+      const key = pinBtn.dataset.pin;
+      if(PART_DETAIL[key]) openCard(key, true);
+      else { // pin with no dedicated detail → fall back to component
+        const nid = key.split("@")[0];
+        if(PART_DETAIL[nid]) openCard(nid, true);
+      }
+      updateRecenter();
+      return;
+    }
+    const nodeEl = e.target.closest(".node");
+    if(nodeEl){ e.stopPropagation();
+      const nid = nodeEl.dataset.node;
+      // prefer the component detail; else the node's first pin detail
+      if(PART_DETAIL[nid]){ openCard(nid, false); }
+      else {
+        const n = NODES[nid];
+        if(n.pins){ const k = nid+"@"+n.pins[0].id; if(PART_DETAIL[k]) openCard(k, true); }
+      }
+      updateRecenter();
+    }
+  });
+
+  // dismiss on background tap (canvas pane), keep menu/controls clicks alive
+  document.getElementById("canvas").addEventListener("click",(e)=>{
+    if(e.target.closest(".card") || e.target.closest(".node") || e.target.closest(".controls")
+       || e.target.closest(".recenter") || e.target.closest(".scenario") || e.target.closest(".scenmenu")) return;
+    closeCard(); closeScenMenu(); updateRecenter();
+  });
+
+  // prototype controls
+  document.getElementById("btnNext").addEventListener("click",(e)=>{ e.stopPropagation(); goToStep(stepIdx+1); });
+  document.getElementById("btnBack").addEventListener("click",(e)=>{ e.stopPropagation(); goToStep(stepIdx-1); });
+  document.getElementById("btnWhole").addEventListener("click",(e)=>{ e.stopPropagation(); showWholeSystem(); });
+  document.getElementById("recenter").addEventListener("click",(e)=>{ e.stopPropagation(); backToStep(); });
+
+  // scenario
+  document.getElementById("scenPick").addEventListener("click",(e)=>{ e.stopPropagation();
+    const m = document.getElementById("scenMenu");
+    m.classList.contains("is-open") ? closeScenMenu() : openScenMenu();
+  });
+
+  // keyboard: arrows drive steps, esc dismisses
+  window.addEventListener("keydown",(e)=>{
+    if(e.key==="Escape"){ closeCard(); closeScenMenu(); updateRecenter(); }
+    if(e.key==="ArrowRight"){ goToStep(stepIdx+1); }
+    if(e.key==="ArrowLeft"){ goToStep(stepIdx-1); }
+  });
+
+  // reposition card / leader on resize
+  let rt;
+  window.addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(openPartKey) positionCard(openPartKey); },120); });
+
+  // curator role toggle (demo): ?role=curator turns the completeness chip on
+  if(new URLSearchParams(location.search).get("role")==="curator"){
+    document.getElementById("curator").classList.add("is-on");
+  }
+
+  // open on step 1 with its lead reading pulled — the signature settle
+  goToStep(0);
+}
+
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", init);
+else init();
+</script>
+</body>
+</html>
