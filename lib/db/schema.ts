@@ -884,6 +884,7 @@ export const testActions = pgTable(
       ],
     }).notNull(),
     meterMode: text('meter_mode'),
+    stepKind: text('step_kind'),
     expectedValue: real('expected_value'),
     expectedUnit: text('expected_unit'),
     expectedTolerance: real('expected_tolerance'),
@@ -1106,6 +1107,7 @@ export const pinScenarioReadings = pgTable(
       .notNull()
       .references(() => systemScenarios.id, { onDelete: 'cascade' }),
     reading: text('reading').notNull(),
+    isOutOfRange: boolean('is_out_of_range'),
   },
   (t) => [
     primaryKey({ columns: [t.pinId, t.scenarioId] }),
