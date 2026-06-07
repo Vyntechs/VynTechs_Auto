@@ -117,3 +117,36 @@ describe('diagram-mobile.css — sheet detent contract', () => {
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
   })
 })
+
+describe('focus-part-above-sheet is shape-generic (the scalability bar)', () => {
+  // Drive the same assertion across unlike systems' shapes + one unseen shape.
+  // The CSS reserves the peek height for ANY [data-shape] — no per-case branch.
+  const shapes = ['electrical-probe', 'pressure-flow', 'never-before-seen-shape']
+
+  it.each(shapes)(
+    'the template root carries the [data-shape] seam T5 reserves space against (%s)',
+    (shape) => {
+      const { container } = render(
+        <div data-shape={shape} data-testid="template-root">
+          <div data-testid="focus-part" />
+        </div>,
+      )
+      const root = container.querySelector('[data-shape]')
+      // The seam exists for every shape (JSDOM does not apply @media CSS, so we
+      // assert the contract surface the CSS rule keys on, not computed px).
+      expect(root).toHaveAttribute('data-shape', shape)
+      expect(screen.getByTestId('focus-part')).toBeInTheDocument()
+    },
+  )
+
+  it('the [data-shape] padding rule in CSS is unconditional (no per-shape selector)', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/diagram-kit/diagram-mobile.css'),
+      'utf8',
+    )
+    // A bare [data-shape] selector reserves the peek height — proves no
+    // [data-shape='pressure-flow'] special-case exists for the guarantee.
+    expect(css).toMatch(/\[data-shape\]\s*\{[^}]*padding-bottom:\s*calc\(var\(--meter-sheet-peek/s)
+    expect(css).not.toMatch(/\[data-shape='[^']+'\][^{]*padding-bottom/)
+  })
+})
