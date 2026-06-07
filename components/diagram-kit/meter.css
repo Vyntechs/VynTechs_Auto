@@ -1,0 +1,186 @@
+/* The Meter — EXPECT / NOW / VERDICT hero. Ported from the validated canon in
+   .design-shots/mockups/proto-meter.html (.meter-card / .m-instr / .m-expect /
+   .m-now / .m-verdict). Red ONLY for out-of-range / branch-fail (.m-chip.fail);
+   neutral is graphite (.m-chip.neutral) — the verdict is decided upstream (C3),
+   this file only styles the signal it is handed. */
+
+.meter-card {
+  position: relative;
+  max-width: 760px;
+  background: linear-gradient(var(--vt-bone-50), var(--vt-bone-100));
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 5px;
+  box-shadow: 0 -2px 24px oklch(40% 0.012 70 / 0.12), 0 1px 0 oklch(100% 0 0 / 0.6) inset;
+  padding: 15px 20px 16px;
+}
+.meter-card::before {
+  /* engraved top hairline highlight */
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 0;
+  height: 0.5px;
+  background: var(--vt-rule);
+}
+
+.meter-card .m-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+.meter-card .m-label {
+  font-family: var(--vt-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+}
+.meter-card .m-step {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-bone-500);
+  padding: 2px 7px;
+  border: 0.5px solid var(--vt-rule);
+  border-radius: 3px;
+}
+
+/* THE INSTRUMENT BLOCK — the hero */
+.meter-card .m-instr {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 22px;
+  align-items: stretch;
+}
+.meter-card .m-expect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.meter-card .m-col-label {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.meter-card .m-plate {
+  border: 0.5px solid var(--vt-bone-600);
+  border-radius: 4px;
+  background: var(--vt-bone-50);
+  padding: 10px 20px;
+  min-width: 128px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 0 oklch(100% 0 0 / 0.6) inset;
+}
+.meter-card .m-plate .big {
+  font-family: var(--vt-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 46px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 0.9;
+  color: var(--vt-fg);
+}
+.meter-card .m-plate .unit {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--vt-fg-2);
+  margin-left: 3px;
+}
+
+.meter-card .m-now {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  justify-content: center;
+  padding-top: 2px;
+}
+.meter-card .m-now-val {
+  font-family: var(--vt-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--vt-fg);
+}
+.meter-card .m-now-val .unit {
+  color: var(--vt-fg-2);
+}
+.meter-card .m-now-empty {
+  font-family: var(--vt-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--vt-fg-3);
+}
+
+/* verdict chip — graphite by default; red ONLY for the fault signals */
+.meter-card .m-verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 7px;
+}
+.meter-card .m-chip {
+  font-family: var(--vt-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 4px;
+  color: var(--vt-fg-2);
+  white-space: nowrap;
+}
+.meter-card .m-chip .gly {
+  font-size: 13px;
+  line-height: 1;
+}
+.meter-card .m-chip.neutral {
+  color: var(--vt-fg-3);
+}
+.meter-card .m-chip.fail {
+  color: var(--vt-risk-high);
+  border-color: color-mix(in oklch, var(--vt-risk-high) 50%, var(--vt-rule-strong));
+}
+
+/* Mobile: stack EXPECT/NOW, verdict drops to its own row (port of proto @media). */
+@media (max-width: 540px) {
+  .meter-card .m-instr {
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+  }
+  .meter-card .m-verdict {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: 2px;
+  }
+  .meter-card .m-plate {
+    min-width: 104px;
+    padding: 8px 14px;
+  }
+  .meter-card .m-plate .big {
+    font-size: 38px;
+  }
+  .meter-card .m-now-val {
+    font-size: 16px;
+  }
+}
