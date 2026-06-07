@@ -628,3 +628,60 @@ describe('loadSystemTopology — surfaces meter + branch fields additively', () 
     expect(action.stepKind).toBeNull()
   })
 })
+
+describe('loadSystemTopology — surfaces symptom-test-implication priority', () => {
+  it('sets priority from symptom_test_implications for implicated actions and null otherwise', async () => {
+    const platformId = await seedPlatform()
+    const [symptomRow] = await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    }).returning({ id: symptoms.id })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [implicated] = await db.insert(testActionsT).values({
+      slug: 'measure-rail-pressure',
+      componentId: rail.id,
+      description: 'Read fuel rail pressure',
+      scenarioRequired: 'idle',
+      observationMethod: 'pressure_test_with_gauge',
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: testActionsT.id })
+
+    await db.insert(testActionsT).values({
+      slug: 'unrelated-visual',
+      componentId: rail.id,
+      description: 'Visual check (not in this symptom plan)',
+      scenarioRequired: 'none',
+      observationMethod: 'direct_visual_external',
+      // invasiveness has a DB CHECK (BETWEEN 1 AND 5) from migration 0021.
+      invasiveness: 1,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    await db.insert(symptomTestImplications).values({
+      symptomId: symptomRow.id,
+      testActionId: implicated.id,
+      priority: 7,
+      sourceProvenance: 'TRAINING-CONFIRMED',
+    })
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const actions = topo!.components.find((c) => c.slug === 'fuel-rail')!.testActions
+    const impl = actions.find((t) => t.slug === 'measure-rail-pressure')!
+    const non = actions.find((t) => t.slug === 'unrelated-visual')!
+
+    expect(impl.implicatedByCurrentSymptom).toBe(true)
+    expect(impl.priority).toBe(7)
+    expect(non.implicatedByCurrentSymptom).toBe(false)
+    expect(non.priority).toBeNull()
+  })
+})

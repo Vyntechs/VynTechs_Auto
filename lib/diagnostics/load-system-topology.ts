@@ -365,10 +365,15 @@ export async function loadSystemTopology({
         )
     : []
 
-  // Which of those test actions does the CURRENT symptom implicate?
+  // Which of those test actions does the CURRENT symptom implicate, and at what
+  // priority? A Map (testActionId -> priority) carries the rank so the engine
+  // can order steps; non-implicated actions get priority: null.
   const implRows = testActionIds.length
     ? await db
-        .select({ testActionId: symptomTestImplications.testActionId })
+        .select({
+          testActionId: symptomTestImplications.testActionId,
+          priority: symptomTestImplications.priority,
+        })
         .from(symptomTestImplications)
         .where(
           and(
@@ -378,7 +383,9 @@ export async function loadSystemTopology({
           ),
         )
     : []
-  const implicatedIds = new Set(implRows.map((r) => r.testActionId))
+  const implicatedPriorities = new Map<string, number>(
+    implRows.map((r) => [r.testActionId, r.priority]),
+  )
 
   // 8. Scenarios for this (platform, system)
   const scenarioRows = await db
@@ -488,13 +495,13 @@ export async function loadSystemTopology({
         observationMethod: t.observationMethod,
         expectedObservation: t.expectedObservation,
         invasiveness: t.invasiveness,
-        implicatedByCurrentSymptom: implicatedIds.has(t.id),
+        implicatedByCurrentSymptom: implicatedPriorities.has(t.id),
         meterMode: (t.meterMode as MeterMode | null) ?? null,
         expectedValue: t.expectedValue,
         expectedUnit: t.expectedUnit,
         expectedTolerance: t.expectedTolerance,
         stepKind: t.stepKind,
-        priority: null, // wired in Task 3
+        priority: implicatedPriorities.get(t.id) ?? null,
         branches: branchRows
           .filter((b) => b.testActionId === t.id)
           .map((b) => ({
