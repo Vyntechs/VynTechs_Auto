@@ -1,0 +1,7 @@
+.dk-part__body { fill: var(--vt-bone-100); stroke: var(--vt-bone-400); stroke-width: 1.5; }
+.dk-part__label { fill: var(--vt-fg-2); font-family: var(--vt-font-sans); font-size: 11px; }
+.dk-part[data-tier="recede"] { opacity: var(--vt-recede); }
+.dk-part[data-active="true"] .dk-part__body { stroke: var(--vt-signal-500); stroke-width: 2.5; }
+.dk-part[data-selected="true"] .dk-part__body { stroke: var(--vt-signal-600); }
+.dk-part[data-provenance="needs-field-check"] .dk-part__body { stroke: var(--vt-amber-600); }
+.dk-part[data-provenance="field-verified"] .dk-part__body { stroke: var(--vt-signal-400); }
