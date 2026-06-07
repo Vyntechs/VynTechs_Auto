@@ -9,3 +9,21 @@
 .dk-part__tick { fill: none; stroke: var(--vt-signal-400); stroke-width: 2; stroke-linecap: round; }
 .dk-part[data-provenance="needs-field-check"] .dk-part__body,
 .dk-part[data-provenance="needs-field-check"] .dk-glyph-stroke { stroke: var(--vt-amber-600); }
+.dk-wire { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.dk-wire[data-role="12v"]     { stroke: var(--role-12v); }
+.dk-wire[data-role="ground"]  { stroke: var(--role-ground); }
+.dk-wire[data-role="signal"]  { stroke: var(--role-signal); }
+.dk-wire[data-role="5v-ref"]  { stroke: var(--role-5v-ref); }
+.dk-wire[data-role="low-ref"] { stroke: var(--role-low-ref); }
+.dk-wire[data-role="pwm"]     { stroke: var(--role-pwm); stroke-dasharray: 6 4; }
+.dk-wire[data-active="true"]  { stroke-width: 4; }
+.dk-link { fill: none; stroke-width: 3; stroke-linecap: round; }
+.dk-link[data-kind="fuel-line"]       { stroke: var(--role-fuel); }
+.dk-link[data-kind="mechanical-link"] { stroke: var(--vt-bone-600); stroke-dasharray: 2 5; }
+.dk-link:not([data-kind="fuel-line"]):not([data-kind="mechanical-link"]) { stroke: var(--vt-bone-500); }
+.dk-terminal__dot { fill: var(--role-signal); }
+.dk-terminal[data-role="12v"] .dk-terminal__dot    { fill: var(--role-12v); }
+.dk-terminal[data-role="ground"] .dk-terminal__dot { fill: var(--role-ground); }
+.dk-terminal[data-role="5v-ref"] .dk-terminal__dot { fill: var(--role-5v-ref); }
+.dk-terminal[data-role="low-ref"] .dk-terminal__dot{ fill: var(--role-low-ref); }
+.dk-terminal[data-role="pwm"] .dk-terminal__dot    { fill: var(--role-pwm); }

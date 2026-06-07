@@ -1,2 +1,5 @@
 export * from './part-api'
 export { resolvePart, isFallbackKey } from './registry'
+export { Wire } from './wires/wire'
+export { ConnectionLink } from './wires/connection-link'
+export { Terminal } from './wires/terminal'
