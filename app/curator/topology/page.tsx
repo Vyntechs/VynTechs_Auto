@@ -78,7 +78,10 @@ export default async function CuratorTopologyPage({
           sessionId="preview"
         />
       ) : (
-        <p>No diagram data for this case yet.</p>
+        // Loader-null = not-found (no platform/symptom/components). Distinct from
+        // the CLIENT's zero-step honest degrade (a topology loaded, but no step
+        // is implicated) — that lives in TopologyDiagnostic.
+        <p className="topo__not-found">No diagram data for this case yet.</p>
       )}
     </div>
   )
