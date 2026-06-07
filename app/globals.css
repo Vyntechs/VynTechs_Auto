@@ -64,6 +64,18 @@
   --vt-signal-200: oklch(90% 0.04  240);
   --vt-signal-300: oklch(78% 0.10  240);
   --vt-signal-400: oklch(62% 0.15  245);
+
+  /* Diagram role-wire palette + fade floor + amber ink — proto-meter.html canon.
+     topology.css and the diagram-kit consume these; defined here once. */
+  --role-12v: oklch(62% .20 30);        /* power = warm red, hot */
+  --role-ground: var(--vt-bone-700);    /* return = graphite */
+  --role-signal: var(--vt-signal-400);  /* signal = navy family */
+  --role-5v-ref: var(--vt-signal-300);  /* 5V reference = cool */
+  --role-low-ref: oklch(66% .07 230);   /* low-reference = cooler graphite-navy */
+  --role-pwm: oklch(58% .16 300);       /* PWM = violet */
+  --role-fuel: oklch(72% .07 150);      /* fluid line, muted green (link primitive) */
+  --vt-recede: 0.16;                    /* canonical fade floor — never vanish */
+  --vt-amber-600: oklch(58% .16 55);    /* amber ink — needs-field-check register */
   --vt-signal-500: oklch(50% 0.18  248);   /* canonical brand signal-navy */
   --vt-signal-600: oklch(42% 0.17  250);
   --vt-signal-700: oklch(34% 0.14  252);
