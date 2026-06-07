@@ -685,3 +685,60 @@ describe('loadSystemTopology — surfaces symptom-test-implication priority', ()
     expect(non.priority).toBeNull()
   })
 })
+
+describe('loadSystemTopology — isOutOfRange sibling map', () => {
+  it('flags an out-of-range pin reading without disturbing the pinReadings string map', async () => {
+    const platformId = await seedPlatform()
+    await db.insert(symptoms).values({
+      slug: 'p0087-fuel-rail-pressure-too-low',
+      description: 'P0087 Fuel Rail Pressure Too Low',
+      category: 'dtc',
+      system: 'fuel',
+    })
+    await promoteSystemDataDraft(db, fuelDraft())
+    const rail = (
+      await db.select().from(components)
+        .where(and(eq(components.platformId, platformId), eq(components.slug, 'fuel-rail')))
+    )[0]
+
+    const [pinHot] = await db.insert(componentPins).values({
+      slug: 'rail-sensor-sig', componentId: rail.id, name: 'FRP signal',
+      roleAbbreviation: 'SIG', edge: 'right', displayOrder: 0,
+      probeLocation: 'connector pin 2', expectedReading: '0.5-4.5V',
+      missingLogic: 'no signal => open', sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: componentPins.id })
+
+    const [pinOk] = await db.insert(componentPins).values({
+      slug: 'rail-sensor-ref', componentId: rail.id, name: 'FRP 5V ref',
+      roleAbbreviation: 'REF', edge: 'left', displayOrder: 1,
+      probeLocation: 'connector pin 1', expectedReading: '5V',
+      missingLogic: 'no ref => open', sourceProvenance: 'TRAINING-CONFIRMED',
+    }).returning({ id: componentPins.id })
+
+    const [scn] = await db.insert(systemScenarios).values({
+      slug: 'idle', platformId, system: 'fuel', label: 'Idle', sub: 'engine running',
+      kind: 'operation', keyPosition: 'on', engineState: 'running', loadLevel: 'idle',
+      isDefault: true, displayOrder: 0,
+    }).returning({ id: systemScenarios.id })
+
+    await db.insert(pinScenarioReadingsT).values([
+      { pinId: pinHot.id, scenarioId: scn.id, reading: '0.2V (low)', isOutOfRange: true },
+      { pinId: pinOk.id, scenarioId: scn.id, reading: '5.0V', isOutOfRange: false },
+    ])
+
+    const topo = await loadSystemTopology({
+      db, platformSlug: PLATFORM_SLUG, symptomSlug: 'p0087-fuel-rail-pressure-too-low',
+    })
+    const scenario = topo!.scenarios.find((s) => s.slug === 'idle')!
+
+    // pinReadings string map unchanged:
+    expect(scenario.pinReadings[pinHot.id]).toBe('0.2V (low)')
+    expect(scenario.pinReadings[pinOk.id]).toBe('5.0V')
+
+    // sibling map: only the truthy flag is present as true; false stays false;
+    // a pin with no reading row is absent (neutral by absence).
+    expect(scenario.isOutOfRange![pinHot.id]).toBe(true)
+    expect(scenario.isOutOfRange![pinOk.id]).toBe(false)
+    expect(scenario.isOutOfRange!['no-such-pin']).toBeUndefined()
+  })
+})
