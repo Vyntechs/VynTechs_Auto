@@ -35,3 +35,8 @@
 }
 .dk-overlay[data-reduced-motion="true"] .dk-overlay__pulse { animation: none; }
 @keyframes dk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.dk-catalog { display: flex; flex-direction: column; gap: 24px; padding: 24px; background: var(--vt-bg); }
+.dk-catalog__row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.dk-catalog__row .dk-part { width: 120px; height: auto; }
+.dk-catalog__overlay-cell { width: 60px; height: 36px; }
+@media (max-width: 414px) { .dk-catalog__row .dk-part { width: 96px; } }
