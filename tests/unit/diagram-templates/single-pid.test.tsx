@@ -29,8 +29,8 @@ const scene: ResolvedScene = {
 }
 
 describe('single-pid template', () => {
-  it('is device + gauge only — no source/ground/overlay slots', () => {
-    expect(Object.keys(SINGLE_PID_SLOTS).sort()).toEqual(['device-under-test', 'gauge'])
+  it('is device + gauge + detail only — no source/ground/overlay slots', () => {
+    expect(Object.keys(SINGLE_PID_SLOTS).sort()).toEqual(['detail', 'device-under-test', 'gauge'])
   })
   it('renders the centered device + gauge, no pins', () => {
     const { container } = render(<SinglePid scene={scene} />)

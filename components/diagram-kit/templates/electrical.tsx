@@ -15,6 +15,7 @@ export const ELECTRICAL_SLOTS: SlotSet = {
   ground: { x: 660, y: 600, anchor: 'center', tier: 'anchor' },
   'downstream-anchor': { x: 1140, y: 380, anchor: 'center', tier: 'recede' },
   overlay: { x: 760, y: 380, anchor: 'left', tier: 'focus' },
+  detail: { x: 660, y: 700, anchor: 'center', tier: 'anchor' },
 }
 
 export const ELECTRICAL_FRAMING: FramingHint = {
@@ -22,8 +23,8 @@ export const ELECTRICAL_FRAMING: FramingHint = {
   maxScale: 1.55,
 }
 
-/** Ordered render so source/ground/downstream draw under, DUT + overlay on top. */
-const ORDER: SlotName[] = ['downstream-anchor', 'source', 'ground', 'device-under-test', 'overlay']
+/** Ordered render so source/ground/downstream draw under, DUT + overlay on top; detail prose last. */
+const ORDER: SlotName[] = ['downstream-anchor', 'source', 'ground', 'device-under-test', 'overlay', 'detail']
 
 export default function Electrical({
   scene,

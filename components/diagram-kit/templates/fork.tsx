@@ -10,6 +10,7 @@ import './templates.css'
 export const FORK_SLOTS: SlotSet = {
   route: { x: 360, y: 380, anchor: 'center', tier: 'recede' },
   'device-under-test': { x: 880, y: 380, anchor: 'center', tier: 'focus' },
+  detail: { x: 660, y: 690, anchor: 'center', tier: 'anchor' },
 }
 
 export const FORK_FRAMING: FramingHint = {
@@ -39,6 +40,13 @@ export default function Fork({
         name="device-under-test"
         placement={FORK_SLOTS['device-under-test']!}
         fill={scene.slots['device-under-test']}
+        onInspect={onInspect}
+        selectedPartId={selectedPartId}
+      />
+      <SlotBox
+        name="detail"
+        placement={FORK_SLOTS.detail!}
+        fill={scene.slots.detail}
         onInspect={onInspect}
         selectedPartId={selectedPartId}
       />

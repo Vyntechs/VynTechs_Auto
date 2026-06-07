@@ -11,6 +11,7 @@ import './templates.css'
 export const LOCATE_SLOTS: SlotSet = {
   'device-under-test': { x: 660, y: 360, anchor: 'center', tier: 'focus' },
   location: { x: 660, y: 540, anchor: 'center', tier: 'anchor' },
+  detail: { x: 660, y: 700, anchor: 'center', tier: 'anchor' },
 }
 
 export const LOCATE_FRAMING: FramingHint = {
@@ -40,6 +41,13 @@ export default function Locate({
         name="location"
         placement={LOCATE_SLOTS.location!}
         fill={scene.slots.location}
+        onInspect={onInspect}
+        selectedPartId={selectedPartId}
+      />
+      <SlotBox
+        name="detail"
+        placement={LOCATE_SLOTS.detail!}
+        fill={scene.slots.detail}
         onInspect={onInspect}
         selectedPartId={selectedPartId}
       />

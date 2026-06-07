@@ -31,8 +31,8 @@ function forkScene(route: RouteSlotFill | null): ResolvedScene {
 }
 
 describe('fork template', () => {
-  it('declares EXACTLY one route slot + the one next device — no second branch', () => {
-    expect(Object.keys(FORK_SLOTS).sort()).toEqual(['device-under-test', 'route'])
+  it('declares EXACTLY one route slot + the one next device + detail — no second branch', () => {
+    expect(Object.keys(FORK_SLOTS).sort()).toEqual(['detail', 'device-under-test', 'route'])
   })
   it('renders exactly one route slot, dimmed (cleared run)', () => {
     const route: RouteSlotFill = { fillKind: 'route', routesToTestActionId: 't-next', nextActionText: 'go to FRP test' }
