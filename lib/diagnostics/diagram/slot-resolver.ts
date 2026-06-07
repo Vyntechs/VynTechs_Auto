@@ -72,6 +72,13 @@ function findFocus(
  * Bounded breadth-first walk of the connection graph from the focus component.
  * Returns the focus + every component within `depth` hops. No step→circuit FK
  * exists, so the circuit set IS this walk. Islands (no path to focus) excluded.
+ *
+ * ROLE: this is the published bounded-circuit-set primitive for CONSUMERS
+ * (T4/T6) that render the wider FADED circuit CONTEXT beyond the immediate
+ * slots. `assembleScene` does NOT call it: the scene intentionally derives its
+ * slots (source/ground/downstream) from the focus's DIRECT connections only, so
+ * a multi-hop walk would over-reach the slot set. Kept separate, not dead — the
+ * two answer different questions (direct slots vs. faded context).
  */
 export function walkCircuitSet(
   topology: SystemTopology,
@@ -152,7 +159,10 @@ function emptySlots(): Record<SlotName, SlotFill> {
   }
 }
 
-/** Source = the OTHER endpoint of a power/ref wire touching the focus. */
+/** Source = the component that SUPPLIES power/ref INTO the focus. Power flows
+ *  from→to on a power/ref wire, so the focus has a source ONLY when it is the
+ *  `to` (downstream) end — never when it is the `from` (upstream) end feeding a
+ *  consumer. (Directional, unlike ground, which is the ground node either way.) */
 function deriveSource(
   topology: SystemTopology,
   focusId: string,
@@ -161,7 +171,6 @@ function deriveSource(
   for (const conn of topology.connections) {
     if (conn.electricalRole == null || !POWER_REF_ROLES.includes(conn.electricalRole)) continue
     if (conn.toComponentId === focusId) return byId.get(conn.fromComponentId) ?? null
-    if (conn.fromComponentId === focusId) return byId.get(conn.toComponentId) ?? null
   }
   return null
 }
