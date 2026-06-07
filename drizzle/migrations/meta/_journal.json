@@ -183,6 +183,13 @@
       "when": 1780312069518,
       "tag": "0023_interactive_electrical_topology",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1780312069519,
+      "tag": "0024_diagram_step_kind_out_of_range",
+      "breakpoints": true
     }
   ]
 }
