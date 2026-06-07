@@ -101,6 +101,18 @@ export type OverlayKind =
   | 'test-point'
   | 'scope-clip'
 
+// Runtime tuple — the single source T2's overlay kit imports for its registry +
+// tests (mirrors ALL_SLOT_NAMES/ALL_STEP_SHAPES). `satisfies` rejects any drift
+// from the OverlayKind union, so T2 can never re-declare a wrong spelling.
+export const ALL_OVERLAY_KINDS = [
+  'probe-lead',
+  'voltage-drop-bracket',
+  'amp-clamp',
+  'pressure-gauge-tee',
+  'test-point',
+  'scope-clip',
+] as const satisfies readonly OverlayKind[]
+
 export type OverlaySpec = {
   kind: OverlayKind
   /** Component the hookup attaches to (the device-under-test). */
@@ -118,14 +130,21 @@ export type GaugeSpec = {
 }
 
 // --- A part placed into a slot (C2 ref + the props the part needs) ---
+// Carries everything DiagramPartProps requires so a template can render the part
+// from the scene ALONE (templates get no topology access). `name`/`active` are
+// resolved by T3 from the focus TopologyComponent + active scenario.
 export type PartSlotFill = {
   fillKind: 'part'
   partId: string
   kind: PartKind
+  /** Display label (TopologyComponent.name) — DiagramPartProps.name has no default. */
+  name: string
   roleSpecial: PartRoleSpecial | null
   tier: PartTier
   provenance: PartProvenance
   terminals: Terminal[]
+  /** Energized/relevant in the active scenario — DiagramPartProps.active. */
+  active: boolean
   selected: boolean
 }
 

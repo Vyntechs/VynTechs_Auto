@@ -22,6 +22,7 @@ import type {
   TopologyComponent,
   TopologyConnection,
   TopologyPin,
+  MeterMode,
 } from '@/lib/diagnostics/load-system-topology'
 import type { VerdictSignal } from '@/lib/diagnostics/diagram/slot-interface'
 
@@ -88,6 +89,8 @@ describe('C2 props type-compat with C1', () => {
     expectTypeOf<PartReading>().toHaveProperty('unit')
     expectTypeOf<PartReading>().toHaveProperty('mode')
     expectTypeOf<PartReading>().toHaveProperty('verdict')
+    expectTypeOf<PartReading['unit']>().toEqualTypeOf<string | null>()
+    expectTypeOf<PartReading['mode']>().toEqualTypeOf<MeterMode | null>()
     expectTypeOf<PartReading['verdict']>().toEqualTypeOf<VerdictSignal>()
   })
 
