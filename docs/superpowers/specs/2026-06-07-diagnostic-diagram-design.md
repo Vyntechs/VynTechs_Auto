@@ -13,17 +13,26 @@ The exploration nailed three things — the data model, the reading/gauge ("the 
 
 **Root fix:** build a **fixed kit of designed visual parts once** (in Figma), and **compose the diagram deterministically from data that's already modeled**. The AI never draws a diagram again; adding a make/system/symptom/step is **data only**.
 
-## 2. Principles (must hold)
+## 2. Principles (must hold) — scalability is the driver, not a feature
 
+**THE BAR (everything else serves this):** drop in *any* system, symptom, make, or concern → the correct screen renders itself, with **zero new design and zero new code**. The 6.7L fuel case is one *fixture*, never the thing we design around; generality is proven across multiple unlike systems (fuel + electrical + a non-fuel system such as DEF / charging / air), not on a single happy path.
+
+**Why it can scale — the mechanism everything hinges on:** every vehicle system on every make is built from the same finite list of building-block *types* the data already speaks — part types (`components.kind`), connection types (`connectionKind`), wire roles (`electricalRole`), the ways a test is observed (`observationMethod`), and operating states (`system_scenarios`). That vocabulary is **identical for fuel, air, hydraulics, DEF, charging — all of it.** The kit + engine + templates are built **once against that vocabulary**; a new system is then just its parts and tests written in the same vocabulary = pure data.
+
+Supporting principles:
 - **Load off the AI.** The drawing path has zero AI and zero per-case work. Parts are designed once; data snaps in.
-- **The screen IS the circuit you're testing, not the truck.** Only the 3–6 parts the current step involves are ever drawn. There is no whole-system map to lay out.
-- **Reads like a real circuit to a diesel tech.** Wiring-diagram conventions on the electrical side; recognizable parts on the fuel/mechanical side.
+- **Built once against the *whole* vocabulary, with a graceful fallback.** The kit/engine cover every enum value, not the slice fuel happens to use; an unseen part/test/role still renders something sane — never a blank, never a break. Adding a system can never produce a broken screen.
+- **Templates key off the *kind of test* (pressure / electrical / reading / scope / look), never a system's shape** — so an air-brake circuit or a DEF line lays out as cleanly as a fuel circuit.
+- **The screen IS the circuit you're testing, not the truck.** Only the parts the current step involves are drawn; no whole-system map to lay out.
+- **Reads like a real circuit to a tech.** Wiring-diagram conventions on the electrical side; recognizable parts on the fluid/mechanical side.
 - **Contextually exact.** A step shows only what that test involves; nothing leaks.
-- **Scales with zero per-case AND zero per-system layout work.**
+- **Partial/incomplete data is the steady state, not an error** — it degrades honestly (the universal "needs field check" path), so systems come online progressively as curators fill them in.
 
 ## 3. The element kit (built once, in Figma)
 
 A small, fixed library of reusable parts. Each is designed once as a Figma component, aligned to the existing vt design tokens (bone surface ramp, navy `--vt-signal-*`, amber, Instrument Serif / JetBrains Mono), then exported to the app (SVG / component) and never redrawn per case.
+
+**The kit is keyed to the COMPLETE building-block vocabulary** — every `components.kind`, every `electricalRole`, every `connectionKind`, and every `observationMethod` / test hookup — **plus a generic fallback** symbol for any value not yet given a bespoke glyph. That is what makes it system-agnostic: fuel, air, hydraulic, DEF, charging all decompose into these same parts, and a never-before-seen value still renders sanely instead of blank.
 
 **Component symbols** — one per `components.kind` (the 8-value enum already in the data): `pump`, `sensor`, `actuator`, `valve`, `module` (PCM/controller), `mechanical`, `splice`, `connector`. Each a recognizable schematic-style glyph.
 **Role-special symbols** (resolved by role/name, not `kind`): `ground` (standard ground symbol), `relay`, `fuse` (when present), `power source / battery`.
@@ -82,7 +91,12 @@ The kit (§3) is built once in Figma as a component set, matched to the vt desig
 ## 7. What's replaced / what's kept
 
 - **Replaced:** the abstract dot+label nodes; ad-hoc per-case drawing; pins rendered on every part regardless of step; the "draw the whole faded system" backdrop as the default.
-- **Kept:** the data model (the deterministic driver); the Meter/reading block; the provenance grammar + three-color discipline; the bottom-sheet/mobile behavior; the scenario chip; the whole-system view as an explicit escape hatch.
+- **Kept:** the data model (the deterministic driver); the Meter/reading block; the provenance grammar + three-color discipline; the bottom-sheet/mobile behavior; the scenario chip.
+
+### 7a. Interaction decisions (v1 — Brandon, confirmed)
+- **Tap any shown part to inspect it — KEPT.** The current step drives the default view, but the tech can tap any part on screen to pull up its detail. (This overrides the scope-dial-in synthesis, which had proposed removing free part-selection; the selection mechanism is adapted, not deleted.)
+- **"Whole system" button → the existing full view.** It drops the tech into the current whole-topology / faded-system browser, not a placeholder. (Overrides the synthesis's v1 placeholder.)
+- **Mobile reading sheet → tap-to-toggle** (peek ↔ expanded), not a free-drag sheet. Matches what the prototype proved; avoids fragile drag-physics at 375px.
 
 ## 8. Non-goals / out of scope
 
@@ -94,9 +108,13 @@ The kit (§3) is built once in Figma as a component set, matched to the vt desig
 
 - The exact visual of each component symbol gets validated with Brandon as the first few Figma parts exist (a quick look-at-the-real-thing check), since "reads like a real circuit to a tech" is his call to confirm on concrete parts — not decided from words.
 
-## 10. Success criteria
+## 10. Success criteria — the scalability bar
 
-- A diesel tech glances at any step and reads it as a real circuit, with **only** that step's elements present (a pressure step never shows `12V`/`GND`).
-- Adding a new make/system/symptom/step requires **data only** — no layout, no drawing, no AI.
+**Primary (the bar):** adding a new system / symptom / make / concern is **data-only** — no new design, no new code, no AI — and the correct screen renders itself. This is proven **across multiple unlike systems** (at minimum: a fuel case, a purely-electrical case, and one non-fuel system such as DEF / charging / air — synthetic fixtures are fine where real data isn't authored yet), not on the fuel example alone.
+
+Held to that bar:
+- The kit + engine + templates contain **zero system-specific or per-case branching**; everything is a pure function of the building-block vocabulary (`kind` / `connectionKind` / `electricalRole` / `observationMethod` / scenario / `stepKind`).
+- An **unseen** part type, role, connection type, or test method renders via the generic fallback — never a blank, never a crash.
+- A tech glances at any step and reads it as a real circuit, with **only** that step's elements present (a pressure step never shows `12V`/`GND`) — and can tap any shown part to inspect it.
 - The diagram's parts are a **single Figma component set**; the app contains **no per-case drawing logic**.
-- Desktop and 375px mobile both read clean.
+- Desktop and 375px mobile both read clean; partial data degrades honestly.
