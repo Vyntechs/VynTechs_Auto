@@ -331,6 +331,11 @@ export async function loadSystemTopology({
       observationMethod: testActions.observationMethod,
       expectedObservation: testActions.expectedObservation,
       invasiveness: testActions.invasiveness,
+      meterMode: testActions.meterMode,
+      expectedValue: testActions.expectedValue,
+      expectedUnit: testActions.expectedUnit,
+      expectedTolerance: testActions.expectedTolerance,
+      stepKind: testActions.stepKind,
     })
     .from(testActions)
     .where(
@@ -348,6 +353,8 @@ export async function loadSystemTopology({
           condition: branchLogic.condition,
           verdict: branchLogic.verdict,
           nextAction: branchLogic.nextAction,
+          routesToTestActionId: branchLogic.routesToTestActionId,
+          reasoning: branchLogic.reasoning,
         })
         .from(branchLogic)
         .where(
@@ -482,12 +489,20 @@ export async function loadSystemTopology({
         expectedObservation: t.expectedObservation,
         invasiveness: t.invasiveness,
         implicatedByCurrentSymptom: implicatedIds.has(t.id),
+        meterMode: (t.meterMode as MeterMode | null) ?? null,
+        expectedValue: t.expectedValue,
+        expectedUnit: t.expectedUnit,
+        expectedTolerance: t.expectedTolerance,
+        stepKind: t.stepKind,
+        priority: null, // wired in Task 3
         branches: branchRows
           .filter((b) => b.testActionId === t.id)
           .map((b) => ({
             condition: b.condition,
             verdict: b.verdict,
             nextAction: b.nextAction,
+            routesToTestActionId: b.routesToTestActionId,
+            reasoning: b.reasoning,
           })),
       })),
     pins: pinRows
