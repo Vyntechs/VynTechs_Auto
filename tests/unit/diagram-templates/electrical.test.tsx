@@ -52,10 +52,10 @@ function emptySlots(): Record<SlotName, SlotFill> {
 }
 
 describe('electrical template', () => {
-  it('declares exactly the spec §5 electrical slots and the SINGLE overlay attachment region', () => {
+  it('declares exactly the spec §5 electrical slots, the SINGLE overlay attachment region, and the detail prose slot', () => {
     const keys = Object.keys(ELECTRICAL_SLOTS).sort()
     expect(keys).toEqual(
-      ['device-under-test', 'downstream-anchor', 'ground', 'overlay', 'source'].sort(),
+      ['detail', 'device-under-test', 'downstream-anchor', 'ground', 'overlay', 'source'].sort(),
     )
   })
 

@@ -5,10 +5,12 @@ import { GaugeRegion } from './gauge-region'
 import type { SlotSet, FramingHint } from './template-local-types'
 import './templates.css'
 
-/** Device centered + a single gauge. NO source/ground/overlay key => no electrical leak possible. */
+/** Device centered + a single gauge + the why/probe detail prose below. NO source/ground/overlay
+ *  key => no electrical leak possible. */
 export const SINGLE_PID_SLOTS: SlotSet = {
   'device-under-test': { x: 660, y: 420, anchor: 'center', tier: 'focus' },
   gauge: { x: 660, y: 210, anchor: 'center', tier: 'focus' },
+  detail: { x: 660, y: 690, anchor: 'center', tier: 'anchor' },
 }
 
 export const SINGLE_PID_FRAMING: FramingHint = {
@@ -35,6 +37,13 @@ export default function SinglePid({
         selectedPartId={selectedPartId}
       />
       <GaugeRegion placement={SINGLE_PID_SLOTS.gauge!} gauge={scene.gaugeSpec} />
+      <SlotBox
+        name="detail"
+        placement={SINGLE_PID_SLOTS.detail!}
+        fill={scene.slots.detail}
+        onInspect={onInspect}
+        selectedPartId={selectedPartId}
+      />
     </div>
   )
 }

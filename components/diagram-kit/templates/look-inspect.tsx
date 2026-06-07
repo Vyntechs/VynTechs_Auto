@@ -11,6 +11,7 @@ import './templates.css'
 export const LOOK_SLOTS: SlotSet = {
   'device-under-test': { x: 520, y: 400, anchor: 'center', tier: 'focus' },
   'good-vs-bad': { x: 860, y: 400, anchor: 'center', tier: 'anchor' },
+  detail: { x: 660, y: 690, anchor: 'center', tier: 'anchor' },
 }
 
 export const LOOK_FRAMING: FramingHint = {
@@ -40,6 +41,13 @@ export default function LookInspect({
         name="good-vs-bad"
         placement={LOOK_SLOTS['good-vs-bad']!}
         fill={scene.slots['good-vs-bad']}
+        onInspect={onInspect}
+        selectedPartId={selectedPartId}
+      />
+      <SlotBox
+        name="detail"
+        placement={LOOK_SLOTS.detail!}
+        fill={scene.slots.detail}
         onInspect={onInspect}
         selectedPartId={selectedPartId}
       />

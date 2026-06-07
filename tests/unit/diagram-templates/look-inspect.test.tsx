@@ -30,8 +30,8 @@ const scene: ResolvedScene = {
 }
 
 describe('look-inspect template', () => {
-  it('is device + good-vs-bad only — no gauge/overlay/ground slots', () => {
-    expect(Object.keys(LOOK_SLOTS).sort()).toEqual(['device-under-test', 'good-vs-bad'])
+  it('is device + good-vs-bad + detail only — no gauge/overlay/ground slots', () => {
+    expect(Object.keys(LOOK_SLOTS).sort()).toEqual(['detail', 'device-under-test', 'good-vs-bad'])
   })
   it('places good-vs-bad beside the device (same row, to the right)', () => {
     const d = LOOK_SLOTS['device-under-test']!

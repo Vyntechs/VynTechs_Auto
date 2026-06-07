@@ -96,12 +96,16 @@ describe('generality across unlike systems (the scalability bar)', () => {
       const { container } = render(<Tpl scene={scene(c.shape, c.slots, c.overlay, c.gaugeSpec)} />)
       const hasOverlay = container.querySelector('[data-slot="overlay"]') != null
       const hasGround = container.querySelector('[data-slot="ground"]') != null
+      const hasSource = container.querySelector('[data-slot="source"]') != null
       if (ELECTRICAL_SHAPES.has(c.shape)) {
         expect(hasOverlay).toBe(true)
       } else {
-        // non-electrical: NO 12V/GND, NO terminal overlay — structurally impossible
-        expect(hasOverlay).toBe(false)
+        // non-electrical: NO 12V/GND, NO terminal overlay, NO electrical source — structurally impossible.
+        // pressure-flow legitimately carries an 'overlay' slot (the pressure-gauge-tee mechanical
+        // hookup), so the no-overlay assertion is scoped to the non-pressure shapes.
+        if (c.shape !== 'pressure-flow') expect(hasOverlay).toBe(false)
         expect(hasGround).toBe(false)
+        expect(hasSource).toBe(false)
         expect(container.textContent).not.toMatch(/\b(12V|GND)\b/)
       }
     })

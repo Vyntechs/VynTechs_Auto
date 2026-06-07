@@ -112,10 +112,11 @@ export const CONTACT_SHEET_SCENES: Record<StepShape, ResolvedScene> = {
   'pressure-flow': build(
     'pressure-flow',
     {
-      source: part('c-pump', 'pump', 'HP Pump'),
+      // No source: pressure-flow FORBIDS the electrical source slot (the leak-lock) — T3 never fills it.
       'device-under-test': focusPart('c-frp', 'valve', 'FRP'),
       'downstream-anchor': part('c-rail', 'mechanical', 'Rail', null, 'recede'),
       gauge: { fillKind: 'gauge', gauge: gauge('≥5000psi', '1200psi', 'psi') },
+      overlay: { fillKind: 'overlay', overlay: overlay('pressure-gauge-tee', 'c-frp', null) },
       detail: detail('tee a mechanical gauge at the rail'),
     },
     { gaugeSpec: gauge('≥5000psi', '1200psi', 'psi'), overlay: overlay('pressure-gauge-tee', 'c-frp', null) },
