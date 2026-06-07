@@ -1,6 +1,7 @@
 'use client'
 
 import { useReducer, type ReactNode } from 'react'
+import type { ResolvedScene } from '@/lib/diagnostics/diagram/slot-interface'
 
 /** Mobile bottom-sheet detents for the kept Meter/reading.
  *  peek      = reading band visible, the tested part stays above the sheet edge
@@ -34,17 +35,27 @@ export function useMeterSheetDetent(initial: MeterSheetDetent = 'peek') {
   return useReducer(nextDetent, initial)
 }
 
+/** The frozen C3 verdict-bearing gauge payload: `{ reading, verdict } | null`. */
+type GaugeSpec = ResolvedScene['gaugeSpec']
+
 type MeterSheetProps = {
-  /** The kept Meter/reading block, rendered verbatim — T5 does not re-own the gauge. */
-  children: ReactNode
   /** Thin "now showing" strip text (scenario · step). NEVER "step N of M", never "AI". */
   nowShowing: string
+  /** The C3 verdict-bearing gauge payload, forwarded UNTOUCHED. The kept Meter renders red;
+   *  the sheet never re-decides a verdict (single source of truth = C3). */
+  gaugeSpec?: GaugeSpec
+  /** The kept Meter/reading. Either a plain node, or a render-prop receiving gaugeSpec verbatim. */
+  children: ReactNode | ((gaugeSpec: GaugeSpec) => ReactNode)
 }
 
 /** Mobile-only bottom sheet around the kept Meter. Desktop renders the Meter inline
  *  (no MeterSheet); the screen (T6) mounts this only at the mobile breakpoint. */
-export function MeterSheet({ children, nowShowing }: MeterSheetProps) {
+export function MeterSheet({ children, nowShowing, gaugeSpec }: MeterSheetProps) {
   const [detent, dispatch] = useMeterSheetDetent('peek')
+  const body =
+    typeof children === 'function'
+      ? (children as (g: GaugeSpec) => ReactNode)(gaugeSpec ?? null)
+      : children
 
   return (
     <div className="meter-sheet" data-testid="meter-sheet" data-detent={detent}>
@@ -66,7 +77,7 @@ export function MeterSheet({ children, nowShowing }: MeterSheetProps) {
       >
         ✕
       </button>
-      <div className="meter-sheet__body">{children}</div>
+      <div className="meter-sheet__body">{body}</div>
     </div>
   )
 }

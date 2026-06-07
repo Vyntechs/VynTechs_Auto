@@ -5,6 +5,7 @@ import {
   MeterSheet,
   type MeterSheetDetent,
 } from '@/components/diagram-kit/meter-sheet'
+import type { ResolvedScene } from '@/lib/diagnostics/diagram/slot-interface'
 
 describe('nextDetent — tap-to-toggle (Brandon override: no drag)', () => {
   it('toggles peek <-> expanded on a tap', () => {
@@ -61,5 +62,36 @@ describe('MeterSheet — tap toggles the detent, renders the kept Meter as a chi
     expect(strip).toHaveTextContent('Idle · Probe')
     expect(strip.textContent ?? '').not.toMatch(/step \d+ of \d+/i)
     expect(strip.textContent ?? '').not.toMatch(/\bAI\b/)
+  })
+})
+
+describe('MeterSheet — verdict signal passes through untouched (C3 owns the verdict)', () => {
+  it('forwards scene.gaugeSpec verbatim to the render-prop child', () => {
+    const scene = {
+      gaugeSpec: { verdict: 'out-of-range' },
+    } as unknown as ResolvedScene
+
+    let received: ResolvedScene['gaugeSpec'] | undefined
+    render(
+      <MeterSheet nowShowing="Idle · Probe" gaugeSpec={scene.gaugeSpec}>
+        {(gaugeSpec) => {
+          received = gaugeSpec
+          return <div data-testid="kept-meter" />
+        }}
+      </MeterSheet>,
+    )
+    // Same reference — the sheet did not clone, re-map, or re-decide the verdict.
+    expect(received).toBe(scene.gaugeSpec)
+  })
+
+  it('the sheet itself carries NO verdict attribute (no second red-decider)', () => {
+    render(
+      <MeterSheet nowShowing="Idle · Probe" gaugeSpec={{ verdict: 'out-of-range' } as never}>
+        {() => <div />}
+      </MeterSheet>,
+    )
+    const sheet = screen.getByTestId('meter-sheet')
+    expect(sheet).not.toHaveAttribute('data-verdict')
+    expect(sheet.className).not.toMatch(/fault|fail|out-of-range|red/i)
   })
 })
