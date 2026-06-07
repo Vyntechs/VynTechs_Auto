@@ -1,0 +1,219 @@
+[
+ {
+  "name": "T1 \u2014 data deltas (migration + loader surfacing) [owns C1]",
+  "scope": "Land the additive data layer. (a) Migration 0024_diagram_step_kind_out_of_range.sql: ALTER TABLE test_actions ADD COLUMN step_kind text; --> statement-breakpoint; ALTER TABLE pin_scenario_readings ADD COLUMN is_out_of_range boolean; append journal idx 26 (breakpoints:true). (b) schema.ts: testActions.stepKind text() nullable; pinScenarioReadings.isOutOfRange boolean() nullable. (c) Loader un-drops: add meterMode/expectedValue/expectedUnit/expectedTolerance/stepKind to the testActions SELECT; add routesToTestActionId/reasoning to the branchLogic SELECT; add isOutOfRange to the readingRows SELECT and fold into a sibling TopologyScenario.isOutOfRange map; widen implRows to also SELECT priority and replace the implicatedIds Set with a Map<testActionId,priority>, surfacing priority on TopologyTestAction. DO NOT touch the connection SELECT (electricalRole/fromPinId/toPinId already surfaced). (d) The MeterMode union doc note. (e) A live-staging-Supabase apply task for the two new columns (Brandon-approved).",
+  "consumes": [],
+  "produces": [
+   "C1 (the frozen additive SystemTopology shape + MeterMode union)",
+   "migration 0024 + journal idx 26",
+   "loader SELECT widening + Set->Map priority",
+   "TopologyScenario.isOutOfRange sibling map"
+  ],
+  "dependsOn": [],
+  "filesOwned": [
+   "drizzle/migrations/0024_diagram_step_kind_out_of_range.sql",
+   "drizzle/migrations/meta/_journal.json",
+   "lib/db/schema.ts",
+   "lib/diagnostics/load-system-topology.ts",
+   "tests/unit/promote-system-data.test.ts"
+  ],
+  "definitionOfDone": "Migration 0024 has --> statement-breakpoint between the two ALTERs and a journal idx-26 entry. schema.ts has stepKind+isOutOfRange nullable; tsc passes. loadSystemTopology surfaces all six additive fields (4 meter + routesToTestActionId/reasoning) plus priority and the isOutOfRange sibling map, with NO existing key renamed/removed and pinReadings still a string map. ALL existing consumers (topology-detail-panel.tsx, topology-flow.ts, scenario-bar.tsx, captured-missing-footer.tsx, topology-diagram.tsx, topology-layout.ts, cached-lookup.ts, app/curator/topology/page.tsx) typecheck unchanged. The extended loadSystemTopology round-trip test asserts new keys populate and default safely (null / not-out-of-range / null priority for non-implicated). pnpm test green on a full run (not tail-masked), rerun once on cold cache. New columns applied to live staging (or a noted approved task)."
+ },
+ {
+  "name": "T2 \u2014 Figma part kit + export + tokens [owns C2]",
+  "scope": "Design the diagram visual vocabulary ONCE in Figma, ship it as deterministic AI-free React/SVG parts implementing C2, AND define the missing design tokens. Deliverables: (a) Wave 0 FIRST: part-api.ts (the C2 prop interface + unions + registry signature) + typed placeholder stubs so T3/T4 render before art lands, AND the 8 tokens defined in app/globals.css (--role-signal/5v-ref/low-ref/pwm/12v/ground, --vt-recede, --vt-amber-600) with the exact proto-meter.html values. (b) Wave 1: the 8 component-kind symbols + role-specials (ground/relay/fuse/power-source) + connection primitives (wire-per-role, fuel-line, mechanical-link, terminal) + test-overlay primitives (probe-lead, voltage-drop bracket, amp-clamp ring, pressure-gauge tee, test-point marker; scope-clip stubbed/deferred). Provenance expressed by HOW a part draws (graphite drafted / navy tick field-verified / amber needs-field-check sourced from labelGap/electricalContract, NEVER from a provenance grade). Animated parts gate on prefers-reduced-motion. A kit catalog preview at desktop + 375px for the visual gate. Pipeline: prefer inline-JSX SVG (no build-config change).",
+  "consumes": [
+   "C1"
+  ],
+  "produces": [
+   "C2 (part-api.ts + unions + registry)",
+   "the 8 globals.css tokens (Wave 0)",
+   "the exported part component library",
+   "kit catalog preview"
+  ],
+  "dependsOn": [
+   "C1"
+  ],
+  "filesOwned": [
+   "components/diagram-kit/part-api.ts",
+   "components/diagram-kit/registry.ts",
+   "components/diagram-kit/index.ts",
+   "components/diagram-kit/parts/*",
+   "components/diagram-kit/wires/*",
+   "components/diagram-kit/overlays/*",
+   "components/diagram-kit/stubs/*",
+   "app/globals.css"
+  ],
+  "definitionOfDone": "part-api.ts + all unions + registry are exported and typecheck-clean against the real C1 SystemTopology types (a TopologyComponent/Connection/Pin maps onto props with no casts); registry resolves all 25 components in scene-data.json with no kind unmapped. The 8 tokens are defined in app/globals.css with proto values and grep confirms topology.css no longer references undefined tokens. Every v1 part renders a recognizable symbol accepting tier/active/selected/provenance and visibly changing; provenance is by draw not a badge; animated parts honor prefers-reduced-motion. Kit catalog renders every part/variant cleanly at desktop AND 375px with zero console errors; Brandon has eyeballed the first 3-4 real symbols and confirmed they read as a real circuit. No data fetch, no slot logic, no layout math, no @xyflow import, no AI, no 'AI' string."
+ },
+ {
+  "name": "T3 \u2014 assembly engine (show-rule + slot-resolver) [owns C3]",
+  "scope": "The pure, deterministic, AI-free brain. (a) Wave 0 FIRST: author slot-interface.ts (the C3 type module \u2014 all types + selectStepShape SIGNATURE + the per-shape forbidden-slot table). (b) Wave 1 bodies (importing those types, never re-declaring): show-rule.ts exporting selectStepShape(observationMethod, meterMode, stepKind, hasBranches) (maps ALL 9 observationMethod values + the electrical split by meterMode + locate via stepKind + fork via hasBranches; waveform_capture degrades to a neutral 'no reference trace' shape \u2014 exhaustiveness test asserts no unmapped arm) and computeShowBudget enforcing pinsAllowed=TRUE only for electrical shapes; slot-resolver.ts exporting resolveSlots that assigns device-under-test=focus component, derives the 3-6 part circuit-set by GRAPH-WALK from the focus component over connections (since there is no step->circuit-set FK), selects source=upstream endpoint of the feeding/reference wire (role-agnostic among 12v/5v-ref, NOT literal '12v' only), ground=ground-role endpoint or ground symbol, downstream-anchor=outbound fluid-line, emits exactly-one overlay + activeWireIds, assembles the 'detail' content payload (probe/why/secondary/theori) from C1 prose fields, and DEGRADES honestly on null electricalRole/fromPinId (empty source/ground, no fabrication). Emits a single verdict signal (out-of-range|branch-fail|neutral) as pure data \u2014 the Meter renders it, T3 does not decide red twice. Populates ResolvedScene.elements (the enumerable set) for the leak test.",
+  "consumes": [
+   "C1",
+   "C2"
+  ],
+  "produces": [
+   "C3 (slot-interface.ts type module)",
+   "show-rule.ts (selectStepShape + computeShowBudget)",
+   "slot-resolver.ts (resolveSlots + graph-walk circuit-set + verdict signal + content payload)"
+  ],
+  "dependsOn": [
+   "C1",
+   "C2"
+  ],
+  "filesOwned": [
+   "lib/diagnostics/diagram/slot-interface.ts",
+   "lib/diagnostics/diagram/show-rule.ts",
+   "lib/diagnostics/diagram/slot-resolver.ts",
+   "lib/diagnostics/diagram/show-rule.test.ts",
+   "lib/diagnostics/diagram/slot-resolver.test.ts"
+  ],
+  "definitionOfDone": "slot-interface.ts compiles standalone exporting the closed SlotName union, the 10-shape StepShape union, the 4-arg selectStepShape signature, SlotFill/ResolvedScene/AssembleScene/StepTemplate/Slot types, and the typed per-shape forbidden-slot table. Bodies: selectStepShape maps all 9 observationMethod values + the meterMode electrical split + locate + waveform-degrade (exhaustiveness test, no unmapped arm). computeShowBudget yields pinsAllowed=false for pressure-flow/single-pid/look-inspect/locate/confirm. resolveSlots assigns slots correctly and DEGRADES honestly on null roles (a test on the real-scene null-role connections asserts empty-source without fabrication; a synthetic-test_action fixture proves the FRP electrical-probe slots since scene-data.json lacks test_actions). The pressure step yields zero terminals in ResolvedScene.elements. Verdict signal is pure data; nothing colors red unless isOutOfRange or branch verdict==='fail'. Both modules import nothing from React/DOM/network/AI (lint/test assertion). No per-case, no per-system branch. pnpm test green."
+ },
+ {
+  "name": "T7 \u2014 step engine (sequence + current-step + fork routing)",
+  "scope": "NEW track \u2014 the spine that feeds T3 one step at a time. A pure module: buildStepSequence(topology) -> ordered TestAction[] keyed on implicatedByCurrentSymptom + the surfaced symptom_test_implications.priority; a currentStep + advance/back reducer; resolveFork(step, verdict) -> nextStepId via branch_logic.routesToTestActionId (degrade to words-only nextAction when the id is null). Pure / no-React / no-AI. Sits upstream of T3 (feeds resolveSlots the current step) and is mounted by T6 into the screen. The reducer is the producer of T3's 'current step' input that no original unit owned.",
+  "consumes": [
+   "C1"
+  ],
+  "produces": [
+   "lib/diagnostics/diagram/step-sequence.ts (buildStepSequence + step reducer + resolveFork)"
+  ],
+  "dependsOn": [
+   "C1"
+  ],
+  "filesOwned": [
+   "lib/diagnostics/diagram/step-sequence.ts",
+   "lib/diagnostics/diagram/step-sequence.test.ts"
+  ],
+  "definitionOfDone": "buildStepSequence returns the implicated test_actions ordered by priority (proven against a synthetic fixture with priorities; depends on T1 having surfaced priority as a Map). The reducer advances/goes-back over the sequence and exposes the current step. resolveFork returns routesToTestActionId when present and degrades to the nextAction text when null. Pure: no React/DOM/network/AI import. A zero-step sequence (symptom with no implicated actions) returns an empty ordered list without throwing (feeds T6's empty-state). pnpm test green; no per-case/per-system logic."
+ },
+ {
+  "name": "T4 \u2014 per-shape layout templates",
+  "scope": "One declarative template per v1 first-class shape (confirm / electrical-probe / continuity-ground / single-PID / pressure-flow / look-inspect / locate / fork; electrical.ts also serves continuity-ground + duty-PWM + voltage-drop via sub-type). Each template imports C3 types (never re-declares SlotName/StepShape/ResolvedScene) and exports its ordered NAMED SLOTS + placement geometry per slot (position/anchor, recede tier, the single overlay attachment region, a camera/framing HINT) for a fixed canvas, deterministic for every case and system. Defines ONLY template-local types (SlotPlacement, framing hint, the concrete per-shape slot SETS). Owns the StepShape->template REGISTRY (a pure map keyed on the T3-produced StepShape \u2014 NO re-derivation from observationMethod). Owns a STABLE root class + data-attribute per StepShape (e.g. data-shape='pressure-flow') as the responsive seam T5 targets. Places the 'detail' content payload inside the Meter/sheet region. Ports the proto's per-shape arrangements (node tiers, source-top/DUT-center/ground-bottom, fork cleared-run-then-one-next, confirm whole-spine-with-one-raised, settleCamera bbox). The 'quiet-field' confirm slot is a single backdrop, not 24 placed parts.",
+  "consumes": [
+   "C1",
+   "C2",
+   "C3"
+  ],
+  "produces": [
+   "the per-shape template modules",
+   "the StepShape->template registry",
+   "stable per-shape root classes (the responsive seam)"
+  ],
+  "dependsOn": [
+   "C1",
+   "C2",
+   "C3"
+  ],
+  "filesOwned": [
+   "components/diagram-kit/templates/confirm.tsx",
+   "components/diagram-kit/templates/electrical.tsx",
+   "components/diagram-kit/templates/pressure-flow.tsx",
+   "components/diagram-kit/templates/single-pid.tsx",
+   "components/diagram-kit/templates/look-inspect.tsx",
+   "components/diagram-kit/templates/locate.tsx",
+   "components/diagram-kit/templates/fork.tsx",
+   "components/diagram-kit/templates/registry.ts",
+   "components/diagram-kit/templates/template-local-types.ts",
+   "components/diagram-kit/templates/templates.css",
+   "components/diagram-kit/templates/__tests__/*"
+  ],
+  "definitionOfDone": "Every v1 first-class shape has a template that declares exactly the spec-section-5 named slots in the C3 vocabulary (importing C3 types, no re-declaration), emits deterministic geometry + exactly one overlay attachment region identical for every case/system, exposes a stable root class per shape, and renders cleanly with stub fills at desktop AND 375px with the lit/active region above the bottom-sheet zone. Leak-lock is structural: pin/terminal slots exist ONLY on electrical; pressure/PID/look/locate/fork templates have no electrical slots. duty-PWM + voltage-drop degrade onto electrical.tsx without a new file. The registry keys only on StepShape (no re-derivation). Snapshot tests pass for slot names + geometry. No AI call/word, no 'step N of M', reuses vt/--role-* tokens (no hardcoded palette). Each template reads as its prototype-validated shape on a contact-sheet review."
+ },
+ {
+  "name": "T5 \u2014 mobile (375px) + Meter bottom-sheet",
+  "scope": "The 375-414px responsive layer (plus a 1023px tablet hinge). Owns ONLY: the @media mobile overrides, the bottom-sheet Meter + detent state machine (peek/expanded/dismissed, grabber, env(safe-area-inset-bottom)), the 'tested part (device-under-test from C3.focus) stays above the sheet at peek' guarantee, the >=48px tap-target floor (raising the proto's 44px and topology.css's 32px), the 'now showing' status strip (no 'step N of M', no 'AI'), and prefers-reduced-motion on sheet transitions (animated PARTS already gate via C2). Writes ALL responsive rules in its OWN diagram-mobile.css targeting T4's stable root classes \u2014 NEVER edits T4's template TSX or app/globals.css. The Meter is a sheet on mobile only (inline on desktop), so meter-sheet.tsx is a mobile wrapper around the kept Meter, passing the T3 verdict signal through untouched (no independent red-deciding).",
+  "consumes": [
+   "C2",
+   "C3"
+  ],
+  "produces": [
+   "diagram-mobile.css (all mobile @media + detent + tap-target + safe-area)",
+   "meter-sheet.tsx (the bottom-sheet wrapper + detent reducer)"
+  ],
+  "dependsOn": [
+   "C2",
+   "C3",
+   "T4"
+  ],
+  "filesOwned": [
+   "components/diagram-kit/diagram-mobile.css",
+   "components/diagram-kit/meter-sheet.tsx"
+  ],
+  "definitionOfDone": "On 375px each v1 first-class shape + duty-PWM + voltage-drop renders clean: only the step's parts present (no 12V/GND on a pressure step), no horizontal overflow, no overlap. The Meter is a bottom sheet with working peek/expanded/dismissed detents; at peek the device-under-test (C3.focus) stays fully visible above the sheet edge (verified on the real P0087 electrical-probe step). Every interactive element >=48px in its smallest tappable dimension. Safe-area insets honored; sheet never covers the lit part at any detent. Reuses vt tokens only (consumes the --role-* set from globals.css, adds none). No 'step N of M', no 'AI' word; provenance by draw. prefers-reduced-motion respected for sheet transitions. Verified via a 375px screenshot of the real scene (contact-sheet pattern), not just CSS reading. T5 wrote zero edits to T4 TSX or globals.css."
+ },
+ {
+  "name": "T6 \u2014 app integration / swap",
+  "scope": "Replace the @xyflow/react + dagre dot-canvas in the live app with the assembled diagram, driven by loadSystemTopology + the T7 step engine + T3 assembler + T4 templates + T2 parts + T5 mobile. EXCLUSIVE owner of the screen + route edits + the delete set + topology.css retirement + package.json dep removal. Rewire topology-diagnostic.tsx to mount the assembler instead of <TopologyDiagram>, mount the T7 step reducer (computing current step silently \u2014 no 'step N of M'), keep ScenarioBar + the kept Meter/reading + captured-missing footer + add a whole-system escape control. Remove layoutTopology from page.tsx. Delete topology-diagram.tsx, topology-flow.ts, topology-node.tsx, wire-edge.tsx, topology-layout.ts, topology-selection-context.tsx (selection-context consumed only by deleted node-tree files; per C3 there is NO free node-click selection in v1). Surgically retire ONLY the xyflow/.topo-node rules in topology.css, keeping scenario-bar/footer/detail-panel rules. Remove @xyflow/react + @dagrejs/dagre from package.json LAST (after the assembler is mounted and grep is clean). Own the empty/null render states: loadSystemTopology null (preserve not-found) and topology-with-zero-implicated-steps (honest 'no test plan captured for this code yet', no crash).",
+  "consumes": [
+   "C1",
+   "C2",
+   "C3"
+  ],
+  "produces": [
+   "the rewired screen + route",
+   "the deleted dot-canvas + dep removal",
+   "the whole-system escape control",
+   "empty/null state handling"
+  ],
+  "dependsOn": [
+   "C1",
+   "C2",
+   "C3",
+   "T1",
+   "T2",
+   "T3",
+   "T4",
+   "T5",
+   "T7"
+  ],
+  "filesOwned": [
+   "components/screens/topology-diagnostic.tsx",
+   "app/curator/topology/page.tsx",
+   "components/topology/topology.css",
+   "components/topology/topology-diagram.tsx",
+   "components/topology/topology-flow.ts",
+   "components/topology/topology-node.tsx",
+   "components/topology/wire-edge.tsx",
+   "lib/diagnostics/topology-layout.ts",
+   "components/topology/topology-selection-context.tsx",
+   "package.json"
+  ],
+  "definitionOfDone": "/curator/topology renders the real 6.7L P0087 scene (and the other two seeded symptoms) through the assembler \u2014 NOT @xyflow \u2014 on desktop AND 375px, verified in a browser screenshot. The 5 dot-canvas files + selection-context are deleted, @xyflow/react + @dagrejs/dagre are gone from package.json, grep -r @xyflow/dagre clean, build passing. ScenarioBar + Meter/reading + captured-missing footer + a whole-system escape control all present and functional. Only the current step's parts render (no 12V/GND leak on the pressure step \u2014 visually confirmed). Empty/null states render honestly (loader-null preserves not-found; zero-step shows the honest 'no test plan' state, no crash). Honest degradation holds on today's data (null electricalRole, 9 pins, empty expectedValue): qualitative bands + neutral verdicts, never fabricated numbers/red. No 'step N of M', no 'AI' word, no AI/network in the render path. tsc + lint pass; non-topology vitest stays green; a smoke render test of the assembled screen added."
+ },
+ {
+  "name": "INTEGRATION \u2014 wire, render the real scene, validate (gate)",
+  "scope": "Convergence + gate, runs LAST, READ-ONLY on every track's files. Owns only its new files. Confirms the dot-canvas is off the route, then proves the chain against the real 2018 F-250 6.7L P0087 scene at desktop AND 375px. Forks .design-shots/scene-walk.mjs from sheet.mjs + cap-meter-walk.mjs (adds the 375 viewport \u2014 sheet.mjs uses 390 today) to sign in, walk the P0087 step sequence on the LIVE route (scene-data.json is parts-only and insufficient for the step pipeline), and capture desktop+375 frames per step into one contact sheet with console-error capture. Writes a deterministic invariant test (using a SYNTHETIC test_action fixture, not scene-data.json) feeding the loaded SystemTopology through the assembler and asserting the leak invariants per shape from ResolvedScene.elements (pressure => zero terminals; locate => reading suppressed; look => no wires/pins; fork => one road). Produces a validation report as text (NOT a committed .md): leak per step, provenance honesty, grep-proven no-AI in draw path, grep-proven zero per-case/per-system literals, the 375 mobile pass, a reduced-motion frame, and a second-seeded-symptom pass. Any required change is reported back to the owning track, never edited here.",
+  "consumes": [
+   "C1",
+   "C2",
+   "C3"
+  ],
+  "produces": [
+   ".design-shots/scene-walk.mjs",
+   ".design-shots/out/scene-walk-sheet.png",
+   "tests/unit/diagnostic-scene-assembly.test.ts",
+   "the validation report (as text)"
+  ],
+  "dependsOn": [
+   "C1",
+   "C2",
+   "C3",
+   "T1",
+   "T2",
+   "T3",
+   "T4",
+   "T5",
+   "T6",
+   "T7"
+  ],
+  "filesOwned": [
+   ".design-shots/scene-walk.mjs",
+   ".design-shots/out/scene-walk-sheet.png",
+   "tests/unit/diagnostic-scene-assembly.test.ts"
+  ],
+  "definitionOfDone": "The real P0087 scene renders end-to-end on the live /curator/topology route via the data->step-engine->assembler chain with zero console/page errors at 1440 and at 375 (375 is the HARD gate). LEAK CHECK passes both visually (contact sheet) and deterministically (the invariant test asserts terminals.length===0 on pressure/PID/look/locate from ResolvedScene.elements). PROVENANCE HONESTY passes: nothing red unless isOutOfRange OR branch verdict==='fail'; amber only from labelGap/electricalContract; default graphite. NO AI in draw path (grep). ZERO per-case/per-system literals (grep). No 'AI' word, no 'step N of M' in any captured frame. A reduced-motion frame captured. A second seeded symptom (p0088 or no-start) exercised. The honest degraded state (null roles -> qualitative bands, neutral verdicts) is validated as CORRECT, not flagged as a bug. pnpm test green for the invariant test (cold-cache rerun caveat honored, not tail-piped). Contact sheet produced and judged as a user before handoff."
+ }
+]
