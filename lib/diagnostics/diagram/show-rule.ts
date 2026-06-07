@@ -79,6 +79,12 @@ export const selectStepShape = (
     return 'locate'
   }
 
+  // stepKind=confirm overrides any method (even hasBranches) — it is a
+  // confirm/orient framing step the curator marks via stepKind.
+  if (stepKind === 'confirm') {
+    return 'confirm'
+  }
+
   // The base shape from the KIND OF TEST.
   let base: StepShape
   if (observationMethod === 'electrical_measurement_at_pin') {

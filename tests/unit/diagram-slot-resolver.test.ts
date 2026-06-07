@@ -10,7 +10,10 @@ import type {
   TopologyPin,
 } from '@/lib/diagnostics/load-system-topology'
 import type { PartSlotFill } from '@/lib/diagnostics/diagram/slot-interface'
-import { SHAPE_SLOT_RULES as RULES } from '@/lib/diagnostics/diagram/slot-interface'
+import {
+  SHAPE_SLOT_RULES as RULES,
+  ALL_STEP_SHAPES,
+} from '@/lib/diagnostics/diagram/slot-interface'
 import {
   assembleScene,
   resolveSlots,
@@ -285,6 +288,36 @@ describe('assembleScene — source/ground/downstream from roles (Task 6)', () =>
     expect((scene.slots['source'] as PartSlotFill)?.partId).toBe('ref')
   })
 
+  it('does NOT name a downstream consumer as source when the focus is the FROM (upstream) end', () => {
+    // The focus FEEDS a downstream consumer over a 12v wire (focus = from end),
+    // and NO power wire feeds INTO the focus. source must be null: power flows
+    // from→to, so the focus's source is whoever feeds IT, not who it feeds.
+    const topo = fuelTopology()
+    topo.components.push(comp({ id: 'consumer', kind: 'actuator' }))
+    topo.components[2].testActions = [
+      action({
+        slug: 'hp-feed',
+        observationMethod: 'electrical_measurement_at_pin',
+        meterMode: 'volts',
+      }),
+    ]
+    topo.connections.push(
+      conn({
+        id: 'feed',
+        fromComponentId: 'hp', // focus is the upstream supplier here
+        toComponentId: 'consumer',
+        connectionKind: 'wire',
+        electricalRole: '12v',
+        fromPinId: 'hp-a',
+        toPinId: 'consumer-1',
+      }),
+    )
+    const scene = assembleScene(topo, topo.components[2].testActions[0], SCENARIO)
+    expect(scene.shape).toBe('electrical-probe')
+    // The engine must NOT name 'consumer' (the thing hp powers) as hp's source.
+    expect(scene.slots['source']).toBeNull()
+  })
+
   it('DEGRADES honestly on null electricalRole — empty source/ground, no fabrication', () => {
     const topo = fuelTopology() // every connection has electricalRole: null
     topo.components[2].testActions = [
@@ -436,7 +469,7 @@ describe('computeVerdict — pure-data precedence (Task 8)', () => {
     expect(computeVerdict(step, SCENARIO, [pin({ id: 'p1' })])).toBe('neutral')
   })
 
-  it('a null scenario => neutral (R10)', () => {
+  it('a null scenario does not crash; a failing branch still yields branch-fail', () => {
     const step = action({
       slug: 'x',
       observationMethod: 'scan_tool_pid',
@@ -446,6 +479,18 @@ describe('computeVerdict — pure-data precedence (Task 8)', () => {
     // null scenario means no out-of-range evidence, but a failing branch still
     // reads as branch-fail (branch verdict is scenario-independent).
     expect(computeVerdict(step, null, [pin({ id: 'p1' })])).toBe('branch-fail')
+  })
+
+  it('a null scenario with NO branches => neutral (the genuine R10 null-safety case)', () => {
+    const stepNoBranches = action({
+      slug: 'x',
+      observationMethod: 'scan_tool_pid',
+      meterMode: 'pid',
+      branches: [],
+    })
+    // No out-of-range evidence (null scenario) AND no failing branch → neutral,
+    // never red without evidence and never a crash on the null scenario.
+    expect(computeVerdict(stepNoBranches, null, [pin({ id: 'p1' })])).toBe('neutral')
   })
 
   it('R14 scope: out-of-range is currently keyed to the FOCUS pins ONLY (documented limitation)', () => {
@@ -652,12 +697,33 @@ describe('generality across unlike systems (data-only, zero per-case code) (Task
       { topo: def, step: def.components[1].testActions[0] },
       { topo: charging, step: charging.components[0].testActions[0] },
     ]
-    // Identical loop — every fixture must produce a well-formed scene.
+    // Identical loop — every fixture must produce a well-formed scene, and the
+    // electrical-vs-non-electrical leak-lock must hold per fixture (a fixture
+    // that took a system-specific path would leak terminals or fill a forbidden
+    // source/ground slot, tripping this).
     for (const { topo, step } of cases) {
       const scene = assembleScene(topo, step, SCENARIO)
       expect(scene.elements.length).toBeGreaterThan(0)
       expect(scene.slots['device-under-test']?.fillKind).toBe('part')
       expect(['out-of-range', 'branch-fail', 'neutral']).toContain(scene.verdict)
+      expect(ALL_STEP_SHAPES).toContain(scene.shape)
+
+      const isElectrical = [
+        'electrical-probe',
+        'continuity-ground',
+        'voltage-drop',
+        'duty-pwm',
+      ].includes(scene.shape)
+      if (isElectrical) {
+        expect(scene.pinsAllowed).toBe(true)
+      } else {
+        expect(
+          scene.elements.filter((e) => e.elementKind === 'terminal'),
+        ).toHaveLength(0)
+        expect(scene.slots['source']).toBeNull()
+        expect(scene.slots['ground']).toBeNull()
+        expect(scene.pinsAllowed).toBe(false)
+      }
     }
   })
 

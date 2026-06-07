@@ -6,13 +6,6 @@ import {
   OBSERVATION_METHODS,
 } from '@/lib/diagnostics/diagram/show-rule'
 
-// Known case count for this file (R11 — a non-collected suite fails loud):
-//   selectStepShape   = 9 cases
-//   computeShowBudget = 3 cases
-//   -------------------------------
-//   total             = 12 cases
-const EXPECTED_CASE_COUNT = 12
-
 describe('selectStepShape (Task 3)', () => {
   it('maps all 9 observationMethod values to a known shape (no unmapped arm)', () => {
     expect(OBSERVATION_METHODS).toHaveLength(9)
@@ -55,6 +48,11 @@ describe('selectStepShape (Task 3)', () => {
     expect(selectStepShape('scan_tool_pid', 'pid', 'locate', false)).toBe('locate')
     expect(selectStepShape('direct_visual_inspection', null, 'orient', false)).toBe('locate')
     expect(selectStepShape('electrical_measurement_at_pin', 'volts', 'find', false)).toBe('locate')
+  })
+
+  it('stepKind=confirm overrides to confirm (even over hasBranches)', () => {
+    expect(selectStepShape('scan_tool_pid', 'pid', 'confirm', false)).toBe('confirm')
+    expect(selectStepShape('direct_visual_inspection', null, 'confirm', true)).toBe('confirm')
   })
 
   it('hasBranches=true on a non-electrical reading routes to fork', () => {
@@ -100,13 +98,5 @@ describe('computeShowBudget (Task 4 — the terminals leak-lock by shape)', () =
     for (const shape of ALL_STEP_SHAPES) {
       expect(typeof computeShowBudget(shape).pinsAllowed).toBe('boolean')
     }
-  })
-})
-
-describe('show-rule file case-count guard (R11)', () => {
-  it('asserts the known collected case count so a missed suite fails loud', () => {
-    // selectStepShape (9) + computeShowBudget (3) = 12. This guard itself is not
-    // counted; it is a tripwire on the two real describe blocks above.
-    expect(EXPECTED_CASE_COUNT).toBe(12)
   })
 })
