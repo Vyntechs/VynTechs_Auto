@@ -1,0 +1,42 @@
+.dk-part__body { fill: var(--vt-bone-100); stroke: var(--vt-bone-400); stroke-width: 1.5; }
+.dk-part__label { fill: var(--vt-fg-2); font-family: var(--vt-font-sans); font-size: 11px; }
+.dk-part[data-tier="recede"] { opacity: var(--vt-recede); }
+.dk-part[data-active="true"] .dk-part__body { stroke: var(--vt-signal-500); stroke-width: 2.5; }
+.dk-part[data-selected="true"] .dk-part__body { stroke: var(--vt-signal-600); }
+.dk-part[data-provenance="needs-field-check"] .dk-part__body { stroke: var(--vt-amber-600); }
+.dk-part[data-provenance="field-verified"] .dk-part__body { stroke: var(--vt-signal-400); }
+.dk-glyph-stroke { fill: none; stroke: var(--role-ground); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.dk-part__tick { fill: none; stroke: var(--vt-signal-400); stroke-width: 2; stroke-linecap: round; }
+.dk-part[data-provenance="needs-field-check"] .dk-part__body,
+.dk-part[data-provenance="needs-field-check"] .dk-glyph-stroke { stroke: var(--vt-amber-600); }
+.dk-wire { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.dk-wire[data-role="12v"]     { stroke: var(--role-12v); }
+.dk-wire[data-role="ground"]  { stroke: var(--role-ground); }
+.dk-wire[data-role="signal"]  { stroke: var(--role-signal); }
+.dk-wire[data-role="5v-ref"]  { stroke: var(--role-5v-ref); }
+.dk-wire[data-role="low-ref"] { stroke: var(--role-low-ref); }
+.dk-wire[data-role="pwm"]     { stroke: var(--role-pwm); stroke-dasharray: 6 4; }
+.dk-wire[data-active="true"]  { stroke-width: 4; }
+.dk-link { fill: none; stroke-width: 3; stroke-linecap: round; }
+.dk-link[data-kind="fuel-line"]       { stroke: var(--role-fuel); }
+.dk-link[data-kind="mechanical-link"] { stroke: var(--vt-bone-600); stroke-dasharray: 2 5; }
+.dk-link:not([data-kind="fuel-line"]):not([data-kind="mechanical-link"]) { stroke: var(--vt-bone-500); }
+.dk-terminal__dot { fill: var(--role-signal); }
+.dk-terminal[data-role="12v"] .dk-terminal__dot    { fill: var(--role-12v); }
+.dk-terminal[data-role="ground"] .dk-terminal__dot { fill: var(--role-ground); }
+.dk-terminal[data-role="5v-ref"] .dk-terminal__dot { fill: var(--role-5v-ref); }
+.dk-terminal[data-role="low-ref"] .dk-terminal__dot{ fill: var(--role-low-ref); }
+.dk-terminal[data-role="pwm"] .dk-terminal__dot    { fill: var(--role-pwm); }
+.dk-overlay__stroke { fill: none; stroke: var(--vt-signal-600); stroke-width: 2; stroke-linecap: round; }
+.dk-overlay__label { fill: var(--vt-fg-3); font-family: var(--vt-font-mono); font-size: 9px; }
+.dk-overlay[data-deferred="true"] .dk-overlay__stroke { stroke-dasharray: 3 3; stroke: var(--vt-bone-500); }
+@media (prefers-reduced-motion: no-preference) {
+  .dk-overlay__pulse { animation: dk-pulse 1.6s ease-in-out infinite; }
+}
+.dk-overlay[data-reduced-motion="true"] .dk-overlay__pulse { animation: none; }
+@keyframes dk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.dk-catalog { display: flex; flex-direction: column; gap: 24px; padding: 24px; background: var(--vt-bg); }
+.dk-catalog__row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.dk-catalog__row .dk-part { width: 120px; height: auto; }
+.dk-catalog__overlay-cell { width: 60px; height: 36px; }
+@media (max-width: 414px) { .dk-catalog__row .dk-part { width: 96px; } }
