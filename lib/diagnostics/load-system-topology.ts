@@ -21,6 +21,15 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * The meter hookup vocabulary. Nullable everywhere — a test action that isn't a
+ * meter reading (pressure / look / PID) carries `null`. Exported here as the
+ * SINGLE source so C2 (part-api) and C3 (slot-interface) import the name and
+ * never re-declare it.
+ */
+export type MeterMode =
+  | 'volts' | 'ohms' | 'drop' | 'duty' | 'amps' | 'pid' | 'pressure'
+
 export type TopologyObservableProperty = {
   slug: string
   description: string
@@ -31,6 +40,10 @@ export type TopologyBranch = {
   condition: string
   verdict: string
   nextAction: string
+  // C1 additive (Wave 0 type-freeze; runtime wired by T1). Optional so the
+  // unchanged loader still typechecks; neutral-by-absence.
+  routesToTestActionId?: string | null
+  reasoning?: string | null
 }
 
 export type TopologyTestAction = {
@@ -42,6 +55,18 @@ export type TopologyTestAction = {
   invasiveness: number
   /** True when the cache-hit symptom's test plan implicates this action. */
   implicatedByCurrentSymptom: boolean
+  // C1 additive (Wave 0 type-freeze; runtime wired by T1). Optional so the
+  // unchanged loader still typechecks; null/absent degrades honestly.
+  /** Meter hookup mode; null for non-meter tests. */
+  meterMode?: MeterMode | null
+  /** Expected reading magnitude; null when not authored. */
+  expectedValue?: number | null
+  expectedUnit?: string | null
+  expectedTolerance?: number | null
+  /** Step-shape hint (e.g. 'locate'); null when not authored. */
+  stepKind?: string | null
+  /** symptom_test_implications.priority for the current symptom; null when not implicated. */
+  priority?: number | null
   branches: TopologyBranch[]
 }
 
@@ -81,6 +106,9 @@ export type TopologyScenario = {
   pinStates: Record<string, TopologyWireState>
   /** Map of pinId → "right now" reading text for this scenario. Missing key → treat as null. */
   pinReadings: Record<string, string>
+  /** Map of pinId → out-of-range flag. Missing key → not-out-of-range → neutral.
+   *  Authoritative for verdict. C1 additive (Wave 0 type-freeze; runtime wired by T1). */
+  isOutOfRange?: Record<string, boolean>
 }
 
 export type TopologyDataStatus = {
