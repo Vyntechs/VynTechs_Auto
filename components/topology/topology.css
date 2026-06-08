@@ -778,13 +778,24 @@
    is only the host frame. */
 .topo__assembled {
   position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
+  width: 100%;
+  /* Host height tracks the fixed-stage aspect, so the width-scaled stage fits
+     exactly (no crush, no clipping). The screen sets the numeric scale on
+     .topo__stage via a ResizeObserver (CSS can't derive scale from a width). */
+  aspect-ratio: 1320 / 760;
   border: 1px solid var(--vt-border);
   border-radius: var(--vt-radius-2);
   background: var(--vt-bone-100);
   overflow: hidden;
+}
+/* The fixed 1320×760 drawing stage; transform: scale(...) is applied inline by
+   the screen to fit the host width. transform-origin top-left keeps it anchored. */
+.topo__stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1320px;
+  height: 760px;
 }
 
 /* Whole-system escape control — sits over the canvas top-right, above the
@@ -848,10 +859,10 @@
    the device-under-test stays visible above T5's bottom sheet. T5 owns the
    sheet detents; this only sizes the host frame. */
 @media (max-width: 1023px) {
-  .topo__assembled,
+  /* .topo__assembled keeps its 1320:760 aspect-ratio (the stage scales to width);
+     only the no-plan empty-state needs a min-height floor. */
   .topo__no-plan { min-height: 60dvh; }
 }
 @media (max-width: 414px) {
-  .topo__assembled,
   .topo__no-plan { min-height: 55dvh; }
 }

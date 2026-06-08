@@ -11,6 +11,11 @@
   align-items: center;
   justify-content: center;
 }
+/* The kit part SVGs carry only a viewBox (no intrinsic px size), so in an
+   absolutely-positioned slot they collapse to 0×0 and vanish. Give them a
+   concrete size on the stage. */
+.slot-box .dk-part { display: block; width: 120px; height: 72px; }
+
 /* Tier emphasis — faded but always LEGIBLE (the 0.16 token floor was unreadable
    gray-mush on real data; a slot you can't read isn't context, it's noise). */
 .slot-box[data-tier='recede'] { opacity: 0.5; pointer-events: none; }
