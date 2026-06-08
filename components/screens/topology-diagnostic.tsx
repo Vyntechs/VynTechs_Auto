@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   SystemTopology,
   TopologyScenario,
@@ -100,6 +100,8 @@ export function TopologyDiagnostic({
 }: Props) {
   const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
   const [showWholeSystem, setShowWholeSystem] = useState(false)
+  const assembledRef = useRef<HTMLDivElement>(null)
+  const [diagramScale, setDiagramScale] = useState(1)
   const [activeScenarioSlug, setActiveScenarioSlug] = useState<string | null>(
     () => defaultScenarioSlug(topology.scenarios, topology.lastScenarioSlug),
   )
@@ -208,6 +210,24 @@ export function TopologyDiagnostic({
       ? selection.id
       : null
 
+  // Zoom-to-fit: the templates draw on a fixed 1320×760 stage; scale that stage
+  // to the host width so the whole diagram fits on screen (the "settleCamera"
+  // port the templates declared a framing hint for, computed here since CSS
+  // cannot derive a unitless scale from a container width).
+  const STAGE_W = 1320
+  useEffect(() => {
+    const el = assembledRef.current
+    if (!el) return
+    const update = () => {
+      const w = el.clientWidth
+      if (w > 0) setDiagramScale(w / STAGE_W)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [stepView.kind, showWholeSystem])
+
   return (
     <div className="topo">
       <header className="topo__header">
@@ -261,20 +281,17 @@ export function TopologyDiagnostic({
             onClearSelection={() => setSelection({ kind: 'empty' })}
           />
         ) : stepView.kind === 'scene' ? (
-          <div className="topo__assembled">
-            <stepView.Template
-              scene={stepView.scene}
-              onInspect={handleInspect}
-              selectedPartId={selectedPartId}
-            />
-            {stepView.scene.gaugeSpec !== null && (
-              <MeterSheet
-                nowShowing={`${activeScenario?.label ?? ''} · ${stepView.scene.shape}`}
-                gaugeSpec={stepView.scene.gaugeSpec}
-              >
-                {(g) => (g ? <Meter gauge={g} /> : null)}
-              </MeterSheet>
-            )}
+          <div className="topo__assembled" ref={assembledRef}>
+            <div
+              className="topo__stage"
+              style={{ transform: `scale(${diagramScale})`, transformOrigin: 'top left' }}
+            >
+              <stepView.Template
+                scene={stepView.scene}
+                onInspect={handleInspect}
+                selectedPartId={selectedPartId}
+              />
+            </div>
           </div>
         ) : (
           <div className="topo__no-plan">
@@ -297,6 +314,20 @@ export function TopologyDiagnostic({
         >
           {showWholeSystem ? 'Back to step' : 'Whole system'}
         </button>
+
+        {/* The Meter sits BELOW the diagram (not over it) on desktop; T5's CSS
+            promotes it to a tap-to-toggle bottom sheet at mobile widths. Only
+            mounted on a gauge-bearing scene. */}
+        {!showWholeSystem &&
+          stepView.kind === 'scene' &&
+          stepView.scene.gaugeSpec !== null && (
+            <MeterSheet
+              nowShowing={`${activeScenario?.label ?? ''} · ${stepView.scene.shape}`}
+              gaugeSpec={stepView.scene.gaugeSpec}
+            >
+              {(g) => (g ? <Meter gauge={g} /> : null)}
+            </MeterSheet>
+          )}
 
         {/* Footer lives inside the canvas wrap so it can overlay the
             diagram bottom (CSS: position absolute). On mobile the wrap
