@@ -35,6 +35,10 @@ export function Meter({ gauge, label, nowShowing }: MeterProps): ReactNode {
   const chip = VERDICT_CHIP[verdict] ?? VERDICT_CHIP.neutral
   // Honest no-now state: never fabricate a number when there is no field reading.
   const hasNow = reading.now != null && reading.now !== ''
+  // The hero plate is for SHORT values ("5000", "12V", "0.5-4.5V"). A long/prose
+  // expectation (or a missing one) renders as a small readable note instead of
+  // blowing up to 46px — keeps the Meter compact so the diagram stays visible.
+  const isShortValue = reading.expect != null && reading.expect.length <= 24
 
   return (
     <div className="meter-card" data-verdict={verdict}>
@@ -48,14 +52,16 @@ export function Meter({ gauge, label, nowShowing }: MeterProps): ReactNode {
       <div className="m-instr">
         <div className="m-expect">
           <span className="m-col-label">Expect</span>
-          <div className="m-plate">
-            <span className="big">
-              {reading.expect ?? 'needs field check'}
-              {reading.expect != null && reading.unit && (
-                <span className="unit">{reading.unit}</span>
-              )}
-            </span>
-          </div>
+          {isShortValue ? (
+            <div className="m-plate">
+              <span className="big">
+                {reading.expect}
+                {reading.unit && <span className="unit">{reading.unit}</span>}
+              </span>
+            </div>
+          ) : (
+            <p className="m-expect-prose">{reading.expect ?? 'needs field check'}</p>
+          )}
         </div>
 
         <div className="m-now">

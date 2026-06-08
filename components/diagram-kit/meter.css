@@ -97,6 +97,23 @@
   margin-left: 3px;
 }
 
+/* Prose/long EXPECT — a readable note, NOT the hero plate. Clamped so a long
+   sentence never grows the Meter unbounded or buries the diagram behind it. */
+.meter-card .m-expect-prose {
+  max-width: 340px;
+  margin: 0;
+  font-family: var(--vt-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: var(--vt-fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .meter-card .m-now {
   display: flex;
   flex-direction: column;

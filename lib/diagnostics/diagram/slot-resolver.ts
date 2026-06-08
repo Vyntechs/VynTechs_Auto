@@ -240,8 +240,11 @@ export function computeVerdict(
  * Field names match the FROZEN C2 PartReading {expect, now, unit, mode, verdict}.
  */
 function buildReading(step: TopologyTestAction, verdict: VerdictSignal): PartReading {
+  // Hero EXPECT prefers the SHORT numeric value (e.g. "5000" + unit "psi"). The
+  // prose expectedObservation is only the fallback when no value is authored;
+  // the Meter renders a long/prose expect at a small readable size, never hero.
   return {
-    expect: step.expectedObservation ?? null,
+    expect: step.expectedValue != null ? String(step.expectedValue) : (step.expectedObservation ?? null),
     now: null,
     unit: step.expectedUnit ?? null,
     mode: step.meterMode ?? null,

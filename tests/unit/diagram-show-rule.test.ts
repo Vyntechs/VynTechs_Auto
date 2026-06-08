@@ -7,8 +7,9 @@ import {
 } from '@/lib/diagnostics/diagram/show-rule'
 
 describe('selectStepShape (Task 3)', () => {
-  it('maps all 9 observationMethod values to a known shape (no unmapped arm)', () => {
-    expect(OBSERVATION_METHODS).toHaveLength(9)
+  it('maps every observationMethod value to a known shape (no unmapped arm)', () => {
+    // 4 instrument methods + the look/inspect family (real R10 slugs + legacy).
+    expect(OBSERVATION_METHODS).toHaveLength(12)
     for (const m of OBSERVATION_METHODS) {
       const shape = selectStepShape(m, null, null, false)
       expect(ALL_STEP_SHAPES).toContain(shape)
@@ -55,12 +56,27 @@ describe('selectStepShape (Task 3)', () => {
     expect(selectStepShape('direct_visual_inspection', null, 'confirm', true)).toBe('confirm')
   })
 
-  it('hasBranches=true on a non-electrical reading routes to fork', () => {
-    expect(selectStepShape('scan_tool_pid', 'pid', null, true)).toBe('fork')
-    // ...but an electrical reading keeps its shape (branches route via the Meter).
+  it('a branchy reading is NOT a fork — it keeps its reading shape (branches route the next step)', () => {
+    // Fork is now an explicit stepKind decision. A PID/visual/pressure reading with
+    // pass/fail branches renders as the reading itself; the branches drive
+    // resolveFork for the NEXT step, not a bare routing arm in place of the view.
+    expect(selectStepShape('scan_tool_pid', 'pid', null, true)).toBe('single-pid')
+    expect(selectStepShape('direct_visual_external', null, null, true)).toBe('look-inspect')
+    expect(selectStepShape('pressure_test_with_gauge', 'pressure', null, true)).toBe('pressure-flow')
     expect(selectStepShape('electrical_measurement_at_pin', 'volts', null, true)).toBe(
       'electrical-probe',
     )
+  })
+
+  it('stepKind=fork is the ONLY route to a fork shape', () => {
+    expect(selectStepShape('scan_tool_pid', 'pid', 'fork', false)).toBe('fork')
+    expect(selectStepShape('direct_visual_external', null, 'fork', true)).toBe('fork')
+  })
+
+  it('the REAL curated look/inspect slugs (R10) resolve to look-inspect', () => {
+    expect(selectStepShape('direct_visual_external', null, null, false)).toBe('look-inspect')
+    expect(selectStepShape('direct_visual_internal', null, null, false)).toBe('look-inspect')
+    expect(selectStepShape('smell', null, null, false)).toBe('look-inspect')
   })
 
   it('waveform_capture degrades to a neutral single-pid (no reference trace in v1)', () => {
