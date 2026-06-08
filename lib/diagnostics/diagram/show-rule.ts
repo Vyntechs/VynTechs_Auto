@@ -17,16 +17,25 @@ export const OBSERVATION_METHODS = [
   'electrical_measurement_at_pin',
   'pressure_test_with_gauge',
   'scan_tool_pid',
+  'waveform_capture',
+  // Look/inspect family — the REAL curated slugs (R10, verified against the seed):
+  'direct_visual_external',
+  'direct_visual_internal',
+  'smell',
+  // Earlier-assumed look slugs kept so synthetic fixtures still resolve:
   'direct_visual_inspection',
   'audible_check',
   'tactile_touch_check',
   'smell_check',
-  'waveform_capture',
   'mechanical_actuation_check',
 ] as const
 
-/** Methods that resolve to a no-meter look/inspect shape. */
+/** Methods that resolve to a no-meter look/inspect shape. The first three are the
+ *  REAL curated slugs (R10); the rest are kept so older fixtures still resolve. */
 const LOOK_METHODS: readonly string[] = [
+  'direct_visual_external',
+  'direct_visual_internal',
+  'smell',
   'direct_visual_inspection',
   'audible_check',
   'tactile_touch_check',
@@ -72,7 +81,9 @@ export const selectStepShape = (
   observationMethod: string,
   meterMode: MeterMode | null,
   stepKind: string | null,
-  hasBranches: boolean,
+  // Retained for the frozen SelectStepShape signature; fork is now stepKind-driven,
+  // so the mere presence of branches no longer changes the shape.
+  _hasBranches: boolean,
 ): StepShape => {
   // stepKind=locate/orient/find overrides any method — it is a placement step.
   if (stepKind !== null && LOCATE_STEP_KINDS.includes(stepKind)) {
@@ -83,6 +94,15 @@ export const selectStepShape = (
   // confirm/orient framing step the curator marks via stepKind.
   if (stepKind === 'confirm') {
     return 'confirm'
+  }
+
+  // stepKind=fork is an EXPLICIT routing/decision step (rare, curator-marked).
+  // A reading that merely HAS pass/fail branches is NOT a fork — it renders as
+  // its reading shape (pressure/PID/look/electrical) and the branches route the
+  // NEXT step via resolveFork. Collapsing every branchy reading into a bare fork
+  // hid the actual diagnostic view, so fork is now opt-in via stepKind only.
+  if (stepKind === 'fork') {
+    return 'fork'
   }
 
   // The base shape from the KIND OF TEST.
@@ -101,12 +121,6 @@ export const selectStepShape = (
   } else {
     // Generic fallback for any UNSEEN method — a neutral single reading.
     base = 'single-pid'
-  }
-
-  // A branchy NON-electrical reading is a fork (the electrical shapes already
-  // own the source/DUT/ground arrangement; branches there route via the Meter).
-  if (hasBranches && !ELECTRICAL_SHAPES.includes(base)) {
-    return 'fork'
   }
 
   return base

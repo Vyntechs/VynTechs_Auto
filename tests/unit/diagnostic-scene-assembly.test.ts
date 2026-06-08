@@ -200,11 +200,12 @@ describe('diagnostic scene assembly — leak invariant (per StepShape)', () => {
     expect(terminalCount(scene.elements)).toBeGreaterThan(0)
   })
 
-  it('fork emits exactly one route arm (branchy non-electrical reading)', () => {
+  it('fork emits exactly one route arm (explicit stepKind=fork decision step)', () => {
     const focus = component({ id: 'dut', kind: 'sensor' })
     const topo = syntheticTopology('fuel', focus)
     const ta = syntheticStep({
       observationMethod: 'scan_tool_pid',
+      stepKind: 'fork', // fork is an explicit decision step, not "has branches"
       branches: [
         { condition: 'low', verdict: 'fail', nextAction: 'inspect pump', routesToTestActionId: null, reasoning: null },
       ],
@@ -287,8 +288,10 @@ describe('diagnostic scene assembly — verdict honesty', () => {
       branches: [{ condition: 'x', verdict: 'fail', nextAction: 'replace', routesToTestActionId: null, reasoning: null }],
     })
     const scene = assembleFor(topo, ta, null)
-    // A branched PID resolves to the fork SHAPE; the scene VERDICT is branch-fail.
-    expect(scene.shape).toBe('fork')
+    // A branchy PID renders as the READING (single-pid) — fork is stepKind-only now;
+    // the branches still set the scene VERDICT to branch-fail (they route the next
+    // step, they don't replace the view).
+    expect(scene.shape).toBe('single-pid')
     expect(scene.verdict).toBe('branch-fail')
   })
 

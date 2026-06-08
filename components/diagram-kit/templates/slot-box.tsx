@@ -3,6 +3,10 @@ import type { SlotName, SlotFill } from '@/lib/diagnostics/diagram/slot-interfac
 import type { DiagramPartProps } from '@/components/diagram-kit/part-api'
 import { resolvePart } from '@/components/diagram-kit'
 import type { SlotPlacement } from './template-local-types'
+// The kit's part/wire/overlay/terminal glyph styling. Without this the SVG parts
+// render with NO stroke (invisible) on the screen — it was only loaded by the
+// standalone catalog before. Importing it here loads it wherever a template renders.
+import '@/components/diagram-kit/diagram-kit.css'
 
 const ANCHOR_TRANSFORM: Record<SlotPlacement['anchor'], string> = {
   center: 'translate(-50%, -50%)',

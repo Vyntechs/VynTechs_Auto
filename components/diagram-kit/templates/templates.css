@@ -11,9 +11,10 @@
   align-items: center;
   justify-content: center;
 }
-/* recede tier — fade, never display:none (proto canonical floor) */
-.slot-box[data-tier='recede'] { opacity: var(--vt-recede); pointer-events: none; }
-.slot-box[data-tier='anchor'] { opacity: 0.62; }
+/* Tier emphasis — faded but always LEGIBLE (the 0.16 token floor was unreadable
+   gray-mush on real data; a slot you can't read isn't context, it's noise). */
+.slot-box[data-tier='recede'] { opacity: 0.5; pointer-events: none; }
+.slot-box[data-tier='anchor'] { opacity: 0.82; }
 .slot-box[data-tier='focus'] { opacity: 1; }
 .slot-box[data-selected='true'] { outline: 1.5px solid var(--vt-signal-600); outline-offset: 2px; border-radius: 8px; }
 .slot-box.is-degraded {
@@ -29,10 +30,11 @@
 .slot-box--detail {
   max-width: 360px;
   font-family: var(--vt-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.02em;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
   text-align: center;
-  color: var(--vt-fg-3);
+  color: var(--vt-fg-2);
 }
 .overlay-region {
   position: absolute;

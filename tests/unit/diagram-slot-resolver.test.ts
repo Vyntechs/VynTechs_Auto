@@ -576,6 +576,7 @@ describe('assembleScene — detail payload + fork route (Task 9)', () => {
         slug: 'fk',
         observationMethod: 'scan_tool_pid',
         meterMode: 'pid',
+        stepKind: 'fork', // fork is now an explicit decision step (not "has branches")
         branches: [
           {
             condition: 'low',
@@ -601,6 +602,7 @@ describe('assembleScene — detail payload + fork route (Task 9)', () => {
         slug: 'fk2',
         observationMethod: 'scan_tool_pid',
         meterMode: 'pid',
+        stepKind: 'fork', // fork is now an explicit decision step (not "has branches")
         branches: [
           { condition: 'low', verdict: 'fail', nextAction: 'Check the FRP sensor wiring' },
         ],
