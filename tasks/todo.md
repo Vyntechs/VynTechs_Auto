@@ -51,3 +51,81 @@ Skipped/Failed:
 - Did NOT run a local `next build` (relied on tsc + 1016 tests + dev-compiled curator routes; the production build runs on the Vercel preview deploy).
 - Live research-progress polling UI not screenshotted with a real run (would cost a real ~$2–3 run, Brandon-gated). Validated via code + no-run/error states.
 - Full legacy content polish intentionally deferred (handoff scoped legacy as lower-urgency).
+
+---
+
+# Validate the rebuilt diagnostic diagram — operate & diagnose walkthrough
+
+Branch: `feat/system-data-ingest` · Worktree: `.claude/worktrees/system-data-ingest`
+Created: 2026-06-14 · Status: **NOT STARTED — awaiting Brandon approval**
+Companion handoff: `docs/superpowers/handoffs/2026-06-07-diagnostic-diagram-HANDOFF.md`
+Nature: **read-only validation. NOT a merge gate. NOT a fix pass.**
+
+## Goal
+Brandon has seen the rebuilt diagram walk the seeded fault cases end-to-end on `/curator/topology` and holds an honest, evidence-backed list of what diagnoses as intended vs. what's still broken/incomplete — so we know what development actually remains.
+
+## Scope
+- In play: `/curator/topology` only — the assembled diagram, the Meter, step sequence/fork routing, tap-to-inspect, the mobile tap-to-toggle sheet, the whole-system view.
+- Cases: P0087 (fuel-rail-pressure too low), P0088 (too high), no-start-cranks-normally, plus a no-DTC case.
+- Viewports: desktop-1440 and mobile-375.
+- Run from the worktree above (branch `feat/system-data-ingest`).
+
+## Out of scope (do NOT touch)
+- **No `main`. No PR. No merge anything.**
+- **No fixes.** Do not modify diagnostic logic, the part kit, templates, or any code to "fix" what you find — only document it; Brandon decides fixes.
+- Nothing outside the topology diagram — leave the curator wizard, the system-data-ingest PRs (PR0–PR3), and curator-console work alone.
+- Do not trigger any paid research/AI run.
+
+## Steps (each independently verifiable)
+1. **App up + curator auth.** Start the dev server in the worktree (`npm run dev`). Log in as `e2e@vyntechs.com` (password in `.env.local`); if login drifts, reset via the service-role admin (drift is the password, not email-confirm). → Verifiable: `/curator/topology` loads as a curator (no 403).
+2. **Browser harness.** Playwright MCP is broken on this machine — drive a Node `@playwright/test` script with `executablePath` = the bundled `ms-playwright` chromium build. → Verifiable: the script produces a screenshot of `/curator/topology`.
+3. **Per-case step-through (the core).** For P0087-low, P0088-high, and no-start-cranks, walk the guided flow step by step. At EACH step verify intent, not just render: (a) the diagram shows ONLY what that step tests — no leaked 12V/GND on a pressure step; (b) the Meter reads the right EXPECT / NOW / VERDICT; (c) forks route to the correct next step; (d) tap-to-inspect works; (e) the walk lands on the correct root cause. → Verifiable: a labeled screenshot sequence per case + a per-step pass/gap note.
+4. **Mobile + edge views.** Repeat the walk at mobile-375 (confirm the Meter tap-to-toggle sheet peeks/expands correctly), and exercise the whole-system view and the no-DTC case. → Verifiable: mobile screenshots + whole-system + no-DTC shots.
+5. **Judge against the quality bar across the spread** (not one case): right answer + knows-this-vehicle + honest/calibrated + sound method + no-DTC robustness. → Verifiable: a scored line per case.
+6. **Honest report.** Per case: what diagnoses as intended vs. what's wrong/incomplete, with screenshots; then a consolidated "remaining development" list. Do not fix anything. → Verifiable: the report exists with an explicit pass/gap line per case + a remaining-dev list.
+
+## Verify by
+A written report + step-by-step screenshot set covering each case on `/curator/topology`, with an explicit **pass/gap line per case** and a **"remaining development" list** at the end. If the app won't run locally or a case won't load, that is stated loudly — not papered over.
+
+⚙️ `/effort high` — runs the app, drives a browser, reasons about the diagnostic engine across multiple cases.
+🤖 Model: `claude-opus-4-8` — judging whether each step diagnoses correctly is a judgment call, not a mechanical check.
+
+---
+
+# Design the finish — close the interactive-diagnostic gaps (DESIGN ONLY, no code)
+
+Branch: `feat/system-data-ingest` · Worktree: `.claude/worktrees/system-data-ingest`
+Created: 2026-06-14 · Status: **NOT STARTED — awaiting Brandon approval**
+Input: `docs/superpowers/research/2026-06-14-interactive-diagnostic-state-map.md` (9 gaps, data-model verdict, 7 open questions)
+Vision: `[[interactive-diagnostic-vision]]` (memory) — topology becomes the user diagnostic; build-as-needed, reuse, self-connecting, gap-closing graph.
+Nature: **design + plan only. NO production code.**
+
+## Goal
+A vetted design doc + phased build plan exists that closes all 9 gaps between today's interactive diagnostic and the build-as-needed / reuse / self-connecting-graph intent — each gap solved with the simplest elegant approach (not over- or under-engineered) — with the few real product decisions surfaced for Brandon's sign-off, and zero production code written.
+
+## Scope
+- Read-only over the worktree (branch `feat/system-data-ingest`).
+- Inputs: the state map above — its 9 capability gaps, the data-model verdict, the 7 open design questions.
+- Deliverable: a design doc + phased plan written under `docs/superpowers/`.
+- **Full toolkit allowed:** ultracode Workflow (candidate → judge → synthesize → adversarial), Explore subagents, Supabase MCP (READ-only) for the live-DB row check.
+
+## Out of scope (do NOT)
+- No feature / production code — **design only**.
+- Don't touch `main`, the curator's existing working flows, the live AI-tree/wizard user path, or any DB **data** (reads only).
+- Don't propose ripping out working pieces unless clearly justified.
+- No new dependencies unless one is genuinely the simplest elegant option (justify it).
+
+## Steps (each independently verifiable)
+1. **Re-ground on facts.** Confirm the 3 "still assumption" items from the state map: test status (already green — 1375 tests / 176 files), live-DB row counts for platform `ford-super-duty-4th-gen-67-psd` (Supabase read), and a verdict on whether "topology takes over at intake" is a routing change vs a diagnose→lock→repair lifecycle rebuild (from reading `slot-resolver`, `topology-layout`, `routeForSession`). → Verifiable: those 3 facts appear in the doc with evidence.
+2. **Solve each gap (all 9).** 2–3 candidate approaches each, judged on simplest + elegant + fewest-future-problems + schema-fit; pick one with reason + name the runner-up. → Verifiable: 9 gap sections, each with chosen + runner-up + why.
+3. **Answer each open question (all 7).** A recommended answer each; flag the ones that genuinely need Brandon's decision. → Verifiable: 7 answers, decisions marked.
+4. **One coherent target architecture.** entry → reuse-or-build decision → build-on-demand → render → compounding/gap-fill graph; plus the minimal data-model delta; naming the existing code reused. → Verifiable: an architecture section + a data-model-delta list.
+5. **Phased build order.** Smallest valuable slice first, each independently shippable + verifiable, with size/risk per phase. → Verifiable: an ordered phase list with size/risk.
+6. **Adversarial review of the design.** Hunt over-engineering, under-engineering (problems we'd create), hidden coupling; check against the honesty/no-DTC + scalability bars. → Verifiable: a "design red-team" section listing what was challenged and how it resolved.
+7. **Write the doc** to `docs/superpowers/` with a **"Decisions Brandon must make"** list at the very top. → Verifiable: the file exists; that list is first.
+
+## Verify by
+A design doc under `docs/superpowers/` that: solves all 9 gaps (chosen + runner-up + why), answers all 7 open questions (decisions flagged), gives one architecture + data-model delta, a phased build order, and a top "Decisions Brandon must make" list. Spot-check: every chosen approach names the specific file/table it touches and why it's the simplest elegant fit. And: `git diff` shows **only the new doc** — no code files changed.
+
+⚙️ `/effort xhigh` — vyntechs architecture; this design drives a large multi-system build.
+🤖 Model: `claude-opus-4-8` — every choice is a simplest-vs-elegant-vs-future-proof judgment call.
