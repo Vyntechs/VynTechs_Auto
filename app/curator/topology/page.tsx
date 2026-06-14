@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { db } from '@/lib/db/client'
 import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
 import { layoutTopology } from '@/lib/diagnostics/topology-layout'
@@ -42,40 +41,18 @@ export default async function CuratorTopologyPage({
   })
 
   return (
-    <div>
-      <nav
-        aria-label="Symptom"
-        style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}
-      >
-        {SYMPTOMS.map((s) => {
-          const active = s.slug === symptomSlug
-          return (
-            <Link
-              key={s.slug}
-              href={`/curator/topology?symptom=${s.slug}`}
-              aria-current={active ? 'page' : undefined}
-              style={{
-                padding: '0.35rem 0.75rem',
-                borderRadius: 6,
-                border: '1px solid #ccc',
-                fontWeight: active ? 600 : 400,
-                background: active ? '#111' : 'transparent',
-                color: active ? '#fff' : 'inherit',
-                textDecoration: 'none',
-              }}
-            >
-              {s.label}
-            </Link>
-          )
-        })}
-      </nav>
-
+    // Full-window escape: .topo-route renders OVER the curator shell (topbar +
+    // sidebar + main padding) as a fixed full-viewport layer. The layout's
+    // canCurate auth gate still runs server-side — only the chrome is covered.
+    <div className="topo-route">
       {topology ? (
         <TopologyDiagnostic
           topology={topology}
           layout={layoutTopology(topology)}
           vehicleName={topology.platform.name}
           sessionId="preview"
+          symptoms={SYMPTOMS}
+          activeSymptomSlug={symptomSlug}
         />
       ) : (
         // Loader-null = not-found (no platform/symptom/components). Distinct from

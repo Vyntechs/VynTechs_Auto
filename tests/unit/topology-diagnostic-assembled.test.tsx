@@ -174,6 +174,8 @@ describe('TopologyDiagnostic — assembled screen', () => {
         layout={emptyLayout}
         vehicleName="2017 F-250"
         sessionId="preview"
+        symptoms={[]}
+        activeSymptomSlug=""
       />,
     )
     // The assembled diagram region is present (stable root class).
@@ -195,6 +197,8 @@ describe('TopologyDiagnostic — assembled screen', () => {
         layout={emptyLayout}
         vehicleName="2017 F-250"
         sessionId="preview"
+        symptoms={[]}
+        activeSymptomSlug=""
       />,
     )
     const headline = document.querySelector('.topo__no-plan-title')
@@ -210,6 +214,8 @@ describe('TopologyDiagnostic — assembled screen', () => {
         layout={emptyLayout}
         vehicleName="2017 F-250"
         sessionId="preview"
+        symptoms={[]}
+        activeSymptomSlug=""
       />,
     )
     // The template exposes a tappable region per scene element via onInspect;
@@ -236,6 +242,8 @@ describe('mobile Meter sheet', () => {
         layout={emptyLayout}
         vehicleName="2017 F-250"
         sessionId="preview"
+        symptoms={[]}
+        activeSymptomSlug=""
       />,
     )
     // The pressure scene resolves a gauge, so the sheet host must be present.
