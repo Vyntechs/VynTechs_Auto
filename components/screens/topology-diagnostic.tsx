@@ -78,6 +78,10 @@ type Props = {
   layout: TopologyLayout
   vehicleName: string
   sessionId: string
+  /** Symptom switcher options, rendered in the floating control dock. */
+  symptoms: { slug: string; label: string }[]
+  /** The currently-loaded symptom slug (drives the active pill). */
+  activeSymptomSlug: string
 }
 
 type SelectionState =
@@ -97,6 +101,8 @@ export function TopologyDiagnostic({
   layout,
   vehicleName,
   sessionId,
+  symptoms,
+  activeSymptomSlug,
 }: Props) {
   const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
   const [showWholeSystem, setShowWholeSystem] = useState(false)
@@ -230,44 +236,7 @@ export function TopologyDiagnostic({
 
   return (
     <div className="topo">
-      <header className="topo__header">
-        <Link
-          href="/today"
-          style={{
-            fontFamily: 'var(--vt-font-mono)',
-            fontSize: 11,
-            letterSpacing: '0.08em',
-            color: 'var(--vt-fg-3)',
-            textDecoration: 'none',
-          }}
-        >
-          ← Sessions
-        </Link>
-        <div className="topo__eyebrow">
-          Electrical topology · diagnostic-complete from theory
-        </div>
-        <h1 className="topo__title">{formatSymptomTitle(topology.symptom.slug)}</h1>
-        <div className="topo__vehicle">
-          {vehicleName} · {topology.platform.name}
-        </div>
-      </header>
-
-      {topology.scenarios.length > 0 && (
-        <ScenarioBar
-          scenarios={topology.scenarios}
-          activeSlug={activeScenarioSlug}
-          onScenarioChange={handleScenarioChange}
-        />
-      )}
-
-      {activeScenario && (
-        <div
-          className={`topo__readout${activeScenario.kind === 'fault' ? ' is-fault' : ''}`}
-        >
-          Now showing · <b>{activeScenario.label}</b> — {activeScenario.sub}
-        </div>
-      )}
-
+      {/* The canvas fills the entire window; every control floats over it. */}
       <div className="topo__canvas-wrap">
         {showWholeSystem ? (
           // Brandon override: the whole-system button drops into the EXISTING
@@ -329,11 +298,63 @@ export function TopologyDiagnostic({
             </MeterSheet>
           )}
 
-        {/* Footer lives inside the canvas wrap so it can overlay the
-            diagram bottom (CSS: position absolute). On mobile the wrap
-            collapses to a flex column and the footer renders inline. */}
+        {/* Footer overlays the diagram bottom (CSS: position absolute). On
+            mobile it pins to the bottom edge as a collapsible strip. */}
         <CapturedMissingFooter topology={topology} />
       </div>
+
+      {/* Floating left control dock — Back, the symptom switch, the
+          ignition/fault simulator, and the live status. All float over the
+          diagram; on mobile the dock reflows to a bottom sheet. */}
+      <aside className="topo__dock" aria-label="Diagram controls">
+        <Link href="/curator" className="topo__back">
+          ← Back
+        </Link>
+
+        <div className="topo__dock-head">
+          <div className="topo__eyebrow">Electrical topology</div>
+          <h1 className="topo__title">
+            {formatSymptomTitle(topology.symptom.slug)}
+          </h1>
+          <div className="topo__vehicle">
+            {vehicleName} · {topology.platform.name}
+          </div>
+        </div>
+
+        {symptoms.length > 0 && (
+          <nav className="topo__symptoms" aria-label="Symptom">
+            {symptoms.map((s) => {
+              const active = s.slug === activeSymptomSlug
+              return (
+                <Link
+                  key={s.slug}
+                  href={`/curator/topology?symptom=${s.slug}`}
+                  className={`topo__symptom${active ? ' is-active' : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {s.label}
+                </Link>
+              )
+            })}
+          </nav>
+        )}
+
+        {topology.scenarios.length > 0 && (
+          <ScenarioBar
+            scenarios={topology.scenarios}
+            activeSlug={activeScenarioSlug}
+            onScenarioChange={handleScenarioChange}
+          />
+        )}
+
+        {activeScenario && (
+          <div
+            className={`topo__readout${activeScenario.kind === 'fault' ? ' is-fault' : ''}`}
+          >
+            Now showing · <b>{activeScenario.label}</b> — {activeScenario.sub}
+          </div>
+        )}
+      </aside>
 
       <TopologyDetailPanel
         selection={panelSelection}

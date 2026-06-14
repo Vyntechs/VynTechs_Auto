@@ -1,54 +1,119 @@
 /* Interactive wiring-topology diagnostic — PR-B.
    Tokens (--vt-*) are defined in app/globals.css. */
 
-/* ---- layout shell --------------------------------------------------- */
-/*
-   Named grid areas pin every region — without them, the canvas (1fr) gets
-   pushed into an implicit auto-sized row by the sibling scenario / readout /
-   panel / footer elements and collapses to ~54 px tall. Areas guarantee:
-   - header spans both columns at the top
-   - scenario bar + readout stack in col 1 at their natural heights
-   - canvas-wrap takes the remaining 1fr row, so React Flow has real space
-   - detail panel docks in col 2 and spans the lower rows
-*/
-.topo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
-  grid-template-rows: auto auto auto 1fr;
-  grid-template-areas:
-    'header   header'
-    'scenario panel'
-    'readout  panel'
-    'canvas   panel';
-  gap: var(--vt-space-6);
-  align-items: stretch;
-  height: 100dvh;
-  padding: var(--vt-space-5);
+/* ---- full-window layout (curator /topology) ------------------------------
+   This route renders OVER the curator shell as a full-viewport layer: the
+   diagram fills the window edge-to-edge and every control floats on top of it.
+   The auth gate in app/curator/layout.tsx still runs server-side — only the
+   shell chrome (topbar + sidebar + main padding) is covered, never bypassed.
+   The page root carries .topo-route; .topo fills it; the canvas fills .topo. */
+.topo-route {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* over the static topbar + the mobile sidebar drawer (z40) */
+  /* The curator shell adds `.vt-main > * { padding: 24px 28px }` to every page
+     wrapper; this route must escape it to reach the window edges. */
+  padding: 0 !important;
   background: var(--vt-bg);
 }
-.topo__header {
-  grid-area: header;
+.topo {
+  --topo-dock-w: clamp(248px, 24vw, 300px);
+  position: absolute;
+  inset: 0;
+  background: var(--vt-bg);
+}
+
+/* Canvas wrapper fills the window; it is the positioning context for every
+   floating overlay (dock, captured/missing footer, detail panel, zoom). */
+.topo__canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+.topo__canvas-wrap > .topo__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* Floating left control dock — frosted, over the diagram's left edge. Holds
+   Back, the symptom switch, the ignition/fault simulator, and the live status.
+   Same frosted treatment as the footer / whole-system pill for consistency. */
+.topo__dock {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--topo-dock-w);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-4);
+  padding: var(--vt-space-4);
+  overflow-y: auto;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 8%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-right: 1px solid var(--vt-rule);
+}
+.topo__dock-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.topo-scenario-bar { grid-area: scenario; }
-.topo__readout { grid-area: readout; }
-.topo__canvas-wrap { grid-area: canvas; }
-.topo-panel { grid-area: panel; }
-
-/* Canvas wrapper: provides the positioning context for the absolute
-   CapturedMissingFooter overlay and constrains the canvas to fill it. */
-.topo__canvas-wrap {
-  position: relative;
+.topo__back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  text-decoration: none;
+  transition: color 120ms ease, background 120ms ease;
+}
+.topo__back:hover {
+  color: var(--vt-fg);
+  background: var(--vt-bone-100);
+}
+.topo__symptoms {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: 6px;
 }
-.topo__canvas-wrap > .topo__canvas {
-  flex: 1;
-  min-height: 0;
+.topo__symptom {
+  padding: 7px 10px;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
 }
+.topo__symptom:hover { background: var(--vt-bone-100); }
+.topo__symptom.is-active {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+
+/* The ignition/fault simulator stacks vertically inside the narrow dock. */
+.topo__dock .topo-scenario-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.topo__dock .topo-scenario-bar__group { flex-wrap: wrap; }
+.topo__dock .topo-scenario-bar__group--fault { margin-left: 0; }
+.topo__dock .topo__readout { padding: 0; }
 .topo__eyebrow {
   font-family: var(--vt-font-mono);
   font-size: 11px;
@@ -69,14 +134,19 @@
 
 /* ---- canvas --------------------------------------------------------- */
 .topo__canvas {
-  position: relative;
   min-height: 0;
-  border: 1px solid var(--vt-border);
-  border-radius: var(--vt-radius-2);
   background: var(--vt-bone-100);
   overflow: hidden;
 }
 .topo__canvas .react-flow__attribution { display: none; }
+/* Zoom +/− (whole-system view) floats bottom-right, clear of the dock and
+   just above the captured/missing strip — react-flow defaults to bottom-left,
+   which would sit under the control dock. */
+.topo__canvas .react-flow__controls {
+  left: auto;
+  right: var(--vt-space-4);
+  bottom: calc(var(--vt-space-4) + 52px);
+}
 
 /* ---- node ----------------------------------------------------------- */
 .topo-node {
@@ -153,7 +223,16 @@
 .topo-edge--reports_to .react-flow__edge-path { stroke: var(--vt-graphite-500); }
 
 /* ---- detail panel --------------------------------------------------- */
+/* On-demand inspector: hidden (slid off the right edge) until a part is
+   selected, then floats over the diagram. Dismissed via its ✕ or by clicking
+   the diagram background. On mobile it becomes a bottom sheet (rules below). */
 .topo-panel {
+  position: absolute;
+  top: var(--vt-space-4);
+  right: var(--vt-space-4);
+  bottom: var(--vt-space-4);
+  width: clamp(320px, 32vw, 400px);
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: var(--vt-space-3);
@@ -162,6 +241,18 @@
   border: 1px solid var(--vt-border);
   border-radius: var(--vt-radius-2);
   overflow-y: auto;
+  box-shadow: 0 8px 32px color-mix(in oklab, var(--vt-fg), transparent 84%);
+  transform: translateX(calc(100% + var(--vt-space-5)));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--vt-dur-3) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
+}
+.topo-panel.is-open {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
 }
 .topo-panel__close {
   position: sticky;
@@ -555,9 +646,9 @@
    below revert this to inline always-expanded rendering. */
 .topo-footer {
   position: absolute;
-  left: var(--vt-space-3);
-  right: var(--vt-space-3);
-  bottom: var(--vt-space-3);
+  left: calc(var(--topo-dock-w) + var(--vt-space-4));
+  right: var(--vt-space-4);
+  bottom: var(--vt-space-4);
   display: flex;
   flex-direction: column;
   background: color-mix(in oklab, var(--vt-bone-50), transparent 6%);
@@ -686,87 +777,59 @@
   line-height: 1.55;
 }
 
-/* ---- mobile baseline (spec 2026-05-23 §6 + D14) -------------------------
-   Stack everything single-column. Panel renders inline below the diagram
-   instead of as a bottom sheet (D14 — polished sheet deferred to Claude
-   Design's polish pass). On ≤414 px the empty-state panel is suppressed so
-   the footer renders directly below the canvas until the tech taps something.
-   ---------------------------------------------------------------------- */
+/* ---- mobile (≤1023px) — overlays reflow to sheets ------------------------
+   The diagram still fills the window. The left dock detaches and becomes a
+   bottom control sheet; the inspector becomes a bottom sheet that slides up
+   over it; Back pins to the top-left; the captured/missing strip stays a
+   collapsible overlay pinned to the bottom edge. Reuses the same frosted +
+   bottom-sheet language as desktop and the Meter sheet. */
 @media (max-width: 1023px) {
-  /* Drop the named-area grid entirely on mobile — children auto-flow into
-     a single column at their natural heights, which is what we want for
-     vertical stacking. */
-  .topo {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    grid-template-areas: none;
-    height: auto;
-    min-height: 100dvh;
-  }
-  .topo__header,
-  .topo-scenario-bar,
-  .topo__readout,
-  .topo__canvas-wrap,
-  .topo-panel { grid-area: auto; }
+  /* Dock width no longer reserves left space — the footer spans full width. */
+  .topo { --topo-dock-w: 0px; }
 
-  .topo__canvas-wrap {
-    min-height: 60dvh;
-    display: block; /* let footer flow inline below canvas */
+  /* Back leaves the dock and pins to the top-left, over the diagram. */
+  .topo__back {
+    position: fixed;
+    top: var(--vt-space-3);
+    left: var(--vt-space-3);
+    z-index: 7;
   }
-  /* Explicit `height` (not just `min-height`) is required: react-flow's
-     inner div uses `height: 100%`, which resolves to 0 against a parent
-     that only has min-height. On desktop the flex sizing gives the canvas
-     a computed height, so the bug doesn't surface there. */
-  .topo__canvas-wrap > .topo__canvas {
-    height: 60dvh;
-    min-height: 60dvh;
-  }
-  .topo-panel {
-    /* Drop the bottom-sheet positioning entirely — render inline. */
-    position: static;
-    transform: none;
-    max-height: none;
-    width: 100%;
-    border-radius: var(--vt-radius-2);
-  }
-  /* Footer reverts from overlay → inline below the canvas, always
-     expanded; toggle button is suppressed since there's nothing to
-     collapse to. */
-  .topo-footer {
-    position: static;
-    margin-top: var(--vt-space-5);
-    max-height: none;
-    overflow: visible;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: transparent;
-    border: none;
+
+  /* Dock → bottom control sheet, sitting just above the captured/missing strip. */
+  .topo__dock {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--vt-space-4) + 50px);
+    width: auto;
+    max-height: 46dvh;
+    gap: var(--vt-space-3);
+    border-right: 0;
     border-top: 1px solid var(--vt-rule);
-    border-radius: 0;
-    padding: 28px 0 0;
+    border-radius: var(--vt-radius-2) var(--vt-radius-2) 0 0;
+    box-shadow: 0 -6px 24px color-mix(in oklab, var(--vt-fg), transparent 86%);
   }
-  .topo-footer__toggle { display: none; }
-  .topo-footer__detail,
-  .topo-footer__detail[hidden] {
-    display: grid;
-    padding: 0;
-    border-top: 0;
+
+  /* Inspector → full-width bottom sheet, slides up on selection. */
+  .topo-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 82dvh;
+    border-radius: var(--vt-radius-2) var(--vt-radius-2) 0 0;
+    transform: translateY(100%);
   }
 }
 
 @media (max-width: 414px) {
-  .topo {
+  .topo__dock {
+    max-height: 50dvh;
     padding: var(--vt-space-3);
-    gap: var(--vt-space-5);
+    bottom: calc(var(--vt-space-3) + 48px);
   }
-  .topo__canvas-wrap { min-height: 55dvh; }
-  .topo__canvas-wrap > .topo__canvas { height: 55dvh; min-height: 55dvh; }
-  .topo-footer { grid-template-columns: 1fr; gap: 24px; }
-  /* Suppress the empty-state panel on phone-sized viewports so the footer
-     renders directly under the diagram until the tech taps something.
-     Once a selection lands, the panel re-renders without this class. */
-  .topo-panel.is-empty-mobile-hidden { display: none; }
+  .topo-footer__detail { grid-template-columns: 1fr; gap: 20px; }
 }
 
 /* ---- assembled diagram (T6 swap) -----------------------------------------
@@ -777,14 +840,11 @@
    their internal geometry via their own stable root classes; .topo__assembled
    is only the host frame. */
 .topo__assembled {
-  position: relative;
-  width: 100%;
-  /* Host height tracks the fixed-stage aspect, so the width-scaled stage fits
-     exactly (no crush, no clipping). The screen sets the numeric scale on
-     .topo__stage via a ResizeObserver (CSS can't derive scale from a width). */
-  aspect-ratio: 1320 / 760;
-  border: 1px solid var(--vt-border);
-  border-radius: var(--vt-radius-2);
+  /* Fills the window; the stage scales to this host's WIDTH (the ResizeObserver
+     in topology-diagnostic.tsx sets the numeric scale — CSS can't derive a
+     scale from a width). A wider window therefore renders a bigger diagram. */
+  position: absolute;
+  inset: 0;
   background: var(--vt-bone-100);
   overflow: hidden;
 }
@@ -829,8 +889,8 @@
 /* Honest zero-step state — "no test plan captured for this code yet". The
    universal needs-field-check degrade, not an error: quiet graphite, no red. */
 .topo__no-plan {
-  flex: 1;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -838,8 +898,6 @@
   gap: var(--vt-space-2);
   text-align: center;
   padding: var(--vt-space-6);
-  border: 1px solid var(--vt-border);
-  border-radius: var(--vt-radius-2);
   background: var(--vt-bone-100);
 }
 .topo__no-plan-title {
@@ -855,14 +913,29 @@
   color: var(--vt-fg-3);
 }
 
-/* Mobile: the assembled host + zero-step state get a tall-enough min-height so
-   the device-under-test stays visible above T5's bottom sheet. T5 owns the
-   sheet detents; this only sizes the host frame. */
-@media (max-width: 1023px) {
-  /* .topo__assembled keeps its 1320:760 aspect-ratio (the stage scales to width);
-     only the no-plan empty-state needs a min-height floor. */
-  .topo__no-plan { min-height: 60dvh; }
+/* The MeterSheet (gauge scenes only) floats bottom-right on desktop, above the
+   captured/missing strip; on mobile its own bottom-sheet rules (diagram-mobile
+   .css) take over. */
+@media (min-width: 1024px) {
+  .topo__canvas-wrap > .meter-sheet {
+    position: absolute;
+    right: var(--vt-space-4);
+    bottom: calc(var(--vt-space-4) + 52px);
+    width: clamp(280px, 26vw, 360px);
+    z-index: 5;
+  }
 }
-@media (max-width: 414px) {
-  .topo__no-plan { min-height: 55dvh; }
+
+/* Not-found fallback (no topology for this case) — center it in the bare
+   full-window root instead of pinning it to the top-left corner. */
+.topo-route > .topo__not-found {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+  padding: var(--vt-space-6);
+  text-align: center;
+  font-family: var(--vt-font-serif);
+  color: var(--vt-fg-2);
 }
