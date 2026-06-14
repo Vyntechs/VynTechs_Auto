@@ -13,7 +13,7 @@ The **root-cause rebuild of the diagnostic diagram** (the canvas on `/curator/to
 
 > ⚠️ **The pre-2026-06-14 version of this doc said "design done, plan ~40% authored, paused."** That is obsolete — disregard it. The plan was finished and the whole thing was built. Do **not** re-run the plan-authoring workflow or rebuild the tracks; the commit history below is the source of truth.
 
-**Still true:** none of this is on `main` (the branch is ~110+ commits ahead). This targets **staging-curator / V2**. Brandon merges — see the unresolved items at the bottom before any PR.
+**Where it actually stands:** the planned tracks are all coded and the unit suite is green — but **development is NOT finished, and Brandon has not yet watched it operate / diagnose a real case.** Built ≠ validated. The next real step is a hands-on diagnostic walkthrough, *not* anything to do with `main`. (For the record only: nothing is on `main`; this targets staging-curator / V2; merge timing is Brandon's call, much later — don't optimize for it now.)
 
 ## What's actually committed (Wave 0 → 4, newest first — proof, not plan)
 
@@ -58,13 +58,14 @@ The **root-cause rebuild of the diagnostic diagram** (the canvas on `/curator/to
 - **Latest visual proof:** `.design-shots/out/topology-fullscreen_*.png`, `.design-shots/out/walk_*.png`, `.design-shots/out/topology-BEFORE_*.png`.
 - **Workflow scripts:** `.design-shots/{canvas-exploration,scope-dialin,plan-authoring}.workflow.js`
 
-## Unresolved before any merge to main (READ before PR)
+## Still open (development + validation — the real remaining work)
 
+- **NOT yet validated in operation.** Brandon has not watched the diagram diagnose a real case end-to-end. That walkthrough — does it show *only* what each step tests, read the Meter correctly, route forks correctly, hold up on mobile, and stay honest with no DTC — is the next step and the real gate. **A green unit suite is not "diagnoses correctly."**
 - **Apply the T1 migration (0024) to live Supabase**, not just the local/PGlite test DB — `test_actions.step_kind` + `pin_scenario_readings.is_out_of_range` (both nullable), plus the meter columns + `branch_logic.routes_to_test_action_id`/`reasoning`, and surfacing `symptom_test_implications.priority`. Hand-written Drizzle migrations need statement-breakpoint markers or the unit suite breaks; rerun the test suite once on a cold cache before trusting failures.
 - The loader contract change is **additive only** — `tsc` across all existing consumers must stay green.
-- This targets **staging-curator / V2**, not prod. **Never push to main without Brandon's go** — and per his merge-ownership rule, only through a hard verify-everything gate.
-- This branch carries **much more than the diagram** (system-data-ingest PR0–PR3, the curator wizard, curator-console polish). A diagram-only PR would need that work separated, or the whole branch reviewed together. Decide scope before opening anything.
+
+**Not now (later, Brandon's call):** nothing ships to `main` until *he* has validated it operating as intended — and even then only through his hard verify-everything merge gate. Note too that this branch carries far more than the diagram (system-data-ingest PR0–PR3, the curator wizard, console polish), so the eventual integration path (split the diagram out vs. review the branch whole) is a future decision, not a current one.
 
 ## Status
 
-Diagram rebuild: **complete and verified on-branch.** Open question is integration path (separate the diagram from the rest of the branch, or review the branch whole) and the live-DB migration — both gated on Brandon.
+Diagram rebuild: **all planned tracks coded and unit-tested on-branch — but not yet validated in real operation.** Development continues. Next step is a hands-on diagnostic walkthrough so Brandon can see it diagnose as intended. Merge-to-main is explicitly out of scope until that happens.
