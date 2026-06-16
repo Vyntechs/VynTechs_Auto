@@ -7,6 +7,7 @@ import { validateSpecificity } from '@/lib/ai/outcome-validator'
 import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
 import { scheduleFollowUps } from '@/lib/comeback/schedule'
 import { enqueueIfNovelPattern } from '@/lib/curator/novel-trigger'
+import { recordDiagnosticSession } from '@/lib/diagnostics/record-diagnostic-session'
 import { getSessionById } from '@/lib/db/queries'
 
 export async function POST(
@@ -40,6 +41,7 @@ export async function POST(
     scheduleFollowUps,
     enqueueNovelPattern: enqueueIfNovelPattern,
     maxCorpusSimilarity,
+    recordDiagnosticOutcome: recordDiagnosticSession,
   })
 
   if (!result.ok) {
