@@ -28,6 +28,10 @@ import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
+import type {
+  RecordDiagnosticSessionInput,
+  RecordDiagnosticSessionResult,
+} from './diagnostics/record-diagnostic-session'
 import type { ScheduleFollowUpsFn } from './comeback/schedule'
 import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repair-guidance'
 import type { AdvanceStreamEvent } from './advance-stream-events'
@@ -39,6 +43,11 @@ export type PromoteToCorpusFn = (
   db: AppDb,
   input: CorpusPromotionInput,
 ) => Promise<string | null>
+
+export type RecordDiagnosticOutcomeFn = (
+  db: AppDb,
+  input: RecordDiagnosticSessionInput,
+) => Promise<RecordDiagnosticSessionResult>
 
 export type CreateSessionResult =
   | { ok: true; id: string }
@@ -283,6 +292,9 @@ export async function closeSessionForUser(opts: {
    *  when enqueueNovelPattern is provided; ignored otherwise. Defaults to 0
    *  when not supplied (treats as no corpus hits). */
   maxCorpusSimilarity?: number
+  /** Proof-of-fix writer. Optional — when omitted, no diagnostic_sessions row is
+   *  written. Failures are non-fatal; the session still closes regardless. */
+  recordDiagnosticOutcome?: RecordDiagnosticOutcomeFn
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -369,6 +381,20 @@ export async function closeSessionForUser(opts: {
       )
     } catch (err) {
       console.warn('novel-pattern queue enqueue failed (session still closed):', err)
+    }
+  }
+
+  if (opts.recordDiagnosticOutcome) {
+    try {
+      await opts.recordDiagnosticOutcome(opts.db, {
+        vehicleId: session.vehicleId,
+        shopId: session.shopId,
+        techId: session.techId,
+        complaintText: session.intake.customerComplaint,
+        outcome: parsed.data,
+      })
+    } catch (err) {
+      console.warn('diagnostic-session record failed (session still closed):', err)
     }
   }
 
