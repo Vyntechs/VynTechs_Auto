@@ -22,6 +22,20 @@ import {
 
 export const runtime = 'nodejs'
 
+// This streaming route runs long: sequential retrieval (budgeted 30s) + a
+// validator LLM call (~11s) + the reasoning LLM call (~22s, up to 3 retries).
+// Measured: ~34s cache-warm, ~63s cold, 90s+ when retrying. Two distinct
+// things can sever the response mid-flight, both of which surface to the
+// client as "AI took too long or your connection dropped":
+//   (1) exceeding the function execution cap (504 FUNCTION_INVOCATION_TIMEOUT);
+//   (2) the long silent gaps below (no bytes for ~20-30s) letting an HTTP/1.1
+//       client or intermediate proxy drop the idle connection — Vercel's
+//       duration doc calls this out explicitly and prescribes streaming a
+//       heartbeat while work runs.
+// maxDuration=300 (the per-plan ceiling, valid on all plans) removes (1) across
+// the full 34-90s range; the heartbeat below removes (2). Both are load-bearing.
+export const maxDuration = 300
+
 const ADAPTERS = [
   new NHTSAAdapter(),
   new ManufacturerRecallAdapter(),
@@ -94,8 +108,31 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
+      let closed = false
+      // Guard every write: the heartbeat interval and the main body both
+      // enqueue, and a write after the stream closes (client disconnected)
+      // throws. Swallowing that lets the request unwind cleanly.
+      const safeEnqueue = (chunk: Uint8Array) => {
+        if (closed) return
+        try {
+          controller.enqueue(chunk)
+        } catch {
+          closed = true
+        }
+      }
       const emit = (event: AdvanceStreamEvent) =>
-        controller.enqueue(encoder.encode(encodeEvent(event)))
+        safeEnqueue(encoder.encode(encodeEvent(event)))
+
+      // Heartbeat: a bare newline every 10s. The work below goes silent for
+      // long stretches — up to ~30s during cold retrieval and ~22s during the
+      // reasoning LLM call — and a stream with no bytes flowing can be severed
+      // as idle by the platform/proxy or the browser, which surfaces to the
+      // client as the "AI took too long or your connection dropped" error. The
+      // client's NDJSON parser skips empty lines, so heartbeats never reach the UI.
+      const heartbeat = setInterval(
+        () => safeEnqueue(encoder.encode('\n')),
+        10_000,
+      )
 
       // Send init FIRST so the client knows the canonical stage set.
       emit({ type: 'init', stages: plannedStages })
@@ -152,7 +189,15 @@ export async function POST(
           message: err instanceof Error ? err.message : 'stream error',
         })
       } finally {
-        controller.close()
+        clearInterval(heartbeat)
+        closed = true
+        // close() also throws if the client already disconnected (the stream
+        // was cancelled). Swallow it so the request unwinds cleanly.
+        try {
+          controller.close()
+        } catch {
+          // already closed — nothing to do
+        }
       }
     },
   })
