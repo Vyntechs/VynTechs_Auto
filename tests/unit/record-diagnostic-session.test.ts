@@ -2,9 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { and, count, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile, createSession } from '@/lib/db/queries'
-import { customers, vehicles, symptoms, diagnosticSessions } from '@/lib/db/schema'
+import {
+  customers,
+  vehicles,
+  symptoms,
+  diagnosticSessions,
+  platforms,
+  components,
+  testActions,
+  symptomTestImplications,
+} from '@/lib/db/schema'
 import type { OutcomePayload } from '@/lib/db/schema'
 import { recordDiagnosticSession } from '@/lib/diagnostics/record-diagnostic-session'
+import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
+import { loadCachedDiagnostic } from '@/lib/diagnostics/cached-lookup'
 
 // ---------------------------------------------------------------------------
 // Why this suite exists
@@ -226,5 +237,113 @@ describe('recordDiagnosticSession', () => {
     expect(result.written).toBe(false)
     if (result.written) throw new Error('unreachable')
     expect(result.reason).toBe('no-vehicle')
+  })
+
+  // This is the end-to-end proof that the writer is wired to the SAME slug the
+  // counter reads. The writer resolves the symptom from the complaint via
+  // resolveSymptomSlug; the counter's view path (app/(app)/sessions/[id]/page.tsx)
+  // resolves it the identical way. Here we seed the catalog under that exact
+  // emitted slug, then assert the REAL loadCachedDiagnostic.priorFixCount — not a
+  // hand-copied mirror — moves 0 -> 1. If writer and counter ever keyed on
+  // different slugs, this test would stay at 0 and fail.
+  describe('real proof-of-fix counter linkage (loadCachedDiagnostic)', () => {
+    async function seedCatalogChainForCranksNoStart() {
+      const [platform] = await db
+        .insert(platforms)
+        .values({
+          slug: 'ford-super-duty-67',
+          yearRange: '2017-2022',
+          parentMake: 'Ford',
+          parentModelFamily: 'Super Duty',
+          generation: '4th Gen',
+        })
+        .returning()
+      const [symptom] = await db
+        .insert(symptoms)
+        .values({ slug: 'cranks-no-start', description: 'Cranks, no start', category: 'no-start' })
+        .returning()
+      const [component] = await db
+        .insert(components)
+        .values({
+          slug: 'hp-fuel-pump',
+          platformId: platform.id,
+          name: 'HP Fuel Pump',
+          kind: 'pump',
+          systems: ['fuel'],
+          sourceProvenance: 'TRAINING-CONFIRMED',
+          isRetired: false,
+        })
+        .returning()
+      const [ta] = await db
+        .insert(testActions)
+        .values({
+          slug: 'measure-rail-pressure',
+          componentId: component.id,
+          description: 'Read fuel rail pressure',
+          scenarioRequired: 'idle',
+          observationMethod: 'pressure_test_with_gauge',
+          invasiveness: 1,
+          sourceProvenance: 'TRAINING-CONFIRMED',
+        })
+        .returning()
+      await db
+        .insert(symptomTestImplications)
+        .values({ symptomId: symptom.id, testActionId: ta.id, priority: 1, sourceProvenance: 'TRAINING-CONFIRMED' })
+      return { platform, symptom }
+    }
+
+    it('a recorded verified fix makes the real loadCachedDiagnostic counter go 0 -> 1', async () => {
+      await seedCatalogChainForCranksNoStart()
+
+      // The writer and the counter must resolve the complaint to the SAME slug —
+      // assert that explicitly so the linkage cannot be a coincidence.
+      expect(resolveSymptomSlug({ complaintText: 'engine cranks but no start' })).toBe('cranks-no-start')
+
+      const before = await loadCachedDiagnostic({
+        db,
+        platformSlug: 'ford-super-duty-67',
+        symptomSlug: 'cranks-no-start',
+      })
+      expect(before?.priorFixCount).toBe(0)
+
+      const { shop, tech, vehicle } = await seedShopTechVehicle(db)
+      const result = await recordDiagnosticSession(db, {
+        vehicleId: vehicle.id,
+        shopId: shop.id,
+        techId: tech.id,
+        complaintText: 'engine cranks but no start',
+        outcome: makeOutcome({ actionType: 'repair' }),
+      })
+      expect(result.written).toBe(true)
+      if (!result.written) throw new Error('unreachable')
+      expect(result.finalVerdict).toBe('commit-allowed')
+
+      const after = await loadCachedDiagnostic({
+        db,
+        platformSlug: 'ford-super-duty-67',
+        symptomSlug: 'cranks-no-start',
+      })
+      expect(after?.priorFixCount).toBe(1)
+    })
+
+    it('a non-fix close does NOT move the real counter', async () => {
+      await seedCatalogChainForCranksNoStart()
+      const { shop, tech, vehicle } = await seedShopTechVehicle(db)
+
+      await recordDiagnosticSession(db, {
+        vehicleId: vehicle.id,
+        shopId: shop.id,
+        techId: tech.id,
+        complaintText: 'engine cranks but no start',
+        outcome: makeOutcome({ actionType: 'no_fix', verification: { codesCleared: false, testDrive: false, symptomsResolved: 'no' } }),
+      })
+
+      const after = await loadCachedDiagnostic({
+        db,
+        platformSlug: 'ford-super-duty-67',
+        symptomSlug: 'cranks-no-start',
+      })
+      expect(after?.priorFixCount).toBe(0)
+    })
   })
 })
