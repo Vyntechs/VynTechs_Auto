@@ -9,14 +9,25 @@ import { resolveSymptomSlug } from './symptom-resolver'
  * have confirmed this fix". Nothing wrote those rows, so the counter was stuck at
  * zero. This is the writer — wired into session close as a non-fatal hook.
  *
- * Honesty is the whole point. It records a confirmed fix ONLY when it is true,
- * and stays silent rather than guess:
+ * Honesty is the whole point. A confirmed fix is recorded ONLY when it is true,
+ * and the writer never guesses an attribution:
  *   - 'commit-allowed' requires a real repair action AND the tech confirming the
  *     symptom is resolved. A no_fix/referred close, or "not resolved", is never
- *     a win — it is recorded with a truthful non-allowed verdict.
- *   - If the complaint can't be resolved to a KNOWN problem, or that problem
- *     isn't in the catalog yet, NO row is written (no fabricated attribution).
- *     The writer activates automatically once the catalog row exists.
+ *     a win — it is still recorded, but with a truthful non-allowed verdict
+ *     ('commit-refused'/'incomplete'). The counter only counts 'commit-allowed',
+ *     so these rows form an honest outcome ledger (denominator) without inflating
+ *     the win count.
+ *   - It writes NOTHING (stays silent) when the complaint can't be resolved to a
+ *     KNOWN problem, that problem isn't in the catalog yet, or there's no vehicle
+ *     to attribute to — never a fabricated attribution. The writer activates
+ *     automatically once the catalog row exists.
+ *
+ * Attribution deliberately mirrors the counter's read path
+ * (app/(app)/sessions/[id]/page.tsx), which resolves the symptom via
+ * resolveSymptomSlug({ complaintText }) — so the slug written here is the same
+ * slug the counter queries. Changing attribution to a different signal (e.g. the
+ * tech's selected scenario) must be done in BOTH places together, or the writer
+ * and counter would key on different slugs.
  */
 
 export type FinalVerdict = 'commit-allowed' | 'commit-refused' | 'incomplete'
