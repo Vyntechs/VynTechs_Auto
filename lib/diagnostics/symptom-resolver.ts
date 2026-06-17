@@ -32,6 +32,15 @@ const COMPLAINT_PATTERNS: { pattern: RegExp; slug: string }[] = [
       /no.?start.*crank|crank.*no.?start|won.?t start.*crank|cranks?\s+but\s+(won.?t|will not)\s+start/i,
     slug: 'no-start-cranks-normally-fuel-system-suspect',
   },
+  // Emissions / DEF limp-mode (2011-2016 6.7 PSD beachhead). Appended last so the
+  // crank/no-start patterns keep priority. Deliberately precise — a bare "check engine"
+  // complaint is too ambiguous to route here and is left to fall through (return null),
+  // so the wizard only intercepts genuine emissions/derate language.
+  {
+    pattern:
+      /reduced\s+(engine\s+)?power|\blimp\b|de-?rate|\bdef\b|(diesel\s+)?exhaust\s+fluid|\bscr\b|\bnox\b|emissions?|\bregen(eration)?\b/i,
+    slug: 'reduced-power-limp-mode-emissions-suspect',
+  },
 ]
 
 export function resolveSymptomSlug(input: SymptomResolveInput): string | null {

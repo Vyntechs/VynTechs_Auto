@@ -46,3 +46,36 @@ describe('resolveSymptomSlug (pure)', () => {
     ).toBe('p0088')
   })
 })
+
+describe('resolveSymptomSlug — emissions / DEF limp-mode (6.7 beachhead)', () => {
+  const DEF = 'reduced-power-limp-mode-emissions-suspect'
+
+  // Real-shop emissions/limp-mode phrasing must resolve to the DEF/emissions slug.
+  it.each([
+    'truck went into limp mode',
+    'reduced engine power warning',
+    'reduced power, DEF light on',
+    'DEF light came on',
+    'exhaust fluid warning on dash',
+    'diesel exhaust fluid system fault',
+    "engine derate, won't go over 55",
+    'SCR system fault',
+    'NOx sensor code, low power',
+    'stuck in regen, no power',
+    'emissions system fault, limp home',
+  ])('resolves emissions/limp complaint "%s" → DEF/emissions slug', (text) => {
+    expect(resolveSymptomSlug({ complaintText: text })).toBe(DEF)
+  })
+
+  // Precision guard (DELIBERATE deviation from the plan's "check engine" trigger):
+  // a bare check-engine complaint is too ambiguous to route to a DEF-specific flow.
+  // It MUST fall through to the honestly-labeled AI path, not mis-route to the wizard.
+  it('does NOT resolve a bare "check engine light" complaint to the DEF slug', () => {
+    expect(resolveSymptomSlug({ complaintText: 'check engine light came on' })).toBeNull()
+  })
+
+  // Regression: the DEF pattern is additive (appended last); crank complaints still win.
+  it('still resolves crank/no-start complaints to cranks-no-start', () => {
+    expect(resolveSymptomSlug({ complaintText: 'cranks but will not start' })).toBe('cranks-no-start')
+  })
+})

@@ -3,6 +3,7 @@ import { VehicleStrip, Module, Pill } from '@/components/vt'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session, SessionEvent } from '@/lib/db/schema'
 import { AbandonButton } from './abandon-button'
+import { AiUnverifiedBanner } from './ai-unverified-banner'
 import { RepairConversation } from './repair-conversation'
 import { RepairAskForm } from './repair-ask-form'
 
@@ -41,6 +42,7 @@ export function RepairPhaseView({ session, events }: Props) {
           overflow: 'auto',
         }}
       >
+        <AiUnverifiedBanner />
         <Module
           num="🔒"
           label="Diagnosis locked"

@@ -1,5 +1,15 @@
 # Lessons
 
+### mock-tested-ai-pipeline-has-latent-live-bugs
+Trigger: an AI pipeline (subagents, tool-use, synthesis) is "done" but its tests only mock the model/API.
+Rule: Run it end-to-end against the REAL API + real volume before trusting it. Expect several distinct latent bugs in a row.
+Reason: The curator research pipeline passed all mocked unit tests but hit 3 separate live-only bugs — last-text-block parsing, synthesis max_tokens truncation, findings missing `sources`.
+
+### prefer-tool-use-over-regex-json
+Trigger: asking a model to emit a large JSON object as free text, then regex/JSON.parse-ing it.
+Rule: Use tool-use structured output (forced tool_choice → SDK returns a parsed object) + graceful degradation so one bad pass falls back instead of killing an expensive run.
+Reason: Free-text JSON truncated mid-array on big flows and failed the whole research run; tool-use + degrade made it resilient.
+
 ### dont-push-main-readiness-unprompted
 Trigger: work is committed on a feature branch and feels "done."
 Rule: Don't raise merge-to-main / PR scope unless Brandon asks. Mid-dev branches stay on-branch until he validates.

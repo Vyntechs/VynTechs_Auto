@@ -31,7 +31,7 @@ function isFord60Psd(engine: string): boolean {
 // Normalizes messy real-world Super Duty model strings to a canonical kebabed form.
 // Handles: "F250", "F-250", "F250 Super Duty", "f-250 superduty", "F-350 Super Duty", etc.
 // Returns the normalized model if it's one of the known Super Duty slugs; null otherwise.
-// NOTE: Applied ONLY to the 6.0L branch — the 6.7L branch is intentionally unchanged.
+// NOTE: Applied to BOTH the 6.0L and 6.7L Super Duty branches for messy-input parity.
 function normalizeFordSuperDutyModel(model: string): string | null {
   const SUPER_DUTY_MODELS = new Set(['f-250', 'f-350', 'f-450', 'f-550'])
   let m = model.toLowerCase().trim()
@@ -44,16 +44,21 @@ function normalizeFordSuperDutyModel(model: string): string | null {
   return SUPER_DUTY_MODELS.has(m) ? m : null
 }
 
-const FORD_67_PSD_MODELS = new Set(['f-250', 'f-350', 'f-450', 'f-550'])
-
 export function resolvePlatformSlug(input: PlatformResolveInput): string | null {
   const make = (input.make ?? '').toLowerCase().trim()
   const model = (input.model ?? '').toLowerCase().trim()
   const engine = (input.engine ?? '').trim()
 
-  if (make === 'ford' && FORD_67_PSD_MODELS.has(model) && isFord67Psd(engine)) {
-    if (input.year >= 2017 && input.year <= 2022) {
-      return 'ford-super-duty-4th-gen-67-psd'
+  if (make === 'ford' && isFord67Psd(engine)) {
+    const normalizedModel = normalizeFordSuperDutyModel(model)
+    if (normalizedModel !== null) {
+      if (input.year >= 2017 && input.year <= 2022) {
+        return 'ford-super-duty-4th-gen-67-psd'
+      }
+      // 2011-2016: first-shop beachhead (6.7 debuted on the 2011-2016 Super Duty).
+      if (input.year >= 2011 && input.year <= 2016) {
+        return 'ford-super-duty-3rd-gen-67-psd'
+      }
     }
   }
 

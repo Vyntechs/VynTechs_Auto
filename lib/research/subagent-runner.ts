@@ -97,26 +97,41 @@ export async function runSubagent(input: SubagentInput): Promise<ResearchAgentOu
 
 type ParsedOutput = { researchLog: string; findings: ResearchFinding[] }
 
-function parseStructuredOutput(content: Anthropic.Messages.Message['content']): ParsedOutput {
+/**
+ * Extract the {researchLog, findings} JSON from the model's response.
+ *
+ * With the server-side web_search tool the model emits MULTIPLE text blocks
+ * (reasoning interleaved with tool use) and frequently puts the findings JSON in
+ * an EARLIER block, ending with a short prose sign-off. So scan every text block
+ * (latest first) for the first one that yields a parseable `findings` array —
+ * reading only the last block silently drops all findings (run fails as "thin").
+ * Exported for unit testing.
+ */
+export function parseStructuredOutput(content: Anthropic.Messages.Message['content']): ParsedOutput {
   const blocks = Array.isArray(content) ? content : []
-  const lastText = [...blocks].reverse().find((b) => b.type === 'text')
-  if (!lastText || lastText.type !== 'text') return { researchLog: '', findings: [] }
-  const text = lastText.text
+  const texts = blocks
+    .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+    .map((b) => b.text)
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) return { researchLog: text, findings: [] }
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      researchLog?: string
-      findings?: ResearchFinding[]
+  for (const text of [...texts].reverse()) {
+    const cleaned = text.replace(/```(?:json)?/gi, '')
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) continue
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        researchLog?: string
+        findings?: ResearchFinding[]
+      }
+      if (Array.isArray(parsed.findings)) {
+        return { researchLog: parsed.researchLog ?? '', findings: parsed.findings }
+      }
+    } catch {
+      // Not the findings block — keep scanning earlier blocks.
     }
-    return {
-      researchLog: parsed.researchLog ?? '',
-      findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-    }
-  } catch {
-    return { researchLog: text, findings: [] }
   }
+
+  // No findings JSON anywhere — preserve the last text block for audit.
+  return { researchLog: texts[texts.length - 1] ?? '', findings: [] }
 }
 
 function collectVisitedUrls(response: Anthropic.Messages.Message): string[] {

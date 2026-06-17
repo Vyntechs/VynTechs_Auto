@@ -1,39 +1,58 @@
-# HANDOFF — Diagnostics engine: P0-1 proof-of-fix writer shipped on-branch
+# HANDOFF — Phase 1 beachhead: Step 1 + both gates DONE & verified; research pipeline FIXED & working; one citation gap left
 
-**Last updated:** 2026-06-16
-**Work branch:** `feat/system-data-ingest` · **Worktree:** `.claude/worktrees/system-data-ingest` (NOT `main`, NOT the `revert/pr-96` checkout). Prod/beta untouched all session.
+**Last updated:** 2026-06-17
+**Work branch:** `feat/system-data-ingest` · **Worktree:** `/Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/system-data-ingest` (NOT `main`, NOT the `revert/pr-96` checkout).
+**Plan:** `docs/superpowers/plans/2026-06-16-curator-flows-beachhead-to-topology-grail.md` (Phase 1 of 3).
 
-## THE ONE THING TO KNOW NEXT SESSION
-P0-1 (the proof-of-fix writer) is **built + verified + committed on the side branch** — 3 commits, **not pushed, not merged, no migration, no deploy**. The counter now HAS a writer, but it produces **0 in production until the symptom catalog is seeded** — seeding is the real next unlock (and a canonical seed was recently reverted; see below).
+---
 
-## WHAT SHIPPED THIS SESSION (verified, on `feat/system-data-ingest`)
-- `326dff6` — cherry-picked 4 prompt-spec docs (`prompt-1..4a`) from `staging-interactive-diagnostics`. Docs only; no code/migrations.
-- `15405fa` — **P0-1 honest proof-of-fix writer.** New `lib/diagnostics/record-diagnostic-session.ts`, wired into `closeSessionForUser` as a non-fatal injected hook + the `app/api/sessions/[id]/close` route. Records `finalVerdict='commit-allowed'` ONLY on a real repair action the tech verified resolved; `no_fix`/`referred`/`not-resolved`→non-allowed verdict; stays **silent** (writes nothing — no fabrication) when the complaint can't resolve to a *seeded* symptom or there's no vehicle.
-- `8dbd6d3` — real linkage proof + doc tighten. E2E test drives the **real** `loadCachedDiagnostic.priorFixCount` 0→1 on a verified fix and 0 on a non-fix.
-- Adversarial code-review pass run: one valid hit (a self-confirming test → replaced with the real e2e above); its bigger "writer files under the wrong slug" alarm was **disproved by grounding** — the counter's read path (`app/(app)/sessions/[id]/page.tsx:62`) and the writer both resolve via `resolveSymptomSlug({ complaintText })`, so they agree by construction.
+## WHERE WE ARE
+Phase 1 (beachhead = 2011–2016 F-250/350 6.7 PSD, emissions/DEF limp-mode). **Done & verified:** Step 1 (resolver), Gate A (interception), Gate B (AI honesty banner) — 123 unit/integration tests green, `tsc` clean, AND a live browser run on a throwaway Supabase DB (gate screenshots at `.design-shots/out-phase1/phase1-gate-sheet.png`). **Step 5 (author the sourced DEF flow):** the curator research pipeline now **works end-to-end** — I fixed 3 live-API bugs this session and a real research run produced an **18-step draft flow** with genuinely strong Ford specifics (NOx CSPs 21N02/21N05, FSA 21E01, DEF pump test P20E8/P204C, DEF heater CSP 21M01, anti-tamper TSB 14-0192, SCR dosing pinpoint RK7…). **The one remaining gap:** that draft has **0 citations** — the citations pass is too big for one call on an 18-step flow, so my graceful-degrade safety net correctly fell back to the uncited structure draft. Unsourced = not publishable under the trust doctrine. Code is committed to `feat/system-data-ingest`.
 
-**Verified by:** `tsc --noEmit` clean; `record-diagnostic-session` 9/9 (incl. the real `loadCachedDiagnostic` counter going 0→1) + `close-session-handler` 18/18; an isolated re-run of my files **plus 4 of the full-suite's flaky-failed files = 105/105**. The full suite ran 1386/0 green once earlier this session; later full runs hit a **pre-existing PGlite `createTestDb` hook-timeout flake under parallel load** (non-deterministic 24→94 fails on identical code, all rooted in `beforeEach` timeout — never an assertion). See lesson `full-suite-pglite-flake-under-load`. Re-confirm failed files in ISOLATION, not via one full run.
+## IMMEDIATE NEXT STEP (exact, no-context-needed)
+Make citations survive on large flows by **chunking the citations pass** in `lib/research/synthesis-runner.ts` (in the worktree):
+1. Replace the single whole-flow citations call (`max_tokens: 32_000`) with a **per-step** (or small-batch) loop: for each step, ask the model (tool-use, `emit_citations` returning just that step's `Citation[]`) to cite only that step from the agents' findings. Each call stays tiny → no truncation. Reassemble into the flow. TDD it in `tests/unit/research-synthesis.test.ts` (add a "citations survive on a many-step flow" case). Keep the existing anti-fabrication strip (drops any citation URL no agent fetched).
+2. Re-run the pipeline against the throwaway DB (commands below). Confirm the new draft flow_version has citations on its steps (query `flow_versions.body` → count step citations).
+3. Review the draft (it's state='draft' — `getPublishedFlowFor` ignores drafts, so nothing serves it yet). Shape step 1 into the code-family branch if the model didn't. **Publishing is Brandon's call** (AI-as-tool). Present it; only publish on his go.
+4. Re-run `phase1-gate-walk.mjs` to re-screenshot the now-sourced wizard.
 
-## GROUNDED REALITY — corrects the planning docs (memory: `diagnostics-engine-wiring-reality`)
-- **Live tech flow = the legacy freetext wizard** (`/intake`, `/sessions/new` → `sessions` table). The normalized topology engine (`symptoms`/`platforms`/`diagnostic_sessions`/`cached-lookup`) is **read-only + curator-only**, and the `symptoms`/`platforms` **catalog tables are empty**.
-- The proof-of-fix counter keys on `diagnostic_sessions.symptomId`, resolved from the freetext complaint via `resolveSymptomSlug` — the same path the new writer uses.
-- So the planned P0 sequence assumes infra that doesn't exist yet: a **seeded symptom catalog**, sessions **tagged with a symptomId**, and a real **"fix verified"** event. The writer is the valve; it fills automatically once the catalog seeds.
-
-## IMMEDIATE NEXT STEP (the real unlock)
-The **empty symptom catalog** is the blocker. A canonical seed for it — PR #96 "cranks-no-start canonical seed" — was **recently reverted** (the main checkout is literally `revert/pr-96-...`). Seeding branches exist (`feat/diesel-platform-seeding`, `feat/6.0-psd-cranks-no-start-seed`).
-**First action for a fresh agent:** investigate *why* PR #96 was reverted and what's reusable BEFORE re-seeding. Then seed ONE problem (`cranks-no-start`) end-to-end so `loadCachedDiagnostic` returns a real, non-zero number for a real vehicle+symptom.
-⚠️ Seeding writes to a DB → **Brandon-gated: disposable/preview DB only, NEVER prod or the live-login DB.**
-
-## SMALLER ALTERNATIVE NEXT BRICK (fully in-court; needs a migration)
-Add a `sessionId` link (FK → `sessions.id`) + unique constraint on `diagnostic_sessions`, for auditability + dedupe of the count. (Adversarial-review MEDIUM; safe today via the close status-guard, but not auditable / not re-run-safe.)
+**Re-run commands (from the worktree):**
+```
+set -a && . ./.env.development.local && set +a && PORT=3210 node_modules/.bin/next dev &   # wait for :3210
+node phase1-research.mjs          # dispatches a fresh run, prints runId, polls (14 min)
+RUN_ID=<id> node phase1-poll.mjs  # if synthesis still running when the first poll ends
+```
 
 ## HARD CONSTRAINTS / WHAT ONLY BRANDON DOES
-- Do NOT touch `main`/prod/the live-login DB. Build on `feat/system-data-ingest` behind a preview.
-- Merge SDI → `main`: parked to ship-day, Brandon's explicit go only.
-- Push `feat/system-data-ingest` to remote: **Brandon's call** (committed local-only this session; `origin/feat/system-data-ingest` exists).
-- Any DB write (migration/seed/prove-from-empty): Brandon-gated, disposable DB only.
+- **NEVER touch the live DB** — Supabase `ynmtszuybeenjbigxdyl` ("Vyntechs Auto"): real shops, 85 real sessions, Stripe customers. All Phase-1 work uses the **throwaway** `cojmftuuukcsaxvcntls` only (`.env.development.local`). Live `.env.local` is UNTOUCHED.
+- **Throwaway DB is KEPT UP** (Brandon's call, ~$10/mo prorated). **Delete it only after Step 5 + Brandon signs off** (task #7): via Supabase MCP / dashboard.
+- **Publishing the beachhead flow is Brandon's decision** (strong-domain bar; the pipeline only drafts — it never publishes).
+- **Phase 2 (prod cutover)** — merge `feat/system-data-ingest` → `main` + apply migrations 0019/0020 to the live DB — is hard-gated on Brandon's explicit go.
+- Never commit secrets. `.env.development.local` (throwaway creds incl. the DB password) is gitignored — keep it so.
 
-## Resume prompt
+## WHAT SHIPPED THIS SESSION (committed to `feat/system-data-ingest`)
+- **Step 1 — resolver:** `lib/diagnostics/resolve-platform.ts` (new 2011–2016 6.7 branch → `ford-super-duty-3rd-gen-67-psd`; 6.7 branch now uses `normalizeFordSuperDutyModel` for messy-input parity). `lib/diagnostics/symptom-resolver.ts` (DEF/emissions `COMPLAINT_PATTERN` → `reduced-power-limp-mode-emissions-suspect`; deliberately NOT matching bare "check engine"). `lib/curator/slug-catalog.ts` (both slugs).
+- **Gate B:** `components/screens/ai-unverified-banner.tsx` (NEW — "AI GUESS · NOT VERIFIED BY A REAL TECH", amber, WCAG-AA) mounted in `active-session.tsx`, `diagnosis-proposed-review.tsx`, `repair-phase-view.tsx`.
+- **Gate A:** `lib/flows/interception.ts` (NEW — `resolveWizardInterception`, extracted from `app/(app)/sessions/[id]/page.tsx`, which now calls it).
+- **Research pipeline — 3 bugs FIXED:** `lib/research/subagent-runner.ts` (`parseStructuredOutput` scans ALL text blocks — web_search puts findings JSON in an earlier block; 0→50+ findings). `lib/research/synthesis-runner.ts` (durable rewrite: **tool-use structured output** instead of regex-on-free-text, **graceful degradation** so a failed pass falls back instead of killing the run, raised `max_tokens`, and **defensive field access** for model-output findings missing `sources`/`visitedUrls`).
+- **Tests:** `interception-beachhead.test.ts` (7), `subagent-parse.test.ts` (4), `research-synthesis.test.ts` (rewritten to tool-use + degrade, 6), plus resolver/symptom/catalog/active-session updates. 123 green in isolation.
+
+## PENDING / DEFERRED
+- **Step 5 citation chunking** (the immediate next step above) → re-run → review → publish (Brandon).
+- **Phase 1 final verify** (full-suite isolation sweep) + written "Gate A ✓ / Gate B ✓".
+- **PR** for the verified code (already committed on `feat/system-data-ingest`).
+- **Cleanup after Step 5:** delete throwaway project `cojmftuuukcsaxvcntls`; remove untracked `phase1-*.mjs` + `.env.development.local` from the worktree.
+
+## GOTCHAS / NON-OBVIOUS FACTS
+- **The research pipeline was never run against the live API before this session** — it had 3 latent bugs that only the real Anthropic `web_search` + real volume exposed (all fixed). Expect the citation chunking to possibly surface a 4th; budget for iteration.
+- **0 citations on the draft is the safety net WORKING, not a regression** — graceful degrade returned an uncited-but-usable flow instead of failing the run. Citations need the per-step chunk to fit under the token ceiling.
+- **Throwaway DB facts** (`cojmftuuukcsaxvcntls`): full schema via `drizzle-kit migrate` (pgvector enabled in `public` first). Curator user `e2e@vyntechs.com` (pwd = `TEST_USER_PASSWORD` in `.env.development.local`), `profiles.is_curator=true` AND **`is_comp=true`** (REQUIRED — without `is_comp` the app shows a subscription paywall, not the diagnosing screens). user_id `57998050-5c33-4802-b470-4e0b357c5eda`, profile.id `16e15549-2f55-4a41-9d65-a836eedc90cf`. Flow slug `sd-67psd-2011-2016-def-limp`, flow_id `c0a2eae2-ec5f-4ded-bb9b-53633dbeb986`: v1 = published skeleton `e8dd7e4a-…`; v2 = the research **draft** `46c6d153-3551-4db5-a2f8-bfc4128d8038` (18 steps, 0 citations). Sessions: wizard `5b80b520-…` (intercepts), uncovered `bf726fef-…` (AI banner).
+- **The app connects as the Postgres `postgres` superuser** (pooler) → bypasses RLS; no RLS policies needed for it to read/write.
+- **Local browser verify** uses the bundled chromium headless-shell (Playwright MCP broken locally) — see `phase1-gate-walk.mjs` (Supabase signin → `sb-<ref>-auth-token` cookie). `next dev` prefers `.env.development.local` over `.env.local`, keeping the live DB untouched.
+- **Reusable scripts in the worktree (untracked):** `phase1-db-check.mjs`, `phase1-seed.mjs`, `phase1-gate-walk.mjs`, `phase1-research.mjs`, `phase1-poll.mjs`. All load `.env.development.local`.
+- **Running synthesis standalone via tsx is blocked** by `@/` path-alias resolution — drive the pipeline through the running app's `/api/curator/research-runs/start` route (what `phase1-research.mjs` does).
+
+## RESUME PROMPT
 ```
-Read HANDOFF.md in full and tell me where we left off.
+Read /Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/system-data-ingest/HANDOFF.md in full and tell me where we left off. We're on Phase 1 of the curator-flows beachhead; Step 1 + Gate A + Gate B are done/verified and the research pipeline now works end-to-end (it produced an 18-step draft). The one remaining task is making citations survive on large flows — chunk the citations pass per-step in lib/research/synthesis-runner.ts, re-run the pipeline against the throwaway DB (cojmftuuukcsaxvcntls, kept up), confirm the draft has citations, then hand me the draft to review before publishing. Do NOT touch the live DB (ynmtszuybeenjbigxdyl). Start by reading synthesis-runner.ts and proposing the per-step citation chunk.
 ```

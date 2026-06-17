@@ -11,6 +11,7 @@ import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@
 import type { Session, SessionEvent } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
 import { AbandonButton } from './abandon-button'
+import { AiUnverifiedBanner } from './ai-unverified-banner'
 import { DiagnosisProposedReview } from './diagnosis-proposed-review'
 import { RepairPhaseView } from './repair-phase-view'
 
@@ -57,6 +58,7 @@ export function ActiveSession({ session, events = [] }: Props) {
           overflow: 'auto',
         }}
       >
+        <AiUnverifiedBanner />
         <Module
           num={stepNumber}
           label="Active step"
