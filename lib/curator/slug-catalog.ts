@@ -13,6 +13,7 @@ export type SlugChoice = { slug: string; display: string }
 
 const PLATFORM_CHOICES: readonly SlugChoice[] = [
   { slug: 'ford-super-duty-3rd-gen-60-psd', display: '2003–2007 Ford Super Duty (6.0L PSD)' },
+  { slug: 'ford-super-duty-3rd-gen-67-psd', display: '2011–2016 Ford Super Duty (6.7L PSD)' },
   { slug: 'ford-super-duty-4th-gen-67-psd', display: '2017–2022 Ford Super Duty (6.7L PSD)' },
 ] as const
 
@@ -21,6 +22,10 @@ const SYMPTOM_CHOICES: readonly SlugChoice[] = [
   {
     slug: 'no-start-cranks-normally-fuel-system-suspect',
     display: 'No start, cranks normally — fuel system suspect',
+  },
+  {
+    slug: 'reduced-power-limp-mode-emissions-suspect',
+    display: 'Reduced power / limp mode — emissions (DEF/SCR) suspect',
   },
 ] as const
 

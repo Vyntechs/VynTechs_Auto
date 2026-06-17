@@ -119,10 +119,16 @@ describe('resolvePlatformSlug', () => {
     ).toBe(PSD_67)
   })
 
-  it('returns null for 2014 F-250 (before 4th gen)', () => {
+  it('resolves 2014 F-250 6.7L to the 3rd-gen (2011-2016) platform, not 4th-gen', () => {
+    const slug = resolvePlatformSlug({ year: 2014, make: 'Ford', model: 'F-250', engine: '6.7L PSD' })
+    expect(slug).toBe('ford-super-duty-3rd-gen-67-psd')
+    expect(slug).not.toBe(PSD_67)
+  })
+
+  it('normalizes messy model "F250 Super Duty" for a 2018 6.7L PSD (parity fix)', () => {
     expect(
-      resolvePlatformSlug({ year: 2014, make: 'Ford', model: 'F-250', engine: '6.7L PSD' }),
-    ).toBeNull()
+      resolvePlatformSlug({ year: 2018, make: 'Ford', model: 'F250 Super Duty', engine: '6.7L PSD' }),
+    ).toBe(PSD_67)
   })
 
   it('returns null for 2023 F-250 (after 4th gen)', () => {
@@ -146,6 +152,66 @@ describe('resolvePlatformSlug', () => {
   it('returns null when engine is missing', () => {
     expect(
       resolvePlatformSlug({ year: 2018, make: 'Ford', model: 'F-250', engine: '' }),
+    ).toBeNull()
+  })
+})
+
+describe('resolvePlatformSlug — 2011-2016 F-250/350 6.7L PSD (first-shop beachhead)', () => {
+  const PSD_67_3RD = 'ford-super-duty-3rd-gen-67-psd'
+  const PSD_67_4TH = 'ford-super-duty-4th-gen-67-psd'
+
+  // Whole 2011-2016 window resolves to the 3rd-gen 6.7 platform.
+  it.each([2011, 2012, 2013, 2014, 2015, 2016])(
+    'resolves year %i F-250 6.7L PSD → 3rd-gen 6.7',
+    (year) => {
+      expect(
+        resolvePlatformSlug({ year, make: 'Ford', model: 'F-250', engine: '6.7L Power Stroke Diesel' }),
+      ).toBe(PSD_67_3RD)
+    },
+  )
+
+  it.each(['F-250', 'F-350', 'F-450', 'F-550'])(
+    'resolves model %s on the 2014 6.7L PSD',
+    (model) => {
+      expect(
+        resolvePlatformSlug({ year: 2014, make: 'Ford', model, engine: '6.7L Power Stroke' }),
+      ).toBe(PSD_67_3RD)
+    },
+  )
+
+  // Messy real-world model input now resolves on the 6.7 branch (parity with the 6.0 branch).
+  it.each(['F250', 'f250', 'F-250 Super Duty', 'f-250 superduty', 'F250 Super Duty'])(
+    'normalizes messy model "%s" for a 2014 6.7L PSD',
+    (model) => {
+      expect(
+        resolvePlatformSlug({ year: 2014, make: 'Ford', model, engine: '6.7L PSD' }),
+      ).toBe(PSD_67_3RD)
+    },
+  )
+
+  // Boundaries: 2010 is before the 6.7 era; 2017 belongs to the 4th gen.
+  it('returns null for 2010 F-250 6.7L (before the 6.7 era)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2010, make: 'Ford', model: 'F-250', engine: '6.7L PSD' }),
+    ).toBeNull()
+  })
+
+  it('resolves 2017 to the 4th-gen platform, not the 3rd-gen (upper boundary)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2017, make: 'Ford', model: 'F-250', engine: '6.7L PSD' }),
+    ).toBe(PSD_67_4TH)
+  })
+
+  // Engine / make guards still apply within the new window.
+  it('returns null for 2014 F-250 6.4L (wrong engine)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2014, make: 'Ford', model: 'F-250', engine: '6.4L Power Stroke' }),
+    ).toBeNull()
+  })
+
+  it('returns null for 2014 Ram 2500 6.7L Cummins (wrong make)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2014, make: 'Ram', model: '2500', engine: '6.7L Cummins' }),
     ).toBeNull()
   })
 })
