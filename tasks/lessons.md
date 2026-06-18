@@ -50,3 +50,8 @@ Trigger: `npm test` (full 177-file vitest run) shows scattered reds rooted in `c
 Rule: This is resource-contention flake, NOT a regression. Confirm by re-running the failed files in ISOLATION (they pass). Don't trust one full run; counts are non-deterministic.
 Reason: Identical code gave 1386/0 then 24-fail then 94-fail across three back-to-back full runs; every failure was a PGlite startup timeout, never an assertion.
 
+### dont-rerun-research-to-test-synthesis
+Trigger: validating a synthesis/citations change end-to-end against the real API.
+Rule: Never re-run the research phase (web_search fan-out = ~2M tokens, $$). Re-run synthesis-only against saved `research_runs.agent_outputs`.
+Reason: The app bills the API key, not Brandon's subscription; research is the expensive part, synthesis is pennies. Reuse run f92e438e's findings.
+

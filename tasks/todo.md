@@ -129,3 +129,36 @@ A design doc under `docs/superpowers/` that: solves all 9 gaps (chosen + runner-
 
 ⚙️ `/effort xhigh` — vyntechs architecture; this design drives a large multi-system build.
 🤖 Model: `claude-opus-4-8` — every choice is a simplest-vs-elegant-vs-future-proof judgment call.
+
+---
+
+# TASK: Open the PR for the verified citation-chunking fix (2026-06-18)
+
+**Goal:** A **draft** PR exists on GitHub for `feat/system-data-ingest → main` with the verified per-step citation-chunking fix committed + pushed — opened as a review surface, NOT merged.
+
+## Scope
+- Commit ONLY the two verified files: `lib/research/synthesis-runner.ts`, `tests/unit/research-synthesis.test.ts`.
+- Push `feat/system-data-ingest` to origin.
+- Open a **DRAFT** PR to `main`.
+
+## Out of scope (do NOT)
+- **Do NOT merge.** Phase-2 prod cutover (this branch → main + live migrations) is hard-gated on Brandon's explicit go.
+- Do NOT commit untracked dev artifacts: `phase1-*.mjs`, `.env.development.local` (gitignored — keep it so), `.design-shots/`, or the untracked `docs/superpowers/` plans/research (separate decision).
+- Do NOT touch the live DB or main's working user path.
+
+## ⚠️ Scope flag (confirm before opening)
+This branch is **88 commits ahead of `main`** — the PR diff is the WHOLE accumulated body of work (topology diagram T4–T6, wizard, P0-1, beachhead, the citation fix), not just the fix. That diff == the gated prod cutover. Draft status + a body caveat keep it from reading as merge-ready, but confirm `main` is the intended base (or name a narrower target) before opening. Note: `main` has 1 commit not in this branch (#105 streaming fix) — non-blocking for opening; reconcile at merge time.
+
+## Steps (each independently verifiable)
+1. Commit the 2 verified files (msg: per-step citation chunking; verified unit + real-API). → `git show --stat HEAD` lists exactly those 2 files, nothing else.
+2. Push `feat/system-data-ingest` to origin. → `git status` shows up to date with origin.
+3. Open a DRAFT PR → main. Body: what's verified (0→162 citations on the real 23-step flow; 7/7 synthesis tests, full suite green, tsc clean), full-branch scope (88 commits = engine+diagram+beachhead), gated-cutover caveat. → PR created.
+4. Return the PR URL.
+
+## Verify by
+`gh pr view --json url,isDraft,baseRefName,title` shows `isDraft=true`, `baseRefName=main`; the URL opens to a PR whose latest commit is the citation fix, marked "Draft."
+
+## Quality Bar
+Do this directly — mechanical git/gh sequence, no fan-out/workflow (over-tooling would be a Rule-2 failure). One real verify: `gh pr view`. Ground check before pushing: confirm `git show --stat HEAD` is exactly the 2 files (no stray dev artifacts).
+
+⚙️ `/effort medium` — mechanical PR open; outward-facing (creates a GitHub PR) + tied to the gated cutover, so confirm scope first.
