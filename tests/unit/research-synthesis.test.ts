@@ -43,15 +43,16 @@ const structurePass = {
   },
 }
 
-const citationsPass = (citations: Array<{ sourceUrl: string }>) => ({
-  startStepId: 'step-1',
-  steps: {
-    'step-1': {
-      kind: 'question',
-      n: 1,
-      of: 1,
-      title: 'Pull codes',
-      question: 'Any codes?',
+// Citations pass is now PER-STEP: the model returns only this step's Citation[]
+// via the emit_citations tool, never a re-emitted flow body. For a 1-step flow
+// that's a single emit_citations call.
+const citationsResp = (
+  citations: Array<{ sourceUrl: string }>,
+  usage: { input_tokens: number; output_tokens: number } = { input_tokens: 1, output_tokens: 1 },
+) =>
+  toolResp(
+    'emit_citations',
+    {
       citations: citations.map((c) => ({
         sourceUrl: c.sourceUrl,
         title: 'Diagnostic',
@@ -59,10 +60,9 @@ const citationsPass = (citations: Array<{ sourceUrl: string }>) => ({
         excerpt: 'Pull codes first.',
         evidenceGrade: 'confirmed',
       })),
-      answers: [{ id: 'a1', label: 'No', finding: { verdict: 'Move on', action: 'Test ICP', severity: 'fixable' } }],
     },
-  },
-})
+    usage,
+  )
 
 describe('runSynthesis (tool-use, 3-pass)', () => {
   beforeEach(() => createMock.mockReset())
@@ -70,7 +70,7 @@ describe('runSynthesis (tool-use, 3-pass)', () => {
   it('produces a Flow draft with citations + empty conflicts + summed token usage', async () => {
     createMock
       .mockResolvedValueOnce(toolResp('emit_flow', structurePass, { input_tokens: 100, output_tokens: 200 }))
-      .mockResolvedValueOnce(toolResp('emit_flow', citationsPass([{ sourceUrl: 'https://dieselhub.com/test' }]), { input_tokens: 150, output_tokens: 250 }))
+      .mockResolvedValueOnce(citationsResp([{ sourceUrl: 'https://dieselhub.com/test' }], { input_tokens: 150, output_tokens: 250 }))
       .mockResolvedValueOnce(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 80, output_tokens: 50 }))
 
     const out = await runSynthesis({
@@ -88,9 +88,7 @@ describe('runSynthesis (tool-use, 3-pass)', () => {
   it('strips citations whose sourceUrl no agent actually fetched (anti-fabrication)', async () => {
     createMock
       .mockResolvedValueOnce(toolResp('emit_flow', structurePass, { input_tokens: 1, output_tokens: 1 }))
-      .mockResolvedValueOnce(
-        toolResp('emit_flow', citationsPass([{ sourceUrl: 'https://real.com/a' }, { sourceUrl: 'https://fabricated.invalid/x' }]), { input_tokens: 1, output_tokens: 1 }),
-      )
+      .mockResolvedValueOnce(citationsResp([{ sourceUrl: 'https://real.com/a' }, { sourceUrl: 'https://fabricated.invalid/x' }]))
       .mockResolvedValueOnce(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 1, output_tokens: 1 }))
 
     const out = await runSynthesis({
@@ -122,24 +120,40 @@ describe('runSynthesis (tool-use, 3-pass)', () => {
     expect(out.conflicts).toEqual([])
   })
 
-  it('degrades when the citations pass returns an unusable (no-steps) body', async () => {
-    createMock
-      .mockResolvedValueOnce(toolResp('emit_flow', structurePass, { input_tokens: 5, output_tokens: 5 }))
-      .mockResolvedValueOnce(toolResp('emit_flow', { startStepId: 'x' }, { input_tokens: 5, output_tokens: 5 })) // no steps
-      .mockResolvedValueOnce(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 5, output_tokens: 5 }))
+  it("keeps the other steps cited when one step's citation call fails (per-step isolation)", async () => {
+    const twoStep = {
+      startStepId: 'step-1',
+      steps: {
+        'step-1': { kind: 'question', n: 1, of: 2, title: 'Pull codes', question: 'Q1?', answers: [{ id: 'a1', label: 'No', next: 'step-2' }] },
+        'step-2': { kind: 'question', n: 2, of: 2, title: 'Test ICP', question: 'Q2?', answers: [{ id: 'a1', label: 'No', finding: { verdict: 'v', action: 'a', severity: 'fixable' } }] },
+      },
+    }
+    // Key on the per-step user message so only step-2's citation call fails.
+    createMock.mockImplementation((req: { tool_choice?: { name?: string }; messages?: Array<{ content?: string }> }) => {
+      const name = req?.tool_choice?.name
+      if (name === 'emit_flow') return Promise.resolve(toolResp('emit_flow', twoStep, { input_tokens: 1, output_tokens: 1 }))
+      if (name === 'emit_citations') {
+        const content = req?.messages?.[0]?.content ?? ''
+        if (content.includes('"title": "Test ICP"')) return Promise.reject(new Error('overloaded')) // step-2 fails
+        return Promise.resolve(citationsResp([{ sourceUrl: 'https://real.com/a' }]))
+      }
+      return Promise.resolve(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 1, output_tokens: 1 }))
+    })
 
     const out = await runSynthesis({
       platformDisplay: 'p',
       symptomDisplay: 's',
       agents: [agentWith([{ url: 'https://real.com/a' }]), agentWith([]), agentWith([])],
     })
-    expect(out.draftBody.steps['step-1']).toBeDefined() // kept the structure draft
+    // step-1 cited (its call succeeded); step-2 uncited (its call failed) — run survived.
+    expect(out.draftBody.steps['step-1'].citations?.[0]?.sourceUrl).toBe('https://real.com/a')
+    expect(out.draftBody.steps['step-2'].citations ?? []).toEqual([])
   })
 
   it('does not crash when an agent finding is missing its sources / visitedUrls (real-API tolerance)', async () => {
     createMock
       .mockResolvedValueOnce(toolResp('emit_flow', structurePass, { input_tokens: 1, output_tokens: 1 }))
-      .mockResolvedValueOnce(toolResp('emit_flow', citationsPass([{ sourceUrl: 'https://real.com/a' }]), { input_tokens: 1, output_tokens: 1 }))
+      .mockResolvedValueOnce(citationsResp([{ sourceUrl: 'https://real.com/a' }]))
       .mockResolvedValueOnce(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 1, output_tokens: 1 }))
 
     const malformed = {
@@ -162,7 +176,7 @@ describe('runSynthesis (tool-use, 3-pass)', () => {
   it('still returns the draft when the conflicts pass throws (conflicts default to [])', async () => {
     createMock
       .mockResolvedValueOnce(toolResp('emit_flow', structurePass, { input_tokens: 5, output_tokens: 5 }))
-      .mockResolvedValueOnce(toolResp('emit_flow', citationsPass([{ sourceUrl: 'https://real.com/a' }]), { input_tokens: 5, output_tokens: 5 }))
+      .mockResolvedValueOnce(citationsResp([{ sourceUrl: 'https://real.com/a' }], { input_tokens: 5, output_tokens: 5 }))
       .mockRejectedValueOnce(new Error('conflicts pass failed'))
 
     const out = await runSynthesis({
@@ -172,5 +186,55 @@ describe('runSynthesis (tool-use, 3-pass)', () => {
     })
     expect(out.draftBody.startStepId).toBe('step-1')
     expect(out.conflicts).toEqual([])
+  })
+
+  // Why this matters: prod produced an 18-step draft with 0 citations because the old
+  // single whole-flow citations call truncated and graceful-degrade fell back to the
+  // uncited structure. The per-step pass must keep every step cited regardless of size.
+  it('attaches citations to every step on a many-step flow (per-step chunking; no truncation)', async () => {
+    const N = 12
+    const url = 'https://dieselhub.com/test'
+    const manyStep = {
+      startStepId: 'step-1',
+      steps: Object.fromEntries(
+        Array.from({ length: N }, (_, i) => [
+          `step-${i + 1}`,
+          {
+            kind: 'question',
+            n: i + 1,
+            of: N,
+            title: `Step ${i + 1}`,
+            question: 'Q?',
+            answers: [{ id: 'a1', label: 'No', finding: { verdict: 'v', action: 'a', severity: 'fixable' } }],
+          },
+        ]),
+      ),
+    }
+    const oneCitation = {
+      citations: [{ sourceUrl: url, title: 'T', fetchedAt: '2026-05-26T00:00:00Z', excerpt: 'E', evidenceGrade: 'confirmed' }],
+    }
+    // Tool-name-keyed mock: robust to per-step call ordering / bounded parallelism.
+    // (A trailing no-arg invocation from vitest's cleanup hook returns the empty
+    // default — runSynthesis itself makes exactly 1 + N + 1 well-formed calls.)
+    createMock.mockImplementation((req: { tool_choice?: { name?: string } }) => {
+      const name = req?.tool_choice?.name
+      if (name === 'emit_flow') return Promise.resolve(toolResp('emit_flow', manyStep, { input_tokens: 10, output_tokens: 10 }))
+      if (name === 'emit_citations') return Promise.resolve(toolResp('emit_citations', oneCitation, { input_tokens: 1, output_tokens: 1 }))
+      return Promise.resolve(toolResp('emit_conflicts', { conflicts: [] }, { input_tokens: 1, output_tokens: 1 }))
+    })
+
+    const out = await runSynthesis({
+      platformDisplay: 'p',
+      symptomDisplay: 's',
+      agents: [agentWith([{ url }]), agentWith([]), agentWith([])],
+    })
+
+    const steps = Object.values(out.draftBody.steps)
+    expect(steps).toHaveLength(N)
+    for (const step of steps) {
+      expect(step.citations?.[0]?.sourceUrl).toBe(url)
+    }
+    // Usage summed across structure + N per-step citation calls + conflicts.
+    expect(out.tokenUsage.inputTokens).toBe(10 + N * 1 + 1)
   })
 })

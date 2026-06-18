@@ -120,6 +120,20 @@ const EMIT_CONFLICTS_TOOL = {
   input_schema: CONFLICTS_INPUT_SCHEMA,
 } as unknown as Anthropic.Messages.Tool
 
+const EMIT_CITATIONS_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    citations: { type: 'array', items: CITATION_SCHEMA },
+  },
+  required: ['citations'],
+} as const
+
+const EMIT_CITATIONS_TOOL = {
+  name: 'emit_citations',
+  description: "Return ONLY this one step's inline citations (empty array if none apply).",
+  input_schema: EMIT_CITATIONS_INPUT_SCHEMA,
+} as unknown as Anthropic.Messages.Tool
+
 const STRUCTURE_SYSTEM_PROMPT = `
 You are a senior diagnostic engineer translating 3 parallel research agents' findings into a structured decision-tree flow.
 
@@ -131,9 +145,9 @@ Call the emit_flow tool with the flow. Rules (the schema rejects violations):
 `.trim()
 
 const CITATIONS_SYSTEM_PROMPT = `
-You attach inline citations to a decision-tree flow. You receive the flow body + 3 parallel research agents' findings (each with sources + excerpts).
+You attach inline citations to ONE step of a diagnostic decision-tree flow. You receive 3 parallel research agents' findings (each with sources + excerpts), then the single step to cite.
 
-Call the emit_flow tool with the SAME flow body, but with every step's "citations" array populated. Each citation MUST reference a source URL that actually appears in one of the agents' findings — never invent URLs.
+Call the emit_citations tool with the citations array for THIS step only (empty array if no finding supports it). Each citation MUST reference a source URL that actually appears in one of the agents' findings — never invent URLs.
 - sourceUrl + title + fetchedAt + excerpt come VERBATIM from an agent finding.
 - evidenceGrade: "confirmed" if 2+ agents cite the same claim, "plausible" if only 1 agent, "unverified" if no agent source (then excerpt may be empty; otherwise excerpt MUST be a non-empty real quote).
 `.trim()
@@ -165,6 +179,64 @@ async function callTool<T>(args: {
   )
   if (!block) throw new Error(`synthesis: model did not call ${args.tool.name}`)
   return { input: block.input as T, usage: resp.usage }
+}
+
+const CITATION_CONCURRENCY = 4
+const CITATIONS_MAX_TOKENS = 4_000
+
+/**
+ * Pass 2 (citations), per-step. The previous single whole-flow call asked the model
+ * to re-emit the entire flow with citations added; on a large flow (18 steps) that
+ * output truncated and graceful-degrade fell back to a 0-citation draft. Instead we
+ * cite ONE step per call — each output is just that step's Citation[], so nothing
+ * truncates — and reattach to the structure draft (whose shape is never re-emitted,
+ * so it can't be mangled). The findings JSON repeats per step but is cached
+ * (cache_control), so repeats read at ~10% cost. A single step's failure leaves only
+ * that step uncited; the rest of the flow still gets citations.
+ */
+async function runCitationsPass(
+  draftBody: Flow,
+  findingsJson: string,
+  addUsage: (u: Anthropic.Messages.Usage) => void,
+): Promise<Flow> {
+  const citationsById: Record<string, Citation[]> = {}
+
+  const citeStep = async (id: string) => {
+    try {
+      const resp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: CITATIONS_MAX_TOKENS,
+        system: [
+          { type: 'text', text: CITATIONS_SYSTEM_PROMPT },
+          { type: 'text', text: `Agents' findings:\n${findingsJson}`, cache_control: { type: 'ephemeral' } },
+        ],
+        tools: [EMIT_CITATIONS_TOOL],
+        tool_choice: { type: 'tool', name: EMIT_CITATIONS_TOOL.name },
+        messages: [{ role: 'user', content: `Step to cite:\n${JSON.stringify(draftBody.steps[id], null, 2)}` }],
+      })
+      addUsage(resp.usage)
+      const block = (Array.isArray(resp.content) ? resp.content : []).find(
+        (b): b is Anthropic.Messages.ToolUseBlock =>
+          b.type === 'tool_use' && b.name === EMIT_CITATIONS_TOOL.name,
+      )
+      const cites = (block?.input as { citations?: Citation[] } | undefined)?.citations
+      if (Array.isArray(cites)) citationsById[id] = cites
+    } catch {
+      // leave this step uncited — the rest of the flow still gets citations.
+    }
+  }
+
+  // Bounded concurrency: a large flow shouldn't open dozens of simultaneous calls.
+  const stepIds = Object.keys(draftBody.steps)
+  for (let i = 0; i < stepIds.length; i += CITATION_CONCURRENCY) {
+    await Promise.all(stepIds.slice(i, i + CITATION_CONCURRENCY).map(citeStep))
+  }
+
+  const steps: Record<string, Step> = {}
+  for (const [id, step] of Object.entries(draftBody.steps)) {
+    steps[id] = id in citationsById ? { ...step, citations: citationsById[id] } : step
+  }
+  return { ...draftBody, steps }
 }
 
 function isUsableFlow(f: unknown): f is Flow {
@@ -205,18 +277,13 @@ export async function runSynthesis(input: SynthesisInput): Promise<SynthesisOutp
     throw new Error('synthesis structure pass produced no usable flow')
   }
 
-  // Pass 2: citations — degrade to the uncited structure draft on ANY failure
-  // (parse/truncation/API). A citations hiccup must never throw away the whole run.
+  // Pass 2: citations — per-step (see runCitationsPass). Individual steps degrade
+  // in-pass; this outer guard degrades the whole pass to the uncited structure draft
+  // only on a catastrophic (non-per-step) failure. A citations hiccup must never
+  // throw away the whole run.
   let citedBody: Flow = draftBody
   try {
-    const cited = await callTool<Flow>({
-      system: CITATIONS_SYSTEM_PROMPT,
-      user: `Flow draft:\n${JSON.stringify(draftBody, null, 2)}\n\nAgents' findings:\n${findingsJson}`,
-      tool: EMIT_FLOW_TOOL,
-      maxTokens: 32_000,
-    })
-    addUsage(cited.usage)
-    if (isUsableFlow(cited.input)) citedBody = cited.input
+    citedBody = await runCitationsPass(draftBody, findingsJson, addUsage)
   } catch {
     // keep draftBody — uncited but usable.
   }
