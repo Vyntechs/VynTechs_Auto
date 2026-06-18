@@ -1,58 +1,51 @@
-# HANDOFF — Phase 1 beachhead: Step 1 + both gates DONE & verified; research pipeline FIXED & working; one citation gap left
+# HANDOFF — Citation chunking DONE & verified (unit + real-API: 0→162 citations); PR drafted-not-opened; prod-safety analysis is the next gate
 
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-18
 **Work branch:** `feat/system-data-ingest` · **Worktree:** `/Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/system-data-ingest` (NOT `main`, NOT the `revert/pr-96` checkout).
 **Plan:** `docs/superpowers/plans/2026-06-16-curator-flows-beachhead-to-topology-grail.md` (Phase 1 of 3).
 
 ---
 
 ## WHERE WE ARE
-Phase 1 (beachhead = 2011–2016 F-250/350 6.7 PSD, emissions/DEF limp-mode). **Done & verified:** Step 1 (resolver), Gate A (interception), Gate B (AI honesty banner) — 123 unit/integration tests green, `tsc` clean, AND a live browser run on a throwaway Supabase DB (gate screenshots at `.design-shots/out-phase1/phase1-gate-sheet.png`). **Step 5 (author the sourced DEF flow):** the curator research pipeline now **works end-to-end** — I fixed 3 live-API bugs this session and a real research run produced an **18-step draft flow** with genuinely strong Ford specifics (NOx CSPs 21N02/21N05, FSA 21E01, DEF pump test P20E8/P204C, DEF heater CSP 21M01, anti-tamper TSB 14-0192, SCR dosing pinpoint RK7…). **The one remaining gap:** that draft has **0 citations** — the citations pass is too big for one call on an 18-step flow, so my graceful-degrade safety net correctly fell back to the uncited structure draft. Unsourced = not publishable under the trust doctrine. Code is committed to `feat/system-data-ingest`.
+Phase 1 beachhead (2011–2016 F-250/350 6.7 PSD, DEF/emissions limp-mode). **The citation gap is CLOSED.** The synthesis citations pass was rewritten from a single whole-flow call (which truncated on big flows → 0 citations) to **per-step chunking** — one tiny `emit_citations` call per step, reattached to the structure draft, findings cached, bounded-parallel, per-step degrade. **Verified at three levels:** 7/7 synthesis unit tests (incl. a new "citations survive on a many-step flow" RED→GREEN case), `tsc` clean, full suite green on a clean run; AND a **real-API synthesis-only re-run** produced **162 citations across all 23 steps** (125 confirmed / 37 plausible) + 6 conflicts — vs the prior 0/18. Code committed to `feat/system-data-ingest`.
 
 ## IMMEDIATE NEXT STEP (exact, no-context-needed)
-Make citations survive on large flows by **chunking the citations pass** in `lib/research/synthesis-runner.ts` (in the worktree):
-1. Replace the single whole-flow citations call (`max_tokens: 32_000`) with a **per-step** (or small-batch) loop: for each step, ask the model (tool-use, `emit_citations` returning just that step's `Citation[]`) to cite only that step from the agents' findings. Each call stays tiny → no truncation. Reassemble into the flow. TDD it in `tests/unit/research-synthesis.test.ts` (add a "citations survive on a many-step flow" case). Keep the existing anti-fabrication strip (drops any citation URL no agent fetched).
-2. Re-run the pipeline against the throwaway DB (commands below). Confirm the new draft flow_version has citations on its steps (query `flow_versions.body` → count step citations).
-3. Review the draft (it's state='draft' — `getPublishedFlowFor` ignores drafts, so nothing serves it yet). Shape step 1 into the code-family branch if the model didn't. **Publishing is Brandon's call** (AI-as-tool). Present it; only publish on his go.
-4. Re-run `phase1-gate-walk.mjs` to re-screenshot the now-sourced wizard.
-
-**Re-run commands (from the worktree):**
-```
-set -a && . ./.env.development.local && set +a && PORT=3210 node_modules/.bin/next dev &   # wait for :3210
-node phase1-research.mjs          # dispatches a fresh run, prints runId, polls (14 min)
-RUN_ID=<id> node phase1-poll.mjs  # if synthesis still running when the first poll ends
-```
+Brandon was deciding **how to open the PR** when we paused; he asked **"will merging break prod?"** — that's the live question. Resume here:
+1. **Open the PR (Brandon's pending choice).** A DRAFT PR `feat/system-data-ingest → main` is recommended (brief: `tasks/todo.md`, last block). **Opening a draft PR touches NOTHING in prod** — it's a review page. Options offered: (a) draft PR → main [recommended], (b) commit+push only / hold PR, (c) different base. He has not picked.
+2. **Run the prod-breakage risk gate (the real answer to his question) — do this on the PR diff, do NOT merge.** Proportional to "live money + data":
+   - Diff THIS branch's migrations vs what's actually applied on the **prod** DB `ynmtszuybeenjbigxdyl` (the real collision check — memory says the forked engines have COLLIDING migrations; verify, don't trust memory). Live DB has real shops, ~85 sessions, Stripe customers.
+   - Map every change to the live user path (intake routing / engine swap) + confirm whether a feature flag can ship it dark. `main → prod` auto-deploys on Vercel, so **merge = instant live**.
+   - Confirm the prod flows catalog isn't empty for the engine we'd switch to (else users hit empty diagnostics).
+   - Dry-run on a prod-like copy. Then bring Brandon a grounded yes/no.
+3. **Publish the beachhead flow** — still Brandon's call (strong-domain bar; AI-as-tool). The sourced draft exists (see below); present it, publish only on his go.
 
 ## HARD CONSTRAINTS / WHAT ONLY BRANDON DOES
-- **NEVER touch the live DB** — Supabase `ynmtszuybeenjbigxdyl` ("Vyntechs Auto"): real shops, 85 real sessions, Stripe customers. All Phase-1 work uses the **throwaway** `cojmftuuukcsaxvcntls` only (`.env.development.local`). Live `.env.local` is UNTOUCHED.
-- **Throwaway DB is KEPT UP** (Brandon's call, ~$10/mo prorated). **Delete it only after Step 5 + Brandon signs off** (task #7): via Supabase MCP / dashboard.
-- **Publishing the beachhead flow is Brandon's decision** (strong-domain bar; the pipeline only drafts — it never publishes).
-- **Phase 2 (prod cutover)** — merge `feat/system-data-ingest` → `main` + apply migrations 0019/0020 to the live DB — is hard-gated on Brandon's explicit go.
-- Never commit secrets. `.env.development.local` (throwaway creds incl. the DB password) is gitignored — keep it so.
+- **NEVER touch the live DB** — Supabase `ynmtszuybeenjbigxdyl` ("Vyntechs Auto"): real shops, 85 real sessions, Stripe customers. All Phase-1 work uses the **throwaway** `cojmftuuukcsaxvcntls` (`.env.development.local`). Live `.env.local` UNTOUCHED.
+- **Do NOT merge `feat/system-data-ingest` → `main`** (the Phase-2 prod cutover) without the risk gate above AND Brandon's explicit go. `main` auto-deploys. Per `pr-merge-ownership` memory, Claude MAY merge/deploy but ONLY through a hard verify-everything gate.
+- **Publishing the beachhead flow is Brandon's decision.**
+- **API cost reality (Brandon flagged):** the app's Anthropic calls bill the **API key**, NOT his Claude Code subscription — there is no supported way to route app calls through the subscription. To test synthesis cheaply, **never re-run the research phase** (the 2M-token web_search fan-out); re-run **synthesis-only against the saved `research_runs.agent_outputs`** (see below). Pennies, not dollars.
+- Never commit secrets. `.env.development.local` (throwaway creds) is gitignored — keep it so.
 
 ## WHAT SHIPPED THIS SESSION (committed to `feat/system-data-ingest`)
-- **Step 1 — resolver:** `lib/diagnostics/resolve-platform.ts` (new 2011–2016 6.7 branch → `ford-super-duty-3rd-gen-67-psd`; 6.7 branch now uses `normalizeFordSuperDutyModel` for messy-input parity). `lib/diagnostics/symptom-resolver.ts` (DEF/emissions `COMPLAINT_PATTERN` → `reduced-power-limp-mode-emissions-suspect`; deliberately NOT matching bare "check engine"). `lib/curator/slug-catalog.ts` (both slugs).
-- **Gate B:** `components/screens/ai-unverified-banner.tsx` (NEW — "AI GUESS · NOT VERIFIED BY A REAL TECH", amber, WCAG-AA) mounted in `active-session.tsx`, `diagnosis-proposed-review.tsx`, `repair-phase-view.tsx`.
-- **Gate A:** `lib/flows/interception.ts` (NEW — `resolveWizardInterception`, extracted from `app/(app)/sessions/[id]/page.tsx`, which now calls it).
-- **Research pipeline — 3 bugs FIXED:** `lib/research/subagent-runner.ts` (`parseStructuredOutput` scans ALL text blocks — web_search puts findings JSON in an earlier block; 0→50+ findings). `lib/research/synthesis-runner.ts` (durable rewrite: **tool-use structured output** instead of regex-on-free-text, **graceful degradation** so a failed pass falls back instead of killing the run, raised `max_tokens`, and **defensive field access** for model-output findings missing `sources`/`visitedUrls`).
-- **Tests:** `interception-beachhead.test.ts` (7), `subagent-parse.test.ts` (4), `research-synthesis.test.ts` (rewritten to tool-use + degrade, 6), plus resolver/symptom/catalog/active-session updates. 123 green in isolation.
+- **Per-step citation chunking** — `lib/research/synthesis-runner.ts`: new `EMIT_CITATIONS_TOOL` + `runCitationsPass(draftBody, findingsJson, addUsage)` replaces the single whole-flow citations call. One `emit_citations` call per step (returns just that step's `Citation[]`), findings JSON sent in a `cache_control: ephemeral` system block, bounded concurrency (`CITATION_CONCURRENCY=4`), per-step try/catch (one step failing leaves only that step uncited), reassembled onto the structure draft. Anti-fabrication strip unchanged. `callTool` (structure + conflicts passes) untouched.
+- **Tests** — `tests/unit/research-synthesis.test.ts`: new many-step RED→GREEN case, 1-step tests updated to `emit_citations`, the old "no-steps body" test reworked into a per-step-isolation test. 7/7 green.
 
 ## PENDING / DEFERRED
-- **Step 5 citation chunking** (the immediate next step above) → re-run → review → publish (Brandon).
-- **Phase 1 final verify** (full-suite isolation sweep) + written "Gate A ✓ / Gate B ✓".
-- **PR** for the verified code (already committed on `feat/system-data-ingest`).
-- **Cleanup after Step 5:** delete throwaway project `cojmftuuukcsaxvcntls`; remove untracked `phase1-*.mjs` + `.env.development.local` from the worktree.
+- **Open the PR** (Brandon's base/scope choice) → **prod-breakage risk gate** → his go/no-go on cutover. Brief in `tasks/todo.md`.
+- **Publish** the sourced beachhead draft (Brandon).
+- **Speed:** synthesis wall-clock ~6.4 min (structure pass generates a ~23-step flow + 18-ish per-step citation calls). Acceptable for a back-office curator action; can ~halve it by bumping `CITATION_CONCURRENCY`.
+- **Draft quality nit:** the model set step `of` = 20 but emitted 23 steps (cosmetic count mismatch — curator/cleanup fix).
+- **Cleanup after publish:** delete throwaway project `cojmftuuukcsaxvcntls`; remove untracked `phase1-*.mjs` + `.env.development.local`.
 
 ## GOTCHAS / NON-OBVIOUS FACTS
-- **The research pipeline was never run against the live API before this session** — it had 3 latent bugs that only the real Anthropic `web_search` + real volume exposed (all fixed). Expect the citation chunking to possibly surface a 4th; budget for iteration.
-- **0 citations on the draft is the safety net WORKING, not a regression** — graceful degrade returned an uncited-but-usable flow instead of failing the run. Citations need the per-step chunk to fit under the token ceiling.
-- **Throwaway DB facts** (`cojmftuuukcsaxvcntls`): full schema via `drizzle-kit migrate` (pgvector enabled in `public` first). Curator user `e2e@vyntechs.com` (pwd = `TEST_USER_PASSWORD` in `.env.development.local`), `profiles.is_curator=true` AND **`is_comp=true`** (REQUIRED — without `is_comp` the app shows a subscription paywall, not the diagnosing screens). user_id `57998050-5c33-4802-b470-4e0b357c5eda`, profile.id `16e15549-2f55-4a41-9d65-a836eedc90cf`. Flow slug `sd-67psd-2011-2016-def-limp`, flow_id `c0a2eae2-ec5f-4ded-bb9b-53633dbeb986`: v1 = published skeleton `e8dd7e4a-…`; v2 = the research **draft** `46c6d153-3551-4db5-a2f8-bfc4128d8038` (18 steps, 0 citations). Sessions: wizard `5b80b520-…` (intercepts), uncovered `bf726fef-…` (AI banner).
-- **The app connects as the Postgres `postgres` superuser** (pooler) → bypasses RLS; no RLS policies needed for it to read/write.
-- **Local browser verify** uses the bundled chromium headless-shell (Playwright MCP broken locally) — see `phase1-gate-walk.mjs` (Supabase signin → `sb-<ref>-auth-token` cookie). `next dev` prefers `.env.development.local` over `.env.local`, keeping the live DB untouched.
-- **Reusable scripts in the worktree (untracked):** `phase1-db-check.mjs`, `phase1-seed.mjs`, `phase1-gate-walk.mjs`, `phase1-research.mjs`, `phase1-poll.mjs`. All load `.env.development.local`.
-- **Running synthesis standalone via tsx is blocked** by `@/` path-alias resolution — drive the pipeline through the running app's `/api/curator/research-runs/start` route (what `phase1-research.mjs` does).
+- **The sourced draft is in `/tmp` (EPHEMERAL), not the DB:** `/tmp/draft-review.md` (readable walk-through) + `/tmp/resynth-draft.json` (raw 23-step flow + 162 citations + 6 conflicts). NOT persisted as a flow_version. Reproducible by re-running synthesis-only (below). If you want Brandon to walk it in the UI, persist it as a `draft` flow_version in the **throwaway** DB (his call).
+- **Cheap synthesis-only re-run (THE pattern):** the orchestrator persists agents' findings to `research_runs.agent_outputs` BEFORE synthesis (`lib/research/orchestrator.ts:128`). The most recent COMPLETED throwaway run is **`f92e438e-f009-488a-adfa-8c67bb30da4a`** (3 agents, 53 findings, 200 URLs). Re-run synthesis against those saved findings — NO web_search, NO research re-run. Mechanism used this session: a temp vitest harness (`// @vitest-environment node`) importing `@/lib/db/client` + `runSynthesis`, run with `set -a && . ./.env.development.local && set +a && vitest run <harness>` (vitest resolves the `@/` alias the handoff said blocks `tsx`; the un-mocked real client + env key make the cheap calls). The harness was deleted after use — recreate from this recipe.
+- **Full vitest suite is FLAKY under load** — saw 84 / 12 / 0 failures on the SAME code across three runs (DB-teardown races like `close is not a function`). Verify changes via the affected files in isolation + `tsc`, NOT a single full-suite count. (Memory: `full-suite-flaky-db-tests`.)
+- **Throwaway DB facts** (`cojmftuuukcsaxvcntls`): curator `e2e@vyntechs.com` (pwd = `TEST_USER_PASSWORD` in `.env.development.local`), `is_curator=true` AND `is_comp=true` (without `is_comp` the app shows a paywall, not the diagnosing screens). Flow slug `sd-67psd-2011-2016-def-limp`. The app connects as the Postgres `postgres` superuser (pooler) → bypasses RLS.
+- **`@/lib/db/client`** = plain postgres-js to `DATABASE_URL_DIRECT` (dev) / `DATABASE_URL` — no PGlite swap; loading `.env.development.local` points it at the throwaway DB. `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` (sonnet-4-6) are in that same env file.
+- **Reusable untracked scripts in the worktree:** `phase1-db-check.mjs`, `phase1-seed.mjs`, `phase1-gate-walk.mjs`, `phase1-research.mjs`, `phase1-poll.mjs`.
 
 ## RESUME PROMPT
 ```
-Read /Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/system-data-ingest/HANDOFF.md in full and tell me where we left off. We're on Phase 1 of the curator-flows beachhead; Step 1 + Gate A + Gate B are done/verified and the research pipeline now works end-to-end (it produced an 18-step draft). The one remaining task is making citations survive on large flows — chunk the citations pass per-step in lib/research/synthesis-runner.ts, re-run the pipeline against the throwaway DB (cojmftuuukcsaxvcntls, kept up), confirm the draft has citations, then hand me the draft to review before publishing. Do NOT touch the live DB (ynmtszuybeenjbigxdyl). Start by reading synthesis-runner.ts and proposing the per-step citation chunk.
+Read HANDOFF.md in full and tell me where we left off. We're on Phase 1 of the curator-flows beachhead. The citation-chunking fix is DONE and verified (unit + a real-API synthesis-only re-run produced 162 citations across all 23 steps). The code is committed to feat/system-data-ingest and pushed. We paused on opening the PR: I asked whether merging this branch to main would break prod. Next: confirm how to open the PR (draft → main recommended; brief in tasks/todo.md), then run the prod-breakage risk gate ON THE DIFF (migrations vs the live DB, user-path/routing changes, feature-flag, prod catalog) and bring me a grounded yes/no BEFORE anyone says "merge." Do NOT touch the live DB (ynmtszuybeenjbigxdyl) and do NOT merge to main.
 ```
