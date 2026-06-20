@@ -23,20 +23,31 @@ import type {
   DeclineLanguageInput,
 } from './gating/decline-language'
 import type { Artifact, NewArtifact } from './db/schema'
-import { sessionEvents } from './db/schema'
+import { sessions, sessionEvents } from './db/schema'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
 import { inferSymptomTags, type CorpusPromotionInput } from './corpus/promotion'
+import type {
+  RecordDiagnosticSessionInput,
+  RecordDiagnosticSessionResult,
+} from './diagnostics/record-diagnostic-session'
 import type { ScheduleFollowUpsFn } from './comeback/schedule'
 import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repair-guidance'
 import type { AdvanceStreamEvent } from './advance-stream-events'
+import type { Finding, WizardState } from './flows/types'
+import { synthesizeHandoffFromFinding } from './wizard-state'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
   db: AppDb,
   input: CorpusPromotionInput,
 ) => Promise<string | null>
+
+export type RecordDiagnosticOutcomeFn = (
+  db: AppDb,
+  input: RecordDiagnosticSessionInput,
+) => Promise<RecordDiagnosticSessionResult>
 
 export type CreateSessionResult =
   | { ok: true; id: string }
@@ -281,6 +292,9 @@ export async function closeSessionForUser(opts: {
    *  when enqueueNovelPattern is provided; ignored otherwise. Defaults to 0
    *  when not supplied (treats as no corpus hits). */
   maxCorpusSimilarity?: number
+  /** Proof-of-fix writer. Optional — when omitted, no diagnostic_sessions row is
+   *  written. Failures are non-fatal; the session still closes regardless. */
+  recordDiagnosticOutcome?: RecordDiagnosticOutcomeFn
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -367,6 +381,20 @@ export async function closeSessionForUser(opts: {
       )
     } catch (err) {
       console.warn('novel-pattern queue enqueue failed (session still closed):', err)
+    }
+  }
+
+  if (opts.recordDiagnosticOutcome) {
+    try {
+      await opts.recordDiagnosticOutcome(opts.db, {
+        vehicleId: session.vehicleId,
+        shopId: session.shopId,
+        techId: session.techId,
+        complaintText: session.intake.customerComplaint,
+        outcome: parsed.data,
+      })
+    } catch (err) {
+      console.warn('diagnostic-session record failed (session still closed):', err)
     }
   }
 
@@ -838,6 +866,71 @@ export async function lockDiagnosisForUser(opts: {
     sessionId: opts.sessionId,
     nodeId: session.treeState.currentNodeId,
     eventType: 'tree_update',
+  })
+
+  return { ok: true }
+}
+
+export type LockDiagnosisFromWizardResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 404; error: 'not found' | 'session is not open' | 'diagnosis already locked' }
+
+/**
+ * Lock-in handoff from the curator-guided wizard to the existing repair surface.
+ *
+ * Merges the wizard's terminal Finding into the session's existing treeState
+ * (phase -> 'repairing', rootCauseSummary, proposedAction, diagnosisLockedAt) so
+ * ActiveSession -> RepairPhaseView renders WITH NO CHANGES to those components. The
+ * merge preserves the session's real nodes[]/currentNodeId/message — we never fabricate
+ * tree nodes (#98: nothing rendered downstream is invented). Clears sessions.wizardState.
+ * Inserts exactly one 'wizard_lock_in' session_event. Idempotent: the already-locked
+ * guard rejects a second call BEFORE any insert, so no duplicate event is written.
+ *
+ * Unlike lockDiagnosisForUser, this path does NOT require treeState.done — the wizard's
+ * terminal Finding is itself the readiness signal (the wizard bypasses the AI tree).
+ * Ownership failures (no profile / not the session's tech) intentionally collapse into a
+ * single 404 'not found' so the response never leaks whether a profile or session exists;
+ * this is why the result type omits the peers' 400 'no profile'.
+ */
+export async function lockDiagnosisFromWizard(opts: {
+  db: AppDb
+  userId: string
+  sessionId: string
+  finding: Finding
+  // Forwarded from the route's lock-in payload; unused here in N4. Reserved for the
+  // PR-N5 audit/outcome work, kept in the signature so the route call site stays flat.
+  history: WizardState['history']
+  flowVersionId: string
+}): Promise<LockDiagnosisFromWizardResult> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  // Uniform 404 (not the peers' 400 'no profile') — see JSDoc: don't leak existence.
+  if (!profile) return { ok: false, status: 404, error: 'not found' }
+
+  const session = await getSessionById(opts.db, opts.sessionId)
+  if (!session || session.techId !== profile.id) {
+    return { ok: false, status: 404, error: 'not found' }
+  }
+  if (session.status !== 'open') {
+    return { ok: false, status: 400, error: 'session is not open' }
+  }
+  if (session.treeState.phase === 'repairing' || session.treeState.diagnosisLockedAt) {
+    return { ok: false, status: 400, error: 'diagnosis already locked' }
+  }
+
+  const handoff = synthesizeHandoffFromFinding({ finding: opts.finding })
+  const mergedTreeState: TreeState = { ...session.treeState, ...handoff }
+
+  await opts.db
+    .update(sessions)
+    .set({ treeState: mergedTreeState, wizardState: null })
+    .where(eq(sessions.id, opts.sessionId))
+
+  await appendSessionEvent(opts.db, {
+    sessionId: opts.sessionId,
+    nodeId: session.treeState.currentNodeId,
+    eventType: 'wizard_lock_in',
+    observationText: opts.finding.verdict,
+    aiResponse: { wizardLockIn: { flowVersionId: opts.flowVersionId } },
   })
 
   return { ok: true }

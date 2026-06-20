@@ -1,0 +1,941 @@
+/* Interactive wiring-topology diagnostic — PR-B.
+   Tokens (--vt-*) are defined in app/globals.css. */
+
+/* ---- full-window layout (curator /topology) ------------------------------
+   This route renders OVER the curator shell as a full-viewport layer: the
+   diagram fills the window edge-to-edge and every control floats on top of it.
+   The auth gate in app/curator/layout.tsx still runs server-side — only the
+   shell chrome (topbar + sidebar + main padding) is covered, never bypassed.
+   The page root carries .topo-route; .topo fills it; the canvas fills .topo. */
+.topo-route {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* over the static topbar + the mobile sidebar drawer (z40) */
+  /* The curator shell adds `.vt-main > * { padding: 24px 28px }` to every page
+     wrapper; this route must escape it to reach the window edges. */
+  padding: 0 !important;
+  background: var(--vt-bg);
+}
+.topo {
+  --topo-dock-w: clamp(248px, 24vw, 300px);
+  position: absolute;
+  inset: 0;
+  background: var(--vt-bg);
+}
+
+/* Canvas wrapper fills the window; it is the positioning context for every
+   floating overlay (dock, captured/missing footer, detail panel, zoom). */
+.topo__canvas-wrap {
+  position: absolute;
+  inset: 0;
+}
+.topo__canvas-wrap > .topo__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* Floating left control dock — frosted, over the diagram's left edge. Holds
+   Back, the symptom switch, the ignition/fault simulator, and the live status.
+   Same frosted treatment as the footer / whole-system pill for consistency. */
+.topo__dock {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--topo-dock-w);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-4);
+  padding: var(--vt-space-4);
+  overflow-y: auto;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 8%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-right: 1px solid var(--vt-rule);
+}
+.topo__dock-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.topo__back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  text-decoration: none;
+  transition: color 120ms ease, background 120ms ease;
+}
+.topo__back:hover {
+  color: var(--vt-fg);
+  background: var(--vt-bone-100);
+}
+.topo__symptoms {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.topo__symptom {
+  padding: 7px 10px;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.topo__symptom:hover { background: var(--vt-bone-100); }
+.topo__symptom.is-active {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+
+/* The ignition/fault simulator stacks vertically inside the narrow dock. */
+.topo__dock .topo-scenario-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.topo__dock .topo-scenario-bar__group { flex-wrap: wrap; }
+.topo__dock .topo-scenario-bar__group--fault { margin-left: 0; }
+.topo__dock .topo__readout { padding: 0; }
+.topo__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo__title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-32);
+  color: var(--vt-fg);
+}
+.topo__vehicle {
+  font-family: var(--vt-font-mono);
+  font-size: 13px;
+  color: var(--vt-fg-2);
+}
+
+/* ---- canvas --------------------------------------------------------- */
+.topo__canvas {
+  min-height: 0;
+  background: var(--vt-bone-100);
+  overflow: hidden;
+}
+.topo__canvas .react-flow__attribution { display: none; }
+/* Zoom +/− (whole-system view) floats bottom-right, clear of the dock and
+   just above the captured/missing strip — react-flow defaults to bottom-left,
+   which would sit under the control dock. */
+.topo__canvas .react-flow__controls {
+  left: auto;
+  right: var(--vt-space-4);
+  bottom: calc(var(--vt-space-4) + 52px);
+}
+
+/* ---- node ----------------------------------------------------------- */
+.topo-node {
+  width: 210px;
+  height: 86px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--vt-bone-50);
+  border: 1.4px solid var(--vt-fg);
+  border-radius: var(--vt-radius-1);
+  cursor: pointer;
+  transition: box-shadow var(--vt-dur-2) var(--vt-ease);
+}
+.topo-node:hover { box-shadow: var(--vt-shadow-pop); }
+.topo-node.is-selected {
+  border-color: var(--vt-amber-500);
+  border-width: 2px;
+}
+.topo-node--mechanical {
+  background: var(--vt-bone-100);
+  border-style: dashed;
+  border-color: var(--vt-bone-400);
+}
+.topo-node--splice,
+.topo-node--connector { border-radius: var(--vt-radius-3); }
+.topo-node__name {
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  color: var(--vt-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topo-node__kind {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo-node__loc {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  color: var(--vt-fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topo-node__gap {
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+}
+/* connection handles exist for React Flow edge routing — keep them invisible */
+.topo-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---- edges (connection_kind palette, spec D4) ----------------------- */
+.topo-edge .react-flow__edge-path { stroke-width: 2; }
+.topo-edge.is-selected .react-flow__edge-path { stroke-width: 3.5; }
+.topo-edge--electrical-wire .react-flow__edge-path { stroke: var(--vt-elem-voltage); }
+.topo-edge--fluid-line .react-flow__edge-path { stroke: var(--vt-elem-fuel); }
+.topo-edge--mechanical-linkage .react-flow__edge-path { stroke: var(--vt-elem-mech); }
+.topo-edge--can-bus .react-flow__edge-path { stroke: var(--vt-signal-500); }
+.topo-edge--lin-bus .react-flow__edge-path { stroke: var(--vt-signal-600); }
+.topo-edge--controlled_by .react-flow__edge-path { stroke: var(--vt-graphite-600); }
+.topo-edge--reports_to .react-flow__edge-path { stroke: var(--vt-graphite-500); }
+
+/* ---- detail panel --------------------------------------------------- */
+/* On-demand inspector: hidden (slid off the right edge) until a part is
+   selected, then floats over the diagram. Dismissed via its ✕ or by clicking
+   the diagram background. On mobile it becomes a bottom sheet (rules below). */
+.topo-panel {
+  position: absolute;
+  top: var(--vt-space-4);
+  right: var(--vt-space-4);
+  bottom: var(--vt-space-4);
+  width: clamp(320px, 32vw, 400px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-3);
+  padding: var(--vt-space-5);
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-2);
+  overflow-y: auto;
+  box-shadow: 0 8px 32px color-mix(in oklab, var(--vt-fg), transparent 84%);
+  transform: translateX(calc(100% + var(--vt-space-5)));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--vt-dur-3) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
+}
+.topo-panel.is-open {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+.topo-panel__close {
+  position: sticky;
+  top: 0;
+  align-self: flex-end;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-border);
+  border-radius: var(--vt-radius-1);
+  color: var(--vt-fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.topo-panel__close:hover {
+  background: var(--vt-bone-100);
+}
+.topo-panel__empty {
+  margin: auto;
+  text-align: center;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+}
+.topo-panel__kind {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+}
+.topo-panel__title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-24);
+  color: var(--vt-fg);
+}
+.topo-panel__row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vt-rule);
+  font-size: 13px;
+}
+.topo-panel__row-label {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo-panel__section-title {
+  font-family: var(--vt-font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  margin-top: var(--vt-space-2);
+}
+.topo-panel__probe,
+.topo-panel__test {
+  padding: 8px 10px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-size: 12.5px;
+}
+.topo-panel__test.is-implicated { border-color: var(--vt-amber-400); }
+.topo-panel__provenance {
+  align-self: flex-start;
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  color: var(--vt-fg-3);
+}
+.topo-panel__provenance[data-provenance='GAP'] {
+  color: var(--vt-amber-600);
+  border-color: var(--vt-amber-400);
+}
+.topo-panel__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vt-signal-600);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* =============================================================================
+   Interactive wiring topology (spec 2026-05-23 §4.4)
+
+   The shipped .topo-edge--<connectionKind> palette stays for non-electrical
+   connections (fluid lines, mechanical linkages). The .wire palette below
+   replaces it for connections carrying an electricalRole; the custom
+   <WireEdge> component picks the right className.
+   ============================================================================= */
+
+.wire {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke-width var(--vt-dur-2) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
+}
+
+.wire--signal  { stroke: var(--role-signal); }
+.wire--5v-ref  { stroke: var(--role-5v-ref); }
+.wire--low-ref { stroke: var(--role-low-ref); }
+.wire--pwm     { stroke: var(--role-pwm); }
+.wire--12v     { stroke: var(--role-12v); }
+.wire--ground  { stroke: var(--role-ground); }
+
+.wire.off          { opacity: 0.16; animation: none !important; stroke-dasharray: 0; }
+.wire.steady-12v   { stroke-dasharray: 12 4; animation: flow 2.4s linear infinite; }
+.wire.steady-5v    { stroke-dasharray: 10 4; animation: flow 2.8s linear infinite; opacity: 0.92; }
+.wire.steady-gnd   { stroke-dasharray: 16 3; animation: flow 2.6s linear infinite; opacity: 0.85; }
+.wire.signal-rest  { stroke-dasharray: 6 8;  animation: flow 3.2s linear infinite; opacity: 0.55; }
+.wire.signal-low   { stroke-dasharray: 6 6;  animation: flow 2.4s linear infinite; opacity: 0.70; }
+.wire.signal-med   { stroke-dasharray: 6 5;  animation: flow 1.6s linear infinite; }
+.wire.signal-high  { stroke-dasharray: 6 4;  animation: flow 1.0s linear infinite; }
+.wire.signal-pegged{ stroke-dasharray: 6 3;  animation: flow 0.5s linear infinite; }
+.wire.pwm-low      { stroke-dasharray: 5 4;  animation: flow 1.5s linear infinite; opacity: 0.85; }
+.wire.pwm-med      { stroke-dasharray: 5 3;  animation: flow 0.85s linear infinite; }
+.wire.pwm-high     { stroke-dasharray: 4 2;  animation: flow 0.42s linear infinite; }
+.wire.pwm-max      { stroke-dasharray: 4 2;  animation: flow 0.22s linear infinite; }
+
+.wire.is-active {
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.wire.dim { opacity: 0.25; }
+
+@keyframes flow {
+  to { stroke-dashoffset: -16; }
+}
+
+/* Respect reduced-motion — disable the dash flow without losing the static
+   role color (the tech still gets to read the diagram). */
+@media (prefers-reduced-motion: reduce) {
+  .wire {
+    animation: none !important;
+  }
+}
+
+/* Pin rectangle + handle (spec 2026-05-23 §4.5) ---------------------- */
+.topo-pin-wrap {
+  pointer-events: none; /* handle is invisible; pin button takes the clicks */
+}
+.topo-pin-handle {
+  /* Override React Flow's default handle dot — make it the geometric anchor only */
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+}
+.topo-pin {
+  pointer-events: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px; /* mobile hit-target floor per spec §6 */
+  min-height: 28px;
+  padding: 2px 4px;
+  background: var(--vt-bone-50);
+  border: 0.6px solid var(--vt-fg-2);
+  border-radius: 1.5px;
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+}
+.topo-pin:hover,
+.topo-pin:focus-visible {
+  background: var(--vt-amber-400);
+  outline: none;
+}
+.topo-pin.is-selected {
+  background: var(--vt-amber-500);
+  border-color: var(--vt-amber-500);
+  color: var(--vt-bone-50);
+}
+.topo-pin__role {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.topo-pin__num {
+  font-size: 7px;
+  opacity: 0.6;
+}
+
+/* Pin panel + component pin list (spec 2026-05-23 §4.6) ----------------- */
+.topo-panel__subtitle {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  margin-bottom: 12px;
+}
+.topo-panel__rule {
+  height: 1px;
+  background: var(--vt-rule);
+  margin: 16px -20px;
+}
+.topo-panel__body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vt-fg);
+  margin: 6px 0 16px;
+}
+
+.topo-panel__right-now {
+  background: #1a1a1a;
+  color: var(--vt-bone-50);
+  padding: 12px 14px;
+  border-radius: 2px;
+  font-family: var(--vt-font-mono);
+  font-size: 12.5px;
+  margin: 8px 0 16px;
+}
+.topo-panel__right-now-label {
+  color: #e7c87a;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.topo-panel__right-now.is-fault {
+  background: #2d1818;
+  border-left: 3px solid var(--role-12v);
+}
+.topo-panel__right-now.is-fault .topo-panel__right-now-label {
+  color: var(--role-12v);
+}
+.topo-panel__right-now-missing { opacity: 0.6; }
+
+.topo-panel__expect {
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  padding: 10px 12px;
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  margin: 6px 0 16px;
+}
+.topo-panel__expect b { color: var(--vt-signal-500); }
+
+.topo-panel__alarm {
+  background: rgba(179, 77, 77, 0.06);
+  border-left: 2px solid var(--role-12v);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  margin: 6px 0 16px;
+}
+.topo-panel__alarm b { color: var(--role-12v); font-weight: 600; }
+
+.topo-panel__label-gap {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  color: var(--vt-fg-3);
+  margin-top: 8px;
+}
+
+.topo-panel__pin-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+.topo-panel__pin-list-item {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vt-fg);
+}
+.topo-panel__pin-list-item:hover {
+  background: var(--vt-bone-100);
+  border-color: var(--vt-amber-500);
+}
+.topo-panel__pin-list-role {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  color: var(--vt-fg-2);
+}
+
+/* Scenario bar (spec 2026-05-23 §4.8) — compositional picker ----------- */
+.topo-scenario-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  margin-bottom: 12px;
+}
+.topo-scenario-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.topo-scenario-bar__group--fault { margin-left: auto; }
+.topo-scenario-bar__label {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-2);
+  margin-right: 4px;
+}
+.topo-scenario-bar__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--vt-rule);
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition:
+    background var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease);
+  min-height: 32px;
+}
+.topo-scenario-bar__pill:hover { background: var(--vt-bone-100); }
+.topo-scenario-bar__pill.is-active {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+.topo-scenario-bar__pill--fault.is-active {
+  background: var(--role-12v);
+  border-color: var(--role-12v);
+  color: var(--vt-bone-50);
+}
+
+@media (max-width: 414px) {
+  .topo-scenario-bar { gap: 12px; padding: 10px 12px; }
+  .topo-scenario-bar__group--fault { margin-left: 0; flex-basis: 100%; }
+}
+
+/* Live readout under the picker — scenario label + sub copy --------- */
+.topo__readout {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+  padding: 0 0 16px;
+  line-height: 1.55;
+}
+.topo__readout b {
+  color: var(--vt-amber-500);
+  font-weight: 600;
+}
+.topo__readout.is-fault b { color: var(--role-12v); }
+
+/* Captured / Not captured footer (spec 2026-05-23 §4.7) -----------------
+   On desktop the footer overlays the bottom of the canvas as a thin click-
+   to-expand strip (per industry pattern — Autel Topology Map legend rail,
+   KiCad message panel) so it doesn't steal vertical space from the diagram.
+   Compact by default; expanded reveals the full two-column detail. The
+   wrapper .topo__canvas-wrap provides the positioning context. Mobile rules
+   below revert this to inline always-expanded rendering. */
+.topo-footer {
+  position: absolute;
+  left: calc(var(--topo-dock-w) + var(--vt-space-4));
+  right: var(--vt-space-4);
+  bottom: var(--vt-space-4);
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  box-shadow: 0 4px 16px color-mix(in oklab, var(--vt-fg), transparent 90%);
+  pointer-events: auto;
+  max-height: calc(100% - var(--vt-space-6));
+  overflow: hidden;
+}
+.topo-footer.is-expanded {
+  overflow-y: auto;
+}
+.topo-footer__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 10px 18px;
+  background: transparent;
+  border: 0;
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg);
+  cursor: pointer;
+  text-align: left;
+}
+.topo-footer__toggle:hover { background: color-mix(in oklab, var(--vt-fg), transparent 96%); }
+.topo-footer__toggle:focus-visible {
+  outline: 2px solid var(--vt-signal-500);
+  outline-offset: -2px;
+}
+.topo-footer__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.topo-footer__count { font-weight: 500; }
+.topo-footer__count--captured { color: var(--vt-fg); }
+.topo-footer__count--captured::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--role-signal);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.topo-footer__count--missing { color: var(--vt-fg-2); }
+.topo-footer__count--missing::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--vt-amber-500);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.topo-footer__sep { color: var(--vt-fg-3); }
+.topo-footer__chevron {
+  font-size: 12px;
+  color: var(--vt-fg-3);
+  line-height: 1;
+}
+.topo-footer__detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  padding: 8px 20px 18px;
+  border-top: 1px solid var(--vt-rule);
+}
+.topo-footer__detail[hidden] { display: none; }
+.topo-footer__col {
+  min-width: 0;
+}
+.topo-footer__header {
+  font-family: var(--vt-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  margin-bottom: 12px;
+}
+.topo-footer__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+.topo-footer__list li {
+  padding: 8px 0 8px 16px;
+  border-bottom: 1px solid var(--vt-rule);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  color: var(--vt-fg);
+  position: relative;
+}
+.topo-footer__list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.topo-footer__list--captured li::before {
+  background: var(--role-signal);
+}
+.topo-footer__list--missing li::before {
+  background: transparent;
+  border: 1.5px solid var(--vt-amber-500);
+}
+.topo-footer__closing-note {
+  background: var(--vt-bone-100);
+  border-left: 2px solid var(--vt-signal-500);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--vt-fg);
+  line-height: 1.55;
+}
+
+/* ---- mobile (≤1023px) — overlays reflow to sheets ------------------------
+   The diagram still fills the window. The left dock detaches and becomes a
+   bottom control sheet; the inspector becomes a bottom sheet that slides up
+   over it; Back pins to the top-left; the captured/missing strip stays a
+   collapsible overlay pinned to the bottom edge. Reuses the same frosted +
+   bottom-sheet language as desktop and the Meter sheet. */
+@media (max-width: 1023px) {
+  /* Dock width no longer reserves left space — the footer spans full width. */
+  .topo { --topo-dock-w: 0px; }
+
+  /* Back leaves the dock and pins to the top-left, over the diagram. */
+  .topo__back {
+    position: fixed;
+    top: var(--vt-space-3);
+    left: var(--vt-space-3);
+    z-index: 7;
+  }
+
+  /* Dock → bottom control sheet, sitting just above the captured/missing strip. */
+  .topo__dock {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--vt-space-4) + 50px);
+    width: auto;
+    max-height: 46dvh;
+    gap: var(--vt-space-3);
+    border-right: 0;
+    border-top: 1px solid var(--vt-rule);
+    border-radius: var(--vt-radius-2) var(--vt-radius-2) 0 0;
+    box-shadow: 0 -6px 24px color-mix(in oklab, var(--vt-fg), transparent 86%);
+  }
+
+  /* Inspector → full-width bottom sheet, slides up on selection. */
+  .topo-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 82dvh;
+    border-radius: var(--vt-radius-2) var(--vt-radius-2) 0 0;
+    transform: translateY(100%);
+  }
+}
+
+@media (max-width: 414px) {
+  .topo__dock {
+    max-height: 50dvh;
+    padding: var(--vt-space-3);
+    bottom: calc(var(--vt-space-3) + 48px);
+  }
+  .topo-footer__detail { grid-template-columns: 1fr; gap: 20px; }
+}
+
+/* ---- assembled diagram (T6 swap) -----------------------------------------
+   The assembled scene replaces the xyflow dot-canvas as the DEFAULT view. The
+   .topo-node / .topo-edge / .react-flow__* / .wire* rules above are RETAINED:
+   they style the whole-system escape view (Brandon override — the button drops
+   into the existing full faded-system browser). T4's per-shape templates own
+   their internal geometry via their own stable root classes; .topo__assembled
+   is only the host frame. */
+.topo__assembled {
+  /* Fills the window; the stage scales to this host's WIDTH (the ResizeObserver
+     in topology-diagnostic.tsx sets the numeric scale — CSS can't derive a
+     scale from a width). A wider window therefore renders a bigger diagram. */
+  position: absolute;
+  inset: 0;
+  background: var(--vt-bone-100);
+  overflow: hidden;
+}
+/* The fixed 1320×760 drawing stage; transform: scale(...) is applied inline by
+   the screen to fit the host width. transform-origin top-left keeps it anchored. */
+.topo__stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1320px;
+  height: 760px;
+}
+
+/* Whole-system escape control — sits over the canvas top-right, above the
+   captured/missing footer's bottom strip so the two never collide. */
+.topo__whole-system {
+  position: absolute;
+  top: var(--vt-space-3);
+  right: var(--vt-space-3);
+  z-index: 2;
+  min-height: 32px;
+  padding: 6px 12px;
+  background: color-mix(in oklab, var(--vt-bone-50), transparent 6%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vt-fg);
+  cursor: pointer;
+}
+.topo__whole-system:hover { background: var(--vt-bone-100); }
+.topo__whole-system[aria-pressed='true'] {
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  border-color: var(--vt-fg);
+}
+
+/* Honest zero-step state — "no test plan captured for this code yet". The
+   universal needs-field-check degrade, not an error: quiet graphite, no red. */
+.topo__no-plan {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vt-space-2);
+  text-align: center;
+  padding: var(--vt-space-6);
+  background: var(--vt-bone-100);
+}
+.topo__no-plan-title {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+  color: var(--vt-fg);
+}
+.topo__no-plan-sub {
+  max-width: 42ch;
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--vt-fg-3);
+}
+
+/* The MeterSheet (gauge scenes only) floats bottom-right on desktop, above the
+   captured/missing strip; on mobile its own bottom-sheet rules (diagram-mobile
+   .css) take over. */
+@media (min-width: 1024px) {
+  .topo__canvas-wrap > .meter-sheet {
+    position: absolute;
+    right: var(--vt-space-4);
+    bottom: calc(var(--vt-space-4) + 52px);
+    width: clamp(280px, 26vw, 360px);
+    z-index: 5;
+  }
+}
+
+/* Not-found fallback (no topology for this case) — center it in the bare
+   full-window root instead of pinning it to the top-left corner. */
+.topo-route > .topo__not-found {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+  padding: var(--vt-space-6);
+  text-align: center;
+  font-family: var(--vt-font-serif);
+  color: var(--vt-fg-2);
+}

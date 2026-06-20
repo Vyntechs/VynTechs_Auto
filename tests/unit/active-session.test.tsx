@@ -141,3 +141,25 @@ describe('ActiveSession — phase routing', () => {
     ).not.toBeInTheDocument()
   })
 })
+
+// Gate B (NON-NEGOTIABLE #2): the AI diagnostic path must carry an unmissable
+// "AI-generated / not shop-verified" honesty signal on EVERY container, since
+// day one ~99% of sessions fall through to this path. "Shipped" must not imply
+// "the liar is gone" — uncovered cases still get an AI guess, just an honest one.
+describe('ActiveSession — AI honesty signal (Gate B)', () => {
+  it('shows the unverified banner on the diagnosing-active path', () => {
+    render(<ActiveSession session={session} />)
+    expect(screen.getByText(/ai guess/i)).toBeInTheDocument()
+    expect(screen.getByText(/not verified by a real tech/i)).toBeInTheDocument()
+  })
+
+  it('shows the unverified banner on the diagnosis-proposed review path', () => {
+    render(<ActiveSession session={doneSession} />)
+    expect(screen.getByText(/not verified by a real tech/i)).toBeInTheDocument()
+  })
+
+  it('shows the unverified banner on the repair phase path', () => {
+    render(<ActiveSession session={repairingSession} events={[]} />)
+    expect(screen.getByText(/not verified by a real tech/i)).toBeInTheDocument()
+  })
+})

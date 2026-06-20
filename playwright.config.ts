@@ -25,7 +25,7 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         storageState: STORAGE_STATE_PATH,
       },
-      testMatch: /curator\.spec\.ts/,
+      testMatch: /curator(-flows)?\.spec\.ts/,
     },
   ],
   webServer: {

@@ -1,0 +1,141 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]: ‹ sessions
+    - generic [ref=e5]: ·
+    - generic [ref=e6]: 2018 Ford F-250 · 6.7L Power Stroke
+    - generic [ref=e7]: ·
+    - generic [ref=e8]: P0087 · rail pressure low
+    - button "▣ any key state ▾" [ref=e193] [cursor=pointer]:
+      - generic [ref=e10]: ▣
+      - generic [ref=e11]: any key state
+      - generic [ref=e12]: ▾
+    - button "⌖ whole system" [ref=e13] [cursor=pointer]
+    - generic [ref=e14] [cursor=pointer]: curator ▾
+  - generic [ref=e15]:
+    - generic [ref=e17]:
+      - img
+      - img
+      - img
+      - generic:
+        - generic [ref=e20] [cursor=pointer]: Fuel Tank
+        - generic [ref=e22] [cursor=pointer]:
+          - generic [ref=e23]: Electric Lift Pump
+          - generic [ref=e24]:
+            - generic [ref=e25]: 12V
+            - generic [ref=e27]: GND
+        - generic [ref=e31] [cursor=pointer]: Primary Fuel Filter
+        - generic [ref=e34] [cursor=pointer]: Bosch CP4.2 HP Pump
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank A
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank B
+        - generic:
+          - generic:
+            - generic: Lift Pump Relay
+        - generic:
+          - generic:
+            - generic: Chassis Ground
+        - generic:
+          - generic:
+            - generic: PCM
+        - generic:
+          - generic:
+            - generic: 5V Reference Splice
+        - generic:
+          - generic:
+            - generic: Low-Reference Splice
+        - generic:
+          - generic:
+            - generic: Inlet Metering Valve
+        - generic:
+          - generic:
+            - generic: Volume Control Valve
+        - generic:
+          - generic:
+            - generic: FRP Regulator
+        - generic:
+          - generic:
+            - generic: Water-in-Fuel Sensor
+        - generic [ref=e69] [cursor=pointer]:
+          - generic [ref=e70]: why we're here
+          - generic [ref=e71]: FRP Sensor
+          - generic [ref=e72]:
+            - generic [ref=e73]: SIG
+            - generic [ref=e75]: 5V
+            - generic [ref=e77]: LREF
+        - generic:
+          - generic:
+            - generic: Fuel Level Sender
+        - generic:
+          - generic:
+            - generic: Pressure Relief Valve
+        - generic:
+          - generic:
+            - generic: Passive Return Circuit
+        - generic:
+          - generic:
+            - generic: Injector 1
+        - generic:
+          - generic:
+            - generic: Injector 2
+        - generic:
+          - generic:
+            - generic: Injector 3
+        - generic:
+          - generic:
+            - generic: Injector 4
+        - generic:
+          - generic:
+            - generic: Injector 5
+        - generic:
+          - generic:
+            - generic: Injector 6
+        - generic:
+          - generic:
+            - generic: Injector 7
+        - generic:
+          - generic:
+            - generic: Injector 8
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]: FUEL FILTER · CP4 DEBRIS CHECK
+        - generic [ref=e116]: INSPECT
+        - button "✕" [ref=e117] [cursor=pointer]
+      - generic [ref=e118]: lookCut the primary fuel filter open and look at the media. Then check the separator bowl for water.
+      - generic [ref=e194]:
+        - generic [ref=e195]: LOOK
+        - generic [ref=e196]: which one are you looking at?
+      - generic [ref=e197]:
+        - generic [ref=e198]:
+          - generic [ref=e199]: Good
+          - generic [ref=e200]: Clean media. Bowl is clear — diesel only, no water line, no glitter.
+        - generic [ref=e201] [cursor=pointer]:
+          - generic [ref=e202]: Fault
+          - generic [ref=e203]: Fine metallic glitter in the media or the bowl — the CP4 signature. Water in the separator bowl.
+      - generic [ref=e135]: The CP4-debris and water-in-fuel signatures are drafted from how this pump fails on the 6.7 Power Stroke — what to look for, not a measurement against this truck.
+      - generic [ref=e136]:
+        - generic [ref=e204]: if you saw the fault
+        - text: If you see metal glitter, the CP4.2 has started coming apart and has seeded the whole fuel system. The next move isn't another test — it's a full system flush and pump replacement.
+      - generic [ref=e137] [cursor=pointer]:
+        - generic [ref=e138]: good vs bad · what it means · Operational Theori
+        - generic [ref=e140]: ▾
+      - generic [ref=e141]:
+        - generic [ref=e205]:
+          - generic [ref=e206]: How it's checked
+          - generic [ref=e207]: Look, don't meter — cut the filter, inspect the bowl
+        - generic [ref=e208]:
+          - generic [ref=e209]: Why it matters
+          - generic [ref=e210]: CP4 debris means the failure has spread downstream to the injectors
+        - generic [ref=e211]:
+          - generic [ref=e212]: Needs field check
+          - generic [ref=e213]: No photo or note from this truck's filter is on file yet
+        - generic [ref=e214]:
+          - generic [ref=e215]: Operational Theori
+          - generic [ref=e216]: The CP4.2 runs on diesel for lubrication. When it scuffs, it sheds fine metal into the supply, contaminating the filter, rail, and injectors. Catching glitter early changes the whole repair.
+    - generic [ref=e154]:
+      - button "◂ back" [ref=e155] [cursor=pointer]
+      - button "▸ next test" [ref=e156] [cursor=pointer]
+      - button "⌖ whole system" [ref=e157] [cursor=pointer]
+      - generic [ref=e158]: demo

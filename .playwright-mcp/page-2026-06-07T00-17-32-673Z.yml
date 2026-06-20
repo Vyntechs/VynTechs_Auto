@@ -1,0 +1,98 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]: ‹ sessions
+    - generic [ref=e5]: ·
+    - generic [ref=e6]: 2018 Ford F-250 · 6.7L Power Stroke
+    - generic [ref=e7]: ·
+    - generic [ref=e8]: P0087 · rail pressure low
+    - 'button "▣ Fault Sim: No Rail Pressure ▾" [ref=e9] [cursor=pointer]':
+      - generic [ref=e10]: ▣
+      - generic [ref=e11]: "Fault Sim: No Rail Pressure"
+      - generic [ref=e12]: ▾
+    - button "⌖ whole system" [ref=e13] [cursor=pointer]
+    - generic [ref=e14] [cursor=pointer]: curator ▾
+  - generic [ref=e15]:
+    - generic [ref=e17]:
+      - img
+      - img
+      - img
+      - generic:
+        - generic [ref=e20] [cursor=pointer]: Fuel Tank
+        - generic [ref=e22] [cursor=pointer]:
+          - generic [ref=e23]: Electric Lift Pump
+          - generic [ref=e24]:
+            - generic [ref=e25]: 12V
+            - generic [ref=e27]: GND
+        - generic [ref=e31] [cursor=pointer]: Primary Fuel Filter
+        - generic [ref=e34] [cursor=pointer]: Bosch CP4.2 HP Pump
+        - generic [ref=e37] [cursor=pointer]: HP Fuel Rail · Bank A
+        - generic [ref=e40] [cursor=pointer]: HP Fuel Rail · Bank B
+        - generic [ref=e43] [cursor=pointer]: Lift Pump Relay
+        - generic [ref=e46] [cursor=pointer]: Chassis Ground
+        - generic [ref=e49] [cursor=pointer]: PCM
+        - generic [ref=e52] [cursor=pointer]: 5V Reference Splice
+        - generic [ref=e55] [cursor=pointer]: Low-Reference Splice
+        - generic [ref=e58] [cursor=pointer]: Inlet Metering Valve
+        - generic [ref=e61] [cursor=pointer]: Volume Control Valve
+        - generic [ref=e64] [cursor=pointer]: FRP Regulator
+        - generic [ref=e67] [cursor=pointer]: Water-in-Fuel Sensor
+        - generic [ref=e69] [cursor=pointer]:
+          - generic [ref=e70]: why we're here
+          - generic [ref=e71]: FRP Sensor
+          - generic [ref=e72]:
+            - generic [ref=e73]: SIG
+            - generic [ref=e75]: 5V
+            - generic [ref=e77]: LREF
+        - generic [ref=e81] [cursor=pointer]: Fuel Level Sender
+        - generic [ref=e84] [cursor=pointer]: Pressure Relief Valve
+        - generic [ref=e87] [cursor=pointer]: Passive Return Circuit
+        - generic [ref=e90] [cursor=pointer]: Injector 1
+        - generic [ref=e93] [cursor=pointer]: Injector 2
+        - generic [ref=e96] [cursor=pointer]: Injector 3
+        - generic [ref=e99] [cursor=pointer]: Injector 4
+        - generic [ref=e102] [cursor=pointer]: Injector 5
+        - generic [ref=e105] [cursor=pointer]: Injector 6
+        - generic [ref=e108] [cursor=pointer]: Injector 7
+        - generic [ref=e111] [cursor=pointer]: Injector 8
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]: P0087 · RAIL PRESSURE LOW
+        - generic [ref=e116]: COMPLAINT
+        - button "✕" [ref=e117] [cursor=pointer]
+      - generic [ref=e118]: complaintP0087 is active and the MIL is on. Low power under load. The number the FRP sensor reports is below the PCM's threshold.
+      - generic [ref=e119]:
+        - generic [ref=e120]:
+          - generic [ref=e121]: Expect
+          - generic [ref=e123]: ≥ idletarget
+          - generic [ref=e124]: Rail pressure should reach the PCM's idle target once the engine is running.
+        - generic [ref=e125]:
+          - generic [ref=e126]: "Now · Fault Sim: No Rail Pressure"
+          - generic [ref=e127]: Flat low even while cranking — well under the PCM's minimum to start
+          - generic [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]: from theory
+            - generic [ref=e130]: · why?
+        - generic [ref=e132]:
+          - generic [ref=e133]: ◐
+          - generic [ref=e134]: reported low
+      - generic [ref=e135]: The complaint is sourced from the stored code and the FRP sensor reading the PCM logged — drafted from how this system works on the 6.7 Power Stroke, not yet verified against this exact truck.
+      - generic [ref=e137] [cursor=pointer]:
+        - generic [ref=e138]: why P0087 · the spine · Operational Theori
+        - generic [ref=e140]: ▾
+      - generic [ref=e141]:
+        - generic [ref=e142]:
+          - generic [ref=e143]: The code
+          - generic [ref=e144]: P0087 — Fuel Rail/System Pressure Too Low
+        - generic [ref=e145]:
+          - generic [ref=e146]: What the truck does
+          - generic [ref=e147]: Hard start, low power under load, may stall
+        - generic [ref=e148]:
+          - generic [ref=e149]: Needs field check
+          - generic [ref=e150]: The exact rail pressure number the PCM saw isn't captured here yet
+        - generic [ref=e151]:
+          - generic [ref=e152]: Operational Theori
+          - generic [ref=e153]: Rail pressure is built by the high-pressure pump and held by the regulator, but it starts with clean fuel delivered by the lift pump. A low rail number can come from either side — the walk narrows it down.
+    - generic [ref=e154]:
+      - button "◂ back" [disabled] [ref=e155]
+      - button "▸ next test" [ref=e156] [cursor=pointer]
+      - button "⌖ whole system" [ref=e157] [cursor=pointer]
+      - generic [ref=e158]: demo

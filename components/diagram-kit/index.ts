@@ -1,0 +1,7 @@
+export * from './part-api'
+export { resolvePart, isFallbackKey } from './registry'
+export { Wire } from './wires/wire'
+export { ConnectionLink } from './wires/connection-link'
+export { Terminal } from './wires/terminal'
+export { OVERLAY_KINDS, type OverlayKind } from './overlays/overlay-api'
+export { TestOverlay } from './overlays/test-overlay'

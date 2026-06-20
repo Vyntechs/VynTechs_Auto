@@ -9,6 +9,7 @@ import { formatVehicleName, formatElapsed, nodesToSteps, getActiveNode } from '@
 import type { Session } from '@/lib/db/schema'
 import { ActiveStepForm } from './active-step-form'
 import { AbandonButton } from './abandon-button'
+import { AiUnverifiedBanner } from './ai-unverified-banner'
 import { LockDiagnosisButton } from './lock-diagnosis-button'
 
 export function DiagnosisProposedReview({ session }: { session: Session }) {
@@ -35,6 +36,7 @@ export function DiagnosisProposedReview({ session }: { session: Session }) {
           overflow: 'auto',
         }}
       >
+        <AiUnverifiedBanner />
         <Module
           num="✓"
           label="Diagnosis proposed"
