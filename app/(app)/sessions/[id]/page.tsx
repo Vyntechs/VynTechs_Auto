@@ -17,6 +17,7 @@ import { layoutTopology } from '@/lib/diagnostics/topology-layout'
 import { TopologyDiagnostic } from '@/components/screens/topology-diagnostic'
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
 import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
+import { reconcileSeededSymptom } from '@/lib/diagnostics/reconcile-seeded-symptom'
 import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
 export default async function SessionPage({
@@ -70,24 +71,33 @@ export default async function SessionPage({
 
   // ---- Topology diagnostic gate ----------------------------------------
   // When the session's vehicle has graph data, serve the interactive diagram.
-  // resolvePlatformSlug + resolveSymptomSlug are pure (no DB). loadSystemTopology
-  // returns null when no data exists for the pair — falls through to AI silently.
+  // resolvePlatformSlug is pure (no DB). reconcileSeededSymptom maps the resolver's
+  // candidate symptom to an actually-seeded slug (e.g. bare "p0087" → the seeded
+  // "p0087-fuel-rail-pressure-too-low") and returns null when nothing seeded matches
+  // — so this falls through to AI silently. It runs the IDENTICAL reconcile the
+  // intake route ran, so the two can't drift. The reconciled slug feeds the topology
+  // load AND every display prop, so the diagram's active symptom + label always match.
   const platformSlug = resolvePlatformSlug({
     year: session.intake.vehicleYear,
     make: session.intake.vehicleMake,
     model: session.intake.vehicleModel,
     engine: session.intake.vehicleEngine ?? '',
   })
-  const symptomSlug = resolveSymptomSlug({
-    dtcCodes: extractDtcCodes(session.intake.customerComplaint),
-    complaintText: session.intake.customerComplaint,
-  })
+  const reconciledSymptomSlug = platformSlug
+    ? await reconcileSeededSymptom(db, platformSlug, {
+        candidateSlug: resolveSymptomSlug({
+          dtcCodes: extractDtcCodes(session.intake.customerComplaint),
+          complaintText: session.intake.customerComplaint,
+        }),
+        complaintText: session.intake.customerComplaint,
+      })
+    : null
 
-  if (platformSlug && symptomSlug) {
+  if (platformSlug && reconciledSymptomSlug) {
     const topology = await loadSystemTopology({
       db,
       platformSlug,
-      symptomSlug,
+      symptomSlug: reconciledSymptomSlug,
       sessionId: session.id,
     })
     if (topology) {
@@ -97,8 +107,8 @@ export default async function SessionPage({
           layout={layoutTopology(topology)}
           vehicleName={formatVehicleName(session.intake)}
           sessionId={session.id}
-          symptoms={[{ slug: symptomSlug, label: symptomLabel(symptomSlug) }]}
-          activeSymptomSlug={symptomSlug}
+          symptoms={[{ slug: reconciledSymptomSlug, label: symptomLabel(reconciledSymptomSlug) }]}
+          activeSymptomSlug={reconciledSymptomSlug}
         />
       )
     }

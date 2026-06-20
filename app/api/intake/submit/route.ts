@@ -20,7 +20,7 @@ import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { customers as customersTable, profiles, vehicles as vehiclesTable } from '@/lib/db/schema'
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
 import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
-import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
+import { reconcileSeededSymptom } from '@/lib/diagnostics/reconcile-seeded-symptom'
 import type { TreeState } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
@@ -208,24 +208,27 @@ export async function POST(req: Request) {
     resolvedCustomerEmail = email
   }
 
-  // Pre-flight topology check: resolve platform + symptom (pure) then confirm
-  // topology data exists in the DB. When both match, skip AI — the session
-  // page's render-time topology gate will intercept and show the interactive
-  // diagram. Mirror the exact check page.tsx runs at render time.
+  // Pre-flight topology check: resolve platform (pure), then reconcile the
+  // resolver's candidate symptom to an actually-seeded, topology-reachable slug.
+  // reconcileSeededSymptom returns a slug ONLY when loadSystemTopology would hit,
+  // so a non-null result means topology exists — skip AI and let the session
+  // page's render-time gate (which runs the identical reconcile) show the diagram.
   const platformSlug = resolvePlatformSlug({
     year: resolvedYear,
     make: resolvedMake,
     model: resolvedModel,
     engine: resolvedEngine ?? '',
   })
-  const symptomSlug = resolveSymptomSlug({
-    dtcCodes: extractDtcCodes(description),
-    complaintText: description,
-  })
-  const topologyExists =
-    platformSlug && symptomSlug
-      ? Boolean(await loadSystemTopology({ db, platformSlug, symptomSlug }))
-      : false
+  const reconciledSymptomSlug = platformSlug
+    ? await reconcileSeededSymptom(db, platformSlug, {
+        candidateSlug: resolveSymptomSlug({
+          dtcCodes: extractDtcCodes(description),
+          complaintText: description,
+        }),
+        complaintText: description,
+      })
+    : null
+  const topologyExists = Boolean(reconciledSymptomSlug)
 
   // Mirror /api/sessions: best-effort corpus + retrieval, then mandatory AI
   // tree generation. Without a populated tree, the diagnostic page hangs on
