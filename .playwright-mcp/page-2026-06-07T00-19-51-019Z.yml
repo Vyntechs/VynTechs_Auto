@@ -1,0 +1,149 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]: ‹ sessions
+    - generic [ref=e5]: ·
+    - generic [ref=e6]: 2018 Ford F-250 · 6.7L Power Stroke
+    - generic [ref=e7]: ·
+    - generic [ref=e8]: P0087 · rail pressure low
+    - button "▣ Engine Idle ▾" [ref=e159] [cursor=pointer]:
+      - generic [ref=e10]: ▣
+      - generic [ref=e11]: Engine Idle
+      - generic [ref=e12]: ▾
+    - button "⌖ whole system" [ref=e13] [cursor=pointer]
+    - generic [ref=e14] [cursor=pointer]: curator ▾
+  - generic [ref=e15]:
+    - generic [ref=e17]:
+      - img
+      - img
+      - img
+      - generic:
+        - generic:
+          - generic:
+            - generic: Fuel Tank
+        - generic:
+          - generic:
+            - generic: Electric Lift Pump
+            - generic:
+              - generic: 12V
+              - generic: GND
+        - generic:
+          - generic:
+            - generic: Primary Fuel Filter
+        - generic:
+          - generic:
+            - generic: Bosch CP4.2 HP Pump
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank A
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank B
+        - generic:
+          - generic:
+            - generic: Lift Pump Relay
+        - generic:
+          - generic:
+            - generic: Chassis Ground
+        - generic:
+          - generic:
+            - generic: PCM
+        - generic:
+          - generic:
+            - generic: 5V Reference Splice
+        - generic:
+          - generic:
+            - generic: Low-Reference Splice
+        - generic:
+          - generic:
+            - generic: Inlet Metering Valve
+        - generic:
+          - generic:
+            - generic: Volume Control Valve
+        - generic:
+          - generic:
+            - generic: FRP Regulator
+        - generic:
+          - generic:
+            - generic: Water-in-Fuel Sensor
+        - generic [ref=e69] [cursor=pointer]:
+          - generic [ref=e70]: why we're here
+          - generic [ref=e71]: FRP Sensor
+          - generic [ref=e72]:
+            - generic [ref=e73]: SIG
+            - generic [ref=e75]: 5V
+            - generic [ref=e77]: LREF
+        - generic:
+          - generic:
+            - generic: Fuel Level Sender
+        - generic:
+          - generic:
+            - generic: Pressure Relief Valve
+        - generic:
+          - generic:
+            - generic: Passive Return Circuit
+        - generic:
+          - generic:
+            - generic: Injector 1
+        - generic:
+          - generic:
+            - generic: Injector 2
+        - generic:
+          - generic:
+            - generic: Injector 3
+        - generic:
+          - generic:
+            - generic: Injector 4
+        - generic:
+          - generic:
+            - generic: Injector 5
+        - generic:
+          - generic:
+            - generic: Injector 6
+        - generic:
+          - generic:
+            - generic: Injector 7
+        - generic:
+          - generic:
+            - generic: Injector 8
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]: FRP SENSOR · RAIL PRESSURE PID
+        - generic [ref=e116]: READING
+        - button "✕" [ref=e117] [cursor=pointer]
+      - generic [ref=e118]: readingRead the FRP sensor PID on the scan tool at idle. This is the symptom signal — the number the complaint is about.
+      - generic [ref=e119]:
+        - generic [ref=e120]:
+          - generic [ref=e121]: Expect
+          - generic [ref=e123]: idletarget
+          - generic [ref=e124]: At warm idle the PCM expects rail pressure at its idle target. The captured number isn't loaded yet, so this stays a band, not a needle.
+        - generic [ref=e125]:
+          - generic [ref=e126]: Now · Engine Idle
+          - generic [ref=e127]: Reports rail pressure below the PCM's idle target
+          - generic [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]: from theory
+            - generic [ref=e130]: · why?
+        - generic [ref=e132]:
+          - generic [ref=e133]: ◐
+          - generic [ref=e134]: reported low
+      - generic [ref=e135]: The idle target and tolerance for this engine aren't captured yet, so the gauge can't judge the reading against a number. It reports what the PID says and stays neutral until an expected value is on file.
+      - generic [ref=e137] [cursor=pointer]:
+        - generic [ref=e138]: the PID · why no leads · Operational Theori
+        - generic [ref=e140]: ▾
+      - generic [ref=e141]:
+        - generic [ref=e181]:
+          - generic [ref=e182]: How it's read
+          - generic [ref=e183]: Scan-tool PID through the PCM — no probe leads on the sensor
+        - generic [ref=e184]:
+          - generic [ref=e185]: This signal
+          - generic [ref=e186]: FRP = Fuel Rail Pressure. It's the number P0087 is raised against.
+        - generic [ref=e187]:
+          - generic [ref=e188]: Needs field check
+          - generic [ref=e189]: The idle target pressure and tolerance for this engine aren't captured yet
+        - generic [ref=e190]:
+          - generic [ref=e191]: Operational Theori
+          - generic [ref=e192]: The PCM compares this PID to its target and trims the high-pressure pump to hold it. A reading stuck low means pressure isn't being built or isn't being held — supply or high-pressure side.
+    - generic [ref=e154]:
+      - button "◂ back" [ref=e155] [cursor=pointer]
+      - button "▸ next test" [active] [ref=e156] [cursor=pointer]
+      - button "⌖ whole system" [ref=e157] [cursor=pointer]
+      - generic [ref=e158]: demo

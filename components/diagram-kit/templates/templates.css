@@ -1,0 +1,60 @@
+/* T4 templates — desktop geometry + the stable responsive seam (T5 owns @media in its own file). */
+.diagram-template {
+  position: relative;
+  width: 1320px;
+  height: 760px;
+  transform-origin: 0 0;
+}
+.slot-box {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* The kit part SVGs carry only a viewBox (no intrinsic px size), so in an
+   absolutely-positioned slot they collapse to 0×0 and vanish. Give them a
+   concrete size on the stage. */
+.slot-box .dk-part { display: block; width: 120px; height: 72px; }
+
+/* Tier emphasis — faded but always LEGIBLE (the 0.16 token floor was unreadable
+   gray-mush on real data; a slot you can't read isn't context, it's noise). */
+.slot-box[data-tier='recede'] { opacity: 0.5; pointer-events: none; }
+.slot-box[data-tier='anchor'] { opacity: 0.82; }
+.slot-box[data-tier='focus'] { opacity: 1; }
+.slot-box[data-selected='true'] { outline: 1.5px solid var(--vt-signal-600); outline-offset: 2px; border-radius: 8px; }
+.slot-box.is-degraded {
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+  border: 1px dashed var(--vt-amber-600);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.slot-box--detail {
+  max-width: 360px;
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-align: center;
+  color: var(--vt-fg-2);
+}
+.overlay-region {
+  position: absolute;
+  font-family: var(--vt-font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-signal-600);
+}
+.gauge-region {
+  position: absolute;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  font-family: var(--vt-font-mono);
+}
+.gauge-region .gr-expect { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--vt-bone-500); }
+.gauge-region .gr-now { font-size: 11px; font-weight: 600; color: var(--vt-fg); }

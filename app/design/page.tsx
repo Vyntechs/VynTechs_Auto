@@ -48,6 +48,8 @@ const fixtureSession: Session = {
   curatorNote: null,
   curatorOverrideAction: null,
   maxCorpusSimilarity: null,
+  wizardState: null,
+  lastScenarioSlug: null,
 }
 
 const closedSession: Session = {

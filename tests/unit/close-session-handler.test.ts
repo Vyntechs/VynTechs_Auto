@@ -1,13 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { count, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   createShop,
   createProfile,
   createSession,
 } from '@/lib/db/queries'
-import { sessions, sessionEvents, artifacts } from '@/lib/db/schema'
+import {
+  sessions,
+  sessionEvents,
+  artifacts,
+  customers,
+  vehicles,
+  symptoms,
+  diagnosticSessions,
+} from '@/lib/db/schema'
 import { closeSessionForUser } from '@/lib/sessions'
+import { recordDiagnosticSession } from '@/lib/diagnostics/record-diagnostic-session'
 
 function makeOutcome(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -349,6 +358,109 @@ describe('closeSessionForUser', () => {
         validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
       })
       expect(result.ok).toBe(true)
+    })
+  })
+
+  describe('proof-of-fix recording (P0-1)', () => {
+    async function seedSessionWithVehicle(db: TestDb, complaint = 'engine cranks but no start') {
+      const shop = await createShop(db, { name: 'PoF Shop' })
+      const tech = await createProfile(db, { userId: crypto.randomUUID(), shopId: shop.id })
+      const [customer] = await db
+        .insert(customers)
+        .values({ shopId: shop.id, name: 'Acme', phone: '555-0101' })
+        .returning()
+      const [vehicle] = await db
+        .insert(vehicles)
+        .values({ customerId: customer.id, year: 2017, make: 'Ford', model: 'F-250' })
+        .returning()
+      const session = await createSession(db, {
+        shopId: shop.id,
+        techId: tech.id,
+        vehicleId: vehicle.id,
+        intake: {
+          vehicleYear: 2017,
+          vehicleMake: 'Ford',
+          vehicleModel: 'F-250',
+          customerComplaint: complaint,
+        },
+        treeState: {
+          nodes: [{ id: 'root', label: 'pull DTCs', status: 'active' }],
+          currentNodeId: 'root',
+          message: 'go',
+        },
+      })
+      return { shop, tech, vehicle, session }
+    }
+
+    it('calls recordDiagnosticOutcome with session-derived data after close', async () => {
+      const { shop, tech, vehicle, session } = await seedSessionWithVehicle(db)
+      const record = vi.fn().mockResolvedValue({ written: false, reason: 'symptom-not-in-catalog' })
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        recordDiagnosticOutcome: record,
+      })
+      expect(result.ok).toBe(true)
+      expect(record).toHaveBeenCalledTimes(1)
+      const [dbArg, input] = record.mock.calls[0]!
+      expect(dbArg).toBe(db)
+      expect(input.vehicleId).toBe(vehicle.id)
+      expect(input.shopId).toBe(shop.id)
+      expect(input.techId).toBe(tech.id)
+      expect(input.complaintText).toMatch(/cranks/)
+      expect(input.outcome.rootCause).toContain('Wastegate')
+    })
+
+    it('treats a recordDiagnosticOutcome failure as non-fatal — session still closes', async () => {
+      const { tech, session } = await seedSessionWithVehicle(db)
+      const record = vi.fn().mockRejectedValue(new Error('write boom'))
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        recordDiagnosticOutcome: record,
+      })
+      expect(result.ok).toBe(true)
+      const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id))
+      expect(row.status).toBe('closed')
+    })
+
+    it('does not record when recordDiagnosticOutcome is not provided (back-compat)', async () => {
+      const { tech, session } = await seedSessionWithVehicle(db)
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome(),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+      })
+      expect(result.ok).toBe(true)
+      const [{ value }] = await db.select({ value: count() }).from(diagnosticSessions)
+      expect(value).toBe(0)
+    })
+
+    it('end-to-end: closing a verified fix with the REAL writer lands a commit-allowed row', async () => {
+      const { tech, session } = await seedSessionWithVehicle(db)
+      await db
+        .insert(symptoms)
+        .values({ slug: 'cranks-no-start', description: 'cranks, no start', category: 'no-start' })
+      const result = await closeSessionForUser({
+        db,
+        userId: tech.userId,
+        sessionId: session.id,
+        body: makeOutcome({ actionType: 'repair' }),
+        validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+        recordDiagnosticOutcome: recordDiagnosticSession,
+      })
+      expect(result.ok).toBe(true)
+      const rows = await db.select().from(diagnosticSessions)
+      expect(rows).toHaveLength(1)
+      expect(rows[0].finalVerdict).toBe('commit-allowed')
     })
   })
 })

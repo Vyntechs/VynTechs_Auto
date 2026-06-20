@@ -1,0 +1,140 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]: ‹ sessions
+    - generic [ref=e5]: ·
+    - generic [ref=e6]: 2018 Ford F-250 · 6.7L Power Stroke
+    - generic [ref=e7]: ·
+    - generic [ref=e8]: P0087 · rail pressure low
+    - button "▣ Engine Idle ▾" [ref=e218] [cursor=pointer]:
+      - generic [ref=e10]: ▣
+      - generic [ref=e11]: Engine Idle
+      - generic [ref=e12]: ▾
+    - button "⌖ whole system" [ref=e13] [cursor=pointer]
+    - generic [ref=e14] [cursor=pointer]: curator ▾
+  - generic [ref=e15]:
+    - generic [ref=e17]:
+      - img
+      - img
+      - img
+      - generic:
+        - generic [ref=e20] [cursor=pointer]: Fuel Tank
+        - generic [ref=e22] [cursor=pointer]:
+          - generic [ref=e23]: Electric Lift Pump
+          - generic [ref=e24]:
+            - generic [ref=e25]: 12V
+            - generic [ref=e27]: GND
+        - generic [ref=e31] [cursor=pointer]: Primary Fuel Filter
+        - generic [ref=e34] [cursor=pointer]: Bosch CP4.2 HP Pump
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank A
+        - generic:
+          - generic:
+            - generic: HP Fuel Rail · Bank B
+        - generic:
+          - generic:
+            - generic: Lift Pump Relay
+        - generic:
+          - generic:
+            - generic: Chassis Ground
+        - generic:
+          - generic:
+            - generic: PCM
+        - generic:
+          - generic:
+            - generic: 5V Reference Splice
+        - generic:
+          - generic:
+            - generic: Low-Reference Splice
+        - generic:
+          - generic:
+            - generic: Inlet Metering Valve
+        - generic:
+          - generic:
+            - generic: Volume Control Valve
+        - generic:
+          - generic:
+            - generic: FRP Regulator
+        - generic:
+          - generic:
+            - generic: Water-in-Fuel Sensor
+        - generic [ref=e69] [cursor=pointer]:
+          - generic [ref=e70]: why we're here
+          - generic [ref=e71]: FRP Sensor
+          - generic [ref=e72]:
+            - generic [ref=e73]: SIG
+            - generic [ref=e75]: 5V
+            - generic [ref=e77]: LREF
+        - generic:
+          - generic:
+            - generic: Fuel Level Sender
+        - generic:
+          - generic:
+            - generic: Pressure Relief Valve
+        - generic:
+          - generic:
+            - generic: Passive Return Circuit
+        - generic:
+          - generic:
+            - generic: Injector 1
+        - generic:
+          - generic:
+            - generic: Injector 2
+        - generic:
+          - generic:
+            - generic: Injector 3
+        - generic:
+          - generic:
+            - generic: Injector 4
+        - generic:
+          - generic:
+            - generic: Injector 5
+        - generic:
+          - generic:
+            - generic: Injector 6
+        - generic:
+          - generic:
+            - generic: Injector 7
+        - generic:
+          - generic:
+            - generic: Injector 8
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]: WHERE THE PRESSURE IS LOST
+        - generic [ref=e116]: NEXT MOVE
+        - button "✕" [ref=e117] [cursor=pointer]
+      - generic [ref=e119]:
+        - generic [ref=e125]:
+          - generic [ref=e126]: Carried forward
+          - generic [ref=e127]: Filter clean, supply pressure ~55 psi at idle
+          - generic [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]: from theory
+            - generic [ref=e130]: · why?
+        - generic [ref=e132]:
+          - generic [ref=e133]: ◐
+          - generic [ref=e134]: supply side ok
+      - generic [ref=e219]:
+        - generic [ref=e220]: next move
+        - text: Move to the high-pressure side — the CP4.2 pump and the rail regulator.
+      - generic [ref=e135]: Supply pressure checked out, so the pressure is being lost past the filter — the high-pressure side. This road is chosen because the supply tests passed; the supply branch is set aside, not erased.
+      - generic [ref=e137] [cursor=pointer]:
+        - generic [ref=e138]: why this road · what's set aside · Operational Theori
+        - generic [ref=e140]: ▾
+      - generic [ref=e141]:
+        - generic [ref=e221]:
+          - generic [ref=e222]: Why this road
+          - generic [ref=e223]: "Supply side passed: 12V at the pump, good ground, clean filter, ~55 psi"
+        - generic [ref=e224]:
+          - generic [ref=e225]: What's next
+          - generic [ref=e226]: Rail pressure is built on the high-pressure side — start at the CP4.2
+        - generic [ref=e227]:
+          - generic [ref=e228]: Needs field check
+          - generic [ref=e229]: The supply pressure reading is from the gauge, not yet logged to this case
+        - generic [ref=e230]:
+          - generic [ref=e231]: Operational Theori
+          - generic [ref=e232]: "If the lift pump delivers clean fuel at the right pressure but the rail still won't build, the loss is downstream: the CP4.2, the volume control, the rail, or the regulator. The walk now follows the pressure."
+    - generic [ref=e154]:
+      - button "◂ back" [ref=e155] [cursor=pointer]
+      - button "▸ end of walk" [disabled] [ref=e233]
+      - button "⌖ whole system" [ref=e157] [cursor=pointer]
+      - generic [ref=e158]: demo

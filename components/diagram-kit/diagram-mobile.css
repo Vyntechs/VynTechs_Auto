@@ -1,0 +1,116 @@
+/* T5 — mobile (375–414px) + Meter bottom-sheet. Consumes vt + --role-* tokens
+   from globals.css (T1/T2-owned); adds NO tokens. Targets T4's stable [data-shape]
+   template roots and the MeterSheet's [data-detent] attribute. Ported from the
+   validated prototype: .design-shots/mockups/proto-meter.html lines 681–726. */
+
+@media (max-width: 1023px) {
+  /* Tablet hinge: the Meter becomes a sheet; the diagram canvas stays live above it. */
+  .meter-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: linear-gradient(var(--vt-bone-50), var(--vt-bone-100));
+    border-top: 0.5px solid var(--vt-rule-strong);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 30px oklch(40% 0.012 70 / 0.18);
+    padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+    transition: transform var(--dur-3, 0.28s) var(--vt-ease, ease);
+  }
+
+  /* Tap-to-toggle detents — the reducer sets data-detent; CSS does the geometry.
+     peek    = reading band visible (default translate keeps the body partly below). */
+  .meter-sheet[data-detent='peek'] {
+    transform: translateY(calc(100% - var(--meter-sheet-peek, 168px)));
+  }
+  .meter-sheet[data-detent='expanded'] {
+    transform: translateY(0);
+  }
+  .meter-sheet[data-detent='dismissed'] {
+    transform: translateY(100%);
+    pointer-events: none;
+  }
+
+  /* Grabber affordance (port of .meter-card::after). The whole button is the
+     tap target; the bar is the visual. >=48px tall for the tap floor. */
+  .meter-sheet__grabber {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .meter-sheet__grabber::after {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--vt-bone-400);
+  }
+
+  /* Thin "now showing" strip pinned above the sheet (port of #mobStatus). */
+  .meter-sheet__status {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    top: -22px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--vt-font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--vt-bone-500);
+    pointer-events: none;
+  }
+
+  /* >=48px tap-target floor — raises the proto's 44px + topology.css's 32px. */
+  .meter-sheet__close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 48px;
+    min-height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+}
+
+/* The "tested part stays above the sheet" guarantee: every T4 template root
+   reserves the peek-sheet height as bottom padding so the device-under-test
+   (C3.focus) never sits under the sheet edge at peek. Targets T4's stable
+   [data-shape] seam generically — no per-shape branch (unseen shapes inherit). */
+@media (max-width: 1023px) {
+  [data-shape] {
+    padding-bottom: calc(var(--meter-sheet-peek, 168px) + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 414px) {
+  /* Phone: every interactive diagram element clears the 48px floor. */
+  [data-shape] button,
+  [data-shape] [role='button'] {
+    min-width: 48px;
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter-sheet {
+    transition: none;
+  }
+}

@@ -148,6 +148,48 @@
       "when": 1779571200000,
       "tag": "0018_profile_is_curator_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780187680571,
+      "tag": "0019_curator_flows_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1780312069515,
+      "tag": "0020_sessions_wizard_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780312069516,
+      "tag": "0021_diagnostic_orchestration",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1780312069517,
+      "tag": "0022_component_systems",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780312069518,
+      "tag": "0023_interactive_electrical_topology",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1780312069519,
+      "tag": "0024_diagram_step_kind_out_of_range",
+      "breakpoints": true
     }
   ]
 }

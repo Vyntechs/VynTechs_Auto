@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vyntechs · The Meter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --vt-bone-50:oklch(98.5% .008 80); --vt-bone-100:oklch(96% .010 80); --vt-bone-200:oklch(92% .012 80);
+  --vt-bone-300:oklch(86% .013 80); --vt-bone-400:oklch(76% .014 80); --vt-bone-500:oklch(64% .014 75);
+  --vt-bone-600:oklch(50% .014 70); --vt-bone-700:oklch(38% .013 65); --vt-bone-800:oklch(26% .012 60);
+  --vt-bone-900:oklch(18% .010 55);
+  --vt-signal-300:oklch(78% .10 240); --vt-signal-400:oklch(62% .15 245);
+  --vt-signal-500:oklch(50% .18 248); --vt-signal-600:oklch(42% .17 250);  /* brand navy */
+  --vt-risk-high:oklch(72% .19 55);    /* amber caution = "needs field check" */
+  --vt-elem-voltage:oklch(86% .20 108);/* electrical/voltage wire */
+  --vt-elem-fuel:oklch(78% .19 140);   /* fuel/flow */
+  --vt-elem-spark:oklch(82% .20 62);   /* warm */
+  --vt-bg:var(--vt-bone-50); --vt-fg:var(--vt-bone-900); --vt-fg-2:var(--vt-bone-800); --vt-fg-3:var(--vt-bone-700);
+  --vt-rule:var(--vt-bone-300); --vt-rule-strong:var(--vt-bone-400);
+  --vt-font-serif:"Instrument Serif",ui-serif,Georgia,serif;
+  --vt-font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --vt-font-sans:"Inter Tight",-apple-system,system-ui,sans-serif;
+
+  /* role-colored wires (app's --role-* are undefined — defined here per brief) */
+  --role-12v: oklch(62% .20 30);        /* power = warm red, hot */
+  --role-ground: var(--vt-bone-700);    /* return = graphite */
+  --role-signal: var(--vt-signal-400);  /* signal = navy family */
+  --role-5v: var(--vt-signal-300);
+  --role-fuel: oklch(72% .07 150);      /* fluid line, muted */
+
+  --vt-recede: 0.15;                    /* canonical fade floor — never vanish */
+  --vt-recede-label: 0.10;
+  --vt-ease: cubic-bezier(.4,0,.2,1);   /* instrument ease */
+  --dur-fast: 90ms; --dur-2:170ms; --dur-3:300ms; --dur-4:480ms;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;margin:0;}
+body{
+  font-family:var(--vt-font-sans);
+  color:var(--vt-fg);
+  background:var(--vt-bone-100);
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+
+.paper-ground{
+  background-color:var(--vt-bg);
+  background-image:
+    repeating-linear-gradient(0deg,transparent 0 23px,oklch(40% .012 70 / .022) 23px 24px),
+    repeating-linear-gradient(90deg,transparent 0 23px,oklch(40% .012 70 / .022) 23px 24px);
+}
+
+/* ============================ SHELL ============================ */
+#app{
+  position:fixed; inset:0;
+  display:flex; flex-direction:column;
+}
+
+/* --- orientation ribbon: thin recessed mono, dim --- */
+#ribbon{
+  flex:0 0 auto;
+  height:38px;
+  display:flex; align-items:center; gap:14px;
+  padding:0 16px;
+  background:linear-gradient(var(--vt-bone-100),var(--vt-bone-50));
+  border-bottom:0.5px solid var(--vt-rule);
+  font-family:var(--vt-font-mono);
+  font-size:10.5px; font-weight:500;
+  letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--vt-fg-3);
+  z-index:40;
+  user-select:none;
+}
+#ribbon .r-back{ color:var(--vt-bone-500); cursor:pointer; flex:0 0 auto; }
+#ribbon .r-vehicle{ color:var(--vt-fg-2); }
+#ribbon .r-code{ color:var(--vt-fg-2); }
+#ribbon .r-sep{ color:var(--vt-bone-400); }
+#ribbon .r-spacer{ flex:1 1 auto; }
+#ribbon .r-chip{
+  flex:0 0 auto; cursor:pointer;
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 9px; border:0.5px solid var(--vt-rule-strong);
+  border-radius:3px; color:var(--vt-fg-2);
+  background:var(--vt-bone-50);
+  letter-spacing:0.10em;
+}
+#ribbon .r-chip:hover{ border-color:var(--vt-bone-500); }
+#ribbon .r-chip .car{ color:var(--vt-bone-500); font-size:9px; }
+#ribbon .r-whole{
+  flex:0 0 auto; cursor:pointer; color:var(--vt-bone-500);
+  border:0.5px solid var(--vt-rule); border-radius:3px;
+  padding:4px 8px; background:transparent; font:inherit; letter-spacing:0.10em;
+  text-transform:uppercase;
+}
+#ribbon .r-whole:hover{ color:var(--vt-fg-2); border-color:var(--vt-bone-500); }
+#ribbon .r-curator{
+  flex:0 0 auto; cursor:pointer; color:var(--vt-bone-500);
+  font-size:9px; letter-spacing:0.12em;
+}
+#ribbon .r-curator:hover{ color:var(--vt-fg-3); }
+
+/* --- canvas region (the workspace) --- */
+#stage{
+  position:relative;
+  flex:1 1 auto;
+  overflow:hidden;
+}
+#viewport{
+  position:absolute; inset:0;
+  transform-origin:0 0;
+  transition:transform var(--dur-4) var(--vt-ease);
+  will-change:transform;
+}
+#world{
+  position:absolute; top:0; left:0;
+  width:1320px; height:760px;
+}
+
+/* SVG wire layer sits under nodes */
+#wires{ position:absolute; top:0; left:0; width:1320px; height:760px; overflow:visible; pointer-events:none; }
+.wire{ fill:none; transition:opacity var(--dur-3) var(--vt-ease), stroke-width var(--dur-3) var(--vt-ease); }
+.wire.recede{ opacity:var(--vt-recede); }
+.wire.focus{ opacity:1; }
+.wire.off{ display:none; }            /* hidden while focused — returns in whole-system */
+.wire-flow{ stroke-dasharray:5 6; animation:flow 1.1s linear infinite; }
+@keyframes flow{ to{ stroke-dashoffset:-22; } }
+
+/* ============================ NODES ============================ */
+.node{
+  position:absolute;
+  transform:translate(-50%,-50%);
+  transition:opacity var(--dur-3) var(--vt-ease), filter var(--dur-3) var(--vt-ease);
+  cursor:pointer;
+  user-select:none;
+}
+/* Compact, schematic-light node: a small role-marked point + a one-line name.
+   Type / location / probe detail all live in the tap sheet + gauge, never on
+   the canvas — the canvas shows STRUCTURE, not paragraphs. */
+.node .plate{
+  position:relative;
+  display:inline-flex; align-items:center; gap:8px;
+  background:color-mix(in oklch, var(--vt-bone-50) 78%, transparent);
+  border:0; border-radius:0;
+  padding:3px 4px;
+  white-space:nowrap;
+  transition:none;
+}
+/* the structural point itself — a small node marker on the harness */
+.node .plate::before{
+  content:""; flex:0 0 auto;
+  width:9px; height:9px; border-radius:50%;
+  background:var(--vt-bone-50);
+  border:1.5px solid var(--vt-bone-500);
+  box-shadow:0 0 0 3px var(--vt-bg);
+}
+.node .nm{
+  font-family:var(--vt-font-serif);
+  font-size:15px; line-height:1.05; letter-spacing:-0.01em;
+  color:var(--vt-fg-2);
+}
+.node .kd, .node .loc{ display:none; }   /* type + location belong in the tap sheet, not on the map */
+
+/* tiers */
+.node.gone{ display:none; }              /* not in this circuit → off the contextual canvas (returns in whole-system) */
+.node.recede{ opacity:var(--vt-recede); pointer-events:none; }
+.node.recede .plate{ box-shadow:none; }
+.node.recede.lbl{ opacity:var(--vt-recede-label); }
+.node.anchor{ opacity:0.66; }
+.node.anchor .plate::before{ border-color:var(--vt-bone-500); border-style:dashed; }
+.node.focus{ opacity:1; }
+.node.focus .nm{ color:var(--vt-fg); }
+.node.focus .plate::before{ border-color:var(--vt-bone-700); }
+
+/* the active node under test → navy marker + navy ink, the eye lands here */
+.node.active .plate::before{
+  border-color:var(--vt-signal-500);
+  background:color-mix(in oklch, var(--vt-signal-500) 14%, var(--vt-bone-50));
+  box-shadow:0 0 0 3px var(--vt-bg), 0 0 0 4.5px color-mix(in oklch,var(--vt-signal-500) 30%, transparent);
+}
+.node.active .nm{ color:var(--vt-fg); font-style:italic; }
+
+/* GAP parts → hollow dashed marker (schematic "provisional" convention) */
+.node.has-gap .plate::before{ border-style:dashed; }
+
+/* --- pins: tappable role-colored chips --- */
+.pins{ display:flex; gap:5px; margin-top:9px; flex-wrap:wrap; }
+.pin{
+  font-family:var(--vt-font-mono);
+  font-size:9px; font-weight:600; letter-spacing:0.07em;
+  padding:4px 7px;
+  border-radius:3px;
+  border:0.5px solid var(--vt-rule-strong);
+  background:var(--vt-bone-100);
+  color:var(--vt-fg-2);
+  cursor:pointer;
+  position:relative;
+  min-height:22px;
+  display:inline-flex; align-items:center; gap:4px;
+  transition:transform var(--dur-fast) var(--vt-ease), box-shadow var(--dur-fast) var(--vt-ease), border-color var(--dur-2) var(--vt-ease);
+}
+.pin .dot{ width:6px; height:6px; border-radius:50%; flex:0 0 auto; }
+.pin[data-role="12v"] .dot{ background:var(--role-12v); }
+.pin[data-role="gnd"] .dot{ background:var(--role-ground); }
+.pin[data-role="sig"] .dot{ background:var(--role-signal); }
+.pin[data-role="5v"]  .dot{ background:var(--role-5v); }
+.pin.lit{ border-color:var(--vt-bone-600); background:var(--vt-bone-50); color:var(--vt-fg); }
+.pin.selected{
+  border-color:var(--vt-signal-500);
+  box-shadow:0 0 0 2px color-mix(in oklch,var(--vt-signal-500) 28%, transparent);
+  transform:scale(1.04);
+  color:var(--vt-fg);
+}
+
+/* the "why we're here" symptom flag on the FRP anchor */
+.symptom-flag{
+  position:absolute; top:-9px; left:50%; transform:translateX(-50%);
+  font-family:var(--vt-font-mono);
+  font-size:7.5px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase;
+  color:var(--vt-bone-500);
+  white-space:nowrap;
+  background:var(--vt-bg); padding:0 5px;
+}
+
+/* leader line from active pin up to the meter (drawn in SVG overlay) */
+#leader{ position:absolute; inset:0; pointer-events:none; overflow:visible; z-index:5; }
+#leader line{ stroke:var(--vt-signal-500); stroke-width:1; stroke-dasharray:2 3; opacity:0; transition:opacity var(--dur-3) var(--vt-ease); }
+#leader.on line{ opacity:0.5; }
+
+/* ====================== THE METER (bottom band) ====================== */
+#meter{
+  position:absolute; left:0; right:0; bottom:0;
+  z-index:30;
+  transform:translateY(105%);
+  transition:transform var(--dur-3) var(--vt-ease);
+  padding:0 18px 16px;
+  pointer-events:none;
+}
+#meter.up{ transform:translateY(0); pointer-events:auto; }
+.meter-card{
+  position:relative;
+  max-width:760px;
+  margin:0 auto 0 6px;          /* off-center left so it never sits over the lit pump */
+  background:linear-gradient(var(--vt-bone-50),var(--vt-bone-100));
+  border:0.5px solid var(--vt-rule-strong);
+  border-radius:5px;
+  box-shadow:0 -2px 24px oklch(40% .012 70 / .12), 0 1px 0 oklch(100% 0 0 / .6) inset;
+  padding:15px 20px 16px;
+}
+.meter-card::before{  /* engraved top hairline highlight */
+  content:""; position:absolute; left:14px; right:14px; top:0; height:0.5px;
+  background:var(--vt-rule);
+}
+
+.m-head{
+  display:flex; align-items:baseline; gap:12px;
+  margin-bottom:13px;
+}
+.m-label{
+  font-family:var(--vt-font-mono);
+  font-size:10.5px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--vt-fg-2);
+}
+.m-step{
+  font-family:var(--vt-font-mono);
+  font-size:9px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--vt-bone-500);
+  padding:2px 7px; border:0.5px solid var(--vt-rule); border-radius:3px;
+}
+.m-spacer{ flex:1 1 auto; }
+.m-close{
+  font-family:var(--vt-font-mono); font-size:13px; color:var(--vt-bone-500);
+  cursor:pointer; border:0; background:transparent; padding:6px; line-height:1;
+  border-radius:3px;
+}
+.m-close:hover{ color:var(--vt-fg-2); background:var(--vt-bone-200); }
+
+/* probe location lead line */
+.m-probe{
+  font-family:var(--vt-font-serif);
+  font-style:italic; font-size:15px; line-height:1.35;
+  color:var(--vt-fg-2);
+  margin-bottom:14px;
+}
+.m-probe .pc{
+  font-family:var(--vt-font-mono); font-style:normal;
+  font-size:9px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--vt-bone-500); margin-right:8px;
+}
+
+/* THE INSTRUMENT BLOCK — the hero */
+.m-instr{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  gap:22px;
+  align-items:stretch;
+}
+.m-expect{ display:flex; flex-direction:column; gap:6px; }
+.m-col-label{
+  font-family:var(--vt-font-mono);
+  font-size:9px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--vt-fg-3);
+}
+.m-plate{
+  border:0.5px solid var(--vt-bone-600);
+  border-radius:4px;
+  background:var(--vt-bone-50);
+  padding:10px 20px;
+  min-width:128px;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 1px 0 oklch(100% 0 0 / .6) inset;
+}
+.m-plate .big{
+  font-family:var(--vt-font-mono);
+  font-variant-numeric:tabular-nums;
+  font-size:46px; font-weight:600; letter-spacing:-0.03em; line-height:0.9;
+  color:var(--vt-fg);
+}
+.m-plate .unit{ font-size:24px; font-weight:500; color:var(--vt-fg-2); margin-left:3px; }
+.m-expect-note{
+  font-family:var(--vt-font-mono); font-size:10px; letter-spacing:0.02em;
+  color:var(--vt-fg-3); max-width:150px; line-height:1.4;
+}
+
+.m-now{ display:flex; flex-direction:column; gap:6px; min-width:0; justify-content:center; padding-top:2px; }
+.m-now-val{
+  font-family:var(--vt-font-mono);
+  font-variant-numeric:tabular-nums;
+  font-size:20px; font-weight:500; letter-spacing:-0.01em; line-height:1.25;
+  color:var(--vt-fg);
+  transition:opacity var(--dur-2) var(--vt-ease);
+}
+.m-now.flip .m-now-val{ opacity:0; }
+.m-prov{
+  font-family:var(--vt-font-mono);
+  font-size:10.5px; font-weight:500; letter-spacing:0.02em;
+  color:var(--vt-fg-3);
+  cursor:pointer;
+  display:inline-flex; align-items:center; gap:5px;
+  width:fit-content;
+  border-bottom:0.5px dotted var(--vt-bone-500);
+  padding:2px 0;
+  min-height:24px;
+}
+.m-prov:hover{ color:var(--vt-fg-2); }
+.m-prov .src{ color:var(--vt-signal-500); }
+.m-prov .why{ color:var(--vt-bone-500); }
+.m-prov.amber .src{ color:var(--vt-risk-high); }
+.m-prov.amber{ border-bottom-color:var(--vt-risk-high); }
+
+/* verdict chip */
+.m-verdict{ display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:7px; }
+.m-chip{
+  font-family:var(--vt-font-mono);
+  font-size:10.5px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase;
+  display:inline-flex; align-items:center; gap:7px;
+  padding:7px 13px;
+  border:0.5px solid var(--vt-rule-strong); border-radius:4px;
+  color:var(--vt-fg-2);
+  white-space:nowrap;
+}
+.m-chip .gly{ font-size:13px; line-height:1; }
+.m-chip.inrange{ color:var(--vt-signal-600); border-color:color-mix(in oklch,var(--vt-signal-500) 45%,var(--vt-rule-strong)); background:color-mix(in oklch,var(--vt-signal-500) 5%,transparent); }
+.m-chip.conditional{ color:var(--vt-fg-3); }
+
+/* see-source expansion (inline, pull-not-push) */
+.m-why{
+  overflow:hidden; max-height:0; opacity:0;
+  transition:max-height var(--dur-3) var(--vt-ease), opacity var(--dur-2) var(--vt-ease), margin var(--dur-3) var(--vt-ease);
+  margin-top:0;
+}
+.m-why.open{ max-height:200px; opacity:1; margin-top:13px; }
+.m-why-inner{
+  border-top:0.5px solid var(--vt-rule);
+  padding-top:12px;
+  font-family:var(--vt-font-sans);
+  font-size:12.5px; line-height:1.5; color:var(--vt-fg-2);
+  max-width:560px;
+}
+.m-why-inner .amber-txt{ color:oklch(58% .15 55); }
+.m-why-inner b{ font-weight:600; color:var(--vt-fg); }
+
+/* secondary facts row (one tap down) — connector / wires / Operational Theori */
+.m-secondary{
+  margin-top:14px; padding-top:12px;
+  border-top:0.5px solid var(--vt-rule);
+  display:flex; align-items:center; gap:10px;
+  cursor:pointer;
+  font-family:var(--vt-font-mono);
+  font-size:10px; font-weight:500; letter-spacing:0.07em; text-transform:uppercase;
+  color:var(--vt-bone-500);
+  min-height:26px;
+}
+.m-secondary:hover{ color:var(--vt-fg-3); }
+.m-secondary .car{ font-size:9px; transition:transform var(--dur-2) var(--vt-ease); }
+.m-secondary.open .car{ transform:rotate(180deg); }
+.m-secondary .dotline{ flex:1 1 auto; border-bottom:0.5px dotted var(--vt-bone-400); }
+
+.m-detail{
+  overflow:hidden; max-height:0; opacity:0;
+  transition:max-height var(--dur-4) var(--vt-ease), opacity var(--dur-2) var(--vt-ease), margin var(--dur-3) var(--vt-ease);
+}
+.m-detail.open{ max-height:320px; opacity:1; margin-top:12px; }
+.m-detail-grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:14px 28px;
+}
+.m-fact .ft{
+  font-family:var(--vt-font-mono); font-size:9px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--vt-fg-3); margin-bottom:4px;
+}
+.m-fact .fv{
+  font-family:var(--vt-font-mono); font-size:12px; line-height:1.45; color:var(--vt-fg-2);
+}
+.m-fact .fv.amber{ color:oklch(58% .15 55); }
+.m-fact.theori{ grid-column:1 / -1; }
+.m-fact.theori .fv{
+  font-family:var(--vt-font-serif); font-style:normal; font-size:15px; line-height:1.5; color:var(--vt-fg);
+}
+
+/* ====================== PROTOTYPE DEMO CONTROLS ====================== */
+#controls{
+  position:absolute; left:14px; bottom:14px; z-index:35;
+  display:flex; gap:7px; align-items:center;
+  transition:opacity var(--dur-3) var(--vt-ease);
+}
+#controls.hidden{ opacity:0; pointer-events:none; }
+.ctl{
+  font-family:var(--vt-font-mono);
+  font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase;
+  padding:8px 12px;
+  border:0.5px solid var(--vt-rule-strong); border-radius:4px;
+  background:var(--vt-bone-50);
+  color:var(--vt-fg-2);
+  cursor:pointer;
+  min-height:34px;
+  box-shadow:0 1px 4px oklch(40% .012 70 / .10);
+  transition:border-color var(--dur-2) var(--vt-ease), color var(--dur-2) var(--vt-ease);
+}
+.ctl:hover{ border-color:var(--vt-bone-600); color:var(--vt-fg); }
+.ctl.primary{ color:var(--vt-signal-600); border-color:color-mix(in oklch,var(--vt-signal-500) 40%,var(--vt-rule-strong)); }
+.ctl:disabled{ opacity:0.4; cursor:default; }
+.ctl-tag{
+  font-family:var(--vt-font-mono); font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--vt-bone-500); margin-left:4px; align-self:center;
+}
+
+/* curator-only completeness — clearly labeled, tiny, tucked top-right under ribbon */
+#curatorPanel{
+  position:absolute; right:14px; top:14px; z-index:36;
+  width:228px;
+  background:var(--vt-bone-50);
+  border:0.5px solid var(--vt-rule-strong); border-radius:5px;
+  box-shadow:0 2px 16px oklch(40% .012 70 / .14);
+  padding:12px 14px 13px;
+  display:none;
+}
+#curatorPanel.show{ display:block; }
+#curatorPanel .cp-eyebrow{
+  font-family:var(--vt-font-mono); font-size:8.5px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
+  color:var(--vt-risk-high); margin-bottom:9px;
+  display:flex; justify-content:space-between; align-items:center;
+}
+#curatorPanel .cp-x{ cursor:pointer; color:var(--vt-bone-500); }
+#curatorPanel .cp-row{
+  display:flex; justify-content:space-between; align-items:baseline;
+  padding:6px 0; border-bottom:0.5px dashed var(--vt-bone-300);
+  font-family:var(--vt-font-mono); font-size:10.5px; letter-spacing:0.03em; color:var(--vt-fg-3);
+}
+#curatorPanel .cp-row:last-child{ border-bottom:0; }
+#curatorPanel .cp-row .n{ font-variant-numeric:tabular-nums; font-weight:600; color:var(--vt-fg-2); }
+#curatorPanel .cp-row .n.gap{ color:var(--vt-risk-high); }
+
+/* scenario sheet */
+#scenSheet{
+  position:absolute; right:14px; top:46px; z-index:38;
+  width:230px;
+  background:var(--vt-bone-50);
+  border:0.5px solid var(--vt-rule-strong); border-radius:5px;
+  box-shadow:0 4px 22px oklch(40% .012 70 / .16);
+  padding:8px;
+  display:none;
+}
+#scenSheet.show{ display:block; }
+.scen-opt{
+  display:block; width:100%; text-align:left;
+  font-family:var(--vt-font-mono); font-size:11px; letter-spacing:0.03em;
+  padding:9px 10px; border:0; border-radius:4px; background:transparent;
+  color:var(--vt-fg-2); cursor:pointer; min-height:38px;
+}
+.scen-opt:hover{ background:var(--vt-bone-100); }
+.scen-opt.sel{ background:color-mix(in oklch,var(--vt-signal-500) 7%,transparent); color:var(--vt-signal-600); }
+.scen-opt .so-sub{ display:block; font-size:8.5px; color:var(--vt-bone-500); letter-spacing:0.04em; margin-top:2px; text-transform:none; }
+
+/* mobile status strip (hidden on desktop) */
+#mobStatus{ display:none; }
+
+/* reduced motion */
+@media (prefers-reduced-motion: reduce){
+  #viewport{ transition:none; }
+  .wire-flow{ animation:none; stroke-dasharray:none; }
+  .node, .wire, #meter, .m-why, .m-detail{ transition-duration:1ms; }
+}
+
+/* ============================ MOBILE ============================ */
+@media (max-width:430px){
+  #ribbon{ height:44px; font-size:9px; gap:7px; padding:0 11px; flex-wrap:nowrap; white-space:nowrap; overflow:hidden; }
+  #ribbon .long{ display:none; }
+  #ribbon .r-whole{ display:none; }
+  #ribbon .r-curator{ display:none; }
+  #ribbon .r-vehicle{ flex:0 0 auto; }
+  #ribbon .r-chip{ flex:0 1 auto; min-width:0; overflow:hidden; }
+  #ribbon #scenChipLabel{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:96px; display:inline-block; vertical-align:middle; }
+
+  /* meter becomes a non-modal bottom sheet (peek), canvas stays live above */
+  #meter{ padding:0; transform:translateY(100%); }
+  #meter.up{ transform:translateY(0); }
+  .meter-card{
+    margin:0; max-width:none; border-radius:14px 14px 0 0;
+    border-left:0; border-right:0; border-bottom:0;
+    padding:14px 16px calc(16px + env(safe-area-inset-bottom));
+    box-shadow:0 -4px 30px oklch(40% .012 70 / .18);
+  }
+  .meter-card::after{   /* grabber */
+    content:""; position:absolute; top:7px; left:50%; transform:translateX(-50%);
+    width:38px; height:4px; border-radius:2px; background:var(--vt-bone-400);
+  }
+  .meter-card{ padding-top:20px; }
+  .m-instr{ grid-template-columns:auto 1fr; gap:14px; }
+  .m-verdict{ grid-column:1 / -1; flex-direction:row; align-items:center; justify-content:flex-start; margin-top:2px; }
+  .m-plate{ min-width:104px; padding:8px 14px; }
+  .m-plate .big{ font-size:38px; }
+  .m-expect-note{ display:none; }
+  .m-now-val{ font-size:16px; }
+  .m-detail-grid{ grid-template-columns:1fr; gap:12px; }
+  .m-probe{ font-size:14px; }
+
+  /* controls: full-width tap row above the sheet */
+  #controls{ left:10px; right:10px; bottom:10px; }
+  #controls.lifted{ bottom:auto; }
+  .ctl{ flex:1 1 auto; justify-content:center; min-height:44px; display:inline-flex; align-items:center; }
+  .ctl-tag{ display:none; }
+
+  #curatorPanel{ display:none !important; }
+  #scenSheet{ left:10px; right:10px; width:auto; top:auto; bottom:64px; }
+
+  /* mobile "now showing" thin status line, pinned above sheet */
+  #mobStatus{
+    display:flex; align-items:center; gap:8px;
+    position:absolute; left:12px; right:12px; bottom:8px; z-index:25;
+    font-family:var(--vt-font-mono); font-size:9px; font-weight:600;
+    letter-spacing:0.12em; text-transform:uppercase; color:var(--vt-bone-500);
+    pointer-events:none;
+    transition:opacity var(--dur-3) var(--vt-ease);
+  }
+  #mobStatus.hidden{ opacity:0; }
+  #mobStatus .dotline{ flex:1 1 auto; border-bottom:0.5px dotted var(--vt-bone-400); }
+}
+</style>
+</head>
+<body>
+<div id="app" class="paper-ground">
+
+  <!-- orientation ribbon -->
+  <div id="ribbon">
+    <span class="r-back">‹ <span class="long">sessions</span></span>
+    <span class="r-sep">·</span>
+    <span class="r-vehicle">2018 Ford F-250 <span class="long">· 6.7L Power Stroke</span></span>
+    <span class="r-sep long">·</span>
+    <span class="r-code">P0087 <span class="long">· rail pressure low</span></span>
+    <span class="r-spacer"></span>
+    <button class="r-chip" id="scenChip"><span class="car">▣</span><span id="scenChipLabel">Key On · Engine Off</span><span class="caret"> ▾</span></button>
+    <button class="r-whole" id="wholeBtn">⌖ whole system</button>
+    <span class="r-curator" id="curatorToggle">curator ▾</span>
+  </div>
+
+  <!-- the workspace -->
+  <div id="stage">
+    <div id="viewport">
+      <div id="world">
+        <svg id="wires"></svg>
+        <svg id="leader"><line x1="0" y1="0" x2="0" y2="0"/></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+
+    <!-- mobile now-showing strip -->
+    <div id="mobStatus"><span>Now · <span id="mobScen">Key On</span></span><span class="dotline"></span><span id="mobStep">Probe</span></div>
+
+    <!-- THE METER -->
+    <div id="meter">
+      <div class="meter-card">
+        <div class="m-head">
+          <span class="m-label" id="mLabel">LIFT PUMP · 12V POWER</span>
+          <span class="m-step" id="mStep">PROBE</span>
+          <span class="m-spacer"></span>
+          <button class="m-close" id="mClose">✕</button>
+        </div>
+
+        <div class="m-probe" id="mProbe"><span class="pc">where</span><span id="mProbeText"></span></div>
+
+        <div class="m-instr" id="mInstr">
+          <div class="m-expect">
+            <span class="m-col-label">Expect</span>
+            <div class="m-plate"><span class="big" id="mExpectBig">12<span class="unit">V</span></span></div>
+            <span class="m-expect-note" id="mExpectNote"></span>
+          </div>
+          <div class="m-now" id="mNow">
+            <span class="m-col-label" id="mNowLabel">Now · Key On · Engine Off</span>
+            <span class="m-now-val" id="mNowVal"></span>
+            <span class="m-prov" id="mProv"><span class="src" id="mProvSrc">from theory</span><span class="why">· why?</span></span>
+          </div>
+          <div class="m-verdict">
+            <span class="m-chip inrange" id="mChip"><span class="gly">◐</span><span id="mChipText">in range</span></span>
+          </div>
+        </div>
+
+        <!-- see-source inline expansion -->
+        <div class="m-why" id="mWhy"><div class="m-why-inner" id="mWhyInner"></div></div>
+
+        <!-- secondary facts -->
+        <div class="m-secondary" id="mSecToggle">
+          <span>connector · 2 wires · ground · Operational Theori</span>
+          <span class="dotline"></span>
+          <span class="car">▾</span>
+        </div>
+        <div class="m-detail" id="mDetail">
+          <div class="m-detail-grid" id="mDetailGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- curator-only completeness -->
+    <div id="curatorPanel">
+      <div class="cp-eyebrow"><span>Curator only · coverage</span><span class="cp-x" id="cpX">✕</span></div>
+      <div class="cp-row"><span>Components mapped</span><span class="n">25 / 25</span></div>
+      <div class="cp-row"><span>Pins detailed</span><span class="n">9 / 9</span></div>
+      <div class="cp-row"><span>Field-verified facts</span><span class="n gap">0</span></div>
+      <div class="cp-row"><span>Needs field check</span><span class="n gap">14</span></div>
+    </div>
+
+    <!-- scenario sheet -->
+    <div id="scenSheet"></div>
+
+    <!-- prototype demo controls -->
+    <div id="controls">
+      <button class="ctl" id="ctlBack">◂ back</button>
+      <button class="ctl primary" id="ctlNext">▸ next test</button>
+      <button class="ctl" id="ctlWhole">⌖ whole system</button>
+      <span class="ctl-tag" id="ctlTag">demo</span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------------- WORLD GEOMETRY (positions on the 1320x760 world) ---------------- */
+/* Focus cluster placed center-left high; faded backdrop ringed around the edges. */
+/* Layered layout: PCM "brain" on top, fuel flows LEFT→RIGHT along the mid
+   spine, power/ground drop vertically off the lift pump, injectors in two
+   tidy columns fed by the rails. Minimizes wire crossings; the lift-pump
+   circuit sits at the head of the spine where the camera can frame it clean. */
+const NODES = {
+  // ----- fuel spine (left → right) -----
+  tank:   {x:160, y:392, name:"Fuel Tank", kind:"source · under cab/frame", tier:"focus"},
+  pump:   {x:372, y:392, name:"Electric Lift Pump", kind:"pump · driver frame rail", loc:"under truck, near tank", tier:"focus", gap:true,
+           pins:[{id:"lp-12v",label:"12V",role:"12v"},{id:"lp-gnd",label:"GND",role:"gnd"}]},
+  filter: {x:584, y:392, name:"Primary Fuel Filter", kind:"filter · water separator", loc:"driver-side frame rail", tier:"focus"},
+  cp4:    {x:792, y:392, name:"Bosch CP4.2 HP Pump", kind:"high-pressure pump", tier:"recede"},
+  railA:  {x:980, y:344, name:"HP Fuel Rail · Bank A", kind:"rail", tier:"recede"},
+  railB:  {x:980, y:446, name:"HP Fuel Rail · Bank B", kind:"rail", tier:"recede"},
+  // ----- power + ground for the lift pump (the focus circuit) -----
+  relay:  {x:372, y:214, name:"Lift Pump Relay", kind:"relay · BJB", loc:"commanded by PCM", tier:"focus"},
+  chassis:{x:372, y:566, name:"Chassis Ground", kind:"ground stud", tier:"focus"},
+  // ----- brain + shared references (top band) -----
+  pcm:    {x:640, y:96,  name:"PCM", kind:"controller", tier:"recede"},
+  ref5v:  {x:880, y:96,  name:"5V Reference Splice", kind:"shared splice", tier:"recede", small:true},
+  lref:   {x:1010,y:96,  name:"Low-Reference Splice", kind:"shared splice", tier:"recede", small:true},
+  // ----- control actuators driven by the PCM -----
+  imv:    {x:792, y:230, name:"Inlet Metering Valve", kind:"valve · IMV", tier:"recede", small:true},
+  vcv:    {x:912, y:230, name:"Volume Control Valve", kind:"actuator", tier:"recede", small:true},
+  reg:    {x:1040,y:230, name:"FRP Regulator", kind:"actuator", tier:"recede", small:true},
+  wif:    {x:584, y:236, name:"Water-in-Fuel Sensor", kind:"sensor", tier:"recede", small:true},
+  // ----- downstream symptom anchor -----
+  frp:    {x:792, y:566, name:"FRP Sensor", kind:"sensor · why we're here", tier:"anchor", symptom:true,
+           pins:[{id:"frp-signal",label:"SIG",role:"sig"}]},
+  // ----- lower band: sensors, relief, return -----
+  level:  {x:160, y:556, name:"Fuel Level Sender", kind:"sensor", tier:"recede", small:true},
+  prv:    {x:1088,y:392, name:"Pressure Relief Valve", kind:"valve", tier:"recede", small:true},
+  ret:    {x:500, y:616, name:"Passive Return Circuit", kind:"return line", tier:"recede", small:true},
+  // ----- injectors: two tidy columns fed by the rails -----
+  inj1:   {x:1150,y:300, name:"Injector 1", kind:"inj", tier:"recede", small:true},
+  inj2:   {x:1262,y:300, name:"Injector 2", kind:"inj", tier:"recede", small:true},
+  inj3:   {x:1150,y:366, name:"Injector 3", kind:"inj", tier:"recede", small:true},
+  inj4:   {x:1262,y:366, name:"Injector 4", kind:"inj", tier:"recede", small:true},
+  inj5:   {x:1150,y:432, name:"Injector 5", kind:"inj", tier:"recede", small:true},
+  inj6:   {x:1262,y:432, name:"Injector 6", kind:"inj", tier:"recede", small:true},
+  inj7:   {x:1150,y:498, name:"Injector 7", kind:"inj", tier:"recede", small:true},
+  inj8:   {x:1262,y:498, name:"Injector 8", kind:"inj", tier:"recede", small:true},
+};
+
+/* wires: [fromNode, toNode, role, focusFlag] — role drives color */
+const WIRES = [
+  // focus circuit (electrical + fuel path of the lift-pump circuit)
+  ["relay","pump","12v",true],          // the active 12V feed
+  ["pump","chassis","gnd",true],        // ground
+  ["tank","pump","fuel",true],          // fuel in
+  ["pump","filter","fuel",true],        // fuel out to filter
+  ["filter","cp4","fuel",false],
+  // backdrop wiring (receded)
+  ["cp4","railA","fuel",false],
+  ["cp4","railB","fuel",false],
+  ["pcm","imv","sig",false],
+  ["pcm","vcv","sig",false],
+  ["pcm","reg","sig",false],
+  ["pcm","relay","sig",false],
+  ["ref5v","frp","5v",false],
+  ["frp","pcm","sig",false],
+  ["lref","pcm","gnd",false],
+  ["railA","inj1","fuel",false],["railA","inj2","fuel",false],["railA","inj3","fuel",false],["railA","inj4","fuel",false],
+  ["railB","inj5","fuel",false],["railB","inj6","fuel",false],["railB","inj7","fuel",false],["railB","inj8","fuel",false],
+  ["pcm","inj1","sig",false],["pcm","inj8","sig",false],
+  ["level","pcm","sig",false],["wif","pcm","sig",false],
+  ["prv","ret","fuel",false],["ret","tank","fuel",false],
+  ["railA","reg","fuel",false],
+];
+
+const ROLE_STROKE = { "12v":"var(--role-12v)", "gnd":"var(--role-ground)", "sig":"var(--role-signal)", "5v":"var(--role-5v)", "fuel":"var(--role-fuel)" };
+
+/* ---------------- SCENARIOS (real readings keyed to the two focus pins) ---------------- */
+const SCENARIOS = [
+  {slug:"key-off", label:"Key Off", sub:"Vehicle asleep — no power in this system"},
+  {slug:"key-on", label:"Key On · Engine Off", sub:"PCM awake. Lift pump primes briefly then stops."},
+  {slug:"idle", label:"Engine Idle", sub:"Lift pump steady, FRP reading idle pressure"},
+  {slug:"fault-low", label:"Fault Sim: No Rail Pressure", sub:"FRP flat low — PCM commanding max volume to build pressure"},
+];
+const READINGS = {
+  "lp-12v":{
+    "key-off":"0V — PCM not commanding pump",
+    "key-on":"12V briefly during prime, then 0V",
+    "idle":"12V steady",
+    "fault-low":"12V steady — if pump is actually silent, suspect ground or pump motor",
+  },
+  "lp-gnd":{
+    "key-off":"Continuity to chassis (resistance check valid any time)",
+    "key-on":"Continuity to chassis",
+    "idle":"Continuity to chassis · sinking pump current",
+    "fault-low":"Continuity to chassis",
+  },
+};
+
+/* ---------------- STEP MODEL — the per-step-TYPE fact budget ---------------- */
+/* type: "probe" → full reading band; "locate" → SUPPRESS band, location only. */
+const STEPS = [
+  {
+    id:"probe-12v", type:"probe",
+    focusPin:"lp-12v", activeNode:"pump",
+    circuit:["tank","relay","pump","filter","chassis"], anchor:["frp"],
+    activeWire:["relay","pump"],
+    label:"LIFT PUMP · 12V POWER",
+    probe:"Back-probe the power wire at the lift pump connector under the truck near the tank.",
+    expectBig:"12<span class='unit'>V</span>",
+    expectNote:"12V when commanded by PCM — key-on prime, cranking, or running.",
+    verdict:{cls:"inrange", gly:"◐", text:"in range"},
+    prov:{src:"from theory", amber:false},
+    why:"Drafted from how this system works on the 6.7 Power Stroke — <b>not yet verified</b> against a wiring diagram for this exact truck.",
+    secondary:[
+      {t:"Connector", v:"2 wires — one power, one ground", amber:false},
+      {t:"This pin", v:"12V power feed, switched by the relay", amber:false},
+      {t:"Needs field check", v:"Wire color · connector pin number · prime duration · upstream relay/fuse IDs — not yet captured", amber:true},
+      {t:"Operational Theori", v:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command.", amber:false, theori:true},
+    ],
+  },
+  {
+    id:"locate-ground", type:"locate",
+    focusPin:"lp-gnd", activeNode:"pump",
+    circuit:["pump","chassis"], anchor:[],
+    activeWire:["pump","chassis"],
+    label:"LIFT PUMP · GROUND",
+    probe:"Find the pump's ground stud — driver-side frame rail, the chassis stud near the tank. Locate it before you meter it.",
+    locateOnly:true,
+    secondary:[
+      {t:"Location", v:"Ground wire runs from the lift pump connector to a chassis stud near the tank.", amber:false},
+      {t:"Needs field check", v:"Wire color · exact chassis stud location — not yet captured", amber:true},
+      {t:"Operational Theori", v:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command.", amber:false, theori:true},
+    ],
+  },
+  {
+    id:"probe-ground", type:"probe",
+    focusPin:"lp-gnd", activeNode:"pump",
+    circuit:["pump","chassis"], anchor:[],
+    activeWire:["pump","chassis"],
+    label:"LIFT PUMP · GROUND",
+    probe:"Resistance check from the ground wire at the lift pump connector to chassis ground.",
+    expectBig:"&lt;0.5<span class='unit'>Ω</span>",
+    expectNote:"Less than 0.5 Ω continuity to chassis.",
+    verdict:{cls:"conditional", gly:"◐", text:"continuity"},
+    prov:{src:"from theory", amber:false},
+    why:"Drafted from how this system works on the 6.7 Power Stroke — <b>not yet verified</b> against a wiring diagram for this exact truck.",
+    secondary:[
+      {t:"Connector", v:"2 wires — one power, one ground", amber:false},
+      {t:"This pin", v:"Ground return to the chassis stud", amber:false},
+      {t:"Needs field check", v:"Wire color · exact chassis stud location — not yet captured", amber:true},
+      {t:"Operational Theori", v:"Two-wire electric pump in the tank. PCM commands it on. A fuel pump driver module or relay usually sits upstream — only tested if the power wire isn't getting 12V on command.", amber:false, theori:true},
+    ],
+  },
+];
+
+/* ---------------- STATE ---------------- */
+let stepIdx = 0;
+let scenarioSlug = "key-on";
+let meterOpen = false;
+let selectedPin = null;
+let whyOpen = false, secOpen = false;
+
+/* ---------------- BUILD NODES + WIRES ---------------- */
+const nodesEl = $("#nodes");
+const wiresEl = $("#wires");
+const nodeRefs = {};
+const pinRefs = {};
+
+function buildWorld(){
+  // wires
+  WIRES.forEach(([a,b,role])=>{
+    const A=NODES[a], B=NODES[b];
+    const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+    // gentle elbow path
+    const mx=(A.x+B.x)/2;
+    const d=`M ${A.x} ${A.y} C ${mx} ${A.y}, ${mx} ${B.y}, ${B.x} ${B.y}`;
+    path.setAttribute("d",d);
+    path.setAttribute("class","wire recede");
+    path.setAttribute("stroke",ROLE_STROKE[role]||"var(--vt-bone-500)");
+    path.dataset.a=a; path.dataset.b=b; path.dataset.role=role;
+    wiresEl.appendChild(path);
+  });
+
+  // nodes
+  for(const [key,n] of Object.entries(NODES)){
+    const el=document.createElement("div");
+    el.className="node recede"+(n.gap?" has-gap":"")+(n.small?" lbl":"");
+    el.style.left=n.x+"px"; el.style.top=n.y+"px";
+    let pinsHtml="";
+    if(n.pins){
+      pinsHtml=`<div class="pins">`+n.pins.map(p=>
+        `<span class="pin" data-pin="${p.id}" data-role="${p.role}"><span class="dot"></span>${p.label}</span>`
+      ).join("")+`</div>`;
+    }
+    el.innerHTML=`
+      <div class="plate">
+        ${n.symptom?`<span class="symptom-flag">why we're here</span>`:""}
+        <div class="nm">${n.name}</div>
+        <span class="kd">${n.kind}</span>
+        ${n.loc?`<span class="loc">${n.loc}</span>`:""}
+        ${pinsHtml}
+      </div>`;
+    nodesEl.appendChild(el);
+    nodeRefs[key]=el;
+    el.querySelectorAll(".pin").forEach(pinEl=>{
+      pinRefs[pinEl.dataset.pin]=pinEl;
+      pinEl.addEventListener("click",e=>{ e.stopPropagation(); onPinTap(pinEl.dataset.pin); });
+    });
+  }
+}
+
+/* ---------------- APPLY STEP (focus / recede / camera) ---------------- */
+function applyStep(animate=true){
+  const step=STEPS[stepIdx];
+  const inCircuit=new Set(step.circuit);
+  const inAnchor=new Set(step.anchor);
+
+  // nodes
+  for(const [key,el] of Object.entries(nodeRefs)){
+    el.classList.remove("focus","anchor","recede","active");
+    if(inCircuit.has(key)) el.classList.add("focus");
+    else if(inAnchor.has(key)) el.classList.add("anchor");
+    else el.classList.add("recede");
+    if(key===step.activeNode) el.classList.add("active");
+  }
+
+  // wires
+  wiresEl.querySelectorAll(".wire").forEach(w=>{
+    const a=w.dataset.a, b=w.dataset.b;
+    const isActiveWire = (a===step.activeWire[0]&&b===step.activeWire[1])||(b===step.activeWire[0]&&a===step.activeWire[1]);
+    const bothInCircuit = inCircuit.has(a)&&inCircuit.has(b);
+    w.classList.remove("focus","recede","off","wire-flow");
+    if(bothInCircuit){
+      w.classList.add("focus");
+      w.setAttribute("stroke-width", isActiveWire?"2.4":"1.4");
+      // only the active 12V feed flows; a probe step flows, locate does not animate
+      if(isActiveWire && step.type==="probe" && w.dataset.role==="12v" && !reduceMotion){
+        w.classList.add("wire-flow");
+      }
+    } else {
+      // When focused, the rest of the harness's wiring is HIDDEN, not just
+      // dimmed — a faint web of crossing lines is the noise, not context.
+      // It only returns in the "whole system" overview.
+      w.classList.add("off");
+      w.setAttribute("stroke-width","1");
+    }
+  });
+
+  // pins lit state: only the focus pin's component pins are lit
+  Object.values(pinRefs).forEach(p=>p.classList.remove("lit","selected"));
+  if(pinRefs[step.focusPin]) pinRefs[step.focusPin].classList.add("lit");
+
+  // gentle settle camera (NOT aggressive zoom) — frame the circuit, bottom-heavy
+  settleCamera(step, animate);
+
+  // update mobile status
+  $("#mobStep").textContent = step.type==="locate" ? "Locate" : "Probe";
+
+  // auto-open the meter to the focus pin so the step-change mechanic is FELT
+  selectedPin = step.focusPin;
+  renderMeter(true);
+  openMeter();
+}
+
+/* gentle camera: fit the focus circuit's bounding box with bottom-heavy padding */
+function settleCamera(step, animate){
+  const vp=$("#viewport");
+  const stage=$("#stage");
+  const sw=stage.clientWidth, sh=stage.clientHeight;
+  const keys=[...step.circuit, ...step.anchor];
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  keys.forEach(k=>{ const n=NODES[k]; minX=Math.min(minX,n.x-90);minY=Math.min(minY,n.y-50);maxX=Math.max(maxX,n.x+90);maxY=Math.max(maxY,n.y+60); });
+  const bw=maxX-minX, bh=maxY-minY;
+  const isMobile = sw<=430;
+  // padding: leave room at bottom for meter; mobile keeps circuit in top ~48%
+  const padX = sw*0.10, padTop = sh*(isMobile?0.07:0.10), padBottom = sh*(isMobile?0.52:0.42);
+  const availW = sw - padX*2, availH = sh - padTop - padBottom;
+  let scale = Math.min(availW/bw, availH/bh, 1.18);
+  scale = Math.max(scale, 0.55);
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  const tx = sw/2 - cx*scale;
+  const ty = padTop + availH/2 - cy*scale;
+  if(!animate || reduceMotion) vp.style.transition="none"; else vp.style.transition="";
+  vp.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`;
+  if(!animate || reduceMotion){ vp.offsetHeight; vp.style.transition=""; }
+  // store for leader-line math
+  vp._scale=scale; vp._tx=tx; vp._ty=ty;
+  requestAnimationFrame(()=>updateLeader());
+}
+
+/* show the whole system (no focus, gentle pull back) */
+function showWhole(){
+  closeMeter();
+  for(const el of Object.values(nodeRefs)){ el.classList.remove("focus","anchor","active"); el.classList.add("recede"); }
+  // bring everything to a readable mid-opacity for the overview
+  for(const el of Object.values(nodeRefs)){ el.style.opacity="0.52"; }
+  $("#controls").classList.remove("hidden");
+  // the full harness wiring returns here (and only here)
+  wiresEl.querySelectorAll(".wire").forEach(w=>{ w.classList.remove("focus","off","wire-flow"); w.classList.add("recede"); w.setAttribute("stroke-width","1"); });
+  const vp=$("#viewport"), stage=$("#stage");
+  const sw=stage.clientWidth, sh=stage.clientHeight;
+  const scale=Math.min(sw/1320, sh/760)*0.94;
+  vp.style.transform=`translate(${(sw-1320*scale)/2}px,${(sh-760*scale)/2}px) scale(${scale})`;
+  vp._scale=scale; vp._tx=(sw-1320*scale)/2; vp._ty=(sh-760*scale)/2;
+  $("#leader").classList.remove("on");
+  // tapping background or controls returns to the step
+}
+function clearWholeOverride(){ for(const el of Object.values(nodeRefs)) el.style.opacity=""; }
+
+/* ---------------- THE METER ---------------- */
+function renderMeter(){
+  const step=STEPS[stepIdx];
+  whyOpen=false; secOpen=false;
+  $("#mWhy").classList.remove("open");
+  $("#mDetail").classList.remove("open");
+  $("#mSecToggle").classList.remove("open");
+
+  $("#mLabel").textContent=step.label;
+  $("#mStep").textContent= step.type==="locate" ? "LOCATE" : "PROBE";
+  $("#mProbeText").textContent=step.probe;
+  $("#mProbe").querySelector(".pc").textContent = step.type==="locate" ? "find" : "where";
+
+  const scen=SCENARIOS.find(s=>s.slug===scenarioSlug);
+
+  if(step.locateOnly){
+    // SUPPRESS the reading band entirely — a number is noise when the job is "find the thing"
+    $("#mInstr").style.display="none";
+  } else {
+    $("#mInstr").style.display="grid";
+    $("#mExpectBig").innerHTML=step.expectBig;
+    $("#mExpectNote").textContent=step.expectNote;
+    $("#mNowLabel").textContent="Now · "+scen.label;
+    const reading=(READINGS[step.focusPin]&&READINGS[step.focusPin][scenarioSlug])||"—";
+    $("#mNowVal").textContent=reading;
+    const v=step.verdict;
+    const chip=$("#mChip");
+    chip.className="m-chip "+v.cls;
+    chip.querySelector(".gly").textContent=v.gly;
+    $("#mChipText").textContent=v.text;
+    // provenance
+    const prov=$("#mProv");
+    prov.classList.toggle("amber", !!step.prov.amber);
+    $("#mProvSrc").textContent=step.prov.src;
+    $("#mWhyInner").innerHTML=step.why+` <span class="amber-txt">Wire color, connector pin number, prime duration and the upstream relay/fuse IDs aren't captured yet.</span>`;
+  }
+
+  // secondary facts
+  const grid=$("#mDetailGrid");
+  grid.innerHTML="";
+  step.secondary.forEach(f=>{
+    const d=document.createElement("div");
+    d.className="m-fact"+(f.theori?" theori":"");
+    d.innerHTML=`<div class="ft">${f.t}</div><div class="fv${f.amber?" amber":""}">${f.v}</div>`;
+    grid.appendChild(d);
+  });
+
+  // mobile status reading
+  $("#mobScen").textContent=scen.label.split(" · ")[0];
+}
+
+function openMeter(){ meterOpen=true; $("#meter").classList.add("up"); document.body.classList.add("meter-up"); requestAnimationFrame(updateLeader); }
+function closeMeter(){
+  meterOpen=false; $("#meter").classList.remove("up");
+  document.body.classList.remove("meter-up");
+  selectedPin=null;
+  Object.values(pinRefs).forEach(p=>p.classList.remove("selected"));
+  $("#leader").classList.remove("on");
+}
+
+/* tap a pin → meter updates (still step-aware leading fact) */
+function onPinTap(pinId){
+  // within a step, tapping the focus pin (or other lit pins) opens/updates the meter — no re-fade, no camera move
+  selectedPin=pinId;
+  Object.values(pinRefs).forEach(p=>p.classList.remove("selected"));
+  if(pinRefs[pinId]) pinRefs[pinId].classList.add("selected");
+  // if a non-focus pin is tapped, we still surface its reading if known; else show its component
+  if(READINGS[pinId]){
+    // temporarily reflect this pin in the band (keeps the step's expect/verdict for focus pin)
+  }
+  renderMeter();
+  openMeter();
+  requestAnimationFrame(updateLeader);
+}
+
+/* leader line from active pin chip up to the meter card top edge */
+function updateLeader(){
+  const step=STEPS[stepIdx];
+  const leadSvg=$("#leader");
+  const pinId=selectedPin||step.focusPin;
+  const pinEl=pinRefs[pinId];
+  if(!pinEl || !meterOpen || step.locateOnly){ leadSvg.classList.remove("on"); return; }
+  const vp=$("#viewport"); const scale=vp._scale||1, tx=vp._tx||0, ty=vp._ty||0;
+  // pin center in world coords
+  const node=NODES[step.activeNode];
+  // approximate: use the active node x and a y slightly below its plate for the pin row
+  const r=pinEl.getBoundingClientRect();
+  const stageR=$("#stage").getBoundingClientRect();
+  // convert screen → world
+  const sx=r.left+r.width/2-stageR.left, sy=r.top+r.height-stageR.top;
+  const wx=(sx-tx)/scale, wy=(sy-ty)/scale;
+  // meter card top edge center-ish (screen) → world
+  const card=$("#meter .meter-card").getBoundingClientRect();
+  const mx=card.left+Math.min(card.width*0.18, 120)-stageR.left;
+  const my=card.top-stageR.top;
+  const wmx=(mx-tx)/scale, wmy=(my-ty)/scale;
+  const line=leadSvg.querySelector("line");
+  line.setAttribute("x1",wx);line.setAttribute("y1",wy);
+  line.setAttribute("x2",wmx);line.setAttribute("y2",wmy);
+  // leader drawn in world coords but svg is inside #world (which is transformed) — so use world coords directly
+  leadSvg.classList.add("on");
+}
+
+/* ---------------- STEP NAV ---------------- */
+function goNext(){ if(stepIdx<STEPS.length-1){ clearWholeOverride(); stepIdx++; applyStep(true); updateNavButtons(); } }
+function goBack(){ if(stepIdx>0){ clearWholeOverride(); stepIdx--; applyStep(true); updateNavButtons(); } }
+function updateNavButtons(){
+  $("#ctlBack").disabled = stepIdx===0;
+  $("#ctlNext").disabled = stepIdx===STEPS.length-1;
+  $("#ctlNext").textContent = stepIdx===STEPS.length-1 ? "▸ end of walk" : "▸ next test";
+}
+
+/* ---------------- SCENARIO ---------------- */
+function buildScenSheet(){
+  const sheet=$("#scenSheet");
+  sheet.innerHTML="";
+  SCENARIOS.forEach(s=>{
+    const b=document.createElement("button");
+    b.className="scen-opt"+(s.slug===scenarioSlug?" sel":"");
+    b.innerHTML=`${s.label}<span class="so-sub">${s.sub}</span>`;
+    b.addEventListener("click",e=>{ e.stopPropagation(); setScenario(s.slug); $("#scenSheet").classList.remove("show"); });
+    sheet.appendChild(b);
+  });
+}
+function setScenario(slug){
+  scenarioSlug=slug;
+  const s=SCENARIOS.find(x=>x.slug===slug);
+  $("#scenChipLabel").textContent=s.label;
+  buildScenSheet();
+  // value settles like a damped needle (tnum, no jitter)
+  const now=$("#mNow");
+  if(!STEPS[stepIdx].locateOnly && !reduceMotion){
+    now.classList.add("flip");
+    setTimeout(()=>{ renderMeter(); now.classList.remove("flip"); }, 150);
+  } else {
+    renderMeter();
+  }
+}
+
+/* ---------------- WIRING UP ---------------- */
+$("#ctlNext").addEventListener("click",goNext);
+$("#ctlBack").addEventListener("click",goBack);
+$("#ctlWhole").addEventListener("click",showWhole);
+$("#wholeBtn").addEventListener("click",showWhole);
+
+$("#mClose").addEventListener("click",e=>{ e.stopPropagation(); closeMeter(); });
+$("#mProv").addEventListener("click",e=>{ e.stopPropagation(); whyOpen=!whyOpen; $("#mWhy").classList.toggle("open",whyOpen); });
+$("#mSecToggle").addEventListener("click",e=>{ e.stopPropagation(); secOpen=!secOpen; $("#mDetail").classList.toggle("open",secOpen); $("#mSecToggle").classList.toggle("open",secOpen); });
+
+$("#scenChip").addEventListener("click",e=>{ e.stopPropagation(); $("#scenSheet").classList.toggle("show"); $("#curatorPanel").classList.remove("show"); });
+$("#curatorToggle").addEventListener("click",e=>{ e.stopPropagation(); $("#curatorPanel").classList.toggle("show"); $("#scenSheet").classList.remove("show"); });
+$("#cpX").addEventListener("click",e=>{ e.stopPropagation(); $("#curatorPanel").classList.remove("show"); });
+
+/* background tap dismisses the meter / sheets (canvas reclaims full space).
+   Only fire on true background — not on controls, the meter, a node, or a popover. */
+$("#stage").addEventListener("click",e=>{
+  if(e.target.closest("#controls, #meter, .node, #scenSheet, #curatorPanel")) return;
+  $("#scenSheet").classList.remove("show");
+  $("#curatorPanel").classList.remove("show");
+  if(meterOpen) closeMeter();
+});
+
+window.addEventListener("resize",()=>{ if($("#controls")) applyStep(false); });
+
+/* ---------------- BOOT ---------------- */
+buildWorld();
+buildScenSheet();
+updateNavButtons();
+applyStep(false);
+// settle into the animated frame shortly after load
+requestAnimationFrame(()=>{ requestAnimationFrame(()=>applyStep(true)); });
+</script>
+</body>
+</html>

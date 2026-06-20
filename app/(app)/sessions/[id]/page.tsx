@@ -10,6 +10,8 @@ import { ClosedCaseSummary } from '@/components/screens/closed-case-summary'
 import { TreeGenerating } from '@/components/screens/tree-generating'
 import { formatVehicleName } from '@/lib/format'
 import { sessionEvents } from '@/lib/db/schema'
+import { resolveWizardInterception } from '@/lib/flows/interception'
+import { CuratorGuidedWizard } from '@/components/screens/curator-guided-wizard'
 
 export default async function SessionPage({
   params,
@@ -39,6 +41,25 @@ export default async function SessionPage({
 
   if (route.kind === 'closed-summary') {
     return <ClosedCaseSummary session={session} />
+  }
+
+  // ---- Curator-guided wizard branch (active-session only) -------------------
+  // Intercept to the sourced wizard when a published flow covers this case; null =
+  // uncovered case or locked into repair → fall through to ActiveSession silently
+  // (the existing AI path serves it unchanged). Decision logic + version-pinning
+  // live in resolveWizardInterception (unit-tested in interception-beachhead.test.ts).
+  const wizard = await resolveWizardInterception(db, session)
+  if (wizard) {
+    return (
+      <CuratorGuidedWizard
+        sessionId={session.id}
+        flowVersionId={wizard.flowVersionId}
+        versionNumber={wizard.versionNumber}
+        body={wizard.body}
+        initialState={session.wizardState ?? null}
+        newerVersionAvailable={wizard.newerVersionAvailable}
+      />
+    )
   }
 
   // Fetch session_events for the chat-thread render in RepairPhaseView.
