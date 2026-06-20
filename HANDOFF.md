@@ -1,51 +1,46 @@
-# HANDOFF — Citation chunking DONE & verified (unit + real-API: 0→162 citations); PR drafted-not-opened; prod-safety analysis is the next gate
+# HANDOFF — Topology gate now FIRES: interactive diagnostic shipped to prod (PR #110); awaiting Brandon's visual confirm
 
-**Last updated:** 2026-06-18
-**Work branch:** `feat/system-data-ingest` · **Worktree:** `/Volumes/Creativity/dev/projects/vyntechs/.claude/worktrees/system-data-ingest` (NOT `main`, NOT the `revert/pr-96` checkout).
-**Plan:** `docs/superpowers/plans/2026-06-16-curator-flows-beachhead-to-topology-grail.md` (Phase 1 of 3).
+**Last updated:** 2026-06-20
+**Work branch:** `fix/topology-symptom-reconcile` (MERGED to `main` via PR #110, `600b4e4`; remote branch deleted). Local checkout still on this branch.
+**Prod:** deployed and **Ready** on `vyntechs.dev` (Vercel prod deployment `vyntechs-ad2y4f3rc`).
 
 ---
 
 ## WHERE WE ARE
-Phase 1 beachhead (2011–2016 F-250/350 6.7 PSD, DEF/emissions limp-mode). **The citation gap is CLOSED.** The synthesis citations pass was rewritten from a single whole-flow call (which truncated on big flows → 0 citations) to **per-step chunking** — one tiny `emit_citations` call per step, reattached to the structure draft, findings cached, bounded-parallel, per-step degrade. **Verified at three levels:** 7/7 synthesis unit tests (incl. a new "citations survive on a many-step flow" RED→GREEN case), `tsc` clean, full suite green on a clean run; AND a **real-API synthesis-only re-run** produced **162 citations across all 23 steps** (125 confirmed / 37 plausible) + 6 conflicts — vs the prior 0/18. Code committed to `feat/system-data-ingest`.
+The interactive **topology diagnostic** (live wiring diagram) had **never once fired for a real session** — every intake fell back to the legacy AI step-plan. Brandon hit the legacy screen 3× on combos that should have shown the diagram. Root cause (proven against the live DB, not guessed): `resolveSymptomSlug` emits a **bare DTC code** (`p0087`) but the seeded `symptoms` row is **descriptive** (`p0087-fuel-rail-pressure-too-low`), so `loadSystemTopology` always missed. Two sibling mismatches (crank-prose slug `cranks-no-start` not seeded; engine-string strictness) compounded it. **Fix is built, verified, merged, and deployed.**
 
 ## IMMEDIATE NEXT STEP (exact, no-context-needed)
-Brandon was deciding **how to open the PR** when we paused; he asked **"will merging break prod?"** — that's the live question. Resume here:
-1. **Open the PR (Brandon's pending choice).** A DRAFT PR `feat/system-data-ingest → main` is recommended (brief: `tasks/todo.md`, last block). **Opening a draft PR touches NOTHING in prod** — it's a review page. Options offered: (a) draft PR → main [recommended], (b) commit+push only / hold PR, (c) different base. He has not picked.
-2. **Run the prod-breakage risk gate (the real answer to his question) — do this on the PR diff, do NOT merge.** Proportional to "live money + data":
-   - Diff THIS branch's migrations vs what's actually applied on the **prod** DB `ynmtszuybeenjbigxdyl` (the real collision check — memory says the forked engines have COLLIDING migrations; verify, don't trust memory). Live DB has real shops, ~85 sessions, Stripe customers.
-   - Map every change to the live user path (intake routing / engine swap) + confirm whether a feature flag can ship it dark. `main → prod` auto-deploys on Vercel, so **merge = instant live**.
-   - Confirm the prod flows catalog isn't empty for the engine we'd switch to (else users hit empty diagnostics).
-   - Dry-run on a prod-like copy. Then bring Brandon a grounded yes/no.
-3. **Publish the beachhead flow** — still Brandon's call (strong-domain bar; AI-as-tool). The sourced draft exists (see below); present it, publish only on his go.
+1. **Brandon's visual confirm is the only thing open.** Have him reload session **`1795E2D2`** (his 2018 F-250 + P0087) on `vyntechs.dev` — it should now render the interactive diagram (25-component fuel graph), NOT the "AI GUESS" step list. Existing sessions upgrade automatically (the gate recomputes at render). If it does NOT render, the first thing to check is whether prod (`ynmtszuybeenjbigxdyl`) seeds the same 3 reachable slugs this fix assumes (see verify recipe below).
+2. If confirmed → the gate-reachability work is **done**. Next candidate work (all Brandon-gated, NOT started): (a) platform engine/model **widening** so a bare "6.7"/"Super Duty"/"250" resolves; (b) **DEF/emissions** topology seeding (currently correctly falls to AI); (c) **2011–2016 3rd-gen 6.7** beachhead seeding.
+
+## WHAT SHIPPED THIS SESSION (on `main`, deployed)
+- **`lib/diagnostics/reconcile-seeded-symptom.ts`** (NEW) — DB-aware, **reachability-gated** reconciliation. Maps the resolver's candidate → an actually-seeded slug: exact-match → first-DTC prefix (separator-tolerant for `P 0087`/`P-0087`) → crank/no-start prose → rail-pressure prose → null. Pure decision fn `pickSeededSymptom` + thin `loadReachableSymptomSlugs` query (mirrors `loadSystemTopology`'s gate exactly) + wired `reconcileSeededSymptom`.
+- **Wired BOTH topology call sites** with the one shared helper so intake↔render can't drift: `app/api/intake/submit/route.ts` and `app/(app)/sessions/[id]/page.tsx` (render also reuses the reconciled slug for the diagram's label + active-symptom props, not just the load).
+- **27 new unit tests** (`tests/unit/reconcile-seeded-symptom.test.ts`) covering the full misroute/coverage matrix. Lesson added: `slug-contract-must-match-seeded-data-not-just-compile`.
+- **Untouched (deliberate):** the pure `resolveSymptomSlug`, `extractDtcCodes`, `COMPLAINT_PATTERNS`, and the curator-flow gate `interception.ts` — no re-key, pinned tests stay green.
+
+## DESIGN DECISION (Brandon-stated, encode it)
+**Entered DTC wins.** A complaint carrying a seeded code routes to that code's graph even with crank/no-start language ("I typed P0087 → show me P0087"). Prose fallbacks (crank→no-start, rail-pressure→p0087/p0088) only fire when there is NO seeded DTC. NOT the "crank-aware override" the red-team floated — simpler and predictable for techs.
 
 ## HARD CONSTRAINTS / WHAT ONLY BRANDON DOES
-- **NEVER touch the live DB** — Supabase `ynmtszuybeenjbigxdyl` ("Vyntechs Auto"): real shops, 85 real sessions, Stripe customers. All Phase-1 work uses the **throwaway** `cojmftuuukcsaxvcntls` (`.env.development.local`). Live `.env.local` UNTOUCHED.
-- **Do NOT merge `feat/system-data-ingest` → `main`** (the Phase-2 prod cutover) without the risk gate above AND Brandon's explicit go. `main` auto-deploys. Per `pr-merge-ownership` memory, Claude MAY merge/deploy but ONLY through a hard verify-everything gate.
-- **Publishing the beachhead flow is Brandon's decision.**
-- **API cost reality (Brandon flagged):** the app's Anthropic calls bill the **API key**, NOT his Claude Code subscription — there is no supported way to route app calls through the subscription. To test synthesis cheaply, **never re-run the research phase** (the 2M-token web_search fan-out); re-run **synthesis-only against the saved `research_runs.agent_outputs`** (see below). Pennies, not dollars.
-- Never commit secrets. `.env.development.local` (throwaway creds) is gitignored — keep it so.
-
-## WHAT SHIPPED THIS SESSION (committed to `feat/system-data-ingest`)
-- **Per-step citation chunking** — `lib/research/synthesis-runner.ts`: new `EMIT_CITATIONS_TOOL` + `runCitationsPass(draftBody, findingsJson, addUsage)` replaces the single whole-flow citations call. One `emit_citations` call per step (returns just that step's `Citation[]`), findings JSON sent in a `cache_control: ephemeral` system block, bounded concurrency (`CITATION_CONCURRENCY=4`), per-step try/catch (one step failing leaves only that step uncited), reassembled onto the structure draft. Anti-fabrication strip unchanged. `callTool` (structure + conflicts passes) untouched.
-- **Tests** — `tests/unit/research-synthesis.test.ts`: new many-step RED→GREEN case, 1-step tests updated to `emit_citations`, the old "no-steps body" test reworked into a per-step-isolation test. 7/7 green.
+- **Live/prod DB = `ynmtszuybeenjbigxdyl`** ("Vyntechs Auto"): real shops, ~89 sessions, Stripe customers. This session used it **read-only** (SELECTs) for diagnosis + the live e2e check — fine. Never write to it without Brandon.
+- **Seeding** (DEF/emissions, 2011–2016 3rd-gen) and **platform widening** are Brandon's calls — do NOT bundle them into a "fix."
+- Per `pr-merge-ownership` memory, Claude MAY merge/deploy but ONLY through a hard verify-everything gate (done here under his explicit "ship it").
 
 ## PENDING / DEFERRED
-- **Open the PR** (Brandon's base/scope choice) → **prod-breakage risk gate** → his go/no-go on cutover. Brief in `tasks/todo.md`.
-- **Publish** the sourced beachhead draft (Brandon).
-- **Speed:** synthesis wall-clock ~6.4 min (structure pass generates a ~23-step flow + 18-ish per-step citation calls). Acceptable for a back-office curator action; can ~halve it by bumping `CITATION_CONCURRENCY`.
-- **Draft quality nit:** the model set step `of` = 20 but emitted 23 steps (cosmetic count mismatch — curator/cleanup fix).
-- **Cleanup after publish:** delete throwaway project `cojmftuuukcsaxvcntls`; remove untracked `phase1-*.mjs` + `.env.development.local`.
+- **Brandon's visual confirm** on `1795E2D2` (the one open item).
+- **Sentinel-degradation guard** — intentionally skipped: only triggers if topology data is retired mid-session (rare), and its "fix" (route to tree-generating) could hang a sentinel session that has no real AI tree. Noted, not built.
+- Platform engine/model widening; DEF seeding; 2011–2016 3rd-gen seeding (all gated).
+- The older `feat/system-data-ingest` beachhead/citation track is a SEPARATE work stream (see git history) — not touched this session.
 
 ## GOTCHAS / NON-OBVIOUS FACTS
-- **The sourced draft is in `/tmp` (EPHEMERAL), not the DB:** `/tmp/draft-review.md` (readable walk-through) + `/tmp/resynth-draft.json` (raw 23-step flow + 162 citations + 6 conflicts). NOT persisted as a flow_version. Reproducible by re-running synthesis-only (below). If you want Brandon to walk it in the UI, persist it as a `draft` flow_version in the **throwaway** DB (his call).
-- **Cheap synthesis-only re-run (THE pattern):** the orchestrator persists agents' findings to `research_runs.agent_outputs` BEFORE synthesis (`lib/research/orchestrator.ts:128`). The most recent COMPLETED throwaway run is **`f92e438e-f009-488a-adfa-8c67bb30da4a`** (3 agents, 53 findings, 200 URLs). Re-run synthesis against those saved findings — NO web_search, NO research re-run. Mechanism used this session: a temp vitest harness (`// @vitest-environment node`) importing `@/lib/db/client` + `runSynthesis`, run with `set -a && . ./.env.development.local && set +a && vitest run <harness>` (vitest resolves the `@/` alias the handoff said blocks `tsx`; the un-mocked real client + env key make the cheap calls). The harness was deleted after use — recreate from this recipe.
-- **Full vitest suite is FLAKY under load** — saw 84 / 12 / 0 failures on the SAME code across three runs (DB-teardown races like `close is not a function`). Verify changes via the affected files in isolation + `tsc`, NOT a single full-suite count. (Memory: `full-suite-flaky-db-tests`.)
-- **Throwaway DB facts** (`cojmftuuukcsaxvcntls`): curator `e2e@vyntechs.com` (pwd = `TEST_USER_PASSWORD` in `.env.development.local`), `is_curator=true` AND `is_comp=true` (without `is_comp` the app shows a paywall, not the diagnosing screens). Flow slug `sd-67psd-2011-2016-def-limp`. The app connects as the Postgres `postgres` superuser (pooler) → bypasses RLS.
-- **`@/lib/db/client`** = plain postgres-js to `DATABASE_URL_DIRECT` (dev) / `DATABASE_URL` — no PGlite swap; loading `.env.development.local` points it at the throwaway DB. `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` (sonnet-4-6) are in that same env file.
-- **Reusable untracked scripts in the worktree:** `phase1-db-check.mjs`, `phase1-seed.mjs`, `phase1-gate-walk.mjs`, `phase1-research.mjs`, `phase1-poll.mjs`.
+- **Seeded reachable set (prod DB), verified this session:** ONLY platform `ford-super-duty-4th-gen-67-psd` (2017–2022 6.7 PSD), 3 symptoms, all `system='fuel'`, 25 non-retired components each: `p0087-fuel-rail-pressure-too-low`, `p0088-fuel-rail-pressure-too-high`, `no-start-cranks-normally-fuel-system-suspect`. The whole fix makes exactly these reachable from natural prose/DTC intake.
+- **Live e2e verify recipe** (drives the REAL chain, not a mirror): a tsx script importing `resolvePlatformSlug` + `resolveSymptomSlug`/`extractDtcCodes` + `reconcileSeededSymptom` + `loadSystemTopology` + `@/lib/db/client`, run with `npx tsx --env-file=.env.local <script>`. `.env.local` points `@/lib/db/client` at the prod DB. (Script was a one-off, deleted; recreate from this recipe.) Confirmed: Brandon's exact input → renders 25-component fuel topology; DEF + P2002 → AI.
+- **Vitest full-suite is FLAKY under load** (PGlite teardown races) — verify via affected files in isolation + `tsc`, never a single full-suite count. (Memory: `full-suite-flaky-db-tests`.)
+- **Vercel:** `main` auto-deploys to prod (`vyntechs.dev`). MCP `Vercel` 403s on this team scope — use the linked `vercel` CLI (`vercel ls --yes`). zsh gotcha: `$status` is read-only; the `app/(app)/...` path needs single-quoting to dodge zsh globbing.
+- **How the fix was built:** 10-agent Workflow `wp6nkmvyt` (5-agent edge-case map → synthesize → 3-agent adversarial red-team) produced the spec; the red-team killed a multi-DTC misroute and a render-label mismatch before any code. Then TDD for the implementation.
 
 ## RESUME PROMPT
 ```
-Read HANDOFF.md in full and tell me where we left off. We're on Phase 1 of the curator-flows beachhead. The citation-chunking fix is DONE and verified (unit + a real-API synthesis-only re-run produced 162 citations across all 23 steps). The code is committed to feat/system-data-ingest and pushed. We paused on opening the PR: I asked whether merging this branch to main would break prod. Next: confirm how to open the PR (draft → main recommended; brief in tasks/todo.md), then run the prod-breakage risk gate ON THE DIFF (migrations vs the live DB, user-path/routing changes, feature-flag, prod catalog) and bring me a grounded yes/no BEFORE anyone says "merge." Do NOT touch the live DB (ynmtszuybeenjbigxdyl) and do NOT merge to main.
+Read HANDOFF.md in full and tell me where we left off. The topology-gate fix shipped to prod this session (PR #110 merged to main, deployed to vyntechs.dev). The only open item is Brandon's visual confirm that reloading session 1795E2D2 now shows the interactive diagnostic instead of the AI step-plan. If he confirms it works, the gate-reachability work is done; the next candidate work (all Brandon-gated) is platform engine/model widening, DEF/emissions seeding, and 2011-2016 3rd-gen seeding. Do NOT write to the prod DB (ynmtszuybeenjbigxdyl) or bundle seeding into a fix without his go.
 ```
