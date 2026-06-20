@@ -20,8 +20,8 @@ import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { customers as customersTable, profiles, vehicles as vehiclesTable } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
-// retrieval-validator AI grader stack past 10s easily. Cap at 60s.
-export const maxDuration = 60
+// retrieval-validator AI grader stack past 10s easily. 300s = Vercel platform max.
+export const maxDuration = 300
 
 const ADAPTERS = [
   new NHTSAAdapter(),
