@@ -12,6 +12,12 @@ import { formatVehicleName } from '@/lib/format'
 import { sessionEvents } from '@/lib/db/schema'
 import { resolveWizardInterception } from '@/lib/flows/interception'
 import { CuratorGuidedWizard } from '@/components/screens/curator-guided-wizard'
+import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
+import { layoutTopology } from '@/lib/diagnostics/topology-layout'
+import { TopologyDiagnostic } from '@/components/screens/topology-diagnostic'
+import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
+import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
+import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
 export default async function SessionPage({
   params,
@@ -60,6 +66,39 @@ export default async function SessionPage({
         newerVersionAvailable={wizard.newerVersionAvailable}
       />
     )
+  }
+
+  // ---- Topology diagnostic gate ----------------------------------------
+  // When the session's vehicle has graph data, serve the interactive diagram.
+  // resolvePlatformSlug + resolveSymptomSlug are pure (no DB). loadSystemTopology
+  // returns null when no data exists for the pair — falls through to AI silently.
+  const platformSlug = resolvePlatformSlug({
+    year: session.intake.vehicleYear,
+    make: session.intake.vehicleMake,
+    model: session.intake.vehicleModel,
+    engine: session.intake.vehicleEngine ?? '',
+  })
+  const symptomSlug = resolveSymptomSlug({ complaintText: session.intake.customerComplaint })
+
+  if (platformSlug && symptomSlug) {
+    const topology = await loadSystemTopology({
+      db,
+      platformSlug,
+      symptomSlug,
+      sessionId: session.id,
+    })
+    if (topology) {
+      return (
+        <TopologyDiagnostic
+          topology={topology}
+          layout={layoutTopology(topology)}
+          vehicleName={formatVehicleName(session.intake)}
+          sessionId={session.id}
+          symptoms={[{ slug: symptomSlug, label: symptomLabel(symptomSlug) }]}
+          activeSymptomSlug={symptomSlug}
+        />
+      )
+    }
   }
 
   // Fetch session_events for the chat-thread render in RepairPhaseView.
