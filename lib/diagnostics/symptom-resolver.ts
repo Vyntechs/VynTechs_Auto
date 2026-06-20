@@ -43,6 +43,15 @@ const COMPLAINT_PATTERNS: { pattern: RegExp; slug: string }[] = [
   },
 ]
 
+/**
+ * Extract bare DTC codes (e.g. "p0087") from free-text complaint strings.
+ * Matches /\bp[0-9]{4}\b/ case-insensitively and deduplicates.
+ */
+export function extractDtcCodes(text: string): string[] {
+  const matches = text.match(/\bp[0-9]{4}\b/gi) ?? []
+  return [...new Set(matches.map((c) => c.toLowerCase()))]
+}
+
 export function resolveSymptomSlug(input: SymptomResolveInput): string | null {
   // 1. Explicit chip selection — pass through as-is.
   if (input.selectedSymptomSlug && input.selectedSymptomSlug.trim()) {
