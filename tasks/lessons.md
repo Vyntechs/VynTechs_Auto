@@ -50,6 +50,11 @@ Trigger: `npm test` (full 177-file vitest run) shows scattered reds rooted in `c
 Rule: This is resource-contention flake, NOT a regression. Confirm by re-running the failed files in ISOLATION (they pass). Don't trust one full run; counts are non-deterministic.
 Reason: Identical code gave 1386/0 then 24-fail then 94-fail across three back-to-back full runs; every failure was a PGlite startup timeout, never an assertion.
 
+### verify-gate-is-wired-to-the-right-route
+Trigger: shipping a feature gate (topology, curator, etc.) that intercepts a user flow.
+Rule: Confirm the gate runs in the ACTUAL entry route the UI uses, not just in "a" route that happens to handle similar logic. Trace the form submission from the client to the DB write.
+Reason: PR #107 wired the topology gate only to `/api/sessions`; the intake form uses `/api/intake/submit`. Every real session bypassed the gate entirely. PR #109 fixed it.
+
 ### dont-rerun-research-to-test-synthesis
 Trigger: validating a synthesis/citations change end-to-end against the real API.
 Rule: Never re-run the research phase (web_search fan-out = ~2M tokens, $$). Re-run synthesis-only against saved `research_runs.agent_outputs`.
