@@ -16,7 +16,7 @@ import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
 import { layoutTopology } from '@/lib/diagnostics/topology-layout'
 import { TopologyDiagnostic } from '@/components/screens/topology-diagnostic'
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
-import { resolveSymptomSlug } from '@/lib/diagnostics/symptom-resolver'
+import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
 import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 
 export default async function SessionPage({
@@ -78,7 +78,10 @@ export default async function SessionPage({
     model: session.intake.vehicleModel,
     engine: session.intake.vehicleEngine ?? '',
   })
-  const symptomSlug = resolveSymptomSlug({ complaintText: session.intake.customerComplaint })
+  const symptomSlug = resolveSymptomSlug({
+    dtcCodes: extractDtcCodes(session.intake.customerComplaint),
+    complaintText: session.intake.customerComplaint,
+  })
 
   if (platformSlug && symptomSlug) {
     const topology = await loadSystemTopology({

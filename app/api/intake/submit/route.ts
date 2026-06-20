@@ -18,6 +18,10 @@ import { YouTubeAdapter } from '@/lib/retrieval/adapters/youtube'
 import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { customers as customersTable, profiles, vehicles as vehiclesTable } from '@/lib/db/schema'
+import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
+import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
+import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
+import type { TreeState } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
 // retrieval-validator AI grader stack past 10s easily. 300s = Vercel platform max.
@@ -204,6 +208,25 @@ export async function POST(req: Request) {
     resolvedCustomerEmail = email
   }
 
+  // Pre-flight topology check: resolve platform + symptom (pure) then confirm
+  // topology data exists in the DB. When both match, skip AI — the session
+  // page's render-time topology gate will intercept and show the interactive
+  // diagram. Mirror the exact check page.tsx runs at render time.
+  const platformSlug = resolvePlatformSlug({
+    year: resolvedYear,
+    make: resolvedMake,
+    model: resolvedModel,
+    engine: resolvedEngine ?? '',
+  })
+  const symptomSlug = resolveSymptomSlug({
+    dtcCodes: extractDtcCodes(description),
+    complaintText: description,
+  })
+  const topologyExists =
+    platformSlug && symptomSlug
+      ? Boolean(await loadSystemTopology({ db, platformSlug, symptomSlug }))
+      : false
+
   // Mirror /api/sessions: best-effort corpus + retrieval, then mandatory AI
   // tree generation. Without a populated tree, the diagnostic page hangs on
   // "Building your diagnostic plan..." forever.
@@ -216,21 +239,33 @@ export async function POST(req: Request) {
     customerComplaint: description,
   }
 
-  const generateInitialTreeWithRetrieval = buildGenerateInitialTreeWithRetrieval({
-    db,
-    adapters: ADAPTERS,
-    generateInitialTree,
-    runRetrieval,
-    validateRetrievalResults,
-    retrieveCorpus,
-  })
-
-  let treeState
-  try {
-    treeState = await generateInitialTreeWithRetrieval(intakePayload)
-  } catch (err) {
-    console.error('tree generation failed:', err)
-    return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
+  let treeState: TreeState
+  if (topologyExists) {
+    // Topology hit: skip AI entirely. Use a sentinel with one node + done=true
+    // so routeForSession returns 'active-session' (nodes.length=0 would stall
+    // on 'tree-generating'). The session page's topology gate intercepts first
+    // and renders the interactive diagram before ActiveSession ever sees this.
+    treeState = {
+      nodes: [{ id: '_topology', label: 'topology', status: 'active' as const }],
+      currentNodeId: '_topology',
+      message: '',
+      done: true,
+    }
+  } else {
+    const generateInitialTreeWithRetrieval = buildGenerateInitialTreeWithRetrieval({
+      db,
+      adapters: ADAPTERS,
+      generateInitialTree,
+      runRetrieval,
+      validateRetrievalResults,
+      retrieveCorpus,
+    })
+    try {
+      treeState = await generateInitialTreeWithRetrieval(intakePayload)
+    } catch (err) {
+      console.error('tree generation failed:', err)
+      return NextResponse.json({ error: 'tree generation failed' }, { status: 500 })
+    }
   }
 
   const { sessionId } = await createSessionFromIntake(db, {
