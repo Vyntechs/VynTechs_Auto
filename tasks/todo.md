@@ -1,3 +1,55 @@
+# TASK: Master Platform Brief — diagnostics + living service manual + shop management, on one spine (2026-06-20)
+
+> **This is a hand-off brief to a fresh session.** Read it top-to-bottom, then read the three docs named in §Current State BEFORE writing anything. Your **first** deliverable is a blueprint doc (design, no code) — the full build is laid out as a phased roadmap so you have the whole picture, but Phase 0 is gated on Brandon's decisions.
+
+## North Star (the soul — every decision serves this)
+Today a shop runs the weird-car job across **four disconnected tools**: a service manual (ProDemand / AllData), a diagnostic database (Identifix), a shop-management system (Tekmetric), and the tech's own head — and loses time, accuracy, and trust in the gaps between them. **Vyntechs collapses all four into ONE spine of truth.** The interactive topology diagnostic — the engine that "turns the theory of how a system works into an explorable wiring diagram that IS the diagnostic" — is that spine. The "service manual" and "shop management" are not two more apps bolted on; they are **two more views onto the same graph and the same job**. Done right, the whole shop runs on the fewest moving pieces that can possibly carry the job from phone-call to paid-invoice — with every directive a tech follows being specific, sourced, and impossible to misread.
+
+## Goal (what "done" means for the FIRST deliverable)
+A single blueprint doc exists at `docs/platform/PLATFORM-BLUEPRINT.md` that defines the **two-spine architecture** (one knowledge graph + one job ledger), maps **every shop role to a friction-minimal view onto those two spines**, specifies the **data-model delta** (what to reuse vs. add — named tables), lays out a **phased build roadmap** (Phase 1→N, each independently shippable and verifiable), defines how the **four outcome metrics** get instrumented, and opens with a **"Decisions Brandon must make"** list — so a build session can pick it up and ship Phase 1 the moment Brandon approves. **No application code changes in this deliverable.**
+
+## The thesis: minimum moving pieces = two spines, many views
+The reason ProDemand+Identifix+Tekmetric are friction-heavy is they each own their **own** copy of the truth and force humans to translate between them. The minimum-pieces design is to have exactly **two objects of truth**, and make everything else a view:
+
+1. **The Knowledge Graph** — vehicle + system topology (components, connections, pins, observable properties, test actions, branch logic, scenarios) + field-captured outcomes + citations. *This already largely exists* (`lib/db/schema.ts` graph tables, `lib/diagnostics/*`). This IS both the diagnostic engine **and** the "futuristic service manual" — the same graph, read two ways. The compounding field-outcome loop ("after enough sessions this becomes what a service manual is supposed to be") is the service manual.
+2. **The Job Ledger** — the Repair Order as it flows across roles: intake → assignment → diagnose (the topology engine) → recommend → authorize → parts → labor → invoice → comeback. *Partially exists* as `sessions` + `customers` + `vehicles` + `shops` + `profiles`(roles) + Stripe + `followUps`. Needs the RO lifecycle wrapped around the diagnostic session.
+
+If any proposed feature needs a **third** spine of truth, the blueprint must justify why — the default answer is "make it a view onto spine 1 or spine 2."
+
+## The four outcome goals (the why — each must be measurable in the blueprint)
+1. **Productivity ↑** — RO cycle time; techs unblocked without the owner hovering; tool-switches per job → target near-zero.
+2. **Diagnostic accuracy ↑** — right-repair rate; every call confidence-gated + cited (carry the "never guess / cited or it didn't happen" doctrine).
+3. **Misdiagnosis cost ↓** — comeback rate and free-comeback dollars (the owner-tech's real pain).
+4. **Accidental damage from unclear directives ↓** — *the under-served moat.* Every actionable instruction a tech receives (a test step, a repair step) must carry: precise scope, expected reading/spec, torque/sequence/safety where relevant, the source citation, and the "if the reading is wrong" branch. **No free-text-only directive reaches the bay.** This is what prevents a tech acting on an ambiguous instruction and damaging a part.
+
+## The roles (friction must drop for ALL of them — map each to its view)
+Owner / Owner-Tech · Service Writer/Advisor · Master Tech (the "Gate") · B-Tech (the "Climber") · Parts · Customer (external) · Curator (back-office, already built). The blueprint must show, per role, the **one view** they live in and the fewest taps to do their job. (Persona evidence: `docs/strategy/2026-05-29-customer-interaction-doctrine.md` — honor it.)
+
+## Scope
+**In scope (this deliverable):** the `PLATFORM-BLUEPRINT.md` doc only — architecture, role→view map, data-model delta (reuse-vs-add, named), phased roadmap, metric-instrumentation plan, decisions list. Reconcile explicitly against `MASTER-BUILD-BRIEF.md` (which *vaulted* shop-mgmt) and state that this brief deliberately un-vaults it.
+**Out of scope (this deliverable — do NOT):** write app/lib/migration code; change the schema; start any build phase; re-architect the working topology engine; introduce a third data spine without justification; copy any OEM/licensed manual content (generate uncopyrightable facts only — the doctrine holds).
+
+## Steps (each independently verifiable)
+1. **Read first, reconcile:** `docs/interactive-diagnostics/MASTER-BUILD-BRIEF.md`, `docs/strategy/2026-05-29-customer-interaction-doctrine.md`, and `lib/db/schema.ts`. → Blueprint's opening paragraph names what it reuses and states it un-vaults the deferred shop layer. *Verifiable: those references are present.*
+2. **Lock the two-spine architecture:** define spine 1 (knowledge graph) and spine 2 (job ledger), the boundary between them, and the rule "everything else is a view." → A diagram/section showing the two spines and every view hanging off them. *Verifiable: section exists; no third spine without a written justification.*
+3. **Role→view map:** for each of the 7 roles, name its single view and its critical path (fewest taps). → A table: role | view | job-to-be-done | tap budget. *Verifiable: all 7 roles present, each with a tap budget.*
+4. **Data-model delta:** for the Job Ledger, list exactly which existing tables extend (e.g. `sessions`, `customers`, `vehicles`, `followUps`) and which are net-new (e.g. a repair-order/estimate/line-item layer), with the reuse justification. → A reuse-vs-add table naming real tables from `schema.ts`. *Verifiable: every "add" line says why an existing table can't carry it.*
+5. **Directive-clarity spec:** define the contract every actionable directive must satisfy (scope + expected spec + safety/torque/sequence + citation + if-wrong branch) and where it's enforced. → A section with the directive schema + the enforcement point. *Verifiable: the contract is concrete enough to test against.*
+6. **Phased roadmap:** Phase 1→N, each independently shippable, with a one-line "ship + verify" per phase. Topology engine is the spine threaded through every phase. → Numbered phases, each with a verify line. *Verifiable: Phase 1 is small enough to ship in a session.*
+7. **Metric instrumentation:** for each of the 4 outcome goals, name what's measured, where the data comes from, and the baseline-vs-target. → A 4-row metrics table. *Verifiable: all 4 goals have a measurable definition.*
+8. **Decisions Brandon must make — at the very top of the doc:** the altitude call (blueprint-only first vs. blueprint-then-build), beachhead scope (which vehicles/role first — note the 2011-2016 6.7 PSD beachhead), brand (PlainWrench vs. Vyntechs surfacing), and any spine-boundary judgment calls. → That list is the document's first section. *Verifiable: it's first.*
+
+## Verify by
+`docs/platform/PLATFORM-BLUEPRINT.md` exists and contains: the two-spine architecture, a role→view table covering all 7 roles with tap budgets, a reuse-vs-add data-model table naming real `schema.ts` tables, the directive-clarity contract, a numbered phased roadmap (Phase 1 shippable in one session), a 4-row outcome-metrics table, and a "Decisions Brandon must make" list as the **first** section. And: `git diff` shows **only that new doc** — zero code/schema files changed.
+
+## Quality Bar
+This is the strategic spine for a multi-quarter build — treat it as such. Ground every claim in the actual code/schema (cite `path:line`); do not design on paper against an imagined architecture. The bar: a senior engineer reading the blueprint could start Phase 1 without asking what to reuse. Honest about what's already built vs. net-new — no hand-waving over the hard parts (the directive-clarity enforcement and the spine boundary are the hard parts).
+
+⚙️ `/effort xhigh` — platform architecture; this blueprint drives a large multi-system build.
+🤖 Model: `claude-opus-4-8` — every choice is a reuse-vs-build-vs-future-proof judgment call.
+
+---
+
 # Curator console — visual + UX pass
 
 Branch: `feat/curator-console-design` (from `origin/staging-curator`) → PR back into `staging-curator`.

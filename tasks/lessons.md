@@ -65,3 +65,28 @@ Trigger: validating a synthesis/citations change end-to-end against the real API
 Rule: Never re-run the research phase (web_search fan-out = ~2M tokens, $$). Re-run synthesis-only against saved `research_runs.agent_outputs`.
 Reason: The app bills the API key, not Brandon's subscription; research is the expensive part, synthesis is pennies. Reuse run f92e438e's findings.
 
+### diagnostic-ux-is-the-diagram-not-a-wizard
+Trigger: designing the user-facing diagnostic UX (mockups, screens, the "money shot").
+Rule: The interactive topology diagram IS the surface. Intake/directive/reading/verdict/handoff are STATES on the one diagram. Never step-cards + "Next" buttons.
+Reason: Brandon rejected a 7-screen wizard as "feels like a chatbot." Approved surface: tap a part → its circuit isolates, directive lives on the wire, answer emerges on the map.
+
+### route-craft-questions-to-persona-not-brandon
+Trigger: a design fork is really a domain/UX-craft question (how a tech works, how a screen should behave), not a founder call.
+Rule: Don't hand Brandon an A/B/C of implementation options — he's a technician, not an engineer. Route it to the right persona, synthesize, bring ONE plain-language path to gut-check.
+Reason: Brandon rejected three triage UI options as "hacks/excuses" and said "ask the persona required, idk these technical terms, I'm not an engineer." The right answer came from the technician advocate, not from him picking.
+
+### painless-language-is-a-hard-invariant
+Trigger: writing any user-facing label, directive, transition, or empty-state for the diagnostic surface (any role).
+Rule: Every word must be self-evident — the user never thinks about HOW to interact, what a button means, or what's next. Achieve it with FEWER words, never bloat. No jargon reaches the user.
+Reason: Brandon made this non-negotiable mid-brainstorm: "the language throughout must be painless... shouldn't need to think about an interaction, button label, or what's next... without bloating with unnecessary content."
+
+### diagnostics-is-one-elimination-asking-is-the-craft
+Trigger: designing diagnostic UX, or worrying about whether to "ask" the tech anything (questions/checks/readings).
+Rule: Diagnostics IS one elimination at a time. Asking the tech to do a check is REQUIRED, not a hack to avoid. The craft is HOW you ask — minimize friction per step and use motivation psychology so the tech WANTS to answer. Triage is just the first elimination, not a special "mode." Each turn: present the single best next elimination → painless → motivating → answer advances the map → repeat.
+Reason: Brandon corrected me for inventing tricks (silent probes/tie-breakers) to avoid asking — "it's fine to ask them for questions, checks. You have to... it's all about how you do it without causing excessive pain/friction; use psychology to make them where they wanna give the answer." "The diagram is the diagnostic" means the asking happens ON the diagram in a painless rhythm, NOT that you never ask.
+
+### confidence-is-a-true-compass-not-a-scoreboard
+Trigger: designing, computing, or displaying any confidence/score in the diagnostic.
+Rule: Confidence must be TRUE (built only from real checks the tech confirmed — never hard-coded/faked) AND it is the tool's private compass, not a scoreboard shown to pain the tech. Low confidence = the cue to surface the ONE answer/question/step/test that raises it most toward the most accurate diagnosis with the LEAST friction — never a scary number, never "refuse and stop." Confidence is felt as progress, not judgment. Universal across symptom/application. This reconciles "restraint" with "never give up": low confidence means quietly find the least-painful highest-yield next step.
+Reason: Brandon on the live fake-confidence finding: "the confidence needs to be true, but we don't need to pain the user/tech because the confidence... if confidence is low [zoom out]: what step/test/question gets the confidence to the highest / most efficient + accurate diagnosis with the least pain." The live product was showing a hard-coded 0.85 to paying shops (legal-fatal). See memory diagnostic-loop-is-frictionless-elimination.
+
