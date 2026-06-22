@@ -47,6 +47,50 @@ export type TopologyBranch = {
   reasoning?: string | null
 }
 
+// ---------------------------------------------------------------------------
+// Branch dedup helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Provenance values in descending priority order.
+ * A branch with a higher-priority provenance wins when two rows share the
+ * same (post-normalization) fork verdict.
+ */
+const PROVENANCE_PRIORITY: Record<string, number> = {
+  'FIELD-VERIFIED': 3,
+  'TRAINING-CONFIRMED': 2,
+  'TRAINING-INFERRED': 1,
+  'GAP': 0,
+}
+
+/**
+ * Given branches for a single test action (already verdict-normalized), keep
+ * exactly ONE branch per fork verdict. When two rows tie on verdict, prefer
+ * the one with higher sourceProvenance; first-seen is the stable tiebreak
+ * when provenance is equal.
+ *
+ * Exported for unit tests.
+ */
+export function dedupBranchesByVerdict<T extends TopologyBranch & { sourceProvenance: string }>(
+  branches: T[],
+): T[] {
+  const best = new Map<string, T>()
+  for (const b of branches) {
+    const existing = best.get(b.verdict)
+    if (!existing) {
+      best.set(b.verdict, b)
+      continue
+    }
+    const existingPriority = PROVENANCE_PRIORITY[existing.sourceProvenance] ?? -1
+    const candidatePriority = PROVENANCE_PRIORITY[b.sourceProvenance] ?? -1
+    if (candidatePriority > existingPriority) {
+      best.set(b.verdict, b)
+    }
+    // equal priority → first-seen wins (no update)
+  }
+  return Array.from(best.values())
+}
+
 export type TopologyTestAction = {
   slug: string
   description: string
@@ -356,6 +400,7 @@ export async function loadSystemTopology({
           nextAction: branchLogic.nextAction,
           routesToTestActionId: branchLogic.routesToTestActionId,
           reasoning: branchLogic.reasoning,
+          sourceProvenance: branchLogic.sourceProvenance,
         })
         .from(branchLogic)
         .where(
@@ -509,15 +554,18 @@ export async function loadSystemTopology({
         expectedTolerance: t.expectedTolerance,
         stepKind: t.stepKind,
         priority: implicatedPriorities.get(t.id) ?? null,
-        branches: branchRows
-          .filter((b) => b.testActionId === t.id)
-          .map((b) => ({
-            condition: b.condition,
-            verdict: mapDbVerdictToFork(b.verdict),
-            nextAction: b.nextAction,
-            routesToTestActionId: b.routesToTestActionId,
-            reasoning: b.reasoning,
-          })),
+        branches: dedupBranchesByVerdict(
+          branchRows
+            .filter((b) => b.testActionId === t.id)
+            .map((b) => ({
+              condition: b.condition,
+              verdict: mapDbVerdictToFork(b.verdict),
+              nextAction: b.nextAction,
+              routesToTestActionId: b.routesToTestActionId,
+              reasoning: b.reasoning,
+              sourceProvenance: b.sourceProvenance,
+            })),
+        ),
       })),
     pins: pinRows
       .filter((p) => p.componentId === c.id)
