@@ -110,6 +110,9 @@ export type TopologyTestAction = {
   expectedTolerance?: number | null
   /** Step-shape hint (e.g. 'locate'); null when not authored. */
   stepKind?: string | null
+  /** Curator-seeded per-check weight (0-100); 0 when unauthored. INTERNAL ONLY
+   *  (feeds the confidence accumulator); never rendered to the tech. */
+  confidenceBoost: number
   /** symptom_test_implications.priority for the current symptom; null when not implicated. */
   priority?: number | null
   branches: TopologyBranch[]
@@ -381,6 +384,7 @@ export async function loadSystemTopology({
       expectedUnit: testActions.expectedUnit,
       expectedTolerance: testActions.expectedTolerance,
       stepKind: testActions.stepKind,
+      confidenceBoost: testActions.confidenceBoost,
     })
     .from(testActions)
     .where(
@@ -553,6 +557,7 @@ export async function loadSystemTopology({
         expectedUnit: t.expectedUnit,
         expectedTolerance: t.expectedTolerance,
         stepKind: t.stepKind,
+        confidenceBoost: t.confidenceBoost ?? 0,
         priority: implicatedPriorities.get(t.id) ?? null,
         branches: dedupBranchesByVerdict(
           branchRows

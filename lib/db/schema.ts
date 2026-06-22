@@ -987,6 +987,30 @@ export const diagnosticSessions = pgTable(
   ],
 )
 
+// Per-check outcome log for the interactive diagnostic loop. Created in
+// migration 0021_diagnostic_orchestration.sql; registered here so app code can
+// write/query it. One row per confirmed check the tech performs.
+export const techOutcomes = pgTable('tech_outcomes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  testActionId: uuid('test_action_id')
+    .references(() => testActions.id, { onDelete: 'restrict' })
+    .notNull(),
+  sessionId: uuid('session_id')
+    .references(() => diagnosticSessions.id, { onDelete: 'restrict' })
+    .notNull(),
+  shopId: uuid('shop_id')
+    .references(() => shops.id, { onDelete: 'restrict' })
+    .notNull(),
+  techId: uuid('tech_id')
+    .references(() => profiles.id, { onDelete: 'restrict' })
+    .notNull(),
+  measuredValue: real('measured_value'),
+  measuredUnit: text('measured_unit'),
+  measuredObservation: text('measured_observation'),
+  verdict: text('verdict').notNull(),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const componentConnections = pgTable(
   'component_connections',
   {
