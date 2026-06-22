@@ -1,5 +1,6 @@
 import { and, arrayContains, eq, inArray } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
+import { mapDbVerdictToFork } from '@/lib/diagnostics/diagram/verdict-vocab'
 import {
   platforms,
   symptoms,
@@ -512,7 +513,7 @@ export async function loadSystemTopology({
           .filter((b) => b.testActionId === t.id)
           .map((b) => ({
             condition: b.condition,
-            verdict: b.verdict,
+            verdict: mapDbVerdictToFork(b.verdict),
             nextAction: b.nextAction,
             routesToTestActionId: b.routesToTestActionId,
             reasoning: b.reasoning,
