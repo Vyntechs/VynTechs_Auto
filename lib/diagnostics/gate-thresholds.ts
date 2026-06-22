@@ -3,10 +3,12 @@
 // others until field calibration data exists.
 // TODO (post-PR-1): relocate to a symptoms.gate_threshold column or the
 // confidence_calibration table once per-cell calibration data exists.
-
+//
+// Keys use the long-form slugs as stored in the DB (e.g. symptoms.slug),
+// not bare DTC codes.
 const GATE_THRESHOLDS: Record<string, number> = {
-  'p0087': 0.85,
-  'p0088': 0.85,
+  'p0087-fuel-rail-pressure-too-low': 0.85,
+  'p0088-fuel-rail-pressure-too-high': 0.85,
   'no-start-cranks-normally-fuel-system-suspect': 0.85,
 }
 
