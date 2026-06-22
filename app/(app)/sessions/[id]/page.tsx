@@ -13,6 +13,7 @@ import { sessionEvents } from '@/lib/db/schema'
 import { resolveWizardInterception } from '@/lib/flows/interception'
 import { CuratorGuidedWizard } from '@/components/screens/curator-guided-wizard'
 import { loadSystemTopology } from '@/lib/diagnostics/load-system-topology'
+import { loadCachedDiagnostic } from '@/lib/diagnostics/cached-lookup'
 import { layoutTopology } from '@/lib/diagnostics/topology-layout'
 import { TopologyDiagnostic } from '@/components/screens/topology-diagnostic'
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
@@ -101,6 +102,14 @@ export default async function SessionPage({
       sessionId: session.id,
     })
     if (topology) {
+      // Real prior-fix count for the verdict's "N techs confirmed this fix" line
+      // (rendered only when > 0). Same reconciled slug the topology loaded from,
+      // so the count always matches the case on screen.
+      const cached = await loadCachedDiagnostic({
+        db,
+        platformSlug,
+        symptomSlug: reconciledSymptomSlug,
+      })
       return (
         <TopologyDiagnostic
           topology={topology}
@@ -109,6 +118,7 @@ export default async function SessionPage({
           sessionId={session.id}
           symptoms={[{ slug: reconciledSymptomSlug, label: symptomLabel(reconciledSymptomSlug) }]}
           activeSymptomSlug={reconciledSymptomSlug}
+          priorFixCount={cached?.priorFixCount ?? 0}
         />
       )
     }

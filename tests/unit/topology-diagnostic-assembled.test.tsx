@@ -34,6 +34,7 @@ function pressureAction(overrides: Partial<TopologyTestAction> = {}): TopologyTe
     expectedUnit: 'psi',
     expectedTolerance: null,
     stepKind: null,
+    confidenceBoost: 0,
     priority: 1,
     branches: [],
     ...overrides,

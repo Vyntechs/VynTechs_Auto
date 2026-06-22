@@ -926,6 +926,365 @@
   }
 }
 
+/* =============================================================================
+   The elimination loop — current-check console (in the dock), the honest
+   ruled-out line, and the verdict (center stage over the diagram).
+
+   Reuses the established language: mono eyebrows, serif leads, the amber /
+   signal / role-12v semantics already used across the topology UI. The loop is
+   native to the dock, not a bolted-on widget.
+   ============================================================================= */
+
+/* ---- current-check console (lives at the top of the dock) ---------------- */
+.topo__loop-dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-3);
+}
+.topo-loop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--vt-space-4);
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-border);
+  border-left: 3px solid var(--vt-amber-500);
+  border-radius: var(--vt-radius-2);
+  box-shadow: 0 2px 12px color-mix(in oklab, var(--vt-fg), transparent 92%);
+}
+.topo-loop__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vt-amber-600);
+}
+.topo-loop__ask {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-18);
+  line-height: 1.32;
+  color: var(--vt-fg);
+}
+.topo-loop__expect {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--vt-fg-2);
+}
+.topo-loop__expect-label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+
+/* numeric entry — only where the curator authored a threshold */
+.topo-loop__numeric {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.topo-loop__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--vt-bone-50);
+  border: 1.4px solid var(--vt-border);
+  border-radius: var(--vt-radius-1);
+  transition: border-color var(--vt-dur-2) var(--vt-ease);
+}
+.topo-loop__field:focus-within {
+  border-color: var(--vt-signal-500);
+}
+.topo-loop__input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-family: var(--vt-font-mono);
+  font-size: 20px;
+  color: var(--vt-fg);
+}
+.topo-loop__unit {
+  font-family: var(--vt-font-mono);
+  font-size: 13px;
+  color: var(--vt-fg-3);
+}
+
+/* outcome taps — observation steps with no numeric threshold */
+.topo-loop__outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.topo-loop__outcome {
+  padding: 11px 12px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-left-width: 3px;
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-sans);
+  font-size: 13.5px;
+  text-align: left;
+  color: var(--vt-fg);
+  cursor: pointer;
+  transition: background var(--vt-dur-2) var(--vt-ease), border-color var(--vt-dur-2) var(--vt-ease);
+}
+.topo-loop__outcome--pass { border-left-color: var(--role-signal); }
+.topo-loop__outcome--neutral { border-left-color: var(--vt-amber-500); }
+.topo-loop__outcome--fail { border-left-color: var(--role-12v); }
+.topo-loop__outcome--pass:hover {
+  background: color-mix(in oklab, var(--role-signal), transparent 90%);
+  border-color: var(--role-signal);
+}
+.topo-loop__outcome--neutral:hover {
+  background: color-mix(in oklab, var(--vt-amber-500), transparent 88%);
+  border-color: var(--vt-amber-500);
+}
+.topo-loop__outcome--fail:hover {
+  background: color-mix(in oklab, var(--role-12v), transparent 90%);
+  border-color: var(--role-12v);
+}
+.topo-loop__outcome:focus-visible {
+  outline: 2px solid var(--vt-signal-500);
+  outline-offset: 1px;
+}
+
+.topo-loop__record {
+  padding: 11px 14px;
+  background: var(--vt-fg);
+  border: 1px solid var(--vt-fg);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-sans);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--vt-bone-50);
+  cursor: pointer;
+  transition: opacity var(--vt-dur-2) var(--vt-ease);
+}
+.topo-loop__record:hover { opacity: 0.88; }
+.topo-loop__record:disabled {
+  background: var(--vt-bone-200);
+  border-color: var(--vt-rule);
+  color: var(--vt-fg-disabled);
+  cursor: not-allowed;
+}
+
+.topo-loop__skip {
+  align-self: flex-start;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--vt-fg-3);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.topo-loop__skip:hover { color: var(--vt-fg-2); }
+
+/* the honest ruled-out line — appears under the console after a confirmed check */
+.topo-loop__ruled {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  background: color-mix(in oklab, var(--role-signal), transparent 92%);
+  border: 1px solid color-mix(in oklab, var(--role-signal), transparent 70%);
+  border-radius: var(--vt-radius-1);
+  animation: topo-loop-rise var(--vt-dur-3) var(--vt-ease);
+}
+.topo-loop__ruled-mark {
+  flex: none;
+  margin-top: 1px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--role-signal);
+  color: var(--vt-fg-on-signal);
+  font-size: 10px;
+  font-weight: 700;
+}
+.topo-loop__ruled-text {
+  font-family: var(--vt-font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--vt-fg);
+}
+
+/* compact "done" note that replaces the console once the verdict is showing */
+.topo__loop-done {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-border);
+  border-left: 3px solid var(--role-signal);
+  border-radius: var(--vt-radius-2);
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  color: var(--vt-fg-2);
+}
+.topo__loop-done-mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--role-signal);
+  color: var(--vt-fg-on-signal);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@keyframes topo-loop-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* dim the diagram behind the verdict so the card owns the moment */
+.topo__assembled.is-dimmed > .topo__stage {
+  opacity: 0.32;
+  filter: saturate(0.7);
+  transition: opacity var(--vt-dur-3) var(--vt-ease);
+}
+
+/* ---- the verdict (center stage) ----------------------------------------- */
+.topo-verdict {
+  position: absolute;
+  inset: 0;
+  z-index: 8; /* over the dock (4), footer, whole-system pill (2), meter (5) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--vt-space-6);
+  padding-left: calc(var(--topo-dock-w) + var(--vt-space-6));
+  background: color-mix(in oklab, var(--vt-bg), transparent 32%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: topo-verdict-fade var(--vt-dur-3) var(--vt-ease);
+}
+.topo-verdict__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vt-space-3);
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--vt-space-6);
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-border);
+  border-top: 4px solid var(--role-signal);
+  border-radius: var(--vt-radius-3);
+  box-shadow: var(--vt-shadow-sheet, 0 24px 64px color-mix(in oklab, var(--vt-fg), transparent 78%));
+  animation: topo-verdict-rise var(--vt-dur-4) var(--vt-ease);
+}
+.topo-verdict__eyebrow {
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--role-signal);
+}
+.topo-verdict__eyebrow.is-handoff { color: var(--vt-amber-600); }
+.topo-verdict__lead {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-24);
+  line-height: 1.3;
+  color: var(--vt-fg);
+}
+.topo-verdict__action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--vt-bone-50);
+  border: 1px solid var(--vt-rule);
+  border-left: 3px solid var(--vt-signal-500);
+  border-radius: var(--vt-radius-1);
+}
+.topo-verdict__action-label {
+  font-family: var(--vt-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+}
+.topo-verdict__action-text {
+  font-family: var(--vt-font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--vt-fg);
+}
+.topo-verdict__story {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: var(--vt-space-2);
+  border-top: 1px solid var(--vt-rule);
+}
+.topo-verdict__story-line {
+  font-family: var(--vt-font-mono);
+  font-size: 12.5px;
+  color: var(--vt-fg-2);
+}
+.topo-verdict__story-line--social { color: var(--role-signal); }
+.topo-verdict__again {
+  align-self: flex-start;
+  margin-top: var(--vt-space-1);
+  padding: 9px 16px;
+  background: var(--vt-fg);
+  border: 1px solid var(--vt-fg);
+  border-radius: var(--vt-radius-1);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vt-bone-50);
+  cursor: pointer;
+  transition: opacity var(--vt-dur-2) var(--vt-ease);
+}
+.topo-verdict__again:hover { opacity: 0.88; }
+
+@keyframes topo-verdict-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes topo-verdict-rise {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* On mobile the dock is a bottom sheet; the verdict overlay drops its left
+   inset so it centers on the full window. */
+@media (max-width: 1023px) {
+  .topo-verdict { padding-left: var(--vt-space-5); padding-right: var(--vt-space-5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topo-loop__ruled,
+  .topo-verdict,
+  .topo-verdict__card { animation: none; }
+  .topo__assembled.is-dimmed > .topo__stage { transition: none; }
+}
+
 /* Not-found fallback (no topology for this case) — center it in the bare
    full-window root instead of pinning it to the top-left corner. */
 .topo-route > .topo__not-found {

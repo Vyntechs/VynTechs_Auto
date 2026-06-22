@@ -1,23 +1,32 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type {
   SystemTopology,
   TopologyScenario,
   TopologyPin,
   TopologyComponent,
+  TopologyTestAction,
 } from '@/lib/diagnostics/load-system-topology'
 import type { TopologyLayout } from '@/lib/diagnostics/topology-layout'
 import type { ResolvedScene, StepTemplate } from '@/lib/diagnostics/diagram/slot-interface'
 import {
   buildStepSequence,
+  stepReducer,
   stepReducerInit,
   selectCurrentStep,
-  // resolveFork + ForkVerdict are part of the T7 contract this screen owns the
-  // single mapping point for — see the R9 note below. Not called in the v1
-  // render path (no step-navigation UI yet), so not imported until that lands.
+  stepKeyOf,
+  resolveFork,
+  type ForkResolution,
 } from '@/lib/diagnostics/diagram/step-sequence'
+import { verdictFromReading, type ReadingInput } from '@/lib/diagnostics/diagram/verdict-from-reading'
+import { accumulateConfidence } from '@/lib/diagnostics/diagram/confidence'
+import { hasReachedGate } from '@/lib/diagnostics/diagram/verdict-gate'
+import { formatRuledOut } from '@/lib/diagnostics/diagram/progress-line'
+import { ReadingEntry } from '@/components/topology/reading-entry'
+import { ProgressLine } from '@/components/topology/progress-line'
+import { VerdictPanel } from '@/components/topology/verdict-panel'
 import { resolveSlots } from '@/lib/diagnostics/diagram/slot-resolver'
 import { resolveTemplate } from '@/components/diagram-kit/templates/registry'
 import { MeterSheet } from '@/components/diagram-kit/meter-sheet'
@@ -47,30 +56,35 @@ export type StepView =
 export function assembleStepView(
   topology: SystemTopology,
   activeScenario: TopologyScenario | null,
+  step?: TopologyTestAction | null,
 ): StepView {
-  const steps = buildStepSequence(topology)
-  const state = stepReducerInit(steps)
-  const step = selectCurrentStep(state)
-  if (step === null) return { kind: 'empty' }
-  const scene = resolveSlots(topology, step, activeScenario)
+  // When the live loop drives the view it passes the current reducer step. When
+  // `step` is omitted (the original static caller + its test), fall back to the
+  // first step of the sequence — identical behavior to the pre-loop screen.
+  const resolved =
+    step === undefined ? selectCurrentStep(stepReducerInit(buildStepSequence(topology))) : step
+  if (resolved === null) return { kind: 'empty' }
+  const scene = resolveSlots(topology, resolved, activeScenario)
   const Template = resolveTemplate(scene.shape)
   return { kind: 'scene', scene, Template }
 }
 
 /* ---------------------------------------------------------------------------
- * R9 — fork-token bridge discipline (documented; no navigation built in v1).
+ * R9 — fork-token bridge discipline (LIVE as of the loop wiring).
  *
- * v1 has NO step-navigation UI, so resolveFork is intentionally not called in
- * the render path yet. When T6 later routes a fork (a verdict→next-step jump),
- * THIS screen is the single mapping point that owns the token translation:
+ * THIS screen is the single mapping point that owns the verdict-token
+ * translation. In `handleReadingSubmit` we derive a RAW ForkVerdict
+ * ('fail' | 'pass' | 'neutral') via `verdictFromReading` and feed it straight to
+ * `resolveFork` — NEVER the scene VerdictSignal ('branch-fail'). The two
+ * vocabularies must not be conflated: 'branch-fail' is the rendered signal C3
+ * decided; 'fail' is the raw branch.verdict the engine matches on. Mapping
+ * happens here and ONLY here.
  *
- *   resolveFork(step, RAW_BRANCH_VERDICT)   // 'fail' | 'pass' | 'neutral'
- *
- * It feeds resolveFork the RAW branch verdict string ('fail'), NEVER the scene
- * VerdictSignal ('branch-fail'). The two vocabularies must not be conflated:
- * 'branch-fail' is the rendered signal C3 already decided; 'fail' is the raw
- * branch.verdict the engine matches on. Mapping happens here and ONLY here.
- * No dead navigation code is added until the navigation UI exists.
+ * Routing note: `resolveFork` returns `toTestActionId` (a test_actions row id),
+ * but the sequence is keyed by slug (see stepKeyOf), so a `goTo(id)` can't match
+ * today. Almost every seeded branch has a null route and degrades to 'words', so
+ * the honest behavior is to ADVANCE to the next implicated check. When a public
+ * test-action id is surfaced, swap the advance for a `goTo` here.
  * ------------------------------------------------------------------------- */
 
 type Props = {
@@ -82,6 +96,10 @@ type Props = {
   symptoms: { slug: string; label: string }[]
   /** The currently-loaded symptom slug (drives the active pill). */
   activeSymptomSlug: string
+  /** Real count of prior techs who closed this exact case as a confirmed fix.
+   *  Surfaced in the verdict ONLY when > 0; never fabricated. Defaults to 0
+   *  (e.g. the curator preview, which has no session context). */
+  priorFixCount?: number
 }
 
 type SelectionState =
@@ -103,6 +121,7 @@ export function TopologyDiagnostic({
   sessionId,
   symptoms,
   activeSymptomSlug,
+  priorFixCount = 0,
 }: Props) {
   const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
   const [showWholeSystem, setShowWholeSystem] = useState(false)
@@ -132,14 +151,77 @@ export function TopologyDiagnostic({
     [topology, activeScenarioSlug],
   )
 
-  // The assembled view for the current step (T7 → T3 → T4). The current step is
-  // computed silently from the initial sequence state — no "step N of M" UI in
-  // v1 (the current step IS the default view). buildStepSequence +
-  // selectCurrentStep are the genuinely-used T7 surface; a later navigation
-  // track can swap stepReducerInit for a live reducer without re-plumbing.
+  // ---- The live elimination loop -------------------------------------------
+  // The ordered implicated checks (T7), advanced by a live reducer. The current
+  // step drives the assembled scene — there is NO "step N of M"; the current
+  // check IS the view.
+  const steps = useMemo(() => buildStepSequence(topology), [topology])
+  const [stepState, dispatch] = useReducer(stepReducer, steps, stepReducerInit)
+  const currentStep = selectCurrentStep(stepState)
+
+  // Loop state. `confirmedBoosts` feeds the INTERNAL confidence accumulator only
+  // (never rendered). `confirmedCount` is the true count of checks the tech
+  // actually completed — the only number the verdict is allowed to show. A skip
+  // is NOT a confirmed check, so it touches neither.
+  const [confirmedBoosts, setConfirmedBoosts] = useState<number[]>([])
+  const [confirmedCount, setConfirmedCount] = useState(0)
+  const [lastRuledOut, setLastRuledOut] = useState<string | null>(null)
+  // Only ever holds a decisive (matched) resolution — the 'none' case is never
+  // stored, so the verdict can read reasoning/nextActionText without narrowing.
+  const [lastResolution, setLastResolution] = useState<
+    Exclude<ForkResolution, { kind: 'none' }> | null
+  >(null)
+  const [closed, setClosed] = useState(false)
+
+  // INTERNAL ONLY — drives the gate, never shown. (Memory: no-user-facing-confidence.)
+  const gateReached = hasReachedGate(accumulateConfidence(confirmedBoosts), topology.symptom.slug)
+
+  const handleReadingSubmit = useCallback(
+    (input: ReadingInput) => {
+      if (!currentStep || closed) return
+      const verdict = verdictFromReading(input, currentStep)
+      if (verdict === null) return // no reading + no tap → cannot advance honestly
+      const resolution = resolveFork(currentStep, verdict)
+      const nextBoosts = [...confirmedBoosts, currentStep.confidenceBoost]
+      const wasLast = stepState.index >= steps.length - 1
+
+      setConfirmedBoosts(nextBoosts)
+      setConfirmedCount((c) => c + 1)
+      setLastRuledOut(formatRuledOut(resolution))
+      if (resolution.kind !== 'none') setLastResolution(resolution)
+      dispatch({ type: 'advance' }) // route id can't match a slug key today — advance
+
+      // Earn the verdict when internal confidence crosses the gate, or honestly
+      // hand off when the authored checks are exhausted.
+      if (hasReachedGate(accumulateConfidence(nextBoosts), topology.symptom.slug) || wasLast) {
+        setClosed(true)
+      }
+    },
+    [currentStep, closed, confirmedBoosts, stepState.index, steps.length, topology.symptom.slug],
+  )
+
+  const handleSkip = useCallback(() => {
+    if (!currentStep || closed) return
+    // A skip records NO outcome and NO confidence credit — honesty.
+    setLastRuledOut(null)
+    const wasLast = stepState.index >= steps.length - 1
+    dispatch({ type: 'advance' })
+    if (wasLast) setClosed(true)
+  }, [currentStep, closed, stepState.index, steps.length])
+
+  const handleRunAgain = useCallback(() => {
+    setConfirmedBoosts([])
+    setConfirmedCount(0)
+    setLastRuledOut(null)
+    setLastResolution(null)
+    setClosed(false)
+    if (steps.length > 0) dispatch({ type: 'goTo', stepKey: stepKeyOf(steps[0]) })
+  }, [steps])
+
+  // The assembled view for the CURRENT live step (T7 → T3 → T4).
   const stepView = useMemo(
-    () => assembleStepView(topology, activeScenario),
-    [topology, activeScenario],
+    () => assembleStepView(topology, activeScenario, currentStep),
+    [topology, activeScenario, currentStep],
   )
 
   const panelSelection: TopologySelection = useMemo(() => {
@@ -250,7 +332,7 @@ export function TopologyDiagnostic({
             onClearSelection={() => setSelection({ kind: 'empty' })}
           />
         ) : stepView.kind === 'scene' ? (
-          <div className="topo__assembled" ref={assembledRef}>
+          <div className={`topo__assembled${closed ? ' is-dimmed' : ''}`} ref={assembledRef}>
             <div
               className="topo__stage"
               style={{ transform: `scale(${diagramScale})`, transformOrigin: 'top left' }}
@@ -301,6 +383,23 @@ export function TopologyDiagnostic({
         {/* Footer overlays the diagram bottom (CSS: position absolute). On
             mobile it pins to the bottom edge as a collapsible strip. */}
         <CapturedMissingFooter topology={topology} />
+
+        {/* The verdict — center stage over the dimmed diagram when internal
+            confidence earned it (gate) or the authored checks ran out (handoff).
+            True data only; never a percent. */}
+        {closed && !showWholeSystem && (
+          <VerdictPanel
+            mode={gateReached ? 'verdict' : 'handoff'}
+            confirmedCount={confirmedCount}
+            priorFixCount={priorFixCount}
+            direction={
+              lastResolution
+                ? { reasoning: lastResolution.reasoning, nextAction: lastResolution.nextActionText }
+                : null
+            }
+            onRunAgain={handleRunAgain}
+          />
+        )}
       </div>
 
       {/* Floating left control dock — Back, the symptom switch, the
@@ -312,7 +411,7 @@ export function TopologyDiagnostic({
         </Link>
 
         <div className="topo__dock-head">
-          <div className="topo__eyebrow">Electrical topology</div>
+          <div className="topo__eyebrow">Guided diagnostic</div>
           <h1 className="topo__title">
             {formatSymptomTitle(topology.symptom.slug)}
           </h1>
@@ -320,6 +419,28 @@ export function TopologyDiagnostic({
             {vehicleName} · {topology.platform.name}
           </div>
         </div>
+
+        {/* The elimination loop console — the one ask, plus what the last check
+            ruled out. Hidden in the whole-system escape and once the verdict
+            lands (the verdict takes center stage). */}
+        {!showWholeSystem && currentStep && !closed && (
+          <div className="topo__loop-dock">
+            <ReadingEntry
+              key={stepKeyOf(currentStep)}
+              step={currentStep}
+              onSubmit={handleReadingSubmit}
+              onSkip={handleSkip}
+            />
+            <ProgressLine text={lastRuledOut} />
+          </div>
+        )}
+
+        {!showWholeSystem && closed && (
+          <div className="topo__loop-done">
+            <span className="topo__loop-done-mark" aria-hidden="true">✓</span>
+            Diagnosis complete — see the verdict.
+          </div>
+        )}
 
         {symptoms.length > 0 && (
           <nav className="topo__symptoms" aria-label="Symptom">

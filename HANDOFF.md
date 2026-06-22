@@ -1,13 +1,13 @@
-# HANDOFF — Diagnostic loop: engine + data layer BUILT & VERIFIED; next is the LIVE SCREEN (Phase 4)
+# HANDOFF — Diagnostic loop: the LIVE LOOP IS BUILT & BROWSER-VERIFIED (Phases 0–2 + 4 done)
 
 **Last updated:** 2026-06-21
-**Work branch:** `feat/diagnostic-loop` (HEAD `dee5b8f`). All forward work stays here.
-**Nature of this session:** Designed the confidence call (panel-approved), wrote the build plan, and BUILT + verified Phases 0–2 of the diagnostic loop (the engine + data layer). Next session wires the live UI.
+**Work branch:** `feat/diagnostic-loop` (HEAD `dee5b8f` + UNCOMMITTED Phase-4 working tree). All forward work stays here.
+**Nature of this session:** Wired the live elimination loop into the screen (Phase 4, Tasks 10–15) on the pure engine, and browser-verified it end-to-end (pass→verdict and all-skip→handoff). The money shot works. **Phase-4 changes are not yet committed** — awaiting Brandon's go.
 
 ---
 
 ## WHERE WE ARE
-The user-facing interactive diagnostic ("the loop") on the seeded fuel-rail flow (P0087/P0088, 2017–22 Ford 6.7 PSD). The **engine brain + data layer are done and controller-verified**. What remains is **Phase 4 — wiring the live loop into the screen** (the visible money shot). A key finding (below) means the visible loop needs NO database round-trip, so the screen is the immediate next step, unblocked.
+The user-facing interactive diagnostic ("the loop") on the seeded fuel-rail flow (P0087/P0088, 2017–22 Ford 6.7 PSD) is **LIVE and verified**: the tech enters a reading / taps an outcome → the engine derives a verdict → the check is "ruled out" in the curator's own words → the loop advances → at the internal gate (or when the authored checks run out) an honest verdict reveals with the TRUE confirmed-check count. Runs 100% client-side on the pure engine — no DB round-trip. Verified in a real browser on /curator/topology (P0087): 11-check pass run → verdict "Your 11 checks line up"; all-skip run → honest handoff "You completed 0 checks"; NO percent/confidence/compass/fabricated-count anywhere.
 
 ## LOCKED DECISIONS (do not relitigate)
 - **No user-facing confidence.** The number AND the compass are killed for good (Brandon, panel-approved). Confidence is INTERNAL ONLY — the verdict-gate trigger + next-check selector. Tech sees plain words. See memory `no-user-facing-confidence`.
@@ -24,17 +24,18 @@ One elimination at a time; ACCURACY FIRST; confidence internal-only; tech sees a
 - Verified by controller: `npx vitest` 30/30 across new files; `npx tsc` zero errors in touched files; loader wiring inspected; tree clean. Built **inline via TDD** because the Anthropic agent-fleet API was throwing sustained 529s.
 - **Plan:** `docs/superpowers/plans/2026-06-21-diagnostic-loop-fuel-rail.md`. **Ledger:** `.superpowers/sdd/progress.md` (Tasks 1–7 complete).
 
-## IMMEDIATE NEXT STEP — Phase 4: wire the live loop in the UI
-File: `components/screens/topology-diagnostic.tsx` (today renders only step 0, static). Tasks 10–15 in the plan:
-- Replace the static `stepReducerInit` memo with a live `useReducer(stepReducer)`.
-- Reading-entry surface (numeric input where `expectedValue` exists — only the 5V-ref step; tech taps the outcome against the shown expectation for the other 12).
-- Submit handler: `verdictFromReading` → `resolveFork` → dispatch advance/goTo (map the raw fork verdict at the screen, per the R9 single-mapping-point note).
-- Honest progress line (curator's `nextAction`/`reasoning`; **must name what was ruled out, else suppress**).
-- Verdict screen with its story (true confirmed-check count; `priorFixCount` only when >0).
-- Skip-ahead ("I already know it" — advances WITHOUT a confidence boost) + honest hand-off.
-- **Sub-skills:** `frontend-design`, then `verification-before-completion`. Browser verify per memory `local-browser-verification` (Playwright MCP broken locally → drive the bundled chromium via a Node @playwright/test script). Local login per memory `local-dev-login`.
-- The whole loop runs CLIENT-SIDE on the pure engine — **no DB round-trip needed** to function/demo.
-- Task 8 (the `/api/sessions/[id]/scenario` route, currently a silent 404) is a small independent fix that can ride along.
+## WHAT PHASE 4 SHIPPED (uncommitted working tree)
+- New components: `components/topology/{reading-entry,progress-line,verdict-panel}.tsx`; new pure formatter `lib/diagnostics/diagram/progress-line.ts` (`formatRuledOut`, 6/6 tests).
+- `components/screens/topology-diagnostic.tsx`: live `useReducer(stepReducer)`; the loop console lives in the dock (current-check ask + expectation + entry + skip + ruled-out line); the verdict overlays the dimmed canvas center. `assembleStepView` gained an optional 3rd `step` arg (back-compat).
+- `app/(app)/sessions/[id]/page.tsx`: passes real `priorFixCount` from `loadCachedDiagnostic`.
+- CSS appended to `components/topology/topology.css` (`.topo-loop*`, `.topo-verdict*`, dim/animation, reduced-motion).
+- Test fixture fix: added the now-required `confidenceBoost: 0` to `tests/unit/topology-diagnostic-assembled.test.tsx` (pre-existing Task-4 gap).
+
+## IMMEDIATE NEXT STEPS (Phase 4 done — pick up here)
+1. **COMMIT the Phase-4 working tree** (was awaiting Brandon's go at handoff time). Suggested message per the per-task plan cadence.
+2. **Task 8** — port `/api/sessions/[id]/scenario` (currently a silent 404; the screen already POSTs to it fire-and-forget). Small/independent. Reference impl in `.worktrees/6.0-psd-cranks-no-start-seed/app/api/sessions/[id]/scenario/route.ts`.
+3. **Terminal-cause markers (fast-follow):** today the verdict triggers on gate OR sequence-exhaustion only. A crisp "found it on THIS fail" finale needs curator-authored terminal markers (which fail = a confirmed cause vs continue). Same philosophy as the deferred "N causes left" counter — build post-WTP-test.
+4. **`meter_mode` data-quality flag to curator** (`'PSI'`/`'DC volts'` strings vs the `MeterMode` union) — cosmetic; do not silently coerce.
 
 ## PARKED — Brandon-gated decision (Phase 3 Task 9: durable persistence)
 Durable per-check persistence is DEFERRED (not needed for the visible loop). When wired: `tech_outcomes.session_id` FKs to `diagnostic_sessions.id` (migration 0021:249), and `cumulative_confidence` lives there too. `diagnostic_sessions` is created ONLY at close by `lib/diagnostics/record-diagnostic-session.ts` — the row that powers the public **"N techs confirmed this fix"** counter. Persisting mid-loop requires creating that row early AND making close UPDATE the same row (not INSERT a 2nd), or the live counter double-counts. **Touching that live-counter close path needs Brandon's explicit OK.** Any DB test uses the safe in-memory PGlite harness `tests/helpers/db.ts createTestDb()` (NOT the shared cloud DB).
@@ -56,5 +57,5 @@ Symptom slugs are long-form: `p0087-fuel-rail-pressure-too-low`, `p0088-fuel-rai
 
 ## RESUME PROMPT
 ```
-Read HANDOFF.md in full. Branch feat/diagnostic-loop (HEAD dee5b8f). The diagnostic loop's ENGINE + DATA LAYER are BUILT & VERIFIED (Phases 0–2, plan at docs/superpowers/plans/2026-06-21-diagnostic-loop-fuel-rail.md, ledger at .superpowers/sdd/progress.md). NEXT: Phase 4 — wire the LIVE loop into components/screens/topology-diagnostic.tsx (Tasks 10–15): reading entry → verdictFromReading → resolveFork → advance → honest progress line (must name what was ruled out, else suppress) → verdict-with-its-story. The whole loop runs client-side on the pure engine — NO DB round-trip needed. Use frontend-design then verification-before-completion; browser-verify via the bundled chromium Node script (Playwright MCP is broken locally). Constraints: no user-facing confidence number/compass (internal only); zero AI in render; never a fabricated count. DB persistence (Phase 3 Task 9) is PARKED + Brandon-gated (it would touch the close-time code behind the live "N techs confirmed" counter). If building via the agent fleet, confirm the Anthropic API 529 outage has cleared; else build inline via TDD.
+Read HANDOFF.md in full. Branch feat/diagnostic-loop. The diagnostic loop is BUILT & BROWSER-VERIFIED end-to-end (Phases 0–2 engine/data committed at HEAD dee5b8f; Phase 4 live UI in the UNCOMMITTED working tree). Plan: docs/superpowers/plans/2026-06-21-diagnostic-loop-fuel-rail.md; ledger: .superpowers/sdd/progress.md. The loop runs client-side on the pure engine (no DB round-trip): reading entry → verdictFromReading → resolveFork → advance → honest ruled-out line (curator reasoning, suppressed if absent) → verdict with the TRUE confirmed-check count. Verified on /curator/topology P0087 (pass→verdict, all-skip→handoff); no percent/confidence/compass/fabricated-count. NEXT: (1) commit the Phase-4 working tree; (2) Task 8 scenario route (silent 404); (3) curator-authored terminal-cause markers as a fast-follow; (4) flag meter_mode data-quality to curator. PARKED + Brandon-gated: Phase 3 Task 9 DB persistence (touches the close-time code behind the live "N techs confirmed" counter). Browser-verify via the bundled chromium headless-shell Node script — GLOB the ms-playwright cache for whatever chromium_headless_shell-<N> exists (the @playwright/test default version drifts); memory local-browser-verification.
 ```
