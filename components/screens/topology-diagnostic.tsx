@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useMemo, useReducer, useState } from 'react'
 import type {
   SystemTopology,
   TopologyScenario,
@@ -9,7 +9,11 @@ import type {
   TopologyComponent,
   TopologyTestAction,
 } from '@/lib/diagnostics/load-system-topology'
-import type { TopologyLayout } from '@/lib/diagnostics/topology-layout'
+import { layoutTopology, type TopologyLayout } from '@/lib/diagnostics/topology-layout'
+import {
+  buildFocusedSlice,
+  focusComponentIdForStep,
+} from '@/lib/diagnostics/diagram/focused-slice'
 import type { ResolvedScene, StepTemplate } from '@/lib/diagnostics/diagram/slot-interface'
 import {
   buildStepSequence,
@@ -125,8 +129,6 @@ export function TopologyDiagnostic({
 }: Props) {
   const [selection, setSelection] = useState<SelectionState>({ kind: 'empty' })
   const [showWholeSystem, setShowWholeSystem] = useState(false)
-  const assembledRef = useRef<HTMLDivElement>(null)
-  const [diagramScale, setDiagramScale] = useState(1)
   const [activeScenarioSlug, setActiveScenarioSlug] = useState<string | null>(
     () => defaultScenarioSlug(topology.scenarios, topology.lastScenarioSlug),
   )
@@ -218,11 +220,32 @@ export function TopologyDiagnostic({
     if (steps.length > 0) dispatch({ type: 'goTo', stepKey: stepKeyOf(steps[0]) })
   }, [steps])
 
-  // The assembled view for the CURRENT live step (T7 → T3 → T4).
+  // The assembled view for the CURRENT live step (T7 → T3 → T4). KEPT solely
+  // for (a) the MeterSheet gauge spec and (b) the genuine empty-state probe —
+  // the per-step CANVAS now renders the focused WIRED slice below, not the
+  // scaled template stage.
   const stepView = useMemo(
     () => assembleStepView(topology, activeScenario, currentStep),
     [topology, activeScenario, currentStep],
   )
+
+  // The FOCUSED, still-wired slice for the current step: the part being checked
+  // lit up, its immediate circuit context dimmed around it. Depth 2 is used (not
+  // 1): depth 1 often yields a 1–2-node stub (a sensor/actuator wired only to
+  // the PCM hub) that still reads as "broken". Depth 2 always renders a real,
+  // legibly wired circuit with the focus clearly ringed; on a hub-dense system
+  // like P0087 fuel it can reach ~14–17 nodes (the PCM connects to everything),
+  // which fitView still frames cleanly. Reuses the whole-system React-Flow
+  // renderer via <TopologyDiagram>.
+  const SLICE_DEPTH = 2
+  const focus = useMemo(() => {
+    if (!currentStep) return null
+    const focusId = focusComponentIdForStep(topology, currentStep)
+    if (!focusId) return null
+    const slice = buildFocusedSlice(topology, focusId, SLICE_DEPTH)
+    if (slice.components.length === 0) return null
+    return { focusId, slice, layout: layoutTopology(slice) }
+  }, [topology, currentStep])
 
   const panelSelection: TopologySelection = useMemo(() => {
     if (selection.kind === 'empty') return { kind: 'empty' }
@@ -255,18 +278,10 @@ export function TopologyDiagnostic({
     return { kind: 'empty' }
   }, [selection, componentById, connectionById, pinById, activeScenario])
 
-  // Free selection KEPT: tapping any shown element resolves it to the right
-  // selection kind by looking it up in the loaded graph (component first, then
-  // pin, then connection). Routes by id, never by part kind — scalability-safe.
-  const handleInspect = useCallback(
-    (partId: string) => {
-      if (componentById.has(partId)) setSelection({ kind: 'component', id: partId })
-      else if (pinById.has(partId)) setSelection({ kind: 'pin', id: partId })
-      else if (connectionById.has(partId)) setSelection({ kind: 'connection', id: partId })
-    },
-    [componentById, pinById, connectionById],
-  )
-
+  // Free selection KEPT: tapping any part/pin in the focused (or whole-system)
+  // graph resolves it via the same onSelect handlers wired into both
+  // <TopologyDiagram> renders, which set `selection` directly — opening the
+  // detail panel. Routes by id, never by part kind — scalability-safe.
   const diagramSelection: TopologySelectionState = useMemo(() => {
     if (selection.kind === 'empty') return { kind: 'empty', activeScenarioSlug }
     return { kind: selection.kind, id: selection.id, activeScenarioSlug }
@@ -293,29 +308,6 @@ export function TopologyDiagnostic({
     [persistScenario],
   )
 
-  const selectedPartId =
-    selection.kind === 'component' || selection.kind === 'pin'
-      ? selection.id
-      : null
-
-  // Zoom-to-fit: the templates draw on a fixed 1320×760 stage; scale that stage
-  // to the host width so the whole diagram fits on screen (the "settleCamera"
-  // port the templates declared a framing hint for, computed here since CSS
-  // cannot derive a unitless scale from a container width).
-  const STAGE_W = 1320
-  useEffect(() => {
-    const el = assembledRef.current
-    if (!el) return
-    const update = () => {
-      const w = el.clientWidth
-      if (w > 0) setDiagramScale(w / STAGE_W)
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [stepView.kind, showWholeSystem])
-
   return (
     <div className="topo">
       {/* The canvas fills the entire window; every control floats over it. */}
@@ -331,18 +323,21 @@ export function TopologyDiagnostic({
             onSelectPin={(id) => setSelection({ kind: 'pin', id })}
             onClearSelection={() => setSelection({ kind: 'empty' })}
           />
-        ) : stepView.kind === 'scene' ? (
-          <div className={`topo__assembled${closed ? ' is-dimmed' : ''}`} ref={assembledRef}>
-            <div
-              className="topo__stage"
-              style={{ transform: `scale(${diagramScale})`, transformOrigin: 'top left' }}
-            >
-              <stepView.Template
-                scene={stepView.scene}
-                onInspect={handleInspect}
-                selectedPartId={selectedPartId}
-              />
-            </div>
+        ) : focus ? (
+          // Per-step view: the FOCUSED, WIRED slice of the real circuit — the
+          // part being checked lit up, neighbors dimmed — rendered by the same
+          // React-Flow renderer as the whole-system view. tap-to-inspect reuses
+          // the same selection handlers.
+          <div className={`topo__assembled${closed ? ' is-dimmed' : ''}`}>
+            <TopologyDiagram
+              topology={focus.slice}
+              layout={focus.layout}
+              selection={diagramSelection}
+              focusedComponentId={focus.focusId}
+              onSelectComponent={(id) => setSelection({ kind: 'component', id })}
+              onSelectPin={(id) => setSelection({ kind: 'pin', id })}
+              onClearSelection={() => setSelection({ kind: 'empty' })}
+            />
           </div>
         ) : (
           <div className="topo__no-plan">

@@ -21,7 +21,7 @@ const EDGE_TO_POSITION: Record<TopologyPin['edge'], Position> = {
  * lines, mechanical linkages route by component, not pin).
  */
 export function TopologyNode({ data }: NodeProps<TopologyFlowNode>) {
-  const { component, pins, selected, selectedPinId } = data
+  const { component, pins, selected, selectedPinId, isFocused, isDimmed } = data
   const { onSelectPin, onSelectComponent } = useTopologySelection()
 
   const byEdge: Record<TopologyPin['edge'], TopologyPin[]> = {
@@ -45,7 +45,7 @@ export function TopologyNode({ data }: NodeProps<TopologyFlowNode>) {
     <div
       className={`topo-node topo-node--${component.kind}${
         selected ? ' is-selected' : ''
-      }`}
+      }${isFocused ? ' is-focus' : ''}${isDimmed ? ' is-dim' : ''}`}
       aria-label={`${component.kind} ${component.name}`}
     >
       {/* Legacy top/bottom handles — for non-pin connections */}
@@ -82,6 +82,16 @@ export function TopologyNode({ data }: NodeProps<TopologyFlowNode>) {
                 <Handle
                   id={pin.id}
                   type="source"
+                  position={EDGE_TO_POSITION[edge]}
+                  className="topo-pin-handle"
+                  isConnectable={false}
+                />
+                {/* Co-located target handle (same id + position) so wires whose
+                    toPinId points at this pin can land — fixes React Flow
+                    error #008 "Couldn't create edge" dangling-edge warnings. */}
+                <Handle
+                  id={pin.id}
+                  type="target"
                   position={EDGE_TO_POSITION[edge]}
                   className="topo-pin-handle"
                   isConnectable={false}

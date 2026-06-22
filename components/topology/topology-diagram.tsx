@@ -37,6 +37,9 @@ type Props = {
   onSelectComponent: (componentId: string) => void
   onSelectPin: (pinId: string) => void
   onClearSelection: () => void
+  /** When set, that part lights up and the rest dim (focused-slice mode).
+   *  Undefined → whole-system mode, unchanged behavior. */
+  focusedComponentId?: string
 }
 
 /**
@@ -52,10 +55,11 @@ export function TopologyDiagram({
   onSelectComponent,
   onSelectPin,
   onClearSelection,
+  focusedComponentId,
 }: Props) {
   const { nodes, edges } = useMemo(
-    () => toFlowElements(topology, layout, selection),
-    [topology, layout, selection],
+    () => toFlowElements(topology, layout, selection, focusedComponentId),
+    [topology, layout, selection, focusedComponentId],
   )
 
   // Component clicks come through React Flow's onNodeClick (delegated at the

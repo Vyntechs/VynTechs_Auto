@@ -207,7 +207,7 @@ describe('TopologyDiagnostic — assembled screen', () => {
     expect(headline?.textContent ?? '').toMatch(/no test plan captured for this code yet/i)
   })
 
-  it('tapping a scene element opens the detail panel (free selection KEPT)', () => {
+  it('tapping a part in the focused circuit opens the detail panel (free selection KEPT)', () => {
     const topo = fuelPressureTopology()
     render(
       <TopologyDiagnostic
@@ -219,14 +219,17 @@ describe('TopologyDiagnostic — assembled screen', () => {
         activeSymptomSlug=""
       />,
     )
-    // The template exposes a tappable region per scene element via onInspect;
-    // the screen wires it to selection. Tap the first inspectable element whose
-    // id is a real component (so the lookup resolves to a panel selection).
-    const inspectable = document.querySelector('[data-inspect-part-id="c-pump"]')
-    expect(inspectable).not.toBeNull()
-    fireEvent.click(inspectable as Element)
+    // The per-step view now renders the focused, wired circuit via the same
+    // React-Flow renderer as the whole-system view. Tapping the part node wires
+    // selection through onNodeClick -> onSelectComponent. The React Flow node
+    // carries the component's aria-label from <TopologyNode>.
+    const node = document
+      .querySelector('[aria-label="pump CP4 Pump"]')
+      ?.closest<HTMLElement>('.react-flow__node')
+    expect(node).not.toBeNull()
+    fireEvent.click(node as Element)
     // The panel resolves the tapped component and shows its name — proving the
-    // template->screen tap bridge wired the selection, not just that the aside
+    // node->screen tap bridge wired the selection, not just that the aside
     // exists (the aside is always mounted).
     const panel = document.querySelector('.topo-panel.is-open')
     expect(panel).not.toBeNull()

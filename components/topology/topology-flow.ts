@@ -13,6 +13,10 @@ export type TopologyNodeData = {
   pins: TopologyPin[]
   selected: boolean
   selectedPinId: string | null
+  /** Focused-slice emphasis: the part the current step is checking. */
+  isFocused?: boolean
+  /** Focused-slice emphasis: a neighbor that is shown but de-emphasized. */
+  isDimmed?: boolean
 }
 
 export type TopologyEdgeData = {
@@ -43,6 +47,7 @@ export function toFlowElements(
   topology: SystemTopology,
   layout: TopologyLayout,
   selection: TopologySelectionState,
+  focusedComponentId?: string,
 ): { nodes: TopologyFlowNode[]; edges: TopologyFlowEdge[] } {
   const positionById = new Map(layout.nodes.map((n) => [n.id, n]))
 
@@ -58,6 +63,11 @@ export function toFlowElements(
 
   const nodes: TopologyFlowNode[] = topology.components.map((component) => {
     const pos = positionById.get(component.id)
+    // Focused-slice emphasis: the focus part lights up, every other part dims.
+    // When focusedComponentId is undefined (whole-system mode) both stay false
+    // and behavior is unchanged.
+    const isFocused = focusedComponentId != null && component.id === focusedComponentId
+    const isDimmed = focusedComponentId != null && component.id !== focusedComponentId
     return {
       id: component.id,
       type: 'topology',
@@ -67,6 +77,8 @@ export function toFlowElements(
         pins: component.pins,
         selected: selectedComponentId === component.id,
         selectedPinId,
+        isFocused,
+        isDimmed,
       },
     }
   })
@@ -96,11 +108,22 @@ export function toFlowElements(
     // Electrical → custom wire edge with scenario-driven state
     const drivingPinId = connection.fromPinId ?? connection.toPinId
     const wireState = drivingPinId ? pinStates[drivingPinId] : undefined
+    // Focused-slice emphasis: a wire touching the focus part lights up; the
+    // others dim. Reuses the existing isActive/isDim mechanism (same as the
+    // selected-pin highlight). selected-pin highlighting takes precedence when
+    // a pin is selected; focus emphasis applies otherwise.
+    const touchesFocus =
+      focusedComponentId != null &&
+      (connection.fromComponentId === focusedComponentId ||
+        connection.toComponentId === focusedComponentId)
     const isActive =
-      selectedPinId != null &&
-      (connection.fromPinId === selectedPinId ||
-        connection.toPinId === selectedPinId)
-    const isDim = selectedPinId != null && !isActive
+      (selectedPinId != null &&
+        (connection.fromPinId === selectedPinId ||
+          connection.toPinId === selectedPinId)) ||
+      (selectedPinId == null && touchesFocus)
+    const isDim =
+      (selectedPinId != null && !isActive) ||
+      (selectedPinId == null && focusedComponentId != null && !touchesFocus)
 
     return {
       id: connection.id,

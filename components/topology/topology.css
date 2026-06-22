@@ -29,7 +29,8 @@
   position: absolute;
   inset: 0;
 }
-.topo__canvas-wrap > .topo__canvas {
+.topo__canvas-wrap > .topo__canvas,
+.topo__assembled > .topo__canvas {
   position: absolute;
   inset: 0;
 }
@@ -167,6 +168,17 @@
 .topo-node.is-selected {
   border-color: var(--vt-amber-500);
   border-width: 2px;
+}
+/* Focused-slice emphasis (structure phase — NOT the dark skin). The focus part
+   gets a clear ring; the neighbors fade back so the eye lands on the part being
+   checked. Consistent with the .is-selected amber emphasis above. */
+.topo-node.is-focus {
+  border-color: var(--vt-amber-500);
+  border-width: 2px;
+  box-shadow: 0 0 0 3px var(--vt-amber-200), var(--vt-shadow-pop);
+}
+.topo-node.is-dim {
+  opacity: 0.3;
 }
 .topo-node--mechanical {
   background: var(--vt-bone-100);
@@ -1161,7 +1173,7 @@
 }
 
 /* dim the diagram behind the verdict so the card owns the moment */
-.topo__assembled.is-dimmed > .topo__stage {
+.topo__assembled.is-dimmed > .topo__canvas {
   opacity: 0.32;
   filter: saturate(0.7);
   transition: opacity var(--vt-dur-3) var(--vt-ease);
@@ -1282,7 +1294,7 @@
   .topo-loop__ruled,
   .topo-verdict,
   .topo-verdict__card { animation: none; }
-  .topo__assembled.is-dimmed > .topo__stage { transition: none; }
+  .topo__assembled.is-dimmed > .topo__canvas { transition: none; }
 }
 
 /* Not-found fallback (no topology for this case) — center it in the bare
