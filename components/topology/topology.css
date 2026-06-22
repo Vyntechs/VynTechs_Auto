@@ -14,13 +14,116 @@
   /* The curator shell adds `.vt-main > * { padding: 24px 28px }` to every page
      wrapper; this route must escape it to reach the window edges. */
   padding: 0 !important;
-  background: var(--vt-bg);
+  /* The dark instrument bg — kept literal here because the .topo --vt-bg
+     override below does not cascade UP to this parent. */
+  background: #0e1116;
 }
 .topo {
   --topo-dock-w: clamp(248px, 24vw, 300px);
   position: absolute;
   inset: 0;
+
+  /* =========================================================================
+     DARK "instrument-mode" skin — SCOPED TO .topo ONLY.
+
+     The rest of the app keeps its warm "bone" identity (globals.css :root is
+     untouched). Here we define the founder's dark "pro scanner" palette as
+     --instr- tokens, then RE-POINT the --vt- and --role- tokens the topology
+     rules already consume to the dark values — so every existing
+     var(--vt-surface), var(--vt-fg), etc. resolves dark inside this screen with
+     no per-rule rewrite. Leaving .topo flips the whole screen back to bone.
+     ========================================================================= */
+
+  /* surfaces */
+  --instr-bg:        #0e1116;  /* app / canvas background */
+  --instr-surface:   #12161c;  /* diagram surface */
+  --instr-node:      #1c232c;  /* node fill */
+  --instr-reading:   #212832;  /* "reading" fill */
+  --instr-border:    #333c48;  /* hairline border */
+  --instr-edge:      #2a323d;  /* sheet / raised edge */
+
+  /* semantic */
+  --instr-accent:    #3b9eff;  /* active / primary (blue) */
+  --instr-success:   #4cce87;  /* pass / green */
+  --instr-fault:     #ff5c54;  /* fault / red */
+  --instr-warning:   #fabf4d;  /* warning / amber */
+  --instr-wire:      #8c99a8;  /* neutral wire grey */
+
+  /* text */
+  --instr-text:      #f2f5f7;  /* primary */
+  --instr-text-2:    #98a4b3;  /* secondary */
+  --instr-text-3:    #6b7585;  /* muted */
+
+  /* glows */
+  --instr-glow-blue: 0 0 10px 1px rgba(59, 158, 255, 0.6);
+  --instr-glow-red:  0 0 10px 1px rgba(255, 92, 84, 0.6);
+
+  /* ---- re-point the app tokens this screen consumes to the dark palette ---- */
+  --vt-bg:           var(--instr-bg);
+  --vt-surface:      var(--instr-surface);
+  --vt-surface-2:    var(--instr-edge);
+  --vt-surface-3:    var(--instr-border);
+  --vt-bone-50:      var(--instr-node);
+  --vt-bone-100:     var(--instr-edge);
+  --vt-bone-200:     var(--instr-edge);
+  --vt-bone-400:     var(--instr-border);
+
+  --vt-fg:           var(--instr-text);
+  --vt-fg-2:         var(--instr-text-2);
+  --vt-fg-3:         var(--instr-text-3);
+  --vt-fg-disabled:  var(--instr-text-3);
+  --vt-fg-on-signal: var(--instr-bg);
+
+  --vt-rule:         var(--instr-border);
+  --vt-rule-strong:  var(--instr-border);
+  --vt-border:       var(--instr-border);
+
+  /* accent + brand signals → instrument blue/green/amber */
+  --vt-signal-400:   var(--instr-accent);
+  --vt-signal-500:   var(--instr-accent);
+  --vt-signal-600:   var(--instr-accent);
+  --vt-amber-200:    color-mix(in srgb, var(--instr-warning), transparent 78%);
+  --vt-amber-400:    var(--instr-warning);
+  --vt-amber-500:    var(--instr-warning);
+  --vt-amber-600:    var(--instr-warning);
+  --vt-focus-ring:   var(--instr-accent);
+
+  /* wire roles recolored to the schematic palette */
+  --role-signal:     var(--instr-accent);   /* signal = blue */
+  --role-5v-ref:     var(--instr-accent);
+  --role-low-ref:    var(--instr-wire);
+  --role-pwm:        #b18cff;                /* pwm = violet, kept distinct on dark */
+  --role-12v:        var(--instr-fault);     /* power / hot = red */
+  --role-ground:     var(--instr-wire);      /* ground = grey */
+  --role-fuel:       var(--instr-success);   /* fuel / fluid = green */
+
+  /* React-Flow chrome → dark (canvas dots, controls, edges, handles) */
+  --xy-background-pattern-dots-color: #232b35;
+  --xy-background-color: var(--instr-bg);
+  --xy-controls-button-background-color: var(--instr-node);
+  --xy-controls-button-background-color-hover: var(--instr-edge);
+  --xy-controls-button-color: var(--instr-text-2);
+  --xy-controls-button-color-hover: var(--instr-text);
+  --xy-controls-button-border-color: var(--instr-border);
+  --xy-controls-box-shadow: 0 0 0 1px var(--instr-border);
+  --xy-edge-stroke: var(--instr-wire);
+  --xy-edge-stroke-selected: var(--instr-accent);
+
   background: var(--vt-bg);
+  font-family: var(--vt-font-sans);
+  color: var(--vt-fg);
+}
+
+/* No serif in the instrument skin — chrome uses Inter Tight, readings/values
+   use JetBrains Mono. Override the few serif leads the topology rules set. */
+.topo .topo__title,
+.topo .topo-node__name,
+.topo .topo-panel__title,
+.topo .topo-panel__empty,
+.topo .topo-loop__ask,
+.topo .topo-verdict__lead,
+.topo .topo__no-plan-title {
+  font-family: var(--vt-font-sans);
 }
 
 /* Canvas wrapper fills the window; it is the positioning context for every
@@ -136,7 +239,7 @@
 /* ---- canvas --------------------------------------------------------- */
 .topo__canvas {
   min-height: 0;
-  background: var(--vt-bone-100);
+  background: var(--instr-surface);
   overflow: hidden;
 }
 .topo__canvas .react-flow__attribution { display: none; }
@@ -148,49 +251,67 @@
   right: var(--vt-space-4);
   bottom: calc(var(--vt-space-4) + 52px);
 }
+/* React-Flow control buttons: dark instrument chrome so the +/-/fit cluster
+   never flashes white. The --xy-* overrides on .topo handle the surface; this
+   ensures the glyph SVGs and dividers read on dark too. */
+.topo__canvas .react-flow__controls-button {
+  border-bottom-color: var(--instr-border);
+}
+.topo__canvas .react-flow__controls-button svg { fill: var(--instr-text-2); }
+.topo__canvas .react-flow__controls-button:hover svg { fill: var(--instr-text); }
 
-/* ---- node ----------------------------------------------------------- */
+/* ---- node (dark instrument faceplate) ------------------------------- */
 .topo-node {
   width: 210px;
   height: 86px;
   box-sizing: border-box;
-  padding: 10px 12px;
+  padding: 10px 13px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--vt-bone-50);
-  border: 1.4px solid var(--vt-fg);
-  border-radius: var(--vt-radius-1);
+  background: var(--instr-node);
+  border: 1px solid var(--instr-border);
+  /* Instrument cards use a softer radius than the app's tight default. */
+  border-radius: 12px;
   cursor: pointer;
-  transition: box-shadow var(--vt-dur-2) var(--vt-ease);
+  transition:
+    box-shadow var(--vt-dur-2) var(--vt-ease),
+    border-color var(--vt-dur-2) var(--vt-ease),
+    opacity var(--vt-dur-2) var(--vt-ease);
 }
-.topo-node:hover { box-shadow: var(--vt-shadow-pop); }
+.topo-node:hover {
+  border-color: var(--instr-text-3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
 .topo-node.is-selected {
-  border-color: var(--vt-amber-500);
-  border-width: 2px;
+  border-color: var(--instr-warning);
+  border-width: 1.5px;
 }
-/* Focused-slice emphasis (structure phase — NOT the dark skin). The focus part
-   gets a clear ring; the neighbors fade back so the eye lands on the part being
-   checked. Consistent with the .is-selected amber emphasis above. */
+/* Focused-slice emphasis — THE HERO. The checked part lights up: accent-blue
+   border + the blue glow. Neighbors recede (.is-dim). */
 .topo-node.is-focus {
-  border-color: var(--vt-amber-500);
-  border-width: 2px;
-  box-shadow: 0 0 0 3px var(--vt-amber-200), var(--vt-shadow-pop);
+  background: var(--instr-reading);
+  border-color: var(--instr-accent);
+  border-width: 1.5px;
+  box-shadow: var(--instr-glow-blue);
+  animation: topo-node-pulse 2.4s var(--vt-ease-instrument) infinite;
 }
 .topo-node.is-dim {
-  opacity: 0.3;
+  opacity: 0.4;
 }
 .topo-node--mechanical {
-  background: var(--vt-bone-100);
+  background: var(--instr-surface);
   border-style: dashed;
-  border-color: var(--vt-bone-400);
+  border-color: var(--instr-border);
 }
 .topo-node--splice,
 .topo-node--connector { border-radius: var(--vt-radius-3); }
 .topo-node__name {
-  font-family: var(--vt-font-serif);
-  font-size: 15px;
-  color: var(--vt-fg);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--instr-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -200,15 +321,27 @@
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--vt-fg-3);
+  color: var(--instr-text-3);
 }
 .topo-node__loc {
   font-family: var(--vt-font-mono);
   font-size: 9px;
-  color: var(--vt-fg-3);
+  color: var(--instr-text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The focus glow gently pulses; reduced-motion gets a static glow only. */
+@keyframes topo-node-pulse {
+  0%, 100% { box-shadow: 0 0 8px 0 rgba(59, 158, 255, 0.45); }
+  50%      { box-shadow: 0 0 14px 2px rgba(59, 158, 255, 0.7); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topo-node.is-focus {
+    animation: none;
+    box-shadow: var(--instr-glow-blue);
+  }
 }
 .topo-node__gap {
   font-family: var(--vt-font-mono);
@@ -223,16 +356,19 @@
   pointer-events: none;
 }
 
-/* ---- edges (connection_kind palette, spec D4) ----------------------- */
-.topo-edge .react-flow__edge-path { stroke-width: 2; }
-.topo-edge.is-selected .react-flow__edge-path { stroke-width: 3.5; }
-.topo-edge--electrical-wire .react-flow__edge-path { stroke: var(--vt-elem-voltage); }
-.topo-edge--fluid-line .react-flow__edge-path { stroke: var(--vt-elem-fuel); }
-.topo-edge--mechanical-linkage .react-flow__edge-path { stroke: var(--vt-elem-mech); }
-.topo-edge--can-bus .react-flow__edge-path { stroke: var(--vt-signal-500); }
-.topo-edge--lin-bus .react-flow__edge-path { stroke: var(--vt-signal-600); }
-.topo-edge--controlled_by .react-flow__edge-path { stroke: var(--vt-graphite-600); }
-.topo-edge--reports_to .react-flow__edge-path { stroke: var(--vt-graphite-500); }
+/* ---- edges (connection_kind palette, spec D4) — recolored for dark ---- */
+.topo-edge .react-flow__edge-path {
+  stroke-width: 2;
+  opacity: 0.5; /* non-electrical lines read at a calm level on the dark canvas */
+}
+.topo-edge.is-selected .react-flow__edge-path { stroke-width: 3.5; opacity: 1; }
+.topo-edge--electrical-wire .react-flow__edge-path { stroke: var(--instr-accent); }
+.topo-edge--fluid-line .react-flow__edge-path { stroke: var(--instr-success); }
+.topo-edge--mechanical-linkage .react-flow__edge-path { stroke: var(--instr-warning); }
+.topo-edge--can-bus .react-flow__edge-path { stroke: var(--instr-accent); }
+.topo-edge--lin-bus .react-flow__edge-path { stroke: var(--instr-accent); }
+.topo-edge--controlled_by .react-flow__edge-path { stroke: var(--instr-wire); }
+.topo-edge--reports_to .react-flow__edge-path { stroke: var(--instr-wire); }
 
 /* ---- detail panel --------------------------------------------------- */
 /* On-demand inspector: hidden (slid off the right edge) until a part is
@@ -378,6 +514,9 @@
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  /* On the dark canvas inactive wires read at a low ember like the Figma; the
+     focused/active wire below pulls itself to full strength + glow. */
+  opacity: 0.34;
   transition:
     stroke-width var(--vt-dur-2) var(--vt-ease),
     opacity var(--vt-dur-2) var(--vt-ease);
@@ -406,9 +545,10 @@
 
 .wire.is-active {
   stroke-width: 3.5;
-  filter: drop-shadow(0 0 6px currentColor);
+  opacity: 1;
+  filter: drop-shadow(0 0 7px currentColor) drop-shadow(0 0 3px currentColor);
 }
-.wire.dim { opacity: 0.25; }
+.wire.dim { opacity: 0.18; }
 
 @keyframes flow {
   to { stroke-dashoffset: -16; }
@@ -443,28 +583,35 @@
   justify-content: center;
   min-width: 32px; /* mobile hit-target floor per spec §6 */
   min-height: 28px;
-  padding: 2px 4px;
-  background: var(--vt-bone-50);
-  border: 0.6px solid var(--vt-fg-2);
-  border-radius: 1.5px;
+  padding: 2px 5px;
+  /* small dark instrument chip */
+  background: var(--instr-edge);
+  border: 0.6px solid var(--instr-border);
+  border-radius: 4px;
   font-family: var(--vt-font-mono);
   font-size: 8.5px;
   line-height: 1;
-  color: var(--vt-fg);
+  color: var(--instr-text-2);
   cursor: pointer;
   transition:
     background var(--vt-dur-2) var(--vt-ease),
-    border-color var(--vt-dur-2) var(--vt-ease);
+    border-color var(--vt-dur-2) var(--vt-ease),
+    color var(--vt-dur-2) var(--vt-ease);
 }
 .topo-pin:hover,
 .topo-pin:focus-visible {
-  background: var(--vt-amber-400);
+  background: var(--instr-reading);
+  border-color: var(--instr-accent);
+  color: var(--instr-text);
   outline: none;
 }
+.topo-pin:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 158, 255, 0.5);
+}
 .topo-pin.is-selected {
-  background: var(--vt-amber-500);
-  border-color: var(--vt-amber-500);
-  color: var(--vt-bone-50);
+  background: var(--instr-warning);
+  border-color: var(--instr-warning);
+  color: var(--instr-bg);
 }
 .topo-pin__role {
   font-weight: 600;
@@ -857,7 +1004,7 @@
      scale from a width). A wider window therefore renders a bigger diagram. */
   position: absolute;
   inset: 0;
-  background: var(--vt-bone-100);
+  background: var(--instr-surface);
   overflow: hidden;
 }
 /* The fixed 1320×760 drawing stage; transform: scale(...) is applied inline by
@@ -924,6 +1071,23 @@
   line-height: 1.55;
   color: var(--vt-fg-3);
 }
+
+/* MeterSheet / Meter dark overrides (scoped to .topo — the meter only ever
+   mounts inside this screen). The Meter consumes --vt-* tokens, which are
+   already re-pointed dark above; these few rules kill the white inset
+   highlights and gradients ported from the bone prototype so nothing flashes. */
+.topo .meter-card,
+.topo .meter-sheet {
+  background: var(--instr-surface);
+  box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.45);
+}
+.topo .meter-card::before { background: var(--instr-border); }
+.topo .meter-card .m-plate {
+  background: var(--instr-reading);
+  border-color: var(--instr-border);
+  box-shadow: none;
+}
+.topo .meter-sheet__grabber::after { background: var(--instr-text-3); }
 
 /* The MeterSheet (gauge scenes only) floats bottom-right on desktop, above the
    captured/missing strip; on mobile its own bottom-sheet rules (diagram-mobile
