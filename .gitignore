@@ -80,3 +80,7 @@ skills/
 
 # Visual brainstorming companion (skill: superpowers:brainstorming)
 .superpowers/
+
+# internal ops/session notes — never publish in this repo
+HANDOFF.md
+/tasks/
