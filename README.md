@@ -4,6 +4,14 @@ An AI diagnostic copilot for the auto repair bay. A tech enters a vehicle and a 
 
 Built for independent shops. Billed per shop, one subscription per tenant.
 
+**Live in production** — used by real repair shops, with real Stripe billing and paid diagnostic sessions.
+
+Built by a diagnostic tech, for diagnostic shops. I didn't go to college — I went under cars. Diagnostics since 14, professionally since 2016. I know what a wrong answer costs in a real bay, so I built the tool to measure its own confidence before it ever opens its mouth.
+
+<p align="center">
+  <img src="public/marketing/screenshots/hero.png" alt="A live diagnostic in VynTechs_Auto — active step, risk class, and a calibrated confidence gate" width="320">
+</p>
+
 ## The problem
 
 A misdiagnosis isn't a wrong answer. It's a customer who pays for the wrong part, comes back angry, and never trusts the shop again — a comeback.
@@ -74,9 +82,25 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
 - **Stripe, per shop.** One customer per tenant, Checkout + Billing Portal, signature-verified webhooks that write back only subscription status and period end. No usage metering, no per-seat math — one subscription per shop.
 - **Knowledge graph.** A normalized electrical-topology model (platforms, components, pins, connections, scenarios, readings) sits alongside the corpus, every node carrying source provenance (`TRAINING-CONFIRMED` / `FIELD-VERIFIED` / `GAP`) and an inference class (`LAW` / `LOGIC` / `PATTERN`).
 
+## The flow
+
+One diagnostic, five steps — open the case, pull the evidence, propose the next test, confirm the reading, lock the root cause. Same loop as the diagram above, in the tech's hands.
+
+<p align="center">
+  <img src="public/marketing/screenshots/motion-01-open.png" width="150" alt="Open the case">
+  <img src="public/marketing/screenshots/motion-02-research.png" width="150" alt="Pull the evidence">
+  <img src="public/marketing/screenshots/motion-03-propose.png" width="150" alt="Propose the next test">
+  <img src="public/marketing/screenshots/motion-04-confirm.png" width="150" alt="Confirm the reading">
+  <img src="public/marketing/screenshots/motion-05-lock.png" width="150" alt="Lock the root cause">
+</p>
+
 ## How it's built
 
 This is AI-directed, human-verified work. I direct the agents; I own the judgment and the verification. The architecture decisions, the safety doctrine — rules before LLMs, advisory-not-automatic calibration, locked diagnoses — are mine, and they're enforced in the code and the convention docs. The line-by-line authoring is paired with Claude, credited in the commit trailers. I don't claim I hand-wrote every line. I claim I know exactly why every line is there — and I can show you the test that proves it.
+
+## What this is — and isn't
+
+This is the real production app, shared to show how I work — not a drop-in template you can point at your own shop and run. Some paths are honest stubs: audio transcription is documented as API-pending, not silently broken. The calibration refit is advisory by design — it proposes a threshold nudge for a human to approve; it never moves the safety floor on its own. Still learning, still building. I'd rather show you the limit than hide it.
 
 ## Scale, plainly
 
