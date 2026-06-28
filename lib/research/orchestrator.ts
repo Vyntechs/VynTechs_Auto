@@ -5,6 +5,7 @@ import { researchRuns, flowVersions } from '@/lib/db/schema'
 import { nextVersionFor } from '@/lib/curator/flow-versions' // shared helper, owned by PR-N2
 import { runSubagent } from './subagent-runner'
 import { runSynthesis } from './synthesis-runner'
+import { synthesizeSystemData } from './system-data-synthesis'
 import { RESEARCH_PERSONAS } from './personas'
 import type { ResearchAgentOutput, ResearchRunInput } from './types'
 
@@ -136,11 +137,25 @@ export async function executePipeline(
       return
     }
 
-    const synthesis = await runSynthesis({
-      platformDisplay: platform,
-      symptomDisplay: symptom,
-      agents: agentResults,
-    })
+    // Flow synthesis and DRAFT-ONLY system-data synthesis run in parallel off the
+    // same agent fan-out. A system-data synthesis failure must NEVER block the
+    // research run from completing — it is caught here and the draft left null.
+    const [synthesis, systemDataResult] = await Promise.all([
+      runSynthesis({
+        platformDisplay: platform,
+        symptomDisplay: symptom,
+        agents: agentResults,
+      }),
+      synthesizeSystemData({
+        platformSlug: input.platformSlug,
+        platformDisplay: platform,
+        symptomDisplay: symptom,
+        agents: agentResults,
+      }).catch((err) => {
+        console.error('system-data synthesis failed:', err)
+        return null
+      }),
+    ])
 
     const finalStatus = agentResults.every((a) => a.status === 'completed') ? 'completed' : 'partial'
 
@@ -161,7 +176,13 @@ export async function executePipeline(
 
       await tx
         .update(researchRuns)
-        .set({ status: finalStatus, synthesisMd: synthesis.synthesisMd, completedAt: new Date() })
+        .set({
+          status: finalStatus,
+          synthesisMd: synthesis.synthesisMd,
+          // DRAFT-ONLY envelope (status 'draft'); null when synthesis failed.
+          systemDataDraft: systemDataResult?.draft ?? null,
+          completedAt: new Date(),
+        })
         .where(eq(researchRuns.id, runId))
     })
   } catch (err) {

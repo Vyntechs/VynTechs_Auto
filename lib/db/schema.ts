@@ -16,6 +16,9 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 import type { Flow, WizardState } from '../flows/types'
+// Type-only import (erased at runtime) — avoids a circular dependency, since
+// lib/diagnostics/promote-system-data.ts imports table VALUES from this file.
+import type { SystemDataDraft } from '../diagnostics/promote-system-data'
 
 export type { TreeState }
 
@@ -666,6 +669,9 @@ export const researchRuns = pgTable('research_runs', {
   errorMessage: text('error_message'),
   agentOutputs: jsonb('agent_outputs').$type<unknown[]>().notNull().default([]),
   synthesisMd: text('synthesis_md').notNull().default(''),
+  // DRAFT-ONLY system-data envelope from synthesizeSystemData. Nullable — a run
+  // with no usable draft leaves it null. status is ALWAYS 'draft'; never served.
+  systemDataDraft: jsonb('system_data_draft').$type<SystemDataDraft | null>(),
   startedAt: timestamp('started_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
