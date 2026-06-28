@@ -209,9 +209,114 @@ describe('resolvePlatformSlug — 2011-2016 F-250/350 6.7L PSD (first-shop beach
     ).toBeNull()
   })
 
-  it('returns null for 2014 Ram 2500 6.7L Cummins (wrong make)', () => {
+  // Ram is now RECOGNIZED (green-lit 2026-06-22 to start filling real field cases).
+  // The old "wrong make → null" guard becomes "resolves to the Ram HD platform,
+  // and still NEVER grabs a Ford slug".
+  it('resolves 2014 Ram 2500 6.7L Cummins to the 4th-gen Ram HD (no longer null)', () => {
+    const slug = resolvePlatformSlug({ year: 2014, make: 'Ram', model: '2500', engine: '6.7L Cummins' })
+    expect(slug).toBe('ram-heavy-duty-4th-gen-67-cummins')
+    expect(slug).not.toContain('ford')
+  })
+})
+
+describe('resolvePlatformSlug — Ram HD 6.7L Cummins (real field cases, green-lit 2026-06-22)', () => {
+  const RAM_67_4TH = 'ram-heavy-duty-4th-gen-67-cummins' // 2010-2018 HD
+  const RAM_67_5TH = 'ram-heavy-duty-5th-gen-67-cummins' // 2019-2025 HD
+
+  // Field case #2: ~2011/12 Ram 3500 6.7 Cummins (68RFE TCC concern) → 4th gen
+  it.each([2011, 2012])(
+    'resolves %i Ram 3500 6.7L Cummins → 4th-gen Ram HD',
+    (year) => {
+      expect(
+        resolvePlatformSlug({ year, make: 'Ram', model: '3500', engine: '6.7L Cummins' }),
+      ).toBe(RAM_67_4TH)
+    },
+  )
+
+  // Field case #1: 2024 Ram 3500 6.7 Cummins (un-deleted DEF concern) → 5th gen
+  it('resolves 2024 Ram 3500 6.7L Cummins → 5th-gen Ram HD', () => {
     expect(
-      resolvePlatformSlug({ year: 2014, make: 'Ram', model: '2500', engine: '6.7L Cummins' }),
+      resolvePlatformSlug({ year: 2024, make: 'Ram', model: '3500', engine: '6.7L Cummins Turbo Diesel' }),
+    ).toBe(RAM_67_5TH)
+  })
+
+  it.each(['2500', '3500', '4500', '5500'])(
+    'resolves HD model %s on a 2014 6.7L Cummins',
+    (model) => {
+      expect(
+        resolvePlatformSlug({ year: 2014, make: 'Ram', model, engine: '6.7L Cummins' }),
+      ).toBe(RAM_67_4TH)
+    },
+  )
+
+  // A bare "6.7" on a Ram HD is unambiguously the Cummins (no gas 6.7 offered).
+  it('accepts a bare "6.7" engine string on a Ram HD', () => {
+    expect(
+      resolvePlatformSlug({ year: 2015, make: 'Ram', model: '3500', engine: '6.7' }),
+    ).toBe(RAM_67_4TH)
+  })
+
+  // Messy real-world model/make inputs (per "validate with real inputs").
+  it.each(['Ram 3500', 'ram-3500', 'RAM 3500 Tradesman'])(
+    'normalizes messy model "%s"',
+    (model) => {
+      expect(
+        resolvePlatformSlug({ year: 2012, make: 'Ram', model, engine: '6.7L Cummins' }),
+      ).toBe(RAM_67_4TH)
+    },
+  )
+
+  it('accepts make "Dodge" for a 2012 Dodge Ram 3500 6.7 Cummins (real-world entry)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2012, make: 'Dodge', model: 'Ram 3500', engine: '6.7L Cummins' }),
+    ).toBe(RAM_67_4TH)
+  })
+
+  it('is case-insensitive on make and model', () => {
+    expect(
+      resolvePlatformSlug({ year: 2024, make: 'RAM', model: 'ram 3500', engine: '6.7 cummins' }),
+    ).toBe(RAM_67_5TH)
+  })
+
+  // Generation boundaries.
+  it('resolves 2018 → 4th gen, 2019 → 5th gen (gen boundary)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2018, make: 'Ram', model: '3500', engine: '6.7L Cummins' }),
+    ).toBe(RAM_67_4TH)
+    expect(
+      resolvePlatformSlug({ year: 2019, make: 'Ram', model: '3500', engine: '6.7L Cummins' }),
+    ).toBe(RAM_67_5TH)
+  })
+
+  // Guards.
+  it('returns null for a 2009 Ram (before the 4th-gen 6.7 window we cover)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2009, make: 'Ram', model: '3500', engine: '6.7L Cummins' }),
     ).toBeNull()
+  })
+
+  it('returns null for a Ram 1500 (light-duty, not an HD model)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2014, make: 'Ram', model: '1500', engine: '6.7L Cummins' }),
+    ).toBeNull()
+  })
+
+  it('returns null for a Ram 2500 6.4L Hemi gas (wrong engine)', () => {
+    expect(
+      resolvePlatformSlug({ year: 2014, make: 'Ram', model: '2500', engine: '6.4L Hemi V8 Gas' }),
+    ).toBeNull()
+  })
+
+  it('returns null when engine is missing', () => {
+    expect(
+      resolvePlatformSlug({ year: 2014, make: 'Ram', model: '2500', engine: '' }),
+    ).toBeNull()
+  })
+
+  // Ford regression guard: adding Ram must not perturb the Ford branches.
+  it('does not affect Ford — 2018 F-250 6.7 PSD still resolves to its Ford slug', () => {
+    expect(
+      resolvePlatformSlug({ year: 2018, make: 'Ford', model: 'F-250', engine: '6.7L Power Stroke' }),
+    ).toBe('ford-super-duty-4th-gen-67-psd')
   })
 })

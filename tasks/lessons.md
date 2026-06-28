@@ -90,3 +90,23 @@ Trigger: designing, computing, or displaying any confidence/score in the diagnos
 Rule: Confidence must be TRUE (built only from real checks the tech confirmed — never hard-coded/faked) AND it is the tool's private compass, not a scoreboard shown to pain the tech. Low confidence = the cue to surface the ONE answer/question/step/test that raises it most toward the most accurate diagnosis with the LEAST friction — never a scary number, never "refuse and stop." Confidence is felt as progress, not judgment. Universal across symptom/application. This reconciles "restraint" with "never give up": low confidence means quietly find the least-painful highest-yield next step.
 Reason: Brandon on the live fake-confidence finding: "the confidence needs to be true, but we don't need to pain the user/tech because the confidence... if confidence is low [zoom out]: what step/test/question gets the confidence to the highest / most efficient + accurate diagnosis with the least pain." The live product was showing a hard-coded 0.85 to paying shops (legal-fatal). See memory diagnostic-loop-is-frictionless-elimination.
 
+
+### browser-verify-chromium-version-drift
+Trigger: writing a Node @playwright/test script to browser-verify locally (Playwright MCP is broken here).
+Rule: Don't trust the bundled default — it requests a chromium version often NOT in the cache (this session it wanted chromium_headless_shell-1217; cache had 1223/1228 and the full Chromium.app was absent). GLOB ~/Library/Caches/ms-playwright for whatever chromium_headless_shell-<N> exists and pass it as executablePath. Headless-shell is enough to drive the DOM + screenshot. Brandon does NOT need Chrome to view localhost himself — Safari works.
+Reason: Two failed launches this session ("Executable doesn't exist") before pinning executablePath. See memory local-browser-verification.
+
+### flag-missing-data-in-an-image-immediately
+Trigger: user shares an image/file expecting it carries specific data (codes, a list, a value) and it doesn't.
+Rule: In the SAME turn, say explicitly "this image does not contain X." Never proceed or ask for it later as if unsent — the user may discard the source.
+Reason: Brandon sent an Escalade topology screen (no DTC numbers); I asked for the codes a turn later as if he hadn't sent them. He'd already cleared the photos → the full code list was lost and trust eroded.
+
+### field-data-is-fuel-to-build-from-not-a-fork
+Trigger: Brandon feeds real-world field cases (trucks, complaints, codes, what he found) — especially out-of-coverage ones.
+Rule: Treat each as seed/training input. Capture & structure it to GROW coverage toward predicting/prefilling what he'll see next. Never gate it behind a "should we cover this" fork.
+Reason: He fed two real Rams; I framed it as a Ford-vs-Ram strategy decision. He's not asking permission — he's giving data so the tool gets ahead of his real work. Out-of-coverage = the ranked map of what to fill next, by what he's actually seeing.
+
+### functional-verify-isnt-visual-verify
+Trigger: calling a UI "browser-verified" because the flow completes (clicks → expected end state).
+Rule: Also EYEBALL the default first-render a fresh user lands on (screenshot it). A completed flow does not mean the screen looks right.
+Reason: The loop was handed off "browser-verified end-to-end" (11 checks → verdict worked), but the default P0087 diagram renders near-empty — one floating part, no wires — and read as "broken" to Brandon; the real wired circuit was hidden behind a "Whole system" toggle.

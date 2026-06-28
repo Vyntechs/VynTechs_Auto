@@ -28,6 +28,23 @@ function isFord60Psd(engine: string): boolean {
   return true
 }
 
+// Engine-string patterns considered "6.7L Cummins" (Ram HD 2500/3500/4500/5500).
+// A bare "6.7"/"6.7L" is accepted because no gas 6.7 was offered on a Ram HD —
+// the 6.7 on those trucks is always the Cummins (same rationale as the bare-6.0 PSD case).
+function isRam67Cummins(engine: string): boolean {
+  const e = engine.toLowerCase().replace(/\s+/g, ' ').trim()
+  if (!e) return false
+  return /\b6\.7l?\b/.test(e)
+}
+
+// Extracts the Ram Heavy-Duty model number from messy real-world strings.
+// Handles "3500", "Ram 3500", "ram-3500", "Dodge Ram 2500", "RAM 3500 Tradesman".
+// Returns the canonical HD number (2500/3500/4500/5500) or null for non-HD (e.g. 1500).
+function normalizeRamHdModel(model: string): string | null {
+  const match = model.toLowerCase().match(/\b(2500|3500|4500|5500)\b/)
+  return match ? match[1] : null
+}
+
 // Normalizes messy real-world Super Duty model strings to a canonical kebabed form.
 // Handles: "F250", "F-250", "F250 Super Duty", "f-250 superduty", "F-350 Super Duty", etc.
 // Returns the normalized model if it's one of the known Super Duty slugs; null otherwise.
@@ -66,6 +83,22 @@ export function resolvePlatformSlug(input: PlatformResolveInput): string | null 
     const normalizedModel = normalizeFordSuperDutyModel(model)
     if (normalizedModel !== null && input.year >= 2003 && input.year <= 2007) {
       return 'ford-super-duty-3rd-gen-60-psd'
+    }
+  }
+
+  // Ram Heavy-Duty 6.7L Cummins (2500/3500/4500/5500). Recognized so real field
+  // cases (un-deleted aftertreatment, 68RFE transmission, etc.) can route to
+  // Ram coverage instead of falling through. "Dodge" accepted because pre-2010
+  // brand-split trucks are still entered that way in the real world.
+  if ((make === 'ram' || make === 'dodge') && isRam67Cummins(engine)) {
+    const hdModel = normalizeRamHdModel(model)
+    if (hdModel !== null) {
+      if (input.year >= 2019 && input.year <= 2025) {
+        return 'ram-heavy-duty-5th-gen-67-cummins'
+      }
+      if (input.year >= 2010 && input.year <= 2018) {
+        return 'ram-heavy-duty-4th-gen-67-cummins'
+      }
     }
   }
 

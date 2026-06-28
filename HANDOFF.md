@@ -1,61 +1,62 @@
-# HANDOFF — Diagnostic loop: the LIVE LOOP IS BUILT & BROWSER-VERIFIED (Phases 0–2 + 4 done)
+# HANDOFF — LIVE-VALIDATION SESSION: real shop trucks → field-case library → Ram recognition built. Escalade diagnosis IN PROGRESS.
 
-**Last updated:** 2026-06-21
-**Work branch:** `feat/diagnostic-loop` (HEAD `dee5b8f` + UNCOMMITTED Phase-4 working tree). All forward work stays here.
-**Nature of this session:** Wired the live elimination loop into the screen (Phase 4, Tasks 10–15) on the pure engine, and browser-verified it end-to-end (pass→verdict and all-skip→handoff). The money shot works. **Phase-4 changes are not yet committed** — awaiting Brandon's go.
+**Last updated:** 2026-06-22 (Brandon ran real trucks through the tool as live validation while working his actual shop day)
+**Work branch:** `feat/diagnostic-loop` — HEAD `eac4076`. **Uncommitted working-tree changes** (see below). NOT committed, NOT merged, NOT deployed.
 
----
+## WHAT THIS SESSION WAS
+Brandon validated the diagnostic tool against **real trucks in his own bay**, feeding cases as he diagnosed them. The big reframe he drilled in: **his field data is FUEL to grow coverage toward predicting/pre-filling what he'll see — NOT a "should we cover this" fork.** Capture every case, structure it, build coverage from his reality. (Lesson + memory recorded.)
 
-## WHERE WE ARE
-The user-facing interactive diagnostic ("the loop") on the seeded fuel-rail flow (P0087/P0088, 2017–22 Ford 6.7 PSD) is **LIVE and verified**: the tech enters a reading / taps an outcome → the engine derives a verdict → the check is "ruled out" in the curator's own words → the loop advances → at the internal gate (or when the authored checks run out) an honest verdict reveals with the TRUE confirmed-check count. Runs 100% client-side on the pure engine — no DB round-trip. Verified in a real browser on /curator/topology (P0087): 11-check pass run → verdict "Your 11 checks line up"; all-skip run → honest handoff "You completed 0 checks"; NO percent/confidence/compass/fabricated-count anywhere.
+## SCOREBOARD: 3 real trucks, 0 inside current coverage
+The tool today only covers **Ford 6.7/6.0 PSD diesel** fuel concerns. All three real trucks fell outside it — which is the validation *working* (it honestly has nothing for them) and the ranked map of what to seed next.
 
-## LOCKED DECISIONS (do not relitigate)
-- **No user-facing confidence.** The number AND the compass are killed for good (Brandon, panel-approved). Confidence is INTERNAL ONLY — the verdict-gate trigger + next-check selector. Tech sees plain words. See memory `no-user-facing-confidence`.
-- **Path A** (build the honest loop now; curator-narrative progress; literal "N causes left" counter is a seeded fast-follow, NOT v1). See memory `diagnostic-loop-build-path`.
-- **Old legacy AI/wizard product is fully dropped** — leave it dead and untouched.
+1. **2024 Ram 3500 6.7 Cummins (recently un-deleted)** — root cause: **DEF (reductant) supply line physically broken/separated.** Was OUT → now **RECOGNIZED** (resolver emits `ram-heavy-duty-5th-gen-67-cummins`). Open Q to Brandon: did the U0140/U0422 comm codes clear when the line was fixed, or separate? → `docs/field-cases/2026-06-22-ram-3500-67-undeleted-def-line.md`
+2. **~2011/12 Ram 3500 6.7 Cummins (68RFE)** — TCC won't lock under load → trans over-temp; converter already replaced by prior shop. **RECOGNIZED** (`ram-heavy-duty-4th-gen-67-cummins`). Flow completes when Brandon **pins the apply-side cause** (solenoid / valve-body / pressure / wiring / control). → `docs/field-cases/2026-06-22-ram-3500-67-68rfe-tcc-overtemp.md`
+3. **2019 Cadillac Escalade 6.2 gas — IN PROGRESS (the active diagnosis).** Intermittent ABS warning (not active now). Codes: **EBCM U0422-71** (invalid serial data from BCM) + **BCM C0750/55/60/65-03** (4 TPMS corner sensors, -03=low voltage; C0760=LR, C0765=RR) + **C0775** (TPMS system). OUT of coverage (Cadillac, resolver null). → `docs/field-cases/2026-06-22-cadillac-escalade-2019-network.md`
 
-## THE DESIGN LAW (the loop)
-One elimination at a time; ACCURACY FIRST; confidence internal-only; tech sees a **progress line** (must name what the just-completed check RULED OUT — suppress entirely if the curator didn't author that half; suppression over fabrication) + a **verdict-with-its-reason**; NEVER a percent; NEVER a fabricated count. Verdict story uses only true data: "your N checks line up" = real count of checks done; "N techs confirmed this fix" = priorFixCount, shown only when >0 (the prototype's "41 techs" is dropped). Triage = elimination #1. All on the one diagram — never a wizard/chatbot.
+## IMMEDIATE NEXT STEP (resume here)
+**The Escalade is mid-elimination and waiting on Brandon.** Elimination state:
+- ✅ **Wheel speed sensors RULED OUT** — all four clean, tracking together, no dropout at any speed → the ABS light is NOT a brake-input fault; it's the EBCM reacting to the U0422 (data/network), exactly as the verified read predicted.
+- ⏳ **OPEN: one cause vs two.** Is it ONE shared **BCM data-path** fault (power/ground or the SDGM gateway/connectors corrupting traffic — the leading read, MEDIUM confidence) OR are the **4 TPMS sensors genuinely weak** (-03 = low voltage; 6-7yr-old truck on likely-original sensors = real competing answer) plus a separate network gremlin?
+- **The splitting test (Brandon to run):** trigger each wheel's TPMS sensor with his tool while watching live data. All four answer good at the wheel but BCM shows them missing/invalid → **one cause, upstream** (go to BCM power/grounds + SDGM software PI/TSB). One+ genuinely weak at the wheel → **two problems.** When Brandon reports what the sensors do at the wheel, lock the root cause + update the case doc's elimination log.
 
-## BUILD STATE — Phases 0–2 DONE & VERIFIED (7 commits `b915285`→`dee5b8f`, ~30 unit tests)
-- **Phase 0 (routing fixes):** verdict-vocab map (`lib/diagnostics/diagram/verdict-vocab.ts` — DB `ok/warn/fail`→fork `pass/neutral/fail`; applied in the loader); deterministic branch dedup by provenance (loader); gate thresholds re-keyed to the real long-form slugs (`lib/diagnostics/gate-thresholds.ts`).
-- **Phase 1 (data):** `tech_outcomes` registered as a Drizzle pgTable (`lib/db/schema.ts`); `confidenceBoost` surfaced on `TopologyTestAction`.
-- **Phase 2 (pure engine, `lib/diagnostics/diagram/`):** `verdictFromReading` (numeric auto-judge where a threshold exists, tech-tap otherwise), `accumulateConfidence` (0–100 from confirmed-check boosts), `hasReachedGate` (0–100 vs 0–1 gate, float-safe).
-- Verified by controller: `npx vitest` 30/30 across new files; `npx tsc` zero errors in touched files; loader wiring inspected; tree clean. Built **inline via TDD** because the Anthropic agent-fleet API was throwing sustained 529s.
-- **Plan:** `docs/superpowers/plans/2026-06-21-diagnostic-loop-fuel-rail.md`. **Ledger:** `.superpowers/sdd/progress.md` (Tasks 1–7 complete).
+Doctrine flagged (GM): on U0422, fix the source/network — do NOT lead by replacing the EBCM (the reporter), BCM, or sensors; check for a BCM/SDGM software update first.
 
-## WHAT PHASE 4 SHIPPED (uncommitted working tree)
-- New components: `components/topology/{reading-entry,progress-line,verdict-panel}.tsx`; new pure formatter `lib/diagnostics/diagram/progress-line.ts` (`formatRuledOut`, 6/6 tests).
-- `components/screens/topology-diagnostic.tsx`: live `useReducer(stepReducer)`; the loop console lives in the dock (current-check ask + expectation + entry + skip + ruled-out line); the verdict overlays the dimmed canvas center. `assembleStepView` gained an optional 3rd `step` arg (back-compat).
-- `app/(app)/sessions/[id]/page.tsx`: passes real `priorFixCount` from `loadCachedDiagnostic`.
-- CSS appended to `components/topology/topology.css` (`.topo-loop*`, `.topo-verdict*`, dim/animation, reduced-motion).
-- Test fixture fix: added the now-required `confidenceBoost: 0` to `tests/unit/topology-diagnostic-assembled.test.tsx` (pre-existing Task-4 gap).
+## WHAT GOT BUILT THIS SESSION
+- **Ram HD 6.7 Cummins resolver recognition** (`lib/diagnostics/resolve-platform.ts`). Recognizes Ram/Dodge 2500/3500/4500/5500 6.7 Cummins: 2010–2018 → `ram-heavy-duty-4th-gen-67-cummins`, 2019–2025 → `ram-heavy-duty-5th-gen-67-cummins`. **TDD, 15 new tests, all 75 pass, tsc clean, Ford regressions intact.** Flipped the old deliberate "Ram→null" guard test to the new behavior. **⚠️ Branch-only, MUST NOT MERGE until content is seeded behind those slugs** — else a real Ram session resolves to an empty flow (the dead-gate trap).
+- **Field-case library** at `docs/field-cases/` — README (capture schema + the verified case→coverage "on-ramp") + the 3 case files above. This is the growing seed-source material.
+- **On-ramp recon** (in the README): to turn one captured case into live coverage you author DB rows — `platforms` + resolver code, `symptoms`, `components`/connections/pins, `test_actions` (the checks), `branch_logic` (the routing), `symptom_test_implications` (the chain the coverage gate counts). Every row carries `source_provenance` and **FIELD-VERIFIED is the highest tier** — Brandon's real cases outrank AI-guessed data. **`platform_equivalents`** (per-system) is the reuse shortcut (answers the open "is 2011-16 Ford 6.7 fuel == 2017-22" question).
 
-## IMMEDIATE NEXT STEPS (Phase 4 done — pick up here)
-1. **COMMIT the Phase-4 working tree** (was awaiting Brandon's go at handoff time). Suggested message per the per-task plan cadence.
-2. **Task 8** — port `/api/sessions/[id]/scenario` (currently a silent 404; the screen already POSTs to it fire-and-forget). Small/independent. Reference impl in `.worktrees/6.0-psd-cranks-no-start-seed/app/api/sessions/[id]/scenario/route.ts`.
-3. **Terminal-cause markers (fast-follow):** today the verdict triggers on gate OR sequence-exhaustion only. A crisp "found it on THIS fail" finale needs curator-authored terminal markers (which fail = a confirmed cause vs continue). Same philosophy as the deferred "N causes left" counter — build post-WTP-test.
-4. **`meter_mode` data-quality flag to curator** (`'PSI'`/`'DC volts'` strings vs the `MeterMode` union) — cosmetic; do not silently coerce.
-
-## PARKED — Brandon-gated decision (Phase 3 Task 9: durable persistence)
-Durable per-check persistence is DEFERRED (not needed for the visible loop). When wired: `tech_outcomes.session_id` FKs to `diagnostic_sessions.id` (migration 0021:249), and `cumulative_confidence` lives there too. `diagnostic_sessions` is created ONLY at close by `lib/diagnostics/record-diagnostic-session.ts` — the row that powers the public **"N techs confirmed this fix"** counter. Persisting mid-loop requires creating that row early AND making close UPDATE the same row (not INSERT a 2nd), or the live counter double-counts. **Touching that live-counter close path needs Brandon's explicit OK.** Any DB test uses the safe in-memory PGlite harness `tests/helpers/db.ts createTestDb()` (NOT the shared cloud DB).
+## TEED UP, NOT STARTED — first content authoring
+The **2024 Ram DEF flow** is the cleanest first case to seed (it has a confirmed root cause, minimal fabrication risk — visual/physical inspection chain). Plan: draft it from Brandon's real findings **for his verify**, then it goes live WITH the resolver recognition (so the slug has content behind it). **Never fabricate diagnostic specs/readings — FIELD-VERIFIED means Brandon verified it.**
 
 ## HARD CONSTRAINTS / INVARIANTS
-- Diagnostic UX = the diagram itself; never a wizard/chatbot.
-- Triage/next-step selection stays rule-based, ZERO AI calls in render.
-- Reconcile logic stays in shared functions used by BOTH intake and session-render.
-- Confidence only rises from real confirmed checks; nothing fabricated ever shown.
-- `drizzle-kit check` is PRE-BROKEN on a malformed `0011b` snapshot (unrelated) — don't trust it; match tables to live DDL by hand; never `drizzle generate`/apply blind.
+- **Honest-only:** never fabricate a check, expected reading, or spec. Field-verified content must trace to Brandon's real findings. (No percent/confidence/fake counts either — prior invariant still holds.)
+- **Ram recognition stays branch-only** until content lands behind the slugs.
+- **Don't dev during Brandon's workday** unless he says so; he feeds cases as he works.
+- Branch only — no commit/merge/deploy without his OK.
+- Don't touch the diagnostic engine internals (`lib/diagnostics/diagram/*`, `load-system-topology.ts`) or the close-time "N techs confirmed" counter (Brandon-gated).
 
-## DATA REALITY (verified live, read-only, 2026-06-21)
-Symptom slugs are long-form: `p0087-fuel-rail-pressure-too-low`, `p0088-fuel-rail-pressure-too-high`. Platform `ford-super-duty-4th-gen-67-psd`. P0087: 13 implicated checks / 52 branches; P0088: 12 / 38. Branch verdicts: `ok/warn/fail` (no `impossible`). All 13 P0087 steps have `confidence_boost` (4–20). Only `sd4-67psd-test-frp-5v-ref-at-connector` has a numeric `expected_value` (5 V ±0.2); the rest are prose/observation. `meter_mode` seeded as `'PSI'`/`'DC volts'` (not the `MeterMode` union value — cosmetic; flag to curator, don't silently coerce).
+## UNCOMMITTED WORKING-TREE CHANGES (this session)
+```
+ M lib/diagnostics/resolve-platform.ts      # Ram recognition
+ M tests/unit/resolve-platform.test.ts      # +15 Ram tests, flipped Ram-null guard
+ M tasks/lessons.md                         # +2 lessons
+ M HANDOFF.md                               # this file
+?? docs/field-cases/                        # new library: README + 3 case files
+```
+(`docs/superpowers/plans/2026-06-21-...money-shot-skin.md` was already untracked from the prior session.)
 
-## KEY FILES
-- Engine (built): `lib/diagnostics/diagram/{verdict-vocab,verdict-from-reading,confidence,verdict-gate,step-sequence,slot-resolver,slot-interface}.ts` · `lib/diagnostics/{load-system-topology,gate-thresholds,record-diagnostic-session}.ts` · `lib/db/schema.ts`
-- UI to wire: `components/screens/topology-diagnostic.tsx` · `components/topology/*` · `components/diagram-kit/*`
-- Render/gate: `app/(app)/sessions/[id]/page.tsx` · auth pattern: `app/api/sessions/[id]/wizard-state/route.ts` + `lib/sessions.ts` getSessionForUser
+## PRIOR STATE (still true, from before this session)
+The topology diagnostic screen got its **dark "instrument-mode" / Figma money-shot look** (commits `a6dcdb2` focused wired circuit + `eac4076` dark skin, scoped to `.topo`; `/curator` stays warm). Phase 5 Task 3 polish (exact-Figma console/answer anatomy, worded progress eyebrow, voltage pills, focus-tightening) is still **gated on Brandon's gut-click**. That gut-click + walking the SEEDED loop still needs an **in-coverage truck** (a Ford 6.7 PSD, or a now-recognized Ram once content is seeded) — none of the 3 real trucks so far could exercise it. Plan doc: `docs/superpowers/plans/2026-06-21-diagnostic-loop-money-shot-skin.md`. Ledger: `.superpowers/sdd/progress.md`.
+
+## LESSONS ADDED THIS SESSION (tasks/lessons.md)
+- `flag-missing-data-in-an-image-immediately` — if a shared image doesn't contain the data the user expects (codes), say so IN THAT TURN (they may discard the source). (Cost real data this session — Brandon cleared the Escalade code photos.)
+- `field-data-is-fuel-to-build-from-not-a-fork` — capture/structure his field cases to grow coverage; never gate them behind a strategy fork.
+
+## MEMORIES WRITTEN (auto-memory)
+`field-data-is-fuel-not-a-fork`, `real-truck-validation-1-ram-cummins`, `real-truck-validation-2-ram-trans`, `real-truck-validation-3-escalade-network`.
 
 ## RESUME PROMPT
 ```
-Read HANDOFF.md in full. Branch feat/diagnostic-loop. The diagnostic loop is BUILT & BROWSER-VERIFIED end-to-end (Phases 0–2 engine/data committed at HEAD dee5b8f; Phase 4 live UI in the UNCOMMITTED working tree). Plan: docs/superpowers/plans/2026-06-21-diagnostic-loop-fuel-rail.md; ledger: .superpowers/sdd/progress.md. The loop runs client-side on the pure engine (no DB round-trip): reading entry → verdictFromReading → resolveFork → advance → honest ruled-out line (curator reasoning, suppressed if absent) → verdict with the TRUE confirmed-check count. Verified on /curator/topology P0087 (pass→verdict, all-skip→handoff); no percent/confidence/compass/fabricated-count. NEXT: (1) commit the Phase-4 working tree; (2) Task 8 scenario route (silent 404); (3) curator-authored terminal-cause markers as a fast-follow; (4) flag meter_mode data-quality to curator. PARKED + Brandon-gated: Phase 3 Task 9 DB persistence (touches the close-time code behind the live "N techs confirmed" counter). Browser-verify via the bundled chromium headless-shell Node script — GLOB the ms-playwright cache for whatever chromium_headless_shell-<N> exists (the @playwright/test default version drifts); memory local-browser-verification.
+Read HANDOFF.md in full. Branch feat/diagnostic-loop, HEAD eac4076, UNCOMMITTED changes (Ram resolver recognition + 15 tests, field-case library at docs/field-cases/, 2 lessons). This was a LIVE-VALIDATION session: Brandon ran 3 real shop trucks through the tool — 2 Ram Cummins (DEF line broke; 68RFE TCC won't lock) + a 2019 Escalade — all OUT of current coverage (tool = Ford 6.7/6.0 PSD only). Core reframe: his field data is FUEL to grow coverage toward predict/prefill, NOT a fork. I BUILT Ram HD 6.7 Cummins recognition into the resolver (branch-only, must not merge until content is seeded behind the slug) and a field-case library. THE ACTIVE THING: the 2019 Escalade diagnosis is mid-elimination — wheel speed sensors ruled out; waiting on Brandon's per-wheel TPMS-trigger result to split "one BCM-data-path cause" vs "weak TPMS sensors + separate network fault." First content to author = the 2024 Ram DEF flow, drafted from his findings FOR HIS VERIFY (never fabricate specs). Invariants: honest-only, Ram recognition branch-only until content lands, don't dev during his workday, branch only. Then ask Brandon what the Escalade sensors did at the wheel, and whether to start seeding the DEF flow.
 ```
