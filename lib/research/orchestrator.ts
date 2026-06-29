@@ -3,8 +3,10 @@ import { db as defaultDb } from '@/lib/db/client'
 import type { AppDb } from '@/lib/db/queries'
 import { researchRuns, flowVersions } from '@/lib/db/schema'
 import { nextVersionFor } from '@/lib/curator/flow-versions' // shared helper, owned by PR-N2
+import { isColdCaseSynthesisEnabled } from '@/lib/feature-flags'
 import { runSubagent } from './subagent-runner'
 import { runSynthesis } from './synthesis-runner'
+import { synthesizeSystemData } from './system-data-synthesis'
 import { RESEARCH_PERSONAS } from './personas'
 import type { ResearchAgentOutput, ResearchRunInput } from './types'
 
@@ -136,11 +138,28 @@ export async function executePipeline(
       return
     }
 
-    const synthesis = await runSynthesis({
-      platformDisplay: platform,
-      symptomDisplay: symptom,
-      agents: agentResults,
-    })
+    // Flow synthesis runs always. System-data synthesis is DRAFT-ONLY and gated
+    // behind COLD_CASE_SYNTHESIS_ENABLED — when the flag is off the column is
+    // written null and no extra AI call is made. A synthesis failure must NEVER
+    // block the research run from completing — it is caught and the draft left null.
+    const [synthesis, systemDataResult] = await Promise.all([
+      runSynthesis({
+        platformDisplay: platform,
+        symptomDisplay: symptom,
+        agents: agentResults,
+      }),
+      isColdCaseSynthesisEnabled()
+        ? synthesizeSystemData({
+            platformSlug: input.platformSlug,
+            platformDisplay: platform,
+            symptomDisplay: symptom,
+            agents: agentResults,
+          }).catch((err) => {
+            console.error('system-data synthesis failed:', err)
+            return null
+          })
+        : Promise.resolve(null),
+    ])
 
     const finalStatus = agentResults.every((a) => a.status === 'completed') ? 'completed' : 'partial'
 
@@ -161,7 +180,13 @@ export async function executePipeline(
 
       await tx
         .update(researchRuns)
-        .set({ status: finalStatus, synthesisMd: synthesis.synthesisMd, completedAt: new Date() })
+        .set({
+          status: finalStatus,
+          synthesisMd: synthesis.synthesisMd,
+          // DRAFT-ONLY envelope (status 'draft'); null when synthesis failed.
+          systemDataDraft: systemDataResult?.draft ?? null,
+          completedAt: new Date(),
+        })
         .where(eq(researchRuns.id, runId))
     })
   } catch (err) {

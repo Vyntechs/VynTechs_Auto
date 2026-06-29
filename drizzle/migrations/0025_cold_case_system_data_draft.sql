@@ -1,0 +1,24 @@
+-- 0025_cold_case_system_data_draft
+--
+-- Adds research_runs.system_data_draft — the DRAFT-ONLY system-data envelope
+-- (components + connections + observable properties, each provenance-tagged)
+-- emitted by synthesizeSystemData (lib/research/system-data-synthesis.ts). It is
+-- saved IN PARALLEL with synthesis_md inside executePipeline, mirroring the
+-- existing synthesis_md save pattern exactly — one new nullable JSONB column.
+--
+-- Additive ONLY. No DROP, no TRUNCATE, no type change on any existing column,
+-- no data migration. The column is nullable; a run that produced no draft
+-- (e.g. all 3 research passes failed, or synthesis threw) leaves it NULL.
+--
+-- The persisted envelope is status='draft' ONLY — it is NEVER promoted and
+-- NEVER served. promoteSystemDataDraft (lib/diagnostics/promote-system-data.ts)
+-- remains the sole write path into the live system-data tables and refuses
+-- anything that is not curator-approved. This column is upstream of that wall.
+--
+-- PRE-APPLY NOTE (Brandon-gated): apply migration 0025 to the prod project
+-- (ynmtszuybeenjbigxdyl) before setting COLD_CASE_SYNTHESIS_ENABLED=true in prod.
+-- With the flag off, executePipeline never touches this column, so the migration
+-- can be applied independently of any deploy. Single statement — no Drizzle
+-- breakpoint marker is needed (PGlite runs the lone ALTER as one query).
+
+ALTER TABLE research_runs ADD COLUMN system_data_draft jsonb;

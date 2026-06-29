@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -21,6 +21,9 @@ import { customers as customersTable, profiles, vehicles as vehiclesTable } from
 import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
 import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
 import { reconcileSeededSymptom } from '@/lib/diagnostics/reconcile-seeded-symptom'
+import { startResearchRun, executePipeline, findRecentResearchRun } from '@/lib/research/orchestrator'
+import { isColdCaseSynthesisEnabled } from '@/lib/feature-flags'
+import { platformDisplayName, symptomDisplayName } from '@/lib/curator/slug-catalog'
 import type { TreeState } from '@/lib/db/schema'
 
 // Initial tree generation + corpus retrieval + 6 web-retrieval adapters +
@@ -219,16 +222,41 @@ export async function POST(req: Request) {
     model: resolvedModel,
     engine: resolvedEngine ?? '',
   })
+  // The resolver's candidate symptom slug (null when no pattern/DTC matched).
+  // Used BOTH as the reconcile input and as the cold-case synthesis trigger key.
+  const symptomSlug = resolveSymptomSlug({
+    dtcCodes: extractDtcCodes(description),
+    complaintText: description,
+  })
   const reconciledSymptomSlug = platformSlug
     ? await reconcileSeededSymptom(db, platformSlug, {
-        candidateSlug: resolveSymptomSlug({
-          dtcCodes: extractDtcCodes(description),
-          complaintText: description,
-        }),
+        candidateSlug: symptomSlug,
         complaintText: description,
       })
     : null
   const topologyExists = Boolean(reconciledSymptomSlug)
+
+  // ---- Cold-case system-data DRAFT generation (fire-and-forget, DRAFT-ONLY) ----
+  // A SUPPORTED vehicle (platformSlug resolved) arriving with an UN-SEEDED symptom
+  // (symptomSlug resolved, topologyExists=false) and the flag ON → kick off the
+  // research pipeline in the background via after() and persist a system-data
+  // DRAFT (status 'draft'). Nothing here is rendered, promoted, or customer-facing;
+  // the chatbot tree path below still runs unchanged. Gated OFF by default, and
+  // short-circuited when a recent completed run already exists for the slug pair.
+  if (!topologyExists && isColdCaseSynthesisEnabled() && platformSlug !== null && symptomSlug !== null) {
+    const recentRun = await findRecentResearchRun({ platformSlug, symptomSlug }, db)
+    if (!recentRun) {
+      const synthInput = {
+        platformSlug,
+        symptomSlug,
+        platformDisplay: platformDisplayName(platformSlug),
+        symptomDisplay: symptomDisplayName(symptomSlug),
+        initiatedByProfileId: ctx.profile.id,
+      }
+      const { runId } = await startResearchRun(synthInput, db)
+      after(() => executePipeline(runId, synthInput, db))
+    }
+  }
 
   // Mirror /api/sessions: best-effort corpus + retrieval, then mandatory AI
   // tree generation. Without a populated tree, the diagnostic page hangs on
