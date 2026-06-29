@@ -99,6 +99,9 @@ describe('cold-case system-data draft (executePipeline)', () => {
     // Re-establish the succeeding default each test — vi.clearAllMocks() resets
     // calls but NOT a mockImplementation override (T1-C sets agents to failed).
     vi.mocked(runSubagent).mockImplementation(async ({ persona }) => succeedingAgent(persona.id))
+    // Enable the feature flag for the tests that assert synthesis IS saved (T1-A/B/D/F).
+    // T1-E explicitly deletes it to test the flag-OFF path.
+    process.env.COLD_CASE_SYNTHESIS_ENABLED = 'true'
     ;({ db, close } = await createTestDb())
     ;[{ id: profileId }] = await db
       .insert(profiles)
@@ -117,6 +120,7 @@ describe('cold-case system-data draft (executePipeline)', () => {
   afterEach(async () => {
     await close()
     vi.clearAllMocks()
+    delete process.env.COLD_CASE_SYNTHESIS_ENABLED
   })
 
   const input = (over: Record<string, unknown> = {}) => ({
@@ -177,5 +181,30 @@ describe('cold-case system-data draft (executePipeline)', () => {
     expect(row.status).toBe('completed')
     expect(row.systemDataDraft).not.toBeNull()
     expect((row.systemDataDraft as SystemDataDraft).status).toBe('draft')
+  })
+
+  // T1-E flag-OFF: executePipeline must complete normally, synthesizeSystemData must
+  // never be called, and system_data_draft must be written null.
+  it('does NOT call synthesizeSystemData and leaves system_data_draft null when COLD_CASE_SYNTHESIS_ENABLED is unset', async () => {
+    delete process.env.COLD_CASE_SYNTHESIS_ENABLED
+    const { runId } = await startResearchRun(input(), db)
+    await executePipeline(runId, input(), db)
+
+    const [row] = await db.select().from(researchRuns).where(eq(researchRuns.id, runId)).limit(1)
+    expect(row.status).toBe('completed')
+    expect(synthesizeSystemData).not.toHaveBeenCalled()
+    expect(row.systemDataDraft).toBeNull()
+  })
+
+  // T1-F error-isolation (flag ON): a synthesizeSystemData rejection must never block
+  // the run from completing and must leave system_data_draft null.
+  it('still completes and leaves system_data_draft null when synthesizeSystemData rejects (flag on)', async () => {
+    vi.mocked(synthesizeSystemData).mockRejectedValueOnce(new Error('synthesis boom'))
+    const { runId } = await startResearchRun(input(), db)
+    await executePipeline(runId, input(), db)
+
+    const [row] = await db.select().from(researchRuns).where(eq(researchRuns.id, runId)).limit(1)
+    expect(['completed', 'partial']).toContain(row.status)
+    expect(row.systemDataDraft).toBeNull()
   })
 })

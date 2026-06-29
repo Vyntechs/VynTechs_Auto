@@ -15,11 +15,10 @@
 -- remains the sole write path into the live system-data tables and refuses
 -- anything that is not curator-approved. This column is upstream of that wall.
 --
--- PRE-APPLY NOTE (Brandon-gated): apply to the production Supabase project
--- (ynmtszuybeenjbigxdyl) via Supabase MCP apply_migration BEFORE
--- COLD_CASE_SYNTHESIS_ENABLED is ever set to 'true' in any prod/Vercel env.
--- Until the column exists in prod, the feature flag MUST stay off so prod code
--- never reads or writes this column. Single statement — no Drizzle breakpoint
--- marker is needed (PGlite runs the lone ALTER as one query).
+-- PRE-APPLY NOTE (Brandon-gated): apply migration 0025 to the prod project
+-- (ynmtszuybeenjbigxdyl) before setting COLD_CASE_SYNTHESIS_ENABLED=true in prod.
+-- With the flag off, executePipeline never touches this column, so the migration
+-- can be applied independently of any deploy. Single statement — no Drizzle
+-- breakpoint marker is needed (PGlite runs the lone ALTER as one query).
 
 ALTER TABLE research_runs ADD COLUMN system_data_draft jsonb;

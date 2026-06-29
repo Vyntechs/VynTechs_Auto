@@ -3,6 +3,7 @@ import { db as defaultDb } from '@/lib/db/client'
 import type { AppDb } from '@/lib/db/queries'
 import { researchRuns, flowVersions } from '@/lib/db/schema'
 import { nextVersionFor } from '@/lib/curator/flow-versions' // shared helper, owned by PR-N2
+import { isColdCaseSynthesisEnabled } from '@/lib/feature-flags'
 import { runSubagent } from './subagent-runner'
 import { runSynthesis } from './synthesis-runner'
 import { synthesizeSystemData } from './system-data-synthesis'
@@ -137,24 +138,27 @@ export async function executePipeline(
       return
     }
 
-    // Flow synthesis and DRAFT-ONLY system-data synthesis run in parallel off the
-    // same agent fan-out. A system-data synthesis failure must NEVER block the
-    // research run from completing — it is caught here and the draft left null.
+    // Flow synthesis runs always. System-data synthesis is DRAFT-ONLY and gated
+    // behind COLD_CASE_SYNTHESIS_ENABLED — when the flag is off the column is
+    // written null and no extra AI call is made. A synthesis failure must NEVER
+    // block the research run from completing — it is caught and the draft left null.
     const [synthesis, systemDataResult] = await Promise.all([
       runSynthesis({
         platformDisplay: platform,
         symptomDisplay: symptom,
         agents: agentResults,
       }),
-      synthesizeSystemData({
-        platformSlug: input.platformSlug,
-        platformDisplay: platform,
-        symptomDisplay: symptom,
-        agents: agentResults,
-      }).catch((err) => {
-        console.error('system-data synthesis failed:', err)
-        return null
-      }),
+      isColdCaseSynthesisEnabled()
+        ? synthesizeSystemData({
+            platformSlug: input.platformSlug,
+            platformDisplay: platform,
+            symptomDisplay: symptom,
+            agents: agentResults,
+          }).catch((err) => {
+            console.error('system-data synthesis failed:', err)
+            return null
+          })
+        : Promise.resolve(null),
     ])
 
     const finalStatus = agentResults.every((a) => a.status === 'completed') ? 'completed' : 'partial'
