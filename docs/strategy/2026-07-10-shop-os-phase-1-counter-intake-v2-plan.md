@@ -144,11 +144,11 @@ VIN
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
 - Modify: `docs/strategy/2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md`
 
-- [ ] Run all row-10 focused tests, `pnpm test`, `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check`; record exact counts.
-- [ ] Inspect desktop and 375px layout, keyboard/focus, decode/error/status announcements, Open assignment, below-tier confirmation, and ticket redirect through the required browser accessibility workflow when Chrome is available.
-- [ ] Inspect the full diff for early session creation, engine changes, cross-shop reads, non-atomic customer/vehicle writes, advisor fallback, free-text money, fake controls, unrelated changes, and intent drift.
-- [ ] Obtain independent task reviews and one whole-branch review; resolve every Critical/Important finding and re-review.
-- [ ] Add the Phase-1 counter-intake implementation correction, mark row 10 complete, and preserve row 6 plus feature enablement as owner gates.
+- [x] Run all row-10 focused tests (8 files/105 tests), the full suite (195 files/1,618 tests), TypeScript, production build, and diff check.
+- [x] Attempt the required signed-in Chrome workflow; Chrome remained unavailable, so protect desktop/375px layout, all-width targets, keyboard/focus, decode announcements, assignment, confirmation, and redirect through CSS/static and DOM proof.
+- [x] Inspect the full diff for early session creation, engine changes, cross-shop reads, non-atomic customer/vehicle writes, advisor fallback, free-text money, fake controls, rollout bypass, unrelated changes, and intent drift.
+- [x] Obtain three independent task reviews and one whole-branch review; resolve every Critical/Important/Minor finding and re-review to zero findings.
+- [x] Add the Phase-1 counter-intake implementation correction, mark row 10 complete, and preserve row 6 plus feature enablement as owner gates.
 - [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
 
 ## Verification
