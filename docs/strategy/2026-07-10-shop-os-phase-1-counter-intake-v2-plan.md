@@ -120,8 +120,11 @@ VIN
 **Files:**
 
 - Modify: `components/screens/counter-intake.tsx`
+- Create: `components/screens/counter-intake.module.css`
+- Modify: `components/vt/intake-search/bar.tsx`
 - Modify: `tests/unit/counter-intake.test.tsx`
 - Modify: `tests/unit/intake-page-wiring.test.tsx`
+- Modify: `tests/unit/intake-search-component.test.tsx`
 
 - [ ] Write DOM tests first for VIN decode success/invalid/unavailable, editable decoded fields, primary diagnostic job, optional repair/maintenance job, structured authorization, true-open body, assigned body, below-tier confirmation, error envelopes, and ticket redirect.
 - [ ] Verify RED against the current dead decode copy, free-text authorization, legacy endpoint, and session redirect.

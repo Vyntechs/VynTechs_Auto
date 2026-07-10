@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ChangeEvent, type FormEvent } from 'react'
+import { useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Btn,
@@ -17,6 +17,7 @@ import { PredictiveIntakeSearch } from '@/components/vt/intake-search'
 import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
+import styles from './counter-intake.module.css'
 
 type CounterBody = {
   vehicleMode: 'new' | 'existing'
@@ -110,6 +111,7 @@ export function CounterIntake({
   const [requestedServiceDescription, setRequestedServiceDescription] = useState('')
   const [vinBusy, setVinBusy] = useState(false)
   const [vinStatus, setVinStatus] = useState<string | null>(null)
+  const [vinStatusKind, setVinStatusKind] = useState<'success' | 'error' | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tierWarning, setTierWarning] = useState<TierWarning | null>(null)
@@ -152,12 +154,14 @@ export function CounterIntake({
   const handleVinChange = (e: ChangeEvent<HTMLInputElement>) => {
     setVin(e.target.value.toUpperCase())
     setVinStatus(null)
+    setVinStatusKind(null)
   }
 
   const handleDecodeVin = async () => {
     if (vin.length !== 17 || vinBusy) return
     setVinBusy(true)
     setVinStatus('Decoding VIN…')
+    setVinStatusKind(null)
     try {
       const response = await fetch('/api/intake/decode-vin', {
         method: 'POST',
@@ -168,6 +172,7 @@ export function CounterIntake({
         | { year: number; make: string; model: string; engine: string }
         | { error: string }
       if (!response.ok || 'error' in payload) {
+        setVinStatusKind('error')
         setVinStatus(
           'error' in payload && payload.error === 'invalid'
             ? 'VIN was not recognized. Enter the vehicle details manually.'
@@ -179,8 +184,10 @@ export function CounterIntake({
       setMake(payload.make)
       setModel(payload.model)
       setEngine(payload.engine)
+      setVinStatusKind('success')
       setVinStatus('VIN decoded. Verify each vehicle field before creating the ticket.')
     } catch {
+      setVinStatusKind('error')
       setVinStatus('VIN lookup is unavailable. Enter the vehicle details manually.')
     } finally {
       setVinBusy(false)
@@ -261,8 +268,15 @@ export function CounterIntake({
     void submitTicket()
   }
 
+  const handleFormKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key !== 'Enter' || (!e.metaKey && !e.ctrlKey)) return
+    e.preventDefault()
+    if (!canSubmit) return
+    e.currentTarget.requestSubmit()
+  }
+
   return (
-    <div className="vt-app">
+    <div className={`vt-app ${styles.screen}`}>
       <Topbar
         product="Counter"
         crumbs={[{ label: 'Today' }, { label: 'Intake', bold: true }]}
@@ -307,8 +321,13 @@ export function CounterIntake({
           />
 
           <div className="vt-main__body">
-            <form id="counter-intake-form" className="vt-form" onSubmit={handleSubmit}>
-              <div style={{ padding: '20px 32px 0' }}>
+            <form
+              id="counter-intake-form"
+              className="vt-form"
+              onSubmit={handleSubmit}
+              onKeyDown={handleFormKeyDown}
+            >
+              <div className={styles.search}>
                 <PredictiveIntakeSearch
                   recentCustomers={recentCustomers}
                   onPickVehicle={handlePickVehicle}
@@ -398,12 +417,7 @@ export function CounterIntake({
                   >
                     <Field label="VIN" htmlFor="ci-vin">
                       <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'minmax(0, 1fr) auto',
-                          gap: 8,
-                          alignItems: 'start',
-                        }}
+                        className={styles.vinRow}
                       >
                         <Input
                           id="ci-vin"
@@ -418,6 +432,7 @@ export function CounterIntake({
                           type="button"
                           onClick={() => void handleDecodeVin()}
                           disabled={vin.length !== 17 || vinBusy}
+                          aria-busy={vinBusy}
                           style={{
                             minHeight: 44,
                             padding: '0 16px',
@@ -436,8 +451,8 @@ export function CounterIntake({
                       </div>
                       {vinStatus && (
                         <span
-                          role="status"
-                          aria-live="polite"
+                          role={vinStatusKind === 'error' ? 'alert' : 'status'}
+                          aria-live={vinStatusKind === 'error' ? 'assertive' : 'polite'}
                           style={{
                             display: 'block',
                             marginTop: 7,

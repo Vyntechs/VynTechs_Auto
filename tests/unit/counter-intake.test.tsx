@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }))
 
@@ -29,6 +31,19 @@ describe('CounterIntake', () => {
   it('renders the screen title', () => {
     render(<CounterIntake userEmail="test@example.com" />)
     expect(screen.getByRole('heading', { name: /who's at the counter/i })).toBeInTheDocument()
+  })
+
+  it('protects the counter form at 375px with a single-column responsive contract and 44px controls', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/screens/counter-intake.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/@media\s*\(max-width:\s*767px\)/)
+    expect(css).toMatch(/:global\(\.vt-form__group\)[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
+    expect(css).toMatch(/:global\(\.vt-form__row\)[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
+    expect(css).toMatch(/:global\(\.vt-btn\)[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/:global\(\.vt-field__input\)[\s\S]*min-block-size:\s*44px/)
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
@@ -66,7 +81,9 @@ describe('CounterIntake', () => {
     fireEvent.click(decode)
 
     expect(decode).toBeDisabled()
+    expect(decode).toHaveAttribute('aria-busy', 'true')
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/vin decoded/i))
+    expect(decode).toHaveAttribute('aria-busy', 'false')
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/intake/decode-vin',
       expect.objectContaining({
@@ -97,7 +114,7 @@ describe('CounterIntake', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /decode vin/i }))
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(copy))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(copy))
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2014' } })
     expect(screen.getByLabelText(/^year$/i)).toHaveValue(2014)
   })
@@ -148,6 +165,24 @@ describe('CounterIntake', () => {
     // NOTE: VIN intentionally left blank.
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     submits.forEach((btn) => expect(btn).toBeEnabled())
+  })
+
+  it('submits with Command-Enter from the complaint without bypassing the form gate', async () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    const complaint = screen.getByLabelText(/what brought them in/i)
+
+    fireEvent.keyDown(complaint, { key: 'Enter', metaKey: true })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
+    fireEvent.change(complaint, { target: { value: 'No-start' } })
+    fireEvent.keyDown(complaint, { key: 'Enter', metaKey: true })
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
   })
 
   it('shows the logged-in user email in the top bar (not the old "Diana" placeholder)', () => {
