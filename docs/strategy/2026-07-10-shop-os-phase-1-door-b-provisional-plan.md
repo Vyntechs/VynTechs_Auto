@@ -71,11 +71,11 @@
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
 - Modify: `docs/strategy/2026-07-10-shop-os-phase-1-door-b-provisional-plan.md`
 
-- [ ] Run all focused row-12 tests, the full suite, TypeScript, production build, and diff check; record exact counts.
-- [ ] Attempt signed-in Chrome only with launch authority; otherwise record the gate and use DOM/static proof because visible flow is intentionally unchanged.
-- [ ] Inspect the full diff for fake customer/vehicle identity, partial writes, retry duplication, tenant/tier leaks, provider or engine drift, and unrelated scope.
-- [ ] Obtain task reviews and one whole-branch review; resolve every Critical/Important/Minor finding and re-review.
-- [ ] Add the Phase-1 Door B implementation correction, mark row 12 complete, preserve every production/external gate, and identify row 13 as next.
+- [x] Run all focused row-12 tests (9 files/90 tests), the full suite (201 files/1,715 tests), TypeScript, production build, and diff check; all pass.
+- [x] Attempt signed-in Chrome only with launch authority; Chrome was not running and no launch authority was granted, so the intentionally unchanged visible flow is protected by DOM/static proof.
+- [x] Inspect the full diff for fake customer/vehicle identity, partial writes, retry duplication, tenant/tier leaks, provider or engine drift, and unrelated scope; none remain.
+- [x] Obtain two task reviews and one whole-branch review; resolve five Important retry, authorization, mutable-state, key-lifetime, and transport-recovery findings through TDD and receive final approvals with zero findings.
+- [x] Add the Phase-1 Door B implementation correction, mark row 12 complete, preserve every production/external gate, and identify row 13 as next.
 - [ ] Push final head, wait for GitHub checks, mark ready, squash-merge, verify `origin/main` tree equality, and immediately continue row 13.
 
 ## Verification
