@@ -43,10 +43,10 @@
 - Create: `app/api/tickets/[id]/jobs/[jobId]/assignment/route.ts`
 - Create: `tests/unit/shop-os-job-assignment-route.test.ts`
 
-- [ ] Write failing tests for auth, paywall, invalid JSON, actor translation, every action result, warning envelope, and status mapping.
-- [ ] Keep the route auth → paywall → parse → domain; do not duplicate assignment policy in the route.
-- [ ] Return the updated safe ticket on success and the safe current assignee only on a losing claim.
-- [ ] Independently review the route task and resolve every finding.
+- [x] Write failing tests for auth, paywall, invalid JSON, actor translation, every action result, warning envelope, and status mapping.
+- [x] Keep the route auth → paywall → parse → domain; do not duplicate assignment policy in the route.
+- [x] Return the updated safe ticket on success and the safe current assignee only on a losing claim.
+- [x] Independently review the route task and receive approval with zero findings.
 
 ## Task 4: Verify, review, reconcile, and ship row 13
 
