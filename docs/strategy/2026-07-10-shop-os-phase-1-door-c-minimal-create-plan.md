@@ -48,7 +48,7 @@ QUICK TICKET
 
 - [x] Record PR #121 merge commit/tree equality and close row 10's final shipping checkbox.
 - [x] Mark row 11 `in_progress` on `feat/shop-os-p1-door-c-minimal-create` while preserving row 6 and counter enablement owner gates.
-- [ ] Commit/push this execution packet and open a draft PR before implementation.
+- [x] Commit/push this execution packet and open draft PR #122 before implementation.
 
 ### Task 2: Create the atomic quick-ticket handler and thin route
 

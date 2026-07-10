@@ -708,7 +708,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | complete | PR #119; 40 focused + 1,559 full tests; no production apply |
 | 9 | 1 | Real ticket detail/read surface | A | 8 | complete | PR #120; 18 focused + 1,577 full tests; [execution packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) |
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | complete | PR #121; 8 focused files/105 tests + 195 files/1,618 full tests; [execution packet](./2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md); feature enable remains owner gate |
-| 11 | 1 | Door C minimal create | A | 8,9 | in_progress | `feat/shop-os-p1-door-c-minimal-create`; [execution packet](./2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md) |
+| 11 | 1 | Door C minimal create | A | 8,9 | in_progress | Draft PR #122; `feat/shop-os-p1-door-c-minimal-create`; [execution packet](./2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md) |
 | 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | pending | Creation seam only |
 | 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | pending | — |
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | pending | — |
