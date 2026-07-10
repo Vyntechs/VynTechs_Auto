@@ -33,10 +33,10 @@
 
 - Produces: status row 5 owned by `feat/shop-os-p1-schema`; row 6 remains unchanged.
 
-- [ ] Change row 5 from `pending` to `in_progress` with branch `feat/shop-os-p1-schema`.
-- [ ] Keep row 6 as `owner_gate`.
-- [ ] Commit the execution packet and status claim.
-- [ ] Push the branch and open a draft PR against `main`.
+- [x] Change row 5 from `pending` to `in_progress` with branch `feat/shop-os-p1-schema`.
+- [x] Keep row 6 as `owner_gate`.
+- [x] Commit the execution packet and status claim.
+- [x] Push the branch and open a draft PR against `main`.
 
 ---
 
@@ -54,12 +54,12 @@
 - Produces: schema contract for exports `tickets`, `ticketJobs`, `Ticket`, `NewTicket`, `TicketJob`, and `NewTicketJob`.
 - Produces: one official SQL migration exercised by both the clean source chain and the live predecessor fixture.
 
-- [ ] Add a clean-source test that calls `createTestDb()` and asserts `tickets`, `ticket_jobs`, `shops.next_ticket_number`, `profiles.skill_tier`, and `vehicles.platform_id` exist.
-- [ ] Assert the clean path creates zero canonical rows and gives a seeded active tech tier 1 only when the migration has a predecessor profile to map.
-- [ ] Change the Phase-0 forward rehearsal reader to load `drizzle/migrations/0026_shop_os_ticket_spine.sql`; keep rollback pointed at the reviewed rollback draft.
-- [ ] Add a partial-predecessor test that creates only one predecessor table and expects `shop_os_reconciliation:partial_predecessor_schema`.
-- [ ] Run `pnpm test tests/unit/shop-os-ticket-spine-schema.test.ts tests/unit/shop-os-reconciliation-draft.test.ts`.
-- [ ] Verify RED: missing migration/schema exports or missing canonical tables; no unrelated failure.
+- [x] Add a clean-source test that calls `createTestDb()` and asserts `tickets`, `ticket_jobs`, `shops.next_ticket_number`, `profiles.skill_tier`, and `vehicles.platform_id` exist.
+- [x] Assert the clean path creates zero canonical rows and gives a seeded active tech tier 1 only when the migration has a predecessor profile to map.
+- [x] Change the Phase-0 forward rehearsal reader to load `drizzle/migrations/0026_shop_os_ticket_spine.sql`; keep rollback pointed at the reviewed rollback draft.
+- [x] Add a partial-predecessor test that creates only one predecessor table and expects `shop_os_reconciliation:partial_predecessor_schema`.
+- [x] Run `pnpm test tests/unit/shop-os-ticket-spine-schema.test.ts tests/unit/shop-os-reconciliation-draft.test.ts`.
+- [x] Verify RED: missing migration/schema exports or missing canonical tables; no unrelated failure.
 
 ---
 
@@ -78,15 +78,15 @@
 - `tickets` matches the Phase-0 SQL fields and constraints.
 - `ticketJobs` matches the Phase-0 SQL fields and constraints.
 
-- [ ] Import `bigint`, `check`, and `foreignKey` from `drizzle-orm/pg-core`.
-- [ ] Add `nextTicketNumber` and its positive check to `shops`.
-- [ ] Add nullable `skillTier` and its 1–3 check to `profiles` without narrowing `role`.
-- [ ] Restore `vehicles.platformId` to the Drizzle declaration using the existing `AnyPgColumn` late-reference pattern and index.
-- [ ] Add composite uniqueness needed for same-shop FKs on customers, profiles, vehicles, and sessions.
-- [ ] Declare `tickets` with tenant/customer/vehicle/profile FKs, source/status checks, numbering uniqueness, and provisional-pair check.
-- [ ] Declare `ticketJobs` with tenant ticket/assignee/session FKs, one-session uniqueness, skill/status/state checks, and claim/start indexes.
-- [ ] Add relations and inferred select/insert types without changing existing engine relations.
-- [ ] Run the focused tests and TypeScript; schema assertions may remain red only because migration 0026 is not written yet.
+- [x] Import `bigint`, `check`, and `foreignKey` from `drizzle-orm/pg-core`.
+- [x] Add `nextTicketNumber` and its positive check to `shops`.
+- [x] Add nullable `skillTier` and its 1–3 check to `profiles` without narrowing `role`.
+- [x] Restore `vehicles.platformId` to the Drizzle declaration using the existing `AnyPgColumn` late-reference pattern and index.
+- [x] Add composite uniqueness needed for same-shop FKs on customers, profiles, vehicles, and sessions.
+- [x] Declare `tickets` with tenant/customer/vehicle/profile FKs, source/status checks, numbering uniqueness, and provisional-pair check.
+- [x] Declare `ticketJobs` with tenant ticket/assignee/session FKs, one-session uniqueness, skill/status/state checks, and claim/start indexes.
+- [x] Add relations and inferred select/insert types without changing existing engine relations.
+- [x] Run the focused tests and TypeScript; schema assertions may remain red only because migration 0026 is not written yet.
 
 ---
 
@@ -107,14 +107,14 @@
 - Any partial predecessor state raises `shop_os_reconciliation:partial_predecessor_schema` before DDL.
 - Both successful entries produce identical empty-or-mapped canonical schema.
 
-- [ ] Run `pnpm drizzle-kit generate --custom --name shop_os_ticket_spine` to create the journaled custom migration shell; rename only if the generated index is not `0026`.
-- [ ] Add one transaction and a preflight `DO` block that distinguishes clean, complete-live, partial, and canonical-already-present states.
-- [ ] Reuse every Phase-0 live data guard, including v2 emptiness, exact customer/vehicle/session defaults, tenant relationships, enabled-shop mapping, and exactly one linked session per repair order.
-- [ ] Add canonical columns, helper indexes, tables, checks, FKs, RLS, policies, and grants.
-- [ ] Run legacy row migration inside a conditional PL/pgSQL block so clean source databases never reference absent predecessor tables.
-- [ ] Drop predecessor tables/columns with guarded `IF EXISTS` operations after mapping succeeds.
-- [ ] Preserve `vehicles.platform_id` and its existing FK/index.
-- [ ] Run the focused tests and verify GREEN for clean, complete-live, guard, and rollback cases.
+- [x] Attempt `pnpm drizzle-kit generate --custom --name shop_os_ticket_spine`; the known malformed `0011b_snapshot.json` blocks output, so use migration 0021's established hand-written SQL + journal path.
+- [x] Add a runner-transactional migration and preflight `DO` block that distinguishes clean, complete-live, partial, and canonical-already-present states.
+- [x] Reuse every Phase-0 live data guard, including v2 emptiness, exact customer/vehicle/session defaults, tenant relationships, enabled-shop mapping, and exactly one linked session per repair order.
+- [x] Add canonical columns, helper indexes, tables, checks, FKs, RLS, policies, and grants.
+- [x] Run legacy row migration inside a conditional PL/pgSQL block so clean source databases never reference absent predecessor tables.
+- [x] Drop predecessor tables/columns with guarded `IF EXISTS` operations after mapping succeeds.
+- [x] Preserve `vehicles.platform_id` and its existing FK/index.
+- [x] Run the focused tests and verify GREEN for clean, complete-live, guard, and rollback cases.
 
 ---
 
@@ -129,11 +129,11 @@
 
 - Produces: row 5 `complete` with PR/proof; row 6 still `owner_gate`.
 
-- [ ] Confirm the official migration diff contains no unrelated schema generated from stale snapshots.
-- [ ] Run `pnpm test`.
-- [ ] Run `pnpm exec tsc --noEmit`.
-- [ ] Run `pnpm build`.
-- [ ] Run `git diff --check` and inspect every changed artifact.
-- [ ] Re-query live migration names/counts read-only and confirm no production state changed.
-- [ ] Mark row 5 complete only after proof exists; keep row 6 `owner_gate`.
-- [ ] Update the draft PR body with the exact checks and explicit no-production boundary.
+- [x] Confirm the official migration diff contains no unrelated schema generated from stale snapshots.
+- [x] Run `pnpm test`.
+- [x] Run `pnpm exec tsc --noEmit`.
+- [x] Run `pnpm build`.
+- [x] Run `git diff --check` and inspect every changed artifact.
+- [x] Re-query live migration names/counts read-only and confirm no production state changed.
+- [x] Mark row 5 complete only after proof exists; keep row 6 `owner_gate`.
+- [x] Update the draft PR body with the exact checks and explicit no-production boundary.

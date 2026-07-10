@@ -42,6 +42,7 @@ describe('POST /api/intake/decode-vin', () => {
         shopId: 's1',
         fullName: 'Owner',
         role: 'owner',
+        skillTier: null,
         isComp: false,
         isCurator: false,
         lastSeenWhatsNewAt: null,

@@ -98,6 +98,7 @@ describe('POST /api/sessions/[id]/wizard-state', () => {
         shopId: 's1',
         fullName: 'Owner',
         role: 'owner',
+        skillTier: null,
         isComp: false,
         isCurator: false,
         lastSeenWhatsNewAt: null,

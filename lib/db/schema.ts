@@ -8,11 +8,14 @@ import {
   timestamp,
   jsonb,
   integer,
+  bigint,
   real,
   boolean,
   index,
   uniqueIndex,
   primaryKey,
+  check,
+  foreignKey,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 import type { Flow, WizardState } from '../flows/types'
@@ -24,24 +27,42 @@ export type { TreeState }
 
 export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
 
-export const shops = pgTable('shops', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+export const shops = pgTable(
+  'shops',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    nextTicketNumber: bigint('next_ticket_number', { mode: 'number' }).default(1).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check('shops_next_ticket_number_positive', sql`${table.nextTicketNumber} > 0`),
+  ],
+)
 
-export const profiles = pgTable('profiles', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull().unique(),
-  shopId: uuid('shop_id').references(() => shops.id),
-  fullName: text('full_name'),
-  role: text('role').default('tech').notNull(),
-  isComp: boolean('is_comp').default(false).notNull(),
-  isCurator: boolean('is_curator').default(false).notNull(),
-  lastSeenWhatsNewAt: timestamp('last_seen_whats_new_at', { withTimezone: true }),
-  deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+export const profiles = pgTable(
+  'profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().unique(),
+    shopId: uuid('shop_id').references(() => shops.id),
+    fullName: text('full_name'),
+    role: text('role').default('tech').notNull(),
+    skillTier: integer('skill_tier'),
+    isComp: boolean('is_comp').default(false).notNull(),
+    isCurator: boolean('is_curator').default(false).notNull(),
+    lastSeenWhatsNewAt: timestamp('last_seen_whats_new_at', { withTimezone: true }),
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('profiles_shop_id_id_uq').on(table.shopId, table.id),
+    check(
+      'profiles_skill_tier_range',
+      sql`${table.skillTier} is null or ${table.skillTier} between 1 and 3`,
+    ),
+  ],
+)
 
 export const customers = pgTable(
   'customers',
@@ -54,7 +75,10 @@ export const customers = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('customers_shop_id_phone_idx').on(table.shopId, table.phone)],
+  (table) => [
+    index('customers_shop_id_phone_idx').on(table.shopId, table.phone),
+    uniqueIndex('customers_shop_id_id_uq').on(table.shopId, table.id),
+  ],
 )
 
 export const vehicles = pgTable(
@@ -69,12 +93,18 @@ export const vehicles = pgTable(
     vin: text('vin'),
     mileage: integer('mileage'),
     plate: text('plate'),
+    platformId: uuid('platform_id').references(
+      (): AnyPgColumn => platforms.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('vehicles_customer_id_idx').on(table.customerId),
     index('vehicles_customer_id_vin_idx').on(table.customerId, table.vin),
+    index('vehicles_platform_id_idx').on(table.platformId),
+    uniqueIndex('vehicles_customer_id_id_uq').on(table.customerId, table.id),
   ],
 )
 
@@ -111,25 +141,200 @@ export type OutcomePayload = {
   override?: { at: string; lastFeedback: string }
 }
 
-export const sessions = pgTable('sessions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  shopId: uuid('shop_id').references(() => shops.id).notNull(),
-  techId: uuid('tech_id').references(() => profiles.id).notNull(),
-  vehicleId: uuid('vehicle_id').references(() => vehicles.id),
-  status: text('status', { enum: ['open', 'closed', 'declined', 'deferred'] }).notNull().default('open'),
-  intake: jsonb('intake').notNull().$type<IntakePayload>(),
-  treeState: jsonb('tree_state').notNull().$type<TreeState>(),
-  outcome: jsonb('outcome').$type<OutcomePayload>(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  closedAt: timestamp('closed_at', { withTimezone: true }),
-  curatorNote: text('curator_note'),
-  curatorOverrideAction: text('curator_override_action'),
-  maxCorpusSimilarity: real('max_corpus_similarity'),
-  wizardState: jsonb('wizard_state').$type<WizardState | null>(),
-  // Added by migration 0023 (interactive electrical topology). Tracks the
-  // last scenario the tech picked, so the topology loader can restore it.
-  lastScenarioSlug: text('last_scenario_slug'),
-})
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id).notNull(),
+    techId: uuid('tech_id').references(() => profiles.id).notNull(),
+    vehicleId: uuid('vehicle_id').references(() => vehicles.id),
+    status: text('status', { enum: ['open', 'closed', 'declined', 'deferred'] }).notNull().default('open'),
+    intake: jsonb('intake').notNull().$type<IntakePayload>(),
+    treeState: jsonb('tree_state').notNull().$type<TreeState>(),
+    outcome: jsonb('outcome').$type<OutcomePayload>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    curatorNote: text('curator_note'),
+    curatorOverrideAction: text('curator_override_action'),
+    maxCorpusSimilarity: real('max_corpus_similarity'),
+    wizardState: jsonb('wizard_state').$type<WizardState | null>(),
+    // Added by migration 0023 (interactive electrical topology). Tracks the
+    // last scenario the tech picked, so the topology loader can restore it.
+    lastScenarioSlug: text('last_scenario_slug'),
+  },
+  (table) => [uniqueIndex('sessions_shop_id_id_uq').on(table.shopId, table.id)],
+)
+
+export const tickets = pgTable(
+  'tickets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'restrict' }).notNull(),
+    ticketNumber: bigint('ticket_number', { mode: 'number' }).notNull(),
+    source: text('source', {
+      enum: ['counter', 'tech_quick', 'quick_quote', 'legacy_repair_order'],
+    }).notNull(),
+    customerId: uuid('customer_id'),
+    vehicleId: uuid('vehicle_id'),
+    concern: text('concern').notNull(),
+    whenStarted: text('when_started'),
+    howOften: text('how_often'),
+    diagnosticAuthorizedCents: bigint('diagnostic_authorized_cents', { mode: 'number' }),
+    diagnosticAuthorizationNote: text('diagnostic_authorization_note'),
+    status: text('status', { enum: ['open', 'closed', 'canceled'] }).default('open').notNull(),
+    createdByProfileId: uuid('created_by_profile_id').notNull(),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    canceledByProfileId: uuid('canceled_by_profile_id'),
+    canceledReason: text('canceled_reason'),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    deliveredByProfileId: uuid('delivered_by_profile_id'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closedByProfileId: uuid('closed_by_profile_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('tickets_shop_ticket_number_uq').on(table.shopId, table.ticketNumber),
+    uniqueIndex('tickets_shop_id_id_uq').on(table.shopId, table.id),
+    index('tickets_shop_status_idx').on(table.shopId, table.status),
+    index('tickets_customer_idx').on(table.customerId),
+    index('tickets_vehicle_idx').on(table.vehicleId),
+    foreignKey({
+      name: 'tickets_shop_customer_fk',
+      columns: [table.shopId, table.customerId],
+      foreignColumns: [customers.shopId, customers.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_customer_vehicle_fk',
+      columns: [table.customerId, table.vehicleId],
+      foreignColumns: [vehicles.customerId, vehicles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_shop_creator_fk',
+      columns: [table.shopId, table.createdByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_shop_canceler_fk',
+      columns: [table.shopId, table.canceledByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_shop_deliverer_fk',
+      columns: [table.shopId, table.deliveredByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_shop_closer_fk',
+      columns: [table.shopId, table.closedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    check('tickets_number_positive', sql`${table.ticketNumber} > 0`),
+    check(
+      'tickets_source_valid',
+      sql`${table.source} in ('counter', 'tech_quick', 'quick_quote', 'legacy_repair_order')`,
+    ),
+    check(
+      'tickets_status_valid',
+      sql`${table.status} in ('open', 'closed', 'canceled')`,
+    ),
+    check(
+      'tickets_customer_vehicle_pair',
+      sql`(${table.customerId} is not null and ${table.vehicleId} is not null)
+        or (${table.source} = 'tech_quick' and ${table.customerId} is null and ${table.vehicleId} is null)`,
+    ),
+    check(
+      'tickets_diagnostic_authorized_cents_nonnegative',
+      sql`${table.diagnosticAuthorizedCents} is null or ${table.diagnosticAuthorizedCents} >= 0`,
+    ),
+  ],
+)
+
+export const ticketJobs = pgTable(
+  'ticket_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'restrict' }).notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    title: text('title').notNull(),
+    kind: text('kind', { enum: ['diagnostic', 'repair', 'maintenance'] }).notNull(),
+    requiredSkillTier: integer('required_skill_tier').notNull(),
+    assignedTechId: uuid('assigned_tech_id'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    sessionId: uuid('session_id'),
+    workStatus: text('work_status', {
+      enum: ['open', 'in_progress', 'blocked', 'done', 'canceled'],
+    }).default('open').notNull(),
+    approvalState: text('approval_state', {
+      enum: ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined'],
+    }).default('pending_quote').notNull(),
+    workNotes: text('work_notes'),
+    diagnosticStartState: text('diagnostic_start_state', {
+      enum: ['idle', 'initializing', 'ready', 'failed', 'ambiguous'],
+    }).default('idle').notNull(),
+    diagnosticStartAttemptKey: text('diagnostic_start_attempt_key'),
+    diagnosticStartLeaseUntil: timestamp('diagnostic_start_lease_until', { withTimezone: true }),
+    diagnosticStartErrorCode: text('diagnostic_start_error_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'ticket_jobs_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'ticket_jobs_shop_assignee_fk',
+      columns: [table.shopId, table.assignedTechId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_shop_session_fk',
+      columns: [table.shopId, table.sessionId],
+      foreignColumns: [sessions.shopId, sessions.id],
+    }).onDelete('restrict'),
+    uniqueIndex('ticket_jobs_session_id_uq')
+      .on(table.sessionId)
+      .where(sql`${table.sessionId} is not null`),
+    uniqueIndex('ticket_jobs_shop_start_attempt_uq')
+      .on(table.shopId, table.diagnosticStartAttemptKey)
+      .where(sql`${table.diagnosticStartAttemptKey} is not null`),
+    index('ticket_jobs_shop_assignee_status_idx').on(
+      table.shopId,
+      table.assignedTechId,
+      table.workStatus,
+    ),
+    index('ticket_jobs_shop_open_tier_idx')
+      .on(table.shopId, table.requiredSkillTier, table.workStatus)
+      .where(sql`${table.assignedTechId} is null`),
+    index('ticket_jobs_ticket_idx').on(table.ticketId),
+    check(
+      'ticket_jobs_kind_valid',
+      sql`${table.kind} in ('diagnostic', 'repair', 'maintenance')`,
+    ),
+    check(
+      'ticket_jobs_skill_tier_range',
+      sql`${table.requiredSkillTier} between 1 and 3`,
+    ),
+    check(
+      'ticket_jobs_work_status_valid',
+      sql`${table.workStatus} in ('open', 'in_progress', 'blocked', 'done', 'canceled')`,
+    ),
+    check(
+      'ticket_jobs_approval_state_valid',
+      sql`${table.approvalState} in ('pending_quote', 'quote_ready', 'sent', 'approved', 'declined')`,
+    ),
+    check(
+      'ticket_jobs_diagnostic_start_state_valid',
+      sql`${table.diagnosticStartState} in ('idle', 'initializing', 'ready', 'failed', 'ambiguous')`,
+    ),
+    check(
+      'ticket_jobs_session_only_for_diagnostic',
+      sql`${table.sessionId} is null or ${table.kind} = 'diagnostic'`,
+    ),
+  ],
+)
 
 export const sessionEvents = pgTable('session_events', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -264,11 +469,56 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 export const customersRelations = relations(customers, ({ one, many }) => ({
   shop: one(shops, { fields: [customers.shopId], references: [shops.id] }),
   vehicles: many(vehicles),
+  tickets: many(tickets),
 }))
 
 export const vehiclesRelations = relations(vehicles, ({ one, many }) => ({
   customer: one(customers, { fields: [vehicles.customerId], references: [customers.id] }),
+  platform: one(platforms, { fields: [vehicles.platformId], references: [platforms.id] }),
   sessions: many(sessions),
+  tickets: many(tickets),
+}))
+
+export const ticketsRelations = relations(tickets, ({ one, many }) => ({
+  shop: one(shops, { fields: [tickets.shopId], references: [shops.id] }),
+  customer: one(customers, { fields: [tickets.customerId], references: [customers.id] }),
+  vehicle: one(vehicles, { fields: [tickets.vehicleId], references: [vehicles.id] }),
+  createdBy: one(profiles, {
+    fields: [tickets.createdByProfileId],
+    references: [profiles.id],
+    relationName: 'ticketCreator',
+  }),
+  canceledBy: one(profiles, {
+    fields: [tickets.canceledByProfileId],
+    references: [profiles.id],
+    relationName: 'ticketCanceler',
+  }),
+  deliveredBy: one(profiles, {
+    fields: [tickets.deliveredByProfileId],
+    references: [profiles.id],
+    relationName: 'ticketDeliverer',
+  }),
+  closedBy: one(profiles, {
+    fields: [tickets.closedByProfileId],
+    references: [profiles.id],
+    relationName: 'ticketCloser',
+  }),
+  jobs: many(ticketJobs),
+}))
+
+export const ticketJobsRelations = relations(ticketJobs, ({ one }) => ({
+  shop: one(shops, { fields: [ticketJobs.shopId], references: [shops.id] }),
+  ticket: one(tickets, { fields: [ticketJobs.ticketId], references: [tickets.id] }),
+  assignedTech: one(profiles, {
+    fields: [ticketJobs.assignedTechId],
+    references: [profiles.id],
+    relationName: 'ticketJobAssignee',
+  }),
+  session: one(sessions, {
+    fields: [ticketJobs.sessionId],
+    references: [sessions.id],
+    relationName: 'ticketJobSession',
+  }),
 }))
 
 export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
@@ -278,11 +528,18 @@ export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
 export const profilesRelations = relations(profiles, ({ one, many }) => ({
   shop: one(shops, { fields: [profiles.shopId], references: [shops.id] }),
   sessions: many(sessions),
+  createdTickets: many(tickets, { relationName: 'ticketCreator' }),
+  canceledTickets: many(tickets, { relationName: 'ticketCanceler' }),
+  deliveredTickets: many(tickets, { relationName: 'ticketDeliverer' }),
+  closedTickets: many(tickets, { relationName: 'ticketCloser' }),
+  assignedTicketJobs: many(ticketJobs, { relationName: 'ticketJobAssignee' }),
 }))
 
 export const shopsRelations = relations(shops, ({ many, one }) => ({
   profiles: many(profiles),
   sessions: many(sessions),
+  tickets: many(tickets),
+  ticketJobs: many(ticketJobs),
   stripeCustomer: one(stripeCustomers, { fields: [shops.id], references: [stripeCustomers.shopId] }),
 }))
 
@@ -306,6 +563,10 @@ export type Customer = typeof customers.$inferSelect
 export type NewCustomer = typeof customers.$inferInsert
 export type Vehicle = typeof vehicles.$inferSelect
 export type NewVehicle = typeof vehicles.$inferInsert
+export type Ticket = typeof tickets.$inferSelect
+export type NewTicket = typeof tickets.$inferInsert
+export type TicketJob = typeof ticketJobs.$inferSelect
+export type NewTicketJob = typeof ticketJobs.$inferInsert
 
 export const retrievalCache = pgTable('retrieval_cache', {
   id: uuid('id').primaryKey().defaultRandom(),

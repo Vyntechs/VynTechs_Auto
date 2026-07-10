@@ -21,6 +21,13 @@ afterEach(async () => {
 })
 
 async function readDraft(name: 'forward' | 'rollback'): Promise<string> {
+  if (name === 'forward') {
+    return readFile(
+      path.join(process.cwd(), 'drizzle/migrations/0026_shop_os_ticket_spine.sql'),
+      'utf8',
+    )
+  }
+
   return readFile(
     path.join(
       process.cwd(),
@@ -255,6 +262,21 @@ async function expectForwardFailure(db: PGlite, code: string): Promise<void> {
 }
 
 describe('Shop OS Phase-0 reconciliation SQL drafts', () => {
+  it('refuses a partial predecessor schema before canonical DDL', async () => {
+    const db = new PGlite()
+    openDatabases.push(db)
+    await db.exec(`
+      create table shops (id uuid primary key);
+      create table profiles (id uuid primary key);
+      create table customers (id uuid primary key);
+      create table vehicles (id uuid primary key);
+      create table sessions (id uuid primary key);
+      create table repair_orders (id uuid primary key);
+    `)
+
+    await expectForwardFailure(db, 'shop_os_reconciliation:partial_predecessor_schema')
+  })
+
   it('migrates the linked repair order into a tenant-safe canonical ticket and job', async () => {
     const db = await createLegacyDb()
 
@@ -313,6 +335,14 @@ describe('Shop OS Phase-0 reconciliation SQL drafts', () => {
       [IDS.shop],
     )
     expect(shop.rows[0]?.next_ticket_number).toBe(2)
+
+    const profileTiers = await db.query<{ role: string; skill_tier: number | null }>(
+      'select role, skill_tier from profiles order by role',
+    )
+    expect(profileTiers.rows).toEqual([
+      { role: 'owner', skill_tier: null },
+      { role: 'tech', skill_tier: 1 },
+    ])
 
     for (const table of [
       'repair_orders',
