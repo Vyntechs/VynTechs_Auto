@@ -15,7 +15,7 @@ describe('CounterIntake', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ sessionId: 'session-abc' }),
+        json: async () => ({ ticket: { id: 'ticket-abc' } }),
       }),
     )
   })
@@ -48,6 +48,63 @@ describe('CounterIntake', () => {
     const vin = screen.getByLabelText(/vin/i) as HTMLInputElement
     fireEvent.change(vin, { target: { value: 'wba3a5c50ejf12345' } })
     expect(vin.value).toBe('WBA3A5C50EJF12345')
+  })
+
+  it('decodes an explicit 17-character VIN and leaves every decoded field editable', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ year: 2014, make: 'BMW', model: '335i', engine: 'N55' }),
+    } as Response)
+    render(<CounterIntake userEmail="test@example.com" />)
+
+    const decode = screen.getByRole('button', { name: /decode vin/i })
+    expect(decode).toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/^vin$/i), {
+      target: { value: 'wba3a5c50ejf12345' },
+    })
+    expect(decode).toBeEnabled()
+    fireEvent.click(decode)
+
+    expect(decode).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/vin decoded/i))
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/intake/decode-vin',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ vin: 'WBA3A5C50EJF12345' }),
+      }),
+    )
+    expect(screen.getByLabelText(/^year$/i)).toHaveValue(2014)
+    expect(screen.getByLabelText(/^make$/i)).toHaveValue('BMW')
+    expect(screen.getByLabelText(/^model$/i)).toHaveValue('335i')
+    expect(screen.getByLabelText(/^engine$/i)).toHaveValue('N55')
+
+    fireEvent.change(screen.getByLabelText(/^engine$/i), { target: { value: 'N55B30' } })
+    expect(screen.getByLabelText(/^engine$/i)).toHaveValue('N55B30')
+  })
+
+  it.each([
+    ['invalid', /vin was not recognized/i],
+    ['unavailable', /vin lookup is unavailable/i],
+  ] as const)('keeps manual vehicle fields usable when decode returns %s', async (error, copy) => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ error }),
+    } as Response)
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.change(screen.getByLabelText(/^vin$/i), {
+      target: { value: 'WBA3A5C50EJF12345' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /decode vin/i }))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(copy))
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2014' } })
+    expect(screen.getByLabelText(/^year$/i)).toHaveValue(2014)
+  })
+
+  it('does not claim VIN fields auto-fill before a successful decode', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    expect(screen.queryByText(/vin auto-fills/i)).not.toBeInTheDocument()
   })
 
   // 2026-05-29 trust sweep: the "Scan with camera" button never scanned — it
@@ -106,7 +163,7 @@ describe('CounterIntake', () => {
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
-  it('POSTs the form values to /api/intake/submit and navigates on success', async () => {
+  it('POSTs the exact new-vehicle ticket body with structured authorization and requested service, then navigates to the ticket', async () => {
     render(<CounterIntake userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '(303) 555-0142' } })
@@ -117,24 +174,170 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'Crank-no-start' },
     })
+    fireEvent.change(screen.getByLabelText(/when did it start/i), {
+      target: { value: 'Yesterday' },
+    })
+    fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'Every time' } })
+    fireEvent.change(screen.getByLabelText(/diagnostic authorization amount/i), {
+      target: { value: '175.50' },
+    })
+    fireEvent.change(screen.getByLabelText(/authorization note/i), {
+      target: { value: 'Call before exceeding this amount' },
+    })
+    fireEvent.change(screen.getByLabelText(/requested service description/i), {
+      target: { value: 'Replace rear brake pads' },
+    })
+    fireEvent.change(screen.getByLabelText(/requested service kind/i), {
+      target: { value: 'repair' },
+    })
 
-    // Click either Send-to-Techs button (both submit the same form).
-    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+    fireEvent.submit(document.getElementById('counter-intake-form')!)
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        '/api/intake/submit',
+        '/api/tickets/counter',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({ 'content-type': 'application/json' }),
-          body: expect.stringContaining('Robert Sandoval'),
         }),
       )
     })
 
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/sessions/session-abc')
+    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0]
+    expect(JSON.parse(init!.body as string)).toEqual({
+      vehicleMode: 'new',
+      customer: {
+        name: 'Robert Sandoval',
+        phone: '(303) 555-0142',
+        email: null,
+      },
+      vehicle: {
+        year: 2014,
+        make: 'BMW',
+        model: '335i',
+        engine: null,
+        vin: 'WBA3A5C50EJF12345',
+        mileage: null,
+        plate: null,
+      },
+      concern: 'Crank-no-start',
+      whenStarted: 'Yesterday',
+      howOften: 'Every time',
+      diagnosticAuthorization: {
+        amountDollars: '175.50',
+        note: 'Call before exceeding this amount',
+      },
+      requestedService: { kind: 'repair', description: 'Replace rear brake pads' },
+      assignedTechId: null,
     })
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-abc')
+    })
+  })
+
+  it('sends numeric year and mileage while omitting an empty optional service', async () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/mileage today/i), { target: { value: '123456' } })
+    fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+      target: { value: 'No-start' },
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
+    expect(body.vehicle.year).toBe(2020)
+    expect(body.vehicle.mileage).toBe(123456)
+    expect(body.requestedService).toBeUndefined()
+    expect(body.concern).toBe('No-start')
+    expect(body.jobs).toBeUndefined()
+  })
+
+  it('shows an error envelope and does not redirect without a ticket', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: 'not_found' }),
+    } as Response)
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+      target: { value: 'No-start' },
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/selected customer or vehicle/i),
+    )
+    expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicit Assign anyway action before retrying a below-tier assignment', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          error: 'tier_confirmation_required',
+          warning: {
+            code: 'below_required_tier',
+            assignedTechId: 'b',
+            assignedSkillTier: 2,
+            requiredSkillTier: 3,
+          },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ticket: { id: 'ticket-confirmed' } }),
+      } as Response)
+
+    render(
+      <CounterIntake
+        userEmail="brandon@example.com"
+        team={[
+          {
+            id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true,
+            workload: { open: 0, today: 0 },
+          },
+          {
+            id: 'b', name: 'Diana', skillTier: 2, isCurrentUser: false,
+            workload: { open: 0, today: 0 },
+          },
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('option', { name: /diana/i }))
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+      target: { value: 'No-start' },
+    })
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/below.*a-tier/i))
+    expect(screen.getByRole('alert').getAttribute('style')).toContain(
+      'var(--vt-risk-medium)',
+    )
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(mockPush).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /assign anyway/i }))
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
+    const retryBody = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[1][1]!.body as string)
+    expect(retryBody.confirmBelowTier).toBe(true)
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-confirmed'))
   })
 
   describe('tech selector wiring', () => {

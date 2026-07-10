@@ -18,21 +18,59 @@ import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 
-type IntakeBody = {
+type CounterBody = {
+  vehicleMode: 'new' | 'existing'
   existingVehicleId?: string
-  assignedTechId?: string | null
-  customer?: { name: string; phone: string; email: string }
+  customer?: { name: string; phone: string; email: string | null }
   vehicle?: {
-    vin: string
-    vinScanned: boolean
-    year: string
+    year: number
     make: string
     model: string
-    engine: string
-    mileage: string
-    plate: string
+    engine: string | null
+    vin: string | null
+    mileage: number | null
+    plate: string | null
   }
-  complaint: { description: string; whenStarted: string; howOften: string; authorized: string }
+  mileage?: number | null
+  concern: string
+  whenStarted: string | null
+  howOften: string | null
+  diagnosticAuthorization: { amountDollars: string | null; note: string | null }
+  requestedService?: { kind: 'repair' | 'maintenance'; description: string }
+  assignedTechId: string | null
+  confirmBelowTier?: boolean
+}
+
+type TierWarning = {
+  code: 'below_required_tier'
+  assignedTechId: string
+  assignedSkillTier: 1 | 2 | 3
+  requiredSkillTier: 1 | 2 | 3
+}
+
+function optionalText(value: string): string | null {
+  return value.trim() || null
+}
+
+function optionalNumber(value: string): number | null {
+  return value.trim() === '' ? null : Number(value)
+}
+
+function ticketErrorMessage(error?: string): string {
+  switch (error) {
+    case 'not_found':
+      return 'The selected customer or vehicle is no longer available. Choose it again.'
+    case 'invalid_input':
+      return 'Check the customer, vehicle, mileage, and authorization fields.'
+    case 'invalid_assignee':
+      return 'That technician is no longer available for assignment. Choose Open or another technician.'
+    case 'forbidden':
+    case 'inactive_profile':
+    case 'no_shop':
+      return 'This account cannot create a counter ticket.'
+    default:
+      return 'Could not create the ticket. Try again.'
+  }
 }
 
 export function CounterIntake({
@@ -64,14 +102,21 @@ export function CounterIntake({
   const [description, setDescription] = useState('')
   const [whenStarted, setWhenStarted] = useState('')
   const [howOften, setHowOften] = useState('')
-  const [authorized, setAuthorized] = useState('Diagnostic only · $0 quote review')
+  const [authorizationAmount, setAuthorizationAmount] = useState('')
+  const [authorizationNote, setAuthorizationNote] = useState('')
+  const [requestedServiceKind, setRequestedServiceKind] = useState<'repair' | 'maintenance'>(
+    'repair',
+  )
+  const [requestedServiceDescription, setRequestedServiceDescription] = useState('')
+  const [vinBusy, setVinBusy] = useState(false)
+  const [vinStatus, setVinStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tierWarning, setTierWarning] = useState<TierWarning | null>(null)
 
   const isPickExisting = pickedVehicleId !== null
-  // Mirror /api/intake/submit's requirements exactly so the UI gate never
-  // disables submit for a body the route would accept. VIN is NOT required
-  // (some walk-ins genuinely don't have one in hand); year/make/model ARE.
+  // Mirror the counter-ticket requirements. VIN remains optional for walk-ins;
+  // customer contact, year/make/model, and concern are required.
   const canSubmit =
     !busy &&
     description.trim() !== '' &&
@@ -104,71 +149,116 @@ export function CounterIntake({
     setPickedLabel(null)
   }
 
-  const handleVinChange = (e: ChangeEvent<HTMLInputElement>) => setVin(e.target.value.toUpperCase())
+  const handleVinChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setVin(e.target.value.toUpperCase())
+    setVinStatus(null)
+  }
 
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+  const handleDecodeVin = async () => {
+    if (vin.length !== 17 || vinBusy) return
+    setVinBusy(true)
+    setVinStatus('Decoding VIN…')
+    try {
+      const response = await fetch('/api/intake/decode-vin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ vin: vin.trim() }),
+      })
+      const payload = (await response.json()) as
+        | { year: number; make: string; model: string; engine: string }
+        | { error: string }
+      if (!response.ok || 'error' in payload) {
+        setVinStatus(
+          'error' in payload && payload.error === 'invalid'
+            ? 'VIN was not recognized. Enter the vehicle details manually.'
+            : 'VIN lookup is unavailable. Enter the vehicle details manually.',
+        )
+        return
+      }
+      setYear(String(payload.year))
+      setMake(payload.make)
+      setModel(payload.model)
+      setEngine(payload.engine)
+      setVinStatus('VIN decoded. Verify each vehicle field before creating the ticket.')
+    } catch {
+      setVinStatus('VIN lookup is unavailable. Enter the vehicle details manually.')
+    } finally {
+      setVinBusy(false)
+    }
+  }
+
+  const submitTicket = async (confirmBelowTier = false) => {
     if (!canSubmit) return
     setBusy(true)
     setError(null)
-    const body: IntakeBody = isPickExisting
+    setTierWarning(null)
+    const requestedService = requestedServiceDescription.trim()
+      ? { kind: requestedServiceKind, description: requestedServiceDescription.trim() }
+      : undefined
+    const common = {
+      concern: description.trim(),
+      whenStarted: optionalText(whenStarted),
+      howOften: optionalText(howOften),
+      diagnosticAuthorization: {
+        amountDollars: optionalText(authorizationAmount),
+        note: optionalText(authorizationNote),
+      },
+      requestedService,
+      assignedTechId,
+      ...(confirmBelowTier ? { confirmBelowTier: true } : {}),
+    }
+    const body: CounterBody = isPickExisting
       ? {
+          vehicleMode: 'existing',
           existingVehicleId: pickedVehicleId!,
-          assignedTechId,
-          vehicle: {
-            vin: '',
-            vinScanned: false,
-            year: '',
-            make: '',
-            model: '',
-            engine: '',
-            mileage: mileage.trim(),
-            plate: '',
-          },
-          complaint: {
-            description: description.trim(),
-            whenStarted: whenStarted.trim(),
-            howOften: howOften.trim(),
-            authorized: authorized.trim(),
-          },
+          mileage: optionalNumber(mileage),
+          ...common,
         }
       : {
-          assignedTechId,
-          customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
+          vehicleMode: 'new',
+          customer: { name: name.trim(), phone: phone.trim(), email: optionalText(email) },
           vehicle: {
-            vin: vin.trim(),
-            vinScanned: false,
-            year: year.trim(),
+            year: Number(year),
             make: make.trim(),
             model: model.trim(),
-            engine: engine.trim(),
-            mileage: mileage.trim(),
-            plate: plate.trim(),
+            engine: optionalText(engine),
+            vin: optionalText(vin),
+            mileage: optionalNumber(mileage),
+            plate: optionalText(plate),
           },
-          complaint: {
-            description: description.trim(),
-            whenStarted: whenStarted.trim(),
-            howOften: howOften.trim(),
-            authorized: authorized.trim(),
-          },
+          ...common,
         }
     try {
-      const res = await fetch('/api/intake/submit', {
+      const res = await fetch('/api/tickets/counter', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const payload = (await res.json()) as { sessionId?: string; error?: string }
-      if (!res.ok || !payload.sessionId) {
-        setError(payload.error ?? 'Could not submit. Try again.')
+      const payload = (await res.json()) as {
+        ticket?: { id?: string }
+        error?: string
+        warning?: TierWarning
+      }
+      if (payload.error === 'tier_confirmation_required' && payload.warning) {
+        setTierWarning(payload.warning)
         setBusy(false)
         return
       }
-      router.push(`/sessions/${payload.sessionId}`)
+      if (!res.ok || !payload.ticket?.id) {
+        setError(ticketErrorMessage(payload.error))
+        setBusy(false)
+        return
+      }
+      router.push(`/tickets/${payload.ticket.id}`)
     } catch {
-      setError('Network error. Try again.')
+      setError('The counter service could not be reached. Try again.')
       setBusy(false)
     }
+  }
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    void submitTicket()
   }
 
   return (
@@ -189,7 +279,10 @@ export function CounterIntake({
                   team={team}
                   workloadFailed={workloadFailed}
                   selectedId={assignedTechId}
-                  onChange={setAssignedTechId}
+                  onChange={(id) => {
+                    setAssignedTechId(id)
+                    setTierWarning(null)
+                  }}
                 />
               ) : undefined
             }
@@ -283,6 +376,7 @@ export function CounterIntake({
                           mono
                           value={phone}
                           onChange={(e) => setPhone(e.target.value)}
+                          required
                         />
                       </Field>
                       <Field label="Email" htmlFor="ci-email">
@@ -300,24 +394,70 @@ export function CounterIntake({
 
                   <FormGroup
                     name="Vehicle"
-                    hint="VIN auto-fills year, make, model. Verify the engine."
+                    hint="Decode a complete VIN, or enter the vehicle details manually."
                   >
                     <Field label="VIN" htmlFor="ci-vin">
-                      <Input
-                        id="ci-vin"
-                        name="vin"
-                        mono
-                        maxLength={17}
-                        value={vin}
-                        onChange={handleVinChange}
-                        placeholder="17 characters"
-                      />
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(0, 1fr) auto',
+                          gap: 8,
+                          alignItems: 'start',
+                        }}
+                      >
+                        <Input
+                          id="ci-vin"
+                          name="vin"
+                          mono
+                          maxLength={17}
+                          value={vin}
+                          onChange={handleVinChange}
+                          placeholder="17 characters"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleDecodeVin()}
+                          disabled={vin.length !== 17 || vinBusy}
+                          style={{
+                            minHeight: 44,
+                            padding: '0 16px',
+                            border: '1px solid var(--vt-rule-strong)',
+                            borderRadius: 3,
+                            background: 'var(--vt-bone-50)',
+                            color: 'var(--vt-fg)',
+                            fontFamily: 'var(--vt-font-sans)',
+                            fontSize: 13,
+                            fontWeight: 650,
+                            cursor: vin.length === 17 && !vinBusy ? 'pointer' : 'default',
+                          }}
+                        >
+                          {vinBusy ? 'Decoding…' : 'Decode VIN'}
+                        </button>
+                      </div>
+                      {vinStatus && (
+                        <span
+                          role="status"
+                          aria-live="polite"
+                          style={{
+                            display: 'block',
+                            marginTop: 7,
+                            fontFamily: 'var(--vt-font-serif)',
+                            fontStyle: 'italic',
+                            fontSize: 13,
+                            color: 'var(--vt-fg-3)',
+                          }}
+                        >
+                          {vinStatus}
+                        </span>
+                      )}
                     </Field>
                     <FormRow>
                       <Field label="Year" htmlFor="ci-year">
                         <Input
                           id="ci-year"
                           name="year"
+                          type="number"
+                          min={1886}
                           mono
                           value={year}
                           onChange={(e) => setYear(e.target.value)}
@@ -353,6 +493,8 @@ export function CounterIntake({
                         <Input
                           id="ci-mileage"
                           name="mileage"
+                          type="number"
+                          min={0}
                           mono
                           value={mileage}
                           onChange={(e) => setMileage(e.target.value)}
@@ -379,6 +521,8 @@ export function CounterIntake({
                       <Input
                         id="ci-mileage-pick"
                         name="mileage"
+                        type="number"
+                        min={0}
                         mono
                         value={mileage}
                         onChange={(e) => setMileage(e.target.value)}
@@ -388,11 +532,7 @@ export function CounterIntake({
                 </FormGroup>
               )}
 
-              <FormGroup
-                name="Complaint"
-                hint="In the customer's own words is best. The AI does the translation."
-                last
-              >
+              <FormGroup name="Complaint" hint="Record the customer's own words.">
                 <Field label="What brought them in?" htmlFor="ci-description">
                   <Textarea
                     id="ci-description"
@@ -420,16 +560,112 @@ export function CounterIntake({
                       onChange={(e) => setHowOften(e.target.value)}
                     />
                   </Field>
-                  <Field label="Customer authorized" htmlFor="ci-authorized">
+                </FormRow>
+              </FormGroup>
+
+              <FormGroup
+                name="Authorization & requested work"
+                hint="Diagnostic authorization is optional and does not approve repairs."
+                last
+              >
+                <FormRow>
+                  <Field
+                    label="Diagnostic authorization amount"
+                    htmlFor="ci-authorization-amount"
+                    hint="Dollars, optional"
+                  >
                     <Input
-                      id="ci-authorized"
-                      name="authorized"
-                      value={authorized}
-                      onChange={(e) => setAuthorized(e.target.value)}
+                      id="ci-authorization-amount"
+                      name="authorizationAmount"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="0.00"
+                      mono
+                      value={authorizationAmount}
+                      onChange={(e) => setAuthorizationAmount(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Authorization note" htmlFor="ci-authorization-note">
+                    <Input
+                      id="ci-authorization-note"
+                      name="authorizationNote"
+                      placeholder="optional"
+                      value={authorizationNote}
+                      onChange={(e) => setAuthorizationNote(e.target.value)}
+                    />
+                  </Field>
+                </FormRow>
+                <FormRow>
+                  <Field label="Requested service kind" htmlFor="ci-service-kind">
+                    <select
+                      id="ci-service-kind"
+                      name="requestedServiceKind"
+                      className="vt-field__input"
+                      value={requestedServiceKind}
+                      onChange={(e) =>
+                        setRequestedServiceKind(e.target.value as 'repair' | 'maintenance')
+                      }
+                    >
+                      <option value="repair">Repair</option>
+                      <option value="maintenance">Maintenance</option>
+                    </select>
+                  </Field>
+                  <Field
+                    label="Requested service description"
+                    htmlFor="ci-service-description"
+                    hint="Optional — adds one separate service job"
+                  >
+                    <Input
+                      id="ci-service-description"
+                      name="requestedServiceDescription"
+                      placeholder="e.g. replace rear brake pads"
+                      value={requestedServiceDescription}
+                      onChange={(e) => setRequestedServiceDescription(e.target.value)}
                     />
                   </Field>
                 </FormRow>
               </FormGroup>
+
+              {tierWarning && (
+                <div
+                  role="alert"
+                  style={{
+                    margin: '12px 32px',
+                    padding: '12px 14px',
+                    borderLeft: '2px solid var(--vt-risk-medium)',
+                    background: 'var(--vt-bone-100)',
+                    fontFamily: 'var(--vt-font-serif)',
+                    fontSize: 14,
+                    color: 'var(--vt-fg-2)',
+                  }}
+                >
+                  <div>
+                    This technician is below the A-tier required for diagnostic work. Review the
+                    assignment before continuing.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void submitTicket(true)}
+                    disabled={busy}
+                    style={{
+                      minHeight: 44,
+                      marginTop: 8,
+                      padding: '0 14px',
+                      border: '1px solid var(--vt-rule-strong)',
+                      borderRadius: 3,
+                      background: 'var(--vt-bone-50)',
+                      color: 'var(--vt-fg)',
+                      fontFamily: 'var(--vt-font-sans)',
+                      fontSize: 13,
+                      fontWeight: 650,
+                      cursor: busy ? 'default' : 'pointer',
+                    }}
+                  >
+                    Assign anyway
+                  </button>
+                </div>
+              )}
 
               {error && (
                 <div

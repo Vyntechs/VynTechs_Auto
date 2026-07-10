@@ -1,5 +1,5 @@
 import { type Ref, type KeyboardEvent } from 'react'
-import { Glyph, Kbd, ScanBtn } from './rows'
+import { Glyph, Kbd } from './rows'
 
 export function Bar({
   value,
@@ -39,7 +39,6 @@ export function Bar({
         onFocus={onFocus}
         onKeyDown={onKeyDown}
       />
-      <ScanBtn />
       <Kbd>⌘ K</Kbd>
     </div>
   )
