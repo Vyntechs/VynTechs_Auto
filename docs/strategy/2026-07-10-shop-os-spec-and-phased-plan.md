@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, 9, 10, and 11 are complete in source; row 12 is the next safe source-code lane.** Production application and counter feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, 9, 10, and 11 are complete in source; row 12 is in progress on `feat/shop-os-p1-door-b-provisional`.** Production application and counter feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -711,7 +711,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 9 | 1 | Real ticket detail/read surface | A | 8 | complete | PR #120; 18 focused + 1,577 full tests; [execution packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) |
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | complete | PR #121; 8 focused files/105 tests + 195 files/1,618 full tests; [execution packet](./2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md); feature enable remains owner gate |
 | 11 | 1 | Door C minimal create | A | 8,9 | complete | PR #122; 5 focused files/67 tests + 198 files/1,668 full tests; [execution packet](./2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md) |
-| 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | pending | Creation seam only |
+| 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | in_progress | `feat/shop-os-p1-door-b-provisional`; [execution packet](./2026-07-10-shop-os-phase-1-door-b-provisional-plan.md); creation seam only |
 | 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | pending | — |
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | pending | — |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | pending | Creation seam; diagnostic semantics unchanged |
