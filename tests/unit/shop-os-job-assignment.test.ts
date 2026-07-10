@@ -44,6 +44,7 @@ describe('atomic ticket-job assignment SQL contract', () => {
     expect(body).toContain('${profiles.skillTier} between 1 and 3')
     expect(body).toContain('${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}')
     expect(body).toContain('${body.confirmBelowTier === true} or')
+    expect(body).toContain("${profiles.role} in ('tech', 'advisor', 'parts', 'owner')")
   })
 })
 
@@ -234,6 +235,26 @@ describe('ticket-job assignment mutations', () => {
     expect((await db.select().from(ticketJobs))[0].assignedTechId).toBe(actor.tech.profileId)
   })
 
+  it('rejects reassign when the target role becomes unsupported after prevalidation', async () => {
+    await db.update(ticketJobs).set({ assignedTechId: actor.tech.profileId })
+      .where(eq(ticketJobs.id, jobId))
+
+    const result = await call(
+      actor.owner,
+      { action: 'reassign', assignedTechId: actor.otherTech.profileId },
+      {},
+      {
+        beforeReassignUpdate: async () => {
+          await db.update(profiles).set({ role: 'curator' })
+            .where(eq(profiles.id, actor.otherTech.profileId))
+        },
+      },
+    )
+
+    expect(result).toEqual({ ok: false, error: 'invalid_assignee' })
+    expect((await db.select().from(ticketJobs))[0].assignedTechId).toBe(actor.tech.profileId)
+  })
+
   it('returns only the safe current assignee to sequential and concurrent losing claimers', async () => {
     const first = await call(actor.tech, { action: 'claim' })
     expect(first.ok).toBe(true)
@@ -373,8 +394,15 @@ describe('ticket-job assignment mutations', () => {
       { userId: userId(31), shopId, role: 'tech', skillTier: 3, membershipStatus: 'pending', membershipActivatedAt: null },
       { userId: userId(32), shopId, role: 'tech', skillTier: 3, deactivatedAt: new Date() },
       { userId: userId(33), shopId, role: 'tech', skillTier: null },
+      { userId: userId(34), shopId, role: 'curator', skillTier: 3 },
     ]).returning()
-    const expectations = ['not_found', 'invalid_assignee', 'invalid_assignee', 'invalid_assignee']
+    const expectations = [
+      'not_found',
+      'invalid_assignee',
+      'invalid_assignee',
+      'invalid_assignee',
+      'invalid_assignee',
+    ]
     for (let index = 0; index < targets.length; index += 1) {
       await expect(call(actor.owner, { action: 'reassign', assignedTechId: targets[index].id }))
         .resolves.toEqual({ ok: false, error: expectations[index] })

@@ -424,6 +424,7 @@ async function validateAssignment(
   const [assignee] = await db
     .select({
       id: profiles.id,
+      role: profiles.role,
       skillTier: profiles.skillTier,
       membershipStatus: profiles.membershipStatus,
       deactivatedAt: profiles.deactivatedAt,
@@ -444,6 +445,7 @@ async function validateAssignment(
   if (
     assignee.membershipStatus !== 'active' ||
     assignee.deactivatedAt ||
+    !canCreateTickets(assignee.role) ||
     assignee.skillTier === null ||
     ![1, 2, 3].includes(assignee.skillTier)
   ) {
@@ -944,6 +946,7 @@ async function reassignTicketJob(
             and ${profiles.id} = ${assignment.assignedTechId as string}
             and ${profiles.membershipStatus} = 'active'
             and ${profiles.deactivatedAt} is null
+            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
             and ${profiles.skillTier} between 1 and 3
             and (
               ${body.confirmBelowTier === true}
