@@ -90,6 +90,16 @@ export type CreateTicketResult =
 const optionalTrimmedText = (max: number) =>
   z.string().trim().max(max).nullable().optional()
 
+const ticketJobBodySchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    kind: z.enum(['diagnostic', 'repair', 'maintenance']),
+    requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    assignedTechId: z.uuid().nullable().optional(),
+    confirmBelowTier: z.boolean().optional(),
+  })
+  .strict()
+
 const createTicketBodySchema = z
   .object({
     source: z.enum(['counter', 'tech_quick', 'quick_quote']),
@@ -101,23 +111,13 @@ const createTicketBodySchema = z
     diagnosticAuthorizedCents: z.number().int().safe().nonnegative().nullable().optional(),
     diagnosticAuthorizationNote: optionalTrimmedText(2_000),
     jobs: z
-      .array(
-        z
-          .object({
-            title: z.string().trim().min(1).max(200),
-            kind: z.enum(['diagnostic', 'repair', 'maintenance']),
-            requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-            assignedTechId: z.uuid().nullable().optional(),
-            confirmBelowTier: z.boolean().optional(),
-          })
-          .strict(),
-      )
+      .array(ticketJobBodySchema)
       .min(1)
       .max(25),
   })
   .strict()
 
-type CreateTicketBody = z.infer<typeof createTicketBodySchema>
+type TicketJobBody = z.infer<typeof ticketJobBodySchema>
 
 function actorGate(actor: TicketActor): { ok: false; error: TicketDomainError } | null {
   if (!actor.shopId) return { ok: false, error: 'no_shop' }
@@ -255,7 +255,7 @@ async function loadTicketDetail(
 async function validateAssignment(
   db: AppDb,
   actor: TicketActor,
-  job: CreateTicketBody['jobs'][number],
+  job: TicketJobBody,
 ): Promise<
   | { ok: true; assignedTechId: string | null }
   | { ok: false; error: 'invalid_assignee' | 'not_found' }
@@ -400,6 +400,72 @@ export async function createTicket(
 
     const detail = await loadTicketDetail(tx as AppDb, shopId, ticket.id)
     if (!detail) throw new Error('created_ticket_not_found')
+    return { ok: true, ticket: detail }
+  })
+}
+
+export async function getTicketDetail(
+  db: AppDb,
+  input: { actor: TicketActor; ticketId: unknown },
+): Promise<
+  { ok: true; ticket: TicketDetail } | { ok: false; error: TicketDomainError }
+> {
+  const denied = actorGate(input.actor)
+  if (denied) return denied
+
+  const parsedTicketId = z.uuid().safeParse(input.ticketId)
+  if (!parsedTicketId.success) return { ok: false, error: 'invalid_input' }
+
+  const ticket = await loadTicketDetail(
+    db,
+    input.actor.shopId as string,
+    parsedTicketId.data,
+  )
+  return ticket ? { ok: true, ticket } : { ok: false, error: 'not_found' }
+}
+
+export async function addTicketJob(
+  db: AppDb,
+  input: { actor: TicketActor; ticketId: unknown; body: unknown },
+): Promise<
+  | { ok: true; ticket: TicketDetail }
+  | {
+      ok: false
+      error: TicketDomainError
+      warning?: AssignmentTierWarning
+    }
+> {
+  const denied = actorGate(input.actor)
+  if (denied) return denied
+
+  const parsedTicketId = z.uuid().safeParse(input.ticketId)
+  const parsedBody = ticketJobBodySchema.safeParse(input.body)
+  if (!parsedTicketId.success || !parsedBody.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  const shopId = input.actor.shopId as string
+  return db.transaction(async (tx) => {
+    const ticket = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
+    if (!ticket) return { ok: false, error: 'not_found' as const }
+    if (ticket.status !== 'open') {
+      return { ok: false, error: 'ticket_not_open' as const }
+    }
+
+    const assignment = await validateAssignment(tx as AppDb, input.actor, parsedBody.data)
+    if (!assignment.ok) return assignment
+
+    await tx.insert(ticketJobs).values({
+      shopId,
+      ticketId: parsedTicketId.data,
+      title: parsedBody.data.title,
+      kind: parsedBody.data.kind,
+      requiredSkillTier: parsedBody.data.requiredSkillTier,
+      assignedTechId: assignment.assignedTechId,
+    })
+
+    const detail = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
+    if (!detail) throw new Error('updated_ticket_not_found')
     return { ok: true, ticket: detail }
   })
 }
