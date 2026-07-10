@@ -82,14 +82,16 @@ VIN
 - Modify: `components/vt/tech-selector/tech-selector.css`
 - Modify: `tests/unit/intake-submit-tech-id.test.ts`
 - Modify: `tests/unit/counter-intake.test.tsx`
+- Modify: `tests/unit/tech-selector.test.tsx`
+- Modify: `tests/unit/get-shop-team.test.ts`
 
-- [ ] Write tests first for active non-null-tier roster membership, A/B/C labels, ticket-job + ticketless-session workload, linked-session de-duplication, degradation, and solo open-queue behavior.
-- [ ] Verify RED against the legacy session-only query and inert solo selector.
-- [ ] Return `skillTier` with each member; count open/today assigned ticket jobs plus only legacy sessions with no linked ticket job.
-- [ ] Keep workload best-effort while roster failures remain fatal; preserve current-user pinning and deterministic sort.
-- [ ] Make one-member selection truthful: default Open queue, allow assigning the sole profile, and allow clearing back to Open.
-- [ ] Render compact A/B/C tier labels without changing the selector's keyboard/listbox behavior.
-- [ ] Run the focused roster/selector suites, TypeScript, and independent task review; commit only after approval.
+- [x] Write tests first for active non-null-tier roster membership, A/B/C labels, ticket-job + ticketless-session workload, linked-session de-duplication, degradation, and solo open-queue behavior.
+- [x] Verify RED against the legacy session-only query and inert solo selector.
+- [x] Return `skillTier` with each member; count open/today assigned ticket jobs plus only legacy sessions with no linked ticket job.
+- [x] Keep workload best-effort while roster failures remain fatal; preserve current-user pinning and deterministic sort.
+- [x] Make one-member selection truthful: default Open queue, allow keyboard/pointer assignment of the sole profile, and allow clearing back to Open.
+- [x] Render compact A/B/C tier labels while preserving the selector's keyboard/listbox behavior and 44px targets.
+- [x] Run 4 focused roster/selector files (50/50), TypeScript, diff check, and independent re-review; approved with no remaining findings.
 
 ---
 
