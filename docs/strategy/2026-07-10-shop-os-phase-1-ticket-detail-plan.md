@@ -139,11 +139,11 @@ export default async function TicketPage({
 
 - Produces: row 9 `complete` with PR/proof; rows 10 and 11 become dependency-ready but remain unclaimed; row 6 remains `owner_gate`.
 
-- [ ] Run row-9 focused tests, `pnpm test`, `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check`; record exact counts.
-- [ ] Inspect desktop and 375px layouts, keyboard focus, landmarks/headings/labels, honest provisional state, and linked-session behavior with the required browser accessibility workflow when available.
-- [ ] Inspect the full diff for raw-table reads, engine changes, fake controls, raw colors, unsafe contact leakage, unrelated files, and intent drift.
-- [ ] Obtain independent task reviews and one whole-branch review; resolve every Critical/Important finding and re-review.
-- [ ] Add the Phase-1 ticket-detail implementation correction, mark row 9 complete, and preserve row 6's production owner gate.
+- [x] Run row-9 focused tests (18/18), full tests (193 files / 1,577 tests), `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check`; all passed.
+- [x] Verify 375px stacking, 44px targets, keyboard focus rules, landmarks/headings/labels, honest provisional state, conditional facts, and linked-session behavior through CSS/static and DOM checks. Signed-in Chrome inspection was unavailable because Chrome was not running.
+- [x] Inspect the full diff for raw-table reads, engine changes, fake controls, raw colors, unsafe contact leakage, unrelated files, and intent drift; none found.
+- [x] Obtain independent task reviews and one whole-branch review; resolve both Important Task-2 findings and pass re-review with no remaining findings.
+- [x] Add the Phase-1 ticket-detail implementation correction, mark row 9 complete, and preserve row 6's production owner gate.
 - [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
 
 ## Verification
