@@ -80,6 +80,16 @@ begin
 
   if exists (
     select 1
+    from shops s
+    where s.shop_mgmt_enabled is distinct from exists (
+      select 1 from repair_orders ro where ro.shop_id = s.id
+    )
+  ) then
+    raise exception 'shop_os_reconciliation:shop_flag_mapping';
+  end if;
+
+  if exists (
+    select 1
     from repair_orders ro
     left join sessions s on s.repair_order_id = ro.id
     group by ro.id

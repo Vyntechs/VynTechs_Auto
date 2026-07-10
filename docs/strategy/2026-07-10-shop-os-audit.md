@@ -160,12 +160,13 @@ Use the Rev-4 logical model (`tickets` + `ticket_jobs`) as canonical because it 
 
 ## Approved Phase-0 local proof
 
-Brandon approved the canonical recommendation on 2026-07-10. The subordinate [Phase-0 execution packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) now includes exact forward and rollback SQL drafts plus ten PGlite tests.
+Brandon approved the canonical recommendation on 2026-07-10. The subordinate [Phase-0 execution packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) now includes exact forward and rollback SQL drafts plus eleven PGlite tests.
 
 The rehearsal proves:
 
 - the legacy repair-order UUID, shop/customer/vehicle/opener relationships, linked session UUID, and complaint survive into the canonical ticket/job;
 - cross-tenant or ambiguous legacy links abort the transaction;
+- any enabled-shop flag state that rollback cannot reproduce exactly aborts the transaction;
 - any v2 row, non-default customer channel/opt-in field, non-null diesel context, or non-null legacy authorization aborts the transaction;
 - `vehicles.platform_id` survives because it belongs to the source-controlled diagnostic schema, not v2 drift;
 - canonical tables are tenant-keyed, RLS-enabled, and explicitly unavailable to direct `anon`/`authenticated` DML;

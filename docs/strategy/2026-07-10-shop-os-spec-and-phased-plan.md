@@ -545,7 +545,7 @@ Seven phases including the mandatory Phase 0. Each later phase retains a complet
 
 **Done when:** owner approves the canonical model, legacy-row treatment, and staged forward/rollback design; local migration tests against a representative predecessor schema prove preservation. No production apply occurs in Phase 0.
 
-**Implementation correction — approved and locally proved 2026-07-10.** Brandon approved `tickets` + `ticket_jobs` as canonical, preservation of the linked repair order/session, and fail-closed retirement of empty/default-only predecessor objects. The exact [execution packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md), [forward SQL draft](./sql/2026-07-10-shop-os-reconciliation-forward.sql), and [rollback SQL draft](./sql/2026-07-10-shop-os-reconciliation-rollback.sql) pass ten PGlite tests. Live inspection also found three v2 fields omitted from Rev 3: `customers.preferred_channel`, `customers.opt_ins`, and `vehicles.diesel_context`; the drafts refuse to retire them unless they remain exactly at today's default/default/null state. Nothing was applied to production.
+**Implementation correction — approved and locally proved 2026-07-10.** Brandon approved `tickets` + `ticket_jobs` as canonical, preservation of the linked repair order/session, and fail-closed retirement of empty/default-only predecessor objects. The exact [execution packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md), [forward SQL draft](./sql/2026-07-10-shop-os-reconciliation-forward.sql), and [rollback SQL draft](./sql/2026-07-10-shop-os-reconciliation-rollback.sql) pass eleven PGlite tests. Live inspection also found three v2 fields omitted from Rev 3: `customers.preferred_channel`, `customers.opt_ins`, and `vehicles.diesel_context`; the drafts refuse to retire them unless they remain exactly at today's default/default/null state. Nothing was applied to production.
 
 ### Phase 1 — Ticket spine and honest intake (L)
 
@@ -690,7 +690,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 |---:|---:|---|---|---|---|---|
 | 1 | 0 | Main/remote/live audit + Rev-4 plan reconciliation | C | — | complete | This document; no PR opened |
 | 2 | 0 | Approve canonical model + legacy-row/adopt-retire treatment | C | 1 | complete | Brandon approved 2026-07-10 |
-| 3 | 0 | Reconciliation migration + rollback draft, RLS/grants, local proof | S | 2 | complete | [Phase-0 packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) + 10 tests; no production apply |
+| 3 | 0 | Reconciliation migration + rollback draft, RLS/grants, local proof | S | 2 | complete | [Phase-0 packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) + 11 tests; no production apply |
 | 4 | 0 | Vendor identity/access discovery: PartsTech, O'Reilly, Tri State, RepairPal | X | 1 | owner_gate | External representation/account access |
 | 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | pending | Local/fixture proof only |
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |

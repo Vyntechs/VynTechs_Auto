@@ -389,6 +389,15 @@ describe('Shop OS Phase-0 reconciliation SQL drafts', () => {
     await expectForwardFailure(db, 'shop_os_reconciliation:invalid_legacy_links')
   })
 
+  it('refuses enabled-shop state that rollback could not reproduce exactly', async () => {
+    const db = await createLegacyDb()
+    await db.exec(`
+      insert into shops (id, name, shop_mgmt_enabled)
+      values ('20000000-0000-0000-0000-000000000002', 'Other Shop', true)
+    `)
+    await expectForwardFailure(db, 'shop_os_reconciliation:shop_flag_mapping')
+  })
+
   it('refuses an unlinked repair order', async () => {
     const db = await createLegacyDb()
     await db.exec(`update sessions set repair_order_id=null where id='${IDS.session}'`)
