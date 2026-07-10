@@ -446,9 +446,14 @@ export async function addTicketJob(
 
   const shopId = input.actor.shopId as string
   return db.transaction(async (tx) => {
-    const ticket = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
-    if (!ticket) return { ok: false, error: 'not_found' as const }
-    if (ticket.status !== 'open') {
+    const [lockedTicket] = await tx
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data)))
+      .limit(1)
+      .for('update')
+    if (!lockedTicket) return { ok: false, error: 'not_found' as const }
+    if (lockedTicket.status !== 'open') {
       return { ok: false, error: 'ticket_not_open' as const }
     }
 

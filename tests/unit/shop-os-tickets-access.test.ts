@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -36,6 +38,36 @@ function actorFrom(profile: SeededProfile): TicketActor {
     deactivatedAt: profile.deactivatedAt,
   }
 }
+
+describe('ticket job lock contract', () => {
+  it('locks the tenant-scoped ticket before status checks, assignment, and insertion', async () => {
+    const source = await readFile(path.join(process.cwd(), 'lib/tickets.ts'), 'utf8')
+    const normalized = source.replace(/\s+/g, ' ')
+    const mutationStart = normalized.indexOf('export async function addTicketJob')
+    const transactionStart = normalized.indexOf('return db.transaction', mutationStart)
+    const lockedRead = normalized.indexOf(
+      "const [lockedTicket] = await tx .select({ id: tickets.id, status: tickets.status }) .from(tickets) .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data))) .limit(1) .for('update')",
+      transactionStart,
+    )
+    const missingCheck = normalized.indexOf('if (!lockedTicket)', lockedRead)
+    const statusCheck = normalized.indexOf("if (lockedTicket.status !== 'open')", missingCheck)
+    const assignmentCheck = normalized.indexOf(
+      'const assignment = await validateAssignment',
+      statusCheck,
+    )
+    const jobInsert = normalized.indexOf('await tx.insert(ticketJobs)', assignmentCheck)
+    const detailLoad = normalized.indexOf('const detail = await loadTicketDetail', jobInsert)
+
+    expect(mutationStart).toBeGreaterThan(-1)
+    expect(transactionStart).toBeGreaterThan(mutationStart)
+    expect(lockedRead).toBeGreaterThan(transactionStart)
+    expect(missingCheck).toBeGreaterThan(lockedRead)
+    expect(statusCheck).toBeGreaterThan(missingCheck)
+    expect(assignmentCheck).toBeGreaterThan(statusCheck)
+    expect(jobInsert).toBeGreaterThan(assignmentCheck)
+    expect(detailLoad).toBeGreaterThan(jobInsert)
+  })
+})
 
 describe('ticket detail access and job mutation', () => {
   let db: TestDb
