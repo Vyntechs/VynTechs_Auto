@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 row 5 is complete in source; rows 7–8 are the next safe local lanes.** Production application remains the separate row-6 owner gate.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 row 5 is complete in source; row 7 is in progress and row 8 remains the next safe local lane.** Production application remains the separate row-6 owner gate.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -696,7 +696,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 4 | 0 | Vendor identity/access discovery: PartsTech, O'Reilly, Tri State, RepairPal | X | 1 | owner_gate | External representation/account access |
 | 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | complete | PR #117; 15 focused + 1,495 full tests; no production apply |
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
-| 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | pending | — |
+| 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | in_progress | `feat/shop-os-p1-team-roles`; [row-7 packet](./2026-07-10-shop-os-phase-1-team-roles-plan.md) |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | pending | — |
 | 9 | 1 | Real ticket detail/read surface | A | 8 | pending | — |
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | pending | Feature enable is owner gate |
