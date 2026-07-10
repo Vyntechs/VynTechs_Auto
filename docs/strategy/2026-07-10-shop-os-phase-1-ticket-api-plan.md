@@ -246,7 +246,7 @@ export async function addTicketJob(
 - [x] Obtain independent task reviews plus one whole-branch review; resolve every Critical/Important finding and re-review.
 - [x] Update the Phase-1 implementation correction with exact proof and the explicit no-production/no-engine boundary.
 - [x] Mark row 8 complete only after all verification and review evidence exists.
-- [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
+- [x] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge as PR #119, verify `origin/main` matches the merged tree, and immediately continue row 9.
 
 ## Verification
 

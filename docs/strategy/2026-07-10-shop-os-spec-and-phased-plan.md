@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, and 8 are complete in source; row 9 is the next safe local lane.** Production application remains the separate row-6 owner gate.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, and 9 are complete in source; row 10 is the next safe local lane.** Production application remains the separate row-6 owner gate.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -570,6 +570,8 @@ Counter corrections:
 
 **Implementation correction — ticket domain proved 2026-07-10.** [Row-8 packet](./2026-07-10-shop-os-phase-1-ticket-api-plan.md) adds injected ticket creation, safe detail reads, open-ticket job addition, and three thin authenticated/paywalled route shims. Creation atomically allocates per-shop ticket numbers and inserts one to twenty-five validated jobs; reads hide cross-tenant existence and expose only the approved projection; add-job locks the tenant-scoped ticket before checking open status, assignment, or insertion. Forty focused tests and the complete 1,559-test suite pass with TypeScript, production build, clean GitHub checks, three task reviews, and a whole-branch review. Concurrency tests prove SQL lock/order contracts and single-client outcomes; a two-connection contention test remains a non-blocking future harness improvement. No schema, production, UI, claim/reassign, quote, or diagnostic-engine behavior changed.
 
+**Implementation correction — real ticket detail proved 2026-07-10.** [Row-9 packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) adds one protected `/tickets/[id]` server route and a mobile repair-order ledger rendered only from row 8's safe `TicketDetail` projection. Authentication and actor translation precede the tenant-safe domain read; every denial collapses to the same not-found boundary. The screen shows persisted customer, vehicle, concern, assignment, work, and approval facts; provisional tickets state exactly what remains blocked; unsafe legacy contact actions fail closed to plain text; and only linked diagnostic sessions expose `Open diagnosis`. Eighteen focused tests and the complete 1,577-test suite pass with TypeScript, production build, clean GitHub checks, two task reviews, and a whole-branch review. Chrome was installed and configured but not running, so signed-in visual inspection could not run; 375px stacking, 44px targets, focus rules, landmarks, conditional facts, and linked-session behavior are covered by CSS/static and DOM tests. No schema, production, mutation, quote, assignment, reconciliation, or diagnostic-engine behavior changed.
+
 ### Phase 2 — Technician command center and diagnostic start (M)
 
 **Ships:** My Jobs/Open Jobs composed into `/today` without removing current follow-ups, check-ins, closed-today, or legacy session cards; atomic claim; idempotent full diagnostic bootstrap. Repair/maintenance cards may be claimed and viewed, but their start action remains disabled as "Quote and approval required" until Phase 3 lands the immutable approval contract.
@@ -656,7 +658,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Phase 0 rows 2–3 and Phase 1 rows 5, 7, and 8 are complete in source. Row 9 is the next safe local lane; row 6 remains the production owner gate.
+3. Phase 0 rows 2–3 and Phase 1 rows 5, 7, 8, and 9 are complete in source. Row 10 is the next safe local lane; row 6 remains the production owner gate.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -702,7 +704,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | complete | PR #118; 65 focused + 1,519 full tests; no production apply |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | complete | PR #119; 40 focused + 1,559 full tests; no production apply |
-| 9 | 1 | Real ticket detail/read surface | A | 8 | pending | — |
+| 9 | 1 | Real ticket detail/read surface | A | 8 | complete | PR #120; 18 focused + 1,577 full tests; [execution packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) |
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | pending | Feature enable is owner gate |
 | 11 | 1 | Door C minimal create | A | 8,9 | pending | — |
 | 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | pending | Creation seam only |
