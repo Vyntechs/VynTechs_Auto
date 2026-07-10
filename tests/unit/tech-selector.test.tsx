@@ -3,23 +3,38 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 
 function mem(id: string, name: string, isCurrentUser = false): TeamMember {
-  return { id, name, isCurrentUser }
+  return { id, name, skillTier: 3, isCurrentUser }
 }
 
 describe('TechSelector — resting + solo states', () => {
-  it('renders an inert "You · only tech" pill when team has one member', () => {
-    render(
+  it('keeps a one-member roster open by default and allows assign then clear', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
       <TechSelector
         currentUserId="a"
         team={[mem('a', 'Brandon', true)]}
         selectedId={null}
-        onChange={vi.fn()}
+        onChange={onChange}
       />,
     )
-    const pill = screen.getByRole('group', { name: /assigned to/i })
-    expect(pill).toHaveAttribute('aria-disabled', 'true')
-    expect(pill).toHaveTextContent(/you/i)
-    expect(pill).toHaveTextContent(/only tech/i)
+    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    expect(trigger).toHaveTextContent(/open queue/i)
+
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('option', { name: /brandon/i }))
+    expect(onChange).toHaveBeenLastCalledWith('a')
+
+    rerender(
+      <TechSelector
+        currentUserId="a"
+        team={[mem('a', 'Brandon', true)]}
+        selectedId="a"
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('option', { name: /clear.*open queue/i }))
+    expect(onChange).toHaveBeenLastCalledWith(null)
   })
 
   it('renders an active "Open queue ▾" combobox when team has 2+ members and nothing selected', () => {
@@ -141,6 +156,7 @@ describe('TechSelector — search + workload', () => {
     return Array.from({ length: n }, (_, i) => ({
       id: `m${i}`,
       name: names[i],
+      skillTier: 3,
       isCurrentUser: i === 0,
       workload: { open: i, today: 0 },
     }))
@@ -180,8 +196,8 @@ describe('TechSelector — search + workload', () => {
 
   it('renders workload badges {open} open / {today} today when workloadFailed is false', () => {
     const team: TeamMember[] = [
-      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 3, today: 1 } },
-      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 5, today: 2 } },
+      { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true, workload: { open: 3, today: 1 } },
+      { id: 'b', name: 'Diana', skillTier: 2, isCurrentUser: false, workload: { open: 5, today: 2 } },
     ]
     render(
       <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,
@@ -195,8 +211,8 @@ describe('TechSelector — search + workload', () => {
 
   it('does NOT render workload badges when workloadFailed is true', () => {
     const team: TeamMember[] = [
-      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 3, today: 1 } },
-      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 5, today: 2 } },
+      { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true, workload: { open: 3, today: 1 } },
+      { id: 'b', name: 'Diana', skillTier: 2, isCurrentUser: false, workload: { open: 5, today: 2 } },
     ]
     render(
       <TechSelector
@@ -214,8 +230,8 @@ describe('TechSelector — search + workload', () => {
 
   it('tints the open badge with --busy class when open >= 5', () => {
     const team: TeamMember[] = [
-      { id: 'a', name: 'Brandon', isCurrentUser: true, workload: { open: 5, today: 0 } },
-      { id: 'b', name: 'Diana', isCurrentUser: false, workload: { open: 4, today: 0 } },
+      { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true, workload: { open: 5, today: 0 } },
+      { id: 'b', name: 'Diana', skillTier: 2, isCurrentUser: false, workload: { open: 4, today: 0 } },
     ]
     render(
       <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,

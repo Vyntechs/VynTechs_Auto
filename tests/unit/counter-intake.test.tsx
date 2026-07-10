@@ -138,10 +138,18 @@ describe('CounterIntake', () => {
   })
 
   describe('tech selector wiring', () => {
-    function team(...members: Array<{ id: string; name: string; isCurrentUser?: boolean }>) {
+    function team(
+      ...members: Array<{
+        id: string
+        name: string
+        skillTier: 1 | 2 | 3
+        isCurrentUser?: boolean
+      }>
+    ) {
       return members.map((m) => ({
         id: m.id,
         name: m.name,
+        skillTier: m.skillTier,
         isCurrentUser: m.isCurrentUser ?? false,
         workload: { open: 0, today: 0 },
       }))
@@ -158,16 +166,43 @@ describe('CounterIntake', () => {
       })
     }
 
-    it('renders the inert "You · only tech" pill when team has one member', () => {
+    it('defaults a one-member roster to Open and lets the writer assign then clear the sole profile', () => {
       render(
         <CounterIntake
           userEmail="brandon@example.com"
-          team={team({ id: 'a', name: 'Brandon', isCurrentUser: true })}
+          team={team({ id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true })}
           workloadFailed={false}
         />,
       )
-      const pill = screen.getByRole('group', { name: /assigned to/i })
-      expect(pill).toHaveAttribute('aria-disabled', 'true')
+      const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+      expect(trigger).toHaveTextContent(/open queue/i)
+
+      fireEvent.click(trigger)
+      fireEvent.click(screen.getByRole('option', { name: /brandon/i }))
+      expect(trigger).toHaveTextContent(/brandon/i)
+
+      fireEvent.click(trigger)
+      fireEvent.click(screen.getByRole('option', { name: /clear.*open queue/i }))
+      expect(trigger).toHaveTextContent(/open queue/i)
+    })
+
+    it('renders compact A/B/C skill labels for the wrenching roster', () => {
+      render(
+        <CounterIntake
+          userEmail="brandon@example.com"
+          team={team(
+            { id: 'a', name: 'Alice', skillTier: 3, isCurrentUser: true },
+            { id: 'b', name: 'Bob', skillTier: 2 },
+            { id: 'c', name: 'Charlie', skillTier: 1 },
+          )}
+          workloadFailed={false}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+      expect(screen.getByRole('option', { name: /alice/i })).toHaveTextContent('A')
+      expect(screen.getByRole('option', { name: /bob/i })).toHaveTextContent('B')
+      expect(screen.getByRole('option', { name: /charlie/i })).toHaveTextContent('C')
     })
 
     it('sends assignedTechId: null in the submit body when nothing is picked', async () => {
@@ -175,8 +210,8 @@ describe('CounterIntake', () => {
         <CounterIntake
           userEmail="brandon@example.com"
           team={team(
-            { id: 'a', name: 'Brandon', isCurrentUser: true },
-            { id: 'b', name: 'Diana' },
+            { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
+            { id: 'b', name: 'Diana', skillTier: 2 },
           )}
           workloadFailed={false}
         />,
@@ -197,8 +232,8 @@ describe('CounterIntake', () => {
         <CounterIntake
           userEmail="brandon@example.com"
           team={team(
-            { id: 'a', name: 'Brandon', isCurrentUser: true },
-            { id: 'b', name: 'Diana' },
+            { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
+            { id: 'b', name: 'Diana', skillTier: 2 },
           )}
           workloadFailed={false}
         />,

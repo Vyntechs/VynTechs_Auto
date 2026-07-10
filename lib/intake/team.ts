@@ -1,10 +1,11 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
-import { profiles, sessions } from '@/lib/db/schema'
+import { profiles, sessions, ticketJobs } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
 
 export type TeamMember = {
   id: string
   name: string
+  skillTier: number
   isCurrentUser: boolean
   workload?: { open: number; today: number }
 }
@@ -28,6 +29,7 @@ export async function getShopTeam(input: GetShopTeamInput): Promise<GetShopTeamR
     .select({
       id: profiles.id,
       fullName: profiles.fullName,
+      skillTier: profiles.skillTier,
     })
     .from(profiles)
     .where(
@@ -57,21 +59,46 @@ export async function getShopTeam(input: GetShopTeamInput): Promise<GetShopTeamR
   const workloadByTech = new Map<string, { open: number; today: number }>()
   if (memberIds.length > 0) {
     try {
-      const rows = await db
+      const jobRows = await db
+        .select({
+          techId: ticketJobs.assignedTechId,
+          openCount: sql<number>`count(*)::int`,
+          todayCount: sql<number>`count(*) filter (where ${ticketJobs.createdAt} >= date_trunc('day', now()))::int`,
+        })
+        .from(ticketJobs)
+        .where(
+          and(
+            eq(ticketJobs.shopId, shopId),
+            eq(ticketJobs.workStatus, 'open'),
+            inArray(ticketJobs.assignedTechId, memberIds),
+          ),
+        )
+        .groupBy(ticketJobs.assignedTechId)
+      const legacySessionRows = await db
         .select({
           techId: sessions.techId,
-          openCount: sql<number>`count(*) filter (where ${sessions.status} = 'open')::int`,
+          openCount: sql<number>`count(*)::int`,
           todayCount: sql<number>`count(*) filter (where ${sessions.createdAt} >= date_trunc('day', now()))::int`,
         })
         .from(sessions)
-        .where(and(eq(sessions.shopId, shopId), inArray(sessions.techId, memberIds)))
+        .where(
+          and(
+            eq(sessions.shopId, shopId),
+            eq(sessions.status, 'open'),
+            inArray(sessions.techId, memberIds),
+            sql`not exists (
+              select 1 from ${ticketJobs}
+              where ${ticketJobs.sessionId} = ${sessions.id}
+            )`,
+          ),
+        )
         .groupBy(sessions.techId)
-      for (const row of rows) {
+      for (const row of [...jobRows, ...legacySessionRows]) {
         if (row.techId) {
-          workloadByTech.set(row.techId, {
-            open: Number(row.openCount),
-            today: Number(row.todayCount),
-          })
+          const workload = workloadByTech.get(row.techId) ?? { open: 0, today: 0 }
+          workload.open += Number(row.openCount)
+          workload.today += Number(row.todayCount)
+          workloadByTech.set(row.techId, workload)
         }
       }
     } catch (err) {
@@ -83,7 +110,12 @@ export async function getShopTeam(input: GetShopTeamInput): Promise<GetShopTeamR
   const members: TeamMember[] = roster.map((row) => {
     const isCurrentUser = row.id === currentUserId
     const name = row.fullName ?? 'Tech'
-    const base: TeamMember = { id: row.id, name, isCurrentUser }
+    const base: TeamMember = {
+      id: row.id,
+      name,
+      skillTier: row.skillTier!,
+      isCurrentUser,
+    }
     if (!workloadFailed) {
       base.workload = workloadByTech.get(row.id) ?? { open: 0, today: 0 }
     }

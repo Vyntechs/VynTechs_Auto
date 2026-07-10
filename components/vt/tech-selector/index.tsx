@@ -6,6 +6,7 @@ import './tech-selector.css'
 export type TeamMember = {
   id: string
   name: string
+  skillTier: number
   isCurrentUser: boolean
   workload?: { open: number; today: number }
 }
@@ -46,28 +47,6 @@ export function TechSelector(props: TechSelectorProps) {
   useEffect(() => {
     setActiveIndex(0)
   }, [query])
-
-  // Solo inert variant.
-  if (team.length === 1) {
-    return (
-      <div
-        ref={rootRef}
-        className="ts ts--solo"
-        role="group"
-        aria-labelledby={labelId}
-        aria-disabled="true"
-      >
-        <span id={labelId} className="ts__label">Assigned to</span>
-        <div className="ts__trigger ts__trigger--inert">
-          <span className="ts__avatar" aria-hidden="true">
-            {initials(team[0].name)}
-          </span>
-          <span className="ts__name">You</span>
-          <span className="ts__tag">Only tech</span>
-        </div>
-      </div>
-    )
-  }
 
   const selected = selectedId ? team.find((m) => m.id === selectedId) ?? null : null
   const showSearch = team.length > 5
@@ -138,6 +117,7 @@ export function TechSelector(props: TechSelectorProps) {
           <>
             <span className="ts__avatar" aria-hidden="true">{initials(selected.name)}</span>
             <span className="ts__name">{selected.name}</span>
+            <TierLabel skillTier={selected.skillTier} />
           </>
         ) : (
           <span className="ts__name ts__name--placeholder">Open queue</span>
@@ -177,8 +157,11 @@ export function TechSelector(props: TechSelectorProps) {
                 onClick={() => commit(m.id)}
               >
                 <span className="ts__avatar" aria-hidden="true">{initials(m.name)}</span>
-                <span className="ts__name">{m.name}</span>
-                {m.isCurrentUser && <span className="ts__tag">You</span>}
+                <span className="ts__identity">
+                  <span className="ts__name">{m.name}</span>
+                  {m.isCurrentUser && <span className="ts__tag">You</span>}
+                  <TierLabel skillTier={m.skillTier} />
+                </span>
                 {!workloadFailed && m.workload && (
                   <span
                     className={`ts__badge${m.workload.open >= 5 ? ' ts__badge--busy' : ''}`}
@@ -209,6 +192,16 @@ export function TechSelector(props: TechSelectorProps) {
         </div>
       )}
     </div>
+  )
+}
+
+function TierLabel({ skillTier }: { skillTier: number }) {
+  const label = skillTier === 3 ? 'A' : skillTier === 2 ? 'B' : skillTier === 1 ? 'C' : null
+  if (!label) return null
+  return (
+    <span className="ts__tier" aria-label={`${label}-tech skill tier`}>
+      {label}
+    </span>
   )
 }
 
