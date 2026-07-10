@@ -126,14 +126,14 @@ VIN
 - Modify: `tests/unit/intake-page-wiring.test.tsx`
 - Modify: `tests/unit/intake-search-component.test.tsx`
 
-- [ ] Write DOM tests first for VIN decode success/invalid/unavailable, editable decoded fields, primary diagnostic job, optional repair/maintenance job, structured authorization, true-open body, assigned body, below-tier confirmation, error envelopes, and ticket redirect.
-- [ ] Verify RED against the current dead decode copy, free-text authorization, legacy endpoint, and session redirect.
-- [ ] Add a real 44px `Decode VIN` control with busy/error/status semantics and no auto-fill claim before a successful response.
-- [ ] Replace free-text authorization with optional amount/note fields and keep repair approval language absent.
-- [ ] Always send one diagnostic job from the concern; optionally add one requested repair/maintenance job through a small explicit service field.
-- [ ] POST `/api/tickets/counter`, keep `assignedTechId: null` for Open, support one explicit below-tier confirmation retry, and redirect only to `/tickets/${ticket.id}`.
-- [ ] Preserve existing search, new/existing customer paths, discard/cancel behavior, required-field parity, calm copy, and default-off layout gate.
-- [ ] Run all counter/intake-focused DOM tests, TypeScript, and independent task review; commit only after approval.
+- [x] Write DOM tests first for VIN decode success/invalid/unavailable, editable decoded fields, primary diagnostic job, optional repair/maintenance job, structured authorization, true-open body, assigned body, below-tier confirmation, error envelopes, and ticket redirect.
+- [x] Verify RED against the current dead decode copy, free-text authorization, legacy endpoint, session redirect, fake shortcut, and desktop-only narrow geometry.
+- [x] Add a real 44px `Decode VIN` control with busy/error/status semantics and no auto-fill claim before a successful response.
+- [x] Replace free-text authorization with optional amount/note fields and keep repair approval language absent.
+- [x] Send the persisted concern that the counter handler turns into one diagnostic job; optionally request one separate repair/maintenance job through a small explicit service field.
+- [x] POST `/api/tickets/counter`, keep `assignedTechId: null` for Open, support one explicit below-tier confirmation retry, and redirect only to `/tickets/${ticket.id}`.
+- [x] Preserve existing search, new/existing customer paths, discard/cancel behavior, required-field parity, calm copy, and default-off layout gate; remove the inherited dead scan control.
+- [x] Run 4 counter/intake-focused DOM files (66/66), TypeScript, diff check, and independent re-review; approved with no remaining findings.
 
 ---
 
