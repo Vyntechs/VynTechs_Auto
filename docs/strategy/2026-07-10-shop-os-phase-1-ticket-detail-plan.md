@@ -68,9 +68,9 @@
 
 - Produces: row 9 owned by `feat/shop-os-p1-ticket-detail`; row 8 merge completion recorded; row 6 unchanged.
 
-- [ ] Mark row 9 `in_progress` with branch `feat/shop-os-p1-ticket-detail`.
-- [ ] Record row 8's completed merge/verification checkbox.
-- [ ] Commit the packet and status claim, push the branch, and open a draft PR before UI implementation.
+- [x] Mark row 9 `in_progress` with branch `feat/shop-os-p1-ticket-detail`.
+- [x] Record row 8's completed merge/verification checkbox.
+- [x] Commit the packet and status claim, push the branch, and open draft PR #120 before UI implementation.
 
 ---
 
