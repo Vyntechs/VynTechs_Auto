@@ -76,7 +76,7 @@
 - [x] Inspect the full diff for fake customer/vehicle identity, partial writes, retry duplication, tenant/tier leaks, provider or engine drift, and unrelated scope; none remain.
 - [x] Obtain two task reviews and one whole-branch review; resolve five Important retry, authorization, mutable-state, key-lifetime, and transport-recovery findings through TDD and receive final approvals with zero findings.
 - [x] Add the Phase-1 Door B implementation correction, mark row 12 complete, preserve every production/external gate, and identify row 13 as next.
-- [ ] Push final head, wait for GitHub checks, mark ready, squash-merge, verify `origin/main` tree equality, and immediately continue row 13.
+- [x] Push final head, pass GitGuardian/Vercel, mark ready, and squash-merge PR #123 as `74183eeee63b1413f9dbc4c2c6d8187ff631762b`; reviewed and merged trees both equal `6f8aba53a777646e0b1b6a0c8902010f9adb0dd7`, then continue row 13.
 
 ## Verification
 
