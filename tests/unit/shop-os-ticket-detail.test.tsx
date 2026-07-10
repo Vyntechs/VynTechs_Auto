@@ -1,4 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import type { TicketDetail } from '@/lib/tickets'
@@ -146,6 +148,73 @@ describe('TicketDetailScreen', () => {
     expect(within(provisional).queryByRole('button')).toBeNull()
     expect(screen.queryByText('Marisol Vega')).toBeNull()
     expect(screen.queryByText('2019 Ford F-150')).toBeNull()
+  })
+
+  it('fails closed for ambiguous contact actions and omits absent optional facts', () => {
+    render(
+      <TicketDetailScreen
+        ticket={ticket({
+          customer: {
+            id: 'customer-1',
+            name: 'Legacy Customer',
+            phone: 'Call shop / ask for Lee',
+            email: 'lee@example.com?subject=Override',
+          },
+          vehicle: {
+            id: 'vehicle-1',
+            year: 2004,
+            make: 'Honda',
+            model: 'Accord',
+            engine: null,
+            vin: null,
+            mileage: null,
+            plate: null,
+          },
+          diagnosticAuthorizedCents: null,
+          diagnosticAuthorizationNote: null,
+        })}
+      />,
+    )
+
+    expect(screen.getByText('Call shop / ask for Lee')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Call shop / ask for Lee' })).toBeNull()
+    expect(screen.getByText('lee@example.com?subject=Override')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: 'lee@example.com?subject=Override' }),
+    ).toBeNull()
+    expect(screen.queryByText('VIN')).toBeNull()
+    expect(screen.queryByText('Mileage')).toBeNull()
+    expect(screen.queryByText('Plate')).toBeNull()
+    expect(screen.queryByText('Diagnostic authorization')).toBeNull()
+  })
+
+  it('preserves a deliberate phone extension in the dial target', () => {
+    render(
+      <TicketDetailScreen
+        ticket={ticket({
+          customer: {
+            id: 'customer-1',
+            name: 'Marisol Vega',
+            phone: '(214) 555-0197 ext. 42',
+            email: null,
+          },
+        })}
+      />,
+    )
+
+    expect(
+      screen.getByRole('link', { name: '(214) 555-0197 ext. 42' }),
+    ).toHaveAttribute('href', 'tel:+12145550197;ext=42')
+  })
+
+  it('keeps the mobile AppHeader back target at least 44px', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/screens/ticket-detail.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/:global\(\.app-header__back\)[\s\S]*min-inline-size:\s*44px/)
+    expect(css).toMatch(/:global\(\.app-header__back\)[\s\S]*min-block-size:\s*44px/)
   })
 
   it('renders jobs in projection order with open and assigned ownership plus a real diagnosis link', () => {

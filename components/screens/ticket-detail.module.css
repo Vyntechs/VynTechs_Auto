@@ -3,6 +3,14 @@
   overflow: auto;
 }
 
+.screen :global(.app-header__back) {
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .content {
   width: min(100%, 1120px);
   margin: 0 auto;
@@ -120,6 +128,7 @@
 }
 
 .linkStack a,
+.linkStack > span,
 .textLink,
 .diagnosisLink {
   min-width: 0;
@@ -132,6 +141,11 @@
   font-size: 14px;
   font-weight: 600;
   text-underline-offset: 3px;
+}
+
+.linkStack > span {
+  color: var(--vt-fg-2);
+  font-weight: 400;
 }
 
 .linkStack a:hover,

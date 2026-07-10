@@ -52,6 +52,10 @@ export function TicketDetailScreen({
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
+  const phoneTarget = ticket.customer ? phoneHref(ticket.customer.phone) : null
+  const emailTarget = ticket.customer?.email
+    ? emailHref(ticket.customer.email)
+    : null
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -93,10 +97,16 @@ export function TicketDetailScreen({
               <h2 id="customer-heading">Customer contact</h2>
               <p className={styles.factLead}>{ticket.customer.name}</p>
               <div className={styles.linkStack}>
-                <a href={phoneHref(ticket.customer.phone)}>{ticket.customer.phone}</a>
-                {ticket.customer.email && (
-                  <a href={`mailto:${ticket.customer.email}`}>{ticket.customer.email}</a>
+                {phoneTarget ? (
+                  <a href={phoneTarget}>{ticket.customer.phone}</a>
+                ) : (
+                  <span>{ticket.customer.phone}</span>
                 )}
+                {ticket.customer.email && (emailTarget ? (
+                  <a href={emailTarget}>{ticket.customer.email}</a>
+                ) : (
+                  <span>{ticket.customer.email}</span>
+                ))}
               </div>
             </section>
 
@@ -230,11 +240,28 @@ function vehicleName(vehicle: NonNullable<TicketDetail['vehicle']>): string {
   return `${vehicle.year} ${vehicle.make} ${vehicle.model}`
 }
 
-function phoneHref(phone: string): string {
-  const digits = phone.replace(/\D/g, '')
-  if (phone.trim().startsWith('+')) return `tel:+${digits}`
-  if (digits.length === 10) return `tel:+1${digits}`
-  return `tel:${digits}`
+function phoneHref(phone: string): string | null {
+  const match = phone.trim().match(
+    /^(\+?[\d().\s-]{7,30}?)(?:\s*(?:ext\.?|extension|x)\s*(\d{1,8}))?$/i,
+  )
+  if (!match) return null
+
+  const digits = match[1].replace(/\D/g, '')
+  if (digits.length < 7 || digits.length > 15) return null
+
+  const subscriber = match[1].trim().startsWith('+')
+    ? `+${digits}`
+    : digits.length === 10
+      ? `+1${digits}`
+      : digits
+  const extension = match[2] ? `;ext=${match[2]}` : ''
+  return `tel:${subscriber}${extension}`
+}
+
+function emailHref(email: string): string | null {
+  const value = email.trim()
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return null
+  return `mailto:${value}`
 }
 
 function formatCents(cents: number): string {
