@@ -419,7 +419,7 @@ describe('createTicket', () => {
     }
   })
 
-  it('rejects unknown, cross-shop, pending, deactivated, and tierless assignees', async () => {
+  it('hides cross-shop assignees and rejects invalid same-shop assignees', async () => {
     const [crossShop, pending, deactivated, tierless] = await db
       .insert(profiles)
       .values([
@@ -443,9 +443,24 @@ describe('createTicket', () => {
       ])
       .returning()
 
+    await expect(
+      createTicket(db, {
+        actor: actors.owner,
+        body: body({
+          jobs: [
+            {
+              title: 'Cross-shop assignment',
+              kind: 'repair',
+              requiredSkillTier: 1,
+              assignedTechId: crossShop.id,
+            },
+          ],
+        }),
+      }),
+    ).resolves.toEqual({ ok: false, error: 'not_found' })
+
     for (const assignedTechId of [
       '00000000-0000-4000-8000-000000000999',
-      crossShop.id,
       pending.id,
       deactivated.id,
       tierless.id,

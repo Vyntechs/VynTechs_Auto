@@ -258,7 +258,7 @@ async function validateAssignment(
   job: CreateTicketBody['jobs'][number],
 ): Promise<
   | { ok: true; assignedTechId: string | null }
-  | { ok: false; error: 'invalid_assignee' }
+  | { ok: false; error: 'invalid_assignee' | 'not_found' }
   | {
       ok: false
       error: 'tier_confirmation_required'
@@ -283,8 +283,18 @@ async function validateAssignment(
     )
     .limit(1)
 
+  if (!assignee) {
+    const [outsideShop] = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.id, job.assignedTechId))
+      .limit(1)
+    return outsideShop
+      ? { ok: false, error: 'not_found' }
+      : { ok: false, error: 'invalid_assignee' }
+  }
+
   if (
-    !assignee ||
     assignee.membershipStatus !== 'active' ||
     assignee.deactivatedAt ||
     assignee.skillTier === null ||
