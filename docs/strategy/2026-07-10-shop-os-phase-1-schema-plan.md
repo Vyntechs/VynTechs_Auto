@@ -137,4 +137,3 @@
 - [ ] Re-query live migration names/counts read-only and confirm no production state changed.
 - [ ] Mark row 5 complete only after proof exists; keep row 6 `owner_gate`.
 - [ ] Update the draft PR body with the exact checks and explicit no-production boundary.
-
