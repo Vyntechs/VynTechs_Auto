@@ -64,6 +64,52 @@ export type CreateSessionWrapper = (
   input: CreateTechQuickTicketInput,
 ) => Promise<{ ticketId: string; jobId: string }>
 
+type ValidatedSessionCreation = {
+  profileId: string
+  shopId: string
+  skillTier: 1 | 2 | 3
+  requestKey: string
+  intake: IntakePayload
+}
+
+async function validateSessionCreationRequest(opts: {
+  db: AppDb
+  userId: string
+  body: unknown
+}): Promise<
+  | { ok: true; value: ValidatedSessionCreation }
+  | { ok: false; status: 400; error: string }
+> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
+  if (
+    !isShopRole(profile.role) ||
+    profile.membershipStatus !== 'active' ||
+    profile.deactivatedAt ||
+    profile.skillTier === null ||
+    ![1, 2, 3].includes(profile.skillTier)
+  ) {
+    return { ok: false, status: 400, error: 'inactive wrenching profile' }
+  }
+
+  const parsed = createSessionBodySchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+  const { requestKey, ...intake } = parsed.data
+  return {
+    ok: true,
+    value: {
+      profileId: profile.id,
+      shopId: profile.shopId,
+      skillTier: profile.skillTier as 1 | 2 | 3,
+      requestKey,
+      intake,
+    },
+  }
+}
+
 async function findCompletedSessionWrapper(
   db: AppDb,
   requestKey: string,
@@ -143,6 +189,39 @@ async function findCompletedSessionWrapper(
   return { kind: 'match', ticketId: job.ticketId, jobId: job.id }
 }
 
+export type FindCompletedTechQuickSessionResult =
+  | { ok: true; state: 'match'; id: string; ticketId: string; jobId: string }
+  | { ok: true; state: 'missing' }
+  | { ok: false; status: 400; error: string }
+
+export async function findCompletedTechQuickSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  body: unknown
+}): Promise<FindCompletedTechQuickSessionResult> {
+  const validated = await validateSessionCreationRequest(opts)
+  if (!validated.ok) return validated
+  const { profileId, shopId, requestKey, intake } = validated.value
+  const existing = await findCompletedSessionWrapper(
+    opts.db,
+    requestKey,
+    profileId,
+    shopId,
+    intake,
+  )
+  if (existing.kind === 'missing') return { ok: true, state: 'missing' }
+  if (existing.kind === 'collision') {
+    return { ok: false, status: 400, error: 'request key unavailable' }
+  }
+  return {
+    ok: true,
+    state: 'match',
+    id: requestKey,
+    ticketId: existing.ticketId,
+    jobId: existing.jobId,
+  }
+}
+
 export async function createSessionForUser(opts: {
   db: AppDb
   userId: string
@@ -150,30 +229,14 @@ export async function createSessionForUser(opts: {
   treeState: TreeState
   createWrapper?: CreateSessionWrapper
 }): Promise<CreateSessionResult> {
-  const profile = await getProfileByUserId(opts.db, opts.userId)
-  if (!profile) return { ok: false, status: 400, error: 'no profile' }
-  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
-  if (
-    !isShopRole(profile.role) ||
-    profile.membershipStatus !== 'active' ||
-    profile.deactivatedAt ||
-    profile.skillTier === null ||
-    ![1, 2, 3].includes(profile.skillTier)
-  ) {
-    return { ok: false, status: 400, error: 'inactive wrenching profile' }
-  }
-
-  const parsed = createSessionBodySchema.safeParse(opts.body)
-  if (!parsed.success) {
-    return { ok: false, status: 400, error: parsed.error.message }
-  }
-  const { requestKey, ...intake } = parsed.data
-  const skillTier = profile.skillTier as 1 | 2 | 3
+  const validated = await validateSessionCreationRequest(opts)
+  if (!validated.ok) return validated
+  const { profileId, shopId, skillTier, requestKey, intake } = validated.value
   const existing = await findCompletedSessionWrapper(
     opts.db,
     requestKey,
-    profile.id,
-    profile.shopId,
+    profileId,
+    shopId,
     intake,
   )
   if (existing.kind === 'match') {
@@ -195,15 +258,15 @@ export async function createSessionForUser(opts: {
         .insert(sessions)
         .values({
           id: requestKey,
-          shopId: profile.shopId as string,
-          techId: profile.id,
+          shopId,
+          techId: profileId,
           intake,
           treeState: opts.treeState,
         })
         .returning()
       const wrapper = await createWrapper(tx as AppDb, {
-        shopId: profile.shopId as string,
-        profileId: profile.id,
+        shopId,
+        profileId,
         skillTier,
         sessionId: session.id,
         concern: intake.customerComplaint,
@@ -214,8 +277,8 @@ export async function createSessionForUser(opts: {
     const retry = await findCompletedSessionWrapper(
       opts.db,
       requestKey,
-      profile.id,
-      profile.shopId,
+      profileId,
+      shopId,
       intake,
     )
     if (retry.kind === 'match') {

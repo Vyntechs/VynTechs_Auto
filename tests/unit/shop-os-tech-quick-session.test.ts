@@ -4,6 +4,7 @@ import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import { profiles, sessions, shops, ticketJobs, tickets } from '@/lib/db/schema'
 import {
   createSessionForUser,
+  findCompletedTechQuickSessionForUser,
   type CreateSessionWrapper,
 } from '@/lib/sessions'
 import { createTechQuickTicketInTransaction } from '@/lib/tickets'
@@ -126,6 +127,111 @@ describe('Shop OS tech-quick session wrapper', () => {
     expect(await db.select().from(tickets)).toHaveLength(1)
     expect(await db.select().from(ticketJobs)).toHaveLength(1)
     expect((await db.select().from(shops))[0].nextTicketNumber).toBe(2)
+  })
+
+  it('read-only preflight returns canonical IDs for a completed identical key without mutation', async () => {
+    const profile = await seedActor()
+    const requestKey = crypto.randomUUID()
+    const created = await createFor(profile, requestKey)
+    const before = {
+      sessions: await db.select().from(sessions),
+      tickets: await db.select().from(tickets),
+      jobs: await db.select().from(ticketJobs),
+      nextTicketNumber: (await db.select().from(shops))[0].nextTicketNumber,
+    }
+
+    const preflight = await findCompletedTechQuickSessionForUser({
+      db,
+      userId: profile.userId,
+      body: { ...intake, requestKey },
+    })
+
+    expect(preflight).toEqual(
+      created.ok
+        ? { ok: true, state: 'match', id: created.id, ticketId: created.ticketId, jobId: created.jobId }
+        : created,
+    )
+    expect(await db.select().from(sessions)).toEqual(before.sessions)
+    expect(await db.select().from(tickets)).toEqual(before.tickets)
+    expect(await db.select().from(ticketJobs)).toEqual(before.jobs)
+    expect((await db.select().from(shops))[0].nextTicketNumber).toBe(before.nextTicketNumber)
+  })
+
+  it('read-only preflight reports missing for a valid new key without mutation', async () => {
+    const profile = await seedActor()
+    const result = await findCompletedTechQuickSessionForUser({
+      db,
+      userId: profile.userId,
+      body: { ...intake, requestKey: crypto.randomUUID() },
+    })
+    expect(result).toEqual({ ok: true, state: 'missing' })
+    expect(await db.select().from(sessions)).toEqual([])
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+    expect((await db.select().from(shops))[0].nextTicketNumber).toBe(1)
+  })
+
+  it('read-only preflight fails closed for changed, cross-actor, and noncanonical reuse', async () => {
+    const profile = await seedActor()
+    const other = await seedActor()
+    const requestKey = crypto.randomUUID()
+    const created = await createFor(profile, requestKey)
+    if (!created.ok) throw new Error('initial create failed')
+
+    const changed = await findCompletedTechQuickSessionForUser({
+      db,
+      userId: profile.userId,
+      body: { ...intake, customerComplaint: 'changed complaint text', requestKey },
+    })
+    const crossActor = await findCompletedTechQuickSessionForUser({
+      db,
+      userId: other.userId,
+      body: { ...intake, requestKey },
+    })
+    await db.update(ticketJobs).set({ title: 'noncanonical' }).where(eq(ticketJobs.id, created.jobId))
+    const noncanonical = await findCompletedTechQuickSessionForUser({
+      db,
+      userId: profile.userId,
+      body: { ...intake, requestKey },
+    })
+
+    for (const result of [changed, crossActor, noncanonical]) {
+      expect(result).toEqual({ ok: false, status: 400, error: 'request key unavailable' })
+    }
+    expect(await db.select().from(sessions)).toHaveLength(1)
+    expect(await db.select().from(tickets)).toHaveLength(1)
+    expect(await db.select().from(ticketJobs)).toHaveLength(1)
+    expect((await db.select().from(shops))[0].nextTicketNumber).toBe(2)
+  })
+
+  it('read-only preflight fails closed for invalid actor state and malformed body', async () => {
+    const pending = await seedActor({ membershipStatus: 'pending', membershipActivatedAt: null })
+    const unsupported = await seedActor({ role: 'curator' })
+    const valid = await seedActor()
+
+    const results = await Promise.all([
+      findCompletedTechQuickSessionForUser({
+        db,
+        userId: pending.userId,
+        body: { ...intake, requestKey: crypto.randomUUID() },
+      }),
+      findCompletedTechQuickSessionForUser({
+        db,
+        userId: unsupported.userId,
+        body: { ...intake, requestKey: crypto.randomUUID() },
+      }),
+      findCompletedTechQuickSessionForUser({
+        db,
+        userId: valid.userId,
+        body: { ...intake, requestKey: 'not-a-uuid' },
+      }),
+    ])
+
+    for (const result of results) expect(result).toMatchObject({ ok: false, status: 400 })
+    expect(await db.select().from(sessions)).toEqual([])
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+    expect((await db.select().from(shops))[0].nextTicketNumber).toBe(1)
   })
 
   it('returns the original wrapper when the same active actor has since changed to another valid tier', async () => {

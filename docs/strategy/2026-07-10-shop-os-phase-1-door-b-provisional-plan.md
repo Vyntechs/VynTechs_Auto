@@ -57,12 +57,12 @@
 - Create: `tests/unit/shop-os-tech-quick-route.test.ts`
 - Create: `tests/unit/shop-os-new-session-page.test.tsx`
 
-- [ ] Write failing route tests for auth, paywall, parse, active-wrenching actor, quota/open-cap ordering, retry preflight, and returned IDs.
-- [ ] Require a UUID request key at the route boundary and pass only the validated intake to retrieval/tree generation.
-- [ ] Reuse the same key after a failed submission and short-circuit a completed retry before provider work; never claim row-15 concurrent provider leasing.
-- [ ] Keep the existing session redirect and error behavior while adding direct page defense for non-wrenching actors.
-- [ ] Prove the form posts all existing intake fields plus one stable request key and redirects only from the returned session ID.
-- [ ] Independently review the route/UI task and resolve every finding.
+- [x] Write failing route tests for auth, paywall, parse, active-wrenching actor, quota/open-cap ordering, retry preflight, and returned IDs.
+- [x] Require a UUID request key at the route boundary and pass only the validated intake to retrieval/tree generation.
+- [x] Reuse the same key after a failed submission and short-circuit a completed retry before provider work; never claim row-15 concurrent provider leasing.
+- [x] Keep the existing session redirect and error behavior while adding direct page defense for non-wrenching actors.
+- [x] Prove the form posts all existing intake fields plus one stable request key and redirects only from the returned session ID.
+- [x] Independently review the route/UI task; resolve the Important edited-payload key-lifetime finding through TDD and receive final approval with zero findings.
 
 ## Task 4: Verify, review, reconcile, and ship row 12
 

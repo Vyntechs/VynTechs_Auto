@@ -53,6 +53,94 @@ describe('NewSessionForm', () => {
     const body = JSON.parse(init.body as string)
     expect(body.vehicleMake).toBe('Ford')
     expect(body.customerComplaint).toBe('loss of power going up hills')
+    expect(body.requestKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    )
+  })
+
+  it('reuses one request key after a failed submission and redirects from the returned session id', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'failed' }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'session-retried', ticketId: 'ticket-1', jobId: 'job-1' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    const retry = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(first.requestKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    )
+    expect(retry.requestKey).toBe(first.requestKey)
+    expect(mockPush).toHaveBeenCalledWith('/sessions/session-retried')
+  })
+
+  it('generates a fresh request key when normalized intake changes after a failed submission', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'failed' }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'session-edited', ticketId: 'ticket-2', jobId: 'job-2' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    const complaint = screen.getByLabelText(/customer complaint/i)
+    fireEvent.change(complaint, { target: { value: 'loss of power going up hills' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await screen.findByRole('alert')
+    fireEvent.change(complaint, { target: { value: 'loss of power with warning light' } })
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    const edited = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(edited.customerComplaint).not.toBe(first.customerComplaint)
+    expect(edited.requestKey).not.toBe(first.requestKey)
+    expect(mockPush).toHaveBeenCalledWith('/sessions/session-edited')
+  })
+
+  it('does not redirect when a successful response omits a session id', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticketId: 'ticket-1', jobId: 'job-1' }),
+      }),
+    )
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(mockPush).not.toHaveBeenCalled()
   })
 
   // 2026-05-08 plain-English audit pass: shop-talk "Building your diagnostic
