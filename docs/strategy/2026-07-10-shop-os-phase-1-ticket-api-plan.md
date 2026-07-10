@@ -189,15 +189,15 @@ export async function addTicketJob(
 ): Promise<{ ok: true; ticket: TicketDetail } | { ok: false; error: TicketDomainError; warning?: AssignmentTierWarning }>
 ```
 
-- [ ] Write PGlite tests proving every active Shop OS role can read a same-shop ticket and add a job to an open ticket.
-- [ ] Verify RED because the read/add exports are absent.
-- [ ] Prove unsupported, pending, deactivated, and no-shop actors are rejected before data access.
-- [ ] Prove malformed IDs return validation errors; missing and cross-shop ticket IDs both return `not_found`.
-- [ ] Prove adding to closed/canceled tickets returns `ticket_not_open` without mutation.
-- [ ] Reuse the exact assignment validator from creation; do not duplicate role/tier rules.
-- [ ] Return jobs in stable `createdAt`, then `id` order and expose only the safe `TicketDetail` projection.
-- [ ] Run `pnpm test tests/unit/shop-os-tickets-create.test.ts tests/unit/shop-os-tickets-access.test.ts`; verify GREEN.
-- [ ] Commit the access query, add-job mutation, and focused tests.
+- [x] Write PGlite tests proving every active Shop OS role can read a same-shop ticket and add a job to an open ticket.
+- [x] Verify RED because the read/add exports are absent.
+- [x] Prove unsupported, pending, deactivated, and no-shop actors are rejected before data access.
+- [x] Prove malformed IDs return validation errors; missing and cross-shop ticket IDs both return `not_found`.
+- [x] Prove adding to closed/canceled tickets returns `ticket_not_open` without mutation.
+- [x] Reuse the exact assignment validator from creation; do not duplicate role/tier rules.
+- [x] Return jobs in stable `createdAt`, then `id` order and expose only the safe `TicketDetail` projection.
+- [x] Run `pnpm test tests/unit/shop-os-tickets-create.test.ts tests/unit/shop-os-tickets-access.test.ts`; verify GREEN.
+- [x] Commit the access query, add-job mutation, and focused tests.
 
 ---
 
@@ -205,6 +205,7 @@ export async function addTicketJob(
 
 **Files:**
 
+- Modify: `lib/tickets.ts`
 - Create: `app/api/tickets/route.ts`
 - Create: `app/api/tickets/[id]/route.ts`
 - Create: `app/api/tickets/[id]/jobs/route.ts`
@@ -216,7 +217,8 @@ export async function addTicketJob(
 - `GET /api/tickets/:id` calls `getTicketDetail` and returns `200` with `{ticket}`.
 - `POST /api/tickets/:id/jobs` calls `addTicketJob` and returns `201` with `{ticket}`.
 - All routes call `requireUserAndProfile`, return `401 {error:'unauthenticated'}` when absent, then call the existing `paywallReject` before the domain handler.
-- `ticketDomainStatus` maps validation to 422, forbidden/no-shop/inactive to 403, not-found to 404, tier confirmation/ticket-not-open to 409, and successful create/add to 201.
+- `ticketActorFromProfile` maps the authenticated profile's `id`, `shopId`, `role`, `skillTier`, `membershipStatus`, and `deactivatedAt` once; route files do not duplicate that mapping.
+- `ticketDomainStatus(result, successStatus)` maps validation to 422, forbidden/no-shop/inactive to 403, not-found to 404, tier confirmation/ticket-not-open to 409, and successful create/add to the caller-supplied status.
 
 - [ ] Write route tests first for authentication, paywall short-circuit, body parsing, actor translation, status mapping, route parameter forwarding, and success JSON.
 - [ ] Verify RED because the three route modules do not exist.
