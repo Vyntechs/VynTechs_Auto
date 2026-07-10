@@ -67,9 +67,9 @@ VIN
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
 - Modify: `docs/strategy/2026-07-10-shop-os-phase-1-ticket-detail-plan.md`
 
-- [ ] Mark row 10 `in_progress` on `feat/shop-os-p1-counter-intake-v2` while preserving both owner gates.
-- [ ] Record PR #120's completed merge/tree verification.
-- [ ] Commit/push the approved design and open a draft PR before implementation.
+- [x] Mark row 10 `in_progress` on `feat/shop-os-p1-counter-intake-v2` while preserving both owner gates.
+- [x] Record PR #120's completed merge/tree verification.
+- [x] Commit/push the approved design and open draft PR #121 before implementation.
 
 ---
 

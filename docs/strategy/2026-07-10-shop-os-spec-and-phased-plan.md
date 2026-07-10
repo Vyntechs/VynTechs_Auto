@@ -705,7 +705,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | complete | PR #118; 65 focused + 1,519 full tests; no production apply |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | complete | PR #119; 40 focused + 1,559 full tests; no production apply |
 | 9 | 1 | Real ticket detail/read surface | A | 8 | complete | PR #120; 18 focused + 1,577 full tests; [execution packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) |
-| 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | in_progress | `feat/shop-os-p1-counter-intake-v2`; [execution packet](./2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md); feature enable is owner gate |
+| 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | in_progress | Draft PR #121; `feat/shop-os-p1-counter-intake-v2`; [execution packet](./2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md); feature enable is owner gate |
 | 11 | 1 | Door C minimal create | A | 8,9 | pending | — |
 | 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | pending | Creation seam only |
 | 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | pending | — |
