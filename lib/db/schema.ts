@@ -49,6 +49,12 @@ export const profiles = pgTable(
     fullName: text('full_name'),
     role: text('role').default('tech').notNull(),
     skillTier: integer('skill_tier'),
+    membershipStatus: text('membership_status', {
+      enum: ['pending', 'active'],
+    }).default('active').notNull(),
+    membershipActivatedAt: timestamp('membership_activated_at', {
+      withTimezone: true,
+    }).defaultNow(),
     isComp: boolean('is_comp').default(false).notNull(),
     isCurator: boolean('is_curator').default(false).notNull(),
     lastSeenWhatsNewAt: timestamp('last_seen_whats_new_at', { withTimezone: true }),
@@ -60,6 +66,15 @@ export const profiles = pgTable(
     check(
       'profiles_skill_tier_range',
       sql`${table.skillTier} is null or ${table.skillTier} between 1 and 3`,
+    ),
+    check(
+      'profiles_membership_status_valid',
+      sql`${table.membershipStatus} in ('pending', 'active')`,
+    ),
+    check(
+      'profiles_membership_activation_consistent',
+      sql`(${table.membershipStatus} = 'pending' and ${table.membershipActivatedAt} is null)
+        or (${table.membershipStatus} = 'active' and ${table.membershipActivatedAt} is not null)`,
     ),
   ],
 )

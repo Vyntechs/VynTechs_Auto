@@ -6,14 +6,14 @@ import { requireUserAndProfile, isFounder } from '@/lib/auth'
 import { profiles } from '@/lib/db/schema'
 import { Module } from '@/components/vt'
 import { TeamSection, type TeamMemberRow } from '@/components/vt/team-section'
+import { canManageTeam } from '@/lib/shop-os/capabilities'
 
 export default async function SettingsTeamPage() {
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const isAdmin =
-    ctx.profile.role === 'owner' || isFounder(ctx.user.email)
+  const isAdmin = canManageTeam(ctx.profile.role, isFounder(ctx.user.email))
   if (!isAdmin) notFound()
 
   if (!ctx.profile.shopId) {
@@ -32,6 +32,8 @@ export default async function SettingsTeamPage() {
       profileId: profiles.id,
       fullName: profiles.fullName,
       role: profiles.role,
+      skillTier: profiles.skillTier,
+      membershipStatus: profiles.membershipStatus,
       deactivatedAt: profiles.deactivatedAt,
     })
     .from(profiles)
@@ -45,6 +47,8 @@ export default async function SettingsTeamPage() {
     profileId: r.profileId,
     fullName: r.fullName,
     role: r.role,
+    skillTier: r.skillTier,
+    membershipStatus: r.membershipStatus,
     deactivated: r.deactivatedAt !== null,
   }))
   const selfIdx = members.findIndex((m) => m.userId === ctx.user.id)

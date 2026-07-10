@@ -27,6 +27,7 @@ describe('getShopTeam', () => {
       .values({
         userId: '00000000-0000-0000-0000-000000000001',
         role: 'owner',
+        skillTier: 3,
         shopId,
         fullName: 'Charlie Advisor',
       })
@@ -38,6 +39,7 @@ describe('getShopTeam', () => {
       .values({
         userId: '00000000-0000-0000-0000-000000000002',
         role: 'tech',
+        skillTier: 2,
         shopId,
         fullName: 'Alice Tech',
       })
@@ -49,6 +51,7 @@ describe('getShopTeam', () => {
       .values({
         userId: '00000000-0000-0000-0000-000000000003',
         role: 'tech',
+        skillTier: 1,
         shopId,
         fullName: 'Bob Tech',
       })
@@ -59,6 +62,7 @@ describe('getShopTeam', () => {
     await db.insert(profiles).values({
       userId: '00000000-0000-0000-0000-000000000004',
       role: 'tech',
+      skillTier: 2,
       shopId: otherShop.id,
       fullName: 'Excluded',
     })
@@ -81,6 +85,7 @@ describe('getShopTeam', () => {
     await db.insert(profiles).values({
       userId: '00000000-0000-0000-0000-000000000005',
       role: 'tech',
+      skillTier: 1,
       shopId,
       fullName: null,
     })
@@ -89,6 +94,51 @@ describe('getShopTeam', () => {
     expect(result.members[1].name).toBe('Alice Tech')
     expect(result.members[2].name).toBe('Bob Tech')
     expect(result.members[3].name).toBe('Tech')
+  })
+
+  it('includes any active wrenching role and excludes inactive or no-tier profiles', async () => {
+    const [advisor] = await db
+      .insert(profiles)
+      .values({
+        userId: '00000000-0000-0000-0000-000000000006',
+        role: 'advisor',
+        skillTier: 2,
+        shopId,
+        fullName: 'Dana Advisor',
+      })
+      .returning()
+    await db.insert(profiles).values([
+      {
+        userId: '00000000-0000-0000-0000-000000000007',
+        role: 'parts',
+        skillTier: null,
+        shopId,
+        fullName: 'Office Parts',
+      },
+      {
+        userId: '00000000-0000-0000-0000-000000000008',
+        role: 'tech',
+        skillTier: 3,
+        shopId,
+        fullName: 'Inactive Tech',
+        deactivatedAt: new Date(),
+      },
+      {
+        userId: '00000000-0000-0000-0000-000000000009',
+        role: 'owner',
+        skillTier: 3,
+        shopId,
+        fullName: 'Pending Owner Tech',
+        membershipStatus: 'pending',
+        membershipActivatedAt: null,
+      },
+    ])
+
+    const result = await getShopTeam({ db, shopId, currentUserId: advisorId })
+    expect(result.members.map((member) => member.id)).toContain(advisor.id)
+    expect(result.members.map((member) => member.name)).not.toContain('Office Parts')
+    expect(result.members.map((member) => member.name)).not.toContain('Inactive Tech')
+    expect(result.members.map((member) => member.name)).not.toContain('Pending Owner Tech')
   })
 
   it('returns workload counts when sessions exist', async () => {

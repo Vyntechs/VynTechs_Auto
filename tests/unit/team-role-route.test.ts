@@ -144,6 +144,27 @@ describe('POST /api/team/role', () => {
     expect(res.status).toBe(422)
   })
 
+  it('preserves an existing curator role as out-of-band authority', async () => {
+    await seedInviter('owner')
+    const CURATOR_ID = '00000000-0000-0000-0000-000000000009'
+    await currentDb.insert(profiles).values({
+      userId: CURATOR_ID,
+      role: 'curator',
+      shopId,
+      fullName: 'Protected Curator',
+    })
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: CURATOR_ID, role: 'tech' }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('protected_role')
+
+    const [row] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, CURATOR_ID))
+    expect(row.role).toBe('curator')
+  })
+
   it('returns 404 when target user does not exist', async () => {
     await seedInviter('owner')
     const { POST } = await import('@/app/api/team/role/route')
@@ -173,6 +194,38 @@ describe('POST /api/team/role', () => {
     expect(row.role).toBe('owner')
   })
 
+  it('updates the role and skill tier together', async () => {
+    await seedInviter('owner')
+    await seedTech()
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(
+      makeReq({ userId: TECH_ID, role: 'parts', skillTier: 2 }),
+    )
+    expect(res.status).toBe(200)
+    const [row] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, TECH_ID))
+    expect(row.role).toBe('parts')
+    expect(row.skillTier).toBe(2)
+  })
+
+  it('rejects an invalid skill tier without changing the profile', async () => {
+    await seedInviter('owner')
+    await seedTech()
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(
+      makeReq({ userId: TECH_ID, role: 'tech', skillTier: 4 }),
+    )
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('invalid_skill_tier')
+    const [row] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, TECH_ID))
+    expect(row.skillTier).toBeNull()
+  })
+
   it('demotes an admin to tech when another admin exists', async () => {
     await seedInviter('owner')
     await seedOtherAdmin()
@@ -200,6 +253,48 @@ describe('POST /api/team/role', () => {
       .from(profiles)
       .where(eq(profiles.userId, INVITER_ID))
     expect(row.role).toBe('owner')
+  })
+
+  it('does not count a pending invited owner toward the active-owner quorum', async () => {
+    await seedInviter('owner')
+    await currentDb.insert(profiles).values({
+      userId: OTHER_ADMIN_ID,
+      role: 'owner',
+      shopId,
+      fullName: 'Pending Owner',
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    })
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: INVITER_ID, role: 'tech' }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('last_admin')
+  })
+
+  it('rejects team mutations from a still-pending actor', async () => {
+    const [profile] = await currentDb
+      .insert(profiles)
+      .values({
+        userId: INVITER_ID,
+        role: 'owner',
+        shopId,
+        fullName: 'Pending Inviter',
+        isComp: true,
+        membershipStatus: 'pending',
+        membershipActivatedAt: null,
+      })
+      .returning()
+    await seedTech()
+    const { requireUserAndProfile } = await import('@/lib/auth')
+    vi.mocked(requireUserAndProfile).mockResolvedValue({
+      user: { id: INVITER_ID, email: 'inviter@shop.test' },
+      profile,
+    })
+
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: TECH_ID, role: 'advisor' }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('membership_pending')
   })
 
   it('does not count deactivated admins toward last-admin protection', async () => {

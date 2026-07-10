@@ -1,5 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ensureProfileAndShop } from './db/queries'
+import {
+  activatePendingProfileMembership,
+  ensureProfileAndShop,
+} from './db/queries'
 import type { AppDb } from './db/queries'
 import type { Profile } from './db/schema'
 import { ensureStripeCustomer } from './stripe'
@@ -26,7 +29,11 @@ export async function requireUserAndProfile(opts: {
   if (!user || !user.email) return null
   const metadataName = user.user_metadata?.full_name
   const fullName = typeof metadataName === 'string' ? metadataName : undefined
-  const profile = await ensureProfileAndShop(opts.db, user.id, user.email, fullName)
+  let profile = await ensureProfileAndShop(opts.db, user.id, user.email, fullName)
+  if (profile.membershipStatus === 'pending' && !profile.deactivatedAt) {
+    profile =
+      (await activatePendingProfileMembership(opts.db, user.id)) ?? profile
+  }
   if (profile.shopId) {
     const ensure: EnsureCustomerFn =
       opts.ensureCustomer ??

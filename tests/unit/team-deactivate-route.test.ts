@@ -145,6 +145,21 @@ describe('POST /api/team/deactivate', () => {
     expect(res.status).toBe(403)
   })
 
+  it('does not deactivate an out-of-band curator profile', async () => {
+    await seedInviter('owner')
+    const CURATOR_ID = '00000000-0000-0000-0000-000000000009'
+    await currentDb.insert(profiles).values({
+      userId: CURATOR_ID,
+      role: 'curator',
+      shopId,
+      fullName: 'Protected Curator',
+    })
+    const { POST } = await import('@/app/api/team/deactivate/route')
+    const res = await POST(makeReq({ userId: CURATOR_ID }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('protected_role')
+  })
+
   it('deactivates a tech', async () => {
     await seedInviter('owner')
     await seedTech()
@@ -154,6 +169,28 @@ describe('POST /api/team/deactivate', () => {
 
     const [row] = await currentDb.select().from(profiles).where(eq(profiles.userId, TECH_ID))
     expect(row.deactivatedAt).not.toBeNull()
+  })
+
+  it('can revoke a pending owner invite without treating it as the last active owner', async () => {
+    await seedInviter('owner')
+    const PENDING_OWNER = '00000000-0000-0000-0000-000000000054'
+    await currentDb.insert(profiles).values({
+      userId: PENDING_OWNER,
+      role: 'owner',
+      shopId,
+      fullName: 'Pending Owner',
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    })
+
+    const { POST } = await import('@/app/api/team/deactivate/route')
+    const res = await POST(makeReq({ userId: PENDING_OWNER }))
+    expect(res.status).toBe(200)
+    const [row] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, PENDING_OWNER))
+    expect(row.deactivatedAt).toBeInstanceOf(Date)
   })
 
   it('blocks deactivating the last active admin', async () => {
