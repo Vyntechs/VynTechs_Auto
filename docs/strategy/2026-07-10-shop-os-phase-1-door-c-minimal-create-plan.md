@@ -97,11 +97,11 @@ QUICK TICKET
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
 - Modify: `docs/strategy/2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md`
 
-- [ ] Run all row-11 focused tests, full suite, TypeScript, production build, and diff check; record exact counts.
-- [ ] Attempt the required signed-in Chrome workflow; if unavailable, record the gate and protect layout, targets, keyboard, errors, and redirect through CSS/static and DOM proof.
-- [ ] Inspect the full diff for sessions, diagnostic work, fake quote/approval claims, cross-shop reads, partial writes, assignment ceremony, unrelated changes, and intent drift.
-- [ ] Obtain task reviews and one whole-branch review; resolve every Critical/Important/Minor finding and re-review.
-- [ ] Add the Phase-1 Door C implementation correction, mark row 11 complete, and preserve all production/external gates.
+- [x] Run all row-11 focused tests (5 files/67 tests), full suite (198 files/1,668 tests), TypeScript, production build, and diff check; all pass.
+- [x] Attempt the required signed-in Chrome workflow; Chrome was not running and no launch authority was granted, so CSS/static and DOM proof protect 375px layout, 44px targets, keyboard behavior, errors, and ticket-id-only redirect.
+- [x] Inspect the full diff for sessions, diagnostic work, fake quote/approval claims, cross-shop reads, partial writes, assignment ceremony, unrelated changes, and intent drift; none found.
+- [x] Obtain two task reviews and one whole-branch review; the UI task's three Important findings were resolved and re-reviewed, and the final branch review approved with zero findings.
+- [x] Add the Phase-1 Door C implementation correction, mark row 11 complete, and preserve all production/external gates.
 - [ ] Push final head, wait for GitHub checks, mark ready, squash-merge, verify `origin/main` tree equality, and immediately continue row 12.
 
 ## Verification
