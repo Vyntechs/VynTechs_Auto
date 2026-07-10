@@ -15,7 +15,7 @@ If a feature does not make that sentence more true, it is out of scope.
 ## §1 — Scope
 **IN SCOPE:** the diagnostics engine — the build-time orchestration that turns a vehicle+system+symptom into a graph-stored, refusal-gated, explorable wiring-topology diagnostic; the runtime that serves it; the knowledge/citation spine; the interactive guided-walk UX; the field-capture + outcome compounding loop; cross-vehicle equivalence.
 
-**OUT OF SCOPE (vaulted — do NOT build now):** shop-management features, parts ordering, the TV/command-center dashboard, billing/GTM, the build-in-public/marketing layer. These are the 5-year platform vision, deliberately deferred. *(Amended 2026-07-10: shop-management, parts ordering, and the tech command center are un-vaulted by owner decision and governed by `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`. This brief still governs the engine itself, and the engine remains frozen with respect to that plan.)*
+**OUT OF SCOPE (vaulted — do NOT build now):** shop-management features, parts ordering, the TV/command-center dashboard, billing/GTM, the build-in-public/marketing layer. These are the 5-year platform vision, deliberately deferred. *(Amended 2026-07-10: shop-management, parts ordering, and the tech command center are un-vaulted by owner decision and governed by `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`. This brief still governs diagnostic semantics; only the four narrow OS integration seams in that plan's §3.3 are allowed.)*
 
 ---
 
@@ -88,7 +88,7 @@ If a feature does not make that sentence more true, it is out of scope.
 - **Layout:** keep deterministic dagre auto-layout (already shipped). Do not build stored per-system pixel coordinates.
 - **Platform:** **PWA web app, phone-first — and it STAYS a PWA for the foreseeable future.** A native iOS/Android app is a ~2030 horizon, explicitly NOT a near-term goal. Do NOT add native-portability complexity, abstractions, or "future native" hedges now — build for the PWA. (The cache-served, AI-out-of-hot-path design already gives the offline-leaning benefits without a native app.)
 - **Data:** generate-own + field capture only. **No licensed OEM data, no scraping.** This is both legal and the moat.
-- **Scope:** GTM, pricing, shop-management, marketing = OUT (separate tracks).
+- **Scope:** GTM, pricing, and marketing = OUT. Shop management is a separate track governed by `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`; this brief still governs the diagnostic engine.
 
 ---
 

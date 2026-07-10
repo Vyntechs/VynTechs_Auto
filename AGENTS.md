@@ -1,11 +1,11 @@
 # Agent guide — Vyntechs MVP
 
-This file holds load-bearing conventions for any agent working on the repo. The source of truth for current state is the **active plan's status table** (see below) — not session handoff files; those were removed from the public tree in PR #111 along with the rest of `docs/superpowers/`. Do not go looking for `docs/superpowers/*` paths referenced by older docs.
+This file holds load-bearing conventions for any agent working on the repo. The source of truth for current state is the **active plan's status table** (see below), not session handoff files. PR #111 removed the root handoff/task files; older `docs/superpowers/*` paths referenced by historical docs are also absent from current `main`, but were not all removed by that PR. Do not treat those missing paths as current state.
 
 ## Where to look first
 
 - **Active plan (shop OS — the current line of work):** `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md` — the single source of truth for all shop-OS work. Resume from its §11 session protocol and status table; pick a pending workstream, work it in a parallel worktree lane, update the table in the shipping PR. Its "Implementation corrections" callouts are authoritative over original phase text.
-- **Engine work:** `docs/interactive-diagnostics/MASTER-BUILD-BRIEF.md` — governs the diagnostic engine itself. The engine is frozen with respect to shop-OS work (no engine tables or code paths change; see plan §2/§11).
+- **Engine work:** `docs/interactive-diagnostics/MASTER-BUILD-BRIEF.md` — governs diagnostic semantics. Shop OS may use only the four narrow integration seams named in the active plan §3.3 (outward session FK, creation orchestration, lock/outcome reads, and ticket-aware repair/close guards); it does not change engine prompts, risk/gating, retrieval, topology behavior, or output semantics.
 - **UI/product doctrine:** `docs/strategy/2026-05-29-customer-interaction-doctrine.md` — mandatory pre-read for any UI/frontend task, including customer-facing surfaces.
 
 ## Working rules
@@ -35,6 +35,8 @@ Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 
 ## Architecture conventions
 
+- **Shop OS engine boundary:** the active plan §3.3 is the authority. Its four seams may touch the named intake/session route, handler, page, and repair/close UI paths under regression tests. Any other engine-path or engine-schema change stops for a separate plan. The one-time live-drift cleanup is an explicit owner gate.
+
 - **Handler-in-`lib/` + thin route shim.** Every API route follows this pattern: handler in `lib/sessions.ts` (or similar) takes `db: AppDb` plus injected dependencies, returns a discriminated union. The `app/api/.../route.ts` shim is ~30 lines: read user, call handler with prod deps, map result to `NextResponse`. Makes everything pglite-testable without mocking Next.js.
 - **Queries take `db: AppDb` as first arg.** No global `db` import inside `lib/db/queries.ts` helpers — always passed in.
 - **422 + JSON `{error, feedback}`** for AI-validation rejections.
@@ -61,7 +63,7 @@ Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 
 ## Handoff format
 
-Handoff files are retired (the `docs/superpowers/sessions/` directory was stripped in PR #111). State now lives in exactly two places, updated **in the PR that ships the work**: the active plan's §11 status table (workstream → status → PR#), and an "Implementation corrections" callout at the end of the relevant phase when reality drifted from the plan. Workflow rules, conventions, and verification commands stay here in `AGENTS.md` — do not duplicate them into the plan.
+Handoff files are retired. State now lives in exactly two places, updated **in the PR that ships the work**: the active plan's §11 status table (workstream → status → PR#), and an "Implementation corrections" callout at the end of the relevant phase when reality drifted from the plan. Workflow rules, conventions, and verification commands stay here in `AGENTS.md` — do not duplicate them into the plan.
 
 ## Verification before shipping
 
