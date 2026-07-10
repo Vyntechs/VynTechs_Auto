@@ -22,7 +22,7 @@
 - Do not change `/api/intake/submit`, `createSessionFromIntake`, diagnostic prompts, retrieval, topology, session initialization, repair/close behavior, or engine output semantics.
 - Do not create or link a diagnostic session. Row 15 owns idempotent full diagnostic bootstrap.
 - Counter source always requires a same-shop customer and vehicle. Cross-shop/missing resources fail closed through the handler.
-- The first job is diagnostic, required A-tier, and titled deterministically from the persisted concern. One optional requested-service field may add one repair (B-tier) or maintenance (C-tier) job; no quote lines or canned jobs enter row 10.
+- Every counter ticket includes one diagnostic A-tier job titled deterministically from the persisted concern. One optional requested-service field may add one repair (B-tier) or maintenance (C-tier) job; no quote lines or canned jobs enter row 10. Row 10 does not invent a durable user-defined job sort contract that the current schema does not store.
 - Assignment applies to every created job. `null` stays truly open. A below-tier selection requires the row-8 explicit confirmation round trip; it is never silently downgraded or reassigned to the advisor.
 - VIN decode is explicit and real: a 17-character VIN enables `Decode VIN`; success fills year/make/model/engine, invalid/unavailable results remain editable and visibly explained.
 - Diagnostic authorization is an optional decimal-dollar amount plus optional note. The server parses amount to non-negative integer cents; it never infers repair approval.
@@ -51,7 +51,7 @@ VIN
 
 ## Error and rollback contract
 
-- Route order: parse JSON → authenticate → paywall → shared intake rate limit → handler.
+- Route order: authenticate → paywall → parse JSON → shared intake rate limit → handler. Denied callers do not learn body validity; malformed JSON does not consume creation quota.
 - Handler owns strict input validation and tenant checks. The route never queries customer, vehicle, profile, ticket, or job tables.
 - `tier_confirmation_required` returns the warning needed for a single explicit `Assign anyway` retry.
 - No success without `{ ticket }`; the UI never redirects from an error envelope.
@@ -104,14 +104,14 @@ VIN
 - Create: `tests/unit/shop-os-counter-ticket.test.ts`
 - Create: `tests/unit/shop-os-counter-ticket-route.test.ts`
 
-- [ ] Write PGlite tests first for new/existing vehicle paths, diagnostic + maintenance fixture, full concern, structured authorization, true-open, assigned, below-tier confirmation, cross-shop/missing/invalid inputs, mileage update, and full rollback.
-- [ ] Verify RED because the handler/route do not exist.
-- [ ] Validate a strict discriminated new-vs-existing body; parse optional authorization dollars to integer cents without floating-point rounding.
-- [ ] Resolve/upsert customer and vehicle inside one transaction; update only existing mileage when supplied.
-- [ ] Call row-8 `createTicket` inside the transaction and return its exact safe projection/warning.
-- [ ] Keep the route thin: parse → auth → paywall → shared rate limit → actor translation → handler → status/envelope mapping.
-- [ ] Prove `/api/intake/submit` and legacy session creation are untouched.
-- [ ] Run focused handler/route suites, TypeScript, and independent task review; commit only after approval.
+- [x] Write PGlite tests first for new/existing vehicle paths, diagnostic + maintenance fixture, full concern, structured authorization, true-open, assigned, below-tier confirmation, cross-shop/missing/invalid inputs, mileage update, PostgreSQL bounds, and full rollback.
+- [x] Verify RED because the handler/route do not exist.
+- [x] Validate a strict discriminated new-vs-existing body; parse optional authorization dollars to integer cents without floating-point rounding.
+- [x] Resolve/upsert customer and vehicle inside one transaction; update only existing mileage when supplied.
+- [x] Call row-8 `createTicket` inside the transaction and return its exact safe projection/warning.
+- [x] Keep the route thin: auth → paywall → parse → shared rate limit → actor translation → handler → status/envelope mapping.
+- [x] Prove `/api/intake/submit` and legacy session creation are untouched.
+- [x] Run 2 focused handler/route files (20/20), TypeScript, diff check, three-run flake probe, and independent re-review; approved with no remaining findings.
 
 ---
 
