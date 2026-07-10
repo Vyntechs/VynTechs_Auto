@@ -86,7 +86,6 @@ export function CounterIntake({
   workloadFailed?: boolean
 }) {
   const router = useRouter()
-  const currentUserId = team.find((m) => m.isCurrentUser)?.id ?? ''
   const [assignedTechId, setAssignedTechId] = useState<string | null>(null)
   const [pickedVehicleId, setPickedVehicleId] = useState<string | null>(null)
   const [pickedLabel, setPickedLabel] = useState<string | null>(null)
@@ -287,9 +286,8 @@ export function CounterIntake({
           <MainHeader
             eyebrow="New work order"
             eyebrowSlot={
-              team.length > 0 && currentUserId ? (
+              team.length > 0 ? (
                 <TechSelector
-                  currentUserId={currentUserId}
                   team={team}
                   workloadFailed={workloadFailed}
                   selectedId={assignedTechId}

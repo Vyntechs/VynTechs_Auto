@@ -12,7 +12,8 @@ export type TeamMember = {
 }
 
 export type TechSelectorProps = {
-  currentUserId: string
+  /** Retained for callers during migration; roster rows already carry isCurrentUser. */
+  currentUserId?: string
   team: TeamMember[]
   workloadFailed?: boolean
   selectedId: string | null

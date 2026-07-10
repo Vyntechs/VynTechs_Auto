@@ -501,5 +501,22 @@ describe('CounterIntake', () => {
       expect(screen.queryByRole('group', { name: /assigned to/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('combobox', { name: /assigned to/i })).not.toBeInTheDocument()
     })
+
+    it('lets a non-wrenching counter owner assign from a populated technician roster', () => {
+      render(
+        <CounterIntake
+          userEmail="owner@example.com"
+          team={team(
+            { id: 'a', name: 'Alice', skillTier: 3 },
+            { id: 'b', name: 'Bob', skillTier: 2 },
+          )}
+        />,
+      )
+
+      const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+      fireEvent.click(trigger)
+      fireEvent.click(screen.getByRole('option', { name: /alice/i }))
+      expect(trigger).toHaveTextContent(/alice/i)
+    })
   })
 })
