@@ -358,6 +358,7 @@ export function CounterIntake({
                     complaint below and submit to start the ticket.
                   </span>
                   <button
+                    className={styles.changeButton}
                     type="button"
                     onClick={handleClearPicked}
                     style={{

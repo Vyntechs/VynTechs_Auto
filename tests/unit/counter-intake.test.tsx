@@ -44,6 +44,13 @@ describe('CounterIntake', () => {
     expect(css).toMatch(/:global\(\.vt-form__row\)[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
     expect(css).toMatch(/:global\(\.vt-btn\)[\s\S]*min-block-size:\s*44px/)
     expect(css).toMatch(/:global\(\.vt-field__input\)[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/\.changeButton[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/:global\(\.pis__input\)[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/:global\(\.pis__row\)[\s\S]*min-block-size:\s*56px/)
+    expect(css).toMatch(/:global\(\.pis__row-history\)[\s\S]*min-block-size:\s*56px/)
+    expect(css).toMatch(/:global\(\.pis__create\)[\s\S]*min-block-size:\s*56px/)
+    expect(css).toMatch(/:global\(\.pis__seemore\)[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/:global\(\.pis__tier__back\)[\s\S]*min-block-size:\s*44px/)
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
