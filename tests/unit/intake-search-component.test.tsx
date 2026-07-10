@@ -46,6 +46,18 @@ describe('<PredictiveIntakeSearch>', () => {
     expect(screen.getByRole('combobox')).toBeInTheDocument()
   })
 
+  it('does not render the dead Scan VIN/plate coming-soon control', () => {
+    render(
+      <PredictiveIntakeSearch
+        recentCustomers={recents}
+        onPickVehicle={vi.fn()}
+        onCreateNew={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: /scan vin\/plate/i })).toBeNull()
+  })
+
   it('opens the dropdown with recent customers when the bar is focused', async () => {
     const user = userEvent.setup()
     render(

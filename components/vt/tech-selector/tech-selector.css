@@ -31,6 +31,7 @@
 /* ===== trigger pill (active) ===== */
 
 .ts__trigger {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -51,15 +52,6 @@
 .ts__trigger[aria-expanded="true"] {
   border-color: var(--vt-signal-500);
   box-shadow: 0 0 0 1px var(--vt-signal-500) inset;
-}
-
-/* ===== solo inert variant ===== */
-
-.ts__trigger--inert {
-  background: transparent;
-  border-style: dashed;
-  color: var(--vt-fg-2);
-  cursor: default;
 }
 
 /* ===== avatar disc ===== */
@@ -224,6 +216,31 @@
   line-height: 1.2;
 }
 
+.ts__identity {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ts__tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 2px;
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  color: var(--vt-fg-2);
+  flex-shrink: 0;
+}
+
 .ts__row .ts__tag {
   border-left: 0;
   padding-left: 0;
@@ -236,6 +253,7 @@
 /* ===== clear row at the bottom ===== */
 
 .ts__row--clear {
+  min-height: 44px;
   grid-template-columns: 1fr;
   padding: 12px 16px;
   border-top: 0.5px solid var(--vt-rule);

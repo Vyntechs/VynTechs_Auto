@@ -194,9 +194,8 @@ describe('getShopTeam', () => {
   })
 
   it('sets workloadFailed=true and omits workload when the workload query throws', async () => {
-    // The helper makes exactly two `.select` calls (roster then workload).
-    // Spy on the second invocation to throw, simulating a DB error on the
-    // workload-only path.
+    // The helper reads roster, then ticket-job and legacy-session workload.
+    // Either workload source failing hides every badge.
     const original = db.select.bind(db)
     let callCount = 0
     const spy = vi

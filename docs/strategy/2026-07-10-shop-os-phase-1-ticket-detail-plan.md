@@ -144,7 +144,7 @@ export default async function TicketPage({
 - [x] Inspect the full diff for raw-table reads, engine changes, fake controls, raw colors, unsafe contact leakage, unrelated files, and intent drift; none found.
 - [x] Obtain independent task reviews and one whole-branch review; resolve both Important Task-2 findings and pass re-review with no remaining findings.
 - [x] Add the Phase-1 ticket-detail implementation correction, mark row 9 complete, and preserve row 6's production owner gate.
-- [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
+- [x] Push the final head, wait for GitHub checks, mark PR #120 ready, squash-merge at `c576690`, verify `origin/main` matches the reviewed tree, and immediately continue row 10.
 
 ## Verification
 

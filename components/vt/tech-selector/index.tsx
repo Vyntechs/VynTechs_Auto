@@ -6,12 +6,14 @@ import './tech-selector.css'
 export type TeamMember = {
   id: string
   name: string
+  skillTier: number
   isCurrentUser: boolean
   workload?: { open: number; today: number }
 }
 
 export type TechSelectorProps = {
-  currentUserId: string
+  /** Retained for callers during migration; roster rows already carry isCurrentUser. */
+  currentUserId?: string
   team: TeamMember[]
   workloadFailed?: boolean
   selectedId: string | null
@@ -47,43 +49,23 @@ export function TechSelector(props: TechSelectorProps) {
     setActiveIndex(0)
   }, [query])
 
-  // Solo inert variant.
-  if (team.length === 1) {
-    return (
-      <div
-        ref={rootRef}
-        className="ts ts--solo"
-        role="group"
-        aria-labelledby={labelId}
-        aria-disabled="true"
-      >
-        <span id={labelId} className="ts__label">Assigned to</span>
-        <div className="ts__trigger ts__trigger--inert">
-          <span className="ts__avatar" aria-hidden="true">
-            {initials(team[0].name)}
-          </span>
-          <span className="ts__name">You</span>
-          <span className="ts__tag">Only tech</span>
-        </div>
-      </div>
-    )
-  }
-
   const selected = selectedId ? team.find((m) => m.id === selectedId) ?? null : null
   const showSearch = team.length > 5
   const filteredTeam =
     showSearch && query.trim() !== ''
       ? team.filter((m) => m.name.toLowerCase().includes(query.trim().toLowerCase()))
       : team
+  const optionCount = filteredTeam.length + (selectedId !== null ? 1 : 0)
 
   const optionIdOf = (memberId: string) => `${listboxId}-opt-${memberId}`
+  const clearOptionId = `${listboxId}-opt-clear`
 
   function commit(id: string | null) {
     onChange(id)
     setOpen(false)
   }
 
-  function onTriggerKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+  function onTriggerKeyDown(e: KeyboardEvent<HTMLElement>) {
     if (e.key === 'Escape') {
       e.preventDefault()
       setOpen(false)
@@ -96,19 +78,23 @@ export function TechSelector(props: TechSelectorProps) {
       }
       return
     }
-    if (filteredTeam.length === 0) return
+    if (optionCount === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setActiveIndex((i) => (i + 1) % filteredTeam.length)
+      setActiveIndex((i) => (i + 1) % optionCount)
       return
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setActiveIndex((i) => (i - 1 + filteredTeam.length) % filteredTeam.length)
+      setActiveIndex((i) => (i - 1 + optionCount) % optionCount)
       return
     }
     if (e.key === 'Enter') {
       e.preventDefault()
+      if (selectedId !== null && activeIndex === filteredTeam.length) {
+        commit(null)
+        return
+      }
       const m = filteredTeam[activeIndex]
       if (m) commit(m.id)
       return
@@ -127,8 +113,12 @@ export function TechSelector(props: TechSelectorProps) {
         aria-expanded={open}
         aria-controls={listboxId}
         aria-activedescendant={
-          open && filteredTeam[activeIndex]
-            ? optionIdOf(filteredTeam[activeIndex].id)
+          open
+            ? filteredTeam[activeIndex]
+              ? optionIdOf(filteredTeam[activeIndex].id)
+              : selectedId !== null && activeIndex === filteredTeam.length
+                ? clearOptionId
+                : undefined
             : undefined
         }
         onClick={() => setOpen((v) => !v)}
@@ -138,6 +128,7 @@ export function TechSelector(props: TechSelectorProps) {
           <>
             <span className="ts__avatar" aria-hidden="true">{initials(selected.name)}</span>
             <span className="ts__name">{selected.name}</span>
+            <TierLabel skillTier={selected.skillTier} />
           </>
         ) : (
           <span className="ts__name ts__name--placeholder">Open queue</span>
@@ -156,6 +147,15 @@ export function TechSelector(props: TechSelectorProps) {
                 placeholder="Filter techs"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={onTriggerKeyDown}
+                aria-controls={listboxId}
+                aria-activedescendant={
+                  filteredTeam[activeIndex]
+                    ? optionIdOf(filteredTeam[activeIndex].id)
+                    : selectedId !== null && activeIndex === filteredTeam.length
+                      ? clearOptionId
+                      : undefined
+                }
               />
               <span className="ts__search-count">
                 {filteredTeam.length} of {team.length}
@@ -177,8 +177,11 @@ export function TechSelector(props: TechSelectorProps) {
                 onClick={() => commit(m.id)}
               >
                 <span className="ts__avatar" aria-hidden="true">{initials(m.name)}</span>
-                <span className="ts__name">{m.name}</span>
-                {m.isCurrentUser && <span className="ts__tag">You</span>}
+                <span className="ts__identity">
+                  <span className="ts__name">{m.name}</span>
+                  {m.isCurrentUser && <span className="ts__tag">You</span>}
+                  <TierLabel skillTier={m.skillTier} />
+                </span>
                 {!workloadFailed && m.workload && (
                   <span
                     className={`ts__badge${m.workload.open >= 5 ? ' ts__badge--busy' : ''}`}
@@ -196,10 +199,14 @@ export function TechSelector(props: TechSelectorProps) {
             ))}
             {selectedId !== null && (
               <li
+                id={clearOptionId}
                 role="option"
                 aria-selected="false"
                 aria-label="Clear assignment, return to open queue"
-                className="ts__row ts__row--clear"
+                className={`ts__row ts__row--clear${
+                  activeIndex === filteredTeam.length ? ' ts__row--active' : ''
+                }`}
+                onMouseEnter={() => setActiveIndex(filteredTeam.length)}
                 onClick={() => commit(null)}
               >
                 <span className="ts__name">× Clear · Open queue</span>
@@ -209,6 +216,16 @@ export function TechSelector(props: TechSelectorProps) {
         </div>
       )}
     </div>
+  )
+}
+
+function TierLabel({ skillTier }: { skillTier: number }) {
+  const label = skillTier === 3 ? 'A' : skillTier === 2 ? 'B' : skillTier === 1 ? 'C' : null
+  if (!label) return null
+  return (
+    <span className="ts__tier" aria-label={`${label}-tech skill tier`}>
+      {label}
+    </span>
   )
 }
 

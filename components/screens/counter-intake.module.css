@@ -1,0 +1,129 @@
+.screen {
+  min-height: 100%;
+}
+
+.search {
+  padding: 20px 32px 0;
+}
+
+.vinRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.screen :global(.vt-field__input),
+.screen :global(.vt-field__select) {
+  min-block-size: 44px;
+}
+
+.screen :global(.vt-btn) {
+  min-block-size: 44px;
+}
+
+.changeButton {
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.screen :global(.pis__input) {
+  min-block-size: 44px;
+}
+
+.screen :global(.pis__row) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__row-history) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__create) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__seemore) {
+  min-block-size: 44px;
+}
+
+.screen :global(.pis__tier__back) {
+  min-block-size: 44px;
+}
+
+@media (max-width: 767px) {
+  .screen {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
+  .screen :global(.vt-topbar__brand) {
+    min-width: 0;
+    padding-inline: 14px;
+  }
+
+  .screen :global(.vt-topbar__center),
+  .screen :global(.vt-topbar__right) {
+    display: none;
+  }
+
+  .screen :global(.vt-workspace),
+  .screen :global(.vt-main) {
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .screen :global(.vt-main__header) {
+    padding: 20px 18px 16px;
+  }
+
+  .screen :global(.vt-main__title) {
+    font-size: clamp(30px, 10vw, 36px);
+  }
+
+  .screen :global(.vt-main__eyebrow-row) {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .screen :global(.vt-main__header > .vt-main__actions) {
+    display: none;
+  }
+
+  .search {
+    padding: 16px 18px 0;
+  }
+
+  .screen :global(.vt-form__group) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 18px;
+  }
+
+  .screen :global(.vt-form__row) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .screen :global(.vt-form__footer) {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px 18px;
+  }
+
+  .screen :global(.vt-form__footer-actions) {
+    display: grid;
+    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  }
+
+  .screen :global(.vt-form__footer-actions .vt-btn) {
+    justify-content: center;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .vinRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
