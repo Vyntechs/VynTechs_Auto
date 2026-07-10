@@ -19,7 +19,7 @@
 - [x] Record PR #123 merge commit/tree equality and close row 12's final shipping checkbox.
 - [x] Audit assignment capabilities, creation-time validation, ticket/job schema, API conventions, and Rev-4 race rules against current `main`.
 - [x] Choose one domain seam and one route without adding schema or UI.
-- [ ] Commit/push this packet and open a draft PR before implementation.
+- [x] Commit/push this packet and open draft PR #124 before implementation.
 
 ## Task 2: Prove and build atomic assignment mutations
 
