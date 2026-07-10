@@ -20,6 +20,7 @@ type Props = {
   dueFollowUps?: DueFollowUp[]
   canCurate?: boolean
   canWriteCounterOrder?: boolean
+  canCreateTickets?: boolean
 }
 
 export function TodayHome({
@@ -30,6 +31,7 @@ export function TodayHome({
   dueFollowUps = [],
   canCurate = false,
   canWriteCounterOrder = false,
+  canCreateTickets = false,
 }: Props) {
   const meta = bay ? (
     <span>
@@ -87,6 +89,25 @@ export function TodayHome({
           >
             <Plus size={14} weight="bold" aria-hidden="true" />
             New work order
+          </Link>
+        )}
+        {canCreateTickets && (
+          <Link
+            href="/tickets/new"
+            aria-label="Quick ticket"
+            className="btn btn-primary"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              minHeight: 44,
+              padding: '6px 12px',
+              fontSize: 13,
+              textDecoration: 'none',
+            }}
+          >
+            <Plus size={14} weight="bold" aria-hidden="true" />
+            Quick ticket
           </Link>
         )}
         <Link

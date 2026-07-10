@@ -150,6 +150,13 @@ describe('TicketDetailScreen', () => {
     expect(screen.queryByText('2019 Ford F-150')).toBeNull()
   })
 
+  it('labels quick_quote source as Quick ticket, not a completed quote', () => {
+    render(<TicketDetailScreen ticket={ticket({ source: 'quick_quote' })} />)
+
+    expect(screen.getByText('Open · Quick ticket')).toBeInTheDocument()
+    expect(screen.queryByText('Open · Quick quote')).toBeNull()
+  })
+
   it('fails closed for ambiguous contact actions and omits absent optional facts', () => {
     render(
       <TicketDetailScreen

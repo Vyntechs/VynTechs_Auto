@@ -149,7 +149,7 @@ VIN
 - [x] Inspect the full diff for early session creation, engine changes, cross-shop reads, non-atomic customer/vehicle writes, advisor fallback, free-text money, fake controls, rollout bypass, unrelated changes, and intent drift.
 - [x] Obtain three independent task reviews and one whole-branch review; resolve every Critical/Important/Minor finding and re-review to zero findings.
 - [x] Add the Phase-1 counter-intake implementation correction, mark row 10 complete, and preserve row 6 plus feature enablement as owner gates.
-- [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
+- [x] Push the final head, pass GitHub checks, squash-merge as PR #121 at `ac573df`, verify source/merge tree equality (`cbc7eb8`), and immediately continue row 11.
 
 ## Verification
 

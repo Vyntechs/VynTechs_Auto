@@ -12,7 +12,7 @@ const TICKET_STATUS_LABELS: Record<string, string> = {
 const TICKET_SOURCE_LABELS: Record<string, string> = {
   counter: 'Counter intake',
   tech_quick: 'Tech quick',
-  quick_quote: 'Quick quote',
+  quick_quote: 'Quick ticket',
   legacy_repair_order: 'Legacy repair order',
 }
 
