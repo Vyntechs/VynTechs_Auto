@@ -3,17 +3,25 @@ import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { db } from '@/lib/db/client'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
+import { isDesktopIntakeEnabled } from '@/lib/feature-flags'
 import { rateLimitReject } from '@/lib/rate-limit'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { ticketActorFromProfile, ticketDomainStatus } from '@/lib/tickets'
 
 export async function POST(req: Request) {
+  if (!isDesktopIntakeEnabled()) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
+
   const ctx = await requireUserAndProfile({
     supabase: await getServerSupabase(),
     db,
   })
   if (!ctx) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+  if (ctx.profile.role !== 'owner') {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 
   const denied = await paywallReject(db, ctx.user.id)

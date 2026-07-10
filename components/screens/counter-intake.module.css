@@ -13,6 +13,45 @@
   gap: 8px;
 }
 
+.screen :global(.vt-field__input),
+.screen :global(.vt-field__select) {
+  min-block-size: 44px;
+}
+
+.screen :global(.vt-btn) {
+  min-block-size: 44px;
+}
+
+.changeButton {
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.screen :global(.pis__input) {
+  min-block-size: 44px;
+}
+
+.screen :global(.pis__row) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__row-history) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__create) {
+  min-block-size: 56px;
+}
+
+.screen :global(.pis__seemore) {
+  min-block-size: 44px;
+}
+
+.screen :global(.pis__tier__back) {
+  min-block-size: 44px;
+}
+
 @media (max-width: 767px) {
   .screen {
     height: auto;
@@ -65,45 +104,6 @@
 
   .screen :global(.vt-form__row) {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .screen :global(.vt-field__input),
-  .screen :global(.vt-field__select) {
-    min-block-size: 44px;
-  }
-
-  .screen :global(.vt-btn) {
-    min-block-size: 44px;
-  }
-
-  .changeButton {
-    min-block-size: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .screen :global(.pis__input) {
-    min-block-size: 44px;
-  }
-
-  .screen :global(.pis__row) {
-    min-block-size: 56px;
-  }
-
-  .screen :global(.pis__row-history) {
-    min-block-size: 56px;
-  }
-
-  .screen :global(.pis__create) {
-    min-block-size: 56px;
-  }
-
-  .screen :global(.pis__seemore) {
-    min-block-size: 44px;
-  }
-
-  .screen :global(.pis__tier__back) {
-    min-block-size: 44px;
   }
 
   .screen :global(.vt-form__footer) {

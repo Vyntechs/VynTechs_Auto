@@ -51,7 +51,7 @@ VIN
 
 ## Error and rollback contract
 
-- Route order: authenticate → paywall → parse JSON → shared intake rate limit → handler. Denied callers do not learn body validity; malformed JSON does not consume creation quota.
+- Route order: default-off feature gate → authenticate → owner-only counter boundary → paywall → parse JSON → shared intake rate limit → handler. Disabled and unauthorized callers cannot reach mutation or consume quota; malformed JSON does not consume creation quota.
 - Handler owns strict input validation and tenant checks. The route never queries customer, vehicle, profile, ticket, or job tables.
 - `tier_confirmation_required` returns the warning needed for a single explicit `Assign anyway` retry.
 - No success without `{ ticket }`; the UI never redirects from an error envelope.
@@ -109,7 +109,7 @@ VIN
 - [x] Validate a strict discriminated new-vs-existing body; parse optional authorization dollars to integer cents without floating-point rounding.
 - [x] Resolve/upsert customer and vehicle inside one transaction; update only existing mileage when supplied.
 - [x] Call row-8 `createTicket` inside the transaction and return its exact safe projection/warning.
-- [x] Keep the route thin: auth → paywall → parse → shared rate limit → actor translation → handler → status/envelope mapping.
+- [x] Keep the route thin: feature gate → auth → owner boundary → paywall → parse → shared rate limit → actor translation → handler → status/envelope mapping.
 - [x] Prove `/api/intake/submit` and legacy session creation are untouched.
 - [x] Run 2 focused handler/route files (20/20), TypeScript, diff check, three-run flake probe, and independent re-review; approved with no remaining findings.
 

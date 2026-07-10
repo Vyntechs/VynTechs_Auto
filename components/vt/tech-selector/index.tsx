@@ -65,7 +65,7 @@ export function TechSelector(props: TechSelectorProps) {
     setOpen(false)
   }
 
-  function onTriggerKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+  function onTriggerKeyDown(e: KeyboardEvent<HTMLElement>) {
     if (e.key === 'Escape') {
       e.preventDefault()
       setOpen(false)
@@ -147,6 +147,15 @@ export function TechSelector(props: TechSelectorProps) {
                 placeholder="Filter techs"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={onTriggerKeyDown}
+                aria-controls={listboxId}
+                aria-activedescendant={
+                  filteredTeam[activeIndex]
+                    ? optionIdOf(filteredTeam[activeIndex].id)
+                    : selectedId !== null && activeIndex === filteredTeam.length
+                      ? clearOptionId
+                      : undefined
+                }
               />
               <span className="ts__search-count">
                 {filteredTeam.length} of {team.length}

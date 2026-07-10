@@ -212,6 +212,25 @@ describe('TechSelector — search + workload', () => {
     expect(options[0]).toHaveTextContent(/diana/i)
   })
 
+  it('commits the filtered technician with Enter from the search input', () => {
+    const onChange = vi.fn()
+    render(
+      <TechSelector
+        currentUserId="m0"
+        team={bigTeam(8)}
+        selectedId={null}
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    const input = screen.getByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'di' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onChange).toHaveBeenCalledWith('m1')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
   it('renders workload badges {open} open / {today} today when workloadFailed is false', () => {
     const team: TeamMember[] = [
       { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true, workload: { open: 3, today: 1 } },

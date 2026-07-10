@@ -7,19 +7,21 @@ vi.mock('@/lib/rate-limit', () => ({ rateLimitReject: vi.fn() }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/intake/counter-ticket', () => ({ createCounterTicket: vi.fn() }))
+vi.mock('@/lib/feature-flags', () => ({ isDesktopIntakeEnabled: vi.fn() }))
 
 import { POST } from '@/app/api/tickets/counter/route'
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import { rateLimitReject } from '@/lib/rate-limit'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
+import { isDesktopIntakeEnabled } from '@/lib/feature-flags'
 
 const profile = {
   id: '00000000-0000-0000-0000-000000000201',
   userId: '00000000-0000-0000-0000-000000000301',
   shopId: '00000000-0000-0000-0000-000000000401',
   fullName: 'Avery Advisor',
-  role: 'advisor',
+  role: 'owner',
   skillTier: 2,
   membershipStatus: 'active' as const,
   membershipActivatedAt: new Date('2026-07-10T12:00:00Z'),
@@ -52,6 +54,7 @@ const authMock = vi.mocked(requireUserAndProfile)
 const paywallMock = vi.mocked(paywallReject)
 const rateLimitMock = vi.mocked(rateLimitReject)
 const handlerMock = vi.mocked(createCounterTicket)
+const featureFlagMock = vi.mocked(isDesktopIntakeEnabled)
 
 function request(payload: unknown): Request {
   return new Request('http://localhost/api/tickets/counter', {
@@ -64,9 +67,38 @@ function request(payload: unknown): Request {
 describe('POST /api/tickets/counter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    featureFlagMock.mockReturnValue(true)
     authMock.mockResolvedValue(authContext)
     paywallMock.mockResolvedValue(null)
     rateLimitMock.mockResolvedValue(null)
+  })
+
+  it('fails closed while counter intake is disabled without authenticating or consuming quota', async () => {
+    featureFlagMock.mockReturnValue(false)
+
+    const response = await POST(request(body))
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+    expect(authMock).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
+    expect(rateLimitMock).not.toHaveBeenCalled()
+    expect(handlerMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed for a non-owner before paywall, parsing, quota, or mutation', async () => {
+    authMock.mockResolvedValue({
+      ...authContext,
+      profile: { ...profile, role: 'advisor' },
+    })
+
+    const response = await POST(request('not json{'))
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+    expect(paywallMock).not.toHaveBeenCalled()
+    expect(rateLimitMock).not.toHaveBeenCalled()
+    expect(handlerMock).not.toHaveBeenCalled()
   })
 
   it('authenticates before parsing JSON and returns the exact 401 envelope', async () => {

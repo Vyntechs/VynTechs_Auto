@@ -38,6 +38,7 @@ describe('CounterIntake', () => {
       resolve(process.cwd(), 'components/screens/counter-intake.module.css'),
       'utf8',
     )
+    const allWidths = css.slice(0, css.indexOf('@media'))
 
     expect(css).toMatch(/@media\s*\(max-width:\s*767px\)/)
     expect(css).toMatch(/:global\(\.vt-form__group\)[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
@@ -51,6 +52,9 @@ describe('CounterIntake', () => {
     expect(css).toMatch(/:global\(\.pis__create\)[\s\S]*min-block-size:\s*56px/)
     expect(css).toMatch(/:global\(\.pis__seemore\)[\s\S]*min-block-size:\s*44px/)
     expect(css).toMatch(/:global\(\.pis__tier__back\)[\s\S]*min-block-size:\s*44px/)
+    expect(allWidths).toMatch(/:global\(\.vt-btn\)[\s\S]*min-block-size:\s*44px/)
+    expect(allWidths).toMatch(/\.changeButton[\s\S]*min-block-size:\s*44px/)
+    expect(allWidths).toMatch(/:global\(\.pis__row\)[\s\S]*min-block-size:\s*56px/)
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
