@@ -240,12 +240,12 @@ export async function addTicketJob(
 
 - Produces: row 8 `complete` with PR/proof; rows 9, 11, 12, and 13 become eligible but remain unclaimed; row 6 remains `owner_gate`.
 
-- [ ] Run the focused row-8 suite and record exact file/test counts.
-- [ ] Run `pnpm test`, `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check`.
-- [ ] Inspect the full branch diff for unrelated files, engine-semantic changes, schema changes, direct route SQL, unsafe data exposure, and status drift.
-- [ ] Obtain independent task reviews plus one whole-branch review; resolve every Critical/Important finding and re-review.
-- [ ] Update the Phase-1 implementation correction with exact proof and the explicit no-production/no-engine boundary.
-- [ ] Mark row 8 complete only after all verification and review evidence exists.
+- [x] Run the focused row-8 suite and record exact file/test counts: 3 files, 40 tests.
+- [x] Run `pnpm test` (191 files, 1,559 tests), `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check`.
+- [x] Inspect the full branch diff for unrelated files, engine-semantic changes, schema changes, direct route SQL, unsafe data exposure, and status drift.
+- [x] Obtain independent task reviews plus one whole-branch review; resolve every Critical/Important finding and re-review.
+- [x] Update the Phase-1 implementation correction with exact proof and the explicit no-production/no-engine boundary.
+- [x] Mark row 8 complete only after all verification and review evidence exists.
 - [ ] Push the final head, wait for GitHub checks, mark the PR ready, squash-merge, verify `origin/main` matches the merged tree, and immediately continue the next dependency-safe row.
 
 ## Verification
