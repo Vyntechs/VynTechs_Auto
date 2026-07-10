@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 
 function mem(id: string, name: string, isCurrentUser = false): TeamMember {
@@ -7,7 +9,7 @@ function mem(id: string, name: string, isCurrentUser = false): TeamMember {
 }
 
 describe('TechSelector — resting + solo states', () => {
-  it('keeps a one-member roster open by default and allows assign then clear', () => {
+  it('keeps a one-member roster open by default and allows keyboard assign then clear', () => {
     const onChange = vi.fn()
     const { rerender } = render(
       <TechSelector
@@ -20,8 +22,8 @@ describe('TechSelector — resting + solo states', () => {
     const trigger = screen.getByRole('combobox', { name: /assigned to/i })
     expect(trigger).toHaveTextContent(/open queue/i)
 
-    fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('option', { name: /brandon/i }))
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    fireEvent.keyDown(trigger, { key: 'Enter' })
     expect(onChange).toHaveBeenLastCalledWith('a')
 
     rerender(
@@ -32,9 +34,25 @@ describe('TechSelector — resting + solo states', () => {
         onChange={onChange}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
-    fireEvent.click(screen.getByRole('option', { name: /clear.*open queue/i }))
+    const selectedTrigger = screen.getByRole('combobox', { name: /assigned to/i })
+    fireEvent.keyDown(selectedTrigger, { key: 'Enter' })
+    fireEvent.keyDown(selectedTrigger, { key: 'ArrowDown' })
+    expect(selectedTrigger).toHaveAttribute(
+      'aria-activedescendant',
+      expect.stringContaining('clear'),
+    )
+    fireEvent.keyDown(selectedTrigger, { key: 'Enter' })
     expect(onChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('keeps the trigger and Clear option at least 44px high', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/vt/tech-selector/tech-selector.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/\.ts__trigger\s*\{[\s\S]*?min-height:\s*44px/)
+    expect(css).toMatch(/\.ts__row--clear\s*\{[\s\S]*?min-height:\s*44px/)
   })
 
   it('renders an active "Open queue ▾" combobox when team has 2+ members and nothing selected', () => {

@@ -54,8 +54,10 @@ export function TechSelector(props: TechSelectorProps) {
     showSearch && query.trim() !== ''
       ? team.filter((m) => m.name.toLowerCase().includes(query.trim().toLowerCase()))
       : team
+  const optionCount = filteredTeam.length + (selectedId !== null ? 1 : 0)
 
   const optionIdOf = (memberId: string) => `${listboxId}-opt-${memberId}`
+  const clearOptionId = `${listboxId}-opt-clear`
 
   function commit(id: string | null) {
     onChange(id)
@@ -75,19 +77,23 @@ export function TechSelector(props: TechSelectorProps) {
       }
       return
     }
-    if (filteredTeam.length === 0) return
+    if (optionCount === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setActiveIndex((i) => (i + 1) % filteredTeam.length)
+      setActiveIndex((i) => (i + 1) % optionCount)
       return
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setActiveIndex((i) => (i - 1 + filteredTeam.length) % filteredTeam.length)
+      setActiveIndex((i) => (i - 1 + optionCount) % optionCount)
       return
     }
     if (e.key === 'Enter') {
       e.preventDefault()
+      if (selectedId !== null && activeIndex === filteredTeam.length) {
+        commit(null)
+        return
+      }
       const m = filteredTeam[activeIndex]
       if (m) commit(m.id)
       return
@@ -106,8 +112,12 @@ export function TechSelector(props: TechSelectorProps) {
         aria-expanded={open}
         aria-controls={listboxId}
         aria-activedescendant={
-          open && filteredTeam[activeIndex]
-            ? optionIdOf(filteredTeam[activeIndex].id)
+          open
+            ? filteredTeam[activeIndex]
+              ? optionIdOf(filteredTeam[activeIndex].id)
+              : selectedId !== null && activeIndex === filteredTeam.length
+                ? clearOptionId
+                : undefined
             : undefined
         }
         onClick={() => setOpen((v) => !v)}
@@ -179,10 +189,14 @@ export function TechSelector(props: TechSelectorProps) {
             ))}
             {selectedId !== null && (
               <li
+                id={clearOptionId}
                 role="option"
                 aria-selected="false"
                 aria-label="Clear assignment, return to open queue"
-                className="ts__row ts__row--clear"
+                className={`ts__row ts__row--clear${
+                  activeIndex === filteredTeam.length ? ' ts__row--active' : ''
+                }`}
+                onMouseEnter={() => setActiveIndex(filteredTeam.length)}
                 onClick={() => commit(null)}
               >
                 <span className="ts__name">× Clear · Open queue</span>
