@@ -90,15 +90,15 @@ import type { TicketDetail } from '@/lib/tickets'
 export function TicketDetailScreen({ ticket }: { ticket: TicketDetail }): React.JSX.Element
 ```
 
-- [ ] Write DOM tests first for a complete counter ticket, a provisional tech-quick ticket, open/unassigned work, assigned work, every persisted work/approval label, a linked diagnostic session, and safe contact/vehicle links.
-- [ ] Verify RED because `TicketDetailScreen` does not exist.
-- [ ] Render `AppHeader` with `RO ${ticketNumber.toString().padStart(6, '0')}`, ticket status/source, and a real `/today` back link.
-- [ ] Render full concern, optional `whenStarted`/`howOften`, optional diagnostic authorization amount/note, customer contact, vehicle identity, VIN, mileage, plate, and vehicle-history link only when the projection contains them.
-- [ ] Render the provisional state as `Customer and vehicle still needed` plus `Quoting, sending, delivery, and closeout stay blocked until this ticket is reconciled.` No action control appears.
-- [ ] Render an ordered job ledger with title, kind, required A/B/C tier, assignee or `Open — no technician assigned`, work label, approval label, and `Open diagnosis` only when `sessionId` is non-null.
-- [ ] Keep copy and labels pure/deterministic through small private formatter maps; never infer a state absent from the projection.
-- [ ] Implement responsive CSS Modules with the existing tokens, 44px links, visible `:focus-visible`, and no motion dependency.
-- [ ] Run `pnpm test tests/unit/shop-os-ticket-detail.test.tsx`; verify GREEN and commit the screen slice.
+- [x] Write DOM tests first for a complete counter ticket, a provisional tech-quick ticket, open/unassigned work, assigned work, every persisted work/approval label, a linked diagnostic session, and safe contact/vehicle links.
+- [x] Verify RED because `TicketDetailScreen` does not exist.
+- [x] Render `AppHeader` with `RO ${ticketNumber.toString().padStart(6, '0')}`, ticket status/source, and a real `/today` back link.
+- [x] Render full concern, optional `whenStarted`/`howOften`, optional diagnostic authorization amount/note, customer contact, vehicle identity, VIN, mileage, plate, and vehicle-history link only when the projection contains them.
+- [x] Render the provisional state as `Customer and vehicle still needed` plus `Quoting, sending, delivery, and closeout stay blocked until this ticket is reconciled.` No action control appears.
+- [x] Render an ordered job ledger with title, kind, required A/B/C tier, assignee or `Open — no technician assigned`, work label, approval label, and `Open diagnosis` only when `sessionId` is non-null.
+- [x] Keep copy and labels pure/deterministic through small private formatter maps; never infer a state absent from the projection.
+- [x] Implement responsive CSS Modules with the existing tokens, 44px links, visible `:focus-visible`, and no motion dependency.
+- [x] Run the focused screen suite; verify GREEN at 7/7, TypeScript clean, independent re-review approved, and commit the screen slice.
 
 ---
 
