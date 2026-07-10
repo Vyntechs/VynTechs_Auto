@@ -26,7 +26,7 @@
 - [x] Record PR #122 merge commit and reviewed-tree equality; close row 11's shipping checkbox.
 - [x] Audit `createSessionForUser`, `/api/sessions`, `/sessions/new`, ticket creation, schema constraints, and existing tests against Rev 4.
 - [x] Choose the smallest atomic and retry-safe seam without adding schema or changing provider/engine behavior.
-- [ ] Commit/push this packet and open a draft PR before implementation.
+- [x] Commit/push this packet and open draft PR #123 before implementation.
 
 ## Task 2: Prove and build the atomic wrapper
 
