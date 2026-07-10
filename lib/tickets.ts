@@ -284,14 +284,7 @@ async function validateAssignment(
     .limit(1)
 
   if (!assignee) {
-    const [outsideShop] = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.id, job.assignedTechId))
-      .limit(1)
-    return outsideShop
-      ? { ok: false, error: 'not_found' }
-      : { ok: false, error: 'invalid_assignee' }
+    return { ok: false, error: 'not_found' }
   }
 
   if (
