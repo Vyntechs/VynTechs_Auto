@@ -15,6 +15,9 @@ import { upsertVehicle } from './vehicles'
 const optionalTrimmedText = (max: number) =>
   z.string().trim().max(max).nullable().optional()
 
+const PG_INTEGER_MAX = 2_147_483_647
+const mileageSchema = z.number().int().nonnegative().max(PG_INTEGER_MAX)
+
 const dollarAmountSchema = z
   .string()
   .regex(/^\d+(?:\.\d{1,2})?$/)
@@ -50,7 +53,7 @@ const existingCounterBodySchema = z
   .object({
     vehicleMode: z.literal('existing'),
     existingVehicleId: z.uuid(),
-    mileage: z.number().int().safe().nonnegative().nullable().optional(),
+    mileage: mileageSchema.nullable().optional(),
     ...commonShape,
   })
   .strict()
@@ -72,7 +75,7 @@ const newCounterBodySchema = z
         model: z.string().trim().min(1).max(100),
         engine: optionalTrimmedText(200),
         vin: z.string().trim().length(17).nullable().optional(),
-        mileage: z.number().int().safe().nonnegative().nullable().optional(),
+        mileage: mileageSchema.nullable().optional(),
         plate: optionalTrimmedText(32),
       })
       .strict(),

@@ -303,6 +303,28 @@ describe('createCounterTicket', () => {
     expect(await db.select().from(tickets)).toEqual([])
   })
 
+  it('rejects mileage above the PostgreSQL integer maximum before any write', async () => {
+    const beforeCustomers = await db.select().from(customers)
+    const beforeVehicles = await db.select().from(vehicles)
+    const overflowMileage = 2_147_483_648
+    const newVehicle = newBody().vehicle as Record<string, unknown>
+
+    for (const body of [
+      newBody({ vehicle: { ...newVehicle, mileage: overflowMileage } }),
+      existingBody({ mileage: overflowMileage }),
+    ]) {
+      await expect(createCounterTicket(db, { actor, body })).resolves.toEqual({
+        ok: false,
+        error: 'invalid_input',
+      })
+    }
+
+    expect(await db.select().from(customers)).toEqual(beforeCustomers)
+    expect(await db.select().from(vehicles)).toEqual(beforeVehicles)
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
   it('parses decimal dollars without binary floating-point rounding', async () => {
     const expected = [
       ['0', 0],
