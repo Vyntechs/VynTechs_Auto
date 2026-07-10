@@ -61,6 +61,12 @@ begin
   end if;
 
   if predecessor_table_count = 6 then
+    -- Hold these locks through the migration runner's transaction so no
+    -- predecessor/core DML can land after validation but before retirement.
+    lock table shops, profiles, customers, vehicles, sessions,
+      repair_orders, work_orders, concerns, line_items, authorizations, outbound_messages
+      in share row exclusive mode;
+
     if exists (select 1 from work_orders)
        or exists (select 1 from concerns)
        or exists (select 1 from line_items)
