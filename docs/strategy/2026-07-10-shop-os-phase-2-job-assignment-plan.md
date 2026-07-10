@@ -28,13 +28,13 @@
 - Modify: `lib/tickets.ts`
 - Create: `tests/unit/shop-os-job-assignment.test.ts`
 
-- [ ] Write failing tests first for eligible self-claim, exact `claimedAt`, self-unclaim, privileged unclaim, and privileged reassign.
-- [ ] Prove claim is one conditional update over same-shop ticket/job, open ticket/job state, null assignment, and active sufficient-tier actor.
-- [ ] Prove a sequential and concurrent losing claim returns the safe current assignee and never overwrites the winner.
-- [ ] Prove below-tier reassign warns, explicit confirmation succeeds, and assignment clears `claimedAt`.
-- [ ] Prove every tenant, role, membership, tier, ticket/job state, malformed-input, and authorization negative path leaves rows unchanged.
-- [ ] Return only the canonical safe ticket projection or safe conflict assignee; expose no profile user/shop fields.
-- [ ] Independently review the domain task and resolve every finding.
+- [x] Write failing tests first for eligible self-claim, exact `claimedAt`, self-unclaim, privileged unclaim, and privileged reassign.
+- [x] Prove claim is one conditional update over same-shop ticket/job, open ticket/job state, null assignment, and active sufficient-tier actor.
+- [x] Prove a sequential and concurrent losing claim returns the safe current assignee and never overwrites the winner.
+- [x] Prove below-tier reassign warns, explicit confirmation succeeds, and assignment clears `claimedAt`.
+- [x] Prove every tenant, role, membership, tier, ticket/job state, malformed-input, and authorization negative path leaves rows unchanged.
+- [x] Return only the canonical safe ticket projection or safe conflict assignee; expose no profile user/shop fields.
+- [x] Independently review the domain task; resolve the Important tier-confirmation TOCTOU finding through TDD and receive final approval with zero findings.
 
 ## Task 3: Add the thin assignment route
 
