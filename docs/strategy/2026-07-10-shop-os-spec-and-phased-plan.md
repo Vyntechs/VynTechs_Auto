@@ -692,7 +692,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 2 | 0 | Approve canonical model + legacy-row/adopt-retire treatment | C | 1 | complete | Brandon approved 2026-07-10 |
 | 3 | 0 | Reconciliation migration + rollback draft, RLS/grants, local proof | S | 2 | complete | [Phase-0 packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) + 11 tests; no production apply |
 | 4 | 0 | Vendor identity/access discovery: PartsTech, O'Reilly, Tri State, RepairPal | X | 1 | owner_gate | External representation/account access |
-| 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | pending | Local/fixture proof only |
+| 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | in_progress | `feat/shop-os-p1-schema`; [execution packet](./2026-07-10-shop-os-phase-1-schema-plan.md) |
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | pending | — |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | pending | — |
