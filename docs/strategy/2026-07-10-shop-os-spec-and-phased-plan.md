@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 0 is complete locally; Phase 1 row 5 is next.** Production application remains the separate row-6 owner gate.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 row 5 is complete in source; rows 7–8 are the next safe local lanes.** Production application remains the separate row-6 owner gate.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -564,6 +564,8 @@ Counter corrections:
 
 **Done when:** source schema/migrations/live history agree and Shop-OS-specific advisors are clean; the legacy row is preserved in the approved canonical form; fixture-based counter intake creates one ticket with diagnostic + maintenance jobs in under 90 seconds; full concern survives; open stays open; advisor can read the result; quick tech session creates exactly one provisional wrapper on retry; legacy sessions still render; tenant/role/tier negative tests pass.
 
+**Implementation correction — source spine proved 2026-07-10.** [Row-5 packet](./2026-07-10-shop-os-phase-1-schema-plan.md) promotes the rehearsal into Drizzle declarations plus `0026_shop_os_ticket_spine.sql`. One runner-transactional migration accepts either the clean source chain or the complete guarded live predecessor; partial drift aborts before DDL, and transaction-scoped table locks prevent guarded rows from changing between validation and predecessor retirement. Fifteen focused tests cover clean, live, catalog-security, lock, guard, and rollback behavior, and the complete 1,495-test suite passes. Drizzle's known malformed `0011b_snapshot.json` blocks custom generation, so this follows migration 0021's established hand-written SQL + journal pattern. Nothing was applied to production.
+
 ### Phase 2 — Technician command center and diagnostic start (M)
 
 **Ships:** My Jobs/Open Jobs composed into `/today` without removing current follow-ups, check-ins, closed-today, or legacy session cards; atomic claim; idempotent full diagnostic bootstrap. Repair/maintenance cards may be claimed and viewed, but their start action remains disabled as "Quote and approval required" until Phase 3 lands the immutable approval contract.
@@ -650,7 +652,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Phase 0 rows 2–3 are complete locally. Phase 1 row 5 is the next claimable implementation row; row 6 remains the production owner gate.
+3. Phase 0 rows 2–3 and Phase 1 row 5 are complete in source. Rows 7–8 are the next safe local lanes; row 6 remains the production owner gate.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -692,7 +694,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 2 | 0 | Approve canonical model + legacy-row/adopt-retire treatment | C | 1 | complete | Brandon approved 2026-07-10 |
 | 3 | 0 | Reconciliation migration + rollback draft, RLS/grants, local proof | S | 2 | complete | [Phase-0 packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) + 11 tests; no production apply |
 | 4 | 0 | Vendor identity/access discovery: PartsTech, O'Reilly, Tri State, RepairPal | X | 1 | owner_gate | External representation/account access |
-| 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | pending | Local/fixture proof only |
+| 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | complete | PR #117; 15 focused + 1,495 full tests; no production apply |
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | pending | — |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | pending | — |
