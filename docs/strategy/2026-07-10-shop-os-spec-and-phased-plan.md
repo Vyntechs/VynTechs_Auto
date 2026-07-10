@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
-**Date:** 2026-07-10 · **Rev 2** (same day, owner feedback): auto-order removed entirely; the quick-quote / customer-request door elevated to first-class; ticket + quote *building* opened to every role; canned jobs added as the friction-killer.
-**Status:** Proposed — awaiting Brandon's review. No code in this change; spec + plan only.
+**Date:** 2026-07-10 · **Rev 3** — rev 2 (owner feedback): auto-order removed entirely; quick-quote door first-class; building opened to every role; canned jobs. Rev 3: audited claim-by-claim against `main` @ `54921a4` and confirmed accurate; session protocol + parallel-worktree lanes added (§11); AGENTS.md repointed here.
+**Status:** **ACTIVE PLAN — the single source of truth for shop-OS work.** Future development sessions resume from §11. No code in this change; spec + plan only.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop — built universally, dialed in against our shop (2 manager/owners, 3 techs) as the first tenant. The diagnostic engine is the centerpiece and does not change.
 
 ---
@@ -12,7 +12,7 @@ The task pointed at `docs/strategy/2026-07-10-shop-os-audit.md` as the baseline.
 
 Rather than quietly working around it, this doc says so plainly and **reconstructs the audit as §1** from the actual code: schema (`lib/db/schema.ts`), routes (`app/api/*`, `app/(app)/*`), the flow map (`docs/flow.md`), the customer-interaction doctrine (`docs/strategy/2026-05-29-customer-interaction-doctrine.md`), the diagnostics brief (`docs/interactive-diagnostics/MASTER-BUILD-BRIEF.md`), and `README.md`. Every claim below is grounded in a file that exists today. If the original audit surfaces and contradicts something here, reconcile before building Phase 1.
 
-One real conflict to name up front: **`MASTER-BUILD-BRIEF.md` §1 explicitly vaults shop-management features, parts ordering, and the command-center dashboard** ("do NOT build now"). This plan un-vaults them — on the owner's explicit instruction, which supersedes the brief. The brief's *doctrine* (never guess, cited-or-it-didn't-happen, bay-is-the-boss, no theater) is not un-vaulted; it governs every surface below. When Phase 1 lands, amend the brief's §1 with a pointer to this doc so the two don't contradict silently.
+One real conflict to name up front: **`MASTER-BUILD-BRIEF.md` §1 explicitly vaults shop-management features, parts ordering, and the command-center dashboard** ("do NOT build now"). This plan un-vaults them — on the owner's explicit instruction, which supersedes the brief. The brief's *doctrine* (never guess, cited-or-it-didn't-happen, bay-is-the-boss, no theater) is not un-vaulted; it governs every surface below. The brief's §1 was amended 2026-07-10 with a pointer to this doc so the two don't contradict silently; the brief still governs the engine itself.
 
 ---
 
@@ -508,6 +508,70 @@ Six phases. Each ships something our shop uses in anger the week it lands; each 
 ### Sequencing rationale & risks
 
 Spine → tech room → money → vendors → customer channel → nudges: each phase's output is the next phase's input, and the shop gets standalone value at every cut. The two integration phases (4, 5) carry external-party risk (API grants, carrier vetting) — both are sequenced *after* the manual paths that make them optional, so a slipped vendor never blocks quoting and a slow carrier never blocks phone approvals. The single biggest product risk is the story's quality (Phase 3): it's the deal-closer, and it's held to the doctrine's bar — cited, honest, no theater — with the advisor edit loop as the safety net while the prompt earns trust against real customers.
+
+---
+
+## 11. Session protocol — how future sessions resume from this plan
+
+**This document is the only active plan for shop-OS work.** AGENTS.md's "Where to look first" points here; the previous plan/spec/handoff files it referenced were removed from the public tree in PR #111 and are gone. If any other planning doc for shop-OS work appears, it is stale — this one wins, and the conflict gets flagged to Brandon.
+
+**Audit stamp.** Rev 3 was verified claim-by-claim against `main` @ `54921a4` (2026-07-10): every cited file path exists, both line citations are exact (`lib/db/schema.ts:117`, `:103-112`), the 38-table count holds, all symbol claims resolve (`generateDeclineLanguage` → `lib/gating/decline-language.ts`, `routeForSession` → `lib/session-routing.ts:25`, signed URLs → `lib/storage/client.ts`), and the absence claims (no SMS/email/push/notifications code anywhere) are confirmed. If `main` has moved when you read this, re-verify §1 before building on it.
+
+### Resume protocol (fresh session, every time)
+
+1. Read this doc, then `AGENTS.md` (conventions, migration workflow, verification gates). UI work also reads the interaction doctrine (`docs/strategy/2026-05-29-customer-interaction-doctrine.md`) — its principles apply to every new surface, including the customer-facing approval page.
+2. Open the **status table** below. Pick the highest-priority `pending` workstream whose lane is free and whose dependencies (listed with each phase in §10) have shipped.
+3. Branch from `main`: `feat/shop-os-p<phase>-<workstream-slug>`, one git worktree per lane. Keep the repo's PR grain (small, reviewed, green).
+4. Gates before any PR: `pnpm test` · `pnpm exec tsc --noEmit` · `pnpm build`. Schema changes follow AGENTS.md's Supabase MCP migration workflow to the letter.
+5. When a workstream ships: update its status-table row (status + PR#) **in the same PR**, and if reality drifted from this plan, add an *"Implementation corrections"* callout at the end of the relevant phase in §10 — that convention is kept from the previous plan, and **corrections callouts are authoritative over the original phase text**.
+6. Hard boundary, restated from §2: no PR in this plan touches engine tables or engine code paths (`sessions`, `session_events`, `artifacts`, corpus/calibration/gating/retrieval/topology tables; `lib/ai` except *new* files, `lib/gating`, `lib/retrieval`, `lib/corpus`, `lib/diagnostics`, `lib/flows`). A workstream that seems to need an engine change is mis-scoped — stop and flag it.
+
+### Parallel worktree lanes
+
+One hard rule makes parallelism painless: **the schema lane is exclusive.** `lib/db/schema.ts` + `drizzle/migrations/*` (+ meta snapshots) may have exactly one open PR at any time — schema PRs are deliberately small and merge first. Everything else parallelizes by directory ownership:
+
+```
+LANE S  schema + migrations            exclusive; ships first in each phase
+LANE A  advisor/customer surfaces      app/(app)/tickets/*, quote builder,
+                                       intake v2, approval page, board
+LANE T  tech surfaces                  command center, simple work view
+                                       (app/(app)/today, its screens)
+LANE L  lib-only, pglite-tested        lib/tickets, lib/quotes, lib/parts,
+                                       lib/ai/customer-story.ts (new file),
+                                       lib/messaging, lib/notifications
+```
+
+Overlap map: within a phase, S ships first, then A/T/L run concurrently. Across phases: Phase 2 lanes start once Phase 1's S + claim API land; Phase 3's S can land while Phase 2 UI is in flight; Phase 4's adapters (manual mode) can start any time after Phase 3's S; Phase 5's A2P registration is external and starts during Phase 3; Phase 6 consumes everything and goes last. Never parallel: two PRs touching `schema.ts`; two PRs on the same screen file.
+
+### Status table — the resume point (update in the PR that ships the work)
+
+| # | Phase | Workstream | Lane | Status | PR |
+|---|---|---|---|---|---|
+| 1 | 1 | Schema: `tickets`, `ticket_jobs`, `skillTier`, roles, capability helpers | S | pending | — |
+| 2 | 1 | Intake v2 on counter intake (+ kill the two fake affordances) | A | pending | — |
+| 3 | 1 | Door C minimal create (any role; customer + vehicle + title) | A | pending | — |
+| 4 | 1 | Tech quick path auto-wraps ticket+job | L | pending | — |
+| 5 | 2 | Claim API — atomic, tier-gated (+ tests) | L | pending | — |
+| 6 | 2 | Command center: My Jobs / Open Jobs cards | T | pending | — |
+| 7 | 2 | Session-creation seam (job → `createSessionFromIntake`) | L | pending | — |
+| 8 | 2 | Simple work view + "found something" escalation | T | pending | — |
+| 9 | 3 | Schema: `job_lines`, `canned_jobs`, shop rates, approval/story columns | S | pending | — |
+| 10 | 3 | Quote builder + totals (+ sent-edit reverts, snapshot rules) | A | pending | — |
+| 11 | 3 | Canned jobs + door C one-screen quote (60-second bar) | A | pending | — |
+| 12 | 3 | Customer story generator + guards (`lib/ai/customer-story.ts`) | L | pending | — |
+| 13 | 3 | Story review/edit surface + phone approval | A | pending | — |
+| 14 | 3 | *(external)* A2P 10DLC brand + campaign registration | — | pending | — |
+| 15 | 4 | Schema: `vendor_accounts` | S | pending | — |
+| 16 | 4 | Adapter interface + manual mode | L | pending | — |
+| 17 | 4 | PartsTech transport (search/offers/punchout) | L | pending | — |
+| 18 | 4 | Diagnosis-seeded search + line-fill UI (+ RepairPal benchmark) | A | pending | — |
+| 19 | 5 | Schema: `quote_sends`, `quote_events`, `sms_log` | S | pending | — |
+| 20 | 5 | Hosted approval page (token, story, per-job approve/decline, question) | A | pending | — |
+| 21 | 5 | SMS send + delivery webhooks + audit trail | L | pending | — |
+| 22 | 6 | Schema: `notifications`, `push_subscriptions` | S | pending | — |
+| 23 | 6 | Web push + routing table (§9) | L | pending | — |
+| 24 | 6 | Order queue + staleness re-check | A | pending | — |
+| 25 | 6 | Ticket board (derived stages) + delivery/closeout | A | pending | — |
 
 ---
 
