@@ -220,12 +220,12 @@ export async function addTicketJob(
 - `ticketActorFromProfile` maps the authenticated profile's `id`, `shopId`, `role`, `skillTier`, `membershipStatus`, and `deactivatedAt` once; route files do not duplicate that mapping.
 - `ticketDomainStatus(result, successStatus)` maps validation to 422, forbidden/no-shop/inactive to 403, not-found to 404, tier confirmation/ticket-not-open to 409, and successful create/add to the caller-supplied status.
 
-- [ ] Write route tests first for authentication, paywall short-circuit, body parsing, actor translation, status mapping, route parameter forwarding, and success JSON.
-- [ ] Verify RED because the three route modules do not exist.
-- [ ] Add the three route shims without direct Drizzle table imports or business validation.
-- [ ] Ensure invalid JSON returns `400 {error:'invalid_json'}` before calling a mutation handler.
-- [ ] Run `pnpm test tests/unit/shop-os-ticket-routes.test.ts`; verify GREEN.
-- [ ] Run all three row-8 focused test files together and commit the route slice.
+- [x] Write route tests first for authentication, paywall short-circuit, body parsing, actor translation, status mapping, route parameter forwarding, and success JSON.
+- [x] Verify RED because the three route modules do not exist.
+- [x] Add the three route shims without direct Drizzle table imports or business validation.
+- [x] Ensure invalid JSON returns `400 {error:'invalid_json'}` before calling a mutation handler.
+- [x] Run `pnpm test tests/unit/shop-os-ticket-routes.test.ts`; verify GREEN.
+- [x] Run all three row-8 focused test files together and commit the route slice.
 
 ---
 
