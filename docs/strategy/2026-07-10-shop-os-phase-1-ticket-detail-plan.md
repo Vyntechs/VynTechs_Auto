@@ -119,12 +119,12 @@ export default async function TicketPage({
 }): Promise<React.JSX.Element>
 ```
 
-- [ ] Write page tests first for unauthenticated redirect, exact actor/ticket forwarding, successful screen render, and one indistinguishable `notFound` result for every domain denial/error.
-- [ ] Verify RED because the page module does not exist.
-- [ ] Authenticate with `requireUserAndProfile`, redirect unauthenticated users to `/sign-in`, and call `getTicketDetail(db, {actor: ticketActorFromProfile(ctx.profile), ticketId: id})`.
-- [ ] Call `notFound()` for every non-success domain result; do not branch on error codes or query raw tables.
-- [ ] Render only `<TicketDetailScreen ticket={result.ticket} />` on success.
-- [ ] Run both row-9 focused test files and TypeScript; verify GREEN and commit the route slice.
+- [x] Write page tests first for unauthenticated redirect, exact actor/ticket forwarding, successful screen render, and one indistinguishable `notFound` result for every domain denial/error.
+- [x] Verify RED because the page module does not exist.
+- [x] Authenticate with `requireUserAndProfile`, redirect unauthenticated users to `/sign-in`, and call `getTicketDetail(db, {actor: ticketActorFromProfile(ctx.profile), ticketId: id})`.
+- [x] Call `notFound()` for every non-success domain result; do not branch on error codes or query raw tables.
+- [x] Render only `<TicketDetailScreen ticket={result.ticket} />` on success.
+- [x] Run both row-9 focused test files and TypeScript; verify GREEN at 18/18 and obtain an independent no-findings route review.
 
 ---
 
