@@ -36,9 +36,9 @@
 
 - Produces: row 8 owned by `feat/shop-os-p1-ticket-api`; row 6 remains `owner_gate`.
 
-- [ ] Record row 8 as `in_progress` with branch `feat/shop-os-p1-ticket-api`.
-- [ ] Commit this execution packet and status claim.
-- [ ] Push the branch and open a draft PR against `main` before production-code edits.
+- [x] Record row 8 as `in_progress` with branch `feat/shop-os-p1-ticket-api`.
+- [x] Commit this execution packet and status claim.
+- [x] Push the branch and open draft PR #119 against `main` before production-code edits.
 
 ---
 

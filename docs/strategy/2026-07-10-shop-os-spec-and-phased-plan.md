@@ -699,7 +699,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | complete | PR #117; 15 focused + 1,495 full tests; no production apply |
 | 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | complete | PR #118; 65 focused + 1,519 full tests; no production apply |
-| 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | in_progress | `feat/shop-os-p1-ticket-api`; [execution packet](./2026-07-10-shop-os-phase-1-ticket-api-plan.md) |
+| 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | in_progress | PR #119 on `feat/shop-os-p1-ticket-api`; [execution packet](./2026-07-10-shop-os-phase-1-ticket-api-plan.md) |
 | 9 | 1 | Real ticket detail/read surface | A | 8 | pending | — |
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | pending | Feature enable is owner gate |
 | 11 | 1 | Door C minimal create | A | 8,9 | pending | — |
