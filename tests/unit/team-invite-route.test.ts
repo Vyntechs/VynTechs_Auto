@@ -151,6 +151,8 @@ describe('POST /api/team/invite', () => {
     expect(newProfile.role).toBe('tech')
     expect(newProfile.shopId).toBe(shopId)
     expect(newProfile.deactivatedAt).toBeNull()
+    expect((newProfile as unknown as Record<string, unknown>).membershipStatus).toBe('pending')
+    expect((newProfile as unknown as Record<string, unknown>).membershipActivatedAt).toBeNull()
   })
 
   it('stores the selected advisor role and nullable wrenching tier', async () => {

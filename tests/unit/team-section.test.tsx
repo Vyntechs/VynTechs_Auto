@@ -15,6 +15,7 @@ const members = [
     fullName: 'Olivia Owner',
     role: 'owner',
     skillTier: 3,
+    membershipStatus: 'active',
     deactivated: false,
   },
   {
@@ -23,6 +24,16 @@ const members = [
     fullName: 'Alex Advisor',
     role: 'advisor',
     skillTier: null,
+    membershipStatus: 'active',
+    deactivated: false,
+  },
+  {
+    userId: 'parts-pending',
+    profileId: 'profile-3',
+    fullName: 'Pat Pending',
+    role: 'parts',
+    skillTier: 1,
+    membershipStatus: 'pending',
     deactivated: false,
   },
 ]
@@ -79,5 +90,10 @@ describe('TeamSection Shop OS roles', () => {
     render(<TeamSection members={members} currentUserId="owner-1" />)
     expect(screen.getByLabelText('Invite role')).toHaveValue('tech')
     expect(screen.getByLabelText('Invite skill tier')).toHaveValue('')
+  })
+
+  it('labels an unaccepted invitation as pending rather than active', () => {
+    render(<TeamSection members={members} currentUserId="owner-1" />)
+    expect(screen.getByText('Invite pending')).toBeInTheDocument()
   })
 })

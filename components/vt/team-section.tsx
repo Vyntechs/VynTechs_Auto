@@ -10,6 +10,7 @@ export type TeamMemberRow = {
   fullName: string | null
   role: string
   skillTier: number | null
+  membershipStatus: string
   deactivated: boolean
 }
 
@@ -57,7 +58,10 @@ export function TeamSection({ members, currentUserId }: Props) {
   const [invite, setInvite] = useState<InviteState>({ kind: 'idle' })
 
   const activeOwners = members.filter(
-    (member) => member.role === 'owner' && !member.deactivated,
+    (member) =>
+      member.role === 'owner' &&
+      member.membershipStatus === 'active' &&
+      !member.deactivated,
   )
   const lastOwnerUserId = activeOwners.length === 1 ? activeOwners[0].userId : null
 
@@ -144,7 +148,11 @@ export function TeamSection({ members, currentUserId }: Props) {
                   <span className="vt-team-row__name-text">{name}</span>
                   {isSelf && <span className="vt-team-row__you">You</span>}
                   <span className="vt-team-row__status">
-                    {member.deactivated ? 'Deactivated' : 'Active'}
+                    {member.deactivated
+                      ? 'Deactivated'
+                      : member.membershipStatus === 'pending'
+                        ? 'Invite pending'
+                        : 'Active'}
                   </span>
                 </div>
 
@@ -382,6 +390,7 @@ function humanizeActionError(code: string | undefined): string {
   if (code === 'cannot_self') return 'You cannot deactivate your own account.'
   if (code === 'invalid_role') return 'That role is not allowed.'
   if (code === 'protected_role') return 'Curator access is managed separately.'
+  if (code === 'membership_pending') return 'Accept your invite before managing the team.'
   if (code === 'invalid_skill_tier') return 'Choose A-tech, B-tech, C-tech, or Does not wrench.'
   if (code === 'not_found') return 'That teammate is no longer in the shop.'
   if (code === 'forbidden') return 'Only Owners can change team roles.'

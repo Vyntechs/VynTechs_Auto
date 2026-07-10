@@ -7,6 +7,7 @@ export type TeamActor = {
   userId: string
   shopId: string | null
   role: string
+  membershipStatus: string
   isFounder: boolean
 }
 
@@ -18,6 +19,7 @@ export type TeamMutationError =
   | 'invalid_role'
   | 'invalid_skill_tier'
   | 'protected_role'
+  | 'membership_pending'
   | 'not_found'
   | 'cannot_self'
   | 'last_admin'
@@ -47,6 +49,9 @@ function validSkillTier(value: unknown): value is 1 | 2 | 3 | null {
 }
 
 function actorGate(actor: TeamActor): TeamMutationResult | null {
+  if (actor.membershipStatus !== 'active') {
+    return { ok: false, error: 'membership_pending' }
+  }
   if (!canManageTeam(actor.role, actor.isFounder)) {
     return { ok: false, error: 'forbidden' }
   }
@@ -109,6 +114,8 @@ export async function inviteTeamMember(
     shopId: input.actor.shopId,
     role,
     skillTier,
+    membershipStatus: 'pending',
+    membershipActivatedAt: null,
     fullName: null,
     isComp: false,
     deactivatedAt: null,
@@ -128,6 +135,7 @@ async function lockActiveOwners(
       and(
         eq(profiles.shopId, shopId),
         eq(profiles.role, 'owner'),
+        eq(profiles.membershipStatus, 'active'),
         isNull(profiles.deactivatedAt),
       ),
     )
@@ -182,6 +190,7 @@ export async function updateTeamMember(
 
     if (
       target.role === 'owner' &&
+      target.membershipStatus === 'active' &&
       !target.deactivatedAt &&
       input.role !== 'owner' &&
       activeOwnerIds.length <= 1
@@ -241,6 +250,7 @@ export async function deactivateTeamMember(
     if (target.deactivatedAt) return { ok: true, noop: true }
     if (
       target.role === 'owner' &&
+      target.membershipStatus === 'active' &&
       activeOwnerIds.length <= 1
     ) {
       return { ok: false, error: 'last_admin' }
@@ -262,7 +272,8 @@ export function teamMutationStatus(result: TeamMutationResult): number {
   if (
     result.error === 'forbidden' ||
     result.error === 'no_shop' ||
-    result.error === 'protected_role'
+    result.error === 'protected_role' ||
+    result.error === 'membership_pending'
   ) return 403
   if (result.error === 'cannot_self' || result.error === 'last_admin') return 400
   return 422

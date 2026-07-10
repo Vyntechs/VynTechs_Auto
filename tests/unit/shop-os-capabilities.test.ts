@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { getTableColumns } from 'drizzle-orm'
+import { profiles } from '@/lib/db/schema'
 import {
   canAssignWork,
   canBuildQuotes,
@@ -10,6 +12,13 @@ import {
 } from '@/lib/shop-os/capabilities'
 
 describe('Shop OS role capabilities', () => {
+  it('declares a durable pending-to-active membership lifecycle', () => {
+    expect(getTableColumns(profiles)).toMatchObject({
+      membershipStatus: expect.anything(),
+      membershipActivatedAt: expect.anything(),
+    })
+  })
+
   it('keeps create and quote-build universal across shop roles', () => {
     for (const role of ['tech', 'advisor', 'parts', 'owner'] as const) {
       expect(canCreateTickets(role)).toBe(true)

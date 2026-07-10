@@ -43,6 +43,8 @@ describe('POST /api/intake/decode-vin', () => {
         fullName: 'Owner',
         role: 'owner',
         skillTier: null,
+        membershipStatus: 'active',
+        membershipActivatedAt: new Date(),
         isComp: false,
         isCurator: false,
         lastSeenWhatsNewAt: null,

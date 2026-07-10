@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
         userId: ctx.user.id,
         shopId: ctx.profile.shopId,
         role: ctx.profile.role,
+        membershipStatus: ctx.profile.membershipStatus,
         isFounder: isFounder(ctx.user.email),
       },
       email: body.email,

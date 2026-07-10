@@ -33,6 +33,7 @@ export default async function SettingsTeamPage() {
       fullName: profiles.fullName,
       role: profiles.role,
       skillTier: profiles.skillTier,
+      membershipStatus: profiles.membershipStatus,
       deactivatedAt: profiles.deactivatedAt,
     })
     .from(profiles)
@@ -47,6 +48,7 @@ export default async function SettingsTeamPage() {
     fullName: r.fullName,
     role: r.role,
     skillTier: r.skillTier,
+    membershipStatus: r.membershipStatus,
     deactivated: r.deactivatedAt !== null,
   }))
   const selfIdx = members.findIndex((m) => m.userId === ctx.user.id)

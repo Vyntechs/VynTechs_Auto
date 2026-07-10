@@ -33,6 +33,7 @@ export async function getShopTeam(input: GetShopTeamInput): Promise<GetShopTeamR
     .where(
       and(
         eq(profiles.shopId, shopId),
+        eq(profiles.membershipStatus, 'active'),
         isNull(profiles.deactivatedAt),
         isNotNull(profiles.skillTier),
       ),

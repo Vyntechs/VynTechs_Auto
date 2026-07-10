@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import type * as schema from './schema'
@@ -91,6 +91,27 @@ export async function ensureProfileAndShop(
     })
     .returning()
   return profile
+}
+
+export async function activatePendingProfileMembership(
+  db: AppDb,
+  userId: string,
+): Promise<Profile | null> {
+  const [profile] = await db
+    .update(profiles)
+    .set({
+      membershipStatus: 'active',
+      membershipActivatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(profiles.userId, userId),
+        eq(profiles.membershipStatus, 'pending'),
+        isNull(profiles.deactivatedAt),
+      ),
+    )
+    .returning()
+  return profile ?? null
 }
 
 export async function getSessionById(db: AppDb, id: string) {

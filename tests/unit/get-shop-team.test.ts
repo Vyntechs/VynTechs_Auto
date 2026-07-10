@@ -123,12 +123,22 @@ describe('getShopTeam', () => {
         fullName: 'Inactive Tech',
         deactivatedAt: new Date(),
       },
+      {
+        userId: '00000000-0000-0000-0000-000000000009',
+        role: 'owner',
+        skillTier: 3,
+        shopId,
+        fullName: 'Pending Owner Tech',
+        membershipStatus: 'pending',
+        membershipActivatedAt: null,
+      },
     ])
 
     const result = await getShopTeam({ db, shopId, currentUserId: advisorId })
     expect(result.members.map((member) => member.id)).toContain(advisor.id)
     expect(result.members.map((member) => member.name)).not.toContain('Office Parts')
     expect(result.members.map((member) => member.name)).not.toContain('Inactive Tech')
+    expect(result.members.map((member) => member.name)).not.toContain('Pending Owner Tech')
   })
 
   it('returns workload counts when sessions exist', async () => {

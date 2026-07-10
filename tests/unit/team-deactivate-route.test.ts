@@ -171,6 +171,28 @@ describe('POST /api/team/deactivate', () => {
     expect(row.deactivatedAt).not.toBeNull()
   })
 
+  it('can revoke a pending owner invite without treating it as the last active owner', async () => {
+    await seedInviter('owner')
+    const PENDING_OWNER = '00000000-0000-0000-0000-000000000054'
+    await currentDb.insert(profiles).values({
+      userId: PENDING_OWNER,
+      role: 'owner',
+      shopId,
+      fullName: 'Pending Owner',
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    })
+
+    const { POST } = await import('@/app/api/team/deactivate/route')
+    const res = await POST(makeReq({ userId: PENDING_OWNER }))
+    expect(res.status).toBe(200)
+    const [row] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, PENDING_OWNER))
+    expect(row.deactivatedAt).toBeInstanceOf(Date)
+  })
+
   it('blocks deactivating the last active admin', async () => {
     await seedInviter('owner')
     // Only one admin — the inviter. Their target must not be them (self),

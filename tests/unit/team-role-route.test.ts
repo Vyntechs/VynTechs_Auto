@@ -255,6 +255,48 @@ describe('POST /api/team/role', () => {
     expect(row.role).toBe('owner')
   })
 
+  it('does not count a pending invited owner toward the active-owner quorum', async () => {
+    await seedInviter('owner')
+    await currentDb.insert(profiles).values({
+      userId: OTHER_ADMIN_ID,
+      role: 'owner',
+      shopId,
+      fullName: 'Pending Owner',
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    })
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: INVITER_ID, role: 'tech' }))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('last_admin')
+  })
+
+  it('rejects team mutations from a still-pending actor', async () => {
+    const [profile] = await currentDb
+      .insert(profiles)
+      .values({
+        userId: INVITER_ID,
+        role: 'owner',
+        shopId,
+        fullName: 'Pending Inviter',
+        isComp: true,
+        membershipStatus: 'pending',
+        membershipActivatedAt: null,
+      })
+      .returning()
+    await seedTech()
+    const { requireUserAndProfile } = await import('@/lib/auth')
+    vi.mocked(requireUserAndProfile).mockResolvedValue({
+      user: { id: INVITER_ID, email: 'inviter@shop.test' },
+      profile,
+    })
+
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: TECH_ID, role: 'advisor' }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('membership_pending')
+  })
+
   it('does not count deactivated admins toward last-admin protection', async () => {
     await seedInviter('owner')
     // Other admin exists but is deactivated → still counts as last active admin.

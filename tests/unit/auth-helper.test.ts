@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { requireUserAndProfile } from '@/lib/auth'
-import { stripeCustomers } from '@/lib/db/schema'
+import { profiles, shops, stripeCustomers } from '@/lib/db/schema'
 
 type FakeSupabase = {
   auth: { getUser: () => Promise<{ data: { user: { id: string; email: string } | null } }> }
@@ -54,6 +54,58 @@ describe('requireUserAndProfile', () => {
     const second = await requireUserAndProfile({ supabase, db })
     expect(second!.profile.id).toBe(first!.profile.id)
     expect(second!.profile.shopId).toBe(first!.profile.shopId)
+  })
+
+  it('activates a pending invited membership on first authenticated use', async () => {
+    const userId = crypto.randomUUID()
+    const [shop] = await db.insert(shops).values({ name: 'Inviting Shop' }).returning()
+    await db.insert(profiles).values({
+      userId,
+      shopId: shop.id,
+      role: 'owner',
+      skillTier: 3,
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    })
+    const ensureCustomer = vi.fn().mockResolvedValue('cus_invited')
+
+    const result = await requireUserAndProfile({
+      supabase: fakeSupabase({ id: userId, email: 'invitee@shop.test' }) as never,
+      db,
+      ensureCustomer,
+    })
+
+    expect(result?.profile.membershipStatus).toBe('active')
+    expect(result?.profile.membershipActivatedAt).toBeInstanceOf(Date)
+    const [stored] = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, userId))
+    expect(stored.membershipStatus).toBe('active')
+    expect(stored.membershipActivatedAt).toBeInstanceOf(Date)
+  })
+
+  it('does not reactivate a pending invitation that an owner deactivated', async () => {
+    const userId = crypto.randomUUID()
+    const [shop] = await db.insert(shops).values({ name: 'Inviting Shop' }).returning()
+    await db.insert(profiles).values({
+      userId,
+      shopId: shop.id,
+      role: 'tech',
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+      deactivatedAt: new Date(),
+    })
+
+    const result = await requireUserAndProfile({
+      supabase: fakeSupabase({ id: userId, email: 'revoked@shop.test' }) as never,
+      db,
+      ensureCustomer: vi.fn().mockResolvedValue('cus_revoked'),
+    })
+
+    expect(result?.profile.membershipStatus).toBe('pending')
+    expect(result?.profile.membershipActivatedAt).toBeNull()
+    expect(result?.profile.deactivatedAt).toBeInstanceOf(Date)
   })
 
   it('auto-creates a Stripe customer for a brand-new shop on first sign-in', async () => {
