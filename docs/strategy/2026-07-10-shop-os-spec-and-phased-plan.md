@@ -1,6 +1,6 @@
 # Shop OS — Spec & Phased Implementation Plan
 
-**Date:** 2026-07-10
+**Date:** 2026-07-10 · **Rev 2** (same day, owner feedback): auto-order removed entirely; the quick-quote / customer-request door elevated to first-class; ticket + quote *building* opened to every role; canned jobs added as the friction-killer.
 **Status:** Proposed — awaiting Brandon's review. No code in this change; spec + plan only.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop — built universally, dialed in against our shop (2 manager/owners, 3 techs) as the first tenant. The diagnostic engine is the centerpiece and does not change.
 
@@ -91,8 +91,24 @@ The shape of the gap is consistent: **the product is a diagnostic instrument, no
 
 Target flow, mapped to the nine steps in the request. `[NEW]` marks new surfaces; everything under `SESSION` is the existing engine, byte-for-byte.
 
+**Three doors into a ticket, all landing in the same structure.** The tree below draws the full flow, but most tickets won't walk every step of it — that's by design, not exception handling:
+
 ```
-1 INTAKE  (advisor or manager; counter intake v2)                    [NEW-ish]
+DOOR A  Full counter intake — vehicle arrives with the customer, concern
+        captured in detail, jobs assigned or opened. The tree below.
+DOOR B  Tech quick path — a tech starts a diagnostic directly (exists
+        today); the ticket+job wrapper is created automatically behind it.
+DOOR C  Quick ticket/quote — ANY role, one screen: customer, vehicle,
+        what they want, lines. No assignment, no approval ceremony, no
+        concern narrative required. This is the door for the customer
+        request ("just do my brakes"), the phone-shopper estimate, the
+        counter quote, and every edge case that doesn't need the normal
+        flow. The normal flow is available to that ticket later if the
+        job turns out to need it — never the other way around.
+```
+
+```
+1 INTAKE  (door A shown; doors B/C skip straight to their point)     [NEW-ish]
   │  Customer + vehicle (search / VIN decode — already real)
   │  Ticket created: RO number, customer concern in full detail
   │  Jobs added to ticket, each one:
@@ -162,13 +178,15 @@ Target flow, mapped to the nine steps in the request. `[NEW]` marks new surfaces
 `profiles.role` (text) grows from `tech | owner` to:
 
 ```
-tech      wrench: sees command center, works jobs, builds quotes on own jobs
-advisor   counter: intake, assign, edit/send quotes, order parts, close tickets
+tech      wrench: command center, works jobs — and creates tickets and
+          builds quotes like everyone else (see the principle below)
+advisor   counter: assign/reassign, send quotes to customers, order parts,
+          close tickets
 parts     optional seat: vendor lookups + order queue only (big-shop role)
 owner     everything advisor can do + team, billing, rates, settings
 ```
 
-Capability checks are **role-set based**, mirroring how `canCurate` already works (a helper, not scattered `role ===` comparisons): e.g. `canWriteService = role in {advisor, owner}`, `canOrderParts = role in {parts, advisor, owner}`. The `parts` role exists so a bigger shop can hire a dedicated parts person, but no capability requires it — per the requirement, parts duties fall to advisor/owner by default. Curator/founder stays its own axis, untouched.
+**The permission principle: building is open to everyone; only customer-facing sends and money commits are gated.** Any profile — tech, advisor, parts, owner — can create a ticket, add jobs, and build a quote, from any door (§3). At a 5-person shop, gatekeeping *entry* of work is pure friction with zero protective value; what actually needs a gate is the moment something leaves the building or spends money. Concretely, the only role-gated actions: **send quote to customer** and **close/cancel ticket** (`advisor|owner`), **place parts orders** (`parts|advisor|owner`), **assign/reassign someone else's job** (`advisor|owner`), settings/rates/team (`owner`). Capability checks are role-set helpers, mirroring how `canCurate` already works — not scattered `role ===` comparisons. The `parts` role exists so a bigger shop can hire a dedicated parts person, but no capability requires it — per the requirement, parts duties fall to advisor/owner by default. Curator/founder stays its own axis, untouched.
 
 ### 4.2 Two hats: `skillTier`, not multi-role
 
@@ -250,6 +268,12 @@ job_lines           id, jobId, kind: part | labor | fee, description, sort,
                     priceCents (extended customer price), taxable bool,
                     source: manual | vendor_quote | diagnosis_seed | guide
 
+canned_jobs         id, shopId, title, kind: repair | maintenance,
+                    defaultRequiredSkillTier, defaultLines jsonb
+                    (template rows: description/qty/hours — priced at
+                    apply time from shop rate, then hand-adjusted),
+                    sort, retiredAt
+
 vendor_accounts     id, shopId, vendor: oreilly | partstech | tristate,
                     displayName, credentials jsonb, mode: api | punchout,
                     enabled
@@ -300,14 +324,14 @@ Implementation notes baked into Phase 5: provider Twilio (Telnyx is marginally c
 
 The bar from the request stands: if the story does its job, the page needs no follow-up — just the approve tap. The question box exists for the exception, and lands as a quiet advisor notification, not a 2-way SMS thread (deliberately not built in v1).
 
-### 6.2 Auto-order vs. reminder — **human-confirmed one-click order, with a staleness re-check. Auto-order: no.**
+### 6.2 Auto-order vs. reminder — **DECIDED (owner, 2026-07-10): auto-order is removed from the plan entirely. Human-confirmed one-click order with a staleness re-check.**
 
 On approval, every vendor-sourced part line on the approved job goes into an **order queue** for parts-capable roles. The queue re-runs the vendor lookup live and diffs against the line's `vendorSnapshot`:
 
 - Price/availability unchanged → line shows green, **one click places the order** (or opens the vendor punchout cart pre-filled, depending on integration mode — §6.6).
 - Price up, or availability changed → line is flagged with the delta and blocks one-click until a human re-prices or re-sources. Never silently ordered, never silently absorbed.
 
-Reasoning: you already sensed this ("that argues for a human-confirmed order step") and you're right — but the deeper reason isn't just stale prices. Ordering is where the shop commits money against a quote a customer approved; wrong-part, core charges, will-call vs. delivery, and vendor substitutions all live in that moment, and a 5-person shop confirms an order in under 30 seconds. Automation buys ~30 seconds and risks a wrong $400 part on the shelf. Auto-order isn't Phase-anything; if it ever earns its way in, the staleness gate built here is the prerequisite anyway.
+Reasoning: ordering is where the shop commits money against a quote a customer approved; wrong-part, core charges, will-call vs. delivery, and vendor substitutions all live in that moment, and a 5-person shop confirms an order in under 30 seconds. Automation buys ~30 seconds and risks a wrong $400 part on the shelf. **Auto-order is not deferred — it is out of the plan.** The one-click confirm above is the floor of ceremony ordering will ever have; no code path places a vendor order without a human tap.
 
 ### 6.3 Skill-gated open jobs — **yes, with one integer, and no skills matrix**
 
@@ -317,10 +341,13 @@ Pushing back on the fancier versions before they're proposed: no per-system skil
 
 ### 6.4 The non-diagnostic path — **a job kind, not a mode; the session simply doesn't exist**
 
-`kind: repair | maintenance` jobs never touch the engine: no session, no tree, no topology, no AI cost. The tech's simple work view is start → notes/photos → done, and the quote machinery (lines, story, approval) is *identical* — a brake job gets a human-written or template story line, not an AI narrative. Two design commitments make this genuinely first-class rather than a stub:
+`kind: repair | maintenance` jobs never touch the engine: no session, no tree, no topology, no AI cost. The tech's simple work view is start → notes/photos → done, and the quote machinery (lines, story, approval) is *identical* — a brake job gets a human-written or template story line, not an AI narrative. Three design commitments make this genuinely first-class rather than a stub:
 
 1. **Approval can precede everything.** A known-good complaint ("customer wants front brakes, quoted $489 on the phone") can be quoted and marked `pre_approved` at intake, before any tech is assigned. Statuses-not-pipelines (§2.4) is what makes this fall out for free.
 2. **An escalation seam, cheap and unceremonious.** The real shop pattern is the oil change that finds a leaking valve cover. From a simple job's work view: "found something → add diagnostic job to this ticket" — one tap, creates a `diagnostic` job on the same ticket (open or self-assigned), which then runs the full engine → story → quote-addendum → re-approval flow. The upsell inherits all the trust machinery.
+3. **A quick door that skips the ceremony entirely (door C, §3).** One screen, any role: pick-or-create customer (search already exists), pick-or-create vehicle (VIN decode already exists), what they want, lines. It auto-creates the ticket and a single job underneath — the user never thinks about "jobs" unless they add a second one. No assignment, no concern narrative, no approval state beyond draft. This covers the customer request, the phone-shopper estimate ("how much for brakes on a 2016 F-150?" → priced quote in under a minute, texted or read aloud, and if they never call back it's just a recorded estimate — the board derives an "Estimate" stage from *no job approved or started*, no extra schema), and every edge case that doesn't fit the normal flow. Structure stays uniform; the friction lives only in the UI.
+
+**The friction-killer for door C: canned jobs.** A shop-scoped `canned_jobs` table — title, kind, default lines (parts descriptions, labor hours at shop rate) — so "Front brakes," "Synthetic oil change," "4-tire mount & balance" land as a priced job in two taps, then get adjusted, not built. This is the single highest-leverage speed feature for the exact case that skips diagnosis, and it's one table and a picker. Deliberate restraint: no nested packages, no per-vehicle pricing matrices, no fluid-capacity lookups — a canned job is a starting template, and the human finishes it.
 
 ### 6.5 RepairPal — **pushback: it is not a parts vendor. Reposition as the labor-time / fair-price source.**
 
@@ -416,7 +443,7 @@ Six phases. Each ships something our shop uses in anger the week it lands; each 
 
 ### Phase 1 — The ticket spine (L)
 
-**What ships:** `tickets` + `ticket_jobs` + role/tier plumbing, and intake v2 on top of the existing counter intake: create ticket → add jobs (kind, tier default, pre-assign-or-open, pre-approve toggle for counter-authorized work) → full concern detail persisted at last. The tech quick path auto-wraps its session in a ticket+job so every new unit of work has a spine. Kill the two fake affordances in counter intake while touching it (camera-scan toggle → wire the real `decode-vin.ts` or remove the button; fake auto-save footer → remove) — doctrine debt paid in passing, not a redesign.
+**What ships:** `tickets` + `ticket_jobs` + role/tier plumbing, and intake v2 on top of the existing counter intake: create ticket → add jobs (kind, tier default, pre-assign-or-open, pre-approve toggle for counter-authorized work) → full concern detail persisted at last. Ticket creation is open to **every role** from day one (§4.1's principle), and door C's minimal create — customer + vehicle + title, nothing else required — ships here even though its full 60-second quote experience needs Phase 3's lines. The tech quick path auto-wraps its session in a ticket+job so every new unit of work has a spine. Kill the two fake affordances in counter intake while touching it (camera-scan toggle → wire the real `decode-vin.ts` or remove the button; fake auto-save footer → remove) — doctrine debt paid in passing, not a redesign.
 **Data delta:** `tickets`, `ticket_jobs` (minus approval/story columns — those land with their phases), `profiles.skillTier`, `shops.nextTicketNumber`, role vocabulary + capability helpers.
 **Serves:** advisor/manager (intake, assignment); the whole system structurally.
 **Diagnostic plug:** additive only — `ticket_jobs.sessionId` FK; sessions untouched; nothing reads it yet.
@@ -432,11 +459,11 @@ Six phases. Each ships something our shop uses in anger the week it lands; each 
 
 ### Phase 3 — Quote builder + the customer story (L)
 
-**What ships:** `job_lines` CRUD on the ticket (parts/labor/fee, manual entry — the floor), shop rate/tax settings, quote totals per job + ticket, the story generator + advisor review/edit surface (§8), "build quote from diagnosis" (seeds lines from `outcome.partInfo` / recommended repair), diag-fee line from `tickets.authorizedCents`, and mark-approved-by-phone (`approvedVia='phone'`) so the full loop works *before* SMS exists. **Also: start the A2P 10DLC brand/campaign registration paperwork now** — it's external lead time for Phase 5, not code.
-**Data delta:** `job_lines`; `ticket_jobs` approval + story columns; `shops.laborRateCents/taxRatePct`.
-**Serves:** technician (enters parts/labor), advisor/manager (finalizes, closes by phone).
+**What ships:** `job_lines` CRUD on the ticket (parts/labor/fee, manual entry — the floor), shop rate/tax settings, quote totals per job + ticket, the story generator + advisor review/edit surface (§8), "build quote from diagnosis" (seeds lines from `outcome.partInfo` / recommended repair), diag-fee line from `tickets.authorizedCents`, and mark-approved-by-phone (`approvedVia='phone'`) so the full loop works *before* SMS exists. **Door C completes here:** the one-screen quick-quote flow (§6.4.3) plus `canned_jobs` — pick customer, pick vehicle, tap a canned job, adjust, done. Quote *building* is open to every role; only send/close stays gated. **Also: start the A2P 10DLC brand/campaign registration paperwork now** — it's external lead time for Phase 5, not code.
+**Data delta:** `job_lines`, `canned_jobs`; `ticket_jobs` approval + story columns; `shops.laborRateCents/taxRatePct`.
+**Serves:** every role (builds tickets and quotes), advisor/manager (finalizes, sends, closes by phone).
 **Diagnostic plug:** first read-back from the engine: story compiled from `session_events`/artifacts/locked diagnosis; quote seeded from outcome. Read-only; a session with no ticket (legacy) simply has no story button.
-**Done when:** a real customer's diagnostic job goes lock → story → quote → phone-approval → `approved` with the story text stored, edited, and pinned; totals match a hand calculation to the cent; editing a sent quote forces re-send (test-enforced).
+**Done when:** a real customer's diagnostic job goes lock → story → quote → phone-approval → `approved` with the story text stored, edited, and pinned; totals match a hand calculation to the cent; editing a sent quote forces re-send (test-enforced); **and the friction bar: a customer-request job ("front brakes, 2016 F-150") goes from nothing → priced quote in under 60 seconds via door C + a canned job, by a tech, with no advisor involved.**
 
 ### Phase 4 — Parts vendor layer (M; external-dependency risk)
 
@@ -473,7 +500,7 @@ Six phases. Each ships something our shop uses in anger the week it lands; each 
 ### Headline numbers
 
 - **6 phases**; our shop is live on the spine after Phase 2, quoting after Phase 3, texting after Phase 5.
-- **~11 new tables + 2 column-adds** (`shops`, `profiles`); **0 engine tables or engine code paths modified**.
+- **~12 new tables + 2 column-adds** (`shops`, `profiles`); **0 engine tables or engine code paths modified**.
 - **1 seam** between OS and engine: `ticket_jobs.sessionId` + the existing `createSessionFromIntake` pick-existing path.
 - **~$59 one-time + ~$10–20/mo** projected SMS cost at our volume; **$0** for the PartsTech transport.
 - **2 external lead-time items to start early:** A2P campaign vetting (start in Phase 3) and the O'Reilly-direct partner application (start in Phase 4, PartsTech covers the gap).
