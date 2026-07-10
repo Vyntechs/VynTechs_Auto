@@ -90,6 +90,62 @@ describe('NewSessionForm', () => {
     expect(mockPush).toHaveBeenCalledWith('/sessions/session-retried')
   })
 
+  it('recovers from an ambiguous fetch rejection and retries identical intake with the same key', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('connection reset'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'session-after-reset', ticketId: 'ticket-1', jobId: 'job-1' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not start session/i))
+    expect(screen.getByRole('button', { name: /start diagnosis/i })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /start diagnosis/i }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    const retry = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(retry.requestKey).toBe(first.requestKey)
+    expect(mockPush).toHaveBeenCalledWith('/sessions/session-after-reset')
+  })
+
+  it('restores the retry state when a nominal success response has invalid JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError('invalid json')
+        },
+      }),
+    )
+    render(<NewSessionForm />)
+    fireEvent.change(screen.getByLabelText(/year/i), { target: { value: '2018' } })
+    fireEvent.change(screen.getByLabelText(/make/i), { target: { value: 'Ford' } })
+    fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'F-150' } })
+    fireEvent.change(screen.getByLabelText(/customer complaint/i), {
+      target: { value: 'loss of power going up hills' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /start/i }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not start session/i))
+    expect(screen.getByRole('button', { name: /start diagnosis/i })).toBeEnabled()
+    expect(mockPush).not.toHaveBeenCalled()
+  })
+
   it('generates a fresh request key when normalized intake changes after a failed submission', async () => {
     const fetchMock = vi
       .fn()

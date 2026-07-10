@@ -37,34 +37,39 @@ export function NewSessionForm() {
     }
     const payload = { ...intake, requestKey: attemptRef.current.key }
 
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
-    if (res.status === 409) {
-      const { openSessionId: existingId, limit } = await res.json()
-      setOpenSessionId(existingId)
-      const cap = typeof limit === 'number' ? limit : 5
-      setError(
-        `You already have ${cap} open diagnoses. Resume or close one before starting a new one.`,
-      )
-      setGenerating(false)
-      return
-    }
-    if (!res.ok) {
-      setError(`Could not start session (${res.status}). Try again.`)
-      setGenerating(false)
-      return
-    }
-    const { id } = await res.json()
-    if (typeof id !== 'string' || !id) {
+      if (res.status === 409) {
+        const { openSessionId: existingId, limit } = await res.json()
+        setOpenSessionId(existingId)
+        const cap = typeof limit === 'number' ? limit : 5
+        setError(
+          `You already have ${cap} open diagnoses. Resume or close one before starting a new one.`,
+        )
+        setGenerating(false)
+        return
+      }
+      if (!res.ok) {
+        setError(`Could not start session (${res.status}). Try again.`)
+        setGenerating(false)
+        return
+      }
+      const { id } = await res.json()
+      if (typeof id !== 'string' || !id) {
+        setError('Could not start session. Try again.')
+        setGenerating(false)
+        return
+      }
+      router.push(`/sessions/${id}`)
+    } catch {
       setError('Could not start session. Try again.')
       setGenerating(false)
-      return
     }
-    router.push(`/sessions/${id}`)
   }
 
   return (
