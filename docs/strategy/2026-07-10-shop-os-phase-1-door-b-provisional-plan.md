@@ -38,13 +38,13 @@
 - Modify: `tests/unit/manual-session-loop.test.ts`
 - Create: `tests/unit/shop-os-tech-quick-session.test.ts`
 
-- [ ] Write failing tests first for one transaction creating one session, one provisional ticket, and one linked diagnostic job with null customer/vehicle.
-- [ ] Prove the ticket source, concern, creator, assignee, tier, open state, pending-quote state, and session link use only persisted facts.
-- [ ] Prove the same request key returns the same session/ticket/job and leaves all three table counts at one.
-- [ ] Prove no-profile, no-shop, pending, deactivated, null-tier, malformed intake/key, and cross-actor key collision fail closed.
-- [ ] Inject a wrapper failure and prove the session and ticket-number allocation roll back.
-- [ ] Refactor the canonical ticket transaction only enough to expose a narrow transaction-local tech-quick helper; preserve the public ticket API contract.
-- [ ] Independently review the domain task and resolve every finding.
+- [x] Write failing tests first for one transaction creating one session, one provisional ticket, and one linked diagnostic job with null customer/vehicle.
+- [x] Prove the ticket source, concern, creator, assignee, tier, open state, pending-quote state, and session link use only persisted facts.
+- [x] Prove the same request key returns the same session/ticket/job and leaves all three table counts at one.
+- [x] Prove no-profile, no-shop, pending, deactivated, null-tier, malformed intake/key, and cross-actor key collision fail closed.
+- [x] Inject a wrapper failure and prove the session and ticket-number allocation roll back.
+- [x] Refactor the canonical ticket transaction only enough to expose a narrow transaction-local tech-quick helper; preserve the public ticket API contract.
+- [x] Independently review the domain task; resolve three Important retry/authorization findings through TDD and receive final approval with zero findings.
 
 ## Task 3: Carry the idempotency key through the existing flow
 

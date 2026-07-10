@@ -158,6 +158,105 @@ const createTicketBodySchema = z
 
 type TicketJobBody = z.infer<typeof ticketJobBodySchema>
 
+type TransactionTicketJob = {
+  title: string
+  kind: 'diagnostic' | 'repair' | 'maintenance'
+  requiredSkillTier: 1 | 2 | 3
+  assignedTechId: string | null
+  sessionId?: string | null
+}
+
+type TransactionTicketInput = {
+  shopId: string
+  source: 'counter' | 'tech_quick' | 'quick_quote'
+  customerId: string | null
+  vehicleId: string | null
+  concern: string
+  whenStarted?: string | null
+  howOften?: string | null
+  diagnosticAuthorizedCents?: number | null
+  diagnosticAuthorizationNote?: string | null
+  createdByProfileId: string
+  jobs: TransactionTicketJob[]
+}
+
+async function insertTicketInTransaction(db: AppDb, input: TransactionTicketInput) {
+  const [sequence] = await db
+    .update(shops)
+    .set({ nextTicketNumber: sql`${shops.nextTicketNumber} + 1` })
+    .where(eq(shops.id, input.shopId))
+    .returning()
+  if (!sequence) return null
+
+  const [ticket] = await db
+    .insert(tickets)
+    .values({
+      shopId: input.shopId,
+      ticketNumber: sequence.nextTicketNumber - 1,
+      source: input.source,
+      customerId: input.customerId,
+      vehicleId: input.vehicleId,
+      concern: input.concern,
+      whenStarted: input.whenStarted,
+      howOften: input.howOften,
+      diagnosticAuthorizedCents: input.diagnosticAuthorizedCents,
+      diagnosticAuthorizationNote: input.diagnosticAuthorizationNote,
+      createdByProfileId: input.createdByProfileId,
+    })
+    .returning()
+
+  const jobs = await db
+    .insert(ticketJobs)
+    .values(
+      input.jobs.map((job) => ({
+        shopId: input.shopId,
+        ticketId: ticket.id,
+        title: job.title,
+        kind: job.kind,
+        requiredSkillTier: job.requiredSkillTier,
+        assignedTechId: job.assignedTechId,
+        sessionId: job.sessionId,
+      })),
+    )
+    .returning()
+
+  return { ticketId: ticket.id, jobIds: jobs.map((job) => job.id) }
+}
+
+export type CreateTechQuickTicketInput = {
+  shopId: string
+  profileId: string
+  skillTier: 1 | 2 | 3
+  sessionId: string
+  concern: string
+}
+
+/** Internal orchestration seam. The caller must supply an open transaction. */
+export async function createTechQuickTicketInTransaction(
+  tx: AppDb,
+  input: CreateTechQuickTicketInput,
+): Promise<{ ticketId: string; jobId: string }> {
+  const created = await insertTicketInTransaction(tx, {
+    shopId: input.shopId,
+    source: 'tech_quick',
+    customerId: null,
+    vehicleId: null,
+    concern: input.concern,
+    createdByProfileId: input.profileId,
+    jobs: [
+      {
+        title: input.concern,
+        kind: 'diagnostic',
+        requiredSkillTier: input.skillTier,
+        assignedTechId: input.profileId,
+        sessionId: input.sessionId,
+      },
+    ],
+  })
+  if (!created) throw new Error('tech_quick_shop_not_found')
+  return { ticketId: created.ticketId, jobId: created.jobIds[0] }
+}
+
 function actorGate(actor: TicketActor): { ok: false; error: TicketDomainError } | null {
   if (!actor.shopId) return { ok: false, error: 'no_shop' }
   if (actor.membershipStatus !== 'active' || actor.deactivatedAt) {
@@ -401,43 +500,27 @@ export async function createTicket(
       assignments.push(assignment.assignedTechId)
     }
 
-    const [sequence] = await tx
-      .update(shops)
-      .set({ nextTicketNumber: sql`${shops.nextTicketNumber} + 1` })
-      .where(eq(shops.id, shopId))
-      .returning()
-    if (!sequence) return { ok: false, error: 'not_found' as const }
-    const ticketNumber = sequence.nextTicketNumber - 1
-
-    const [ticket] = await tx
-      .insert(tickets)
-      .values({
-        shopId,
-        ticketNumber,
-        source: body.source,
-        customerId: body.customerId,
-        vehicleId: body.vehicleId,
-        concern: body.concern,
-        whenStarted: body.whenStarted,
-        howOften: body.howOften,
-        diagnosticAuthorizedCents: body.diagnosticAuthorizedCents,
-        diagnosticAuthorizationNote: body.diagnosticAuthorizationNote,
-        createdByProfileId: input.actor.profileId,
-      })
-      .returning()
-
-    await tx.insert(ticketJobs).values(
-      body.jobs.map((job, index) => ({
-        shopId,
-        ticketId: ticket.id,
+    const created = await insertTicketInTransaction(tx as AppDb, {
+      shopId,
+      source: body.source,
+      customerId: body.customerId,
+      vehicleId: body.vehicleId,
+      concern: body.concern,
+      whenStarted: body.whenStarted,
+      howOften: body.howOften,
+      diagnosticAuthorizedCents: body.diagnosticAuthorizedCents,
+      diagnosticAuthorizationNote: body.diagnosticAuthorizationNote,
+      createdByProfileId: input.actor.profileId,
+      jobs: body.jobs.map((job, index) => ({
         title: job.title,
         kind: job.kind,
         requiredSkillTier: job.requiredSkillTier,
         assignedTechId: assignments[index],
       })),
-    )
+    })
+    if (!created) return { ok: false, error: 'not_found' as const }
 
-    const detail = await loadTicketDetail(tx as AppDb, shopId, ticket.id)
+    const detail = await loadTicketDetail(tx as AppDb, shopId, created.ticketId)
     if (!detail) throw new Error('created_ticket_not_found')
     return { ok: true, ticket: detail }
   })
