@@ -61,6 +61,23 @@ export type TicketActor = {
   deactivatedAt: Date | null
 }
 
+export type TicketDomainError =
+  | 'forbidden'
+  | 'no_shop'
+  | 'inactive_profile'
+  | 'invalid_input'
+  | 'not_found'
+  | 'invalid_assignee'
+  | 'tier_confirmation_required'
+  | 'ticket_not_open'
+
+export type AssignmentTierWarning = {
+  code: 'below_required_tier'
+  assignedTechId: string
+  assignedSkillTier: 1 | 2 | 3
+  requiredSkillTier: 1 | 2 | 3
+}
+
 export type CreateTicketResult =
   | { ok: true; ticket: TicketDetail }
   | { ok: false; error: TicketDomainError; warning?: AssignmentTierWarning }
@@ -98,7 +115,8 @@ The accepted body is:
 - [ ] Add Zod validation that trims concern/title/optional text, limits concern to 5,000 characters, job title to 200, optional context fields to 1,000, authorization note to 2,000, and rejects unsafe or negative authorization cents.
 - [ ] Prove non-`tech_quick` creation rejects missing/mismatched/cross-shop customer/vehicle pairs and `tech_quick` rejects either non-null field.
 - [ ] Prove open assignment remains null, self-assignment requires sufficient active tier, assigning another requires `canAssignWork`, and below-tier advisor/owner assignment requires explicit confirmation.
-- [ ] Implement one transaction that atomically increments `shops.nextTicketNumber`, inserts the ticket, inserts all jobs, and returns the canonical read contract.
+- [ ] Prove concurrent same-shop creates receive distinct consecutive ticket numbers and different shops maintain independent sequences.
+- [ ] Implement one transaction that atomically increments `shops.nextTicketNumber`, inserts the ticket, inserts all jobs, and returns the canonical read contract through one private safe-projection loader; Task 3 adds the actor-gated exported read wrapper around that loader.
 - [ ] Run `pnpm test tests/unit/shop-os-tickets-create.test.ts`; verify GREEN.
 - [ ] Commit only the creation handler and focused tests.
 
