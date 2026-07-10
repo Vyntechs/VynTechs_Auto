@@ -15,7 +15,7 @@ If a feature does not make that sentence more true, it is out of scope.
 ## §1 — Scope
 **IN SCOPE:** the diagnostics engine — the build-time orchestration that turns a vehicle+system+symptom into a graph-stored, refusal-gated, explorable wiring-topology diagnostic; the runtime that serves it; the knowledge/citation spine; the interactive guided-walk UX; the field-capture + outcome compounding loop; cross-vehicle equivalence.
 
-**OUT OF SCOPE (vaulted — do NOT build now):** shop-management features, parts ordering, the TV/command-center dashboard, billing/GTM, the build-in-public/marketing layer. These are the 5-year platform vision, deliberately deferred.
+**OUT OF SCOPE (vaulted — do NOT build now):** shop-management features, parts ordering, the TV/command-center dashboard, billing/GTM, the build-in-public/marketing layer. These are the 5-year platform vision, deliberately deferred. *(Amended 2026-07-10: shop-management, parts ordering, and the tech command center are un-vaulted by owner decision and governed by `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`. This brief still governs the engine itself, and the engine remains frozen with respect to that plan.)*
 
 ---
 
