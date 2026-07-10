@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { profiles, sessions } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
 
@@ -30,7 +30,13 @@ export async function getShopTeam(input: GetShopTeamInput): Promise<GetShopTeamR
       fullName: profiles.fullName,
     })
     .from(profiles)
-    .where(eq(profiles.shopId, shopId))
+    .where(
+      and(
+        eq(profiles.shopId, shopId),
+        isNull(profiles.deactivatedAt),
+        isNotNull(profiles.skillTier),
+      ),
+    )
 
   // Sort: nulls last on fullName, then alpha. Done in JS for portability —
   // Drizzle's NULLS LAST helper isn't consistently available across dialects.

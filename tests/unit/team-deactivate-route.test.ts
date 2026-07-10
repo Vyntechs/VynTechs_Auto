@@ -145,6 +145,21 @@ describe('POST /api/team/deactivate', () => {
     expect(res.status).toBe(403)
   })
 
+  it('does not deactivate an out-of-band curator profile', async () => {
+    await seedInviter('owner')
+    const CURATOR_ID = '00000000-0000-0000-0000-000000000009'
+    await currentDb.insert(profiles).values({
+      userId: CURATOR_ID,
+      role: 'curator',
+      shopId,
+      fullName: 'Protected Curator',
+    })
+    const { POST } = await import('@/app/api/team/deactivate/route')
+    const res = await POST(makeReq({ userId: CURATOR_ID }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('protected_role')
+  })
+
   it('deactivates a tech', async () => {
     await seedInviter('owner')
     await seedTech()

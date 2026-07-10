@@ -153,6 +153,39 @@ describe('POST /api/team/invite', () => {
     expect(newProfile.deactivatedAt).toBeNull()
   })
 
+  it('stores the selected advisor role and nullable wrenching tier', async () => {
+    await seedProfile({ role: 'owner' })
+    const NEW_USER_ID = '00000000-0000-0000-0000-000000000097'
+    inviteUserByEmail.mockResolvedValueOnce({
+      data: { user: { id: NEW_USER_ID, email: 'advisor@test.com' } },
+      error: null,
+    })
+
+    const { POST } = await import('@/app/api/team/invite/route')
+    const res = await POST(
+      makeReq({ email: 'advisor@test.com', role: 'advisor', skillTier: null }) as never,
+    )
+    expect(res.status).toBe(200)
+
+    const [newProfile] = await currentDb
+      .select()
+      .from(profiles)
+      .where(eq(profiles.userId, NEW_USER_ID))
+    expect(newProfile.role).toBe('advisor')
+    expect(newProfile.skillTier).toBeNull()
+  })
+
+  it('rejects unsupported roles before sending an invite', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/team/invite/route')
+    const res = await POST(
+      makeReq({ email: 'manager@test.com', role: 'manager', skillTier: 2 }) as never,
+    )
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('invalid_role')
+    expect(inviteUserByEmail).not.toHaveBeenCalled()
+  })
+
   it('lowercases and trims the email before invite + storage', async () => {
     await seedProfile({ role: 'owner' })
     inviteUserByEmail.mockResolvedValueOnce({

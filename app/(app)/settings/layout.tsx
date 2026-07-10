@@ -5,6 +5,7 @@ import { requireUserAndProfile, isFounder } from '@/lib/auth'
 import { AppHeader } from '@/components/vt'
 import { SettingsGrid } from '@/components/vt/settings-grid'
 import { SettingsList } from '@/components/vt/settings-list'
+import { canManageTeam } from '@/lib/shop-os/capabilities'
 
 export default async function SettingsLayout({
   children,
@@ -15,8 +16,7 @@ export default async function SettingsLayout({
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const isAdmin =
-    ctx.profile.role === 'owner' || isFounder(ctx.user.email)
+  const isAdmin = canManageTeam(ctx.profile.role, isFounder(ctx.user.email))
 
   return (
     <div className="app">
