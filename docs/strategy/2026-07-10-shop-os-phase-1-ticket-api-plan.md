@@ -110,15 +110,15 @@ The accepted body is:
 }
 ```
 
-- [ ] Write PGlite tests for active tech/advisor/parts/owner creation, unsupported/pending/deactivated/no-shop actors, and invalid body fields.
-- [ ] Verify RED because `lib/tickets.ts` does not exist.
-- [ ] Add Zod validation that trims concern/title/optional text, limits concern to 5,000 characters, job title to 200, optional context fields to 1,000, authorization note to 2,000, and rejects unsafe or negative authorization cents.
-- [ ] Prove non-`tech_quick` creation rejects missing/mismatched/cross-shop customer/vehicle pairs and `tech_quick` rejects either non-null field.
-- [ ] Prove open assignment remains null, self-assignment requires sufficient active tier, assigning another requires `canAssignWork`, and below-tier advisor/owner assignment requires explicit confirmation.
-- [ ] Prove concurrent same-shop creates receive distinct consecutive ticket numbers and different shops maintain independent sequences.
-- [ ] Implement one transaction that atomically increments `shops.nextTicketNumber`, inserts the ticket, inserts all jobs, and returns the canonical read contract through one private safe-projection loader; Task 3 adds the actor-gated exported read wrapper around that loader.
-- [ ] Run `pnpm test tests/unit/shop-os-tickets-create.test.ts`; verify GREEN.
-- [ ] Commit only the creation handler and focused tests.
+- [x] Write PGlite tests for active tech/advisor/parts/owner creation, unsupported/pending/deactivated/no-shop actors, and invalid body fields.
+- [x] Verify RED because `lib/tickets.ts` does not exist.
+- [x] Add Zod validation that trims concern/title/optional text, limits concern to 5,000 characters, job title to 200, optional context fields to 1,000, authorization note to 2,000, and rejects unsafe or negative authorization cents.
+- [x] Prove non-`tech_quick` creation rejects missing/mismatched/cross-shop customer/vehicle pairs and `tech_quick` rejects either non-null field.
+- [x] Prove open assignment remains null, self-assignment requires sufficient active tier, assigning another requires `canAssignWork`, and below-tier advisor/owner assignment requires explicit confirmation.
+- [x] Prove concurrent same-shop creates receive distinct consecutive ticket numbers and different shops maintain independent sequences.
+- [x] Implement one transaction that atomically increments `shops.nextTicketNumber`, inserts the ticket, inserts all jobs, and returns the canonical read contract through one private safe-projection loader; Task 3 adds the actor-gated exported read wrapper around that loader.
+- [x] Run `pnpm test tests/unit/shop-os-tickets-create.test.ts`; verify GREEN.
+- [x] Commit only the creation handler and focused tests.
 
 ---
 
