@@ -15,7 +15,7 @@
 - [x] Demoting or deactivating an active owner uses a transaction-scoped lock and cannot remove the last active owner under concurrent requests.
 - [x] Team settings expose all four roles, nullable A/B/C-tech tier, and honest pending-invite status without fake controls.
 - [x] Focused capability, membership, handler, route, and UI tests prove positive, negative, tenant, activation, last-owner, and founder paths.
-- [ ] Full tests, TypeScript, build, diff review, independent re-review, and GitHub checks pass before merge.
+- [x] Full tests, TypeScript, build, diff review, independent re-review, and GitHub checks pass before merge.
 
 ## Verification
 
