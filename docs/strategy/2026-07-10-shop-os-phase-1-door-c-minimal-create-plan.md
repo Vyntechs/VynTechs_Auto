@@ -59,13 +59,13 @@ QUICK TICKET
 - Create: `tests/unit/shop-os-quick-ticket.test.ts`
 - Create: `tests/unit/shop-os-quick-ticket-route.test.ts`
 
-- [ ] Write PGlite tests first for new/existing vehicle paths, repair/maintenance tiers, true-open assignment, exact source/concern, same-shop enforcement, role gates, input bounds, mileage update, and complete rollback.
-- [ ] Verify RED because the handler and route do not exist.
-- [ ] Validate a strict new-vs-existing body and resolve/upsert customer/vehicle inside one outer transaction.
-- [ ] Call canonical `createTicket` with one sessionless repair or maintenance job; throw a rollback sentinel for every domain failure.
-- [ ] Keep the route thin: auth → paywall → parse → shared intake rate limit → actor translation → handler → status/envelope mapping.
-- [ ] Prove no session, counter, engine, quote, schema, or production path changes.
-- [ ] Run focused handler/route tests, TypeScript, diff check, and independent task review; resolve all findings.
+- [x] Write PGlite tests first for new/existing vehicle paths, repair/maintenance tiers, true-open assignment, exact source/concern, same-shop enforcement, role gates, input bounds, mileage update, and complete rollback.
+- [x] Verify RED because the handler and route do not exist.
+- [x] Validate a strict new-vs-existing body and resolve/upsert customer/vehicle inside one outer transaction.
+- [x] Call canonical `createTicket` with one sessionless repair or maintenance job; throw a rollback sentinel for every domain failure.
+- [x] Keep the route thin: auth → paywall → parse → shared intake rate limit → actor translation → handler → status/envelope mapping.
+- [x] Prove no session, counter, engine, quote, schema, or production path changes.
+- [x] Run 2 focused handler/route files (29/29), TypeScript, diff check, and independent review; approved with no findings.
 
 ### Task 3: Wire the honest quick-ticket surface test-first
 
