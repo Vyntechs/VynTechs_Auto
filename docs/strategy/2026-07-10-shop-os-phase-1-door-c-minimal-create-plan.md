@@ -81,14 +81,14 @@ QUICK TICKET
 - Modify: `tests/unit/today-home.test.tsx`
 - Modify: `tests/unit/shop-os-ticket-detail.test.tsx`
 
-- [ ] Write DOM/page tests first for role-visible entry, new/existing bodies, required work parity, repair/maintenance selection, true-open semantics, error envelopes, and ticket-only redirect.
-- [ ] Verify RED because `/tickets/new` and the quick-ticket surface do not exist.
-- [ ] Reuse predictive search; support same-shop existing vehicle selection and a minimal new customer/vehicle form.
-- [ ] Use honest **Quick ticket** copy and state that this step does not approve repair; do not render quote/price/AI/assignment theater.
-- [ ] POST only `/api/tickets/quick` and redirect only from `{ticket:{id}}` to `/tickets/${id}`.
-- [ ] Add a 44px Today entry for active Shop OS roles and label `quick_quote` tickets as **Quick ticket** on detail.
-- [ ] Preserve keyboard/focus behavior and intentional single-column 375px layout.
-- [ ] Run all Door C DOM tests, TypeScript, diff check, and independent task review; resolve all findings.
+- [x] Write DOM/page tests first for role-visible entry, new/existing bodies, required work parity, repair/maintenance selection, true-open semantics, error envelopes, and ticket-only redirect.
+- [x] Verify RED because `/tickets/new` and the quick-ticket surface do not exist.
+- [x] Reuse predictive search; support same-shop existing vehicle selection and a minimal new customer/vehicle form.
+- [x] Use honest **Quick ticket** copy and state that this step does not approve repair; do not render quote/price/AI/assignment theater.
+- [x] POST only `/api/tickets/quick` and redirect only from `{ticket:{id}}` to `/tickets/${id}`.
+- [x] Add a 44px Today entry for active Shop OS roles and label `quick_quote` tickets as **Quick ticket** on detail.
+- [x] Preserve keyboard/focus behavior, handler-parity input bounds, entity-state resets, and intentional single-column 375px layout.
+- [x] Run 3 Door C DOM files (38/38), TypeScript, diff check, and independent re-review; approved with no findings.
 
 ### Task 4: Verify, review, reconcile, and ship row 11
 

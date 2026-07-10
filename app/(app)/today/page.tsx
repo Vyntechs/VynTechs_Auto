@@ -6,6 +6,7 @@ import { listSessionsForShop } from '@/lib/db/queries'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
 import { TodayHome } from '@/components/screens/today-home'
+import { canCreateTickets } from '@/lib/shop-os/capabilities'
 
 export default async function TodayPage() {
   const supabase = await getServerSupabase()
@@ -35,6 +36,7 @@ export default async function TodayPage() {
       dueFollowUps={dueFollowUps}
       canCurate={canCurate(ctx.profile.isCurator, ctx.user.email)}
       canWriteCounterOrder={ctx.profile.role === 'owner'}
+      canCreateTickets={canCreateTickets(ctx.profile.role)}
     />
   )
 }

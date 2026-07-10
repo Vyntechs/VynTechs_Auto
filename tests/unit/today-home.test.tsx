@@ -151,6 +151,25 @@ describe('TodayHome', () => {
     )
     expect(screen.queryByRole('link', { name: /reviewer/i })).toBeNull()
   })
+
+  it('renders a 44px Quick ticket entry when the active role can create tickets', () => {
+    render(
+      <TodayHome
+        techName="Avery"
+        inProgress={[]}
+        closedToday={[]}
+        canCreateTickets
+      />,
+    )
+    const link = screen.getByRole('link', { name: 'Quick ticket' })
+    expect(link).toHaveAttribute('href', '/tickets/new')
+    expect(link).toHaveStyle({ minHeight: '44px' })
+  })
+
+  it('does not render the Quick ticket entry without the create capability', () => {
+    render(<TodayHome techName="Avery" inProgress={[]} closedToday={[]} />)
+    expect(screen.queryByRole('link', { name: 'Quick ticket' })).toBeNull()
+  })
 })
 
 // 2026-05-29 trust sweep: every active row stamped a hardcoded "Risk · Low"
