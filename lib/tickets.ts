@@ -8,6 +8,7 @@ import {
   ticketJobs,
   tickets,
   vehicles,
+  type Profile,
 } from '@/lib/db/schema'
 import { canAssignWork, canCreateTickets } from '@/lib/shop-os/capabilities'
 
@@ -86,6 +87,44 @@ export type TicketDetail = {
 export type CreateTicketResult =
   | { ok: true; ticket: TicketDetail }
   | { ok: false; error: TicketDomainError; warning?: AssignmentTierWarning }
+
+type TicketActorProfile = Pick<
+  Profile,
+  'id' | 'shopId' | 'role' | 'skillTier' | 'membershipStatus' | 'deactivatedAt'
+>
+
+export function ticketActorFromProfile(profile: TicketActorProfile): TicketActor {
+  return {
+    profileId: profile.id,
+    shopId: profile.shopId,
+    role: profile.role,
+    skillTier: profile.skillTier,
+    membershipStatus: profile.membershipStatus,
+    deactivatedAt: profile.deactivatedAt,
+  }
+}
+
+export function ticketDomainStatus(
+  result: { ok: true } | { ok: false; error: TicketDomainError },
+  successStatus: number,
+): number {
+  if (result.ok) return successStatus
+
+  switch (result.error) {
+    case 'invalid_input':
+    case 'invalid_assignee':
+      return 422
+    case 'forbidden':
+    case 'no_shop':
+    case 'inactive_profile':
+      return 403
+    case 'not_found':
+      return 404
+    case 'tier_confirmation_required':
+    case 'ticket_not_open':
+      return 409
+  }
+}
 
 const optionalTrimmedText = (max: number) =>
   z.string().trim().max(max).nullable().optional()
