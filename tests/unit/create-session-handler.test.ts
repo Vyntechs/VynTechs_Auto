@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import {
   ensureProfileAndShop,
@@ -7,6 +8,7 @@ import {
   getSessionById,
 } from '@/lib/db/queries'
 import { createSessionForUser } from '@/lib/sessions'
+import { profiles } from '@/lib/db/schema'
 import type { TreeState } from '@/lib/ai/tree-engine'
 
 const stubTree: TreeState = {
@@ -20,6 +22,16 @@ const validIntake = {
   vehicleMake: 'Ford',
   vehicleModel: 'F-150',
   customerComplaint: 'loss of power going up hills',
+}
+
+async function ensureWrenchingProfile(db: TestDb, userId: string, email: string) {
+  const profile = await ensureProfileAndShop(db, userId, email)
+  const [updated] = await db
+    .update(profiles)
+    .set({ skillTier: 2 })
+    .where(eq(profiles.id, profile.id))
+    .returning()
+  return updated
 }
 
 describe('createSessionForUser', () => {
@@ -36,11 +48,11 @@ describe('createSessionForUser', () => {
 
   it('creates a session and returns its id given a valid intake body', async () => {
     const userId = crypto.randomUUID()
-    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    await ensureWrenchingProfile(db, userId, 'mike@joesgarage.com')
     const result = await createSessionForUser({
       db,
       userId,
-      body: validIntake,
+      body: { ...validIntake, requestKey: crypto.randomUUID() },
       treeState: stubTree,
     })
     expect(result.ok).toBe(true)
@@ -49,7 +61,7 @@ describe('createSessionForUser', () => {
 
   it('persists the caller-provided treeState on the created session row', async () => {
     const userId = crypto.randomUUID()
-    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    await ensureWrenchingProfile(db, userId, 'mike@joesgarage.com')
     const customTree: TreeState = {
       nodes: [{ id: 'unique-node-xyz', label: 'foo', status: 'active' }],
       currentNodeId: 'unique-node-xyz',
@@ -58,7 +70,7 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: validIntake,
+      body: { ...validIntake, requestKey: crypto.randomUUID() },
       treeState: customTree,
     })
     expect(result.ok).toBe(true)
@@ -73,7 +85,7 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: validIntake,
+      body: { ...validIntake, requestKey: crypto.randomUUID() },
       treeState: stubTree,
     })
     expect(result.ok).toBe(false)
@@ -89,7 +101,7 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: validIntake,
+      body: { ...validIntake, requestKey: crypto.randomUUID() },
       treeState: stubTree,
     })
     expect(result.ok).toBe(false)
@@ -98,11 +110,11 @@ describe('createSessionForUser', () => {
 
   it('returns a 400 error when the intake body fails validation', async () => {
     const userId = crypto.randomUUID()
-    await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    await ensureWrenchingProfile(db, userId, 'mike@joesgarage.com')
     const result = await createSessionForUser({
       db,
       userId,
-      body: { vehicleYear: 2018, vehicleMake: 'Ford' },
+      body: { vehicleYear: 2018, vehicleMake: 'Ford', requestKey: crypto.randomUUID() },
       treeState: stubTree,
     })
     expect(result.ok).toBe(false)
@@ -111,7 +123,7 @@ describe('createSessionForUser', () => {
 
   it('creates a session even when the tech already has an open session (lock-out is the route layer concern)', async () => {
     const userId = crypto.randomUUID()
-    const profile = await ensureProfileAndShop(db, userId, 'mike@joesgarage.com')
+    const profile = await ensureWrenchingProfile(db, userId, 'mike@joesgarage.com')
     await createSession(db, {
       shopId: profile.shopId!,
       techId: profile.id,
@@ -121,7 +133,7 @@ describe('createSessionForUser', () => {
     const result = await createSessionForUser({
       db,
       userId,
-      body: validIntake,
+      body: { ...validIntake, requestKey: crypto.randomUUID() },
       treeState: stubTree,
     })
     expect(result.ok).toBe(true)

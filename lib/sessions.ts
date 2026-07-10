@@ -1,9 +1,8 @@
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
 import type { AmbientConditions } from './types'
 import {
-  createSession,
   getProfileByUserId,
   getSessionById,
   appendSessionEvent,
@@ -23,7 +22,11 @@ import type {
   DeclineLanguageInput,
 } from './gating/decline-language'
 import type { Artifact, NewArtifact } from './db/schema'
-import { sessions, sessionEvents } from './db/schema'
+import { sessions, sessionEvents, ticketJobs, tickets } from './db/schema'
+import {
+  createTechQuickTicketInTransaction,
+  type CreateTechQuickTicketInput,
+} from './tickets'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
@@ -37,6 +40,7 @@ import type { RepairGuidanceResult, RepairGuidancePromptInput } from './ai/repai
 import type { AdvanceStreamEvent } from './advance-stream-events'
 import type { Finding, WizardState } from './flows/types'
 import { synthesizeHandoffFromFinding } from './wizard-state'
+import { isShopRole } from './shop-os/capabilities'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
@@ -50,29 +54,245 @@ export type RecordDiagnosticOutcomeFn = (
 ) => Promise<RecordDiagnosticSessionResult>
 
 export type CreateSessionResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; ticketId: string; jobId: string }
   | { ok: false; status: 400 | 401 | 500; error: string }
+
+const createSessionBodySchema = intakeSchema.extend({ requestKey: z.uuid() }).strict()
+
+export type CreateSessionWrapper = (
+  tx: AppDb,
+  input: CreateTechQuickTicketInput,
+) => Promise<{ ticketId: string; jobId: string }>
+
+type ValidatedSessionCreation = {
+  profileId: string
+  shopId: string
+  skillTier: 1 | 2 | 3
+  requestKey: string
+  intake: IntakePayload
+}
+
+async function validateSessionCreationRequest(opts: {
+  db: AppDb
+  userId: string
+  body: unknown
+}): Promise<
+  | { ok: true; value: ValidatedSessionCreation }
+  | { ok: false; status: 400; error: string }
+> {
+  const profile = await getProfileByUserId(opts.db, opts.userId)
+  if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
+  if (
+    !isShopRole(profile.role) ||
+    profile.membershipStatus !== 'active' ||
+    profile.deactivatedAt ||
+    profile.skillTier === null ||
+    ![1, 2, 3].includes(profile.skillTier)
+  ) {
+    return { ok: false, status: 400, error: 'inactive wrenching profile' }
+  }
+
+  const parsed = createSessionBodySchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+  const { requestKey, ...intake } = parsed.data
+  return {
+    ok: true,
+    value: {
+      profileId: profile.id,
+      shopId: profile.shopId,
+      skillTier: profile.skillTier as 1 | 2 | 3,
+      requestKey,
+      intake,
+    },
+  }
+}
+
+async function findCompletedSessionWrapper(
+  db: AppDb,
+  requestKey: string,
+  profileId: string,
+  shopId: string,
+  incomingIntake: IntakePayload,
+): Promise<
+  | { kind: 'match'; ticketId: string; jobId: string }
+  | { kind: 'collision' }
+  | { kind: 'missing' }
+> {
+  const [session] = await db
+    .select({
+      id: sessions.id,
+      shopId: sessions.shopId,
+      techId: sessions.techId,
+      intake: sessions.intake,
+    })
+    .from(sessions)
+    .where(eq(sessions.id, requestKey))
+    .limit(1)
+  if (!session) return { kind: 'missing' }
+  const normalizedPersistedIntake = intakeSchema.safeParse(session.intake)
+  if (
+    session.techId !== profileId ||
+    session.shopId !== shopId ||
+    !normalizedPersistedIntake.success ||
+    JSON.stringify(normalizedPersistedIntake.data) !== JSON.stringify(incomingIntake)
+  ) {
+    return { kind: 'collision' }
+  }
+
+  const [job] = await db
+    .select({
+      id: ticketJobs.id,
+      ticketId: ticketJobs.ticketId,
+      jobShopId: ticketJobs.shopId,
+      sessionId: ticketJobs.sessionId,
+      assignedTechId: ticketJobs.assignedTechId,
+      title: ticketJobs.title,
+      kind: ticketJobs.kind,
+      requiredSkillTier: ticketJobs.requiredSkillTier,
+      ticketShopId: tickets.shopId,
+      source: tickets.source,
+      customerId: tickets.customerId,
+      vehicleId: tickets.vehicleId,
+      concern: tickets.concern,
+      createdByProfileId: tickets.createdByProfileId,
+    })
+    .from(ticketJobs)
+    .innerJoin(tickets, eq(tickets.id, ticketJobs.ticketId))
+    .where(
+      and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.sessionId, requestKey),
+        eq(ticketJobs.assignedTechId, profileId),
+      ),
+    )
+    .limit(1)
+  if (
+    !job ||
+    job.jobShopId !== shopId ||
+    job.ticketShopId !== shopId ||
+    job.sessionId !== requestKey ||
+    job.assignedTechId !== profileId ||
+    job.kind !== 'diagnostic' ||
+    ![1, 2, 3].includes(job.requiredSkillTier) ||
+    job.title !== incomingIntake.customerComplaint ||
+    job.source !== 'tech_quick' ||
+    job.customerId !== null ||
+    job.vehicleId !== null ||
+    job.concern !== incomingIntake.customerComplaint ||
+    job.createdByProfileId !== profileId
+  ) {
+    return { kind: 'collision' }
+  }
+  return { kind: 'match', ticketId: job.ticketId, jobId: job.id }
+}
+
+export type FindCompletedTechQuickSessionResult =
+  | { ok: true; state: 'match'; id: string; ticketId: string; jobId: string }
+  | { ok: true; state: 'missing' }
+  | { ok: false; status: 400; error: string }
+
+export async function findCompletedTechQuickSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  body: unknown
+}): Promise<FindCompletedTechQuickSessionResult> {
+  const validated = await validateSessionCreationRequest(opts)
+  if (!validated.ok) return validated
+  const { profileId, shopId, requestKey, intake } = validated.value
+  const existing = await findCompletedSessionWrapper(
+    opts.db,
+    requestKey,
+    profileId,
+    shopId,
+    intake,
+  )
+  if (existing.kind === 'missing') return { ok: true, state: 'missing' }
+  if (existing.kind === 'collision') {
+    return { ok: false, status: 400, error: 'request key unavailable' }
+  }
+  return {
+    ok: true,
+    state: 'match',
+    id: requestKey,
+    ticketId: existing.ticketId,
+    jobId: existing.jobId,
+  }
+}
 
 export async function createSessionForUser(opts: {
   db: AppDb
   userId: string
   body: unknown
   treeState: TreeState
+  createWrapper?: CreateSessionWrapper
 }): Promise<CreateSessionResult> {
-  const profile = await getProfileByUserId(opts.db, opts.userId)
-  if (!profile) return { ok: false, status: 400, error: 'no profile' }
-  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
-  const parsed = intakeSchema.safeParse(opts.body)
-  if (!parsed.success) {
-    return { ok: false, status: 400, error: parsed.error.message }
+  const validated = await validateSessionCreationRequest(opts)
+  if (!validated.ok) return validated
+  const { profileId, shopId, skillTier, requestKey, intake } = validated.value
+  const existing = await findCompletedSessionWrapper(
+    opts.db,
+    requestKey,
+    profileId,
+    shopId,
+    intake,
+  )
+  if (existing.kind === 'match') {
+    return {
+      ok: true,
+      id: requestKey,
+      ticketId: existing.ticketId,
+      jobId: existing.jobId,
+    }
   }
-  const session = await createSession(opts.db, {
-    shopId: profile.shopId,
-    techId: profile.id,
-    intake: parsed.data,
-    treeState: opts.treeState,
-  })
-  return { ok: true, id: session.id }
+  if (existing.kind === 'collision') {
+    return { ok: false, status: 400, error: 'request key unavailable' }
+  }
+
+  const createWrapper = opts.createWrapper ?? createTechQuickTicketInTransaction
+  try {
+    return await opts.db.transaction(async (tx) => {
+      const [session] = await tx
+        .insert(sessions)
+        .values({
+          id: requestKey,
+          shopId,
+          techId: profileId,
+          intake,
+          treeState: opts.treeState,
+        })
+        .returning()
+      const wrapper = await createWrapper(tx as AppDb, {
+        shopId,
+        profileId,
+        skillTier,
+        sessionId: session.id,
+        concern: intake.customerComplaint,
+      })
+      return { ok: true, id: session.id, ...wrapper }
+    })
+  } catch {
+    const retry = await findCompletedSessionWrapper(
+      opts.db,
+      requestKey,
+      profileId,
+      shopId,
+      intake,
+    )
+    if (retry.kind === 'match') {
+      return {
+        ok: true,
+        id: requestKey,
+        ticketId: retry.ticketId,
+        jobId: retry.jobId,
+      }
+    }
+    return retry.kind === 'collision'
+      ? { ok: false, status: 400, error: 'request key unavailable' }
+      : { ok: false, status: 500, error: 'session create failed' }
+  }
 }
 
 export type GetSessionResult =

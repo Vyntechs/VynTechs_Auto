@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from '../helpers/db'
 import { ensureProfileAndShop } from '@/lib/db/queries'
 import { createSessionForUser, closeSessionForUser } from '@/lib/sessions'
 import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
-import { corpusEntries } from '@/lib/db/schema'
+import { corpusEntries, profiles } from '@/lib/db/schema'
 import type { TreeState } from '@/lib/ai/tree-engine'
 
 // Voyage voyage-3 emits 1024-dim vectors; corpus_entries.embedding is vector(1024).
@@ -35,12 +35,14 @@ describe('manual session loop — what Brandon would do on a phone', () => {
   it('walks intake → close case → corpus row appears (real promote, mocked embed)', async () => {
     // ─── Step A: Brandon taps "New diagnosis" and fills intake ─────────────
     const userId = crypto.randomUUID()
-    await ensureProfileAndShop(db, userId, 'brandon@vyntechs.test')
+    const profile = await ensureProfileAndShop(db, userId, 'brandon@vyntechs.test')
+    await db.update(profiles).set({ skillTier: 2 }).where(eq(profiles.id, profile.id))
 
     const created = await createSessionForUser({
       db,
       userId,
       body: {
+        requestKey: crypto.randomUUID(),
         vehicleYear: 2013,
         vehicleMake: 'Ford',
         vehicleModel: 'F-150',

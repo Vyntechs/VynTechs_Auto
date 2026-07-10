@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { HairlineProgress } from '@/components/vt'
@@ -10,6 +10,7 @@ export function NewSessionForm() {
   const [error, setError] = useState<string | null>(null)
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const attemptRef = useRef<{ fingerprint: string; key: string } | null>(null)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -20,40 +21,55 @@ export function NewSessionForm() {
     const yearRaw = formData.get('vehicleYear')
     const mileageRaw = formData.get('mileage')
     const engineRaw = String(formData.get('vehicleEngine') ?? '').trim()
-    const payload: Record<string, unknown> = {
+    const intake: Record<string, unknown> = {
       vehicleYear: Number(yearRaw),
       vehicleMake: String(formData.get('vehicleMake') ?? '').trim(),
       vehicleModel: String(formData.get('vehicleModel') ?? '').trim(),
       customerComplaint: String(formData.get('customerComplaint') ?? '').trim(),
     }
-    if (engineRaw) payload.vehicleEngine = engineRaw
+    if (engineRaw) intake.vehicleEngine = engineRaw
     if (mileageRaw && String(mileageRaw).trim()) {
-      payload.mileage = Number(mileageRaw)
+      intake.mileage = Number(mileageRaw)
     }
+    const fingerprint = JSON.stringify(intake)
+    if (attemptRef.current?.fingerprint !== fingerprint) {
+      attemptRef.current = { fingerprint, key: crypto.randomUUID() }
+    }
+    const payload = { ...intake, requestKey: attemptRef.current.key }
 
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
-    if (res.status === 409) {
-      const { openSessionId: existingId, limit } = await res.json()
-      setOpenSessionId(existingId)
-      const cap = typeof limit === 'number' ? limit : 5
-      setError(
-        `You already have ${cap} open diagnoses. Resume or close one before starting a new one.`,
-      )
+      if (res.status === 409) {
+        const { openSessionId: existingId, limit } = await res.json()
+        setOpenSessionId(existingId)
+        const cap = typeof limit === 'number' ? limit : 5
+        setError(
+          `You already have ${cap} open diagnoses. Resume or close one before starting a new one.`,
+        )
+        setGenerating(false)
+        return
+      }
+      if (!res.ok) {
+        setError(`Could not start session (${res.status}). Try again.`)
+        setGenerating(false)
+        return
+      }
+      const { id } = await res.json()
+      if (typeof id !== 'string' || !id) {
+        setError('Could not start session. Try again.')
+        setGenerating(false)
+        return
+      }
+      router.push(`/sessions/${id}`)
+    } catch {
+      setError('Could not start session. Try again.')
       setGenerating(false)
-      return
     }
-    if (!res.ok) {
-      setError(`Could not start session (${res.status}). Try again.`)
-      setGenerating(false)
-      return
-    }
-    const { id } = await res.json()
-    router.push(`/sessions/${id}`)
   }
 
   return (

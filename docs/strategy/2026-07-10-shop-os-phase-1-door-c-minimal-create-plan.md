@@ -102,7 +102,7 @@ QUICK TICKET
 - [x] Inspect the full diff for sessions, diagnostic work, fake quote/approval claims, cross-shop reads, partial writes, assignment ceremony, unrelated changes, and intent drift; none found.
 - [x] Obtain two task reviews and one whole-branch review; the UI task's three Important findings were resolved and re-reviewed, and the final branch review approved with zero findings.
 - [x] Add the Phase-1 Door C implementation correction, mark row 11 complete, and preserve all production/external gates.
-- [ ] Push final head, wait for GitHub checks, mark ready, squash-merge, verify `origin/main` tree equality, and immediately continue row 12.
+- [x] Push final head, wait for GitHub checks, mark ready, and squash-merge PR #122 as `e7f522bb7b0135fe0379e6fe2b02dbccb73f81e8`; reviewed and merged trees both equal `cd682ba2c006e5026cd44591209f1ea4e3f3c86d`, then continue row 12.
 
 ## Verification
 
