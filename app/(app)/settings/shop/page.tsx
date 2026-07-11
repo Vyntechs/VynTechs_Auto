@@ -6,6 +6,8 @@ import { canManageTeam } from '@/lib/shop-os/capabilities'
 import { getShopById } from '@/lib/db/queries'
 import { Module } from '@/components/vt'
 import { ShopSection } from '@/components/vt/shop-section'
+import { CannedJobsSection } from '@/components/vt/canned-jobs-section'
+import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
 
 export default async function SettingsShopPage() {
   const supabase = await getServerSupabase()
@@ -26,5 +28,22 @@ export default async function SettingsShopPage() {
     )
   }
 
-  return <ShopSection initialName={shop.name} />
+  const founderOverride = isFounder(ctx.user.email)
+  const library = await listCannedJobs(db, {
+    actor: cannedJobActorFromProfile(ctx.profile, founderOverride),
+  })
+
+  return <>
+    <ShopSection initialName={shop.name} />
+    {library.ok ? (
+      <CannedJobsSection
+        initialJobs={library.cannedJobs.map(publicCannedJob)}
+        initialTaxRateBps={library.taxRateBps}
+      />
+    ) : (
+      <Module num="02" label="Canned jobs">
+        <p className="vt-settings-coming-soon">The canned-job library could not be loaded. Refresh the page to try again.</p>
+      </Module>
+    )}
+  </>
 }
