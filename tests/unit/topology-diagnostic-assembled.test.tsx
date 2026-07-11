@@ -163,6 +163,17 @@ describe('assembleStepView — the render pipeline', () => {
     const view = assembleStepView(topo, null)
     expect(view.kind).toBe('empty')
   })
+
+  it('assembles the identical first-step scene after an additive database ID', () => {
+    const withoutId = fuelPressureTopology()
+    const withId = fuelPressureTopology([
+      pressureAction({ id: '11111111-1111-4111-8111-111111111111' }),
+    ])
+
+    expect(assembleStepView(withId, withId.scenarios[0] ?? null)).toEqual(
+      assembleStepView(withoutId, withoutId.scenarios[0] ?? null),
+    )
+  })
 })
 
 describe('TopologyDiagnostic — assembled screen', () => {
@@ -204,6 +215,37 @@ describe('TopologyDiagnostic — assembled screen', () => {
     const headline = document.querySelector('.topo__no-plan-title')
     expect(headline).not.toBeNull()
     expect(headline?.textContent ?? '').toMatch(/no test plan captured for this code yet/i)
+  })
+
+  it('preserves the whole-system escape and return when the step carries a database ID', () => {
+    const topo = fuelPressureTopology([
+      pressureAction({ id: '11111111-1111-4111-8111-111111111111' }),
+    ])
+    render(
+      <TopologyDiagnostic
+        topology={topo}
+        layout={emptyLayout}
+        vehicleName="2017 F-250"
+        sessionId="preview"
+        symptoms={[]}
+        activeSymptomSlug=""
+      />,
+    )
+
+    const escape = screen.getByRole('button', { name: /whole system/i })
+    fireEvent.click(escape)
+    expect(screen.getByRole('button', { name: /back to step/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(document.querySelector('.topo__assembled')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /back to step/i }))
+    expect(screen.getByRole('button', { name: /whole system/i })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    expect(document.querySelector('.topo__assembled')).not.toBeNull()
   })
 
   it('tapping a scene element opens the detail panel (free selection KEPT)', () => {

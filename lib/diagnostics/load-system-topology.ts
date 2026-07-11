@@ -47,6 +47,8 @@ export type TopologyBranch = {
 }
 
 export type TopologyTestAction = {
+  /** Database identity used by adaptive diagnostics. Legacy routing remains slug-keyed. */
+  id?: string
   slug: string
   description: string
   scenarioRequired: string
@@ -495,6 +497,7 @@ export async function loadSystemTopology({
     testActions: testActionRows
       .filter((t) => t.componentId === c.id)
       .map((t) => ({
+        id: t.id,
         slug: t.slug,
         description: t.description,
         scenarioRequired: t.scenarioRequired,
