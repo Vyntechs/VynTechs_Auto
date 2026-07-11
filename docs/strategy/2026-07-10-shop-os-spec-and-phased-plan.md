@@ -727,7 +727,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | complete | PR #126; 10 focused files/176 tests + 209 files/1,866 full tests; [execution packet](./2026-07-10-shop-os-phase-2-diagnostic-bootstrap-plan.md); creation seam and diagnostic semantics preserved |
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | complete | PR #127; 3 focused files/25 tests + 210 files/1,876 full tests; source/local proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
 | 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | complete | PR #128; 6 focused files/113 tests + 216 files/1,989 full tests; [execution packet](./2026-07-10-shop-os-phase-3-quote-domain-plan.md); no production apply |
-| 18 | 3 | Manual quote builder + totals | A | 17 | in progress | `feat/shop-os-p3-quote-builder`; [execution packet](./2026-07-11-shop-os-phase-3-manual-quote-builder-plan.md) |
+| 18 | 3 | Manual quote builder + totals | A | 17 | in progress | PR #129; `feat/shop-os-p3-quote-builder`; [execution packet](./2026-07-11-shop-os-phase-3-manual-quote-builder-plan.md) |
 | 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | pending | Before non-manual lines, expose complete safe builder lines or server totals |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | pending | Tree/published-wizard only |
 | 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | pending | — |

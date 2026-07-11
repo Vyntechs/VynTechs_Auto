@@ -16,7 +16,7 @@
 
 **Files:** This design/plan, master plan row 18, driver state.
 
-- [ ] Mark row 18 in progress on `feat/shop-os-p3-quote-builder` and open draft PR.
+- [x] Mark row 18 in progress on `feat/shop-os-p3-quote-builder` and open draft PR #129.
 - [x] Independently review the design against the merged row-17 API, interaction doctrine, mobile reality, and future-row boundaries.
 - [x] Resolve plan findings before component implementation.
 
