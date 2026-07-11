@@ -24,7 +24,7 @@ Build the tenant-safe domain and thin API seams that turn mutable job-line draft
 
 ## Draft line contract
 
-- Create requires a client-proposed UUID. An exact same-ID retry normalizes omitted labor price/rate against the line's already pinned stored rate, even if the shop default later changes; changed payload reuse conflicts.
+- Create requires a client request UUID, then deterministically derives the persisted line UUID from `shopId + request UUID`. This preserves tenant-local ambiguous retry identity without a global cross-shop collision oracle. An exact same-key retry normalizes omitted labor price/rate against the line's already pinned stored rate, even if the shop default later changes; changed payload reuse conflicts.
 - Strict discriminated inputs prevent field smuggling: manual part lines accept part context but no labor/order lifecycle fields; labor requires hours and accepts an optional pinned rate/explicit price but no part/vendor fields; fee accepts only description, taxable, and extended price. Row 17 writes `source=manual` and never exposes order/provider lifecycle fields.
 - Exact current-state updates are no-ops. Delete returns idempotent success when the authorized ticket/job exists and the named line is already absent; cross-shop or unknown parent context still collapses to not-found.
 - Mutations reject closed/canceled tickets and canceled/done jobs. They may operate on an open unreconciled provisional ticket.

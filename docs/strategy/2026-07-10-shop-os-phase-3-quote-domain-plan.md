@@ -35,11 +35,13 @@
 
 **Files:** Create/extend `lib/shop-os/quotes.ts`; add PGlite tests.
 
-- [ ] Add strict per-kind manual schemas, pinned-rate exact-retry client-ID create, no-op update, and privacy-safe idempotent delete.
-- [ ] Reauthorize persisted actor/ticket/job/line; allow open provisional draft work while rejecting closed/canceled/cross-boundary context.
-- [ ] Atomically supersede the sole active version, reset every snapshot-included job, clear approved pointers, leave excluded jobs unchanged, and fail closed on duplicate-active anomalies.
-- [ ] Prove unauthorized direct projection repoint/clear is absent from public domain inputs.
-- [ ] Independently review draft mutation and invalidation.
+- [x] Add strict per-kind manual schemas, tenant-derived pinned-rate exact-retry client-key create, no-op update, and privacy-safe idempotent delete.
+- [x] Reauthorize persisted actor/ticket/job/line; allow open provisional draft work while rejecting closed/canceled/cross-boundary context.
+- [x] Atomically supersede the sole active version, reset every snapshot-included job, clear approved pointers, leave excluded jobs unchanged, and fail closed on duplicate-active anomalies.
+- [x] Prove unauthorized direct projection repoint/clear is absent from public domain inputs.
+- [x] Independently review draft mutation and invalidation; resolve snapshot, decimal-bound, safe-projection, tenant-key privacy, lock-classification, and UUID-canonicalization findings through tests.
+
+**Task-3 verification boundary:** PGlite proves the generated `NOWAIT` lock structure and deterministic `55P03` rollback/classification, but cannot prove real two-connection wait timing.
 
 ## Task 4: Immutable version creation
 
