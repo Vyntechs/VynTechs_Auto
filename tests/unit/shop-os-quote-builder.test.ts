@@ -204,10 +204,20 @@ describe('Shop OS quote builder read model', () => {
   })
 
   it('derives a bounded diagnostic story mode without exposing raw engine state', async () => {
+    await db.update(ticketJobs).set({ kind: 'diagnostic' }).where(eq(ticketJobs.id, uuid(30)))
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true, builder: { jobs: [{ storyMode: 'unavailable' }] },
+    })
     await db.insert(sessions).values({
       id: uuid(60), shopId, techId: uuid(1), vehicleId: uuid(11),
       intake: { vehicleYear: 2020, vehicleMake: 'Ford', vehicleModel: 'F-150', customerComplaint: 'Brake noise' },
-      treeState: { done: true, phase: 'repairing', currentNodeId: 'root', secretEngineState: 'never-project' } as never,
+      treeState: {
+        done: true, phase: 'repairing', currentNodeId: 'root',
+        diagnosisLockedAt: '2026-07-11T12:00:00.000Z',
+        rootCauseSummary: 'Pads are below specification.',
+        proposedAction: { description: 'Replace front brake pads.', confidence: 0.94 },
+        secretEngineState: 'never-project',
+      } as never,
     })
     await db.update(ticketJobs).set({ kind: 'diagnostic', sessionId: uuid(60) }).where(eq(ticketJobs.id, uuid(30)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
@@ -215,8 +225,14 @@ describe('Shop OS quote builder read model', () => {
     })
     expect(JSON.stringify(await getQuoteBuilder(db, { actor, ticketId }))).not.toContain('secretEngineState')
 
+    await db.update(sessions).set({ treeState: { done: false, phase: 'diagnosing', currentNodeId: 'root' } as never })
+      .where(eq(sessions.id, uuid(60)))
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true, builder: { jobs: [{ storyMode: 'unavailable' }] },
+    })
+
     await db.update(sessions).set({
-      treeState: { done: true, phase: 'repairing', currentNodeId: '_topology' } as never,
+      treeState: { done: true, currentNodeId: '_topology' } as never,
     }).where(eq(sessions.id, uuid(60)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
       ok: true, builder: { jobs: [{ storyMode: 'topology_manual' }] },

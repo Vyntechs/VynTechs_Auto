@@ -223,6 +223,10 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
       diagnosticSnapshot(null, null),
       diagnosticSnapshot(null),
       diagnosticSnapshot({ source: 'template' }),
+      diagnosticSnapshot({ source: 'manual', sessionId: uuid(70) }, {
+        ...diagnosticStory,
+        howWeKnow: [{ claim: 'Fabricated proof.', sourceEventIds: [uuid(71)], sourceArtifactIds: [] }],
+      }),
     ].entries()) {
       await overwriteSnapshot(invalid)
       await expect(decide(approvedBody(uuid(300 + index)))).resolves.toEqual({ ok: false, error: 'not_found' })

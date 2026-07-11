@@ -209,6 +209,11 @@ describe('quote builder refresh projection validation', () => {
 
   it('accepts the complete exact safe projection', () => {
     expect(parseQuoteBuilderProjection(valid)).toEqual(valid)
+    const unavailable = {
+      ...valid,
+      jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'unavailable' }],
+    }
+    expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
   })
 
   it('accepts exact row-17 quantity/hour caps and rejects cap plus one', () => {
@@ -242,6 +247,7 @@ describe('quote builder refresh projection validation', () => {
     { ...valid, jobs: [{ ...valid.jobs[0], story: { ...valid.jobs[0].story, source: 'ai', content: null } }] },
     { ...valid, capabilities: { canRecordCustomerApproval: 'yes' } },
     { ...valid, jobs: [{ ...valid.jobs[0], storyMode: 'ordinary_locked_tree' }] },
+    { ...valid, jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'not-a-mode' }] },
     { ...valid, activeVersion: {
       id: '00000000-0000-4000-8000-000000000401', versionNumber: 1, totalCents: 500,
       jobs: [{ jobId: valid.jobs[0].id, subtotalCents: 501 }],

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -159,7 +159,7 @@ export type QuoteBuilderResult =
           reviewStatus: 'pending' | 'reviewed' | null
           revision: number
         }
-        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'published_wizard_unsupported' | null
+        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'published_wizard_unsupported' | 'unavailable' | null
         approval: {
           state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
           quoteVersionId: string | null
@@ -397,6 +397,7 @@ export async function getQuoteBuilder(
         status: tickets.status,
         customerId: tickets.customerId,
         vehicleId: tickets.vehicleId,
+        concern: tickets.concern,
       }).from(tickets).where(and(
         eq(tickets.shopId, actor.shopId as string),
         eq(tickets.id, parsedTicket.data),
@@ -432,7 +433,7 @@ export async function getQuoteBuilder(
         .filter((job) => job.kind === 'diagnostic' && job.sessionId !== null)
         .map((job) => job.sessionId as string))]
       const linkedSessions = diagnosticSessionIds.length === 0 ? [] : await transactionDb
-        .select({ id: sessions.id, treeState: sessions.treeState })
+        .select({ id: sessions.id, status: sessions.status, treeState: sessions.treeState })
         .from(sessions)
         .where(and(
           eq(sessions.shopId, actor.shopId as string),
@@ -447,6 +448,14 @@ export async function getQuoteBuilder(
           eq(sessionEvents.eventType, 'wizard_lock_in'),
         ))
         .orderBy(sessionEvents.sessionId, sessionEvents.id)
+      let databaseNow: Date | null = null
+      if (diagnosticSessionIds.length > 0) {
+        const clockResult = await transactionDb.execute<{ now: string | Date }>(
+          sql`select statement_timestamp() as "now"`,
+        )
+        const clockRows = ('rows' in clockResult ? clockResult.rows : clockResult) as Array<{ now: string | Date }>
+        databaseNow = new Date(clockRows[0].now)
+      }
       const activeVersions = await transactionDb.select({
         id: quoteVersions.id,
         versionNumber: quoteVersions.versionNumber,
@@ -468,14 +477,31 @@ export async function getQuoteBuilder(
         const wizardSessionIds = new Set(wizardEvents.map((event) => event.sessionId))
         const storyMode = (job: typeof eligibleJobs[number]) => {
           if (job.kind !== 'diagnostic') return null
+          if (!job.sessionId) return 'unavailable' as const
           if (job.sessionId && wizardSessionIds.has(job.sessionId)) return 'published_wizard_unsupported' as const
-          const treeState = job.sessionId ? sessionById.get(job.sessionId)?.treeState : null
-          if (treeState && typeof treeState === 'object'
-            && (treeState as { done?: unknown }).done === true
-            && (treeState as { currentNodeId?: unknown }).currentNodeId === '_topology') {
+          const linkedSession = sessionById.get(job.sessionId)
+          const treeState = linkedSession?.treeState
+          if (!linkedSession || linkedSession.status !== 'open'
+            || !treeState || typeof treeState !== 'object') return 'unavailable' as const
+          const tree = treeState as Record<string, unknown>
+          if (tree.done === true && tree.currentNodeId === '_topology') {
             return 'topology_manual' as const
           }
-          return 'ordinary_locked_tree' as const
+          const lockAt = typeof tree.diagnosisLockedAt === 'string'
+            ? new Date(tree.diagnosisLockedAt) : new Date(Number.NaN)
+          const action = tree.proposedAction && typeof tree.proposedAction === 'object'
+            ? tree.proposedAction as Record<string, unknown> : null
+          const boundedText = (value: unknown) => typeof value === 'string'
+            && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= 5_000
+          if (
+            tree.done === true && tree.phase === 'repairing' && tree.currentNodeId !== '_topology'
+            && !Number.isNaN(lockAt.getTime()) && lockAt.toISOString() === tree.diagnosisLockedAt
+            && databaseNow && lockAt.getTime() <= databaseNow.getTime() + 5 * 60 * 1000
+            && boundedText(ticket.concern) && boundedText(tree.rootCauseSummary)
+            && boundedText(action?.description) && typeof action?.confidence === 'number'
+            && Number.isFinite(action.confidence) && action.confidence >= 0 && action.confidence <= 1
+          ) return 'ordinary_locked_tree' as const
+          return 'unavailable' as const
         }
         const activeVersion = activeVersions[0]
         let activeVersionProjection: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'] = null
@@ -1079,6 +1105,7 @@ function validatedQuoteSnapshot(
       job.customerStory === null
       || job.storyMeta === null
       || (job.storyMeta.source !== 'ai' && job.storyMeta.source !== 'manual')
+      || (job.storyMeta.source === 'manual' && job.customerStory.howWeKnow.length !== 0)
     )) {
       throw new TypeError('quote snapshot diagnostic story is invalid')
     }

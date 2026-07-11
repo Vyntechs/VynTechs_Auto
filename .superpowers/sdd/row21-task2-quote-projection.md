@@ -32,3 +32,9 @@
 - Added bounded server-derived diagnostic story modes and strict private-free workspace/POST/PUT response parsers.
 - Made the expanded server result fields required. Changes in `shop-os-manual-quote-builder.test.tsx` and `shop-os-quote-page.test.tsx` are mechanical fixture-shape updates only; no UI behavior assertion changed.
 - GREEN: seven focused files, 164 tests passed; TypeScript and diff checks passed.
+
+## Final narrow corrections
+
+- Diagnostic snapshot decisions reject manual stories that claim sourced proof.
+- Diagnostic `ordinary_locked_tree` mode now requires a linked same-shop open session with a completed, locked, bounded ordinary diagnosis; missing or malformed paths project `unavailable`.
+- GREEN: four focused files, 101 tests passed; TypeScript and diff checks passed.
