@@ -26,10 +26,10 @@
 
 **Files:** Create `lib/shop-os/quote-math.ts`; create focused math tests.
 
-- [ ] Prove canonical quantity/hour parsing and rejection at precision/range boundaries.
-- [ ] Prove BigInt labor/tax numerators, default/override, subtotal, taxable subtotal, half-up tax, final safe conversion, and overflow behavior without floating-point multiplication.
-- [ ] Define `QuoteSnapshotV1`, recursive JSON key canonicalization, stable job/line/attachment ordering, and content-only identity without volatile actor/time fields.
-- [ ] Independently review math and snapshot identity.
+- [x] Prove canonical quantity/hour parsing and rejection at precision/range boundaries.
+- [x] Prove BigInt labor/tax numerators, default/override, subtotal, taxable subtotal, half-up tax, final safe conversion, and overflow behavior without floating-point multiplication.
+- [x] Define `QuoteSnapshotV1`, recursive JSON key canonicalization, stable job/line/attachment ordering, and content-only identity without volatile actor/time fields.
+- [x] Independently review math and snapshot identity; resolve tax-cap, stored-null-rate, volatile-story-metadata, and boundary-proof findings through tests.
 
 ## Task 3: Tenant-safe draft line CRUD and invalidation
 
