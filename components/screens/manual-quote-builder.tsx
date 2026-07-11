@@ -15,16 +15,22 @@ import {
   type ManualLineKind,
 } from '@/lib/shop-os/quote-builder-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
-import type { TicketDetail } from '@/lib/tickets'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
+
+export type QuoteTicketIdentity = {
+  id: string
+  ticketNumber: number
+  customer: { name: string } | null
+  vehicle: { year: number | null; make: string | null; model: string | null } | null
+}
 
 export function ManualQuoteBuilder({
   ticket,
   builder,
 }: {
-  ticket: TicketDetail
+  ticket: QuoteTicketIdentity
   builder: QuoteBuilder
 }): React.JSX.Element {
   const router = useRouter()
@@ -804,7 +810,7 @@ function formatTaxRate(bps: number): string {
   return fraction ? `${whole}.${fraction}%` : `${whole}%`
 }
 
-function vehicleName(vehicle: NonNullable<TicketDetail['vehicle']>): string {
+function vehicleName(vehicle: NonNullable<QuoteTicketIdentity['vehicle']>): string {
   return `${vehicle.year} ${vehicle.make} ${vehicle.model}`
 }
 

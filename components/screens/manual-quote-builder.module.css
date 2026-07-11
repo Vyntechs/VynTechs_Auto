@@ -90,7 +90,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
   align-items: start;
   gap: clamp(28px, 5vw, 64px);
   margin-top: 36px;
@@ -171,6 +171,12 @@
 
 .line {
   padding: 18px 0;
+}
+
+.line:focus,
+.preparedState:focus {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 4px;
 }
 
 .line + .line {
@@ -375,10 +381,10 @@
 }
 
 .totalList > div {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 20px;
+  gap: 12px;
   border-top: 1px solid var(--vt-rule);
   padding: 12px 0;
 }
@@ -389,6 +395,15 @@
   color: var(--vt-fg-2);
   font-family: var(--vt-font-sans);
   font-size: 13px;
+}
+
+.totalList dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.totalList dd {
+  white-space: nowrap;
 }
 
 .money {
@@ -489,16 +504,35 @@
 @media (max-width: 800px) {
   .workspace {
     grid-template-columns: 1fr;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
   }
 
   .tape {
     position: static;
   }
+
+  .prepareAction {
+    position: fixed;
+    z-index: 10;
+    right: max(18px, env(safe-area-inset-right));
+    bottom: 0;
+    left: max(18px, env(safe-area-inset-left));
+    width: auto;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    box-shadow: 0 -12px 30px color-mix(in oklch, var(--vt-fg) 10%, transparent);
+  }
+
+  .workspace:has(.editor:focus-within) .prepareAction {
+    position: static;
+    width: 100%;
+    padding: 0 18px;
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 600px) {
   .screen {
-    padding: 24px 18px 40px;
+    padding: 24px 18px calc(40px + env(safe-area-inset-bottom));
   }
 
   .workspace {
@@ -527,5 +561,12 @@
 
   .linePrice {
     text-align: left;
+  }
+
+  .error {
+    position: static;
+    width: 100%;
+    margin-top: 24px;
+    box-shadow: none;
   }
 }

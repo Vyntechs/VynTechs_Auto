@@ -53,13 +53,13 @@
 
 ## Task 6: Visual, accessibility, and independent review
 
-- [ ] Implement the calibrated repair-order tape direction with existing tokens, visible labels/focus, decimal mobile keyboards, 44px controls, 375px support, reduced motion, safe-area padding, and no sticky/keyboard overlap.
-- [ ] Run the required loaded protected-page browser/accessibility pass at desktop and 375px; an unauthenticated redirect alone is insufficient. Capture observable proof or report the exact credential/environment gate.
-- [ ] Independently review product truth, money semantics, tenant/privacy boundaries, accessibility, and future-row scope; resolve every finding.
+- [x] Implement the calibrated repair-order tape direction with existing tokens, visible labels/focus, decimal mobile keyboards, 44px controls, 375px support, reduced motion, safe-area padding, and no sticky/keyboard overlap.
+- [x] Attempt the required loaded protected-page browser/accessibility pass at desktop and 375px. Chrome and the ChatGPT extension are installed and enabled, but Chrome is not running; the browser workflow requires owner permission before launch, so static/DOM proof records the exact environment gate without claiming a loaded-page pass.
+- [x] Independently review product truth, money semantics, tenant/privacy boundaries, accessibility, and future-row scope; resolve every finding.
 
 ## Task 7: Verify, reconcile, and ship
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff checks.
+- [x] Run focused tests, full suite, TypeScript, production build, and diff checks.
 - [ ] Add the row-18 implementation correction, mark row 18 complete, and identify row 19 as the next non-overlapping advisor lane.
 - [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and continue the next safe source lane.
 

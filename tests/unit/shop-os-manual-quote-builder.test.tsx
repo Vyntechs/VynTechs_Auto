@@ -189,7 +189,7 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.queryByText(/Vendor/i)).toBeNull()
   })
 
-  it('declares sticky desktop tape, 375px reflow, mono money, and focus visibility', () => {
+  it('declares desktop and 375px tape behavior, safe-area clearance, resilient totals, and focus visibility', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
     const css = readFileSync(
       resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'),
@@ -200,6 +200,12 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*grid-template-columns:\s*1fr/)
     expect(css).not.toMatch(/\.tape\s*\{[^}]*grid-row:\s*1/)
     expect(css).toMatch(/\.header a:focus-visible[\s\S]*outline:/)
+    expect(css).toMatch(/\.totalList\s*>\s*div\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/)
+    expect(css).toMatch(/\.workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(320px,\s*360px\)/)
+    expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor:focus-within\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
 
     const ledger = screen.getByRole('region', { name: 'Quote ledger' })
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })

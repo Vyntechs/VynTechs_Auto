@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
+import styles from '@/components/screens/manual-quote-builder.module.css'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
@@ -35,11 +36,41 @@ export default async function QuotePage({
     actor: quoteActorFromProfile(ctx.profile),
     ticketId: id,
   })
-  if (!builderResult.ok) notFound()
+  if (!builderResult.ok) {
+    if (builderResult.error === 'conflict' && builderResult.retryable) {
+      return (
+        <main className={styles.screen}>
+          <div className={styles.blocked}>
+            <h1>Quote is busy</h1>
+            <p>Another quote update is finishing. Retry to load current server truth.</p>
+            <a className={styles.lineAction} href={`/tickets/${id}/quote`}>
+              Retry quote
+            </a>
+          </div>
+        </main>
+      )
+    }
+    notFound()
+  }
+
+  const quoteTicket = {
+    id: ticketResult.ticket.id,
+    ticketNumber: ticketResult.ticket.ticketNumber,
+    customer: ticketResult.ticket.customer
+      ? { name: ticketResult.ticket.customer.name }
+      : null,
+    vehicle: ticketResult.ticket.vehicle
+      ? {
+          year: ticketResult.ticket.vehicle.year,
+          make: ticketResult.ticket.vehicle.make,
+          model: ticketResult.ticket.vehicle.model,
+        }
+      : null,
+  }
 
   return (
     <ManualQuoteBuilder
-      ticket={ticketResult.ticket}
+      ticket={quoteTicket}
       builder={builderResult.builder}
     />
   )

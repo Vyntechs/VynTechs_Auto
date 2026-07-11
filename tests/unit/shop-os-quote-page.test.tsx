@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TicketDetail } from '@/lib/tickets'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 
-const { notFoundError, redirectError, notFoundMock, redirectMock } = vi.hoisted(() => ({
+const { notFoundError, redirectError, notFoundMock, redirectMock, manualBuilderMock } = vi.hoisted(() => ({
   notFoundError: new Error('NEXT_NOT_FOUND'),
   redirectError: new Error('NEXT_REDIRECT'),
   notFoundMock: vi.fn(() => { throw new Error('NEXT_NOT_FOUND') }),
   redirectMock: vi.fn(() => { throw new Error('NEXT_REDIRECT') }),
+  manualBuilderMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({ notFound: notFoundMock, redirect: redirectMock }))
@@ -25,7 +26,7 @@ vi.mock('@/lib/shop-os/quotes', async (importOriginal) => ({
 }))
 vi.mock('@/components/screens/manual-quote-builder', () => ({
   ManualQuoteBuilder: ({ ticket, builder }: { ticket: TicketDetail; builder: QuoteBuilder }) => (
-    <div>Quote screen {ticket.ticketNumber}; {builder.ticket.id}</div>
+    manualBuilderMock({ ticket, builder }) ?? <div>Quote screen {ticket.ticketNumber}; {builder.ticket.id}</div>
   ),
 }))
 
@@ -124,6 +125,43 @@ describe('QuotePage', () => {
       actor: { profileId: profile.id }, ticketId,
     })
     expect(screen.getByText(`Quote screen 101; ${ticketId}`)).toBeInTheDocument()
+  })
+
+  it('crosses the client boundary with only quote identity fields', async () => {
+    getTicketMock.mockResolvedValue({
+      ok: true,
+      ticket: {
+        ...ticket,
+        concern: 'PRIVATE_CONCERN',
+        customer: {
+          id: 'customer-1', name: 'Marisol Vega', phone: 'PRIVATE_PHONE', email: 'PRIVATE_EMAIL',
+        },
+        vehicle: {
+          id: 'vehicle-1', year: 2019, make: 'Ford', model: 'F-150', engine: 'PRIVATE_ENGINE',
+          vin: 'PRIVATE_VIN', mileage: 88420, plate: 'PRIVATE_PLATE',
+        },
+      },
+    })
+    render(await QuotePage(props()))
+    const clientTicket = manualBuilderMock.mock.calls[0][0].ticket
+    expect(clientTicket).toEqual({
+      id: ticketId,
+      ticketNumber: 101,
+      customer: { name: 'Marisol Vega' },
+      vehicle: { year: 2019, make: 'Ford', model: 'F-150' },
+    })
+    expect(JSON.stringify(clientTicket)).not.toMatch(/PRIVATE_|customer-1|vehicle-1/)
+  })
+
+  it('renders a retry surface for initial quote lock contention', async () => {
+    getBuilderMock.mockResolvedValue({ ok: false, error: 'conflict', retryable: true })
+    render(await QuotePage(props()))
+    expect(screen.getByRole('heading', { name: 'Quote is busy' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Retry quote' })).toHaveAttribute(
+      'href',
+      `/tickets/${ticketId}/quote`,
+    )
+    expect(notFoundMock).not.toHaveBeenCalled()
   })
 
   it.each(['ticket', 'builder'] as const)('collapses %s cross-boundary denial to not-found', async (source) => {
