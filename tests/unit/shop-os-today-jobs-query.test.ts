@@ -153,6 +153,7 @@ describe('Today ticket jobs read model', () => {
         requiredSkillTier: 2,
         assignedTechId: actorProfileId,
         sessionId: session.id,
+        diagnosticStartState: 'ready',
         workStatus: 'open',
         createdAt: new Date('2026-07-10T10:01:00Z'),
       },
@@ -218,8 +219,13 @@ describe('Today ticket jobs read model', () => {
       requiredSkillTier: 2,
       sessionId: session.id,
       workStatus: 'open',
+      diagnosticStartState: 'ready',
+      diagnosticStartErrorCode: null,
     })
     expect(result.linkedSessionIds).toEqual([session.id])
+    expect(JSON.stringify(result)).not.toMatch(
+      /diagnosticStartAttemptKey|diagnosticStartLeaseUntil/,
+    )
   })
 
   it('excludes other tenants and terminal tickets or jobs without leaking profile or private customer/vehicle fields', async () => {
@@ -293,6 +299,46 @@ describe('Today ticket jobs read model', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /Taylor Tech|Hidden Technician|00000000-0000-4000-8000-00000000010[12]|North Shop|South Shop|private@example|PRIVATEVIN|PRIVATE|engine detail|Persisted concern|Hidden concern/,
     )
+  })
+
+  it('projects only safe diagnostic-start state and error fields', async () => {
+    const leaseUntil = new Date('2026-07-10T12:02:00Z')
+    await db.insert(ticketJobs).values({
+      id: uuid(48),
+      shopId,
+      ticketId,
+      title: 'Retry known-safe diagnostic start failure',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      assignedTechId: actorProfileId,
+      diagnosticStartState: 'failed',
+      diagnosticStartAttemptKey: uuid(49),
+      diagnosticStartLeaseUntil: leaseUntil,
+      diagnosticStartErrorCode: 'open_session_limit',
+    })
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result.myJobs).toEqual([
+      expect.objectContaining({
+        id: uuid(48),
+        diagnosticStartState: 'failed',
+        diagnosticStartErrorCode: 'open_session_limit',
+      }),
+    ])
+    expect(JSON.stringify(result)).not.toContain(uuid(49))
+    expect(JSON.stringify(result)).not.toContain(leaseUntil.toISOString())
+    expect(result.myJobs[0]).not.toHaveProperty('diagnosticStartAttemptKey')
+    expect(result.myJobs[0]).not.toHaveProperty('diagnosticStartLeaseUntil')
+
+    await db
+      .update(ticketJobs)
+      .set({ diagnosticStartErrorCode: 'provider_secret=do-not-project' })
+      .where(eq(ticketJobs.id, uuid(48)))
+    const unknownErrorResult = await listTodayTicketJobs(db, { actor })
+
+    expect(unknownErrorResult.myJobs[0].diagnosticStartErrorCode).toBeNull()
+    expect(JSON.stringify(unknownErrorResult)).not.toContain('provider_secret')
   })
 
   it('gates all jobs to active same-shop Shop roles and gives null-tier actors assigned jobs but no Open Jobs', async () => {

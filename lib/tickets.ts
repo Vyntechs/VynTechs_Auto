@@ -122,6 +122,27 @@ export type TodayTicketJob = {
   requiredSkillTier: number
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
+  diagnosticStartState?: 'idle' | 'initializing' | 'ready' | 'failed' | 'ambiguous'
+  diagnosticStartErrorCode?: TodayDiagnosticStartErrorCode | null
+}
+
+export type TodayDiagnosticStartErrorCode =
+  | 'rate_limited'
+  | 'open_session_limit'
+  | 'initializer_outcome_uncertain'
+  | 'lease_expired'
+
+const safeDiagnosticStartErrorCodes = new Set<TodayDiagnosticStartErrorCode>([
+  'rate_limited',
+  'open_session_limit',
+  'initializer_outcome_uncertain',
+  'lease_expired',
+])
+
+function safeDiagnosticStartErrorCode(value: string | null): TodayDiagnosticStartErrorCode | null {
+  return safeDiagnosticStartErrorCodes.has(value as TodayDiagnosticStartErrorCode)
+    ? value as TodayDiagnosticStartErrorCode
+    : null
 }
 
 export type TodayTicketJobs = {
@@ -175,6 +196,8 @@ export async function listTodayTicketJobs(
       persistedSessionId: ticketJobs.sessionId,
       accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
+      diagnosticStartState: ticketJobs.diagnosticStartState,
+      diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
     })
     .from(ticketJobs)
     .innerJoin(
@@ -228,6 +251,8 @@ export async function listTodayTicketJobs(
       requiredSkillTier: row.requiredSkillTier,
       sessionId: row.accessibleSessionId,
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
+      diagnosticStartState: row.diagnosticStartState,
+      diagnosticStartErrorCode: safeDiagnosticStartErrorCode(row.diagnosticStartErrorCode),
     }
 
     if (row.assignedTechId === actor.profileId) myJobs.push(job)

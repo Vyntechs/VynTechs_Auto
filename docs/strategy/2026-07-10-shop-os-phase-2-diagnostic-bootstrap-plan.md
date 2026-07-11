@@ -57,12 +57,12 @@
 
 **Consumes:** Task 2 acquire/finalize/failure operations and the exact current retrieval/tree pipeline.
 
-- [ ] Write failing route tests for auth, paywall, strict UUID body, exact shared `intake:${userId}` limit of ten, five-open-session cap, ready/wait/ambiguous envelopes, ready-retry bypass, and no provider calls outside a lease-winning, quota-eligible state.
-- [ ] Extract only the initializer seams needed to preserve counter intake's topology preflight/populated sentinel and the existing retrieval/tree assembly; prove topology skips AI and non-topology input wiring does not drift.
-- [ ] Run the lease winner through the full initializer, then finalize. Restrict `failed` to errors proven before initializer entry; map every initializer throw/timeout/transport or uncertain persistence outcome to `ambiguous`.
-- [ ] Return only safe state, retry guidance, warning, and owned session ID. Keep `maxDuration = 60`.
-- [ ] Keep optional cold-case draft synthesis outside row 15; it is not part of session initialization correctness.
-- [ ] Independently review the route/pipeline task and resolve all findings.
+- [x] Write failing route tests for auth, paywall, strict UUID body, exact shared `intake:${userId}` limit of ten, five-open-session cap, ready/wait/ambiguous envelopes, ready-retry bypass, and no provider calls outside a lease-winning, quota-eligible state.
+- [x] Extract only the initializer seams needed to preserve counter intake's topology preflight/populated sentinel and the existing retrieval/tree assembly; prove topology skips AI and non-topology input wiring does not drift.
+- [x] Run the lease winner through the full initializer, then finalize. Restrict `failed` to errors proven before initializer entry; map every initializer throw/timeout/transport or uncertain persistence outcome to `ambiguous`.
+- [x] Return only safe state, retry guidance, warning, and owned session ID. Keep `maxDuration = 60`.
+- [x] Keep optional cold-case draft synthesis outside row 15; it is not part of session initialization correctness.
+- [x] Independently review the route/pipeline task and resolve all findings.
 
 ## Task 4: Add the Today third-tap start interaction
 
@@ -74,12 +74,12 @@
 - Modify: `tests/unit/shop-os-today-jobs-query.test.ts`
 - Modify: `tests/unit/shop-os-today-jobs-board.test.tsx`
 
-- [ ] Write failing tests proving My Jobs exposes only safe diagnostic start state/error fields and no lease/attempt internals.
-- [ ] Implement the explicit matrix: `idle|failed` Start; `initializing` disabled/wait+refresh; `ambiguous` warning+confirmation; owned `ready` Open; inconsistent `ready` safe refresh/error. Preserve exact simple-work disabled copy.
-- [ ] Generate one attempt UUID per deliberate start, announce pending/wait/ready/ambiguous/error, and navigate only to a returned owned session.
-- [ ] Require an explicit second confirmation for ambiguous retry with exact possible-duplicate-cost warning and a fresh attempt UUID.
-- [ ] Preserve refresh truth, focus, 44px controls, reduced motion, and 375px single-column behavior.
-- [ ] Independently review the UI task and resolve all findings.
+- [x] Write failing tests proving My Jobs exposes only safe diagnostic start state/error fields and no lease/attempt internals.
+- [x] Implement the explicit matrix: `idle|failed` Start; `initializing` disabled/wait+refresh; `ambiguous` warning+confirmation; owned `ready` Open; inconsistent `ready` safe refresh/error. Preserve exact simple-work disabled copy.
+- [x] Generate one attempt UUID per deliberate start, announce pending/wait/ready/ambiguous/error, and navigate only to a returned owned session.
+- [x] Require an explicit second confirmation for ambiguous retry with exact possible-duplicate-cost warning and a fresh attempt UUID.
+- [x] Preserve refresh truth, focus, 44px controls, reduced motion, and 375px single-column behavior.
+- [x] Independently review the UI task and resolve all findings.
 
 ## Task 5: Verify, review, reconcile, and ship row 15
 
