@@ -12,18 +12,23 @@ vi.mock('@/lib/shop-os/customer-stories', async (importOriginal) => {
     ...actual,
     getCustomerStoryWorkspace: vi.fn(),
     generateAndSaveCustomerStory: vi.fn(),
+    saveReviewedCustomerStory: vi.fn(),
   }
 })
 
-import { GET, POST } from '@/app/api/tickets/[id]/quote/jobs/[jobId]/story/route'
+import * as storyRoute from '@/app/api/tickets/[id]/quote/jobs/[jobId]/story/route'
 import { generateCustomerStory } from '@/lib/ai/customer-story'
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import {
   generateAndSaveCustomerStory,
   getCustomerStoryWorkspace,
+  saveReviewedCustomerStory,
   type CustomerStoryError,
 } from '@/lib/shop-os/customer-stories'
+
+const { GET, POST } = storyRoute
+const PUT = (storyRoute as unknown as { PUT: typeof POST }).PUT
 
 const TICKET_ID = '00000000-0000-4000-8000-000000000020'
 const JOB_ID = '00000000-0000-4000-8000-000000000030'
@@ -64,12 +69,19 @@ const authMock = vi.mocked(requireUserAndProfile)
 const paywallMock = vi.mocked(paywallReject)
 const workspaceMock = vi.mocked(getCustomerStoryWorkspace)
 const generationMock = vi.mocked(generateAndSaveCustomerStory)
+const reviewMock = vi.mocked(saveReviewedCustomerStory)
 const providerMock = vi.mocked(generateCustomerStory)
+const reviewBody = {
+  clientKey: CLIENT_KEY,
+  expectedStoryRevision: 1,
+  whatWeFound: 'Alternator output is below specification.',
+  whatWeRecommend: 'Replace the alternator.',
+}
 
-function request(method: 'GET' | 'POST', body?: unknown, raw?: string, query = ''): Request {
+function request(method: 'GET' | 'POST' | 'PUT', body?: unknown, raw?: string, query = ''): Request {
   return new Request(`http://localhost${path}${query}`, {
     method,
-    ...(method === 'POST' ? {
+    ...(method !== 'GET' ? {
       body: raw ?? JSON.stringify(body),
       headers: { 'content-type': 'application/json' },
     } : {}),
@@ -190,6 +202,55 @@ describe('customer story route', () => {
     const response = await POST(request('POST', postBody), params())
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ changed: false, story, storyMeta, storyRevision: 1 })
+    expect(providerMock).not.toHaveBeenCalled()
+  })
+
+  it('exports the reviewed-story PUT seam', () => {
+    expect(PUT).toBeTypeOf('function')
+  })
+
+  it('PUT authenticates and applies the paywall before parsing or domain access', async () => {
+    authMock.mockResolvedValueOnce(null)
+    let response = await PUT(request('PUT', reviewBody), params())
+    expect(response.status).toBe(401)
+    expect(reviewMock).not.toHaveBeenCalled()
+
+    authMock.mockResolvedValue(authContext as never)
+    paywallMock.mockResolvedValueOnce(NextResponse.json({ error: 'paywall' }, { status: 403 }))
+    response = await PUT(request('PUT', undefined, 'not-json{'), params())
+    expect(response.status).toBe(403)
+    expect(reviewMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ...reviewBody, extra: true },
+    { ...reviewBody, clientKey: 'not-a-uuid' },
+    { ...reviewBody, expectedStoryRevision: -1 },
+    { ...reviewBody, whatWeFound: '' },
+    { ...reviewBody, whatWeRecommend: 'x'.repeat(5_001) },
+  ])('rejects a non-contract PUT envelope before domain access', async (body) => {
+    const response = await PUT(request('PUT', body), params())
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toEqual({ error: 'invalid_input' })
+    expect(reviewMock).not.toHaveBeenCalled()
+  })
+
+  it('passes only the reviewed narrative contract and maps committed server truth', async () => {
+    reviewMock.mockResolvedValue({ ok: true, changed: true, story, storyMeta, storyRevision: 2 })
+    const response = await PUT(request('PUT', reviewBody), params())
+    expect(reviewMock).toHaveBeenCalledWith({}, {
+      actor, ticketId: TICKET_ID, jobId: JOB_ID, ...reviewBody,
+    })
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ changed: true, story, storyMeta, storyRevision: 2 })
+    expect(providerMock).not.toHaveBeenCalled()
+  })
+
+  it('maps PUT conflict without logging or provider work', async () => {
+    reviewMock.mockResolvedValue({ ok: false, error: 'conflict', retryable: true })
+    const response = await PUT(request('PUT', reviewBody), params())
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({ error: 'conflict', retryable: true })
     expect(providerMock).not.toHaveBeenCalled()
   })
 
