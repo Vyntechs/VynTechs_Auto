@@ -9,8 +9,13 @@ import {
   customerStoryErrorBody,
   generateAndSaveCustomerStory,
   getCustomerStoryWorkspace,
+  saveReviewedCustomerStory,
 } from '@/lib/shop-os/customer-stories'
 import { getServerSupabase } from '@/lib/supabase-server'
+import {
+  customerStoryReviewTextSchema,
+  safeCustomerStoryMeta,
+} from '@/lib/shop-os/customer-story-contracts'
 
 const cursorQuery = z.strictObject({
   eventCursor: z.string().min(1).max(1_000).optional(),
@@ -26,6 +31,12 @@ const generationEnvelope = z.strictObject({
   expectedStoryRevision: z.number().int().nonnegative(),
   sourceEventIds: uuidList,
   sourceArtifactIds: uuidList,
+})
+const reviewEnvelope = z.strictObject({
+  clientKey: z.uuid(),
+  expectedStoryRevision: z.number().int().nonnegative(),
+  whatWeFound: customerStoryReviewTextSchema,
+  whatWeRecommend: customerStoryReviewTextSchema,
 })
 
 type RouteContext = {
@@ -101,6 +112,41 @@ export async function POST(req: Request, { params }: RouteContext) {
     changed: result.changed,
     story: result.story,
     storyMeta: result.storyMeta,
+    storyRevision: result.storyRevision,
+  }, { status: 200 })
+}
+
+export async function PUT(req: Request, { params }: RouteContext) {
+  const ctx = await authenticate()
+  if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  const denied = await paywallReject(db, ctx.user.id)
+  if (denied) return denied
+
+  let rawBody: unknown
+  try {
+    rawBody = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+  }
+  const body = reviewEnvelope.safeParse(rawBody)
+  if (!body.success) return invalidInput()
+
+  const { id, jobId } = await params
+  const result = await saveReviewedCustomerStory(db, {
+    actor: { profileId: ctx.profile.id },
+    ticketId: id,
+    jobId,
+    ...body.data,
+  })
+  if (!result.ok) {
+    return NextResponse.json(customerStoryErrorBody(result), {
+      status: customerStoryDomainStatus(result),
+    })
+  }
+  return NextResponse.json({
+    changed: result.changed,
+    story: result.story,
+    storyMeta: safeCustomerStoryMeta(result.storyMeta),
     storyRevision: result.storyRevision,
   }, { status: 200 })
 }

@@ -8,7 +8,10 @@ import {
   classifyQuoteFailure,
   formatMoneyCents,
   getQuotePreparationState,
+  parseCustomerStoryMutationResponse,
+  parseCustomerStoryWorkspaceResponse,
   parseQuoteBuilderProjection,
+  parseQuoteDecisionResponse,
   parsePreparedVersionResponse,
   summarizeQuoteMoney,
   type ManualLineFormValues,
@@ -19,6 +22,7 @@ import {
   type SafeCannedJobTemplate,
 } from '@/lib/shop-os/canned-jobs-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
+import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -26,6 +30,7 @@ type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
 export type QuoteTicketIdentity = {
   id: string
   ticketNumber: number
+  concern: string
   customer: { name: string } | null
   vehicle: { year: number | null; make: string | null; model: string | null } | null
 }
@@ -55,6 +60,8 @@ export function ManualQuoteBuilder({
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
+  const [decision, setDecision] = useState<DecisionState | null>(null)
+  const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
   const editorFirstInputRef = useRef<HTMLInputElement>(null)
@@ -100,7 +107,7 @@ export function ManualQuoteBuilder({
     if (!focusTarget) return
     const element = focusRefs.current.get(focusTarget)
     if (element) {
-      element.focus()
+      queueMicrotask(() => element.focus())
       setFocusTarget(null)
     }
   }, [current, focusTarget])
@@ -108,13 +115,19 @@ export function ManualQuoteBuilder({
   const lines = current.jobs.flatMap((job) => job.lines)
   const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
   const totals = summarizeQuoteMoney(lines, current.configuration.taxRateBps)
-  const preparation = getQuotePreparationState({
+  const basePreparation = getQuotePreparationState({
     builder: current,
     totals,
     editorOpen: editor !== null,
     modalOpen: modal !== null,
     busy,
   })
+  const pendingStory = !current.activeVersion && current.jobs.some((job) =>
+    job.kind === 'diagnostic' && job.lines.length > 0
+      && (job.story.content === null || job.story.reviewStatus !== 'reviewed'))
+  const preparation = basePreparation.kind === 'ready' && pendingStory
+    ? { kind: 'blocked' as const, reasons: ['Review every diagnostic story.'] }
+    : basePreparation
 
   function beginOperation(kind: NonNullable<typeof operation>): boolean {
     if (inFlightRef.current) return false
@@ -357,6 +370,99 @@ export function ManualQuoteBuilder({
     }
   }
 
+  function openDecision(
+    job: QuoteBuilder['jobs'][number],
+    kind: 'phone' | 'in_person' | 'declined',
+    invoker: HTMLButtonElement,
+  ): void {
+    const version = current.activeVersion
+    const versionJob = version?.jobs.find((item) => item.jobId === job.id)
+    if (!version || !versionJob || !job.decisionEligible
+      || !current.capabilities.canRecordCustomerApproval) return
+    setDecision({
+      jobId: job.id, title: job.title, kind, requestKey: crypto.randomUUID(),
+      versionId: version.id, versionNumber: version.versionNumber,
+      jobSubtotalCents: versionJob.subtotalCents, totalCents: version.totalCents,
+      busy: false, error: null, invoker,
+    })
+  }
+
+  async function submitDecision(): Promise<void> {
+    if (!decision || decision.busy) return
+    const pending = decision
+    setDecision({ ...pending, busy: true, error: null })
+    try {
+      const response = await fetch(`/api/tickets/${ticket.id}/quote/decisions`, {
+        method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          requestKey: pending.requestKey, jobId: pending.jobId,
+          quoteVersionId: pending.versionId,
+          decision: pending.kind === 'declined' ? 'declined' : 'approved',
+          ...(pending.kind === 'declined' ? {} : { approvedVia: pending.kind }),
+        }),
+      })
+      const body = await readJson(response)
+      if (!response.ok) {
+        setDecision({ ...pending, busy: false, error: response.status === 409
+          ? 'Quote changed. Refresh before recording this decision.'
+          : 'Review the visible fields, then retry.' })
+        return
+      }
+      const parsed = parseQuoteDecisionResponse(response.status, body)
+      const changedApprovalMatches = parsed?.changed === true
+        && pending.kind !== 'declined'
+        && parsed.event.kind === 'approved'
+        && parsed.event.approvedVia === pending.kind
+        && parsed.event.quoteVersionId === pending.versionId
+        && parsed.projection.approvalState === 'approved'
+        && parsed.projection.approvedQuoteVersionId === pending.versionId
+      const changedDeclineMatches = parsed?.changed === true
+        && pending.kind === 'declined'
+        && parsed.event.kind === 'declined'
+        && parsed.event.quoteVersionId === pending.versionId
+        && parsed.projection.approvalState === 'declined'
+        && parsed.projection.approvedQuoteVersionId === null
+      if (!parsed || parsed.event.jobId !== pending.jobId
+        || (parsed.changed && !changedApprovalMatches && !changedDeclineMatches)) {
+        setDecision({ ...pending, busy: false, error: 'Server truth did not match this decision. Refresh and retry.' })
+        return
+      }
+      if (parsed.changed) {
+        setCurrent((active) => ({
+          ...active,
+          jobs: active.jobs.map((job) => job.id === pending.jobId
+            ? { ...job, approval: {
+              state: parsed.projection.approvalState,
+              quoteVersionId: parsed.projection.approvedQuoteVersionId,
+            } } : job),
+        }))
+      }
+      setDecisionVerdicts((verdicts) => {
+        const next = { ...verdicts }
+        if (changedDeclineMatches) {
+          next[pending.jobId] = `Declined · V${pending.versionNumber}`
+        } else if (changedApprovalMatches) {
+          next[pending.jobId] = `Approved · ${parsed.event.approvedVia === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}`
+        } else {
+          delete next[pending.jobId]
+        }
+        return next
+      })
+      setDecision(null)
+      setFocusTarget(`decision:${pending.jobId}`)
+      const refreshed = await refreshQuote(`decision:${pending.jobId}`, false, true)
+      if (refreshed) {
+        setDecisionVerdicts((verdicts) => {
+          const next = { ...verdicts }
+          delete next[pending.jobId]
+          return next
+        })
+      }
+    } catch {
+      setDecision({ ...pending, busy: false, error: 'Connection interrupted. Retry with the same decision.' })
+    }
+  }
+
   async function applyCannedJob(): Promise<void> {
     if (!selectedCannedJob || !cannedClientKey || editor || modal || inFlightRef.current) return
     if (!beginOperation('canned')) return
@@ -429,7 +535,7 @@ export function ManualQuoteBuilder({
 
   return (
     <main className={`app ${styles.screen}`}>
-      <div data-testid="quote-background" inert={modal ? true : undefined}>
+      <div data-testid="quote-background" inert={modal || decision ? true : undefined}>
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}>
@@ -647,6 +753,18 @@ export function ManualQuoteBuilder({
                         </button>
                       ))}
                     </div>
+                    {job.kind === 'diagnostic' && (
+                      <StoryCard
+                        ticketId={ticket.id}
+                        ticketConcern={ticket.concern}
+                        job={job}
+                        focusRef={(element) => {
+                          if (element) focusRefs.current.set(`story:${job.id}`, element)
+                          else focusRefs.current.delete(`story:${job.id}`)
+                        }}
+                        onServerChange={() => refreshQuote(`story:${job.id}`)}
+                      />
+                    )}
                     {editor?.jobId === job.id && (
                       <LineEditor
                         editor={editor}
@@ -671,8 +789,8 @@ export function ManualQuoteBuilder({
 
         <aside className={styles.tape} aria-label="Quote totals">
           <p className={styles.eyebrow}>Live quote tape</p>
-          <h2>Current draft</h2>
-          {!totals.ok ? (
+          <h2>{current.activeVersion ? 'Prepared quote' : 'Current draft'}</h2>
+          {!current.activeVersion && (!totals.ok ? (
             <div className={styles.blocked}>
               <strong>Totals unavailable</strong>
               <p>Stored quote money could not be totaled safely. Review the quote data.</p>
@@ -707,21 +825,34 @@ export function ManualQuoteBuilder({
                 </dd>
               </div>
             </dl>
-          )}
+          ))}
           {!current.activeVersion && <p className={styles.version}>No prepared version</p>}
           {preparation.kind === 'prepared' ? (
-            <p
-              className={styles.preparedState}
-              role="status"
-              aria-live="polite"
-              tabIndex={-1}
-              ref={(element) => {
+            <div className={styles.preparedState}>
+              <p role="status" aria-live="polite" tabIndex={-1} ref={(element) => {
                 if (element) focusRefs.current.set('prepared', element)
                 else focusRefs.current.delete('prepared')
-              }}
-            >
-              Prepared version V{preparation.version.versionNumber}
-            </p>
+              }}>Prepared version V{preparation.version.versionNumber}</p>
+              {current.activeVersion?.jobs.map((versionJob) => {
+                const job = current.jobs.find((candidate) => candidate.id === versionJob.jobId)
+                return job ? (
+                  <AuthorizationStrip
+                    key={job.id}
+                    job={job}
+                    versionNumber={current.activeVersion!.versionNumber}
+                    jobSubtotalCents={versionJob.subtotalCents}
+                    totalCents={current.activeVersion!.totalCents}
+                    canDecide={current.capabilities.canRecordCustomerApproval}
+                    immediateVerdict={decisionVerdicts[job.id]}
+                    focusRef={(element) => {
+                      if (element) focusRefs.current.set(`decision:${job.id}`, element)
+                      else focusRefs.current.delete(`decision:${job.id}`)
+                    }}
+                    onDecision={(kind, invoker) => openDecision(job, kind, invoker)}
+                  />
+                ) : null
+              })}
+            </div>
           ) : (
             <div className={styles.prepareState}>
               {preparation.kind === 'blocked' && (
@@ -775,11 +906,343 @@ export function ManualQuoteBuilder({
           onRemove={confirmRemove}
         />
       )}
+      {decision && (
+        <DecisionDialog
+          decision={decision}
+          onCancel={() => {
+            if (decision.busy) return
+            const invoker = decision.invoker
+            setDecision(null)
+            setTimeout(() => invoker.focus(), 0)
+          }}
+          onConfirm={submitDecision}
+        />
+      )}
     </main>
   )
 }
 
 type BuilderLine = QuoteBuilder['jobs'][number]['lines'][number]
+type BuilderJob = QuoteBuilder['jobs'][number]
+type StoryWorkspace = NonNullable<ReturnType<typeof parseCustomerStoryWorkspaceResponse>>
+
+type DecisionState = {
+  jobId: string
+  title: string
+  kind: 'phone' | 'in_person' | 'declined'
+  requestKey: string
+  versionId: string
+  versionNumber: number
+  jobSubtotalCents: number
+  totalCents: number
+  busy: boolean
+  error: string | null
+  invoker: HTMLButtonElement
+}
+
+function StoryCard({
+  ticketId,
+  ticketConcern,
+  job,
+  focusRef,
+  onServerChange,
+}: {
+  ticketId: string
+  ticketConcern: string
+  job: BuilderJob
+  focusRef: (element: HTMLElement | null) => void
+  onServerChange: () => Promise<boolean>
+}): React.JSX.Element {
+  const [open, setOpen] = useState(job.storyMode === 'topology_manual')
+  const [story, setStory] = useState(job.story.content)
+  const [revision, setRevision] = useState(job.story.revision)
+  const [reviewStatus, setReviewStatus] = useState(job.story.reviewStatus)
+  const [evidence, setEvidence] = useState<StoryWorkspace['evidence'] | null>(null)
+  const [selectedEvents, setSelectedEvents] = useState<string[]>([])
+  const [selectedArtifacts, setSelectedArtifacts] = useState<string[]>([])
+  const [whatWeFound, setWhatWeFound] = useState(job.story.content?.whatWeFound ?? '')
+  const [whatWeRecommend, setWhatWeRecommend] = useState(job.story.content?.whatWeRecommend ?? '')
+  const dirtyRef = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const generationKey = useRef<string | null>(null)
+  const reviewKey = useRef<string | null>(null)
+  const endpoint = `/api/tickets/${ticketId}/quote/jobs/${job.id}/story`
+
+  useEffect(() => {
+    setStory(job.story.content)
+    setRevision(job.story.revision)
+    setReviewStatus(job.story.reviewStatus)
+    if (!dirtyRef.current) {
+      setWhatWeFound(job.story.content?.whatWeFound ?? '')
+      setWhatWeRecommend(job.story.content?.whatWeRecommend ?? '')
+    }
+  }, [job.story.content, job.story.reviewStatus, job.story.revision])
+
+  async function readBody(response: Response): Promise<unknown> {
+    try { return await response.json() } catch { return {} }
+  }
+
+  async function openWorkspace(): Promise<void> {
+    setOpen(true)
+    if (job.storyMode !== 'ordinary_locked_tree' || evidence || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch(endpoint, { headers: { accept: 'application/json' } })
+      const body = await readBody(response)
+      const parsed = response.ok ? parseCustomerStoryWorkspaceResponse(body) : null
+      if (!parsed) {
+        setError('Story evidence is unavailable. Refresh before retrying.')
+        return
+      }
+      setEvidence(parsed.evidence)
+      if (parsed.story) {
+        setStory(parsed.story)
+        setRevision(parsed.storyRevision)
+        setReviewStatus(parsed.storyMeta?.reviewStatus ?? null)
+        setWhatWeFound(parsed.story.whatWeFound)
+        setWhatWeRecommend(parsed.story.whatWeRecommend)
+      }
+    } catch {
+      setError('Connection interrupted. Retry loading evidence.')
+    } finally { setBusy(false) }
+  }
+
+  async function generate(): Promise<void> {
+    if (busy || !evidence) return
+    generationKey.current ??= crypto.randomUUID()
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ clientKey: generationKey.current, expectedStoryRevision: revision,
+          sourceEventIds: selectedEvents, sourceArtifactIds: selectedArtifacts }),
+      })
+      if (response.status === 409) {
+        try {
+          const workspaceResponse = await fetch(endpoint, { headers: { accept: 'application/json' } })
+          const rebased = workspaceResponse.ok
+            ? parseCustomerStoryWorkspaceResponse(await readBody(workspaceResponse)) : null
+          if (!rebased) {
+            setError('Story changed elsewhere. Refresh before choosing proof again.')
+            return
+          }
+          const currentEventIds = new Set(rebased.evidence.events.map((item) => item.id))
+          const currentArtifactIds = new Set(rebased.evidence.artifacts.map((item) => item.id))
+          setSelectedEvents((ids) => ids.filter((id) => currentEventIds.has(id)))
+          setSelectedArtifacts((ids) => ids.filter((id) => currentArtifactIds.has(id)))
+          setStory(rebased.story)
+          setRevision(rebased.storyRevision)
+          setReviewStatus(rebased.storyMeta?.reviewStatus ?? null)
+          setEvidence(rebased.evidence)
+          generationKey.current = null
+          setError('Story refreshed. Your selected proof is preserved; retry generation.')
+        } catch {
+          setError('Story changed elsewhere. Refresh before choosing proof again.')
+        }
+        return
+      }
+      const parsed = response.ok ? parseCustomerStoryMutationResponse(await readBody(response)) : null
+      if (!parsed) {
+        setError('Story generation did not return safe server truth. Retry with the same evidence.')
+        return
+      }
+      setStory(parsed.story)
+      setRevision(parsed.storyRevision)
+      setReviewStatus(parsed.storyMeta.reviewStatus ?? null)
+      setWhatWeFound(parsed.story.whatWeFound)
+      setWhatWeRecommend(parsed.story.whatWeRecommend)
+      dirtyRef.current = false
+      generationKey.current = null
+      reviewKey.current = crypto.randomUUID()
+    } catch {
+      setError('Connection interrupted. Retry with the same evidence.')
+    } finally { setBusy(false) }
+  }
+
+  function edit(field: 'found' | 'recommend', value: string): void {
+    if (field === 'found') setWhatWeFound(value)
+    else setWhatWeRecommend(value)
+    reviewKey.current = crypto.randomUUID()
+    dirtyRef.current = true
+  }
+
+  async function rebaseStoryDraft(): Promise<void> {
+    if (job.storyMode !== 'ordinary_locked_tree') {
+      await onServerChange()
+      setError('Story refreshed. Your draft is preserved; review current proof and retry.')
+      return
+    }
+    try {
+      const response = await fetch(endpoint, { headers: { accept: 'application/json' } })
+      const parsed = response.ok ? parseCustomerStoryWorkspaceResponse(await readBody(response)) : null
+      if (!parsed) {
+        setError('Story changed elsewhere. Your draft is preserved; refresh before retrying.')
+        return
+      }
+      setStory(parsed.story)
+      setRevision(parsed.storyRevision)
+      setReviewStatus(parsed.storyMeta?.reviewStatus ?? null)
+      setEvidence(parsed.evidence)
+      setError('Story refreshed. Your draft is preserved; review current proof and retry.')
+    } catch {
+      setError('Story changed elsewhere. Your draft is preserved; refresh before retrying.')
+    }
+  }
+
+  async function saveReview(): Promise<void> {
+    if (busy || !whatWeFound.trim() || !whatWeRecommend.trim()) return
+    reviewKey.current ??= crypto.randomUUID()
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch(endpoint, {
+        method: 'PUT', headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ clientKey: reviewKey.current, expectedStoryRevision: revision,
+          whatWeFound: whatWeFound.trim(), whatWeRecommend: whatWeRecommend.trim() }),
+      })
+      if (response.status === 409) {
+        await rebaseStoryDraft()
+        return
+      }
+      const parsed = response.ok ? parseCustomerStoryMutationResponse(await readBody(response)) : null
+      if (!parsed) {
+        setError(response.status === 409
+          ? 'Story changed elsewhere. Your text is preserved; refresh before retrying.'
+          : 'Story review did not return safe server truth. Retry with the same text.')
+        return
+      }
+      setStory(parsed.story)
+      setRevision(parsed.storyRevision)
+      setReviewStatus(parsed.storyMeta.reviewStatus ?? null)
+      setWhatWeFound(parsed.story.whatWeFound)
+      setWhatWeRecommend(parsed.story.whatWeRecommend)
+      reviewKey.current = null
+      await onServerChange()
+      dirtyRef.current = false
+    } catch {
+      setError('Connection interrupted. Retry with the same text.')
+    } finally { setBusy(false) }
+  }
+
+  if (job.storyMode === 'published_wizard_unsupported') {
+    return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Published-wizard stories are not supported yet.</p></section>
+  }
+  if (job.storyMode === 'unavailable') {
+    return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Finish and lock this diagnosis before preparing its customer story.</p></section>
+  }
+
+  return (
+    <section ref={focusRef} className={styles.storyCard} role="region" aria-label={`Diagnostic story for ${job.title}`} tabIndex={-1}>
+      <div className={styles.storyHeading}>
+        <div><p className={styles.eyebrow}>Diagnostic story</p><h4>{job.storyMode === 'topology_manual' ? 'Human-authored topology story' : 'Customer-ready finding'}</h4></div>
+        {job.storyMode === 'ordinary_locked_tree' && !open && (
+          <button type="button" className={styles.lineAction} onClick={openWorkspace}>Open diagnostic story</button>
+        )}
+      </div>
+      {open && (
+        <>
+          {reviewStatus === 'pending' && <p className={styles.pending}>Pending human review</p>}
+          {reviewStatus === 'reviewed' && <p className={styles.reviewed} role="status">Reviewed customer story</p>}
+          {!story && job.storyMode === 'ordinary_locked_tree' && evidence && (
+            <fieldset className={styles.evidencePicker}>
+              <legend>Select proof to include</legend>
+              {[...evidence.events, ...evidence.artifacts].map((item) => (
+                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id) || selectedArtifacts.includes(item.id)} disabled={item.kind === 'observation'
+                  ? selectedEvents.length >= 20 && !selectedEvents.includes(item.id)
+                  : selectedArtifacts.length >= 20 && !selectedArtifacts.includes(item.id)} onChange={(event) => {
+                  const setter = item.kind === 'observation' ? setSelectedEvents : setSelectedArtifacts
+                  setter((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))
+                }} /> <span>{item.label}</span></label>
+              ))}
+              <p role="status" aria-label="Evidence selection" aria-live="polite">Events selected · {selectedEvents.length} of 20<br />Artifacts selected · {selectedArtifacts.length} of 20</p>
+              {selectedEvents.length + selectedArtifacts.length === 0 && <p>No proof selected. The short story will use locked diagnosis facts only.</p>}
+              <button type="button" className={styles.storyAction} disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
+            </fieldset>
+          )}
+          {(story || job.storyMode === 'topology_manual') && (
+            <div className={styles.storyEditor}>
+              {story && <><p className={styles.storyLabel}>What you told us</p><p>{story.whatYouToldUs}</p></>}
+              {!story && job.storyMode === 'topology_manual' && <>
+                <p className={styles.storyLabel}>What you told us</p><p>{ticketConcern}</p>
+                <p className={styles.storyLabel}>If deferred</p><p>{CUSTOMER_STORY_WAIVER}</p>
+              </>}
+              <label>What we found<textarea value={whatWeFound} maxLength={5000} onChange={(event) => edit('found', event.target.value)} /></label>
+              {story && story.howWeKnow.length > 0 && <details className={styles.proof}><summary>Proof · {story.howWeKnow.length} sourced {story.howWeKnow.length === 1 ? 'observation' : 'observations'}</summary>{story.howWeKnow.map((claim) => <p key={claim.claim}>{claim.claim}</p>)}</details>}
+              {story && <><p className={styles.storyLabel}>If deferred</p><p>{story.whatItMeansIfWaived}</p></>}
+              <label>What we recommend<textarea value={whatWeRecommend} maxLength={5000} onChange={(event) => edit('recommend', event.target.value)} /></label>
+              <button type="button" className={styles.storyAction} disabled={busy || !whatWeFound.trim() || !whatWeRecommend.trim()} onClick={saveReview}>{busy ? 'Saving…' : !story && job.storyMode === 'topology_manual' ? 'Review and save story' : 'Save reviewed story'}</button>
+            </div>
+          )}
+          {busy && !story && <p role="status" aria-live="polite">Loading story truth…</p>}
+          {error && <p className={styles.storyError} role="alert">{error}</p>}
+        </>
+      )}
+    </section>
+  )
+}
+
+function AuthorizationStrip({ job, versionNumber, jobSubtotalCents, totalCents, canDecide, immediateVerdict, focusRef, onDecision }: {
+  job: BuilderJob
+  versionNumber: number
+  jobSubtotalCents: number
+  totalCents: number
+  canDecide: boolean
+  immediateVerdict?: string
+  focusRef: (element: HTMLElement | null) => void
+  onDecision: (kind: 'phone' | 'in_person' | 'declined', invoker: HTMLButtonElement) => void
+}): React.JSX.Element {
+  const verdict = immediateVerdict ?? (job.approval.state === 'approved'
+    ? `Approved · V${versionNumber}`
+    : job.approval.state === 'declined' ? `Declined · V${versionNumber}` : null)
+  return (
+    <section className={styles.authorizationStrip} role="region" aria-label={`Authorization for ${job.title}`} tabIndex={-1} ref={focusRef}>
+      <p className={styles.eyebrow}>Quote V{versionNumber} · immutable</p>
+      <p className={styles.authorizationTitle}>{job.title}</p>
+      <dl><div><dt>Job subtotal before tax</dt><dd className={styles.money}>{formatMoneyCents(jobSubtotalCents)}</dd></div><div><dt>Ticket total</dt><dd className={styles.money}>{formatMoneyCents(totalCents)}</dd></div></dl>
+      {verdict ? <p className={styles.verdict} role="status" aria-live="polite">{verdict}</p> : canDecide && job.decisionEligible ? (
+        <div className={styles.decisionActions}>
+          <button type="button" onClick={(event) => onDecision('phone', event.currentTarget)}>Phone approval</button>
+          <button type="button" onClick={(event) => onDecision('in_person', event.currentTarget)}>In-person approval</button>
+          <button type="button" onClick={(event) => onDecision('declined', event.currentTarget)}>Record declined</button>
+        </div>
+      ) : <p className={styles.storyTruth}>{canDecide
+        ? 'Customer decision is unavailable for this job’s current state.'
+        : 'Advisor or owner records the customer decision.'}</p>}
+    </section>
+  )
+}
+
+function DecisionDialog({ decision, onCancel, onConfirm }: { decision: DecisionState; onCancel: () => void; onConfirm: () => void }): React.JSX.Element {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useEffect(() => cancelRef.current?.focus(), [])
+  useEffect(() => { if (decision.busy) dialogRef.current?.focus() }, [decision.busy])
+  const channel = decision.kind === 'phone' ? 'phone' : decision.kind === 'in_person' ? 'in-person' : null
+  const title = channel ? `Record ${channel} approval?` : 'Record declined?'
+  return (
+    <div ref={dialogRef} className={styles.decisionDialog} role="alertdialog" tabIndex={-1} aria-modal="true" aria-label={title} onKeyDown={(event) => {
+      if (event.key === 'Escape' && !decision.busy) { event.preventDefault(); onCancel(); return }
+      if (event.key !== 'Tab') return
+      const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'))
+      if (buttons.length === 0) { event.preventDefault(); dialogRef.current?.focus(); return }
+      const first = buttons[0]; const last = buttons[buttons.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }}>
+      <p className={styles.eyebrow}>Authorization strip</p><h2>{title}</h2>
+      <p>{decision.title} · V{decision.versionNumber}</p>
+      <dl><div><dt>Job subtotal before tax</dt><dd>{formatMoneyCents(decision.jobSubtotalCents)}</dd></div><div><dt>Ticket total</dt><dd>{formatMoneyCents(decision.totalCents)}</dd></div></dl>
+      {decision.error && <p className={styles.storyError} role="alert">{decision.error}</p>}
+      <div className={styles.decisionActions}>
+        <button ref={cancelRef} type="button" disabled={decision.busy} onClick={onCancel}>Cancel</button>
+        <button type="button" disabled={decision.busy} onClick={onConfirm}>{decision.busy ? 'Recording…' : channel ? 'Record approval' : 'Record declined'}</button>
+      </div>
+    </div>
+  )
+}
 
 type EditorTarget = {
   mode: 'create' | 'edit'

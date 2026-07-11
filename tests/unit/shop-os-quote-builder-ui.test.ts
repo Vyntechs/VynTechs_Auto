@@ -5,8 +5,11 @@ import {
   formatMoneyCents,
   getQuotePreparationState,
   parseMoneyToCents,
+  parseCustomerStoryMutationResponse,
+  parseCustomerStoryWorkspaceResponse,
   parseQuoteBuilderProjection,
   parsePreparedVersionResponse,
+  parseQuoteDecisionResponse,
   summarizeQuoteMoney,
 } from '@/lib/shop-os/quote-builder-ui'
 
@@ -19,6 +22,10 @@ describe('quote preparation readiness', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Labor', kind: 'repair', workStatus: 'open',
+      story: { content: null, source: null, reviewStatus: null, revision: 0 },
+      storyMode: null,
+      decisionEligible: false,
+      approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'labor', description: 'Explicit labor',
         sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
@@ -26,6 +33,7 @@ describe('quote preparation readiness', () => {
         laborHours: '1', laborRateCents: null,
       }],
     }],
+    capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
   })!
 
@@ -57,11 +65,42 @@ describe('quote preparation readiness', () => {
   it('treats an active version as already prepared', () => {
     const active = {
       ...readyBuilder,
-      activeVersion: { id: '00000000-0000-4000-8000-000000000401', versionNumber: 4 },
+      activeVersion: {
+        id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
+        totalCents: 10_825,
+        jobs: [{ jobId: '00000000-0000-4000-8000-000000000201', subtotalCents: 10_000 }],
+      },
     }
     expect(getQuotePreparationState({
       builder: active, totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
     })).toEqual({ kind: 'prepared', version: active.activeVersion })
+  })
+
+  it('strictly validates exact-version decision responses', () => {
+    const response = {
+      changed: true,
+      event: {
+        id: '00000000-0000-4000-8000-000000000501', kind: 'approved',
+        quoteVersionId: '00000000-0000-4000-8000-000000000401',
+        jobId: '00000000-0000-4000-8000-000000000201', approvedVia: 'phone',
+      },
+      projection: {
+        approvalState: 'approved',
+        approvedQuoteVersionId: '00000000-0000-4000-8000-000000000401',
+      },
+    }
+    expect(parseQuoteDecisionResponse(201, response)).toEqual(response)
+    expect(parseQuoteDecisionResponse(200, { ...response, changed: false })).toEqual({ ...response, changed: false })
+    expect(parseQuoteDecisionResponse(200, response)).toBeNull()
+    expect(parseQuoteDecisionResponse(201, { ...response, changed: false })).toBeNull()
+    expect(parseQuoteDecisionResponse(201, { ...response, hidden: true })).toBeNull()
+    const decline = {
+      ...response,
+      event: { ...response.event, kind: 'declined', approvedVia: null },
+      projection: { approvalState: 'approved', approvedQuoteVersionId: response.event.quoteVersionId },
+    }
+    expect(parseQuoteDecisionResponse(201, decline)).toBeNull()
+    expect(parseQuoteDecisionResponse(200, { ...decline, changed: false })).toEqual({ ...decline, changed: false })
   })
 
   it('strictly validates 201-created and 200-existing version responses', () => {
@@ -75,6 +114,78 @@ describe('quote preparation readiness', () => {
   })
 })
 
+describe('customer story response validation', () => {
+  const profileId = '00000000-0000-4000-8000-000000000601'
+  const sessionId = '00000000-0000-4000-8000-000000000602'
+  const eventId = '00000000-0000-4000-8000-000000000603'
+  const story = {
+    whatYouToldUs: 'Battery warning appears while driving.',
+    whatWeFound: 'Alternator output is below specification.',
+    howWeKnow: [{ claim: 'Charging output measured 11.8 volts.', sourceEventIds: [eventId], sourceArtifactIds: [] }],
+    whatItMeansIfWaived: 'The diagnosed issue remains unresolved.',
+    whatWeRecommend: 'Replace the alternator.',
+  }
+  const fullMeta = {
+    source: 'ai' as const, sessionId, generatedAt: '2026-07-11T12:00:00.000Z',
+    lastEditedByProfileId: profileId, lastEditedAt: '2026-07-11T12:00:00.000Z',
+    generationClientKey: '00000000-0000-4000-8000-000000000604',
+    generationRequestFingerprint: 'a'.repeat(64), generatedByProfileId: profileId,
+    storyRevision: 1, reviewStatus: 'pending' as const,
+  }
+
+  it('parses a bounded row-20 workspace and strips actor metadata', () => {
+    const workspace = {
+      story,
+      storyMeta: {
+        source: 'ai', sessionId, generatedAt: fullMeta.generatedAt,
+        lastEditedByProfileId: profileId, lastEditedAt: fullMeta.lastEditedAt,
+        reviewStatus: 'pending',
+      },
+      storyRevision: 1,
+      evidence: {
+        events: [{ id: eventId, kind: 'observation', createdAt: fullMeta.generatedAt, label: 'Charging output measured 11.8 volts.' }],
+        artifacts: [], nextEventCursor: null, nextArtifactCursor: null,
+      },
+    }
+    expect(parseCustomerStoryWorkspaceResponse(workspace)).toEqual({
+      ...workspace,
+      storyMeta: {
+        source: 'ai', sessionId, generatedAt: fullMeta.generatedAt,
+        lastEditedAt: fullMeta.lastEditedAt, reviewStatus: 'pending',
+      },
+    })
+    expect(JSON.stringify(parseCustomerStoryWorkspaceResponse(workspace))).not.toContain(profileId)
+  })
+
+  it('parses POST full metadata and PUT safe metadata into the same private-free mutation result', () => {
+    const post = { changed: true, story, storyMeta: fullMeta, storyRevision: 1 }
+    const safeMeta = {
+      source: 'ai', sessionId, generatedAt: fullMeta.generatedAt,
+      lastEditedAt: fullMeta.lastEditedAt, reviewStatus: 'pending', storyRevision: 1,
+    }
+    expect(parseCustomerStoryMutationResponse(post)).toEqual({ ...post, storyMeta: safeMeta })
+    expect(parseCustomerStoryMutationResponse({ ...post, storyMeta: safeMeta })).toEqual({ ...post, storyMeta: safeMeta })
+    expect(JSON.stringify(parseCustomerStoryMutationResponse(post))).not.toContain(profileId)
+  })
+
+  it.each([
+    { story: null, storyMeta: null, storyRevision: 0, evidence: { events: [], artifacts: [], nextEventCursor: null, nextArtifactCursor: null }, extra: true },
+    { story, storyMeta: null, storyRevision: 1, evidence: { events: [], artifacts: [], nextEventCursor: null, nextArtifactCursor: null } },
+    { story: null, storyMeta: null, storyRevision: 0, evidence: { events: [{ id: 'bad', kind: 'observation', createdAt: fullMeta.generatedAt, label: 'x' }], artifacts: [], nextEventCursor: null, nextArtifactCursor: null } },
+  ])('rejects hostile workspace payloads', (hostile) => {
+    expect(parseCustomerStoryWorkspaceResponse(hostile)).toBeNull()
+  })
+
+  it.each([
+    { changed: true, story, storyMeta: { ...fullMeta, generationClientKey: undefined }, storyRevision: 1 },
+    { changed: true, story: { ...story, whatWeFound: ' trailing ' }, storyMeta: fullMeta, storyRevision: 1 },
+    { changed: true, story, storyMeta: fullMeta, storyRevision: 2 },
+    { changed: true, story, storyMeta: { ...fullMeta, hidden: true }, storyRevision: 1 },
+  ])('rejects hostile story mutation payloads', (hostile) => {
+    expect(parseCustomerStoryMutationResponse(hostile)).toBeNull()
+  })
+})
+
 describe('quote builder refresh projection validation', () => {
   const valid = {
     ticket: { id: '00000000-0000-4000-8000-000000000101', status: 'open', reconciled: true },
@@ -84,17 +195,27 @@ describe('quote builder refresh projection validation', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Brake service', kind: 'repair', workStatus: 'open',
+      story: { content: null, source: null, reviewStatus: null, revision: 0 },
+      storyMode: null,
+      decisionEligible: false,
+      approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'fee', description: 'Fee', sort: 0, quantity: '1',
         priceCents: 500, taxable: true, partNumber: null, brand: null,
         coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
       }],
     }],
+    capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
   }
 
   it('accepts the complete exact safe projection', () => {
     expect(parseQuoteBuilderProjection(valid)).toEqual(valid)
+    const unavailable = {
+      ...valid,
+      jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'unavailable' }],
+    }
+    expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
   })
 
   it('accepts exact row-17 quantity/hour caps and rejects cap plus one', () => {
@@ -125,6 +246,15 @@ describe('quote builder refresh projection validation', () => {
     { ...valid, jobs: [{ ...valid.jobs[0], lines: [{ ...valid.jobs[0].lines[0], quantity: '1'.repeat(33) }] }] },
     { ...valid, jobs: [valid.jobs[0], valid.jobs[0]] },
     { ...valid, jobs: [{ ...valid.jobs[0], lines: [{ ...valid.jobs[0].lines[0], unitCostCents: 1 }] }] },
+    { ...valid, jobs: [{ ...valid.jobs[0], story: { ...valid.jobs[0].story, source: 'ai', content: null } }] },
+    { ...valid, capabilities: { canRecordCustomerApproval: 'yes' } },
+    { ...valid, jobs: [{ ...valid.jobs[0], decisionEligible: 'yes' }] },
+    { ...valid, jobs: [{ ...valid.jobs[0], storyMode: 'ordinary_locked_tree' }] },
+    { ...valid, jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'not-a-mode' }] },
+    { ...valid, activeVersion: {
+      id: '00000000-0000-4000-8000-000000000401', versionNumber: 1, totalCents: 500,
+      jobs: [{ jobId: valid.jobs[0].id, subtotalCents: 501 }],
+    } },
   ])('rejects incomplete, malformed, or hidden-extra projections', (hostile) => {
     expect(parseQuoteBuilderProjection(hostile)).toBeNull()
   })

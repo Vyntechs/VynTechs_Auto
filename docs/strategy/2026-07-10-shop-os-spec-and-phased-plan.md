@@ -513,6 +513,8 @@ The bar: readable in under 60 seconds on a phone; verdict first, proof one tap b
 
 **Implementation correction — row 20 provenance boundary proved 2026-07-11.** Row 20 supports ordinary locked tree sessions only. Any `wizard_lock_in` returns `unsupported_path` before provider work because current client-supplied wizard lock provenance cannot satisfy this section's evidence contract without changing engine semantics. This overrides the original tree/published-wizard wording for row 20. Published-wizard and topology bridges require separately approved engine work; topology, simple, and other unsupported paths remain manual/template stories.
 
+**Implementation correction — row 21 human story and exact-version approval proved 2026-07-11.** [Row-21 design](./2026-07-11-shop-os-row21-story-review-and-approval-design.md) and [execution packet](./2026-07-11-shop-os-row21-story-review-and-approval-plan.md) extend the existing quote workspace with strict human review for row-20 AI stories, honest manual topology stories with empty proof, and exact-version phone/in-person/decline decisions. Published-wizard and unfinished diagnostic paths remain explicitly unsupported; parts-role users cannot mutate stories or decisions. Diagnostic versioning/approval fails closed without a valid reviewed or manual story, approval truth is checked against the sole active immutable snapshot, and UI retries defer to refreshed server truth. Full verification passes 231 files/2,312 tests, TypeScript, production build, focused accessibility/interaction tests, independent task reviews, and whole-branch review. No migration, provider, messaging, public approval link, diagnostic-engine semantic, repair authorization, or production-data change shipped in this row.
+
 ---
 
 ## 9. Notifications and push
@@ -678,7 +680,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3 and 5–20 are complete. Row 21 is next; later production feature enablement and external account/spend rows remain owner gates.
+3. Rows 1–3 and 5–21 are complete. Row 22 is next; later production feature enablement and external account/spend rows remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -736,7 +738,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 18 | 3 | Manual quote builder + totals | A | 17 | complete | PR #129; 11 focused files/216 tests + 219 files/2,073 full tests; [execution packet](./2026-07-11-shop-os-phase-3-manual-quote-builder-plan.md) |
 | 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | complete | PR #130; [execution packet](./2026-07-11-shop-os-phase-3-canned-jobs-plan.md); copied lines remain complete visible manual truth |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | complete | PR #132; merge `e9bc780`; 5 focused files/129 tests + 227 files/2,251 full tests; [execution packet](./2026-07-11-shop-os-phase-3-customer-story-plan.md); ordinary locked trees only |
-| 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | pending | — |
+| 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | complete | PR #134; 231 files/2,312 full tests; [design](./2026-07-11-shop-os-row21-story-review-and-approval-design.md) + [execution packet](./2026-07-11-shop-os-row21-story-review-and-approval-plan.md); no migration/provider/engine changes |
 | 22 | 3 | Ticket-aware repair + declined/no-repair closeout guards across handler/API/UI | I | 15,17 | pending | Authorization seam; legacy sessions unchanged |
 | 23 | 3 | Simple-work/attachment/escalation handlers | LT | 13,16,17,22 | pending | Approved quote version required |
 | 24 | 3 | Simple-work/attachment/escalation UI | T | 14,23 | pending | Approved quote version required |

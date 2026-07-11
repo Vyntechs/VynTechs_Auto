@@ -77,7 +77,7 @@ const builder = {
     laborRateCents: 12500, taxRateBps: 825,
     laborRateConfigured: true, taxRateConfigured: true,
   },
-  jobs: [], activeVersion: null,
+  jobs: [], capabilities: { canRecordCustomerApproval: true }, activeVersion: null,
 } satisfies QuoteBuilder
 const props = () => ({ params: Promise.resolve({ id: ticketId }) })
 
@@ -187,10 +187,11 @@ describe('QuotePage', () => {
     expect(clientTicket).toEqual({
       id: ticketId,
       ticketNumber: 101,
+      concern: 'PRIVATE_CONCERN',
       customer: { name: 'Marisol Vega' },
       vehicle: { year: 2019, make: 'Ford', model: 'F-150' },
     })
-    expect(JSON.stringify(clientTicket)).not.toMatch(/PRIVATE_|customer-1|vehicle-1/)
+    expect(JSON.stringify(clientTicket)).not.toMatch(/PRIVATE_PHONE|PRIVATE_EMAIL|PRIVATE_ENGINE|PRIVATE_VIN|PRIVATE_PLATE|customer-1|vehicle-1/)
   })
 
   it('renders a retry surface for initial quote lock contention', async () => {

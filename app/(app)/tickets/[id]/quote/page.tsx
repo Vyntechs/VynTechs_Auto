@@ -68,6 +68,7 @@ export default async function QuotePage({
   const quoteTicket = {
     id: ticketResult.ticket.id,
     ticketNumber: ticketResult.ticket.ticketNumber,
+    concern: ticketResult.ticket.concern,
     customer: ticketResult.ticket.customer
       ? { name: ticketResult.ticket.customer.name }
       : null,

@@ -21,6 +21,12 @@ import {
   type GeneratedEvidenceSelection,
 } from '@/lib/ai/customer-story'
 import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+import {
+  CUSTOMER_STORY_WAIVER,
+  customerStoryReviewTextSchema,
+  parsePersistedCustomerStory,
+  parsePersistedCustomerStoryMeta,
+} from '@/lib/shop-os/customer-story-contracts'
 
 const MAX_SELECTED = 20
 const PAGE_SIZE = 25
@@ -32,7 +38,6 @@ const MAX_STRUCTURED_BYTES = 20_000
 const MAX_PROVIDER_BYTES = 64_000
 const WORKSPACE_SCAN_CHUNK = 50
 const MAX_WORKSPACE_SCAN_CHUNKS = 4
-const WAIVER = 'If you choose not to proceed, the diagnosed issue remains unresolved.'
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const idListSchema = z.array(uuidSchema).max(MAX_SELECTED).superRefine((ids, ctx) => {
@@ -94,6 +99,11 @@ export type CustomerStoryGenerationDependencies = {
   captureLockSql?: (statements: string[]) => void
 }
 
+export type CustomerStoryReviewDependencies = {
+  afterLocks?: () => Promise<void>
+  captureLockSql?: (statements: string[]) => void
+}
+
 export type CustomerStoryWorkspaceDependencies = {
   onEvidenceQuery?: (kind: 'event' | 'artifact') => void
 }
@@ -114,6 +124,16 @@ const generationInputSchema = z.strictObject({
   expectedStoryRevision: z.number().int().nonnegative(),
   sourceEventIds: idListSchema,
   sourceArtifactIds: idListSchema,
+})
+
+const reviewInputSchema = z.strictObject({
+  actor: z.strictObject({ profileId: uuidSchema }),
+  ticketId: uuidSchema,
+  jobId: uuidSchema,
+  clientKey: uuidSchema,
+  expectedStoryRevision: z.number().int().nonnegative(),
+  whatWeFound: customerStoryReviewTextSchema,
+  whatWeRecommend: customerStoryReviewTextSchema,
 })
 
 type GenerationInput = z.infer<typeof generationInputSchema>
@@ -354,46 +374,12 @@ function casFingerprint(context: Context): string {
   })
 }
 
-const safeTextSchema = (maxBytes: number) => z.string().refine((value) => boundedRequiredText(value, maxBytes))
-
 function safeStory(value: unknown): CustomerStory | null {
-  const evidence = z.strictObject({
-    claim: safeTextSchema(2_000), sourceEventIds: z.array(uuidSchema).max(5), sourceArtifactIds: z.array(uuidSchema).max(5),
-  })
-  const schema = z.strictObject({
-    whatYouToldUs: safeTextSchema(5_000), whatWeFound: safeTextSchema(5_000), howWeKnow: z.array(evidence).max(5),
-    whatItMeansIfWaived: safeTextSchema(5_000), whatWeRecommend: safeTextSchema(5_000),
-  })
-  const parsed = schema.safeParse(value)
-  return parsed.success ? parsed.data : null
+  return parsePersistedCustomerStory(value)
 }
 
-const baseMetaSchema = z.strictObject({
-  source: z.enum(['ai', 'manual', 'template']),
-  sessionId: uuidSchema.optional(),
-  generatedAt: z.iso.datetime({ offset: true }).optional(),
-  lastEditedByProfileId: uuidSchema,
-  lastEditedAt: z.iso.datetime({ offset: true }),
-  reviewStatus: z.enum(['pending', 'reviewed']).optional(),
-})
-const generationMetaSchema = z.strictObject({
-  source: z.literal('ai'),
-  sessionId: uuidSchema,
-  generatedAt: z.iso.datetime({ offset: true }),
-  lastEditedByProfileId: uuidSchema,
-  lastEditedAt: z.iso.datetime({ offset: true }),
-  generationClientKey: uuidSchema,
-  generationRequestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-  generatedByProfileId: uuidSchema,
-  storyRevision: z.number().int().nonnegative(),
-  reviewStatus: z.enum(['pending', 'reviewed']),
-})
-
 function safePersistedMeta(value: unknown): CustomerStoryMeta | null {
-  const generated = generationMetaSchema.safeParse(value)
-  if (generated.success) return generated.data
-  const base = baseMetaSchema.safeParse(value)
-  return base.success ? base.data : null
+  return parsePersistedCustomerStoryMeta(value)
 }
 
 function workspaceMeta(value: CustomerStoryMeta): SafeStoryMeta {
@@ -598,7 +584,7 @@ function assembleStory(context: Context, selected: GeneratedEvidenceSelection): 
     whatYouToldUs: context.concern,
     whatWeFound: context.rootCause,
     howWeKnow,
-    whatItMeansIfWaived: WAIVER,
+    whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
     whatWeRecommend: context.action,
   }
 }
@@ -734,6 +720,332 @@ export async function generateAndSaveCustomerStory(
     })
   } catch (error) {
     if (error instanceof AbortGeneration) return error.failure
+    if (lockUnavailable(error)) return fail('conflict', true)
+    throw error
+  }
+}
+
+type ReviewInput = z.infer<typeof reviewInputSchema>
+type ReviewContext = {
+  actor: Pick<typeof profiles.$inferSelect, 'id' | 'shopId' | 'role' | 'membershipStatus' | 'deactivatedAt'>
+  ticket: typeof tickets.$inferSelect
+  targetJob: typeof ticketJobs.$inferSelect
+  jobs: Array<typeof ticketJobs.$inferSelect>
+  versions: Array<typeof quoteVersions.$inferSelect>
+  session: typeof sessions.$inferSelect
+  wizardEvents: SelectedEvent[]
+  now: Date
+}
+
+export type CustomerStoryReviewResult =
+  | {
+      ok: true
+      changed: boolean
+      story: CustomerStory
+      storyMeta: CustomerStoryMeta
+      storyRevision: number
+    }
+  | Failure
+
+type ReviewBinding = {
+  source: 'ai' | 'manual'
+  sessionId: string
+  concern: string
+  waiver: string
+  proof: CustomerStory['howWeKnow']
+  generation: null | {
+    generatedAt: string
+    generationClientKey: string
+    generationRequestFingerprint: string
+    generatedByProfileId: string
+  }
+}
+
+function reviewRequestFingerprint(input: ReviewInput, binding: ReviewBinding): string {
+  return fingerprint({
+    actorProfileId: input.actor.profileId,
+    ticketId: input.ticketId,
+    jobId: input.jobId,
+    clientKey: input.clientKey,
+    expectedStoryRevision: input.expectedStoryRevision,
+    whatWeFound: input.whatWeFound,
+    whatWeRecommend: input.whatWeRecommend,
+    binding,
+  })
+}
+
+async function loadReviewContext(db: AppDb, input: ReviewInput): Promise<{ ok: true; context: ReviewContext } | { ok: false; failure: Failure }> {
+  const [actor] = await db.select({
+    id: profiles.id, shopId: profiles.shopId, role: profiles.role,
+    membershipStatus: profiles.membershipStatus, deactivatedAt: profiles.deactivatedAt,
+  }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1)
+  if (!actor?.shopId) return { ok: false, failure: fail('not_found') }
+
+  const [ticket] = await db.select().from(tickets).where(and(
+    eq(tickets.id, input.ticketId), eq(tickets.shopId, actor.shopId),
+  )).limit(1)
+  const [targetJob] = await db.select().from(ticketJobs).where(and(
+    eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, actor.shopId),
+  )).limit(1)
+  if (!ticket || !targetJob || !targetJob.sessionId) return { ok: false, failure: fail('not_found') }
+  const [session] = await db.select().from(sessions).where(and(
+    eq(sessions.id, targetJob.sessionId), eq(sessions.shopId, actor.shopId),
+  )).limit(1)
+  if (!session) return { ok: false, failure: fail('not_found') }
+  if (actor.membershipStatus !== 'active' || actor.deactivatedAt || !['tech', 'advisor', 'owner'].includes(actor.role)) {
+    return { ok: false, failure: fail('forbidden') }
+  }
+  if (
+    ticket.status !== 'open' || targetJob.kind !== 'diagnostic' ||
+    !['open', 'in_progress', 'blocked'].includes(targetJob.workStatus) || session.status !== 'open'
+  ) return { ok: false, failure: fail('state_conflict', false) }
+
+  const [jobs, versions, wizardEvents, now] = await Promise.all([
+    db.select().from(ticketJobs).where(and(
+      eq(ticketJobs.shopId, actor.shopId), eq(ticketJobs.ticketId, ticket.id),
+    )).orderBy(ticketJobs.id),
+    db.select().from(quoteVersions).where(and(
+      eq(quoteVersions.shopId, actor.shopId), eq(quoteVersions.ticketId, ticket.id),
+    )).orderBy(quoteVersions.id),
+    db.select().from(sessionEvents).where(and(
+      eq(sessionEvents.sessionId, session.id), eq(sessionEvents.eventType, 'wizard_lock_in'),
+    )).orderBy(sessionEvents.id),
+    databaseNow(db),
+  ])
+  if (versions.filter((version) => version.supersededAt === null).length > 1) {
+    return { ok: false, failure: fail('conflict', false) }
+  }
+  return { ok: true, context: { actor, ticket, targetJob, jobs, versions, session, wizardEvents, now } }
+}
+
+async function lockReviewContext(
+  db: AppDb,
+  input: ReviewInput,
+  sessionId: string,
+  shopId: string,
+  dependencies: CustomerStoryReviewDependencies,
+): Promise<void> {
+  const ticketQuery = db.select().from(tickets).where(and(eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId))).limit(1).for('update', { noWait: true })
+  const jobsQuery = db.select().from(ticketJobs).where(and(eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, shopId))).orderBy(ticketJobs.id).for('update', { noWait: true })
+  const versionsQuery = db.select().from(quoteVersions).where(and(eq(quoteVersions.ticketId, input.ticketId), eq(quoteVersions.shopId, shopId))).orderBy(quoteVersions.id).for('update', { noWait: true })
+  const sessionQuery = db.select().from(sessions).where(and(eq(sessions.id, sessionId), eq(sessions.shopId, shopId))).limit(1).for('update', { noWait: true })
+  const actorQuery = db.select().from(profiles).where(and(eq(profiles.id, input.actor.profileId), eq(profiles.shopId, shopId))).limit(1).for('update', { noWait: true })
+  dependencies.captureLockSql?.(
+    [ticketQuery, jobsQuery, versionsQuery, sessionQuery, actorQuery].map((query) => query.toSQL().sql),
+  )
+  await ticketQuery
+  await jobsQuery
+  await versionsQuery
+  await sessionQuery
+  await actorQuery
+}
+
+class AbortReview extends Error {
+  constructor(readonly failure: Failure) {
+    super('abort_customer_story_review')
+  }
+}
+
+function validateReviewBinding(
+  context: ReviewContext,
+  story: CustomerStory | null,
+  meta: CustomerStoryMeta | null,
+): { ok: true; source: 'ai' | 'manual'; binding: ReviewBinding } | { ok: false; failure: Failure } {
+  const concern = customerStoryReviewTextSchema.safeParse(context.ticket.concern)
+  if (!concern.success || concern.data !== context.ticket.concern) {
+    return { ok: false, failure: fail('state_conflict', false) }
+  }
+  const tree = context.session.treeState as TreeState
+  const topology = tree?.done === true && tree.currentNodeId === '_topology'
+  if (context.wizardEvents.length > 0) {
+    return { ok: false, failure: fail('unsupported_path', false) }
+  }
+
+  if (!story && !meta) {
+    if (!topology) return { ok: false, failure: fail('unsupported_path', false) }
+    return {
+      ok: true,
+      source: 'manual',
+      binding: {
+        source: 'manual', sessionId: context.session.id, concern: context.ticket.concern,
+        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
+      },
+    }
+  }
+  if (!story || !meta) return { ok: false, failure: fail('conflict', false) }
+
+  if (meta.source === 'ai') {
+    if (
+      tree?.done !== true || tree.phase !== 'repairing' || topology ||
+      meta.sessionId !== context.session.id
+    ) return { ok: false, failure: fail('unsupported_path', false) }
+    if (
+      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
+      !meta.generatedAt || !meta.generationClientKey || !meta.generationRequestFingerprint ||
+      !meta.generatedByProfileId
+    ) return { ok: false, failure: fail('conflict', false) }
+    return {
+      ok: true,
+      source: 'ai',
+      binding: {
+        source: 'ai', sessionId: context.session.id, concern: context.ticket.concern,
+        waiver: CUSTOMER_STORY_WAIVER, proof: story.howWeKnow,
+        generation: {
+          generatedAt: meta.generatedAt,
+          generationClientKey: meta.generationClientKey,
+          generationRequestFingerprint: meta.generationRequestFingerprint,
+          generatedByProfileId: meta.generatedByProfileId,
+        },
+      },
+    }
+  }
+
+  if (meta.source === 'manual') {
+    if (!topology) {
+      return { ok: false, failure: fail('unsupported_path', false) }
+    }
+    if (meta.sessionId !== context.session.id) {
+      return { ok: false, failure: fail('conflict', false) }
+    }
+    if (
+      meta.reviewStatus !== 'reviewed' || meta.storyRevision === undefined || meta.storyRevision < 1 ||
+      !meta.reviewClientKey || !meta.reviewRequestFingerprint || !meta.reviewedByProfileId || !meta.reviewedAt ||
+      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
+      story.howWeKnow.length > 0
+    ) return { ok: false, failure: fail('conflict', false) }
+    return {
+      ok: true,
+      source: 'manual',
+      binding: {
+        source: 'manual', sessionId: context.session.id, concern: context.ticket.concern,
+        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
+      },
+    }
+  }
+  return { ok: false, failure: fail('unsupported_path', false) }
+}
+
+export async function saveReviewedCustomerStory(
+  db: AppDb,
+  rawInput: unknown,
+  dependencies: CustomerStoryReviewDependencies = {},
+): Promise<CustomerStoryReviewResult> {
+  const parsed = reviewInputSchema.safeParse(rawInput)
+  if (!parsed.success) return fail('invalid_input')
+  const input = parsed.data
+  const [preflightActor] = await db.select({ shopId: profiles.shopId }).from(profiles)
+    .where(eq(profiles.id, input.actor.profileId)).limit(1)
+  if (!preflightActor?.shopId) return fail('not_found')
+  const preflightShopId = preflightActor.shopId
+  const [preflightJob] = await db.select({ sessionId: ticketJobs.sessionId }).from(ticketJobs).where(and(
+    eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
+    eq(ticketJobs.shopId, preflightShopId),
+  )).limit(1)
+  if (!preflightJob?.sessionId) return fail('not_found')
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      await lockReviewContext(
+        transactionDb, input, preflightJob.sessionId!, preflightShopId, dependencies,
+      )
+      await dependencies.afterLocks?.()
+      const loaded = await loadReviewContext(transactionDb, input)
+      if (!loaded.ok) throw new AbortReview(loaded.failure)
+      const context = loaded.context
+      if (context.session.id !== preflightJob.sessionId) throw new AbortReview(fail('conflict', true))
+
+      const rawMeta = context.targetJob.storyMeta
+      const persistedMeta = rawMeta === null ? null : safePersistedMeta(rawMeta)
+      const persistedStory = context.targetJob.customerStory === null ? null : safeStory(context.targetJob.customerStory)
+      if (
+        (rawMeta !== null && !persistedMeta) ||
+        (context.targetJob.customerStory !== null && !persistedStory) ||
+        (persistedMeta === null) !== (persistedStory === null)
+      ) throw new AbortReview(fail('conflict', false))
+
+      const validated = validateReviewBinding(context, persistedStory, persistedMeta)
+      if (!validated.ok) throw new AbortReview(validated.failure)
+      const request = reviewRequestFingerprint(input, validated.binding)
+
+      if (persistedMeta?.reviewClientKey === input.clientKey) {
+        if (persistedMeta.reviewedByProfileId !== context.actor.id || persistedMeta.reviewRequestFingerprint !== request || !persistedStory) {
+          throw new AbortReview(fail('conflict', false))
+        }
+        return {
+          ok: true as const, changed: false, story: persistedStory, storyMeta: persistedMeta,
+          storyRevision: persistedRevision(persistedMeta),
+        }
+      }
+
+      const revision = persistedRevision(persistedMeta)
+      if (revision !== input.expectedStoryRevision) throw new AbortReview(fail('conflict', false))
+      let nextStory: CustomerStory
+      if (validated.source === 'ai' && persistedStory) {
+        nextStory = {
+          ...persistedStory,
+          whatWeFound: input.whatWeFound,
+          whatWeRecommend: input.whatWeRecommend,
+        }
+      } else if (validated.source === 'manual') {
+        nextStory = {
+          whatYouToldUs: context.ticket.concern,
+          whatWeFound: input.whatWeFound,
+          howWeKnow: [],
+          whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
+          whatWeRecommend: input.whatWeRecommend,
+        }
+      } else {
+        throw new AbortReview(fail('unsupported_path', false))
+      }
+
+      const contentChanged = persistedStory === null || fingerprint(persistedStory) !== fingerprint(nextStory)
+      const nextRevision = revision + 1
+      const reviewedAt = context.now.toISOString()
+      const reviewAudit = {
+        reviewClientKey: input.clientKey,
+        reviewRequestFingerprint: request,
+        reviewedByProfileId: context.actor.id,
+        reviewedAt,
+      }
+      const storyMeta: CustomerStoryMeta = validated.source === 'ai'
+        ? {
+            ...persistedMeta!,
+            source: 'ai',
+            lastEditedByProfileId: context.actor.id,
+            lastEditedAt: reviewedAt,
+            storyRevision: nextRevision,
+            reviewStatus: 'reviewed',
+            ...reviewAudit,
+          }
+        : {
+            source: 'manual',
+            sessionId: context.session.id,
+            lastEditedByProfileId: context.actor.id,
+            lastEditedAt: reviewedAt,
+            storyRevision: nextRevision,
+            reviewStatus: 'reviewed',
+            ...reviewAudit,
+          }
+      await transactionDb.update(ticketJobs).set({
+        customerStory: nextStory,
+        storyMeta,
+        updatedAt: context.now,
+      }).where(and(
+        eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
+        eq(ticketJobs.shopId, context.actor.shopId!),
+      ))
+      if (contentChanged) {
+        const invalidation = await invalidateActiveQuoteVersion(transactionDb, {
+          shopId: context.actor.shopId!, ticketId: input.ticketId,
+          jobIds: context.jobs.map((job) => job.id),
+          activeVersions: context.versions.filter((version) => version.supersededAt === null),
+        })
+        if (invalidation) throw new AbortReview(invalidation as Failure)
+      }
+      return { ok: true as const, changed: contentChanged, story: nextStory, storyMeta, storyRevision: nextRevision }
+    })
+  } catch (error) {
+    if (error instanceof AbortReview) return error.failure
     if (lockUnavailable(error)) return fail('conflict', true)
     throw error
   }
