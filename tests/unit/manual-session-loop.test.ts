@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from '../helpers/db'
 import { ensureProfileAndShop } from '@/lib/db/queries'
 import { createSessionForUser, closeSessionForUser } from '@/lib/sessions'
 import { promoteSessionToCorpus } from '@/lib/corpus/promotion'
-import { corpusEntries, profiles } from '@/lib/db/schema'
+import { corpusEntries, profiles, ticketJobs } from '@/lib/db/schema'
 import type { TreeState } from '@/lib/ai/tree-engine'
 
 // Voyage voyage-3 emits 1024-dim vectors; corpus_entries.embedding is vector(1024).
@@ -19,7 +19,7 @@ const stubTree: TreeState = {
   message: 'starting',
 }
 
-describe('manual session loop — what Brandon would do on a phone', () => {
+describe('legacy ticketless manual session loop', () => {
   let db: TestDb
   let close: () => Promise<void>
 
@@ -32,7 +32,7 @@ describe('manual session loop — what Brandon would do on a phone', () => {
     await close()
   })
 
-  it('walks intake → close case → corpus row appears (real promote, mocked embed)', async () => {
+  it('preserves legacy close → corpus behavior without Shop OS authorization', async () => {
     // ─── Step A: Brandon taps "New diagnosis" and fills intake ─────────────
     const userId = crypto.randomUUID()
     const profile = await ensureProfileAndShop(db, userId, 'brandon@vyntechs.test')
@@ -54,6 +54,10 @@ describe('manual session loop — what Brandon would do on a phone', () => {
     expect(created.ok).toBe(true)
     if (!created.ok) throw new Error('intake create failed')
     const sessionId = created.id
+
+    // Row 12 now wraps every new session. Clear only the outward job link to
+    // model a pre-Shop-OS ticketless session and pin its unchanged close path.
+    await db.update(ticketJobs).set({ sessionId: null }).where(eq(ticketJobs.sessionId, sessionId))
 
     // ─── Step B: Brandon taps "Close case" and submits outcome ────────────
     // Skipping the AI tree advance — irrelevant for proving the close loop.

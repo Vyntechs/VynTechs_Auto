@@ -593,7 +593,7 @@ export async function getQuoteBuilder(
   }
 }
 
-function isLockUnavailable(error: unknown): boolean {
+export function isLockUnavailable(error: unknown): boolean {
   let current: unknown = error
   for (let depth = 0; current && depth < 5; depth += 1) {
     if (typeof current === 'object' && 'code' in current && current.code === '55P03') return true

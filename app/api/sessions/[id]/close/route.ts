@@ -51,7 +51,10 @@ export async function POST(
         { status: 422 },
       )
     }
-    return NextResponse.json({ error: result.error }, { status: result.status })
+    return NextResponse.json(
+      { error: result.error, ...(result.retryable ? { retryable: true } : {}) },
+      { status: result.status },
+    )
   }
   return NextResponse.json({ ok: true })
 }

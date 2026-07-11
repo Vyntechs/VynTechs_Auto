@@ -149,7 +149,7 @@ describe('Shop OS diagnostic repair authorization', () => {
         customerComplaint: 'Low rail pressure under load',
       },
       treeState: {
-        nodes: [{ id: 'root', label: 'Confirm pressure', status: 'complete' }],
+        nodes: [{ id: 'root', label: 'Confirm pressure', status: 'resolved' }],
         currentNodeId: 'root',
         message: 'Diagnosis locked',
         phase: 'repairing',

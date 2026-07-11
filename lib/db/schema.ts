@@ -753,6 +753,10 @@ export const sessionEvents = pgTable(
         reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
         note?: string
       }
+      shopOsCloseout?: {
+        kind: 'declined_no_repair'
+        jobId: string
+      }
       repairGuidance?: {
         text: string
         tangentialConcerns?: string[]
