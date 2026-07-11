@@ -23,7 +23,7 @@ import type { Flow, WizardState } from '../flows/types'
 // Type-only import (erased at runtime) — avoids a circular dependency, since
 // lib/diagnostics/promote-system-data.ts imports table VALUES from this file.
 import type { SystemDataDraft } from '../diagnostics/promote-system-data'
-import type { AdaptiveDiagnosticState } from '../diagnostics/adaptive/contracts'
+import type { AdaptiveDiagnosticState, DiagnosticMode } from '../diagnostics/adaptive/contracts'
 
 export type { TreeState }
 
@@ -770,6 +770,13 @@ export const sessionEvents = pgTable(
       /** Stashes the pinned flow_version a wizard lock-in handed off from, so
        *  PR-N5's stale-outcomes cron can read ai_response->'wizardLockIn'->>'flowVersionId'. */
       wizardLockIn?: { flowVersionId: string }
+      adaptiveModeChange?: {
+        schemaVersion: 1
+        from: DiagnosticMode
+        to: DiagnosticMode
+        state: AdaptiveDiagnosticState
+        revision: number
+      }
     }>(),
     requestKey: uuid('request_key'),
     requestActorProfileId: uuid('request_actor_profile_id'),

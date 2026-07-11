@@ -19,6 +19,9 @@ import { resolvePlatformSlug } from '@/lib/diagnostics/resolve-platform'
 import { resolveSymptomSlug, extractDtcCodes } from '@/lib/diagnostics/symptom-resolver'
 import { reconcileSeededSymptom } from '@/lib/diagnostics/reconcile-seeded-symptom'
 import { symptomLabel } from '@/lib/diagnostics/symptom-label'
+import { getAdaptiveEligibility } from '@/lib/diagnostics/adaptive/eligibility'
+import { resolveAdaptiveCoverage } from '@/lib/diagnostics/adaptive/coverage'
+import { AdaptiveDiagnosticEntry } from '@/components/screens/adaptive-diagnostic-entry'
 
 export default async function SessionPage({
   params,
@@ -67,6 +70,86 @@ export default async function SessionPage({
         newerVersionAvailable={wizard.newerVersionAvailable}
       />
     )
+  }
+
+  // ---- Adaptive diagnostic entry (eligible Shop OS sessions only) ----------
+  // This narrow branch intentionally duplicates the legacy topology resolution
+  // below. Feature-off and ineligible sessions must retain that path unchanged.
+  const adaptiveEligibility = ctx.profile.shopId
+    ? await getAdaptiveEligibility(db, {
+        sessionId: session.id,
+        shopId: ctx.profile.shopId,
+      })
+    : { eligible: false as const }
+
+  if (adaptiveEligibility.eligible) {
+    const adaptivePlatformSlug = resolvePlatformSlug({
+      year: session.intake.vehicleYear,
+      make: session.intake.vehicleMake,
+      model: session.intake.vehicleModel,
+      engine: session.intake.vehicleEngine ?? '',
+    })
+    const adaptiveSymptomSlug = adaptivePlatformSlug
+      ? await reconcileSeededSymptom(db, adaptivePlatformSlug, {
+          candidateSlug: resolveSymptomSlug({
+            dtcCodes: extractDtcCodes(session.intake.customerComplaint),
+            complaintText: session.intake.customerComplaint,
+          }),
+          complaintText: session.intake.customerComplaint,
+        })
+      : null
+    const adaptiveCoverage = await resolveAdaptiveCoverage(db, {
+      platformSlug: adaptivePlatformSlug,
+      symptomSlug: adaptiveSymptomSlug,
+    })
+
+    if (session.adaptiveDiagnosticState === null) {
+      return (
+        <AdaptiveDiagnosticEntry
+          sessionId={session.id}
+          concern={session.intake.customerComplaint}
+          vehicleName={formatVehicleName(session.intake)}
+          coverage={adaptiveCoverage}
+        />
+      )
+    }
+
+    if (
+      session.adaptiveDiagnosticState.mode === 'guided'
+      && adaptiveCoverage.technicianInstructionsAvailable
+      && adaptiveCoverage.instructionProof !== null
+      && adaptivePlatformSlug
+      && adaptiveSymptomSlug
+    ) {
+      const adaptiveTopology = await loadSystemTopology({
+        db,
+        platformSlug: adaptivePlatformSlug,
+        symptomSlug: adaptiveSymptomSlug,
+        sessionId: session.id,
+      })
+      if (adaptiveTopology) {
+        return (
+          <TopologyDiagnostic
+            topology={adaptiveTopology}
+            layout={layoutTopology(adaptiveTopology)}
+            vehicleName={formatVehicleName(session.intake)}
+            sessionId={session.id}
+            symptoms={[{ slug: adaptiveSymptomSlug, label: symptomLabel(adaptiveSymptomSlug) }]}
+            activeSymptomSlug={adaptiveSymptomSlug}
+          />
+        )
+      }
+    }
+
+    // Manual mode and proof-open guided state use the current ActiveSession
+    // surface until ADC-5 supplies the shared manual evidence workspace.
+    const adaptiveEvents = await db
+      .select()
+      .from(sessionEvents)
+      .where(eq(sessionEvents.sessionId, session.id))
+      .orderBy(sessionEvents.createdAt)
+
+    return <ActiveSession session={session} events={adaptiveEvents} />
   }
 
   // ---- Topology diagnostic gate ----------------------------------------

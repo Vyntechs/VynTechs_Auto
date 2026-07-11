@@ -1,0 +1,233 @@
+.shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--vt-space-8) var(--vt-gutter);
+  background: var(--vt-bg);
+  color: var(--vt-fg);
+}
+
+.plate {
+  width: min(100%, 920px);
+  border: var(--vt-stroke-strong);
+  border-radius: var(--vt-radius-3);
+  background: var(--vt-surface);
+  box-shadow: var(--vt-shadow-pop);
+  overflow: hidden;
+}
+
+.header {
+  padding: clamp(var(--vt-space-8), 5vw, var(--vt-space-16));
+  border-bottom: var(--vt-stroke-hair);
+}
+
+.eyebrow,
+.vehicle,
+.truth dt,
+.truth dd,
+.choiceDetail,
+.feedback,
+.error {
+  font-family: var(--vt-font-sans);
+}
+
+.eyebrow,
+.truth dt {
+  margin: 0;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  line-height: 1.3;
+  letter-spacing: var(--vt-tr-eyebrow);
+  text-transform: uppercase;
+}
+
+.vehicle {
+  margin: var(--vt-space-4) 0 0;
+  color: var(--vt-fg-2);
+  font-size: var(--vt-fs-14);
+  line-height: var(--vt-lh-normal);
+}
+
+.concern {
+  max-width: 760px;
+  margin: var(--vt-space-3) 0 0;
+  font-family: var(--vt-font-serif);
+  font-size: clamp(var(--vt-fs-32), 5vw, var(--vt-fs-44));
+  font-weight: 400;
+  line-height: var(--vt-lh-tight);
+  letter-spacing: var(--vt-tr-display);
+  text-wrap: balance;
+}
+
+.truth {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-bottom: var(--vt-stroke-hair);
+}
+
+.truth > div {
+  padding: var(--vt-space-5) clamp(var(--vt-space-5), 4vw, var(--vt-space-10));
+}
+
+.truth > div + div {
+  border-left: var(--vt-stroke-hair);
+}
+
+.truth dd {
+  margin: var(--vt-space-2) 0 0;
+  color: var(--vt-fg);
+  font-size: var(--vt-fs-16);
+  line-height: var(--vt-lh-snug);
+  text-transform: capitalize;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--vt-space-4);
+  padding: clamp(var(--vt-space-5), 4vw, var(--vt-space-10));
+}
+
+.manualOnly {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.choice {
+  position: relative;
+  min-height: 112px;
+  padding: var(--vt-space-5);
+  border: var(--vt-stroke-strong);
+  border-radius: var(--vt-radius-2);
+  overflow: hidden;
+  background: var(--vt-surface-2);
+  color: var(--vt-fg);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--vt-dur-2) var(--vt-ease),
+    background var(--vt-dur-2) var(--vt-ease),
+    transform var(--vt-dur-1) var(--vt-ease);
+}
+
+.choice:hover:not(:disabled) {
+  border-color: var(--vt-accent);
+  background: var(--vt-surface);
+}
+
+.choice:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.choice:disabled {
+  color: var(--vt-fg-disabled);
+  cursor: wait;
+}
+
+.choiceTitle,
+.choiceDetail {
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+
+.choiceTitle {
+  font-family: var(--vt-font-serif);
+  font-size: var(--vt-fs-24);
+  font-weight: 400;
+  line-height: var(--vt-lh-snug);
+}
+
+.choiceDetail {
+  margin-top: var(--vt-space-2);
+  color: var(--vt-fg-2);
+  font-size: var(--vt-fs-13);
+  line-height: var(--vt-lh-normal);
+}
+
+.trace {
+  position: absolute;
+  inset: auto -12px -7px auto;
+  width: min(90%, 320px);
+  color: var(--vt-accent);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.trace path,
+.trace circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.trace path {
+  stroke-dasharray: 340;
+  animation: resolve-trace 2.4s var(--vt-ease-instrument) 1 forwards;
+}
+
+.trace circle {
+  fill: var(--vt-surface-2);
+}
+
+.feedback,
+.error {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 clamp(var(--vt-space-5), 4vw, var(--vt-space-10)) var(--vt-space-5);
+  font-size: var(--vt-fs-13);
+  line-height: var(--vt-lh-normal);
+}
+
+.feedback:empty {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.error {
+  color: var(--vt-risk-destructive);
+}
+
+@keyframes resolve-trace {
+  from { stroke-dashoffset: 340; }
+  58%,
+  to { stroke-dashoffset: 0; }
+}
+
+@media (max-width: 600px) {
+  .shell {
+    place-items: start center;
+    padding: var(--vt-space-4);
+  }
+
+  .truth,
+  .choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .truth > div + div {
+    border-top: var(--vt-stroke-hair);
+    border-left: 0;
+  }
+
+  .choice {
+    min-height: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .choice {
+    transition: none;
+  }
+
+  .trace path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
