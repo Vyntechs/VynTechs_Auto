@@ -46,8 +46,10 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
 
 export function TicketDetailScreen({
   ticket,
+  canBuildQuote = false,
 }: {
   ticket: TicketDetail
+  canBuildQuote?: boolean
 }): React.JSX.Element {
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
@@ -80,6 +82,17 @@ export function TicketDetailScreen({
           )}
         </header>
 
+        {ticket.status === 'open' && canBuildQuote && (
+          <div className={styles.actions}>
+            <Link
+              href={`/tickets/${ticket.id}/quote`}
+              className={styles.quoteAction}
+            >
+              Build quote
+            </Link>
+          </div>
+        )}
+
         {!ticket.customer || !ticket.vehicle ? (
           <section
             className={styles.provisional}
@@ -88,7 +101,7 @@ export function TicketDetailScreen({
             <p className={styles.eyebrow}>Provisional ticket</p>
             <h1 id="provisional-title">Customer and vehicle still needed</h1>
             <p>
-              Quoting, sending, delivery, and closeout stay blocked until this ticket is reconciled.
+              Draft quote lines now. Prepare, send, approval, delivery, and closeout stay blocked until this ticket is reconciled.
             </p>
           </section>
         ) : (
