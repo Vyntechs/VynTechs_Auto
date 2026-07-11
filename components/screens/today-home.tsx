@@ -11,6 +11,8 @@ import { FollowUpPanel } from '@/components/comeback/follow-up-panel'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
+import type { TodayTicketJobs } from '@/lib/tickets'
+import { TodayJobsBoard } from '@/components/screens/today-jobs-board'
 
 type Props = {
   techName: string
@@ -21,6 +23,7 @@ type Props = {
   canCurate?: boolean
   canWriteCounterOrder?: boolean
   canCreateTickets?: boolean
+  todayJobs?: TodayTicketJobs
 }
 
 export function TodayHome({
@@ -32,6 +35,7 @@ export function TodayHome({
   canCurate = false,
   canWriteCounterOrder = false,
   canCreateTickets = false,
+  todayJobs = { myJobs: [], openJobs: [], linkedSessionIds: [] },
 }: Props) {
   const meta = bay ? (
     <span>
@@ -137,6 +141,8 @@ export function TodayHome({
           overflow: 'auto',
         }}
       >
+        <TodayJobsBoard myJobs={todayJobs.myJobs} openJobs={todayJobs.openJobs} />
+
         {inProgress.length > 0 && (
           <Module
             num="01"
@@ -177,7 +183,9 @@ export function TodayHome({
 
         {inProgress.length === 0 &&
           closedToday.length === 0 &&
-          dueFollowUps.length === 0 && (
+          dueFollowUps.length === 0 &&
+          todayJobs.myJobs.length === 0 &&
+          todayJobs.openJobs.length === 0 && (
             <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
                 No work orders yet. Start a new diagnosis to begin.
