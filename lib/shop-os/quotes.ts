@@ -303,6 +303,16 @@ const quoteSnapshotSchema = z.strictObject({
   }),
 })
 
+export function quoteSnapshotContainsJob(
+  snapshot: unknown,
+  input: { ticketId: string; jobId: string },
+): boolean {
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  return parsed.success
+    && parsed.data.ticket.id === input.ticketId
+    && parsed.data.jobs.some((job) => job.id === input.jobId)
+}
+
 function notFound(): Failure {
   return { ok: false, error: 'not_found' }
 }
