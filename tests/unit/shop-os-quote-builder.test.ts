@@ -96,6 +96,7 @@ describe('Shop OS quote builder read model', () => {
           id: uuid(30), title: 'Front brakes', kind: 'repair', workStatus: 'open',
           story: { content: null, source: null, reviewStatus: null, revision: 0 },
           storyMode: null,
+          decisionEligible: false,
           approval: { state: 'pending_quote', quoteVersionId: null },
           lines: [{
             id: uuid(40), kind: 'part', description: 'Pads', sort: 0, quantity: '2',
@@ -141,7 +142,7 @@ describe('Shop OS quote builder read model', () => {
       ok: true, builder: { activeVersion: {
         id: uuid(50), versionNumber: 3, totalCents: 13_531,
         jobs: [{ jobId: uuid(30), subtotalCents: 12_500 }],
-      } },
+      }, jobs: [{ decisionEligible: true }] },
     })
     await db.update(quoteVersions).set({ supersededAt: new Date() }).where(eq(quoteVersions.id, uuid(50)))
     await db.insert(quoteVersions).values({
@@ -161,6 +162,58 @@ describe('Shop OS quote builder read model', () => {
       ok: false, error: 'conflict', retryable: false,
     })
   })
+
+  it.each(['in_progress', 'blocked'] as const)(
+    'projects an active-snapshot %s job as decision-ineligible',
+    async (workStatus) => {
+      await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+      const snapshot = {
+        schemaVersion: 1,
+        ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+        jobs: [{
+          id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+          lines: [{ id: uuid(40), kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
+            taxable: true, partNumber: 'PAD', brand: 'ACME', coreChargeCents: 100, fitment: 'Front',
+            laborHours: null, laborRateCents: null, source: 'manual', vendorContext: null }],
+          attachments: [], totals: { subtotalCents: 12_500, taxableSubtotalCents: 12_500 },
+        }],
+        totals: { subtotalCents: 12_500, taxableSubtotalCents: 12_500, taxCents: 1_031, totalCents: 13_531 },
+      }
+      await db.insert(quoteVersions).values({
+        id: uuid(50), shopId, ticketId, versionNumber: 1, snapshot, createdByProfileId: uuid(1),
+      })
+      await db.update(ticketJobs).set({ workStatus }).where(eq(ticketJobs.id, uuid(30)))
+      await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+        ok: true, builder: { jobs: [{ decisionEligible: false }] },
+      })
+    },
+  )
+
+  it.each(['done', 'canceled'] as const)(
+    'fails closed when an active snapshot contains a hidden %s job',
+    async (workStatus) => {
+      await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+      const snapshot = {
+        schemaVersion: 1,
+        ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+        jobs: [{
+          id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+          lines: [{ id: uuid(40), kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
+            taxable: true, partNumber: 'PAD', brand: 'ACME', coreChargeCents: 100, fitment: 'Front',
+            laborHours: null, laborRateCents: null, source: 'manual', vendorContext: null }],
+          attachments: [], totals: { subtotalCents: 12_500, taxableSubtotalCents: 12_500 },
+        }],
+        totals: { subtotalCents: 12_500, taxableSubtotalCents: 12_500, taxCents: 1_031, totalCents: 13_531 },
+      }
+      await db.insert(quoteVersions).values({
+        id: uuid(50), shopId, ticketId, versionNumber: 1, snapshot, createdByProfileId: uuid(1),
+      })
+      await db.update(ticketJobs).set({ workStatus }).where(eq(ticketJobs.id, uuid(30)))
+      await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+        ok: false, error: 'conflict', retryable: false,
+      })
+    },
+  )
 
   it('projects bounded story/review/approval facts and derives approval capability from the fresh actor', async () => {
     await db.update(ticketJobs).set({

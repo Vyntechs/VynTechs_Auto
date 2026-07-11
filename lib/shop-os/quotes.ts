@@ -160,6 +160,7 @@ export type QuoteBuilderResult =
           revision: number
         }
         storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'published_wizard_unsupported' | 'unavailable' | null
+        decisionEligible: boolean
         approval: {
           state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
           quoteVersionId: string | null
@@ -505,12 +506,13 @@ export async function getQuoteBuilder(
         }
         const activeVersion = activeVersions[0]
         let activeVersionProjection: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'] = null
+        let activeSnapshot: QuoteSnapshotV1 | null = null
         let activeSnapshotJobIds = new Set<string>()
         if (activeVersion) {
           const snapshot = validatedQuoteSnapshot(activeVersion.snapshot, ticket)
-          const currentJobIds = new Set(allJobs.map((job) => job.id))
-          if (snapshot.jobs.some((job) => !currentJobIds.has(job.id))) {
-            throw new TypeError('active quote snapshot contains an unknown job')
+          const visibleJobIds = new Set(eligibleJobs.map((job) => job.id))
+          if (snapshot.jobs.some((job) => !visibleJobIds.has(job.id))) {
+            throw new TypeError('active quote snapshot contains a hidden job')
           }
           if (!Number.isInteger(activeVersion.versionNumber) || activeVersion.versionNumber < 1
             || activeVersion.versionNumber > MAX_POSTGRES_INTEGER) {
@@ -526,6 +528,7 @@ export async function getQuoteBuilder(
             })),
           }
           activeSnapshotJobIds = new Set(snapshot.jobs.map((job) => job.id))
+          activeSnapshot = snapshot
         }
         return {
           ok: true as const,
@@ -548,6 +551,7 @@ export async function getQuoteBuilder(
               workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
               story: safeBuilderStory(job.customerStory, job.storyMeta),
               storyMode: storyMode(job),
+              decisionEligible: activeSnapshot ? decisionJobEligible(activeSnapshot, job) : false,
               approval: safeBuilderApproval(
                 job.approvalState,
                 job.approvedQuoteVersionId,
@@ -1325,6 +1329,13 @@ function snapshotContainsDecisionJob(
   }
   const currentJobIds = new Set(currentJobs.map((candidate) => candidate.id))
   if (snapshot.jobs.some((candidate) => !currentJobIds.has(candidate.id))) return false
+  return decisionJobEligible(snapshot, job)
+}
+
+function decisionJobEligible(
+  snapshot: QuoteSnapshotV1,
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus'>,
+): boolean {
   const snapshotJob = snapshot.jobs.find((candidate) => candidate.id === job.id)
   return Boolean(
     snapshotJob

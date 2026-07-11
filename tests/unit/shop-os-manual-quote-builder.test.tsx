@@ -73,6 +73,7 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
 const jobFacts = {
   story: { content: null, source: null, reviewStatus: null, revision: 0 },
   storyMode: null,
+  decisionEligible: false,
   approval: { state: 'pending_quote', quoteVersionId: null },
 } as const
 

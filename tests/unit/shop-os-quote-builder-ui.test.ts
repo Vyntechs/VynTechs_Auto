@@ -24,6 +24,7 @@ describe('quote preparation readiness', () => {
       id: '00000000-0000-4000-8000-000000000201', title: 'Labor', kind: 'repair', workStatus: 'open',
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: null,
+      decisionEligible: false,
       approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'labor', description: 'Explicit labor',
@@ -196,6 +197,7 @@ describe('quote builder refresh projection validation', () => {
       id: '00000000-0000-4000-8000-000000000201', title: 'Brake service', kind: 'repair', workStatus: 'open',
       story: { content: null, source: null, reviewStatus: null, revision: 0 },
       storyMode: null,
+      decisionEligible: false,
       approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'fee', description: 'Fee', sort: 0, quantity: '1',
@@ -246,6 +248,7 @@ describe('quote builder refresh projection validation', () => {
     { ...valid, jobs: [{ ...valid.jobs[0], lines: [{ ...valid.jobs[0].lines[0], unitCostCents: 1 }] }] },
     { ...valid, jobs: [{ ...valid.jobs[0], story: { ...valid.jobs[0].story, source: 'ai', content: null } }] },
     { ...valid, capabilities: { canRecordCustomerApproval: 'yes' } },
+    { ...valid, jobs: [{ ...valid.jobs[0], decisionEligible: 'yes' }] },
     { ...valid, jobs: [{ ...valid.jobs[0], storyMode: 'ordinary_locked_tree' }] },
     { ...valid, jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'not-a-mode' }] },
     { ...valid, activeVersion: {

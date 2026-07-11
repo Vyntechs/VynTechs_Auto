@@ -113,6 +113,7 @@ const quoteBuilderSchema = z.strictObject({
     storyMode: z.enum([
       'ordinary_locked_tree', 'topology_manual', 'published_wizard_unsupported', 'unavailable',
     ]).nullable(),
+    decisionEligible: z.boolean(),
     approval: z.strictObject({
       state: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
       quoteVersionId: uuidSchema.nullable(),
