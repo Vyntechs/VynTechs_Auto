@@ -42,9 +42,10 @@ const actor = {
   deactivatedAt: profile.deactivatedAt,
 }
 const body = {
+  clientKey: '00000000-0000-4000-8000-000000000701',
   vehicleMode: 'existing',
   existingVehicleId: '00000000-0000-0000-0000-000000000501',
-  requestedWork: { kind: 'repair', description: 'Brake vibration' },
+  quote: { mode: 'manual', kind: 'repair', description: 'Brake vibration' },
 }
 
 const authMock = vi.mocked(requireUserAndProfile)
@@ -120,7 +121,7 @@ describe('POST /api/tickets/quick', () => {
 
     expect(handlerMock).toHaveBeenCalledWith({}, { actor: { ...actor, role }, body })
     expect(response.status).toBe(201)
-    await expect(response.json()).resolves.toEqual({ ticket })
+    await expect(response.json()).resolves.toEqual({ ticket: { id: ticket.id } })
   })
 
   it.each([
@@ -134,5 +135,12 @@ describe('POST /api/tickets/quick', () => {
     const response = await POST(request(body))
     expect(response.status).toBe(status)
     await expect(response.json()).resolves.toEqual({ error })
+  })
+
+  it('preserves definitive stale context as an exact non-retryable conflict', async () => {
+    handlerMock.mockResolvedValue({ ok: false, error: 'conflict', retryable: false })
+    const response = await POST(request(body))
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({ error: 'conflict', retryable: false })
   })
 })

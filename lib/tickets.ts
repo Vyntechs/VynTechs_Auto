@@ -32,6 +32,7 @@ export type TicketDomainError =
   | 'inactive_profile'
   | 'invalid_input'
   | 'not_found'
+  | 'conflict'
   | 'invalid_assignee'
   | 'tier_confirmation_required'
   | 'ticket_not_open'
@@ -93,7 +94,12 @@ export type TicketDetail = {
 
 export type CreateTicketResult =
   | { ok: true; ticket: TicketDetail }
-  | { ok: false; error: TicketDomainError; warning?: AssignmentTierWarning }
+  | {
+      ok: false
+      error: TicketDomainError
+      warning?: AssignmentTierWarning
+      retryable?: boolean
+    }
 
 type TicketActorProfile = Pick<
   Profile,
@@ -280,6 +286,7 @@ export function ticketDomainStatus(
     case 'not_found':
       return 404
     case 'tier_confirmation_required':
+    case 'conflict':
     case 'ticket_not_open':
     case 'job_not_open':
     case 'assignment_conflict':
@@ -340,6 +347,7 @@ type TransactionTicketJob = {
 }
 
 type TransactionTicketInput = {
+  ticketId?: string
   shopId: string
   source: 'counter' | 'tech_quick' | 'quick_quote'
   customerId: string | null
@@ -364,6 +372,7 @@ async function insertTicketInTransaction(db: AppDb, input: TransactionTicketInpu
   const [ticket] = await db
     .insert(tickets)
     .values({
+      id: input.ticketId,
       shopId: input.shopId,
       ticketNumber: sequence.nextTicketNumber - 1,
       source: input.source,
@@ -634,7 +643,7 @@ async function validateAssignment(
 
 export async function createTicket(
   db: AppDb,
-  input: { actor: TicketActor; body: unknown },
+  input: { actor: TicketActor; body: unknown; internal?: { ticketId: string } },
 ): Promise<CreateTicketResult> {
   const denied = actorGate(input.actor)
   if (denied) return denied
@@ -642,6 +651,10 @@ export async function createTicket(
   const parsed = createTicketBodySchema.safeParse(input.body)
   if (!parsed.success) return { ok: false, error: 'invalid_input' }
   const body = parsed.data
+  const internalTicketId = input.internal
+    ? z.uuid().safeParse(input.internal.ticketId)
+    : null
+  if (input.internal && !internalTicketId?.success) return { ok: false, error: 'invalid_input' }
   const shopId = input.actor.shopId as string
 
   if (body.source === 'tech_quick') {
@@ -676,6 +689,7 @@ export async function createTicket(
     }
 
     const created = await insertTicketInTransaction(tx as AppDb, {
+      ticketId: internalTicketId?.success ? internalTicketId.data : undefined,
       shopId,
       source: body.source,
       customerId: body.customerId,

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
+import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import type { TicketDetail } from '@/lib/tickets'
 
@@ -12,7 +13,7 @@ vi.mock('next/link', () => ({
   ),
 }))
 
-const router = { push: vi.fn(), replace: vi.fn() }
+const router = { push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }
 vi.mock('next/navigation', () => ({ useRouter: () => router }))
 
 type Builder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -26,6 +27,25 @@ const FEE_LINE_ID = '00000000-0000-4000-8000-000000000303'
 const NEW_LINE_ID = '00000000-0000-4000-8000-000000000304'
 const PINNED_LINE_ID = '00000000-0000-4000-8000-000000000305'
 const VERSION_ID = '00000000-0000-4000-8000-000000000401'
+const CANNED_ID = '00000000-0000-4000-8000-000000000501'
+const CANNED_JOB_ID = '00000000-0000-4000-8000-000000000502'
+const CANNED_PART_LINE_ID = '00000000-0000-4000-8000-000000000503'
+const CANNED_LABOR_LINE_ID = '00000000-0000-4000-8000-000000000504'
+
+const cannedJob = {
+  id: CANNED_ID,
+  title: 'Oil service',
+  kind: 'maintenance',
+  defaultRequiredSkillTier: 1,
+  sort: 10,
+  lines: [
+    { kind: 'part', description: 'Oil filter', sort: 10, quantity: '1', priceCents: 1_250, taxable: true },
+    { kind: 'labor', description: 'Oil service labor', sort: 20, hours: '0.5', priceCents: 5_000, taxable: false, laborRateCents: 10_000 },
+    { kind: 'fee', description: 'Disposal', sort: 30, priceCents: 500, taxable: true },
+  ],
+  fingerprint: 'a'.repeat(64),
+  summary: { subtotalCents: 6_750, taxableSubtotalCents: 1_750, taxCents: 144, totalCents: 6_894 },
+} satisfies SafeCannedJobTemplate
 
 const ticket: TicketDetail = {
   id: TICKET_ID, ticketNumber: 42, source: 'counter', status: 'open',
@@ -78,11 +98,35 @@ function builder(overrides: Partial<Builder> = {}): Builder {
   }
 }
 
+function builderWithAppliedCannedJob(overrides: Partial<Builder> = {}): Builder {
+  return builder({
+    activeVersion: null,
+    jobs: [
+      ...builder().jobs,
+      {
+        id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', workStatus: 'open',
+        lines: [
+          line({ id: CANNED_PART_LINE_ID, description: 'Oil filter', priceCents: 1_250,
+            partNumber: null, brand: null, coreChargeCents: null, fitment: null }),
+          line({ id: CANNED_LABOR_LINE_ID, kind: 'labor', description: 'Oil service labor', priceCents: 5_000,
+            partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+            laborHours: '0.5', laborRateCents: 10_000, taxable: false }),
+          line({ id: NEW_LINE_ID, kind: 'fee', description: 'Disposal', priceCents: 500,
+            partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+            laborHours: null, laborRateCents: null }),
+        ],
+      },
+    ],
+    ...overrides,
+  })
+}
+
 describe('ManualQuoteBuilder', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     router.push.mockReset()
     router.replace.mockReset()
+    router.refresh.mockReset()
   })
   it('renders customer-safe job and manual line truth with the calibrated quote tape', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
@@ -206,10 +250,173 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor:focus-within\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/\.cannedPicker select\s*\{[^}]*min-height:\s*44px/)
+    expect(css).toMatch(/\.cannedApply\s*\{[^}]*min-height:\s*44px/)
+    expect(css).toMatch(/\.job:focus\s*\{[^}]*outline:/)
 
     const ledger = screen.getByRole('region', { name: 'Quote ledger' })
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(ledger.compareDocumentPosition(tape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+describe('ManualQuoteBuilder canned application', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    router.push.mockReset()
+    router.replace.mockReset()
+    router.refresh.mockReset()
+  })
+
+  it('previews exact selected lines and totals before an explicit add', () => {
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    expect(screen.getByText('Maintenance · Tier 1')).toBeInTheDocument()
+    expect(screen.getByText('Part · Qty 1 · Oil filter')).toBeInTheDocument()
+    expect(screen.getByText('Labor · 0.5 hr · Oil service labor')).toBeInTheDocument()
+    expect(screen.getByText('Fee · Disposal')).toBeInTheDocument()
+    expect(screen.getByText('$67.50')).toBeInTheDocument()
+    expect(screen.getByText('$1.44')).toBeInTheDocument()
+    expect(screen.getByText('$68.94')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add canned job' })).toBeEnabled()
+    expect(document.body.textContent).not.toMatch(/unit cost|vendor|approve|authorize|start work/i)
+  })
+
+  it('applies the exact selection, validates refreshed truth, and focuses the new job', async () => {
+    const nextBuilder = builderWithAppliedCannedJob()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, {
+        changed: true,
+        job: { id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
+      }))
+      .mockResolvedValueOnce(response(200, { builder: nextBuilder }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    await screen.findByRole('heading', { name: 'Oil service' })
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    expect(requestBody).toMatchObject({
+      cannedJobId: CANNED_ID,
+      expectedFingerprint: cannedJob.fingerprint,
+      expectedTaxRateBps: 825,
+    })
+    expect(requestBody.clientKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/tickets/${TICKET_ID}/quote`)
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Oil service' }).closest('li'))
+    expect(screen.getByLabelText('Canned job')).toHaveValue('')
+  })
+
+  it('rejects an apply response that does not exactly match the selected template', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(201, {
+      changed: true,
+      job: { id: CANNED_JOB_ID, title: 'Different work', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
+    }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('Canned job')).toHaveValue(CANNED_ID)
+  })
+
+  it('rejects refreshed truth without the returned job and preserves the retry key', async () => {
+    const applied = {
+      changed: true,
+      job: { id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, applied))
+      .mockResolvedValueOnce(response(200, { builder: builder({ activeVersion: null }) }))
+      .mockResolvedValueOnce(response(201, applied))
+      .mockResolvedValueOnce(response(200, { builder: builderWithAppliedCannedJob() }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    const add = screen.getByRole('button', { name: 'Add canned job' })
+    fireEvent.click(add)
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Canned job')).toHaveValue(CANNED_ID)
+    fireEvent.click(add)
+    await screen.findByRole('heading', { name: 'Oil service' })
+    const first = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    const second = JSON.parse(fetchMock.mock.calls[2][1]!.body as string)
+    expect(second.clientKey).toBe(first.clientKey)
+  })
+
+  it('rejects refreshed truth while a prepared version remains active', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, {
+        changed: true,
+        job: { id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
+      }))
+      .mockResolvedValueOnce(response(200, {
+        builder: builderWithAppliedCannedJob({ activeVersion: { id: VERSION_ID, versionNumber: 3 } }),
+      }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Canned job')).toHaveValue(CANNED_ID)
+  })
+
+  it('keeps one apply key across an ambiguous retry and refreshes a stale catalog explicitly', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: false }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    const add = screen.getByRole('button', { name: 'Add canned job' })
+    fireEvent.click(add)
+    await screen.findByText('Connection interrupted. Retry with the same details.')
+    fireEvent.click(add)
+    await screen.findByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')
+    const first = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    const second = JSON.parse(fetchMock.mock.calls[1][1]!.body as string)
+    expect(second.clientKey).toBe(first.clientKey)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh canned jobs' }))
+    expect(router.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('reconciles a stale catalog refresh, resets changed selection, and restores focus', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: false }))
+      .mockRejectedValueOnce(new Error('offline'))
+    const view = render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    await screen.findByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh canned jobs' }))
+    view.rerender(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({ configuration: { ...builder().configuration, taxRateBps: 900 } })}
+      cannedJobs={[cannedJob]}
+    />)
+    await waitFor(() => expect(screen.getByLabelText('Canned job')).toHaveFocus())
+    expect(screen.getByLabelText('Canned job')).toHaveValue('')
+    expect(screen.queryByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    await screen.findByText('Connection interrupted. Retry with the same details.')
+    const beforeRefresh = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    const afterRefresh = JSON.parse(fetchMock.mock.calls[1][1]!.body as string)
+    expect(afterRefresh.clientKey).not.toBe(beforeRefresh.clientKey)
+    expect(afterRefresh.expectedTaxRateBps).toBe(900)
+  })
+
+  it('fails closed when the catalog cannot be trusted or apply success is malformed', async () => {
+    const { rerender } = render(
+      <ManualQuoteBuilder ticket={ticket} builder={builder()} cannedCatalogAvailable={false} />,
+    )
+    expect(screen.getByText('Canned jobs unavailable')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Canned job')).toBeNull()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(201, {
+      changed: true,
+      job: { id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3, extra: true },
+    }))
+    rerender(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
+    fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add canned job' }))
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Oil service' })).toBeNull()
   })
 })
 

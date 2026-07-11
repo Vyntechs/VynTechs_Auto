@@ -100,6 +100,124 @@
   min-width: 0;
 }
 
+.cannedPicker,
+.cannedUnavailable {
+  margin-top: 22px;
+  border: 1px solid var(--vt-rule-strong);
+  padding: 18px;
+  background: var(--vt-bone-100);
+}
+
+.cannedPicker h3,
+.cannedUnavailable strong {
+  margin: 6px 0 0;
+  font-family: var(--vt-font-serif);
+  font-size: 21px;
+  font-weight: 400;
+}
+
+.cannedPicker label {
+  display: block;
+  margin-top: 16px;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cannedPicker select {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  padding: 0 12px;
+  background: var(--vt-bone-50);
+  color: var(--vt-fg);
+  font-family: var(--vt-font-sans);
+  font-size: 16px;
+}
+
+.cannedPicker select:focus-visible,
+.cannedApply:focus-visible,
+.job:focus {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.cannedPreview {
+  margin-top: 16px;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 16px;
+}
+
+.cannedFacts,
+.cannedEmpty,
+.cannedUnavailable p {
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cannedEmpty {
+  margin: 18px 0 0;
+}
+
+.cannedPreview ul {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cannedPreview li,
+.cannedPreview dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border-top: 1px dashed var(--vt-rule);
+  padding: 10px 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+}
+
+.cannedPreview li strong,
+.cannedPreview dd {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.cannedPreview dl {
+  margin: 8px 0 0;
+}
+
+.cannedPreview dt {
+  overflow-wrap: anywhere;
+}
+
+.cannedApply {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  border: 1px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-2);
+  padding: 0 18px;
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cannedApply:disabled {
+  border-color: var(--vt-rule-strong);
+  background: var(--vt-bone-50);
+  color: var(--vt-fg-3);
+  cursor: not-allowed;
+}
+
 .sectionHeading,
 .jobHeader,
 .lineLead {
@@ -561,6 +679,11 @@
 
   .linePrice {
     text-align: left;
+  }
+
+  .cannedPreview li,
+  .cannedPreview dl > div {
+    gap: 8px;
   }
 
   .error {

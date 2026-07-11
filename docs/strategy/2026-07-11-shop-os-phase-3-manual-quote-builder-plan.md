@@ -60,8 +60,8 @@
 ## Task 7: Verify, reconcile, and ship
 
 - [x] Run focused tests, full suite, TypeScript, production build, and diff checks.
-- [ ] Add the row-18 implementation correction, mark row 18 complete, and identify row 19 as the next non-overlapping advisor lane.
-- [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and continue the next safe source lane.
+- [x] Add the row-18 implementation correction, mark row 18 complete, and identify row 19 as the next non-overlapping advisor lane.
+- [x] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and continue the next safe source lane.
 
 ## Stop conditions
 

@@ -4,14 +4,17 @@ import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const { mockPush, mockAuth, mockRecents } = vi.hoisted(() => ({
+const { mockPush, mockRefresh, mockAuth, mockRecents, mockAccess, mockCannedList } = vi.hoisted(() => ({
   mockPush: vi.fn(),
+  mockRefresh: vi.fn(),
   mockAuth: vi.fn(),
   mockRecents: vi.fn(),
+  mockAccess: vi.fn(),
+  mockCannedList: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
   redirect: vi.fn((target: string) => {
     throw new Error(`redirect:${target}`)
   }),
@@ -19,6 +22,11 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/db/client', () => ({ db: { name: 'test-db' } }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
 vi.mock('@/lib/auth', () => ({ requireUserAndProfile: mockAuth }))
+vi.mock('@/lib/auth-access', () => ({ checkAccess: mockAccess }))
+vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/shop-os/canned-jobs')>()
+  return { ...actual, listCannedJobs: mockCannedList }
+})
 vi.mock('@/lib/intake/use-search', () => ({
   useIntakeSearch: () => ({ state: { kind: 'idle' }, setQuery: vi.fn() }),
 }))
@@ -31,6 +39,22 @@ import QuickTicketPage from '@/app/(app)/tickets/new/page'
 import { QuickTicket } from '@/components/screens/quick-ticket'
 
 const vehicleId = '11111111-1111-4111-8111-111111111111'
+const ticketId = '33333333-3333-4333-8333-333333333333'
+const cannedId = '44444444-4444-4444-8444-444444444444'
+const cannedJob = {
+  id: cannedId,
+  title: 'Oil service',
+  kind: 'maintenance' as const,
+  defaultRequiredSkillTier: 1 as const,
+  sort: 10,
+  lines: [
+    { kind: 'part' as const, description: 'Oil filter', sort: 10, quantity: '1', priceCents: 1_250, taxable: true },
+    { kind: 'labor' as const, description: 'Oil service labor', sort: 20, hours: '0.5', priceCents: 5_000, taxable: false, laborRateCents: 10_000 },
+    { kind: 'fee' as const, description: 'Disposal', sort: 30, priceCents: 500, taxable: true },
+  ],
+  fingerprint: 'a'.repeat(64),
+  summary: { subtotalCents: 6_750, taxableSubtotalCents: 1_750, taxCents: 144, totalCents: 6_894 },
+}
 const recentCustomers = [
   {
     id: 'customer-1',
@@ -101,7 +125,8 @@ describe('QuickTicket', () => {
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ ticket: { id: 'ticket-abc' } }),
+        status: 201,
+        json: async () => ({ ticket: { id: ticketId } }),
       }),
     )
   })
@@ -114,15 +139,15 @@ describe('QuickTicket', () => {
   it('states the honest boundary and renders no quote, approval, assignment, AI, or price theater', () => {
     render(<QuickTicket userEmail="avery@shop.test" />)
 
-    expect(screen.getByRole('heading', { name: 'Quick ticket' })).toBeInTheDocument()
-    expect(screen.getByText(/this step does not approve repair/i)).toBeInTheDocument()
-    expect(screen.getByText(/creates one open, unassigned job/i)).toBeInTheDocument()
-    expect(screen.queryByText(/auto.?save|\bAI\b|estimate|price|send quote|assign technician/i)).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Quick quote' })).toBeInTheDocument()
+    expect(screen.getByText(/nothing is prepared, sent, approved, or started here/i)).toBeInTheDocument()
+    expect(screen.getByText(/manual capture creates an incomplete draft/i)).toBeInTheDocument()
+    expect(screen.queryByText(/auto.?save|\bAI\b|send quote|assign technician|start work/i)).toBeNull()
   })
 
   it('requires one requested repair or maintenance description before creation', () => {
     render(<QuickTicket />)
-    const createButtons = screen.getAllByRole('button', { name: /^Create quick ticket/i })
+    const createButtons = screen.getAllByRole('button', { name: /^Create quote/i })
     createButtons.forEach((button) => expect(button).toBeDisabled())
 
     fillNewTicket('maintenance')
@@ -143,7 +168,7 @@ describe('QuickTicket', () => {
       expect.objectContaining({ method: 'POST' }),
     )
     const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       vehicleMode: 'new',
       customer: {
         name: 'Robert Sandoval',
@@ -159,12 +184,13 @@ describe('QuickTicket', () => {
         mileage: 121000,
         plate: 'shop10',
       },
-      requestedWork: { kind, description },
+      quote: { mode: 'manual', kind, description },
     })
+    expect(body.clientKey).toMatch(/^[0-9a-f-]{36}$/)
     expect(body.assignedTechId).toBeUndefined()
     expect(body.sessionId).toBeUndefined()
     expect(body.price).toBeUndefined()
-    expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-abc')
+    expect(mockPush).toHaveBeenCalledWith(`/tickets/${ticketId}/quote`)
   })
 
   it('reuses predictive search and POSTs the exact existing-vehicle body with true-open semantics', async () => {
@@ -181,18 +207,155 @@ describe('QuickTicket', () => {
     fireEvent.change(screen.getByLabelText(/requested work/i), {
       target: { value: 'Rotate tires' },
     })
-    fireEvent.click(screen.getAllByRole('button', { name: /^Create quick ticket/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       vehicleMode: 'existing',
       existingVehicleId: vehicleId,
       mileage: 89000,
-      requestedWork: { kind: 'maintenance', description: 'Rotate tires' },
+      quote: { mode: 'manual', kind: 'maintenance', description: 'Rotate tires' },
     })
+    expect(body.clientKey).toMatch(/^[0-9a-f-]{36}$/)
     expect(body.assignedTechId).toBeUndefined()
-    expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-abc')
+    expect(mockPush).toHaveBeenCalledWith(`/tickets/${ticketId}/quote`)
+  })
+
+  it('defaults to canned work and previews exact lines, tax, and total', () => {
+    render(<QuickTicket cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    expect(screen.getByLabelText('Source')).toHaveValue('canned')
+    expect(screen.getByLabelText('Canned job')).toHaveValue(cannedId)
+    const preview = screen.getByRole('region', { name: 'Exact quote preview' })
+    expect(preview).toHaveTextContent('Oil service')
+    expect(preview).toHaveTextContent('Oil filter')
+    expect(preview).toHaveTextContent('Part · Qty 1 · Oil filter')
+    expect(preview).toHaveTextContent('Labor · 0.5 hr · Oil service labor')
+    expect(preview).toHaveTextContent('Fee · Disposal')
+    expect(preview).toHaveTextContent('$67.50')
+    expect(preview).toHaveTextContent('$1.44')
+    expect(preview).toHaveTextContent('$68.94')
+    expect(screen.queryByLabelText('Requested work')).toBeNull()
+  })
+
+  it('posts exact canned expectations and redirects to the quote builder', async () => {
+    const user = userEvent.setup()
+    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
+    await user.click(screen.getByText('Marisol Vega'))
+    fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
+    expect(body).toMatchObject({
+      vehicleMode: 'existing',
+      existingVehicleId: vehicleId,
+      mileage: null,
+      quote: {
+        mode: 'canned',
+        cannedJobId: cannedId,
+        expectedFingerprint: 'a'.repeat(64),
+        expectedTaxRateBps: 825,
+      },
+    })
+    expect(body.clientKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(body.requestedWork).toBeUndefined()
+    expect(mockPush).toHaveBeenCalledWith(`/tickets/${ticketId}/quote`)
+  })
+
+  it('reuses one request key for ambiguous retries and rotates it when normalized input changes', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }) } as Response)
+    const user = userEvent.setup()
+    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
+    await user.click(screen.getByText('Marisol Vega'))
+    const create = screen.getAllByRole('button', { name: /^Create quote/i })[0]
+    fireEvent.click(create)
+    await screen.findByText('The quote service could not be reached. Retry with the same details.')
+    fireEvent.click(create)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
+    fireEvent.change(screen.getByLabelText(/mileage today/i), { target: { value: '89001' } })
+    fireEvent.click(create)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3))
+    const keys = vi.mocked(globalThis.fetch).mock.calls.map((call) =>
+      JSON.parse(call[1]!.body as string).clientKey as string)
+    expect(keys[1]).toBe(keys[0])
+    expect(keys[2]).not.toBe(keys[0])
+  })
+
+  it.each([
+    ['conflict', 409, { error: 'conflict', retryable: false }],
+    ['retired template', 404, { error: 'not_found' }],
+  ] as const)('refreshes %s canned context, reconciles selection, rotates identity, and restores focus', async (_case, status, errorBody) => {
+    const refreshedJob = { ...cannedJob, title: 'Updated oil service', fingerprint: 'b'.repeat(64) }
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce({
+        ok: false, status, json: async () => errorBody,
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }),
+      } as Response)
+    const user = userEvent.setup()
+    const view = render(<QuickTicket
+      recentCustomers={recentCustomers}
+      cannedJobs={[cannedJob]}
+      cannedTaxRateBps={825}
+    />)
+    await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
+    await user.click(screen.getByText('Marisol Vega'))
+    fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
+    await screen.findByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')
+    screen.getAllByRole('button', { name: /^Create quote/i }).forEach((button) => expect(button).toBeDisabled())
+    const first = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh canned jobs' }))
+    expect(mockRefresh).toHaveBeenCalledTimes(1)
+    view.rerender(<QuickTicket
+      recentCustomers={recentCustomers}
+      cannedJobs={[refreshedJob]}
+      cannedTaxRateBps={900}
+    />)
+    await waitFor(() => expect(screen.getByLabelText('Source')).toHaveFocus())
+    screen.getAllByRole('button', { name: /^Create quote/i }).forEach((button) => expect(button).toBeEnabled())
+    expect(screen.getByLabelText('Canned job')).toHaveValue(cannedId)
+    expect(screen.getAllByText('Updated oil service')).toHaveLength(2)
+    expect(screen.queryByText('Quote or canned-job context changed. Refresh canned jobs and choose again.')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
+    const second = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[1][1]!.body as string)
+    expect(second.clientKey).not.toBe(first.clientKey)
+    expect(second.quote).toMatchObject({ expectedFingerprint: 'b'.repeat(64), expectedTaxRateBps: 900 })
+  })
+
+  it('locks edits and navigation while creation is in flight', async () => {
+    let resolveRequest!: (value: Response) => void
+    vi.mocked(globalThis.fetch).mockReturnValueOnce(new Promise((resolve) => { resolveRequest = resolve }))
+    const user = userEvent.setup()
+    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
+    await user.click(screen.getByText('Marisol Vega'))
+    fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText('Source')).toBeDisabled()
+    expect(screen.getByLabelText('Canned job')).toBeDisabled()
+    screen.getAllByRole('button', { name: /discard|cancel/i }).forEach((button) => expect(button).toBeDisabled())
+    expect(mockPush).not.toHaveBeenCalled()
+    resolveRequest({ ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }) } as Response)
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith(`/tickets/${ticketId}/quote`))
+    expect(mockPush).not.toHaveBeenCalledWith('/today')
+  })
+
+  it('keeps null-tax canned work visibly incomplete and degrades to manual when the catalog fails', () => {
+    const nullTaxJob = { ...cannedJob, summary: { ...cannedJob.summary, taxCents: null, totalCents: null } }
+    const view = render(<QuickTicket cannedJobs={[nullTaxJob]} cannedTaxRateBps={null} />)
+    const preview = screen.getByRole('region', { name: 'Exact quote preview' })
+    expect(preview).toHaveTextContent('TaxUnavailable')
+    expect(preview).toHaveTextContent('TotalUnavailable')
+    expect(preview).toHaveTextContent(/remain an incomplete draft/i)
+    view.rerender(<QuickTicket cannedCatalogAvailable={false} />)
+    expect(screen.getByText(/canned jobs are unavailable/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Source')).toHaveValue('manual')
   })
 
   it('clears entity-specific mileage when switching from one existing vehicle to another', async () => {
@@ -306,6 +469,7 @@ describe('QuickTicket', () => {
   it('keeps the user in place and gives calm recovery copy for an API error envelope', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce({
       ok: false,
+      status: 404,
       json: async () => ({ error: 'not_found' }),
     } as Response)
     render(<QuickTicket />)
@@ -321,6 +485,7 @@ describe('QuickTicket', () => {
   it('does not redirect when a successful response lacks a real ticket id', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce({
       ok: true,
+      status: 201,
       json: async () => ({ ticket: {} }),
     } as Response)
     render(<QuickTicket />)
@@ -346,16 +511,19 @@ describe('QuickTicket', () => {
     expect(allWidths).toMatch(/\.changeButton[\s\S]*min-block-size:\s*44px/)
     expect(allWidths).toMatch(/:global\(\.pis__row\)[\s\S]*min-block-size:\s*56px/)
     expect(css).toMatch(/:focus-visible/)
+    expect(css).toMatch(/padding:\s*12px 18px calc\(12px \+ env\(safe-area-inset-bottom\)\)/)
   })
 })
 
 describe('/tickets/new page', () => {
   it('protects the page and loads recent customers only for the signed-in shop', async () => {
+    mockAccess.mockResolvedValue({ kind: 'allow' })
     mockAuth.mockResolvedValue({
-      user: { email: 'avery@shop.test' },
-      profile: { shopId: 'shop-1', role: 'advisor' },
+      user: { id: 'user-1', email: 'avery@shop.test' },
+      profile: { id: 'profile-1', shopId: 'shop-1', role: 'advisor' },
     })
     mockRecents.mockResolvedValue(recentCustomers)
+    mockCannedList.mockResolvedValue({ ok: true, cannedJobs: [cannedJob], taxRateBps: 825 })
 
     const result = await QuickTicketPage()
 
@@ -369,6 +537,24 @@ describe('/tickets/new page', () => {
     expect(result.props).toMatchObject({
       userEmail: 'avery@shop.test',
       recentCustomers,
+      cannedJobs: [cannedJob],
+      cannedTaxRateBps: 825,
+      cannedCatalogAvailable: true,
+    })
+    expect(mockAccess).toHaveBeenCalledWith({ name: 'test-db' }, 'user-1')
+  })
+
+  it('keeps manual Quick Quote available when the optional canned catalog rejects', async () => {
+    mockAccess.mockResolvedValue({ kind: 'allow' })
+    mockAuth.mockResolvedValue({
+      user: { id: 'user-1', email: 'avery@shop.test' },
+      profile: { id: 'profile-1', shopId: 'shop-1', role: 'advisor' },
+    })
+    mockRecents.mockResolvedValue([])
+    mockCannedList.mockRejectedValue(new Error('catalog unavailable'))
+    const result = await QuickTicketPage()
+    expect(result.props).toMatchObject({
+      cannedJobs: [], cannedTaxRateBps: null, cannedCatalogAvailable: false,
     })
   })
 })
