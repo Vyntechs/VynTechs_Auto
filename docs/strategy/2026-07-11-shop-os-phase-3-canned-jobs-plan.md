@@ -48,16 +48,18 @@
 
 ## Task 6: Complete Door C Quick Quote
 
-- [ ] Add canned/manual source selection to the existing customer/vehicle flow with server-projected exact template preview; disclose that manual and null-tax paths remain incomplete drafts.
-- [ ] Add durable request identity and atomically create customer/vehicle/ticket/job/manual-line copies for new and existing vehicles.
-- [ ] Redirect only from a strict UUID success to `/tickets/[id]/quote`; keep manual fallback and make the explicit Prepare tap the completion step.
-- [ ] Prove first-success-wins same-key retry, client key rotation on normalized input change, stale template/tax context for new requests, rollback after every stage, no session/assignment/approval, and exact totals.
+- [x] Add canned/manual source selection to the existing customer/vehicle flow with server-projected exact template preview; disclose that manual and null-tax paths remain incomplete drafts.
+- [x] Add durable request identity and atomically create customer/vehicle/ticket/job/manual-line copies for new and existing vehicles.
+- [x] Redirect only from a strict UUID success to `/tickets/[id]/quote`; keep manual fallback and make the explicit Prepare tap the completion step.
+- [x] Prove first-success-wins same-key retry, client key rotation on normalized input change, stale template/tax context for new requests, rollback after every stage, no session/assignment/approval, and exact totals.
 
 ## Task 7: Visual, accessibility, and independent review
 
 - [ ] Prove changed Quick Quote controls at desktop and 375px: native labels, visible focus, 44px targets, stale-refresh focus, safe-area footer, keyboard clearance, mode switching, and calm errors.
 - [ ] Run the loaded configured-tax existing-vehicle canned fixture from first interaction through visible Prepared V1, recording elapsed time, tap/key count, and exact preview/display/snapshot total equality; if browser authentication/environment blocks it, record the exact gate without claiming elapsed success.
 - [ ] Independently review product truth, money, tenant/privacy, idempotency, accessibility, and future-row scope; resolve every finding.
+
+Browser proof gate recorded 2026-07-11: Chrome and the ChatGPT Chrome Extension are installed, but Chrome is not running. The browser-control contract requires Brandon's explicit permission to launch it, so no elapsed-time or rendered-browser success is claimed.
 
 ## Task 8: Verify, reconcile, and ship
 

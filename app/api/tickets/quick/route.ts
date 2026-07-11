@@ -34,11 +34,13 @@ export async function POST(req: Request) {
     body,
   })
   if (!result.ok) {
-    const error = result.warning
-      ? { error: result.error, warning: result.warning }
-      : { error: result.error }
+    const error = {
+      error: result.error,
+      ...('retryable' in result && result.retryable !== undefined ? { retryable: result.retryable } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
+    }
     return NextResponse.json(error, { status: ticketDomainStatus(result, 201) })
   }
 
-  return NextResponse.json({ ticket: result.ticket }, { status: 201 })
+  return NextResponse.json({ ticket: { id: result.ticket.id } }, { status: 201 })
 }

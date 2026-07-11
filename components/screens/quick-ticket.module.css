@@ -6,6 +6,13 @@
   padding: 20px 32px 0;
 }
 
+.formLock {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
 .screen :global(.vt-btn),
 .screen :global(.vt-field__input),
 .screen :global(.vt-field__textarea) {
@@ -76,6 +83,86 @@
   padding-block: 11px;
 }
 
+.catalogNotice,
+.draftNotice {
+  color: var(--vt-fg-3);
+  font: italic 14px/1.5 var(--vt-font-serif);
+  margin: 2px 0 0;
+}
+
+.catalogNotice {
+  border-left: 2px solid var(--vt-signal-500);
+  padding: 9px 12px;
+}
+
+.quotePreview {
+  background: var(--vt-bone-100);
+  border: 0.5px solid var(--vt-rule-strong);
+  border-radius: 3px;
+  margin-top: 4px;
+  padding: 16px;
+}
+
+.quotePreview header,
+.quotePreview li,
+.quotePreview dl > div {
+  align-items: baseline;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.quotePreview header span,
+.quotePreview header strong {
+  display: block;
+}
+
+.quotePreview header span {
+  color: var(--vt-fg-3);
+  font: 10px var(--vt-font-mono);
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.quotePreview ul {
+  border-block: 1px solid var(--vt-rule);
+  list-style: none;
+  margin: 14px 0;
+  padding: 8px 0;
+}
+
+.quotePreview li,
+.quotePreview dl > div {
+  font: 13px/1.5 var(--vt-font-serif);
+  padding-block: 3px;
+}
+
+.quotePreview dd,
+.quotePreview li strong,
+.quotePreview > header > strong {
+  font-family: var(--vt-font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.quotePreview dl {
+  margin: 0;
+}
+
+.quotePreview dl > div:last-child {
+  border-top: 1px solid var(--vt-rule-strong);
+  margin-top: 5px;
+  padding-top: 8px;
+}
+
+.quotePreview > p {
+  color: var(--vt-risk-high);
+  font: italic 13px/1.5 var(--vt-font-serif);
+  margin: 10px 0 0;
+}
+
 .truthStrip span {
   color: var(--vt-fg-3);
   font-family: var(--vt-font-mono);
@@ -84,12 +171,16 @@
 }
 
 .error {
+  align-items: center;
   background: var(--vt-bone-100);
   border-left: 2px solid var(--vt-risk-high);
   color: var(--vt-fg-2);
   font: italic 14px/1.5 var(--vt-font-serif);
   margin: 12px 32px;
   padding: 10px 14px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
 }
 
 .screen :global(a:focus-visible),
@@ -163,7 +254,7 @@
   .screen :global(.vt-form__footer) {
     align-items: stretch;
     flex-direction: column;
-    padding: 12px 18px;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
   }
 
   .screen :global(.vt-form__footer-actions) {

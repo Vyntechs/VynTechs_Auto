@@ -289,6 +289,73 @@ function persistedAppliedLineId(jobId: string, index: number): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+export type StrictCannedJobCopyResult =
+  | { ok: true; cannedJob: SafeCannedJob }
+  | Failure
+
+/** Internal transaction seam. Callers must authorize the shop before calling it. */
+export async function loadStrictCannedJobCopy(
+  db: AppDb,
+  input: {
+    shopId: string
+    cannedJobId: string
+    expectedFingerprint: string
+    expectedTaxRateBps: number | null
+  },
+): Promise<StrictCannedJobCopyResult> {
+  const [shop] = await db.select({ taxRateBps: shops.taxRateBps }).from(shops)
+    .where(eq(shops.id, input.shopId)).limit(1).for('update')
+  if (
+    !shop
+    || (shop.taxRateBps !== null
+      && (!Number.isInteger(shop.taxRateBps) || shop.taxRateBps < 0 || shop.taxRateBps > 10_000))
+  ) return conflict()
+  if (shop.taxRateBps !== input.expectedTaxRateBps) return conflict()
+  const [row] = await db.select().from(cannedJobs).where(and(
+    eq(cannedJobs.shopId, input.shopId),
+    eq(cannedJobs.id, input.cannedJobId),
+    isNull(cannedJobs.retiredAt),
+  )).limit(1).for('update')
+  if (!row) return notFound()
+  const cannedJob = projectRow(row, shop.taxRateBps)
+  if (!cannedJob || cannedJob.fingerprint !== input.expectedFingerprint) return conflict()
+  return { ok: true, cannedJob }
+}
+
+export function cannedJobLineInsertValues(
+  shopId: string,
+  jobId: string,
+  lines: SafeCannedJobLine[],
+) {
+  return lines.map((line, index) => ({
+    id: persistedAppliedLineId(jobId, index),
+    shopId,
+    jobId,
+    kind: line.kind,
+    description: line.description,
+    sort: line.sort,
+    quantity: line.kind === 'part' ? Number(line.quantity) : 1,
+    priceCents: line.priceCents,
+    taxable: line.taxable,
+    partNumber: line.kind === 'part' ? line.partNumber ?? null : null,
+    brand: line.kind === 'part' ? line.brand ?? null : null,
+    unitCostCents: null,
+    coreChargeCents: null,
+    fitment: null,
+    vendorAccountId: null,
+    externalOfferId: null,
+    vendorSnapshot: null,
+    partStatus: 'proposed' as const,
+    orderedAt: null,
+    orderedByProfileId: null,
+    receivedAt: null,
+    receivedByProfileId: null,
+    laborHours: line.kind === 'labor' ? Number(line.hours) : null,
+    laborRateCents: line.kind === 'labor' ? line.laborRateCents ?? null : null,
+    source: 'manual' as const,
+  }))
+}
+
 function projectAppliedJob(
   row: typeof ticketJobs.$inferSelect,
   lineCount: number,
