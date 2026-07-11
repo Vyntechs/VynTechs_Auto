@@ -172,12 +172,39 @@ describe('Shop OS immutable quote version creation', () => {
     expect(await db.select().from(quoteVersions)).toHaveLength(0)
     await db.update(ticketJobs).set({ storyMeta: aiMeta }).where(eq(ticketJobs.id, jobId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
-    await db.update(ticketJobs).set({ storyMeta: { ...aiMeta, reviewStatus: 'reviewed' } }).where(eq(ticketJobs.id, jobId))
+    await db.update(ticketJobs).set({ storyMeta: {
+      ...aiMeta, reviewStatus: 'reviewed', reviewClientKey: uuid(72),
+      reviewRequestFingerprint: 'b'.repeat(64), reviewedByProfileId: uuid(1),
+      reviewedAt: '2026-07-11T12:01:00.000Z',
+    } }).where(eq(ticketJobs.id, jobId))
     const reviewed = await create()
     expect(reviewed).toMatchObject({ ok: true, changed: true })
     if (!reviewed.ok) return
     const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, reviewed.version.id))
     expect((stored.snapshot as { jobs: Array<{ storyMeta: unknown }> }).jobs[0].storyMeta).toEqual({ source: 'ai', sessionId: uuid(70) })
+  })
+
+  it('requires every priced diagnostic job to carry a valid reviewed AI or manual story', async () => {
+    await db.update(ticketJobs).set({ kind: 'diagnostic', customerStory: null, storyMeta: null }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({
+      customerStory: {
+        whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn', howWeKnow: [],
+        whatItMeansIfWaived: 'Stopping distance may increase', whatWeRecommend: 'Replace pads',
+      },
+      storyMeta: {
+        source: 'manual', sessionId: uuid(70), lastEditedByProfileId: uuid(1),
+        lastEditedAt: '2026-07-11T12:00:00.000Z', storyRevision: 1, reviewStatus: 'reviewed',
+        reviewClientKey: uuid(72), reviewRequestFingerprint: 'b'.repeat(64),
+        reviewedByProfileId: uuid(1), reviewedAt: '2026-07-11T12:01:00.000Z',
+      },
+    }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toMatchObject({ ok: true, changed: true })
+    await db.update(quoteVersions).set({ supersededAt: new Date() })
+    await db.update(ticketJobs).set({ storyMeta: {
+      source: 'template', lastEditedByProfileId: uuid(1), lastEditedAt: '2026-07-11T12:00:00.000Z',
+    } }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
   it.each([

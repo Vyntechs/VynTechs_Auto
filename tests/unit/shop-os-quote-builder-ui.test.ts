@@ -7,6 +7,7 @@ import {
   parseMoneyToCents,
   parseQuoteBuilderProjection,
   parsePreparedVersionResponse,
+  parseQuoteDecisionResponse,
   summarizeQuoteMoney,
 } from '@/lib/shop-os/quote-builder-ui'
 
@@ -19,6 +20,8 @@ describe('quote preparation readiness', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Labor', kind: 'repair', workStatus: 'open',
+      story: { content: null, source: null, reviewStatus: null, revision: 0 },
+      approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'labor', description: 'Explicit labor',
         sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
@@ -26,6 +29,7 @@ describe('quote preparation readiness', () => {
         laborHours: '1', laborRateCents: null,
       }],
     }],
+    capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
   })!
 
@@ -57,11 +61,35 @@ describe('quote preparation readiness', () => {
   it('treats an active version as already prepared', () => {
     const active = {
       ...readyBuilder,
-      activeVersion: { id: '00000000-0000-4000-8000-000000000401', versionNumber: 4 },
+      activeVersion: {
+        id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
+        totalCents: 10_825,
+        jobs: [{ jobId: '00000000-0000-4000-8000-000000000201', subtotalCents: 10_000 }],
+      },
     }
     expect(getQuotePreparationState({
       builder: active, totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
     })).toEqual({ kind: 'prepared', version: active.activeVersion })
+  })
+
+  it('strictly validates exact-version decision responses', () => {
+    const response = {
+      changed: true,
+      event: {
+        id: '00000000-0000-4000-8000-000000000501', kind: 'approved',
+        quoteVersionId: '00000000-0000-4000-8000-000000000401',
+        jobId: '00000000-0000-4000-8000-000000000201', approvedVia: 'phone',
+      },
+      projection: {
+        approvalState: 'approved',
+        approvedQuoteVersionId: '00000000-0000-4000-8000-000000000401',
+      },
+    }
+    expect(parseQuoteDecisionResponse(201, response)).toEqual(response)
+    expect(parseQuoteDecisionResponse(200, { ...response, changed: false })).toEqual({ ...response, changed: false })
+    expect(parseQuoteDecisionResponse(200, response)).toBeNull()
+    expect(parseQuoteDecisionResponse(201, { ...response, changed: false })).toBeNull()
+    expect(parseQuoteDecisionResponse(201, { ...response, hidden: true })).toBeNull()
   })
 
   it('strictly validates 201-created and 200-existing version responses', () => {
@@ -84,12 +112,15 @@ describe('quote builder refresh projection validation', () => {
     },
     jobs: [{
       id: '00000000-0000-4000-8000-000000000201', title: 'Brake service', kind: 'repair', workStatus: 'open',
+      story: { content: null, source: null, reviewStatus: null, revision: 0 },
+      approval: { state: 'pending_quote', quoteVersionId: null },
       lines: [{
         id: '00000000-0000-4000-8000-000000000301', kind: 'fee', description: 'Fee', sort: 0, quantity: '1',
         priceCents: 500, taxable: true, partNumber: null, brand: null,
         coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
       }],
     }],
+    capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
   }
 
@@ -125,6 +156,12 @@ describe('quote builder refresh projection validation', () => {
     { ...valid, jobs: [{ ...valid.jobs[0], lines: [{ ...valid.jobs[0].lines[0], quantity: '1'.repeat(33) }] }] },
     { ...valid, jobs: [valid.jobs[0], valid.jobs[0]] },
     { ...valid, jobs: [{ ...valid.jobs[0], lines: [{ ...valid.jobs[0].lines[0], unitCostCents: 1 }] }] },
+    { ...valid, jobs: [{ ...valid.jobs[0], story: { ...valid.jobs[0].story, source: 'ai', content: null } }] },
+    { ...valid, capabilities: { canRecordCustomerApproval: 'yes' } },
+    { ...valid, activeVersion: {
+      id: '00000000-0000-4000-8000-000000000401', versionNumber: 1, totalCents: 500,
+      jobs: [{ jobId: valid.jobs[0].id, subtotalCents: 501 }],
+    } },
   ])('rejects incomplete, malformed, or hidden-extra projections', (hostile) => {
     expect(parseQuoteBuilderProjection(hostile)).toBeNull()
   })

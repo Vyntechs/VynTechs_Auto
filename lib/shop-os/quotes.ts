@@ -145,12 +145,28 @@ export type QuoteBuilderResult =
         title: string
         kind: 'diagnostic' | 'repair' | 'maintenance'
         workStatus: 'open' | 'in_progress' | 'blocked'
+        story?: {
+          content: QuoteCustomerStoryV1 | null
+          source: 'ai' | 'manual' | 'template' | null
+          reviewStatus: 'pending' | 'reviewed' | null
+          revision: number
+        }
+        approval?: {
+          state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+          quoteVersionId: string | null
+        }
         lines: Array<
           Omit<SafeManualDraftLine, 'quantity' | 'laborHours'>
           & { quantity: string; laborHours: string | null }
         >
       }>
-      activeVersion: { id: string; versionNumber: number } | null
+      capabilities?: { canRecordCustomerApproval: boolean }
+      activeVersion: {
+        id: string
+        versionNumber: number
+        totalCents?: number
+        jobs?: Array<{ jobId: string; subtotalCents: number }>
+      } | null
     }
   }
   | { ok: false; error: 'invalid_input' | 'not_found' | 'conflict'; retryable?: boolean }
@@ -367,6 +383,7 @@ export async function getQuoteBuilder(
       if (!actor?.shopId) return { ok: false as const, error: 'not_found' as const }
       const [ticket] = await transactionDb.select({
         id: tickets.id,
+        ticketNumber: tickets.ticketNumber,
         status: tickets.status,
         customerId: tickets.customerId,
         vehicleId: tickets.vehicleId,
@@ -401,6 +418,7 @@ export async function getQuoteBuilder(
       const activeVersions = await transactionDb.select({
         id: quoteVersions.id,
         versionNumber: quoteVersions.versionNumber,
+        snapshot: quoteVersions.snapshot,
       }).from(quoteVersions).where(and(
         eq(quoteVersions.shopId, actor.shopId as string),
         eq(quoteVersions.ticketId, ticket.id),
@@ -411,6 +429,28 @@ export async function getQuoteBuilder(
       }
 
       try {
+        const activeVersion = activeVersions[0]
+        let activeVersionProjection: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'] = null
+        if (activeVersion) {
+          const snapshot = validatedQuoteSnapshot(activeVersion.snapshot, ticket)
+          const currentJobIds = new Set(allJobs.map((job) => job.id))
+          if (snapshot.jobs.some((job) => !currentJobIds.has(job.id))) {
+            throw new TypeError('active quote snapshot contains an unknown job')
+          }
+          if (!Number.isInteger(activeVersion.versionNumber) || activeVersion.versionNumber < 1
+            || activeVersion.versionNumber > MAX_POSTGRES_INTEGER) {
+            throw new RangeError('active quote version number is unsafe')
+          }
+          activeVersionProjection = {
+            id: safeUuid(activeVersion.id),
+            versionNumber: activeVersion.versionNumber,
+            totalCents: snapshot.totals.totalCents,
+            jobs: snapshot.jobs.map((job) => ({
+              jobId: job.id,
+              subtotalCents: job.totals.subtotalCents,
+            })),
+          }
+        }
         return {
           ok: true as const,
           builder: {
@@ -430,13 +470,14 @@ export async function getQuoteBuilder(
               title: job.title,
               kind: job.kind,
               workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
+              story: safeBuilderStory(job.customerStory, job.storyMeta),
+              approval: safeBuilderApproval(job.approvalState, job.approvedQuoteVersionId),
               lines: lines
                 .filter((line) => line.jobId === job.id && isMutableManualLine(line))
                 .map(safeBuilderLine),
             })),
-            activeVersion: activeVersions[0]
-              ? { id: safeUuid(activeVersions[0].id), versionNumber: activeVersions[0].versionNumber }
-              : null,
+            capabilities: { canRecordCustomerApproval: canRecordCustomerApproval(actor.role) },
+            activeVersion: activeVersionProjection,
           },
         }
       } catch (error) {
@@ -725,14 +766,110 @@ function safeCustomerStory(value: unknown): QuoteCustomerStoryV1 | null {
   return canonicalizeJson(parsed.data) as unknown as QuoteCustomerStoryV1
 }
 
-function requireReviewedAiStory(story: unknown, meta: unknown): void {
-  if (story === null) return
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
-    throw new TypeError('customer story metadata is required')
+function safeBuilderStory(
+  storyValue: unknown,
+  metaValue: unknown,
+): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['story']> {
+  if (storyValue === null && metaValue === null) {
+    return { content: null, source: null, reviewStatus: null, revision: 0 }
   }
-  const record = meta as Record<string, unknown>
-  if (record.source === 'ai' && record.reviewStatus !== 'reviewed') {
+  if (storyValue === null || !metaValue || typeof metaValue !== 'object' || Array.isArray(metaValue)) {
+    throw new TypeError('customer story and metadata must be paired')
+  }
+  const content = safeCustomerStory(storyValue)
+  if (!content) throw new TypeError('customer story is invalid')
+  const meta = metaValue as Record<string, unknown>
+  if (meta.source !== 'ai' && meta.source !== 'manual' && meta.source !== 'template') {
+    throw new TypeError('customer story source is invalid')
+  }
+  if (meta.sessionId !== undefined
+    && (typeof meta.sessionId !== 'string' || meta.sessionId.length > 200)) {
+    throw new TypeError('customer story session is invalid')
+  }
+  if (meta.reviewStatus !== undefined
+    && meta.reviewStatus !== 'pending' && meta.reviewStatus !== 'reviewed') {
+    throw new TypeError('customer story review status is invalid')
+  }
+  if (meta.storyRevision !== undefined && (
+    typeof meta.storyRevision !== 'number'
+    || !Number.isSafeInteger(meta.storyRevision)
+    || meta.storyRevision < 0
+  )) throw new TypeError('customer story revision is invalid')
+  if (meta.source === 'ai'
+    && (meta.reviewStatus === undefined || meta.storyRevision === undefined)) {
+    throw new TypeError('AI customer story review metadata is incomplete')
+  }
+  const reviewAudit = [
+    meta.reviewClientKey,
+    meta.reviewRequestFingerprint,
+    meta.reviewedByProfileId,
+    meta.reviewedAt,
+  ]
+  const auditCount = reviewAudit.filter((value) => value !== undefined).length
+  if ((meta.reviewStatus === 'reviewed' && auditCount !== reviewAudit.length)
+    || (meta.reviewStatus !== 'reviewed' && auditCount !== 0)) {
+    throw new TypeError('customer story review audit is incomplete')
+  }
+  if (auditCount > 0) {
+    safeUuid(String(meta.reviewClientKey))
+    safeUuid(String(meta.reviewedByProfileId))
+    if (typeof meta.reviewRequestFingerprint !== 'string'
+      || !/^[a-f0-9]{64}$/.test(meta.reviewRequestFingerprint)) {
+      throw new TypeError('customer story review fingerprint is invalid')
+    }
+    if (typeof meta.reviewedAt !== 'string'
+      || Number.isNaN(new Date(meta.reviewedAt).getTime())
+      || new Date(meta.reviewedAt).toISOString() !== meta.reviewedAt) {
+      throw new TypeError('customer story review time is invalid')
+    }
+  }
+  return {
+    content,
+    source: meta.source,
+    reviewStatus: meta.reviewStatus ?? null,
+    revision: meta.storyRevision ?? 0,
+  }
+}
+
+function safeBuilderApproval(
+  state: unknown,
+  quoteVersionId: unknown,
+): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['approval']> {
+  if (state !== 'pending_quote' && state !== 'quote_ready' && state !== 'sent'
+    && state !== 'approved' && state !== 'declined') {
+    throw new TypeError('quote approval state is invalid')
+  }
+  const safeVersionId = quoteVersionId === null ? null
+    : typeof quoteVersionId === 'string' ? safeUuid(quoteVersionId) : null
+  if (quoteVersionId !== null && safeVersionId === null) {
+    throw new TypeError('approved quote version ID is invalid')
+  }
+  if ((state === 'approved') !== (safeVersionId !== null)) {
+    throw new TypeError('quote approval projection is inconsistent')
+  }
+  return { state, quoteVersionId: safeVersionId }
+}
+
+function requireVersionableStory(
+  kind: 'diagnostic' | 'repair' | 'maintenance',
+  story: unknown,
+  meta: unknown,
+): void {
+  if (story === null) {
+    if (meta !== null || kind === 'diagnostic') {
+      throw new TypeError('diagnostic customer story is required')
+    }
+    return
+  }
+  const safeStory = safeBuilderStory(story, meta)
+  if (safeStory.source === 'ai' && safeStory.reviewStatus !== 'reviewed') {
     throw new TypeError('AI customer story requires human review')
+  }
+  if (kind === 'diagnostic' && safeStory.source === 'template') {
+    throw new TypeError('diagnostic template stories are unsupported')
+  }
+  if (kind === 'diagnostic' && safeStory.source === 'manual' && safeStory.reviewStatus !== 'reviewed') {
+    throw new TypeError('manual diagnostic story requires human review')
   }
 }
 
@@ -780,7 +917,7 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
     .filter((job) => job.workStatus !== 'canceled' && (linesByJob.get(job.id)?.length ?? 0) > 0)
     .map((job) => {
       if (!job.title) throw new TypeError('job title is empty')
-      requireReviewedAiStory(job.customerStory, job.storyMeta)
+      requireVersionableStory(job.kind, job.customerStory, job.storyMeta)
       const totalsInput: Array<{ extendedCents: number; taxable: boolean }> = []
       const lines = sortBySnapshotOrder(linesByJob.get(job.id) ?? []).map((line) => {
         if (!line.description) throw new TypeError('line description is empty')
@@ -910,6 +1047,16 @@ function validatedQuoteSnapshot(
       throw new TypeError('quote snapshot job structure is invalid')
     }
     jobIds.add(job.id)
+    if ((job.customerStory === null) !== (job.storyMeta === null)) {
+      throw new TypeError('quote snapshot story metadata is inconsistent')
+    }
+    if (job.kind === 'diagnostic' && (
+      job.customerStory === null
+      || job.storyMeta === null
+      || (job.storyMeta.source !== 'ai' && job.storyMeta.source !== 'manual')
+    )) {
+      throw new TypeError('quote snapshot diagnostic story is invalid')
+    }
     const jobLinesForTotals: Array<{ extendedCents: number; taxable: boolean }> = []
     for (const line of job.lines) {
       if (lineIds.has(line.id)) throw new TypeError('quote snapshot line ID is duplicated')
@@ -1129,7 +1276,7 @@ function snapshotContainsDecisionJob(
   const snapshotJob = snapshot.jobs.find((candidate) => candidate.id === job.id)
   return Boolean(
     snapshotJob
-    && (job.kind === 'repair' || job.kind === 'maintenance')
+    && (job.kind === 'diagnostic' || job.kind === 'repair' || job.kind === 'maintenance')
     && snapshotJob.kind === job.kind
     && job.workStatus === 'open',
   )

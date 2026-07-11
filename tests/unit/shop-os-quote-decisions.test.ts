@@ -40,6 +40,11 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     ...overrides,
   })
 
+  const diagnosticStory = {
+    whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn', howWeKnow: [],
+    whatItMeansIfWaived: 'Stopping distance may increase', whatWeRecommend: 'Replace pads',
+  }
+
   const approvedBody = (requestKey = uuid(100), overrides: Record<string, unknown> = {}) => ({
     requestKey, jobId, quoteVersionId: versionId, decision: 'approved', approvedVia: 'phone',
     ...overrides,
@@ -195,12 +200,11 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     expect(await db.select().from(quoteEvents)).toHaveLength(0)
   })
 
-  it('rejects wrong-ticket and malformed snapshots, diagnostic/canceled/in-progress jobs', async () => {
+  it('rejects wrong-ticket and malformed snapshots plus canceled/in-progress jobs', async () => {
     await overwriteSnapshot(snapshot({ ticket: { ...snapshot().ticket, id: uuid(999) } }))
     await expect(decide(approvedBody(uuid(150)))).resolves.toEqual({ ok: false, error: 'not_found' })
     await overwriteSnapshot(snapshot())
     const forbiddenJobStates = [
-      { kind: 'diagnostic' as const, workStatus: 'open' as const },
       { kind: 'repair' as const, workStatus: 'canceled' as const },
       { kind: 'repair' as const, workStatus: 'in_progress' as const },
     ]
@@ -208,6 +212,29 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
       await db.update(ticketJobs).set(update).where(eq(ticketJobs.id, jobId))
       await expect(decide(approvedBody(uuid(151 + index)))).resolves.toEqual({ ok: false, error: 'not_found' })
     }
+  })
+
+  it('permits diagnostic decisions only when the exact active snapshot contains a valid reviewed/manual story', async () => {
+    await db.update(ticketJobs).set({ kind: 'diagnostic' }).where(eq(ticketJobs.id, jobId))
+    const diagnosticSnapshot = (storyMeta: unknown, customerStory: unknown = diagnosticStory) => snapshot({
+      jobs: [{ ...snapshot().jobs[0], kind: 'diagnostic', customerStory, storyMeta }],
+    })
+    for (const [index, invalid] of [
+      diagnosticSnapshot(null, null),
+      diagnosticSnapshot(null),
+      diagnosticSnapshot({ source: 'template' }),
+    ].entries()) {
+      await overwriteSnapshot(invalid)
+      await expect(decide(approvedBody(uuid(300 + index)))).resolves.toEqual({ ok: false, error: 'not_found' })
+    }
+    await overwriteSnapshot(diagnosticSnapshot({ source: 'manual', sessionId: uuid(70) }))
+    await expect(decide(approvedBody(uuid(310)))).resolves.toMatchObject({
+      ok: true, event: { kind: 'approved', approvedVia: 'phone' },
+    })
+    await overwriteSnapshot(diagnosticSnapshot({ source: 'ai', sessionId: uuid(70) }))
+    await expect(decide(declinedBody(uuid(311)))).resolves.toMatchObject({
+      ok: true, event: { kind: 'declined' },
+    })
   })
 
   it('rejects semantically forged active snapshots before a new decision', async () => {

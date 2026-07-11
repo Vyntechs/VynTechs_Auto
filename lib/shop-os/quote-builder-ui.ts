@@ -13,6 +13,18 @@ type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder
 const safeMoneySchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const nullableText = (max: number) => z.string().max(max).nullable()
+const storyEvidenceSchema = z.strictObject({
+  claim: z.string().max(2_000),
+  sourceEventIds: z.array(z.string().max(200)).max(100),
+  sourceArtifactIds: z.array(z.string().max(200)).max(100),
+})
+const customerStorySchema = z.strictObject({
+  whatYouToldUs: z.string().max(5_000),
+  whatWeFound: z.string().max(5_000),
+  howWeKnow: z.array(storyEvidenceSchema).max(50),
+  whatItMeansIfWaived: z.string().max(5_000),
+  whatWeRecommend: z.string().max(5_000),
+})
 const builderLineSchema = z.strictObject({
   id: uuidSchema,
   kind: z.enum(['part', 'labor', 'fee']),
@@ -81,10 +93,41 @@ const quoteBuilderSchema = z.strictObject({
     title: z.string().min(1).max(500),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
     workStatus: z.enum(['open', 'in_progress', 'blocked']),
+    story: z.strictObject({
+      content: customerStorySchema.nullable(),
+      source: z.enum(['ai', 'manual', 'template']).nullable(),
+      reviewStatus: z.enum(['pending', 'reviewed']).nullable(),
+      revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    }).superRefine((story, context) => {
+      if ((story.content === null) !== (story.source === null)) {
+        context.addIssue({ code: 'custom', message: 'story content and source are inconsistent' })
+      }
+      if (story.source === null && (story.reviewStatus !== null || story.revision !== 0)) {
+        context.addIssue({ code: 'custom', message: 'empty story metadata is inconsistent' })
+      }
+      if (story.source === 'ai' && story.reviewStatus === null) {
+        context.addIssue({ code: 'custom', message: 'AI story review state is required' })
+      }
+    }),
+    approval: z.strictObject({
+      state: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
+      quoteVersionId: uuidSchema.nullable(),
+    }).superRefine((approval, context) => {
+      if ((approval.state === 'approved') !== (approval.quoteVersionId !== null)) {
+        context.addIssue({ code: 'custom', message: 'approval version is inconsistent' })
+      }
+    }),
     lines: z.array(builderLineSchema).max(2_000),
   })).max(500),
+  capabilities: z.strictObject({ canRecordCustomerApproval: z.boolean() }),
   activeVersion: z.strictObject({
-    id: uuidSchema, versionNumber: z.number().int().min(1).max(2_147_483_647),
+    id: uuidSchema,
+    versionNumber: z.number().int().min(1).max(2_147_483_647),
+    totalCents: safeMoneySchema,
+    jobs: z.array(z.strictObject({
+      jobId: uuidSchema,
+      subtotalCents: safeMoneySchema,
+    })).min(1).max(500),
   }).nullable(),
 }).superRefine((builder, context) => {
   const jobIds = builder.jobs.map((job) => job.id)
@@ -94,6 +137,17 @@ const quoteBuilderSchema = z.strictObject({
   const lineIds = builder.jobs.flatMap((job) => job.lines.map((line) => line.id))
   if (new Set(lineIds).size !== lineIds.length) {
     context.addIssue({ code: 'custom', message: 'duplicate line IDs' })
+  }
+  if (builder.activeVersion) {
+    const versionJobIds = builder.activeVersion.jobs.map((job) => job.jobId)
+    if (new Set(versionJobIds).size !== versionJobIds.length
+      || versionJobIds.some((jobId) => !jobIds.includes(jobId))) {
+      context.addIssue({ code: 'custom', message: 'active version job projection is invalid' })
+    }
+    const subtotal = builder.activeVersion.jobs.reduce((sum, job) => sum + BigInt(job.subtotalCents), 0n)
+    if (subtotal > BigInt(builder.activeVersion.totalCents)) {
+      context.addIssue({ code: 'custom', message: 'active version total is invalid' })
+    }
   }
 })
 
@@ -119,6 +173,43 @@ export function parsePreparedVersionResponse(
   if (status === 201 && parsed.data.changed !== true) return null
   if (status === 200 && parsed.data.changed !== false) return null
   if (status !== 200 && status !== 201) return null
+  return parsed.data
+}
+
+const quoteDecisionResponseSchema = z.strictObject({
+  changed: z.boolean(),
+  event: z.strictObject({
+    id: uuidSchema,
+    kind: z.enum(['approved', 'declined']),
+    quoteVersionId: uuidSchema,
+    jobId: uuidSchema,
+    approvedVia: z.enum(['phone', 'in_person']).nullable(),
+  }).superRefine((event, context) => {
+    if ((event.kind === 'approved') !== (event.approvedVia !== null)) {
+      context.addIssue({ code: 'custom', message: 'decision channel is inconsistent' })
+    }
+  }),
+  projection: z.strictObject({
+    approvalState: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
+    approvedQuoteVersionId: uuidSchema.nullable(),
+  }).superRefine((projection, context) => {
+    if ((projection.approvalState === 'approved') !== (projection.approvedQuoteVersionId !== null)) {
+      context.addIssue({ code: 'custom', message: 'decision projection is inconsistent' })
+    }
+  }),
+})
+
+export function parseQuoteDecisionResponse(
+  status: number,
+  value: unknown,
+): z.infer<typeof quoteDecisionResponseSchema> | null {
+  const parsed = quoteDecisionResponseSchema.safeParse(value)
+  if (!parsed.success) return null
+  if (status === 201 && parsed.data.changed !== true) return null
+  if (status === 200 && parsed.data.changed !== false) return null
+  if (status !== 200 && status !== 201) return null
+  if (parsed.data.event.kind === 'approved'
+    && parsed.data.projection.approvedQuoteVersionId !== parsed.data.event.quoteVersionId) return null
   return parsed.data
 }
 
