@@ -175,6 +175,7 @@ describe('POST ticket job diagnostic start', () => {
     ['non-UUID attempt key', { attemptKey: 'not-a-uuid' }],
     ['unknown field', { attemptKey: ATTEMPT_KEY, extra: true }],
     ['non-boolean confirmation', { attemptKey: ATTEMPT_KEY, confirmAmbiguousRetry: 'yes' }],
+    ['non-boolean status poll', { attemptKey: ATTEMPT_KEY, statusOnly: 'yes' }],
   ])('strictly rejects %s before acquire or any guard/provider work', async (_label, body) => {
     const response = await POST(request(body), params())
 
@@ -197,6 +198,38 @@ describe('POST ticket job diagnostic start', () => {
     })
     expect(acquireMock.mock.invocationCallOrder[0]).toBeLessThan(quotaMock.mock.invocationCallOrder[0])
     expect(quotaMock.mock.invocationCallOrder[0]).toBeLessThan(countMock.mock.invocationCallOrder[0])
+  })
+
+  it.each([
+    [{ ok: true as const, state: 'ready' as const, sessionId: SESSION_ID }, 200, { state: 'ready', sessionId: SESSION_ID }],
+    [{ ok: true as const, state: 'initializing' as const, leaseAcquired: false as const }, 202, { state: 'initializing', retryAfterSeconds: 5 }],
+    [{ ok: true as const, state: 'ambiguous' as const }, 409, { state: 'ambiguous', warning: 'possible_duplicate_cost' }],
+    [{ ok: true as const, state: 'failed' as const }, 409, { state: 'failed', error: 'start_failed' }],
+    [{ ok: false as const, status: 409 as const, error: 'start unavailable' as const }, 409, { error: 'start_unavailable' }],
+    [acquired, 202, { state: 'initializing', retryAfterSeconds: 5 }],
+  ])('maps a statusOnly state without quota, cap, initializer, or finalize work', async (result, status, envelope) => {
+    acquireMock.mockResolvedValue(result as never)
+
+    const response = await POST(request({
+      attemptKey: ATTEMPT_KEY,
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    }), params())
+
+    expect(acquireMock).toHaveBeenCalledWith({}, {
+      actor,
+      ticketId: TICKET_ID,
+      jobId: JOB_ID,
+      attemptKey: ATTEMPT_KEY,
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })
+    expect(response.status).toBe(status)
+    await expect(response.json()).resolves.toEqual(envelope)
+    expect(quotaMock).not.toHaveBeenCalled()
+    expect(countMock).not.toHaveBeenCalled()
+    expect(initializerMock).not.toHaveBeenCalled()
+    expect(finalizeMock).not.toHaveBeenCalled()
   })
 
   it('returns an owned ready session before quota, cap, or initializer work', async () => {

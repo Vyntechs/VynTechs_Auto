@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -59,6 +61,35 @@ describe('Shop OS leased diagnostic start', () => {
     jobId,
     attemptKey,
     ...overrides,
+  })
+
+  it('locks every mutable finalize input before snapshot comparison or persistence', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'lib/shop-os/diagnostic-start.ts'),
+      'utf8',
+    )
+    const lockHelper = source.slice(
+      source.indexOf('async function lockFinalizeRows'),
+      source.indexOf('async function settleOwnedAttempt'),
+    )
+    const finalize = source.slice(
+      source.indexOf('export async function finalizeDiagnosticStart'),
+      source.indexOf('export async function recordDiagnosticStartFailure'),
+    )
+
+    expect(lockHelper).toMatch(
+      /\.from\(ticketJobs\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(tickets\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(vehicles\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update'\)/,
+    )
+    expect(lockHelper).toContain('eq(ticketJobs.id, input.jobId)')
+    expect(lockHelper).toContain('eq(tickets.id, input.ticketId)')
+    expect(lockHelper).toContain('eq(vehicles.id, lockedTicket.vehicleId)')
+    expect(lockHelper).toContain('eq(profiles.id, input.actor.profileId)')
+
+    const lockIndex = finalize.indexOf('await lockFinalizeRows(transactionDb, input)')
+    expect(lockIndex).toBeGreaterThan(-1)
+    expect(lockIndex).toBeLessThan(finalize.indexOf('loadAuthorizedSnapshot(transactionDb, input)'))
+    expect(lockIndex).toBeLessThan(finalize.indexOf('sameAcquiredContext'))
+    expect(lockIndex).toBeLessThan(finalize.indexOf('insert(sessions)'))
   })
 
   beforeEach(async () => {
@@ -260,6 +291,83 @@ describe('Shop OS leased diagnostic start', () => {
     expect(row.diagnosticStartState).toBe('ambiguous')
     expect(row.diagnosticStartAttemptKey).toBe(uuid(99))
     expect(row.diagnosticStartLeaseUntil).toBeNull()
+  })
+
+  it('reports a live lease through statusOnly without acquiring or replacing it', async () => {
+    await db.update(ticketJobs).set({
+      diagnosticStartState: 'initializing',
+      diagnosticStartAttemptKey: uuid(99),
+      diagnosticStartLeaseUntil: new Date('2999-01-01T00:00:00Z'),
+    }).where(eq(ticketJobs.id, jobId))
+
+    expect(await acquire(uuid(100), {
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })).toEqual({ ok: true, state: 'initializing', leaseAcquired: false })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        diagnosticStartState: 'initializing',
+        diagnosticStartAttemptKey: uuid(99),
+      })
+  })
+
+  it('atomically expires an initializing lease through statusOnly without reacquiring', async () => {
+    await db.update(ticketJobs).set({
+      diagnosticStartState: 'initializing',
+      diagnosticStartAttemptKey: uuid(99),
+      diagnosticStartLeaseUntil: new Date('2000-01-01T00:00:00Z'),
+    }).where(eq(ticketJobs.id, jobId))
+
+    expect(await acquire(uuid(100), {
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })).toEqual({ ok: true, state: 'ambiguous' })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        diagnosticStartState: 'ambiguous',
+        diagnosticStartAttemptKey: uuid(99),
+        diagnosticStartLeaseUntil: null,
+      })
+  })
+
+  it('reports failed and ambiguous states through statusOnly even when confirmation is present', async () => {
+    await db.update(ticketJobs).set({
+      diagnosticStartState: 'failed',
+      diagnosticStartAttemptKey: uuid(99),
+      diagnosticStartErrorCode: 'rate_limited',
+    }).where(eq(ticketJobs.id, jobId))
+
+    expect(await acquire(uuid(100), {
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })).toEqual({ ok: true, state: 'failed' })
+
+    await db.update(ticketJobs).set({
+      diagnosticStartState: 'ambiguous',
+      diagnosticStartErrorCode: 'provider_outcome_uncertain',
+    }).where(eq(ticketJobs.id, jobId))
+    expect(await acquire(uuid(100), {
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })).toEqual({ ok: true, state: 'ambiguous' })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        diagnosticStartState: 'ambiguous',
+        diagnosticStartAttemptKey: uuid(99),
+      })
+  })
+
+  it('returns safe unavailable for idle statusOnly without acquiring a lease', async () => {
+    expect(await acquire(uuid(100), {
+      statusOnly: true,
+      confirmAmbiguousRetry: true,
+    })).toEqual({ ok: false, status: 409, error: 'start unavailable' })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        diagnosticStartState: 'idle',
+        diagnosticStartAttemptKey: null,
+        diagnosticStartLeaseUntil: null,
+      })
   })
 
   it('requires explicit confirmation and a fresh key before leasing an ambiguous retry', async () => {

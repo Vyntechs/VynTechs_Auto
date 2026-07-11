@@ -41,7 +41,7 @@ type Acquired = {
 type Ambiguous = { ok: true; state: 'ambiguous' }
 type Failed = { ok: true; state: 'failed' }
 
-export type AcquireDiagnosticStartResult = Ready | Waiting | Acquired | Ambiguous | SafeFailure
+export type AcquireDiagnosticStartResult = Ready | Waiting | Acquired | Ambiguous | Failed | SafeFailure
 export type SettleDiagnosticStartResult = Ready | Waiting | Ambiguous | Failed | SafeFailure
 
 type StartInput = {
@@ -214,7 +214,7 @@ async function expireOwnedLease(
 
 export async function acquireDiagnosticStart(
   db: AppDb,
-  input: StartInput & { confirmAmbiguousRetry?: boolean },
+  input: StartInput & { confirmAmbiguousRetry?: boolean; statusOnly?: boolean },
 ): Promise<AcquireDiagnosticStartResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -229,6 +229,12 @@ export async function acquireDiagnosticStart(
         if (!snapshot.attemptKey) return unavailable()
         if (await expireOwnedLease(transactionDb, input, snapshot.attemptKey)) return ambiguous()
         return currentSafeState(transactionDb, input)
+      }
+
+      if (input.statusOnly) {
+        if (snapshot.state === 'ambiguous') return ambiguous()
+        if (snapshot.state === 'failed') return { ok: true, state: 'failed' }
+        return unavailable()
       }
 
       if (snapshot.state === 'ambiguous') {
@@ -308,6 +314,56 @@ function sameAcquiredContext(
     && acquired.intake.customerComplaint === persisted.intake.customerComplaint
 }
 
+async function lockFinalizeRows(db: AppDb, input: StartInput): Promise<boolean> {
+  const [lockedJob] = await db
+    .select({ id: ticketJobs.id })
+    .from(ticketJobs)
+    .where(and(
+      eq(ticketJobs.shopId, input.actor.shopId),
+      eq(ticketJobs.ticketId, input.ticketId),
+      eq(ticketJobs.id, input.jobId),
+    ))
+    .limit(1)
+    .for('update')
+  if (!lockedJob) return false
+
+  const [lockedTicket] = await db
+    .select({
+      vehicleId: tickets.vehicleId,
+      customerId: tickets.customerId,
+    })
+    .from(tickets)
+    .where(and(
+      eq(tickets.shopId, input.actor.shopId),
+      eq(tickets.id, input.ticketId),
+    ))
+    .limit(1)
+    .for('update')
+  if (!lockedTicket?.vehicleId || !lockedTicket.customerId) return false
+
+  const [lockedVehicle] = await db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(and(
+      eq(vehicles.id, lockedTicket.vehicleId),
+      eq(vehicles.customerId, lockedTicket.customerId),
+    ))
+    .limit(1)
+    .for('update')
+  if (!lockedVehicle) return false
+
+  const [lockedActor] = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(and(
+      eq(profiles.shopId, input.actor.shopId),
+      eq(profiles.id, input.actor.profileId),
+    ))
+    .limit(1)
+    .for('update')
+  return Boolean(lockedActor)
+}
+
 async function settleOwnedAttempt(
   db: AppDb,
   input: StartInput & {
@@ -372,6 +428,9 @@ export async function finalizeDiagnosticStart(
   try {
     const result = await db.transaction(async (tx) => {
       const transactionDb = tx as AppDb
+      if (!await lockFinalizeRows(transactionDb, input)) {
+        throw new FinalizeOwnershipLost()
+      }
       const snapshot = await loadAuthorizedSnapshot(transactionDb, input)
       if (!snapshot) throw new FinalizeOwnershipLost()
       const ready = existingReady(snapshot, input.actor)

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -790,6 +790,7 @@ export type TicketJobAssignmentDependencies = {
 type AssignmentContext = {
   ticketStatus: string
   workStatus: string
+  hasLiveDiagnosticStartLease: boolean
   requiredSkillTier: number
   assignedTechId: string | null
   assignedTechFullName: string | null
@@ -807,6 +808,10 @@ async function loadAssignmentContext(
     .select({
       ticketStatus: tickets.status,
       workStatus: ticketJobs.workStatus,
+      hasLiveDiagnosticStartLease: sql<boolean>`
+        ${ticketJobs.diagnosticStartState} = 'initializing'
+        and ${ticketJobs.diagnosticStartLeaseUntil} > now()
+      `,
       requiredSkillTier: ticketJobs.requiredSkillTier,
       assignedTechId: ticketJobs.assignedTechId,
       assignedTechFullName: profiles.fullName,
@@ -910,6 +915,9 @@ function assignmentStateError(
   if (!context) return { ok: false, error: 'not_found' }
   if (context.ticketStatus !== 'open') return { ok: false, error: 'ticket_not_open' }
   if (context.workStatus !== 'open') return { ok: false, error: 'job_not_open' }
+  if (context.hasLiveDiagnosticStartLease) {
+    return { ok: false, error: 'job_not_open' }
+  }
   return null
 }
 
@@ -998,6 +1006,11 @@ async function unclaimTicketJob(
         eq(ticketJobs.ticketId, ticketId),
         eq(ticketJobs.id, jobId),
         eq(ticketJobs.workStatus, 'open'),
+        or(
+          ne(ticketJobs.diagnosticStartState, 'initializing'),
+          isNull(ticketJobs.diagnosticStartLeaseUntil),
+          lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`),
+        ),
         sql`exists (
           select 1 from ${tickets}
           where ${tickets.shopId} = ${ticketJobs.shopId}
@@ -1083,6 +1096,11 @@ async function reassignTicketJob(
         eq(ticketJobs.ticketId, ticketId),
         eq(ticketJobs.id, jobId),
         eq(ticketJobs.workStatus, 'open'),
+        or(
+          ne(ticketJobs.diagnosticStartState, 'initializing'),
+          isNull(ticketJobs.diagnosticStartLeaseUntil),
+          lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`),
+        ),
         sql`exists (
           select 1 from ${tickets}
           where ${tickets.shopId} = ${ticketJobs.shopId}

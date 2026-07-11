@@ -117,19 +117,26 @@ export function TodayJobsBoard({ myJobs, openJobs }: Props) {
     }
   }
 
-  async function startDiagnostic(job: TodayTicketJob, confirmAmbiguousRetry = false) {
+  async function startDiagnostic(
+    job: TodayTicketJob,
+    confirmAmbiguousRetry = false,
+    statusOnly = false,
+  ) {
     if (pendingDiagnosticJobId) return
 
     setPendingDiagnosticJobId(job.id)
     setAnnouncement({
       kind: 'status',
-      text: `Starting diagnosis for ticket ${job.ticketNumber}.`,
+      text: statusOnly
+        ? `Checking diagnosis status for ticket ${job.ticketNumber}.`
+        : `Starting diagnosis for ticket ${job.ticketNumber}.`,
     })
 
     try {
       const payload = {
         attemptKey: crypto.randomUUID(),
         ...(confirmAmbiguousRetry ? { confirmAmbiguousRetry: true } : {}),
+        ...(statusOnly ? { statusOnly: true } : {}),
       }
       const response = await fetch(
         `/api/tickets/${job.ticketId}/jobs/${job.id}/diagnostic/start`,
@@ -168,7 +175,23 @@ export function TodayJobsBoard({ myJobs, openJobs }: Props) {
         })
         setAnnouncement({
           kind: 'status',
-          text: 'Diagnosis is already starting. Refreshing status.',
+          text: statusOnly
+            ? 'Diagnosis is still starting. Refreshing status.'
+            : 'Diagnosis is already starting. Refreshing status.',
+        })
+        router.refresh()
+        return
+      }
+
+      if (statusOnly && response.status === 409 && body.state === 'failed') {
+        setAmbiguousJobStates((current) => {
+          const next = new Map(current)
+          next.delete(job.id)
+          return next
+        })
+        setAnnouncement({
+          kind: 'status',
+          text: 'Diagnosis did not start. Refreshing status.',
         })
         router.refresh()
         return
@@ -225,6 +248,7 @@ export function TodayJobsBoard({ myJobs, openJobs }: Props) {
           ambiguousJobStates={ambiguousJobStates}
           onStartDiagnostic={startDiagnostic}
           onRefreshDiagnostic={() => router.refresh()}
+          onCheckDiagnostic={(job) => startDiagnostic(job, false, true)}
           setDiagnosticButton={(jobId, element) => {
             if (element) diagnosticButtons.current.set(jobId, element)
             else diagnosticButtons.current.delete(jobId)
@@ -271,6 +295,7 @@ function JobSection({
   ambiguousJobStates = new Map(),
   onStartDiagnostic,
   onRefreshDiagnostic,
+  onCheckDiagnostic,
   setDiagnosticButton,
 }: {
   label: string
@@ -285,6 +310,7 @@ function JobSection({
   ambiguousJobStates?: Map<string, TodayTicketJob['diagnosticStartState']>
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
+  onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
 }) {
   return (
@@ -310,6 +336,7 @@ function JobSection({
             }
             onStartDiagnostic={onStartDiagnostic}
             onRefreshDiagnostic={onRefreshDiagnostic}
+            onCheckDiagnostic={onCheckDiagnostic}
             setDiagnosticButton={setDiagnosticButton}
           />
         ))}
@@ -330,6 +357,7 @@ function JobRow({
   forceAmbiguous,
   onStartDiagnostic,
   onRefreshDiagnostic,
+  onCheckDiagnostic,
   setDiagnosticButton,
 }: {
   job: TodayTicketJob
@@ -343,6 +371,7 @@ function JobRow({
   forceAmbiguous: boolean
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
+  onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
 }) {
   const vehicle = job.vehicle
@@ -393,6 +422,7 @@ function JobRow({
             forceAmbiguous={forceAmbiguous}
             onStart={onStartDiagnostic}
             onRefresh={onRefreshDiagnostic}
+            onCheck={onCheckDiagnostic}
             setButton={setDiagnosticButton}
           />
         ) : (
@@ -417,6 +447,7 @@ function DiagnosticAction({
   forceAmbiguous,
   onStart,
   onRefresh,
+  onCheck,
   setButton,
 }: {
   job: TodayTicketJob
@@ -425,13 +456,11 @@ function DiagnosticAction({
   forceAmbiguous: boolean
   onStart?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefresh?: () => void
+  onCheck?: (job: TodayTicketJob) => void
   setButton?: (jobId: string, element: HTMLButtonElement | null) => void
 }) {
   const persistedState = job.diagnosticStartState ?? 'idle'
-  const state =
-    forceAmbiguous && (persistedState === 'idle' || persistedState === 'failed')
-      ? 'ambiguous'
-      : persistedState
+  const state = forceAmbiguous ? 'ambiguous' : persistedState
 
   if (job.sessionId) {
     return (
@@ -465,9 +494,11 @@ function DiagnosticAction({
         <button
           type="button"
           className={`${styles.control} ${styles.secondary}`}
-          onClick={onRefresh}
+          ref={(element) => setButton?.(job.id, element)}
+          disabled={disabled}
+          onClick={() => onCheck?.(job)}
         >
-          Refresh diagnosis status
+          {pending ? 'Checking status…' : 'Refresh diagnosis status'}
         </button>
       </div>
     )

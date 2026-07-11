@@ -14,6 +14,7 @@ import {
   acquireDiagnosticStart,
   finalizeDiagnosticStart,
   recordDiagnosticStartFailure,
+  type AcquireDiagnosticStartResult,
   type DiagnosticStartActor,
   type SettleDiagnosticStartResult,
 } from '@/lib/shop-os/diagnostic-start'
@@ -24,6 +25,7 @@ export const maxDuration = 60
 const requestSchema = z.object({
   attemptKey: z.uuid(),
   confirmAmbiguousRetry: z.boolean().optional(),
+  statusOnly: z.boolean().optional(),
 }).strict()
 
 type Attempt = {
@@ -33,7 +35,9 @@ type Attempt = {
   attemptKey: string
 }
 
-function safeStateResponse(result: SettleDiagnosticStartResult): NextResponse {
+function safeStateResponse(
+  result: AcquireDiagnosticStartResult | SettleDiagnosticStartResult,
+): NextResponse {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error === 'not found' ? 'not_found' : 'start_unavailable' },
@@ -122,7 +126,10 @@ export async function POST(
   const acquired = await acquireDiagnosticStart(db, {
     ...attempt,
     confirmAmbiguousRetry: parsed.data.confirmAmbiguousRetry,
+    statusOnly: parsed.data.statusOnly,
   })
+
+  if (parsed.data.statusOnly) return safeStateResponse(acquired)
 
   if (!acquired.ok || acquired.state !== 'initializing' || !acquired.leaseAcquired) {
     return safeStateResponse(acquired)
