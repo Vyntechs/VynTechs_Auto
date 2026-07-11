@@ -724,7 +724,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | complete | PR #125; 5 focused files/57 tests + 206 files/1,775 full tests; [execution packet](./2026-07-10-shop-os-phase-2-today-jobs-plan.md) |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | complete | PR #126; 10 focused files/176 tests + 209 files/1,866 full tests; [execution packet](./2026-07-10-shop-os-phase-2-diagnostic-bootstrap-plan.md); creation seam and diagnostic semantics preserved |
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | complete | PR #127; 3 focused files/25 tests + 210 files/1,876 full tests; source/local proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
-| 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | in progress | `feat/shop-os-p3-quote-domain`; exact event/projection atomicity required |
+| 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | in progress | PR #128; exact event/projection atomicity required |
 | 18 | 3 | Manual quote builder + totals | A | 17 | pending | — |
 | 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | pending | — |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | pending | Tree/published-wizard only |

@@ -20,7 +20,7 @@
 - [x] Mark row 17 active and correct the stale resume protocol.
 - [x] Draft the row-17 design and implementation packet from the approved master contract.
 - [x] Independently attack lock order, snapshot identity, math precision, mutation invalidation, role gates, idempotency, and row boundaries; correct two Critical, eight Important, and three Medium findings in the packet.
-- [ ] Commit/push the approved packet and open a draft PR before implementation.
+- [x] Commit/push the approved packet and open draft PR #128 before implementation.
 
 ## Task 2: Pure quote math and snapshot types
 
