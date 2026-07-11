@@ -161,9 +161,9 @@ describe('ManualQuoteBuilder', () => {
 
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(within(tape).getByText('$312.50')).toBeInTheDocument()
-    expect(within(tape).getByText('$125.00')).toBeInTheDocument()
-    expect(within(tape).getByText('$10.31')).toBeInTheDocument()
     expect(within(tape).getByText('$322.81')).toBeInTheDocument()
+    expect(within(tape).getByText('Job subtotal before tax')).toBeInTheDocument()
+    expect(within(tape).getByText('Ticket total')).toBeInTheDocument()
     expect(within(tape).queryByText('$337.50')).toBeNull()
     expect(screen.queryByRole('button', { name: /Prepare quote/i })).toBeNull()
   })
@@ -184,6 +184,7 @@ describe('ManualQuoteBuilder', () => {
           laborHours: '1', laborRateCents: null,
         })],
       }],
+      activeVersion: null,
     })} />)
 
     expect(screen.getByText(/Draft quote lines now/)).toBeInTheDocument()
@@ -198,6 +199,7 @@ describe('ManualQuoteBuilder', () => {
         laborRateCents: 15_000, taxRateBps: null,
         laborRateConfigured: true, taxRateConfigured: false,
       },
+      activeVersion: null,
     })} />)
 
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
@@ -217,6 +219,7 @@ describe('ManualQuoteBuilder', () => {
           line({ id: LABOR_LINE_ID, priceCents: 1 }),
         ],
       }],
+      activeVersion: null,
     })} />)
 
     expect(screen.getByText('Totals unavailable')).toBeInTheDocument()
@@ -510,10 +513,10 @@ describe('ManualQuoteBuilder line mutations', () => {
   })
 
   it('keeps totals on server truth while a mutation is still pending', async () => {
-    const empty = builder({ jobs: [{
+    const empty = builder({ activeVersion: null, jobs: [{
       id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [],
     }] })
-    const refreshed = builder({ jobs: [{
+    const refreshed = builder({ activeVersion: null, jobs: [{
       id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
       ...jobFacts,
       lines: [line({ id: NEW_LINE_ID, description: 'Server line', priceCents: 10_000 })],
