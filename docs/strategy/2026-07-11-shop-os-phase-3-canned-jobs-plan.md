@@ -22,10 +22,10 @@
 
 ## Task 2: Strict canned library domain and API
 
-- [ ] Add one strict safe template/line validator, canonical projection, exact subtotal/tax summary, and fingerprint.
-- [ ] Add stable active listing plus client-keyed idempotent create, fingerprint-guarded full replace, and idempotent retirement; corrupt stored JSON fails closed.
-- [ ] Add thin authenticated/paywalled routes. All builders may list; only owner/founder may manage.
-- [ ] Prove tenant/privacy, role/activity, retired/corrupt state, bounds, extra/internal field rejection, retry, stale fingerprint, and no physical deletion.
+- [x] Add one strict safe template/line validator, canonical projection, exact subtotal/tax summary, and fingerprint.
+- [x] Add stable active listing plus client-keyed idempotent create, fingerprint-guarded full replace, and idempotent retirement; corrupt stored JSON fails closed.
+- [x] Add thin authenticated/paywalled routes. All builders may list; only owner/founder may manage.
+- [x] Prove tenant/privacy, role/activity, retired/corrupt state, bounds, extra/internal field rejection, retry, stale fingerprint, and no physical deletion.
 
 ## Task 3: Atomic existing-ticket apply
 
