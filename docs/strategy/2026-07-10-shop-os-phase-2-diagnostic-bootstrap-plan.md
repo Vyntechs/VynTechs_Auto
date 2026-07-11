@@ -37,12 +37,12 @@
 
 **Produces:** acquire/finalize/fail domain operations with narrow safe result unions.
 
-- [ ] Write failing tests for existing ready reuse, one two-minute lease winner, live-lease waiter, attempt-key collision, and database-time lease ownership.
-- [ ] Prove active role/shop/tier/assignment/ticket/job/kind/status authorization and uniform safe failures.
-- [ ] Write failing tests for atomic session insert/link, vehicle/intake persistence, `in_progress` transition, idempotent finalize, and competing finalize recovery.
-- [ ] Prove expired initializing becomes `ambiguous`, ambiguity never auto-acquires, explicit confirmation uses a fresh key, and every transition is attempt-key conditional.
-- [ ] Prove an old worker finalizing or failing after expiry or a confirmed new attempt creates/links nothing and cannot change newer state.
-- [ ] Independently review the domain task and resolve all findings.
+- [x] Write failing tests for existing ready reuse, one two-minute lease winner, live-lease waiter, attempt-key collision, and database-time lease ownership.
+- [x] Prove active role/shop/tier/assignment/ticket/job/kind/status authorization and uniform safe failures.
+- [x] Write failing tests for atomic session insert/link, vehicle/intake persistence, `in_progress` transition, idempotent finalize, and competing finalize recovery.
+- [x] Prove expired initializing becomes `ambiguous`, ambiguity never auto-acquires, explicit confirmation uses a fresh key, and every transition is attempt-key conditional.
+- [x] Prove an old worker finalizing or failing after expiry or a confirmed new attempt creates/links nothing and cannot change newer state.
+- [x] Independently review the domain task and resolve all findings.
 
 ## Task 3: Reuse the full existing initializer and expose the route
 
