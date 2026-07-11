@@ -10,11 +10,13 @@
 
 ## Global constraints
 
-- Preserve diagnostic prompts, retrieval adapters, generated tree shape, topology sentinel behavior, and session UI/API behavior.
+- Preserve diagnostic prompts, retrieval adapters, generated tree shape, counter intake's topology preflight/populated sentinel, and session UI/API behavior.
 - Never invoke a provider for unauthorized, cross-shop, unassigned, other-tech, below-tier, terminal, simple-work, live-lease, ready, or unconfirmed-ambiguous requests.
 - Use database time and conditional writes for lease/state ownership. In-memory locks are not correctness boundaries.
 - Never hold a database transaction across provider work.
+- Return an existing linked session before quota/cap work. A new lease winner must pass the shared intake rate limit and current five-open-session cap before provider work; a certain rejection releases the lease safely.
 - Never auto-regenerate an expired or uncertain attempt.
+- Use a named two-minute database-time lease, exceeding the 60-second route envelope. Every finalize/fail/ambiguity write must match job, `initializing`, attempt key, and lease ownership; a stale worker never changes a newer attempt.
 - Link exactly one session to one diagnostic job; the linked session belongs to the current assigned technician and carries the ticket vehicle ID/intake snapshot.
 - Do not expose attempt keys, provider internals, customer data, or cross-shop resource existence.
 - No migration, production write, quote/approval, repair mutation, account/credential, spend, deployment, or engine redesign.
@@ -35,28 +37,31 @@
 
 **Produces:** acquire/finalize/fail domain operations with narrow safe result unions.
 
-- [ ] Write failing tests for existing ready reuse, one lease winner, live-lease waiter, attempt-key collision, and database-time lease ownership.
+- [ ] Write failing tests for existing ready reuse, one two-minute lease winner, live-lease waiter, attempt-key collision, and database-time lease ownership.
 - [ ] Prove active role/shop/tier/assignment/ticket/job/kind/status authorization and uniform safe failures.
 - [ ] Write failing tests for atomic session insert/link, vehicle/intake persistence, `in_progress` transition, idempotent finalize, and competing finalize recovery.
-- [ ] Prove expired initializing becomes `ambiguous`, ambiguity never auto-acquires, explicit confirmation uses a fresh key, and uncertain failure becomes ambiguous.
+- [ ] Prove expired initializing becomes `ambiguous`, ambiguity never auto-acquires, explicit confirmation uses a fresh key, and every transition is attempt-key conditional.
+- [ ] Prove an old worker finalizing or failing after expiry or a confirmed new attempt creates/links nothing and cannot change newer state.
 - [ ] Independently review the domain task and resolve all findings.
 
 ## Task 3: Reuse the full existing initializer and expose the route
 
 **Files:**
 
-- Create: `lib/ai/initial-tree-pipeline.ts` if extraction is necessary
+- Create: `lib/diagnostics/initial-tree-bootstrap.ts` (or an equivalently focused shared seam)
 - Modify: `app/api/sessions/route.ts`
+- Modify: `app/api/intake/submit/route.ts` only as needed to share and lock existing topology/generator behavior
 - Create: `app/api/tickets/[id]/jobs/[jobId]/diagnostic/start/route.ts`
 - Create: `tests/unit/shop-os-diagnostic-start-route.test.ts`
 - Modify focused session-route tests if the initializer factory is extracted
 
 **Consumes:** Task 2 acquire/finalize/failure operations and the exact current retrieval/tree pipeline.
 
-- [ ] Write failing route tests for auth, strict UUID body, rate limit, ready/wait/ambiguous envelopes, and no provider calls outside lease-winner state.
-- [ ] Extract only the initializer assembly needed to prevent provider-path drift; lock adapter/generator/retrieval wiring with tests.
-- [ ] Run the lease winner through the full initializer, then finalize; map certain pre-provider errors to failed and all uncertain provider/persistence outcomes to ambiguous.
+- [ ] Write failing route tests for auth, paywall, strict UUID body, exact shared `intake:${userId}` limit of ten, five-open-session cap, ready/wait/ambiguous envelopes, ready-retry bypass, and no provider calls outside a lease-winning, quota-eligible state.
+- [ ] Extract only the initializer seams needed to preserve counter intake's topology preflight/populated sentinel and the existing retrieval/tree assembly; prove topology skips AI and non-topology input wiring does not drift.
+- [ ] Run the lease winner through the full initializer, then finalize. Restrict `failed` to errors proven before initializer entry; map every initializer throw/timeout/transport or uncertain persistence outcome to `ambiguous`.
 - [ ] Return only safe state, retry guidance, warning, and owned session ID. Keep `maxDuration = 60`.
+- [ ] Keep optional cold-case draft synthesis outside row 15; it is not part of session initialization correctness.
 - [ ] Independently review the route/pipeline task and resolve all findings.
 
 ## Task 4: Add the Today third-tap start interaction
@@ -70,7 +75,7 @@
 - Modify: `tests/unit/shop-os-today-jobs-board.test.tsx`
 
 - [ ] Write failing tests proving My Jobs exposes only safe diagnostic start state/error fields and no lease/attempt internals.
-- [ ] Show `Start diagnosis` only for an owned unlinked diagnostic; preserve `Open diagnosis` and exact simple-work disabled copy.
+- [ ] Implement the explicit matrix: `idle|failed` Start; `initializing` disabled/wait+refresh; `ambiguous` warning+confirmation; owned `ready` Open; inconsistent `ready` safe refresh/error. Preserve exact simple-work disabled copy.
 - [ ] Generate one attempt UUID per deliberate start, announce pending/wait/ready/ambiguous/error, and navigate only to a returned owned session.
 - [ ] Require an explicit second confirmation for ambiguous retry with exact possible-duplicate-cost warning and a fresh attempt UUID.
 - [ ] Preserve refresh truth, focus, 44px controls, reduced motion, and 375px single-column behavior.
