@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -53,6 +51,8 @@ describe('Shop OS customer story domain', () => {
   let actor: CustomerStoryActor
   let eventId!: string
   let artifactId!: string
+  let ownerId!: string
+  let advisorId!: string
 
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -60,10 +60,13 @@ describe('Shop OS customer story domain', () => {
     ;({ db, close } = await createTestDb())
     const [shop] = await db.insert(shops).values({ id: uuid(1), name: 'North Shop' }).returning()
     shopId = shop.id
-    const [tech, owner] = await db.insert(profiles).values([
+    const [tech, owner, advisor] = await db.insert(profiles).values([
       { id: uuid(2), userId: uuid(102), shopId, fullName: 'Taylor Tech', role: 'tech', skillTier: 2 },
       { id: uuid(3), userId: uuid(103), shopId, fullName: 'Owen Owner', role: 'owner', skillTier: 3 },
+      { id: uuid(12), userId: uuid(112), shopId, fullName: 'Avery Advisor', role: 'advisor', skillTier: 2 },
     ]).returning()
+    ownerId = owner.id
+    advisorId = advisor.id
     actor = { profileId: tech.id }
     const [customer] = await db.insert(customers).values({ id: uuid(4), shopId, name: 'Alex', phone: '555-0100' }).returning()
     const [vehicle] = await db.insert(vehicles).values({ id: uuid(5), customerId: customer.id, year: 2020, make: 'Ford', model: 'F-150' }).returning()
@@ -116,10 +119,21 @@ describe('Shop OS customer story domain', () => {
     sourceEventIds: [eventId], sourceArtifactIds: [artifactId], ...overrides,
   }, { generateCustomerStory: provider, ...dependencyOverrides })
 
-  it('locks the complete mutable context in the pinned NOWAIT order', () => {
-    const source = readFileSync(join(process.cwd(), 'lib/shop-os/customer-stories.ts'), 'utf8')
-    const helper = source.slice(source.indexOf('async function lockGenerationContext'), source.indexOf('function providerFailure'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(sessions\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(sessionEvents\)[\s\S]*?orderBy\(sessionEvents\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(artifacts\)[\s\S]*?orderBy\(artifacts\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+  it('captures generated PGlite SQL in the pinned NOWAIT lock order', async () => {
+    const statements: string[] = []
+    expect(await generate({}, vi.fn(async () => ({ selections: [] })), {
+      captureLockSql: (sqlStatements: string[]) => statements.push(...sqlStatements),
+    })).toMatchObject({ ok: true })
+    expect(statements).toHaveLength(7)
+    expect(statements.map((statement) => statement.replace(/\s+/g, ' '))).toEqual([
+      expect.stringMatching(/from "tickets".*where "tickets"\."id" = \$1.*for update nowait/i),
+      expect.stringMatching(/from "ticket_jobs".*where "ticket_jobs"\."ticket_id" = \$1.*order by "ticket_jobs"\."id".*for update nowait/i),
+      expect.stringMatching(/from "quote_versions".*where "quote_versions"\."ticket_id" = \$1.*order by "quote_versions"\."id".*for update nowait/i),
+      expect.stringMatching(/from "sessions".*where "sessions"\."id" = \$1.*for update nowait/i),
+      expect.stringMatching(/from "session_events".*where "session_events"\."id" in \(\$1\).*order by "session_events"\."id".*for update nowait/i),
+      expect.stringMatching(/from "artifacts".*where "artifacts"\."id" in \(\$1\).*order by "artifacts"\."id".*for update nowait/i),
+      expect.stringMatching(/from "profiles".*where "profiles"\."id" = \$1.*for update nowait/i),
+    ])
   })
 
   it('assembles canonical fields and sends only bounded selected evidence to the provider', async () => {
@@ -218,6 +232,27 @@ describe('Shop OS customer story domain', () => {
     expect(await generate({}, injected as never)).toEqual({ ok: false, error: 'provider_failed' })
   })
 
+  it('never invokes the provider for any preflight rejection class', async () => {
+    const provider = vi.fn(async () => ({ selections: [] }))
+    expect(await generate({ clientKey: 'bad' }, provider)).toMatchObject({ error: 'invalid_input' })
+    expect(await generate({ jobId: uuid(999) }, provider)).toMatchObject({ error: 'not_found' })
+    const [parts] = await db.insert(profiles).values({ id: uuid(44), userId: uuid(144), shopId, role: 'parts' }).returning()
+    expect(await generate({ actor: { profileId: parts.id } }, provider)).toMatchObject({ error: 'forbidden' })
+    await db.update(sessions).set({ status: 'closed' }).where(eq(sessions.id, sessionId))
+    expect(await generate({}, provider)).toMatchObject({ error: 'state_conflict' })
+    await db.update(sessions).set({ status: 'open' }).where(eq(sessions.id, sessionId))
+    await db.update(sessionEvents).set({ eventType: 'repair_observation' }).where(eq(sessionEvents.id, eventId))
+    expect(await generate({ sourceArtifactIds: [] }, provider)).toMatchObject({ error: 'invalid_evidence' })
+    await db.update(sessionEvents).set({ eventType: 'observation' }).where(eq(sessionEvents.id, eventId))
+    expect(await generate({ expectedStoryRevision: 99 }, provider)).toMatchObject({ error: 'conflict' })
+    expect(provider).not.toHaveBeenCalled()
+  })
+
+  it('allows advisor and owner generation', async () => {
+    expect(await generate({ actor: { profileId: advisorId }, clientKey: uuid(120) })).toMatchObject({ ok: true, changed: true, storyRevision: 1 })
+    expect(await generate({ actor: { profileId: ownerId }, clientKey: uuid(121), expectedStoryRevision: 1 })).toMatchObject({ ok: true, changed: false, storyRevision: 1 })
+  })
+
   it('returns same-key exact retries before revision/provider checks and conflicts on changed reuse', async () => {
     const provider = vi.fn(async () => ({ selections: [] }))
     const first = await generate({}, provider)
@@ -258,6 +293,23 @@ describe('Shop OS customer story domain', () => {
     expect(job.customerStory).toBeNull()
   })
 
+  it.each([
+    ['role', async () => { await db.update(profiles).set({ role: 'parts' }).where(eq(profiles.id, advisorId)) }],
+    ['deactivation', async () => { await db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, advisorId)) }],
+    ['shop', async () => {
+      const [otherShop] = await db.insert(shops).values({ id: uuid(70), name: 'Drift Shop' }).returning()
+      await db.update(profiles).set({ shopId: otherShop.id }).where(eq(profiles.id, advisorId))
+    }],
+  ])('detects locked actor %s drift during provider work', async (_label, drift) => {
+    const result = await generate(
+      { actor: { profileId: advisorId }, clientKey: uuid(122) },
+      vi.fn(async () => ({ selections: [] })),
+      { beforeFinalTransaction: drift },
+    )
+    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory).toBeNull()
+  })
+
   it('detects selected evidence and quote-version CAS drift after provider work', async () => {
     const evidenceDrift = await generate({}, vi.fn(async () => ({ selections: [] })), {
       beforeFinalTransaction: async () => {
@@ -293,11 +345,19 @@ describe('Shop OS customer story domain', () => {
       jobs: [{ id: jobId, title: 'Charging diagnosis', kind: 'diagnostic', customerStory: null, storyMeta: null, lines: [], attachments: [], totals: { subtotalCents: 0, taxableSubtotalCents: 0 } }],
       totals: { subtotalCents: 0, taxableSubtotalCents: 0, taxCents: 0, totalCents: 0 },
     })
+    const [excludedJob] = await db.insert(ticketJobs).values({
+      id: uuid(33), shopId, ticketId, title: 'Excluded maintenance', kind: 'maintenance',
+      requiredSkillTier: 1, approvalState: 'quote_ready',
+    }).returning()
     const [version] = await db.insert(quoteVersions).values({
       id: uuid(30), shopId, ticketId, versionNumber: 1, snapshot: snapshot(), createdByProfileId: uuid(3),
     }).returning()
+    await db.update(ticketJobs).set({ approvalState: 'quote_ready', approvedQuoteVersionId: version.id }).where(eq(ticketJobs.id, jobId))
     expect(await generate()).toMatchObject({ ok: true, changed: true })
     expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id)))[0].supersededAt).not.toBeNull()
+    const projectedJobs = await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))
+    expect(projectedJobs.find((job) => job.id === jobId)).toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
+    expect(projectedJobs.find((job) => job.id === excludedJob.id)).toMatchObject({ approvalState: 'quote_ready' })
 
     await db.update(ticketJobs).set({ customerStory: null, storyMeta: null }).where(eq(ticketJobs.id, jobId))
     await db.insert(quoteVersions).values([
@@ -326,6 +386,71 @@ describe('Shop OS customer story domain', () => {
     })
     expect(second.ok && second.workspace.evidence.events.length).toBeGreaterThan(0)
     expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId, eventCursor: 'forged' })).toEqual({ ok: false, error: 'invalid_input' })
+  })
+
+  it('scans bounded chunks past invalid event and artifact rows and preserves tied ordering independently', async () => {
+    await db.delete(sessionEvents).where(and(eq(sessionEvents.sessionId, sessionId), eq(sessionEvents.eventType, 'observation')))
+    await db.delete(artifacts).where(eq(artifacts.sessionId, sessionId))
+    const tiedAt = new Date('2026-07-11T11:57:00Z')
+    await db.insert(sessionEvents).values([
+      ...Array.from({ length: 27 }, (_, index) => ({
+        id: uuid(2000 + index), sessionId, nodeId: 'root', eventType: 'observation' as const,
+        observationText: '', createdAt: new Date('2026-07-11T11:59:00Z'),
+      })),
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: uuid(2100 + index), sessionId, nodeId: 'root', eventType: 'observation' as const,
+        observationText: `Valid tied event ${index} measured twelve point ${index} volts.`, createdAt: tiedAt,
+      })),
+    ])
+    await db.insert(artifacts).values([
+      ...Array.from({ length: 27 }, (_, index) => ({
+        id: uuid(3000 + index), sessionId, nodeId: 'root', kind: 'scan_screen' as const,
+        storageKey: `invalid-${index}`, mimeType: 'image/jpeg', bytes: 1, extractionStatus: 'done' as const,
+        extraction: {}, createdAt: new Date('2026-07-11T11:59:00Z'),
+      })),
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: uuid(3100 + index), sessionId, nodeId: 'root', kind: 'scan_screen' as const,
+        storageKey: `valid-${index}`, mimeType: 'image/jpeg', bytes: 1, extractionStatus: 'done' as const,
+        extraction: { text: `Valid tied artifact ${index} measured charging voltage.` }, createdAt: tiedAt,
+      })),
+    ])
+
+    const first = await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(first.workspace.evidence.events.map((row) => row.id)).toEqual(
+      Array.from({ length: 25 }, (_, index) => uuid(2129 - index)),
+    )
+    expect(first.workspace.evidence.artifacts.map((row) => row.id)).toEqual(
+      Array.from({ length: 25 }, (_, index) => uuid(3129 - index)),
+    )
+    const eventSecond = await getCustomerStoryWorkspace(db, {
+      actor, ticketId, jobId, eventCursor: first.workspace.evidence.nextEventCursor!,
+    })
+    expect(eventSecond.ok && eventSecond.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 5 }, (_, index) => uuid(2104 - index)))
+    expect(eventSecond.ok && eventSecond.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(3129 - index)))
+    const artifactSecond = await getCustomerStoryWorkspace(db, {
+      actor, ticketId, jobId, artifactCursor: first.workspace.evidence.nextArtifactCursor!,
+    })
+    expect(artifactSecond.ok && artifactSecond.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(2129 - index)))
+    expect(artifactSecond.ok && artifactSecond.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 5 }, (_, index) => uuid(3104 - index)))
+  })
+
+  it('rejects unsafe persisted story and metadata instead of returning raw JSONB', async () => {
+    expect(await generate({}, vi.fn(async () => ({ selections: [] })))).toMatchObject({ ok: true })
+    const [stored] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    await db.update(ticketJobs).set({
+      storyMeta: { ...stored.storyMeta!, aiResponse: 'secret', storageKey: 'private', rawUrl: 'https://private.invalid' } as never,
+    }).where(eq(ticketJobs.id, jobId))
+    expect(await generate({ expectedStoryRevision: 999 }, vi.fn(async () => ({ selections: [] })))).toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })).toEqual({ ok: false, error: 'conflict', retryable: false })
+
+    await db.update(ticketJobs).set({ storyMeta: stored.storyMeta, customerStory: { ...stored.customerStory!, whatWeFound: '' } }).where(eq(ticketJobs.id, jobId))
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })).toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({ customerStory: { ...stored.customerStory!, whatWeFound: '😀'.repeat(1_251) } }).where(eq(ticketJobs.id, jobId))
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })).toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({ customerStory: { ...stored.customerStory!, howWeKnow: [{ claim: '', sourceEventIds: [eventId], sourceArtifactIds: [] }] } }).where(eq(ticketJobs.id, jobId))
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })).toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
   it('denies unsupported same-shop roles and privacy-collapses cross-shop parents', async () => {
