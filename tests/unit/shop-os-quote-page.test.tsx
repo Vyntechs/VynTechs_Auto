@@ -24,9 +24,16 @@ vi.mock('@/lib/shop-os/quotes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/shop-os/quotes')>()),
   getQuoteBuilder: vi.fn(),
 }))
+vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/shop-os/canned-jobs')>()),
+  listCannedJobs: vi.fn(),
+}))
 vi.mock('@/components/screens/manual-quote-builder', () => ({
-  ManualQuoteBuilder: ({ ticket, builder }: { ticket: TicketDetail; builder: QuoteBuilder }) => (
-    manualBuilderMock({ ticket, builder }) ?? <div>Quote screen {ticket.ticketNumber}; {builder.ticket.id}</div>
+  ManualQuoteBuilder: ({ ticket, builder, cannedJobs, cannedCatalogAvailable }: {
+    ticket: TicketDetail; builder: QuoteBuilder; cannedJobs: unknown[]; cannedCatalogAvailable: boolean
+  }) => (
+    manualBuilderMock({ ticket, builder, cannedJobs, cannedCatalogAvailable })
+      ?? <div>Quote screen {ticket.ticketNumber}; {builder.ticket.id}</div>
   ),
 }))
 
@@ -34,6 +41,7 @@ import QuotePage from '@/app/(app)/tickets/[id]/quote/page'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { getQuoteBuilder } from '@/lib/shop-os/quotes'
+import { listCannedJobs } from '@/lib/shop-os/canned-jobs'
 import { getTicketDetail } from '@/lib/tickets'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -41,6 +49,7 @@ const requireUserMock = vi.mocked(requireUserAndProfile)
 const checkAccessMock = vi.mocked(checkAccess)
 const getTicketMock = vi.mocked(getTicketDetail)
 const getBuilderMock = vi.mocked(getQuoteBuilder)
+const listCannedMock = vi.mocked(listCannedJobs)
 
 const ticketId = '00000000-0000-0000-0000-000000000101'
 const profile = {
@@ -79,6 +88,7 @@ describe('QuotePage', () => {
     checkAccessMock.mockResolvedValue({ kind: 'allow' })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
     getBuilderMock.mockResolvedValue({ ok: true, builder })
+    listCannedMock.mockResolvedValue({ ok: true, cannedJobs: [], taxRateBps: 825 })
   })
 
   it('redirects unauthenticated visitors before access or domain reads', async () => {
@@ -111,7 +121,7 @@ describe('QuotePage', () => {
     expect(getBuilderMock).not.toHaveBeenCalled()
   })
 
-  it('loads both safe projections directly with their exact actor forms', async () => {
+  it('loads ticket, builder, and canned projections directly with their exact actor forms', async () => {
     render(await QuotePage(props()))
     expect(getTicketMock).toHaveBeenCalledWith({}, {
       actor: {
@@ -124,7 +134,37 @@ describe('QuotePage', () => {
     expect(getBuilderMock).toHaveBeenCalledWith({}, {
       actor: { profileId: profile.id }, ticketId,
     })
+    expect(listCannedMock).toHaveBeenCalledWith({}, { actor: { profileId: profile.id } })
     expect(screen.getByText(`Quote screen 101; ${ticketId}`)).toBeInTheDocument()
+    expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+      cannedJobs: [], cannedCatalogAvailable: true,
+    })
+  })
+
+  it('keeps manual quoting available when the canned catalog is corrupt or tax-stale', async () => {
+    listCannedMock.mockResolvedValueOnce({ ok: false, error: 'conflict', retryable: false })
+    render(await QuotePage(props()))
+    expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+      cannedJobs: [], cannedCatalogAvailable: false,
+    })
+    vi.clearAllMocks()
+    requireUserMock.mockResolvedValue(context)
+    checkAccessMock.mockResolvedValue({ kind: 'allow' })
+    getTicketMock.mockResolvedValue({ ok: true, ticket })
+    getBuilderMock.mockResolvedValue({ ok: true, builder })
+    listCannedMock.mockResolvedValue({ ok: true, cannedJobs: [], taxRateBps: 700 })
+    render(await QuotePage(props()))
+    expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+      cannedJobs: [], cannedCatalogAvailable: false,
+    })
+  })
+
+  it('keeps manual quoting available when the optional canned read rejects', async () => {
+    listCannedMock.mockRejectedValueOnce(new Error('catalog unavailable'))
+    render(await QuotePage(props()))
+    expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+      cannedJobs: [], cannedCatalogAvailable: false,
+    })
   })
 
   it('crosses the client boundary with only quote identity fields', async () => {

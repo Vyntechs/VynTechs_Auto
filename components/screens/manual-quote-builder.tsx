@@ -14,6 +14,10 @@ import {
   type ManualLineFormValues,
   type ManualLineKind,
 } from '@/lib/shop-os/quote-builder-ui'
+import {
+  parseAppliedCannedJobResponse,
+  type SafeCannedJobTemplate,
+} from '@/lib/shop-os/canned-jobs-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import styles from './manual-quote-builder.module.css'
 
@@ -29,23 +33,69 @@ export type QuoteTicketIdentity = {
 export function ManualQuoteBuilder({
   ticket,
   builder,
+  cannedJobs = [],
+  cannedCatalogAvailable = true,
 }: {
   ticket: QuoteTicketIdentity
   builder: QuoteBuilder
+  cannedJobs?: SafeCannedJobTemplate[]
+  cannedCatalogAvailable?: boolean
 }): React.JSX.Element {
   const router = useRouter()
   const [current, setCurrent] = useState(builder)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
-  const [error, setError] = useState<{ message: string; refresh: boolean } | null>(null)
+  const [error, setError] = useState<{
+    message: string
+    refresh: boolean
+    reloadPage?: boolean
+  } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | null>(null)
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
+  const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
+  const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
   const editorFirstInputRef = useRef<HTMLInputElement>(null)
+  const cannedSelectRef = useRef<HTMLSelectElement>(null)
+  const cannedUnavailableRef = useRef<HTMLDivElement>(null)
+  const reloadPendingRef = useRef(false)
+  const resetCannedSelectionOnReloadRef = useRef(false)
+  const reloadBaselineRef = useRef<{
+    builder: QuoteBuilder
+    catalogSignature: string
+    available: boolean
+  } | null>(null)
+  const selectedFingerprintRef = useRef<string | null>(null)
   const quotePath = `/tickets/${ticket.id}/quote`
+  const catalogSignature = cannedJobs.map((job) => `${job.id}:${job.fingerprint}`).join('|')
 
   useEffect(() => setCurrent(builder), [builder])
+  useEffect(() => {
+    if (!reloadPendingRef.current || !reloadBaselineRef.current) return
+    const baseline = reloadBaselineRef.current
+    const changed = baseline.builder !== builder
+      || baseline.catalogSignature !== catalogSignature
+      || baseline.available !== cannedCatalogAvailable
+    if (!changed) return
+    reloadPendingRef.current = false
+    reloadBaselineRef.current = null
+    const selectionStillCurrent = !resetCannedSelectionOnReloadRef.current
+      && selectedCannedId !== null && cannedJobs.some((job) =>
+      job.id === selectedCannedId && job.fingerprint === selectedFingerprintRef.current)
+    if (!selectionStillCurrent) {
+      setSelectedCannedId(null)
+      setCannedClientKey(null)
+      selectedFingerprintRef.current = null
+    }
+    resetCannedSelectionOnReloadRef.current = false
+    setError(null)
+    setTimeout(() => {
+      if (cannedCatalogAvailable) cannedSelectRef.current?.focus()
+      else cannedUnavailableRef.current?.focus()
+    }, 0)
+  }, [builder, cannedCatalogAvailable, cannedJobs, catalogSignature, selectedCannedId])
   useEffect(() => {
     if (!focusTarget) return
     const element = focusRefs.current.get(focusTarget)
@@ -56,6 +106,7 @@ export function ManualQuoteBuilder({
   }, [current, focusTarget])
 
   const lines = current.jobs.flatMap((job) => job.lines)
+  const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
   const totals = summarizeQuoteMoney(lines, current.configuration.taxRateBps)
   const preparation = getQuotePreparationState({
     builder: current,
@@ -65,16 +116,18 @@ export function ManualQuoteBuilder({
     busy,
   })
 
-  function beginOperation(): boolean {
+  function beginOperation(kind: NonNullable<typeof operation>): boolean {
     if (inFlightRef.current) return false
     inFlightRef.current = true
     setBusy(true)
+    setOperation(kind)
     return true
   }
 
   function endOperation(): void {
     inFlightRef.current = false
     setBusy(false)
+    setOperation(null)
   }
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
@@ -130,9 +183,15 @@ export function ManualQuoteBuilder({
     closeEditor = false,
     nested = false,
     expectedVersion?: { id: string; versionNumber: number },
+    expectedAppliedJob?: {
+      id: string
+      title: string
+      kind: 'repair' | 'maintenance'
+      lineCount: number
+    },
   ): Promise<boolean> {
     const ownsOperation = !nested
-    if (ownsOperation && !beginOperation()) return false
+    if (ownsOperation && !beginOperation('refresh')) return false
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/quote`, {
         method: 'GET', headers: { accept: 'application/json' },
@@ -155,6 +214,19 @@ export function ManualQuoteBuilder({
       )) {
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return false
+      }
+      if (expectedAppliedJob) {
+        const appliedJob = refreshed.jobs.find((job) => job.id === expectedAppliedJob.id)
+        if (
+          !appliedJob
+          || appliedJob.title !== expectedAppliedJob.title
+          || appliedJob.kind !== expectedAppliedJob.kind
+          || appliedJob.lines.length !== expectedAppliedJob.lineCount
+          || refreshed.activeVersion !== null
+        ) {
+          setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+          return false
+        }
       }
       setCurrent(refreshed)
       setError(null)
@@ -205,7 +277,7 @@ export function ManualQuoteBuilder({
     const body = editor.mode === 'create'
       ? { clientKey: editor.clientKey, line }
       : line
-    if (!beginOperation()) return
+    if (!beginOperation('line')) return
     setError(null)
     try {
       const response = await fetch(url, {
@@ -233,7 +305,7 @@ export function ManualQuoteBuilder({
   }
 
   async function confirmRemove(): Promise<void> {
-    if (modal?.kind !== 'remove' || !beginOperation()) return
+    if (modal?.kind !== 'remove' || !beginOperation('remove')) return
     const removeTarget = modal.target
     setError(null)
     try {
@@ -260,7 +332,7 @@ export function ManualQuoteBuilder({
   }
 
   async function prepareQuote(): Promise<void> {
-    if (preparation.kind !== 'ready' || !beginOperation()) return
+    if (preparation.kind !== 'ready' || !beginOperation('prepare')) return
     setError(null)
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/quote/versions`, {
@@ -285,6 +357,61 @@ export function ManualQuoteBuilder({
     }
   }
 
+  async function applyCannedJob(): Promise<void> {
+    if (!selectedCannedJob || !cannedClientKey || editor || modal || inFlightRef.current) return
+    if (!beginOperation('canned')) return
+    try {
+      const response = await fetch(`/api/tickets/${ticket.id}/quote/canned-jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          clientKey: cannedClientKey,
+          cannedJobId: selectedCannedJob.id,
+          expectedFingerprint: selectedCannedJob.fingerprint,
+          expectedTaxRateBps: current.configuration.taxRateBps,
+        }),
+      })
+      const body = await readJson(response)
+      if (!response.ok) {
+        const record = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+        if (response.status === 404 || (response.status === 409 && record.retryable !== true)) {
+          resetCannedSelectionOnReloadRef.current = true
+          setError({
+            message: 'Quote or canned-job context changed. Refresh canned jobs and choose again.',
+            refresh: true,
+            reloadPage: true,
+          })
+        } else {
+          applyFailure(response.status, body)
+        }
+        return
+      }
+      const applied = parseAppliedCannedJobResponse(response.status, body)
+      if (!applied) {
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return
+      }
+      if (
+        applied.job.title !== selectedCannedJob.title
+        || applied.job.kind !== selectedCannedJob.kind
+        || applied.job.requiredSkillTier !== selectedCannedJob.defaultRequiredSkillTier
+        || applied.job.lineCount !== selectedCannedJob.lines.length
+      ) {
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return
+      }
+      const refreshed = await refreshQuote(`job:${applied.job.id}`, false, true, undefined, applied.job)
+      if (refreshed) {
+        setSelectedCannedId(null)
+        setCannedClientKey(null)
+      }
+    } catch {
+      setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
+    } finally {
+      endOperation()
+    }
+  }
+
   function closeModal(restore: 'invoker' | 'editor' = 'invoker'): void {
     const invoker = modal?.invoker
     setModal(null)
@@ -292,6 +419,12 @@ export function ManualQuoteBuilder({
       if (restore === 'editor') editorFirstInputRef.current?.focus()
       else invoker?.focus()
     }, 0)
+  }
+
+  function reloadCannedPage(): void {
+    reloadPendingRef.current = true
+    reloadBaselineRef.current = { builder, catalogSignature, available: cannedCatalogAvailable }
+    router.refresh()
   }
 
   return (
@@ -347,12 +480,83 @@ export function ManualQuoteBuilder({
             <p>{current.jobs.length} {current.jobs.length === 1 ? 'job' : 'jobs'}</p>
           </div>
 
+          {!cannedCatalogAvailable ? (
+            <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
+              <strong>Canned jobs unavailable</strong>
+              <p>Manual quote lines remain available. Refresh before using the library.</p>
+              <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
+                Refresh canned jobs
+              </button>
+            </div>
+          ) : cannedJobs.length === 0 ? (
+            <p className={styles.cannedEmpty}>No canned jobs saved. Manual quote lines remain available.</p>
+          ) : (
+            <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
+              <div>
+                <p className={styles.eyebrow}>Saved work</p>
+                <h3 id="canned-job-heading">Add canned job</h3>
+              </div>
+              <label htmlFor="quote-canned-job">Canned job</label>
+              <select
+                id="quote-canned-job"
+                ref={cannedSelectRef}
+                value={selectedCannedId ?? ''}
+                disabled={busy}
+                onChange={(event) => {
+                  setSelectedCannedId(event.target.value || null)
+                  setCannedClientKey(crypto.randomUUID())
+                  selectedFingerprintRef.current = cannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
+                  setError(null)
+                }}
+              >
+                <option value="">Choose saved work</option>
+                {cannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+              </select>
+              {selectedCannedJob && (
+                <div className={styles.cannedPreview} aria-live="polite">
+                  <p className={styles.cannedFacts}>
+                    {selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}
+                  </p>
+                  <ul>
+                    {selectedCannedJob.lines.map((line, index) => (
+                      <li key={`${line.sort}:${index}:${line.description}`}>
+                        <span>{cannedLineLabel(line)} · {line.description}</span>
+                        <strong className={styles.money}>{formatMoneyCents(line.priceCents)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                  <dl>
+                    <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
+                    <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not configured' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
+                    <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
+                  </dl>
+                  <button
+                    type="button"
+                    className={styles.cannedApply}
+                    disabled={busy || editor !== null || modal !== null}
+                    onClick={applyCannedJob}
+                  >
+                    {operation === 'canned' ? 'Adding…' : 'Add canned job'}
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+
           {current.jobs.length === 0 ? (
             <p className={styles.empty}>No eligible jobs on this ticket.</p>
           ) : (
             <ol className={styles.jobs}>
               {current.jobs.map((job, index) => (
-                <li key={job.id} className={styles.job}>
+                <li
+                  key={job.id}
+                  className={styles.job}
+                  tabIndex={-1}
+                  ref={(element) => {
+                    if (element) focusRefs.current.set(`job:${job.id}`, element)
+                    else focusRefs.current.delete(`job:${job.id}`)
+                  }}
+                >
                   <div className={styles.jobNumber} aria-hidden="true">
                     {String(index + 1).padStart(2, '0')}
                   </div>
@@ -531,7 +735,7 @@ export function ManualQuoteBuilder({
                 disabled={preparation.kind !== 'ready'}
                 onClick={prepareQuote}
               >
-                {busy ? 'Preparing…' : 'Prepare quote'}
+                {operation === 'prepare' ? 'Preparing…' : 'Prepare quote'}
               </button>
             </div>
           )}
@@ -542,8 +746,13 @@ export function ManualQuoteBuilder({
         <div className={styles.error} aria-live="assertive">
           <p>{error.message}</p>
           {error.refresh && (
-            <button type="button" className={styles.lineAction} disabled={busy} onClick={() => refreshQuote()}>
-              Refresh quote
+            <button
+              type="button"
+              className={styles.lineAction}
+              disabled={busy}
+              onClick={() => error.reloadPage ? reloadCannedPage() : refreshQuote()}
+            >
+              {error.reloadPage ? 'Refresh canned jobs' : 'Refresh quote'}
             </button>
           )}
         </div>
@@ -791,6 +1000,12 @@ function LineFacts({ line }: { line: BuilderLine }): React.JSX.Element | null {
 function lineLabel(line: BuilderLine): string {
   if (line.kind === 'part') return `Part · Qty ${line.quantity}`
   if (line.kind === 'labor') return `Labor · ${line.laborHours ?? '—'} hr`
+  return 'Fee'
+}
+
+function cannedLineLabel(line: SafeCannedJobTemplate['lines'][number]): string {
+  if (line.kind === 'part') return `Part · Qty ${line.quantity}`
+  if (line.kind === 'labor') return `Labor · ${line.hours} hr`
   return 'Fee'
 }
 

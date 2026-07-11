@@ -5,6 +5,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { cannedJobActorFromProfile, listCannedJobs } from '@/lib/shop-os/canned-jobs'
 import { getQuoteBuilder, quoteActorFromProfile } from '@/lib/shop-os/quotes'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
@@ -53,6 +54,17 @@ export default async function QuotePage({
     notFound()
   }
 
+  let cannedResult: Awaited<ReturnType<typeof listCannedJobs>> | null = null
+  try {
+    cannedResult = await listCannedJobs(db, {
+      actor: cannedJobActorFromProfile(ctx.profile),
+    })
+  } catch {
+    // Canned work is an optional accelerator. Manual quoting remains available.
+  }
+  const cannedCatalogAvailable = cannedResult?.ok === true
+    && cannedResult.taxRateBps === builderResult.builder.configuration.taxRateBps
+
   const quoteTicket = {
     id: ticketResult.ticket.id,
     ticketNumber: ticketResult.ticket.ticketNumber,
@@ -72,6 +84,8 @@ export default async function QuotePage({
     <ManualQuoteBuilder
       ticket={quoteTicket}
       builder={builderResult.builder}
+      cannedJobs={cannedCatalogAvailable && cannedResult?.ok ? cannedResult.cannedJobs : []}
+      cannedCatalogAvailable={cannedCatalogAvailable}
     />
   )
 }

@@ -36,15 +36,15 @@
 
 ## Task 4: Owner canned-library surface
 
-- [ ] Extend protected Shop settings with a calibrated canned-job library and one strict create/edit surface.
-- [ ] Support part/labor/fee lines, exact prices/taxability, stable ordering, explicit discard, stale refresh, and retirement confirmation.
-- [ ] Prove owner/founder access, 44px controls, visible focus, decimal keyboards, 375px stacking, safe-area/error behavior, and no optimistic/fake save.
+- [x] Extend protected Shop settings with a calibrated canned-job library and one strict create/edit surface.
+- [x] Support part/labor/fee lines, exact prices/taxability, stable ordering, explicit discard, stale refresh, and retirement confirmation.
+- [x] Prove owner/founder access, 44px controls, visible focus, decimal keyboards, 375px stacking, safe-area/error behavior, and no optimistic/fake save.
 
 ## Task 5: Existing quote canned application
 
-- [ ] Load only safe active templates into the protected quote page and show the selected title/kind, line breakdown, exact subtotal, and configured tax/total or unavailable state before one explicit Add canned job action.
-- [ ] Preserve one request key across ambiguous retries, rotate on selection/success, serialize operations, and refresh strict builder truth.
-- [ ] Restore focus to the new job and map access, not-found, stale, busy, malformed success, and network outcomes without inventing causes.
+- [x] Load only safe active templates into the protected quote page and show the selected title/kind, line breakdown, exact subtotal, and configured tax/total or unavailable state before one explicit Add canned job action.
+- [x] Preserve one request key across ambiguous retries, rotate on selection/success, serialize operations, and refresh strict builder truth.
+- [x] Restore focus to the new job and map access, not-found, stale, busy, malformed success, and network outcomes without inventing causes.
 
 ## Task 6: Complete Door C Quick Quote
 
