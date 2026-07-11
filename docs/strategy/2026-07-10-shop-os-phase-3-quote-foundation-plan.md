@@ -35,11 +35,11 @@
 - Modify: `lib/db/schema.ts`
 - Create: `tests/unit/shop-os-quote-foundation-schema.test.ts`
 
-- [ ] Write failing source-schema tests for shop rate/tax, job story/approved-version fields, and all five tables.
-- [ ] Add exported story/default-line types without defining row-17 snapshot math.
-- [ ] Add money/safe-integer, precision, JSON-container, event, enum, range, composite uniqueness, same-shop, same-ticket, and exact-version declarations plus required access/FK indexes.
-- [ ] Prove forward references/circular job-version FKs load through the real schema module.
-- [ ] Independently review the declaration task and resolve all findings.
+- [x] Write failing source-schema tests for shop rate/tax, job story/approved-version fields, and all five tables.
+- [x] Add exported story/default-line types without defining row-17 snapshot math.
+- [x] Add money/safe-integer, precision, JSON-container, event, enum, range, composite uniqueness, same-shop, same-ticket, and exact-version declarations plus required access/FK indexes.
+- [x] Prove forward references/circular job-version FKs load through the real schema module.
+- [x] Independently review the declaration task and resolve all findings.
 
 ## Task 3: Add and prove migration `0028`
 

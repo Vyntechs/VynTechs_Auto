@@ -9,6 +9,7 @@ import {
   jsonb,
   integer,
   bigint,
+  numeric,
   real,
   boolean,
   index,
@@ -27,16 +28,62 @@ export type { TreeState }
 
 export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
 
+export type CustomerStory = {
+  whatYouToldUs: string
+  whatWeFound: string
+  howWeKnow: Array<{
+    claim: string
+    sourceEventIds: string[]
+    sourceArtifactIds: string[]
+  }>
+  whatItMeansIfWaived: string
+  whatWeRecommend: string
+}
+
+export type CustomerStoryMeta = {
+  source: 'ai' | 'manual' | 'template'
+  sessionId?: string
+  generatedAt?: string
+  lastEditedByProfileId: string
+  lastEditedAt: string
+}
+
+export type CannedJobDefaultLine = {
+  kind: 'part' | 'labor' | 'fee'
+  description: string
+  sort: number
+  quantity: number
+  priceCents: number
+  taxable: boolean
+  partNumber?: string
+  brand?: string
+  unitCostCents?: number
+  coreChargeCents?: number
+  laborHours?: number
+  laborRateCents?: number
+}
+
 export const shops = pgTable(
   'shops',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     nextTicketNumber: bigint('next_ticket_number', { mode: 'number' }).default(1).notNull(),
+    laborRateCents: bigint('labor_rate_cents', { mode: 'number' }),
+    taxRateBps: integer('tax_rate_bps'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     check('shops_next_ticket_number_positive', sql`${table.nextTicketNumber} > 0`),
+    check(
+      'shops_labor_rate_cents_range',
+      sql`${table.laborRateCents} is null
+        or ${table.laborRateCents} between 0 and 9007199254740991`,
+    ),
+    check(
+      'shops_tax_rate_bps_range',
+      sql`${table.taxRateBps} is null or ${table.taxRateBps} between 0 and 10000`,
+    ),
   ],
 )
 
@@ -265,6 +312,42 @@ export const tickets = pgTable(
   ],
 )
 
+export const quoteVersions = pgTable(
+  'quote_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    createdByProfileId: uuid('created_by_profile_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'quote_versions_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_versions_shop_creator_fk',
+      columns: [table.shopId, table.createdByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('quote_versions_shop_ticket_version_uq').on(
+      table.shopId,
+      table.ticketId,
+      table.versionNumber,
+    ),
+    uniqueIndex('quote_versions_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
+    index('quote_versions_ticket_created_idx').on(table.ticketId, table.createdAt),
+    index('quote_versions_shop_creator_idx').on(table.shopId, table.createdByProfileId),
+    check('quote_versions_number_positive', sql`${table.versionNumber} > 0`),
+    check('quote_versions_snapshot_object', sql`jsonb_typeof(${table.snapshot}) = 'object'`),
+  ],
+)
+
 export const ticketJobs = pgTable(
   'ticket_jobs',
   {
@@ -283,7 +366,10 @@ export const ticketJobs = pgTable(
     approvalState: text('approval_state', {
       enum: ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined'],
     }).default('pending_quote').notNull(),
+    customerStory: jsonb('customer_story').$type<CustomerStory>(),
+    storyMeta: jsonb('story_meta').$type<CustomerStoryMeta>(),
     workNotes: text('work_notes'),
+    approvedQuoteVersionId: uuid('approved_quote_version_id'),
     diagnosticStartState: text('diagnostic_start_state', {
       enum: ['idle', 'initializing', 'ready', 'failed', 'ambiguous'],
     }).default('idle').notNull(),
@@ -309,6 +395,16 @@ export const ticketJobs = pgTable(
       columns: [table.shopId, table.sessionId],
       foreignColumns: [sessions.shopId, sessions.id],
     }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_approved_quote_version_fk',
+      columns: [table.shopId, table.ticketId, table.approvedQuoteVersionId],
+      foreignColumns: [quoteVersions.shopId, quoteVersions.ticketId, quoteVersions.id],
+    }).onDelete('restrict'),
+    uniqueIndex('ticket_jobs_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('ticket_jobs_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
+    index('ticket_jobs_approved_quote_version_idx')
+      .on(table.shopId, table.ticketId, table.approvedQuoteVersionId)
+      .where(sql`${table.approvedQuoteVersionId} is not null`),
     uniqueIndex('ticket_jobs_session_id_uq')
       .on(table.sessionId)
       .where(sql`${table.sessionId} is not null`),
@@ -347,6 +443,258 @@ export const ticketJobs = pgTable(
     check(
       'ticket_jobs_session_only_for_diagnostic',
       sql`${table.sessionId} is null or ${table.kind} = 'diagnostic'`,
+    ),
+    check(
+      'ticket_jobs_story_json_objects',
+      sql`(${table.customerStory} is null or jsonb_typeof(${table.customerStory}) = 'object')
+        and (${table.storyMeta} is null or jsonb_typeof(${table.storyMeta}) = 'object')`,
+    ),
+  ],
+)
+
+export const jobAttachments = pgTable(
+  'job_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    storageKey: text('storage_key').notNull(),
+    kind: text('kind', { enum: ['photo', 'video', 'document'] }).notNull(),
+    mimeType: text('mime_type').notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    uploadedByProfileId: uuid('uploaded_by_profile_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'job_attachments_shop_job_fk',
+      columns: [table.shopId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_attachments_shop_uploader_fk',
+      columns: [table.shopId, table.uploadedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('job_attachments_shop_storage_key_uq').on(table.shopId, table.storageKey),
+    index('job_attachments_job_created_idx').on(table.shopId, table.jobId, table.createdAt),
+    index('job_attachments_uploader_created_idx').on(
+      table.shopId,
+      table.uploadedByProfileId,
+      table.createdAt,
+    ),
+    check(
+      'job_attachments_kind_valid',
+      sql`${table.kind} in ('photo', 'video', 'document')`,
+    ),
+    check(
+      'job_attachments_byte_size_range',
+      sql`${table.byteSize} between 0 and 9007199254740991`,
+    ),
+  ],
+)
+
+export const jobLines = pgTable(
+  'job_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    kind: text('kind', { enum: ['part', 'labor', 'fee'] }).notNull(),
+    description: text('description').notNull(),
+    sort: integer('sort').default(0).notNull(),
+    quantity: numeric('quantity', { precision: 12, scale: 3, mode: 'number' }).default(1).notNull(),
+    priceCents: bigint('price_cents', { mode: 'number' }).notNull(),
+    taxable: boolean('taxable').default(true).notNull(),
+    partNumber: text('part_number'),
+    brand: text('brand'),
+    unitCostCents: bigint('unit_cost_cents', { mode: 'number' }),
+    coreChargeCents: bigint('core_charge_cents', { mode: 'number' }),
+    fitment: text('fitment'),
+    vendorAccountId: uuid('vendor_account_id'),
+    externalOfferId: text('external_offer_id'),
+    vendorSnapshot: jsonb('vendor_snapshot').$type<Record<string, unknown>>(),
+    partStatus: text('part_status', {
+      enum: ['proposed', 'needs_order', 'ordered', 'received', 'installed', 'returned'],
+    }).default('proposed').notNull(),
+    orderedAt: timestamp('ordered_at', { withTimezone: true }),
+    orderedByProfileId: uuid('ordered_by_profile_id'),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    receivedByProfileId: uuid('received_by_profile_id'),
+    laborHours: numeric('labor_hours', { precision: 8, scale: 2, mode: 'number' }),
+    laborRateCents: bigint('labor_rate_cents', { mode: 'number' }),
+    source: text('source', {
+      enum: ['manual', 'vendor_offer', 'diagnosis_seed', 'guide'],
+    }).default('manual').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'job_lines_shop_job_fk',
+      columns: [table.shopId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_lines_shop_ordered_by_fk',
+      columns: [table.shopId, table.orderedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_lines_shop_received_by_fk',
+      columns: [table.shopId, table.receivedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    index('job_lines_job_sort_idx').on(table.shopId, table.jobId, table.sort),
+    index('job_lines_ordered_by_idx')
+      .on(table.shopId, table.orderedByProfileId)
+      .where(sql`${table.orderedByProfileId} is not null`),
+    index('job_lines_received_by_idx')
+      .on(table.shopId, table.receivedByProfileId)
+      .where(sql`${table.receivedByProfileId} is not null`),
+    index('job_lines_shop_vendor_account_idx')
+      .on(table.shopId, table.vendorAccountId)
+      .where(sql`${table.vendorAccountId} is not null`),
+    check('job_lines_kind_valid', sql`${table.kind} in ('part', 'labor', 'fee')`),
+    check('job_lines_sort_nonnegative', sql`${table.sort} >= 0`),
+    check('job_lines_quantity_positive', sql`${table.quantity} > 0`),
+    check(
+      'job_lines_money_nonnegative',
+      sql`${table.priceCents} >= 0
+        and (${table.unitCostCents} is null or ${table.unitCostCents} >= 0)
+        and (${table.coreChargeCents} is null or ${table.coreChargeCents} >= 0)
+        and (${table.laborRateCents} is null or ${table.laborRateCents} >= 0)`,
+    ),
+    check(
+      'job_lines_money_safe_integer',
+      sql`${table.priceCents} <= 9007199254740991
+        and (${table.unitCostCents} is null or ${table.unitCostCents} <= 9007199254740991)
+        and (${table.coreChargeCents} is null or ${table.coreChargeCents} <= 9007199254740991)
+        and (${table.laborRateCents} is null or ${table.laborRateCents} <= 9007199254740991)`,
+    ),
+    check(
+      'job_lines_labor_hours_nonnegative',
+      sql`${table.laborHours} is null or ${table.laborHours} >= 0`,
+    ),
+    check(
+      'job_lines_part_status_valid',
+      sql`${table.partStatus} in ('proposed', 'needs_order', 'ordered', 'received', 'installed', 'returned')`,
+    ),
+    check(
+      'job_lines_source_valid',
+      sql`${table.source} in ('manual', 'vendor_offer', 'diagnosis_seed', 'guide')`,
+    ),
+    check(
+      'job_lines_json_objects',
+      sql`${table.vendorSnapshot} is null or jsonb_typeof(${table.vendorSnapshot}) = 'object'`,
+    ),
+  ],
+)
+
+export const cannedJobs = pgTable(
+  'canned_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'cascade' }).notNull(),
+    title: text('title').notNull(),
+    kind: text('kind', { enum: ['repair', 'maintenance'] }).notNull(),
+    defaultRequiredSkillTier: integer('default_required_skill_tier').notNull(),
+    defaultLines: jsonb('default_lines').$type<CannedJobDefaultLine[]>().default([]).notNull(),
+    sort: integer('sort').default(0).notNull(),
+    retiredAt: timestamp('retired_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('canned_jobs_shop_sort_idx').on(table.shopId, table.retiredAt, table.sort),
+    check('canned_jobs_kind_valid', sql`${table.kind} in ('repair', 'maintenance')`),
+    check(
+      'canned_jobs_skill_tier_range',
+      sql`${table.defaultRequiredSkillTier} between 1 and 3`,
+    ),
+    check('canned_jobs_sort_nonnegative', sql`${table.sort} >= 0`),
+    check('canned_jobs_default_lines_array', sql`jsonb_typeof(${table.defaultLines}) = 'array'`),
+  ],
+)
+
+export const quoteEvents = pgTable(
+  'quote_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    jobId: uuid('job_id'),
+    quoteVersionId: uuid('quote_version_id').notNull(),
+    quoteSendId: uuid('quote_send_id'),
+    kind: text('kind', {
+      enum: ['sent', 'delivered', 'viewed', 'approved', 'declined', 'question'],
+    }).notNull(),
+    actorProfileId: uuid('actor_profile_id'),
+    approvedVia: text('approved_via', { enum: ['page', 'phone', 'in_person'] }),
+    requestKey: text('request_key').notNull(),
+    providerEventId: text('provider_event_id'),
+    body: text('body'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'quote_events_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_events_shop_ticket_job_fk',
+      columns: [table.shopId, table.ticketId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.ticketId, ticketJobs.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_events_shop_ticket_version_fk',
+      columns: [table.shopId, table.ticketId, table.quoteVersionId],
+      foreignColumns: [quoteVersions.shopId, quoteVersions.ticketId, quoteVersions.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_events_shop_actor_fk',
+      columns: [table.shopId, table.actorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('quote_events_shop_request_key_uq').on(table.shopId, table.requestKey),
+    uniqueIndex('quote_events_shop_provider_event_uq')
+      .on(table.shopId, table.providerEventId)
+      .where(sql`${table.providerEventId} is not null`),
+    index('quote_events_ticket_created_idx').on(table.shopId, table.ticketId, table.createdAt),
+    index('quote_events_job_idx')
+      .on(table.shopId, table.ticketId, table.jobId)
+      .where(sql`${table.jobId} is not null`),
+    index('quote_events_version_idx').on(table.shopId, table.ticketId, table.quoteVersionId),
+    index('quote_events_actor_idx')
+      .on(table.shopId, table.actorProfileId)
+      .where(sql`${table.actorProfileId} is not null`),
+    index('quote_events_quote_send_idx')
+      .on(table.quoteSendId)
+      .where(sql`${table.quoteSendId} is not null`),
+    check(
+      'quote_events_kind_valid',
+      sql`${table.kind} in ('sent', 'delivered', 'viewed', 'approved', 'declined', 'question')`,
+    ),
+    check(
+      'quote_events_approved_via_valid',
+      sql`${table.approvedVia} is null or ${table.approvedVia} in ('page', 'phone', 'in_person')`,
+    ),
+    check(
+      'quote_events_approval_channel_consistent',
+      sql`(${table.kind} = 'approved' and ${table.approvedVia} is not null)
+        or (${table.kind} <> 'approved' and ${table.approvedVia} is null)`,
+    ),
+    check(
+      'quote_events_decision_job_consistent',
+      sql`${table.kind} not in ('approved', 'declined') or ${table.jobId} is not null`,
+    ),
+    check(
+      'quote_events_offline_approval_actor_consistent',
+      sql`${table.kind} <> 'approved'
+        or ${table.approvedVia} not in ('phone', 'in_person')
+        or ${table.actorProfileId} is not null`,
     ),
   ],
 )
