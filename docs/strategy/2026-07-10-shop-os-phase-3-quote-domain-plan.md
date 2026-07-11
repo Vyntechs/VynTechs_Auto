@@ -74,10 +74,10 @@
 
 ## Task 7: Verify, reconcile, and ship
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff checks.
-- [ ] Review the full diff for money drift, tenant leaks, mutable history, projection/event divergence, deadlocks, future-row scope, and engine changes.
-- [ ] Resolve all task and whole-branch findings through tests.
-- [ ] Add the row-17 implementation correction, mark row 17 complete, preserve owner/external gates, and identify row 18 as next.
+- [x] Run focused tests, full suite, TypeScript, production build, and diff checks.
+- [x] Review the full diff for money drift, tenant leaks, mutable history, projection/event divergence, deadlocks, future-row scope, and engine changes.
+- [x] Resolve all task and whole-branch findings through tests.
+- [x] Add the row-17 implementation correction, mark row 17 complete, preserve owner/external gates, and identify row 18 as next.
 - [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 18.
 
 ## Verification

@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 row 16 are complete; row 17 is the active safe source-code lane.** Production application, production migrations, external access, and feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 rows 16–17 are complete; row 18 is the next safe source-code lane.** Production application, production migrations, external access, and feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -602,6 +602,8 @@ Quote build is universal. Send/approval recording/close remain capability-gated.
 
 **Done when:** fixture diagnostic runs lock→story→versioned quote→phone approval; repair and simple-work mutation stay locked before approval and unlock only for the approved version; a declined job can close only through the no-repair path and never records performed work; a simple job runs approved→photo/note→done with zero AI calls; math matches hand calculations at rounding/tax edges; mutation/retry/tenant tests pass; Door C creates a canned priced quote in under 60 seconds.
 
+**Implementation correction — deterministic quote domain proved 2026-07-11.** [Row-17 packet](./2026-07-10-shop-os-phase-3-quote-domain-plan.md) adds scaled-integer money math, tenant-safe mutable manual lines, deterministic immutable ticket versions, exact-version phone/in-person decisions, one privacy-safe builder read model, and thin authenticated/paywalled route shims. Ticket-first stable `NOWAIT` locking prevents quote paths from waiting behind the existing diagnostic job→ticket path; exact request-key retries remain actor-bound and precede stale-version checks; append-only decision events and immutable snapshots backstop the current projection. Six focused files/113 tests and the complete 216-file/1,989-test suite pass with TypeScript, production build, task reviews, whole-branch review, and a zero-finding security review. PGlite proves generated lock order, rollback, and deterministic same-client behavior; true two-connection PostgreSQL timing remains deferred to integration proof. No production migration, send/vendor/work execution, UI, or diagnostic-engine behavior changed.
+
 ### Phase 4 — Parts vendor layer (M; external risk)
 
 **Ships:** secure `vendor_accounts`; adapter contract; fully usable manual transport; PartsTech or O'Reilly transport only after access is confirmed; offer snapshot/refresh; diagnosis-seeded query UI; optional RepairPal benchmark only after permitted-use confirmation.
@@ -670,7 +672,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Source rows 1–5 and 7–16 are complete. Row 17 is active on `feat/shop-os-p3-quote-domain`; row 6, production migration/app enablement, and external account/spend rows remain owner gates.
+3. Source rows 1–5 and 7–17 are complete. Row 18 is the next safe lane; row 6, production migration/app enablement, and external account/spend rows remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -724,8 +726,8 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | complete | PR #125; 5 focused files/57 tests + 206 files/1,775 full tests; [execution packet](./2026-07-10-shop-os-phase-2-today-jobs-plan.md) |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | complete | PR #126; 10 focused files/176 tests + 209 files/1,866 full tests; [execution packet](./2026-07-10-shop-os-phase-2-diagnostic-bootstrap-plan.md); creation seam and diagnostic semantics preserved |
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | complete | PR #127; 3 focused files/25 tests + 210 files/1,876 full tests; source/local proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
-| 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | in progress | PR #128; exact event/projection atomicity required |
-| 18 | 3 | Manual quote builder + totals | A | 17 | pending | — |
+| 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | complete | PR #128; 6 focused files/113 tests + 216 files/1,989 full tests; [execution packet](./2026-07-10-shop-os-phase-3-quote-domain-plan.md); no production apply |
+| 18 | 3 | Manual quote builder + totals | A | 17 | pending | Next safe source-code lane |
 | 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | pending | — |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | pending | Tree/published-wizard only |
 | 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | pending | — |
