@@ -339,26 +339,14 @@ async function safeStateAfterWorkerLoss(
   db: AppDb,
   input: StartInput,
 ): Promise<SettleDiagnosticStartResult> {
-  const safe = await currentSafeState(db, input)
-  if (safe.ok || safe.status !== 404) return safe
-
-  const [row] = await db
-    .select({
-      sessionId: ticketJobs.sessionId,
-      state: ticketJobs.diagnosticStartState,
-      attemptKey: ticketJobs.diagnosticStartAttemptKey,
-    })
-    .from(ticketJobs)
-    .where(and(
-      eq(ticketJobs.shopId, input.actor.shopId),
-      eq(ticketJobs.ticketId, input.ticketId),
-      eq(ticketJobs.id, input.jobId),
-    ))
-    .limit(1)
-  if (!row || row.sessionId) return safe
-  if (row.state === 'ambiguous' && row.attemptKey === input.attemptKey) return ambiguous()
-  if (row.state === 'initializing' && row.attemptKey !== input.attemptKey) return waiting()
-  return safe
+  const snapshot = await loadAuthorizedSnapshot(db, input)
+  if (!snapshot) return notFound()
+  const ready = existingReady(snapshot, input.actor)
+  if (ready) return ready
+  if (snapshot.state === 'ambiguous') return ambiguous()
+  if (snapshot.state === 'initializing') return waiting()
+  if (snapshot.state === 'failed') return { ok: true, state: 'failed' }
+  return unavailable()
 }
 
 export async function finalizeDiagnosticStart(
@@ -374,8 +362,10 @@ export async function finalizeDiagnosticStart(
       ...input,
       state: 'ambiguous',
       errorCode: 'empty_initial_tree',
-    })) return ambiguous()
-    if (await expireOwnedLease(db, input, input.attemptKey)) return ambiguous()
+    })) return safeStateAfterWorkerLoss(db, input)
+    if (await expireOwnedLease(db, input, input.attemptKey)) {
+      return safeStateAfterWorkerLoss(db, input)
+    }
     return safeStateAfterWorkerLoss(db, input)
   }
 
@@ -437,8 +427,10 @@ export async function finalizeDiagnosticStart(
       ...input,
       state: 'ambiguous',
       errorCode: 'persistence_outcome_uncertain',
-    })) return ambiguous()
-    if (await expireOwnedLease(db, input, input.attemptKey)) return ambiguous()
+    })) return safeStateAfterWorkerLoss(db, input)
+    if (await expireOwnedLease(db, input, input.attemptKey)) {
+      return safeStateAfterWorkerLoss(db, input)
+    }
     return safeStateAfterWorkerLoss(db, input)
   }
 }
@@ -459,7 +451,9 @@ export async function recordDiagnosticStartFailure(
     ...input,
     state: nextState,
     errorCode: input.errorCode,
-  })) return { ok: true, state: nextState }
-  if (await expireOwnedLease(db, input, input.attemptKey)) return ambiguous()
+  })) return safeStateAfterWorkerLoss(db, input)
+  if (await expireOwnedLease(db, input, input.attemptKey)) {
+    return safeStateAfterWorkerLoss(db, input)
+  }
   return safeStateAfterWorkerLoss(db, input)
 }

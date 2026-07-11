@@ -1,0 +1,1 @@
+export const MAX_OPEN_SESSIONS_PER_TECH = 5

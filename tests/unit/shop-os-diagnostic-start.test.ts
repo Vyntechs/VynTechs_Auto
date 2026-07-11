@@ -512,7 +512,7 @@ describe('Shop OS leased diagnostic start', () => {
       sessionId: uuid(60),
       treeState,
       context: acquiredContext,
-    })).toEqual({ ok: true, state: 'ambiguous' })
+    })).toEqual({ ok: false, status: 404, error: 'not found' })
 
     expect(await db.select().from(sessions)).toHaveLength(0)
     const [row] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
@@ -523,6 +523,75 @@ describe('Shop OS leased diagnostic start', () => {
       diagnosticStartState: 'ambiguous',
       diagnosticStartAttemptKey: uuid(100),
     })
+  })
+
+  it('returns uniform not-found when a deactivated old worker reports failure', async () => {
+    await acquire(uuid(100))
+    await db.update(profiles).set({ deactivatedAt: new Date() })
+      .where(eq(profiles.id, actor.profileId))
+
+    expect(await recordDiagnosticStartFailure(db, {
+      actor,
+      ticketId,
+      jobId,
+      attemptKey: uuid(100),
+      certainty: 'uncertain',
+      errorCode: 'provider_outcome_uncertain',
+    })).toEqual({ ok: false, status: 404, error: 'not found' })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        sessionId: null,
+        diagnosticStartState: 'ambiguous',
+        diagnosticStartAttemptKey: uuid(100),
+      })
+  })
+
+  it('does not reveal a newer attempt to the reassigned old worker finalize or failure', async () => {
+    await acquire(uuid(100))
+    await db.update(ticketJobs).set({
+      assignedTechId: otherTechId,
+      diagnosticStartLeaseUntil: new Date('2000-01-01T00:00:00Z'),
+    }).where(eq(ticketJobs.id, jobId))
+    const otherActor = { profileId: otherTechId, shopId }
+    expect(await acquireDiagnosticStart(db, {
+      actor: otherActor,
+      ticketId,
+      jobId,
+      attemptKey: uuid(101),
+    })).toEqual({ ok: true, state: 'ambiguous' })
+    expect(await acquireDiagnosticStart(db, {
+      actor: otherActor,
+      ticketId,
+      jobId,
+      attemptKey: uuid(101),
+      confirmAmbiguousRetry: true,
+    })).toMatchObject({ ok: true, state: 'initializing', leaseAcquired: true })
+
+    expect(await finalizeDiagnosticStart(db, {
+      actor,
+      ticketId,
+      jobId,
+      attemptKey: uuid(100),
+      sessionId: uuid(60),
+      treeState,
+      context: acquiredContext,
+    })).toEqual({ ok: false, status: 404, error: 'not found' })
+    expect(await recordDiagnosticStartFailure(db, {
+      actor,
+      ticketId,
+      jobId,
+      attemptKey: uuid(100),
+      certainty: 'uncertain',
+      errorCode: 'provider_outcome_uncertain',
+    })).toEqual({ ok: false, status: 404, error: 'not found' })
+
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+      .toMatchObject({
+        assignedTechId: otherTechId,
+        sessionId: null,
+        diagnosticStartState: 'initializing',
+        diagnosticStartAttemptKey: uuid(101),
+      })
   })
 
   it('records certain pre-provider failure as failed and uncertain outcomes as ambiguous', async () => {
