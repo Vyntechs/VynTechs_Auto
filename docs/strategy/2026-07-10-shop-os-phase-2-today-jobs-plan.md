@@ -24,7 +24,7 @@
 - [x] Record PR #124 merge/tree equality and close row 13's final shipping checkbox.
 - [x] Audit Today page/screen/tests, ticket projections, row-13 route, legacy sessions, follow-ups, and Rev-4 composition rules against `main`.
 - [x] Choose one read model and one focused board component; preserve current Today content rather than replacing it.
-- [ ] Commit/push this packet and open a draft PR before implementation.
+- [x] Commit/push this packet and open draft PR #125 before implementation.
 
 ## Task 2: Build the tenant-safe Today job read model
 

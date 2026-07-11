@@ -717,7 +717,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 11 | 1 | Door C minimal create | A | 8,9 | complete | PR #122; 5 focused files/67 tests + 198 files/1,668 full tests; [execution packet](./2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md) |
 | 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | complete | PR #123; 9 focused files/90 tests + 201 files/1,715 full tests; [execution packet](./2026-07-10-shop-os-phase-1-door-b-provisional-plan.md); creation seam only |
 | 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | complete | PR #124; 4 focused files/67 tests + 203 files/1,750 full tests; [execution packet](./2026-07-10-shop-os-phase-2-job-assignment-plan.md) |
-| 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | in_progress | `feat/shop-os-p2-today-jobs`; [execution packet](./2026-07-10-shop-os-phase-2-today-jobs-plan.md) |
+| 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | in_progress | Draft PR #125; `feat/shop-os-p2-today-jobs`; [execution packet](./2026-07-10-shop-os-phase-2-today-jobs-plan.md) |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | pending | Creation seam; diagnostic semantics unchanged |
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | pending | — |
 | 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | pending | — |
