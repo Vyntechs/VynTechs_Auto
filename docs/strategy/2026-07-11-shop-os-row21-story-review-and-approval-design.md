@@ -1,8 +1,8 @@
 # Shop OS Row 21 — Story Review and Exact-Version Approval Design
 
-**Date:** 2026-07-11  
-**Status:** Control-lane approved for implementation  
-**Owner:** advisor/customer UI lane (`A`)  
+**Date:** 2026-07-11
+**Status:** Control-lane approved for implementation
+**Owner:** advisor/customer UI lane (`A`)
 **Depends on:** rows 17 and 20
 
 ## Outcome
