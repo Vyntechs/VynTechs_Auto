@@ -63,11 +63,11 @@
 
 ## Task 4: Verify, review, reconcile, and ship row 14
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff check; record exact counts.
-- [ ] Attempt signed-in Chrome only with launch authority; otherwise record the gate and protect the layout/interactions through DOM/static proof.
-- [ ] Inspect the complete diff for removed Today content, duplicate sessions, tenant/tier leaks, fabricated facts, work-start drift, and unrelated changes.
-- [ ] Obtain task reviews and one whole-branch review; resolve every finding and re-review.
-- [ ] Add the Phase-2 Today implementation correction, mark row 14 complete, preserve owner gates, and identify row 15 as next.
+- [x] Run focused tests (5 files/57 tests), full suite (206 files/1,775 tests), TypeScript, production build, and diff check; all pass.
+- [x] Attempt signed-in Chrome only with launch authority; Chrome was not running and no launch authority was granted, so DOM/static proof protects layout, targets, focus, feedback, and responsive behavior.
+- [x] Inspect the complete diff for removed Today content, duplicate sessions, tenant/tier leaks, fabricated facts, work-start drift, and unrelated changes; none remain.
+- [x] Obtain two task reviews and one whole-branch review; resolve four feedback, focus, target-size, and linked-session authorization findings through TDD and receive final approvals with zero findings.
+- [x] Add the Phase-2 Today implementation correction, mark row 14 complete, preserve owner gates, and identify row 15 as next.
 - [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 15.
 
 ## Verification
