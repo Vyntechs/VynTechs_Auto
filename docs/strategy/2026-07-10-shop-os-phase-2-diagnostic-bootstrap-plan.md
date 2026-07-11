@@ -87,7 +87,7 @@
 - [x] Inspect the full diff for provider duplication, authorization leaks, stale-lease auto-retry, empty-tree persistence, session ownership drift, simple-work start, and unrelated changes; none remain.
 - [x] Obtain task reviews and a whole-branch review; resolve initializer isolation/typing, snapshot drift, stale-state privacy, settlement containment, local/server truth, assignment/provider interleaving, finalize TOCTOU, and expiry-recovery findings through TDD; final reviews approve with zero findings.
 - [x] Add the Phase-2 diagnostic-bootstrap implementation correction, mark row 15 complete, preserve owner gates, and identify row 16 as next.
-- [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 16.
+- [x] Push final head, pass GitHub checks, mark ready, squash-merge PR #126, verify source/merge tree equality at `224a8937444a6d68af12c2f02e130f057927fff7`, and immediately continue row 16.
 
 ## Verification
 

@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, 9, 10, 11, and 12 plus Phase 2 rows 13 and 14 are complete in source; row 15 is the next safe source-code lane.** Production application and counter feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 are complete; row 16 is the active safe source-code lane.** Production application, production migrations, external access, and feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -723,7 +723,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | complete | PR #124; 4 focused files/67 tests + 203 files/1,750 full tests; [execution packet](./2026-07-10-shop-os-phase-2-job-assignment-plan.md) |
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | complete | PR #125; 5 focused files/57 tests + 206 files/1,775 full tests; [execution packet](./2026-07-10-shop-os-phase-2-today-jobs-plan.md) |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | complete | PR #126; 10 focused files/176 tests + 209 files/1,866 full tests; [execution packet](./2026-07-10-shop-os-phase-2-diagnostic-bootstrap-plan.md); creation seam and diagnostic semantics preserved |
-| 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | pending | — |
+| 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | in progress | Source/local migration proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
 | 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | pending | — |
 | 18 | 3 | Manual quote builder + totals | A | 17 | pending | — |
 | 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | pending | — |
