@@ -29,10 +29,10 @@
 
 ## Task 3: Atomic existing-ticket apply
 
-- [ ] Add one ticket-first `NOWAIT` mutation taking request key, canned ID, expected fingerprint, and expected tax context; resolve a first-success-wins committed same-key result before requiring the template to remain active/current.
-- [ ] Create one unassigned repair/maintenance job and exact manual-source line copies; invalidate one active version once.
-- [ ] Make committed same-key retries return the existing job, rotate keys on changed input, and roll back every new-request failure; do not claim schema-free historical input binding.
-- [ ] Prove complete refreshed builder totals equal the next immutable snapshot totals and later template edits cannot mutate applied truth.
+- [x] Add one ticket-first `NOWAIT` mutation taking request key, canned ID, expected fingerprint, and expected tax context; resolve a first-success-wins committed same-key result before requiring the template to remain active/current.
+- [x] Create one unassigned repair/maintenance job and exact manual-source line copies; invalidate one active version once.
+- [x] Make committed same-key retries return the existing job, rotate keys on changed input, and roll back every new-request failure; do not claim schema-free historical input binding.
+- [x] Prove complete refreshed builder totals equal the next immutable snapshot totals and later template edits cannot mutate applied truth.
 
 ## Task 4: Owner canned-library surface
 

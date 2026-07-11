@@ -13,15 +13,18 @@ vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => {
     createCannedJob: vi.fn(),
     replaceCannedJob: vi.fn(),
     retireCannedJob: vi.fn(),
+    applyCannedJobToTicket: vi.fn(),
   }
 })
 
 import { GET, POST } from '@/app/api/shop/canned-jobs/route'
 import { PUT, DELETE } from '@/app/api/shop/canned-jobs/[id]/route'
+import { POST as applyCanned } from '@/app/api/tickets/[id]/quote/canned-jobs/route'
 import { isFounder, requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import {
   createCannedJob,
+  applyCannedJobToTicket,
   listCannedJobs,
   replaceCannedJob,
   retireCannedJob,
@@ -66,6 +69,7 @@ const listMock = vi.mocked(listCannedJobs)
 const createMock = vi.mocked(createCannedJob)
 const replaceMock = vi.mocked(replaceCannedJob)
 const retireMock = vi.mocked(retireCannedJob)
+const applyMock = vi.mocked(applyCannedJobToTicket)
 
 function request(method: string, body?: unknown, raw?: string) {
   return new Request('http://localhost/api/shop/canned-jobs', {
@@ -77,6 +81,13 @@ function request(method: string, body?: unknown, raw?: string) {
   })
 }
 const params = () => ({ params: Promise.resolve({ id: CANNED_ID }) })
+const ticketParams = () => ({ params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000401' }) })
+const applyBody = {
+  clientKey: CLIENT_KEY,
+  cannedJobId: CANNED_ID,
+  expectedFingerprint: FINGERPRINT,
+  expectedTaxRateBps: 825,
+}
 
 describe('Shop OS canned-job routes', () => {
   beforeEach(() => {
@@ -91,6 +102,7 @@ describe('Shop OS canned-job routes', () => {
     { invoke: () => POST(request('POST', { clientKey: CLIENT_KEY, cannedJob: input })), mock: createMock },
     { invoke: () => PUT(request('PUT', { expectedFingerprint: FINGERPRINT, cannedJob: input }), params()), mock: replaceMock },
     { invoke: () => DELETE(request('DELETE', { expectedFingerprint: FINGERPRINT }), params()), mock: retireMock },
+    { invoke: () => applyCanned(request('POST', applyBody), ticketParams()), mock: applyMock },
   ]
 
   it.each(calls())('authenticates and checks paywall before domain access', async ({ invoke, mock }) => {
@@ -109,6 +121,7 @@ describe('Shop OS canned-job routes', () => {
     { invoke: () => POST(request('POST', undefined, 'bad{')), mock: createMock },
     { invoke: () => PUT(request('PUT', undefined, 'bad{'), params()), mock: replaceMock },
     { invoke: () => DELETE(request('DELETE', undefined, 'bad{'), params()), mock: retireMock },
+    { invoke: () => applyCanned(request('POST', undefined, 'bad{'), ticketParams()), mock: applyMock },
   ])('rejects malformed JSON before mutation', async ({ invoke, mock }) => {
     const response = await invoke()
     expect(response.status).toBe(400)
@@ -119,9 +132,35 @@ describe('Shop OS canned-job routes', () => {
     expect((await POST(request('POST', { clientKey: CLIENT_KEY, cannedJob: input, extra: true }))).status).toBe(422)
     expect((await PUT(request('PUT', { expectedFingerprint: FINGERPRINT, cannedJob: input, extra: true }), params())).status).toBe(422)
     expect((await DELETE(request('DELETE', { expectedFingerprint: FINGERPRINT, extra: true }), params())).status).toBe(422)
+    expect((await applyCanned(request('POST', { ...applyBody, extra: true }), ticketParams())).status).toBe(422)
     expect(createMock).not.toHaveBeenCalled()
     expect(replaceMock).not.toHaveBeenCalled()
     expect(retireMock).not.toHaveBeenCalled()
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('forwards the exact canned-apply envelope and serializes only safe job truth', async () => {
+    const job = {
+      id: '00000000-0000-4000-8000-000000000501',
+      title: 'Front brake service',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      lineCount: 3,
+      shopId: 'SECRET_SHOP',
+      assignedTechId: 'SECRET_PROFILE',
+      approvalState: 'approved',
+    }
+    applyMock.mockResolvedValue({ ok: true, changed: true, job } as never)
+    const response = await applyCanned(request('POST', applyBody), ticketParams())
+    expect(response.status).toBe(201)
+    expect(applyMock).toHaveBeenCalledWith({}, {
+      actor: { profileId: PROFILE_ID },
+      ticketId: '00000000-0000-4000-8000-000000000401',
+      ...applyBody,
+    })
+    const serialized = JSON.stringify(await response.json())
+    expect(serialized).toContain('Front brake service')
+    expect(serialized).not.toMatch(/SECRET_|shopId|assignedTechId|approvalState/)
   })
 
   it('forwards founder context and exact inputs with honest success codes', async () => {

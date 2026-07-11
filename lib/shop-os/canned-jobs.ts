@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { cannedJobs, profiles, shops } from '@/lib/db/schema'
+import { cannedJobs, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, formatScaledDecimal, parseScaledDecimal, stableStringify } from '@/lib/shop-os/quote-math'
+import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_TEMPLATE_BYTES = 16 * 1024
@@ -90,6 +91,18 @@ type Failure = {
 }
 type ListResult = { ok: true; cannedJobs: SafeCannedJob[]; taxRateBps: number | null } | Failure
 type MutationResult = { ok: true; changed: boolean; cannedJob: SafeCannedJob } | Failure
+export type SafeAppliedCannedJob = {
+  id: string
+  title: string
+  kind: 'repair' | 'maintenance'
+  requiredSkillTier: 1 | 2 | 3
+  lineCount: number
+}
+type ApplyResult = { ok: true; changed: boolean; job: SafeAppliedCannedJob } | Failure
+export type ApplyCannedJobDependencies = {
+  afterTicketLock?: () => Promise<void>
+  afterJobInsert?: () => Promise<void>
+}
 
 export function cannedJobActorFromProfile(
   profile: { id: string },
@@ -108,6 +121,10 @@ function notFound(): Failure {
 
 function conflict(): Failure {
   return { ok: false, error: 'conflict', retryable: false }
+}
+
+function retryableConflict(): Failure {
+  return { ok: false, error: 'conflict', retryable: true }
 }
 
 function parseBody(body: unknown): z.output<typeof cannedJobBodySchema> | null {
@@ -232,13 +249,107 @@ export function publicCannedJob(template: SafeCannedJob): SafeCannedJob {
   }
 }
 
+export function publicAppliedCannedJob(job: SafeAppliedCannedJob): SafeAppliedCannedJob {
+  return {
+    id: job.id,
+    title: job.title,
+    kind: job.kind,
+    requiredSkillTier: job.requiredSkillTier,
+    lineCount: job.lineCount,
+  }
+}
+
+function persistedAppliedJobId(
+  shopId: string,
+  ticketId: string,
+  profileId: string,
+  clientKey: string,
+): string {
+  const bytes = createHash('sha256')
+    .update('shop-os-applied-canned-job-v1\0')
+    .update(shopId).update('\0')
+    .update(ticketId).update('\0')
+    .update(profileId).update('\0')
+    .update(clientKey)
+    .digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+function persistedAppliedLineId(jobId: string, index: number): string {
+  const bytes = createHash('sha256')
+    .update('shop-os-applied-canned-line-v1\0')
+    .update(jobId).update('\0').update(String(index))
+    .digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+function projectAppliedJob(
+  row: typeof ticketJobs.$inferSelect,
+  lineCount: number,
+): SafeAppliedCannedJob | null {
+  if (
+    !uuidSchema.safeParse(row.id).success
+    || (row.kind !== 'repair' && row.kind !== 'maintenance')
+    || (row.requiredSkillTier !== 1 && row.requiredSkillTier !== 2 && row.requiredSkillTier !== 3)
+    || typeof row.title !== 'string'
+    || row.title.length < 1
+    || row.title.length > 200
+    || !Number.isInteger(lineCount)
+    || lineCount < 1
+    || lineCount > 25
+  ) return null
+  return publicAppliedCannedJob({
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    requiredSkillTier: row.requiredSkillTier,
+    lineCount,
+  })
+}
+
+function isBuilderVisibleAppliedLine(line: typeof jobLines.$inferSelect): boolean {
+  return line.source === 'manual'
+    && line.partStatus === 'proposed'
+    && line.unitCostCents === null
+    && line.coreChargeCents === null
+    && line.fitment === null
+    && line.vendorAccountId === null
+    && line.externalOfferId === null
+    && line.vendorSnapshot === null
+    && line.orderedAt === null
+    && line.orderedByProfileId === null
+    && line.receivedAt === null
+    && line.receivedByProfileId === null
+}
+
+function errorCode(error: unknown, codes: Set<string>): boolean {
+  let current: unknown = error
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    if (typeof current === 'object' && 'code' in current && codes.has(String(current.code))) return true
+    current = typeof current === 'object' && 'cause' in current ? current.cause : null
+  }
+  return false
+}
+
+class AbortCannedApply extends Error {
+  constructor(readonly failure: Failure) {
+    super('abort_canned_apply')
+  }
+}
+
 type ActorRow = { id: string; shopId: string; role: string }
 
 async function loadActor(
   db: AppDb,
   actor: CannedJobActor,
   mode: 'list' | 'manage',
-  lock = false,
+  lock: boolean | 'nowait' = false,
 ): Promise<ActorRow | null> {
   const profileId = uuidSchema.safeParse(actor.profileId)
   if (!profileId.success) return null
@@ -250,7 +361,8 @@ async function loadActor(
       isNull(profiles.deactivatedAt),
     ))
     .limit(1)
-  if (lock) query = query.for('update') as typeof query
+  if (lock === 'nowait') query = query.for('update', { noWait: true }) as typeof query
+  else if (lock) query = query.for('update') as typeof query
   const [profile] = await query
   if (!profile?.shopId) return null
   const founder = actor.founderOverride === true
@@ -394,8 +506,158 @@ export async function retireCannedJob(
   })
 }
 
+export async function applyCannedJobToTicket(
+  db: AppDb,
+  input: {
+    actor: CannedJobActor
+    ticketId: unknown
+    clientKey: unknown
+    cannedJobId: unknown
+    expectedFingerprint: unknown
+    expectedTaxRateBps: unknown
+  },
+  dependencies: ApplyCannedJobDependencies = {},
+): Promise<ApplyResult> {
+  const ticketId = uuidSchema.safeParse(input.ticketId)
+  const clientKey = uuidSchema.safeParse(input.clientKey)
+  const cannedJobId = uuidSchema.safeParse(input.cannedJobId)
+  const fingerprint = fingerprintSchema.safeParse(input.expectedFingerprint)
+  const taxRate = z.union([z.literal(null), z.number().int().min(0).max(10_000)])
+    .safeParse(input.expectedTaxRateBps)
+  if (!ticketId.success || !clientKey.success || !cannedJobId.success || !fingerprint.success || !taxRate.success) {
+    return invalidInput()
+  }
+  const persistedActor = await loadActor(db, input.actor, 'list')
+  if (!persistedActor) return notFound()
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [ticket] = await tx.select({ id: tickets.id }).from(tickets).where(and(
+        eq(tickets.shopId, persistedActor.shopId),
+        eq(tickets.id, ticketId.data),
+        eq(tickets.status, 'open'),
+      )).limit(1).for('update', { noWait: true })
+      if (!ticket) return notFound()
+      await dependencies.afterTicketLock?.()
+
+      const jobRows = await tx.select().from(ticketJobs).where(and(
+        eq(ticketJobs.shopId, persistedActor.shopId),
+        eq(ticketJobs.ticketId, ticketId.data),
+      )).orderBy(ticketJobs.id).for('update', { noWait: true })
+      const lineRows = jobRows.length === 0
+        ? []
+        : await tx.select().from(jobLines).where(and(
+          eq(jobLines.shopId, persistedActor.shopId),
+          inArray(jobLines.jobId, jobRows.map((job) => job.id)),
+        )).orderBy(jobLines.id).for('update', { noWait: true })
+      const activeVersions = await tx.select().from(quoteVersions).where(and(
+        eq(quoteVersions.shopId, persistedActor.shopId),
+        eq(quoteVersions.ticketId, ticketId.data),
+        isNull(quoteVersions.supersededAt),
+      )).orderBy(quoteVersions.id).for('update', { noWait: true })
+      const currentActor = await loadActor(tx, input.actor, 'list', 'nowait')
+      if (!currentActor || currentActor.id !== persistedActor.id || currentActor.shopId !== persistedActor.shopId) {
+        return notFound()
+      }
+      const jobId = persistedAppliedJobId(
+        currentActor.shopId,
+        ticketId.data,
+        currentActor.id,
+        clientKey.data,
+      )
+      const existing = jobRows.find((job) => job.id === jobId)
+      if (existing) {
+        const existingLines = lineRows.filter((line) => line.jobId === existing.id)
+        if (existingLines.some((line) => !isBuilderVisibleAppliedLine(line))) {
+          throw new AbortCannedApply(conflict())
+        }
+        const safe = projectAppliedJob(
+          existing,
+          existingLines.length,
+        )
+        if (!safe) throw new AbortCannedApply(conflict())
+        return { ok: true, changed: false, job: safe }
+      }
+      if (activeVersions.length > 1) throw new AbortCannedApply(conflict())
+
+      const [shop] = await tx.select({ taxRateBps: shops.taxRateBps }).from(shops)
+        .where(eq(shops.id, currentActor.shopId)).limit(1).for('update', { noWait: true })
+      if (
+        !shop
+        || (shop.taxRateBps !== null && (!Number.isInteger(shop.taxRateBps) || shop.taxRateBps < 0 || shop.taxRateBps > 10_000))
+      ) throw new AbortCannedApply(conflict())
+      if (shop.taxRateBps !== taxRate.data) throw new AbortCannedApply(conflict())
+
+      const [templateRow] = await tx.select().from(cannedJobs).where(and(
+        eq(cannedJobs.shopId, currentActor.shopId),
+        eq(cannedJobs.id, cannedJobId.data),
+        isNull(cannedJobs.retiredAt),
+      )).limit(1).for('update', { noWait: true })
+      if (!templateRow) return notFound()
+      const template = projectRow(templateRow, shop.taxRateBps)
+      if (!template) throw new AbortCannedApply(conflict())
+      if (template.fingerprint !== fingerprint.data) throw new AbortCannedApply(conflict())
+
+      const [createdJob] = await tx.insert(ticketJobs).values({
+        id: jobId,
+        shopId: currentActor.shopId,
+        ticketId: ticketId.data,
+        title: template.title,
+        kind: template.kind,
+        requiredSkillTier: template.defaultRequiredSkillTier,
+        assignedTechId: null,
+        workStatus: 'open',
+        approvalState: 'pending_quote',
+      }).returning()
+      await dependencies.afterJobInsert?.()
+      await tx.insert(jobLines).values(template.lines.map((line, index) => ({
+        id: persistedAppliedLineId(jobId, index),
+        shopId: currentActor.shopId,
+        jobId,
+        kind: line.kind,
+        description: line.description,
+        sort: line.sort,
+        quantity: line.kind === 'part' ? Number(line.quantity) : 1,
+        priceCents: line.priceCents,
+        taxable: line.taxable,
+        partNumber: line.kind === 'part' ? line.partNumber ?? null : null,
+        brand: line.kind === 'part' ? line.brand ?? null : null,
+        unitCostCents: null,
+        coreChargeCents: null,
+        fitment: null,
+        vendorAccountId: null,
+        externalOfferId: null,
+        vendorSnapshot: null,
+        partStatus: 'proposed' as const,
+        orderedAt: null,
+        orderedByProfileId: null,
+        receivedAt: null,
+        receivedByProfileId: null,
+        laborHours: line.kind === 'labor' ? Number(line.hours) : null,
+        laborRateCents: line.kind === 'labor' ? line.laborRateCents ?? null : null,
+        source: 'manual' as const,
+      })))
+      const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
+        shopId: currentActor.shopId,
+        ticketId: ticketId.data,
+        jobIds: jobRows.map((job) => job.id),
+        activeVersions,
+      })
+      if (invalidationFailure) throw new AbortCannedApply(invalidationFailure)
+      const safe = projectAppliedJob(createdJob, template.lines.length)
+      if (!safe) throw new AbortCannedApply(conflict())
+      return { ok: true, changed: true, job: safe }
+    })
+  } catch (error) {
+    if (error instanceof AbortCannedApply) return error.failure
+    if (errorCode(error, new Set(['55P03', '40001', '40P01']))) return retryableConflict()
+    if (errorCode(error, new Set(['23505']))) return conflict()
+    throw error
+  }
+}
+
 export function cannedJobDomainStatus(
-  result: ListResult | MutationResult,
+  result: ListResult | MutationResult | ApplyResult,
   successStatus = 200,
 ): number {
   if (result.ok) return successStatus

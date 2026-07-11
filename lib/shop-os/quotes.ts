@@ -556,7 +556,7 @@ async function lockDraftContext(
   }
 }
 
-async function invalidateActiveVersion(
+export async function invalidateActiveQuoteVersion(
   db: AppDb,
   input: {
     shopId: string
@@ -564,20 +564,20 @@ async function invalidateActiveVersion(
     jobIds: string[]
     activeVersions: DraftContext['activeVersions']
   },
-): Promise<void> {
-  if (input.activeVersions.length > 1) throw new AbortDraftMutation(conflict())
+): Promise<Failure | null> {
+  if (input.activeVersions.length > 1) return conflict()
   const active = input.activeVersions[0]
-  if (!active) return
+  if (!active) return null
   const snapshot = quoteSnapshotSchema.safeParse(active.snapshot)
-  if (!snapshot.success) throw new AbortDraftMutation(conflict())
-  if (snapshot.data.ticket.id !== input.ticketId) throw new AbortDraftMutation(conflict())
+  if (!snapshot.success) return conflict()
+  if (snapshot.data.ticket.id !== input.ticketId) return conflict()
   const includedJobIds = snapshot.data.jobs.map((job) => job.id)
   if (new Set(includedJobIds).size !== includedJobIds.length) {
-    throw new AbortDraftMutation(conflict())
+    return conflict()
   }
   const lockedJobIds = new Set(input.jobIds)
   if (includedJobIds.some((jobId) => !lockedJobIds.has(jobId))) {
-    throw new AbortDraftMutation(conflict())
+    return conflict()
   }
 
   const [superseded] = await db
@@ -585,7 +585,7 @@ async function invalidateActiveVersion(
     .set({ supersededAt: new Date() })
     .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
     .returning()
-  if (!superseded) throw new AbortDraftMutation(conflict(true))
+  if (!superseded) return conflict(true)
   if (includedJobIds.length > 0) {
     await db
       .update(ticketJobs)
@@ -596,6 +596,7 @@ async function invalidateActiveVersion(
         inArray(ticketJobs.id, includedJobIds),
       ))
   }
+  return null
 }
 
 export type CreateQuoteVersionResult =
@@ -1445,12 +1446,13 @@ export async function createDraftLine(
       jobId: context.jobId,
       ...desired,
     }).returning()
-    await invalidateActiveVersion(tx, {
+    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
     })
+    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
     return { ok: true, changed: true, line: safeManualDraftLine(line) }
   })
 }
@@ -1481,12 +1483,13 @@ export async function replaceDraftLine(
       eq(jobLines.id, parsedLineId.data),
     )).returning()
     if (!line) throw new AbortDraftMutation(conflict(true))
-    await invalidateActiveVersion(tx, {
+    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
     })
+    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
     return { ok: true, changed: true, line: safeManualDraftLine(line) }
   })
 }
@@ -1510,12 +1513,13 @@ export async function deleteDraftLine(
       eq(jobLines.id, parsedLineId.data),
     )).returning()
     if (!deleted) throw new AbortDraftMutation(conflict(true))
-    await invalidateActiveVersion(tx, {
+    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
     })
+    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
     return { ok: true, changed: true }
   })
 }
