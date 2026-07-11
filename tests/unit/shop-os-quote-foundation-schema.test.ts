@@ -1,6 +1,10 @@
-import { getTableColumns } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { PGlite } from '@electric-sql/pglite'
+import { vector } from '@electric-sql/pglite/vector'
+import { getTableColumns, sql } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   cannedJobs,
   jobAttachments,
@@ -10,6 +14,82 @@ import {
   shops,
   ticketJobs,
 } from '@/lib/db/schema'
+import { createTestDb, type TestDb } from '@/tests/helpers/db'
+
+const closeCallbacks: Array<() => Promise<void>> = []
+
+afterEach(async () => {
+  await Promise.all(closeCallbacks.splice(0).map((close) => close()))
+})
+
+const IDs = {
+  shopA: '10000000-0000-0000-0000-000000000001',
+  shopB: '10000000-0000-0000-0000-000000000002',
+  profileA: '20000000-0000-0000-0000-000000000001',
+  profileB: '20000000-0000-0000-0000-000000000002',
+  userA: '30000000-0000-0000-0000-000000000001',
+  userB: '30000000-0000-0000-0000-000000000002',
+  ticketA: '40000000-0000-0000-0000-000000000001',
+  ticketA2: '40000000-0000-0000-0000-000000000002',
+  ticketB: '40000000-0000-0000-0000-000000000003',
+  jobA: '50000000-0000-0000-0000-000000000001',
+  jobA2: '50000000-0000-0000-0000-000000000002',
+  jobB: '50000000-0000-0000-0000-000000000003',
+  versionA: '60000000-0000-0000-0000-000000000001',
+  versionA2: '60000000-0000-0000-0000-000000000002',
+  versionB: '60000000-0000-0000-0000-000000000003',
+} as const
+
+async function seedQuoteParents(db: TestDb) {
+  await db.execute(sql`
+    insert into shops (id, name) values
+      (${IDs.shopA}::uuid, 'Shop A'),
+      (${IDs.shopB}::uuid, 'Shop B')
+  `)
+  await db.execute(sql`
+    insert into profiles (id, user_id, shop_id, full_name) values
+      (${IDs.profileA}::uuid, ${IDs.userA}::uuid, ${IDs.shopA}::uuid, 'Owner A'),
+      (${IDs.profileB}::uuid, ${IDs.userB}::uuid, ${IDs.shopB}::uuid, 'Owner B')
+  `)
+  await db.execute(sql`
+    insert into tickets (id, shop_id, ticket_number, source, concern, created_by_profile_id) values
+      (${IDs.ticketA}::uuid, ${IDs.shopA}::uuid, 1, 'tech_quick', 'A', ${IDs.profileA}::uuid),
+      (${IDs.ticketA2}::uuid, ${IDs.shopA}::uuid, 2, 'tech_quick', 'A2', ${IDs.profileA}::uuid),
+      (${IDs.ticketB}::uuid, ${IDs.shopB}::uuid, 1, 'tech_quick', 'B', ${IDs.profileB}::uuid)
+  `)
+  await db.execute(sql`
+    insert into ticket_jobs (id, shop_id, ticket_id, title, kind, required_skill_tier) values
+      (${IDs.jobA}::uuid, ${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, 'Job A', 'repair', 1),
+      (${IDs.jobA2}::uuid, ${IDs.shopA}::uuid, ${IDs.ticketA2}::uuid, 'Job A2', 'repair', 1),
+      (${IDs.jobB}::uuid, ${IDs.shopB}::uuid, ${IDs.ticketB}::uuid, 'Job B', 'repair', 1)
+  `)
+  await db.execute(sql`
+    insert into quote_versions (id, shop_id, ticket_id, version_number, snapshot, created_by_profile_id) values
+      (${IDs.versionA}::uuid, ${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, 1, '{}'::jsonb, ${IDs.profileA}::uuid),
+      (${IDs.versionA2}::uuid, ${IDs.shopA}::uuid, ${IDs.ticketA2}::uuid, 1, '{}'::jsonb, ${IDs.profileA}::uuid),
+      (${IDs.versionB}::uuid, ${IDs.shopB}::uuid, ${IDs.ticketB}::uuid, 1, '{}'::jsonb, ${IDs.profileB}::uuid)
+  `)
+}
+
+async function createPre0028Db() {
+  const client = new PGlite({ extensions: { vector } })
+  await client.query('CREATE EXTENSION IF NOT EXISTS vector;')
+  await client.exec('CREATE SCHEMA IF NOT EXISTS auth;')
+  await client.exec(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT '00000000-0000-0000-0000-000000000000'::uuid $$;`)
+
+  const journal = JSON.parse(
+    await readFile(path.join(process.cwd(), 'drizzle/migrations/meta/_journal.json'), 'utf8'),
+  ) as { entries: Array<{ idx: number; tag: string }> }
+  for (const entry of journal.entries.filter(({ idx }) => idx <= 29)) {
+    const migration = await readFile(
+      path.join(process.cwd(), `drizzle/migrations/${entry.tag}.sql`),
+      'utf8',
+    )
+    await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  }
+
+  return client
+}
 
 function names(table: Parameters<typeof getTableConfig>[0]) {
   const config = getTableConfig(table)
@@ -382,5 +462,320 @@ describe('Shop OS quote foundation source schema', () => {
       quote_events_version_idx: ['shop_id', 'ticket_id', 'quote_version_id'],
       quote_events_actor_idx: ['shop_id', 'actor_profile_id'],
     })
+  })
+})
+
+describe('Shop OS quote foundation migration', () => {
+  it('creates the additive foundation through the complete source chain with unconfigured shop rates', async () => {
+    const client = await createPre0028Db()
+    closeCallbacks.push(() => client.close())
+    await client.exec(`
+      insert into shops (id, name) values ('${IDs.shopA}'::uuid, 'Existing-safe');
+      insert into profiles (id, user_id, shop_id, full_name)
+        values ('${IDs.profileA}'::uuid, '${IDs.userA}'::uuid, '${IDs.shopA}'::uuid, 'Existing owner');
+      insert into tickets (id, shop_id, ticket_number, source, concern, created_by_profile_id)
+        values ('${IDs.ticketA}'::uuid, '${IDs.shopA}'::uuid, 1, 'tech_quick', 'Existing concern', '${IDs.profileA}'::uuid);
+      insert into ticket_jobs (id, shop_id, ticket_id, title, kind, required_skill_tier)
+        values ('${IDs.jobA}'::uuid, '${IDs.shopA}'::uuid, '${IDs.ticketA}'::uuid, 'Existing job', 'repair', 1);
+    `)
+    const migration = await readFile(
+      path.join(process.cwd(), 'drizzle/migrations/0028_shop_os_quote_foundation.sql'),
+      'utf8',
+    )
+    await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+    const columns = await client.query<{
+      labor_default: string | null
+      tax_default: string | null
+      labor_nullable: string
+      tax_nullable: string
+    }>(`
+      select
+        max(column_default) filter (where column_name = 'labor_rate_cents') as labor_default,
+        max(column_default) filter (where column_name = 'tax_rate_bps') as tax_default,
+        max(is_nullable) filter (where column_name = 'labor_rate_cents') as labor_nullable,
+        max(is_nullable) filter (where column_name = 'tax_rate_bps') as tax_nullable
+      from information_schema.columns
+      where table_schema = 'public' and table_name = 'shops'
+    `)
+    expect(columns.rows[0]).toEqual({
+      labor_default: null,
+      tax_default: null,
+      labor_nullable: 'YES',
+      tax_nullable: 'YES',
+    })
+
+    const rates = await client.query<{ labor_rate_cents: number | null; tax_rate_bps: number | null }>(
+      `select labor_rate_cents, tax_rate_bps from shops where id = '${IDs.shopA}'::uuid`,
+    )
+    expect(rates.rows[0]).toEqual({ labor_rate_cents: null, tax_rate_bps: null })
+
+    const job = await client.query<{ customer_story: unknown; approved_quote_version_id: string | null }>(
+      `select customer_story, approved_quote_version_id from ticket_jobs where id = '${IDs.jobA}'::uuid`,
+    )
+    expect(job.rows[0]).toEqual({ customer_story: null, approved_quote_version_id: null })
+
+    const tables = await client.query<{ table_name: string }>(`
+      select table_name
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name in ('job_attachments','job_lines','canned_jobs','quote_versions','quote_events')
+      order by table_name
+    `)
+    expect(tables.rows.map((row) => row.table_name)).toEqual([
+      'canned_jobs',
+      'job_attachments',
+      'job_lines',
+      'quote_events',
+      'quote_versions',
+    ])
+  })
+
+  it('enforces same-shop, same-ticket, and exact-version ownership', async () => {
+    const { db, close } = await createTestDb()
+    closeCallbacks.push(close)
+    await seedQuoteParents(db)
+
+    await expect(db.execute(sql`
+      insert into job_attachments
+        (shop_id, job_id, storage_key, kind, mime_type, byte_size, uploaded_by_profile_id)
+      values
+        (${IDs.shopB}::uuid, ${IDs.jobA}::uuid, 'wrong-shop', 'photo', 'image/jpeg', 10, ${IDs.profileB}::uuid)
+    `)).rejects.toThrow()
+
+    await expect(db.execute(sql`
+      update ticket_jobs set approved_quote_version_id = ${IDs.versionA2}::uuid
+      where id = ${IDs.jobA}::uuid
+    `)).rejects.toThrow()
+
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, job_id, quote_version_id, kind, approved_via, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.jobA}::uuid,
+         ${IDs.versionA2}::uuid, 'approved', 'page', 'wrong-version')
+    `)).rejects.toThrow()
+
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, job_id, quote_version_id, kind, approved_via, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.jobA2}::uuid,
+         ${IDs.versionA}::uuid, 'approved', 'page', 'wrong-job')
+    `)).rejects.toThrow()
+  })
+
+  it('rejects unsafe money, precision, ranges, and wrong JSON containers', async () => {
+    const { db, close } = await createTestDb()
+    closeCallbacks.push(close)
+    await seedQuoteParents(db)
+
+    await expect(db.execute(sql`
+      update shops set labor_rate_cents = 9007199254740992 where id = ${IDs.shopA}::uuid
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      update shops set tax_rate_bps = 10001 where id = ${IDs.shopA}::uuid
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      update ticket_jobs set customer_story = '[]'::jsonb where id = ${IDs.jobA}::uuid
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_attachments
+        (shop_id, job_id, storage_key, kind, mime_type, byte_size, uploaded_by_profile_id)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'too-large', 'photo', 'image/jpeg',
+         9007199254740992, ${IDs.profileA}::uuid)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents, vendor_snapshot)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'part', 'Zero quantity', 0, 1, '{}'::jsonb)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'part', 'Negative money', 1, -1)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'part', 'Unsafe integer', 1, 9007199254740992)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'part', 'Quantity overflow', 1000000000, 1)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents, labor_hours)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'labor', 'Hours overflow', 1, 1, 1000000)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into job_lines
+        (shop_id, job_id, kind, description, quantity, price_cents, vendor_snapshot)
+      values
+        (${IDs.shopA}::uuid, ${IDs.jobA}::uuid, 'part', 'Wrong JSON', 1, 1, '[]'::jsonb)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into canned_jobs
+        (shop_id, title, kind, default_required_skill_tier, default_lines)
+      values
+        (${IDs.shopA}::uuid, 'Bad template', 'repair', 1, '{}'::jsonb)
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into quote_versions
+        (shop_id, ticket_id, version_number, snapshot, created_by_profile_id)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, 2, '[]'::jsonb, ${IDs.profileA}::uuid)
+    `)).rejects.toThrow()
+  })
+
+  it('enforces event decision rules and immutable quote history', async () => {
+    const { db, close } = await createTestDb()
+    closeCallbacks.push(close)
+    await seedQuoteParents(db)
+
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, quote_version_id, kind, approved_via, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.versionA}::uuid,
+         'approved', 'page', 'approved-without-job')
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, quote_version_id, kind, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.versionA}::uuid,
+         'declined', 'declined-without-job')
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, quote_version_id, kind, approved_via, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.versionA}::uuid,
+         'sent', 'page', 'nonapproval-with-channel')
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, job_id, quote_version_id, kind, approved_via, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.jobA}::uuid, ${IDs.versionA}::uuid,
+         'approved', 'phone', 'offline-without-actor')
+    `)).rejects.toThrow()
+
+    await db.execute(sql`
+      insert into quote_events
+        (shop_id, ticket_id, job_id, quote_version_id, kind, approved_via, actor_profile_id, request_key)
+      values
+        (${IDs.shopA}::uuid, ${IDs.ticketA}::uuid, ${IDs.jobA}::uuid, ${IDs.versionA}::uuid,
+         'approved', 'phone', ${IDs.profileA}::uuid, 'valid-approval')
+    `)
+    await expect(db.execute(sql`
+      update quote_events set body = 'changed' where request_key = 'valid-approval'
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      delete from quote_events where request_key = 'valid-approval'
+    `)).rejects.toThrow()
+
+    await expect(db.execute(sql`
+      update quote_versions set snapshot = '{"changed":true}'::jsonb where id = ${IDs.versionA}::uuid
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      update quote_versions
+      set superseded_at = now(), snapshot = '{"changed_during_supersession":true}'::jsonb
+      where id = ${IDs.versionA}::uuid
+    `)).rejects.toThrow()
+    await db.execute(sql`
+      update quote_versions set superseded_at = now() where id = ${IDs.versionA}::uuid
+    `)
+    await expect(db.execute(sql`
+      update quote_versions set superseded_at = now() where id = ${IDs.versionA}::uuid
+    `)).rejects.toThrow()
+    await expect(db.execute(sql`
+      delete from quote_versions where id = ${IDs.versionA}::uuid
+    `)).rejects.toThrow()
+  })
+
+  it('keeps every new table server-only with RLS, deny policies, and service grants', async () => {
+    const { db, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    const security = await db.execute<{
+      relname: string
+      relrowsecurity: boolean
+      anon_select: boolean
+      anon_insert: boolean
+      anon_update: boolean
+      anon_delete: boolean
+      authenticated_select: boolean
+      authenticated_insert: boolean
+      authenticated_update: boolean
+      authenticated_delete: boolean
+      service_select: boolean
+      service_insert: boolean
+      service_update: boolean
+      service_delete: boolean
+      policy_name: string
+      policy_roles: string
+      policy_cmd: string
+      policy_qual: string
+      policy_with_check: string
+    }>(sql`
+      select c.relname,
+             c.relrowsecurity,
+             has_table_privilege('anon', c.oid, 'select') as anon_select,
+             has_table_privilege('anon', c.oid, 'insert') as anon_insert,
+             has_table_privilege('anon', c.oid, 'update') as anon_update,
+             has_table_privilege('anon', c.oid, 'delete') as anon_delete,
+             has_table_privilege('authenticated', c.oid, 'select') as authenticated_select,
+             has_table_privilege('authenticated', c.oid, 'insert') as authenticated_insert,
+             has_table_privilege('authenticated', c.oid, 'update') as authenticated_update,
+             has_table_privilege('authenticated', c.oid, 'delete') as authenticated_delete,
+             has_table_privilege('service_role', c.oid, 'select') as service_select,
+             has_table_privilege('service_role', c.oid, 'insert') as service_insert,
+             has_table_privilege('service_role', c.oid, 'update') as service_update,
+             has_table_privilege('service_role', c.oid, 'delete') as service_delete,
+             p.policyname as policy_name,
+             p.roles::text as policy_roles,
+             p.cmd as policy_cmd,
+             p.qual as policy_qual,
+             p.with_check as policy_with_check
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      join pg_policies p on p.schemaname = n.nspname and p.tablename = c.relname
+      where n.nspname = 'public'
+        and c.relname in ('job_attachments','job_lines','canned_jobs','quote_versions','quote_events')
+      order by c.relname
+    `)
+    expect(security.rows).toHaveLength(5)
+    for (const row of security.rows) {
+      expect(row).toMatchObject({
+        relrowsecurity: true,
+        anon_select: false,
+        anon_insert: false,
+        anon_update: false,
+        anon_delete: false,
+        authenticated_select: false,
+        authenticated_insert: false,
+        authenticated_update: false,
+        authenticated_delete: false,
+        service_select: true,
+        service_insert: true,
+        service_update: true,
+        service_delete: true,
+        policy_name: `${row.relname}_server_only_deny_direct`,
+        policy_roles: '{anon,authenticated}',
+        policy_cmd: 'ALL',
+        policy_qual: 'false',
+        policy_with_check: 'false',
+      })
+    }
   })
 })

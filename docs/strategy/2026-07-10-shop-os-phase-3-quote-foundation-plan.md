@@ -43,17 +43,21 @@
 
 ## Task 3: Add and prove migration `0028`
 
+> **Task 3 implementation correction (2026-07-10):** The required pinned generator attempt ran before any `0028` SQL was written: `pnpm drizzle-kit generate` exited with `drizzle/migrations/meta/0011b_snapshot.json data is malformed`. Per the approved boundary, row 16 leaves that unrelated historical snapshot untouched and follows the established hand-written migration plus journal-entry pattern.
+
+> **Security review correction (2026-07-10):** A four-file diff scan completed with zero reportable row-16 findings. PGlite proved the deliberately writable job approval projection can diverge from its event without a handler; row 16 has no writer, consumer, public path, or production apply. Row 17 must therefore derive the exact version server-side, append the approval event and update the job projection atomically and idempotently, and reject unauthorized same-ticket repoint/clear transitions.
+
 **Files:**
 
 - Create: `drizzle/migrations/0028_shop_os_quote_foundation.sql`
 - Modify: `drizzle/migrations/meta/_journal.json`
 - Expand: `tests/unit/shop-os-quote-foundation-schema.test.ts`
 
-- [ ] Write failing PGlite tests for safe existing-row defaults and successful empty-table creation through the complete source chain.
-- [ ] Prove composite cross-shop/cross-ticket violations, money/precision/range violations, and exact approved-version ownership fail.
-- [ ] Prove RLS, deny policies, revoked direct DML, service grants, event append-only triggers, and version snapshot immutability.
-- [ ] Run `pnpm drizzle-kit generate`. If the known historical snapshot blocks it, capture the exact failure and record the explicit implementation correction before adding the hand-written migration/journal entry; do not repair unrelated historical snapshots in this row.
-- [ ] Independently review the migration/security task and resolve all findings.
+- [x] Write failing PGlite tests for safe existing-row defaults and successful empty-table creation through the complete source chain.
+- [x] Prove composite cross-shop/cross-ticket violations, money/precision/range violations, and exact approved-version ownership fail.
+- [x] Prove RLS, deny policies, revoked direct DML, service grants, event append-only triggers, and version snapshot immutability.
+- [x] Run `pnpm drizzle-kit generate`. If the known historical snapshot blocks it, capture the exact failure and record the explicit implementation correction before adding the hand-written migration/journal entry; do not repair unrelated historical snapshots in this row.
+- [x] Independently review the migration/security task and resolve all findings.
 
 ## Task 4: Verify, reconcile, and ship row 16
 

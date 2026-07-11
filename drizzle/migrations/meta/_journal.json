@@ -211,6 +211,13 @@
       "when": 1783703100000,
       "tag": "0027_team_membership_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1783703100001,
+      "tag": "0028_shop_os_quote_foundation",
+      "breakpoints": true
     }
   ]
 }
