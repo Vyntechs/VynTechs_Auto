@@ -59,6 +59,18 @@ describe('Shop OS exact-version approval UI', () => {
     expect(screen.queryByRole('button', { name: /approval|declined/i })).toBeNull()
   })
 
+  it('renders canonical retry truth instead of the attempted approval channel', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ changed: false, event: { id: '00000000-0000-4000-8000-000000000501', kind: 'declined', quoteVersionId: VERSION, jobId: JOB, approvedVia: null }, projection: { approvalState: 'declined', approvedQuoteVersionId: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: builder(true, { state: 'declined', quoteVersionId: null }) }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Phone approval' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Record approval' }))
+    expect(await screen.findByText('Declined · V3')).toBeInTheDocument()
+    expect(screen.queryByText(/Approved · Phone/)).toBeNull()
+  })
+
   it('records an in-person decline intent against the exact version and exposes bay-safe CSS', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ changed: true, event: { id: '00000000-0000-4000-8000-000000000501', kind: 'declined', quoteVersionId: VERSION, jobId: JOB, approvedVia: null }, projection: { approvalState: 'declined', approvedQuoteVersionId: null } }) })

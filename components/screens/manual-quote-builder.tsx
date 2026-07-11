@@ -419,9 +419,19 @@ export function ManualQuoteBuilder({
             quoteVersionId: parsed.projection.approvedQuoteVersionId,
           } } : job),
       }))
-      setDecisionVerdicts((verdicts) => ({ ...verdicts, [pending.jobId]: pending.kind === 'declined'
-        ? `Declined · V${pending.versionNumber}`
-        : `Approved · ${pending.kind === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}` }))
+      setDecisionVerdicts((verdicts) => {
+        const next = { ...verdicts }
+        if (parsed.projection.approvalState === 'declined') {
+          next[pending.jobId] = `Declined · V${pending.versionNumber}`
+        } else if (parsed.projection.approvalState === 'approved') {
+          next[pending.jobId] = parsed.changed && parsed.event.kind === 'approved'
+            ? `Approved · ${parsed.event.approvedVia === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}`
+            : `Approved · V${pending.versionNumber}`
+        } else {
+          delete next[pending.jobId]
+        }
+        return next
+      })
       setDecision(null)
       setFocusTarget(`decision:${pending.jobId}`)
       await refreshQuote(`decision:${pending.jobId}`, false, true)
@@ -926,11 +936,22 @@ function StoryCard({
   const [selectedArtifacts, setSelectedArtifacts] = useState<string[]>([])
   const [whatWeFound, setWhatWeFound] = useState(job.story.content?.whatWeFound ?? '')
   const [whatWeRecommend, setWhatWeRecommend] = useState(job.story.content?.whatWeRecommend ?? '')
+  const dirtyRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const generationKey = useRef<string | null>(null)
   const reviewKey = useRef<string | null>(null)
   const endpoint = `/api/tickets/${ticketId}/quote/jobs/${job.id}/story`
+
+  useEffect(() => {
+    setStory(job.story.content)
+    setRevision(job.story.revision)
+    setReviewStatus(job.story.reviewStatus)
+    if (!dirtyRef.current) {
+      setWhatWeFound(job.story.content?.whatWeFound ?? '')
+      setWhatWeRecommend(job.story.content?.whatWeRecommend ?? '')
+    }
+  }, [job.story.content, job.story.reviewStatus, job.story.revision])
 
   async function readBody(response: Response): Promise<unknown> {
     try { return await response.json() } catch { return {} }
@@ -963,7 +984,7 @@ function StoryCard({
   }
 
   async function generate(): Promise<void> {
-    if (busy || !evidence || selectedEvents.length + selectedArtifacts.length === 0) return
+    if (busy || !evidence) return
     generationKey.current ??= crypto.randomUUID()
     setBusy(true)
     setError(null)
@@ -983,6 +1004,7 @@ function StoryCard({
       setReviewStatus(parsed.storyMeta.reviewStatus ?? null)
       setWhatWeFound(parsed.story.whatWeFound)
       setWhatWeRecommend(parsed.story.whatWeRecommend)
+      dirtyRef.current = false
       generationKey.current = null
       reviewKey.current = crypto.randomUUID()
     } catch {
@@ -994,6 +1016,30 @@ function StoryCard({
     if (field === 'found') setWhatWeFound(value)
     else setWhatWeRecommend(value)
     reviewKey.current = crypto.randomUUID()
+    dirtyRef.current = true
+  }
+
+  async function rebaseStoryDraft(): Promise<void> {
+    if (job.storyMode !== 'ordinary_locked_tree') {
+      await onServerChange()
+      setError('Story refreshed. Your draft is preserved; review current proof and retry.')
+      return
+    }
+    try {
+      const response = await fetch(endpoint, { headers: { accept: 'application/json' } })
+      const parsed = response.ok ? parseCustomerStoryWorkspaceResponse(await readBody(response)) : null
+      if (!parsed) {
+        setError('Story changed elsewhere. Your draft is preserved; refresh before retrying.')
+        return
+      }
+      setStory(parsed.story)
+      setRevision(parsed.storyRevision)
+      setReviewStatus(parsed.storyMeta?.reviewStatus ?? null)
+      setEvidence(parsed.evidence)
+      setError('Story refreshed. Your draft is preserved; review current proof and retry.')
+    } catch {
+      setError('Story changed elsewhere. Your draft is preserved; refresh before retrying.')
+    }
   }
 
   async function saveReview(): Promise<void> {
@@ -1007,6 +1053,10 @@ function StoryCard({
         body: JSON.stringify({ clientKey: reviewKey.current, expectedStoryRevision: revision,
           whatWeFound: whatWeFound.trim(), whatWeRecommend: whatWeRecommend.trim() }),
       })
+      if (response.status === 409) {
+        await rebaseStoryDraft()
+        return
+      }
       const parsed = response.ok ? parseCustomerStoryMutationResponse(await readBody(response)) : null
       if (!parsed) {
         setError(response.status === 409
@@ -1021,6 +1071,7 @@ function StoryCard({
       setWhatWeRecommend(parsed.story.whatWeRecommend)
       reviewKey.current = null
       await onServerChange()
+      dirtyRef.current = false
     } catch {
       setError('Connection interrupted. Retry with the same text.')
     } finally { setBusy(false) }
@@ -1049,12 +1100,16 @@ function StoryCard({
             <fieldset className={styles.evidencePicker}>
               <legend>Select proof to include</legend>
               {[...evidence.events, ...evidence.artifacts].map((item) => (
-                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id) || selectedArtifacts.includes(item.id)} onChange={(event) => {
+                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id) || selectedArtifacts.includes(item.id)} disabled={item.kind === 'observation'
+                  ? selectedEvents.length >= 20 && !selectedEvents.includes(item.id)
+                  : selectedArtifacts.length >= 20 && !selectedArtifacts.includes(item.id)} onChange={(event) => {
                   const setter = item.kind === 'observation' ? setSelectedEvents : setSelectedArtifacts
                   setter((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))
                 }} /> <span>{item.label}</span></label>
               ))}
-              <button type="button" className={styles.storyAction} disabled={busy || selectedEvents.length + selectedArtifacts.length === 0} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
+              <p role="status" aria-label="Evidence selection" aria-live="polite">Events selected · {selectedEvents.length} of 20<br />Artifacts selected · {selectedArtifacts.length} of 20</p>
+              {selectedEvents.length + selectedArtifacts.length === 0 && <p>No proof selected. The short story will use locked diagnosis facts only.</p>}
+              <button type="button" className={styles.storyAction} disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
             </fieldset>
           )}
           {(story || job.storyMode === 'topology_manual') && (

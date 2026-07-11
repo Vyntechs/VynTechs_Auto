@@ -30,3 +30,12 @@
 
 - Full suite, build, browser, production, schema/domain/route/docs changes, per lane limits.
 - One incorrectly formed `pnpm test -- ... --run` command expanded beyond the intended focus and was stopped by the control lane. All subsequent verification used exact Vitest paths.
+
+## Independent-review follow-up
+
+- Verdict copy now comes from parsed committed projection truth; channel appears only for a newly changed approval proven by that response.
+- Empty evidence selection is a supported, honestly labeled locked-facts story.
+- Event and artifact selection each stop at 20 with a live count and reversible selected controls.
+- A 409 reloads current server-owned story/proof/revision while retaining the technician's draft and retry identity; mounted cards also synchronize without overwriting dirty text.
+- Mobile Prepare demotion now covers story-editor focus as well as line-editor focus.
+- RED: five focused regressions failed before the corrections. GREEN: four focused files, 70 tests passed; TypeScript and diff checks passed.

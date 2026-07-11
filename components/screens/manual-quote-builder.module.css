@@ -896,6 +896,13 @@
     padding: 0 18px;
     box-shadow: none;
   }
+
+  .workspace:has(.storyEditor:focus-within) .prepareAction {
+    position: static;
+    width: 100%;
+    padding: 0 18px;
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 600px) {

@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 
@@ -99,5 +101,66 @@ describe('Shop OS diagnostic story UI', () => {
     rerender(<ManualQuoteBuilder ticket={ticket} builder={builder('unavailable')} />)
     expect(screen.getByText('Finish and lock this diagnosis before preparing its customer story.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Generate customer story|Save reviewed story/ })).toBeNull()
+  })
+
+  it('allows a short locked-fact story with no selected proof', async () => {
+    const noProofStory = { ...story, howWeKnow: [] }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ story: null, storyMeta: null, storyRevision: 0, evidence: { events: [], artifacts: [], nextEventCursor: null, nextArtifactCursor: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ changed: true, story: noProofStory, storyMeta: { source: 'ai', sessionId: '00000000-0000-4000-8000-000000000801', generatedAt: '2026-07-11T12:00:00.000Z', lastEditedAt: '2026-07-11T12:01:00.000Z', reviewStatus: 'pending', storyRevision: 1 }, storyRevision: 1 }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder('ordinary_locked_tree')} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open diagnostic story' }))
+    expect(await screen.findByText('No proof selected. The short story will use locked diagnosis facts only.')).toBeInTheDocument()
+    const generateButton = screen.getByRole('button', { name: 'Generate customer story' })
+    expect(generateButton).toBeEnabled()
+    fireEvent.click(generateButton)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ sourceEventIds: [], sourceArtifactIds: [] })
+  })
+
+  it('caps each evidence type at twenty and announces the bounded selection', async () => {
+    const items = Array.from({ length: 21 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, kind: 'observation', createdAt: '2026-07-11T12:00:00.000Z', label: `Observation ${index + 1}` }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ story: null, storyMeta: null, storyRevision: 0, evidence: { events: items, artifacts: [], nextEventCursor: null, nextArtifactCursor: null } }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder('ordinary_locked_tree')} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open diagnostic story' }))
+    await screen.findByText('Observation 21')
+    const checks = screen.getAllByRole('checkbox')
+    checks.slice(0, 20).forEach((check) => fireEvent.click(check))
+    expect(screen.getByRole('status', { name: 'Evidence selection' })).toHaveTextContent('Events selected · 20 of 20')
+    expect(checks[20]).toBeDisabled()
+    expect(checks[0]).toBeEnabled()
+    fireEvent.click(checks[0])
+    expect(checks[20]).toBeEnabled()
+  })
+
+  it('rebases stale server-owned truth while preserving the edited draft and retry identity', async () => {
+    const changedStory = { ...story, whatYouToldUs: 'Updated concern from the ticket.', howWeKnow: [{ claim: 'New server proof.', sourceEventIds: [EVENT], sourceArtifactIds: [] }] }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ story, storyMeta: { source: 'ai', sessionId: '00000000-0000-4000-8000-000000000801', generatedAt: '2026-07-11T12:00:00.000Z', lastEditedByProfileId: '00000000-0000-4000-8000-000000000901', lastEditedAt: '2026-07-11T12:01:00.000Z', reviewStatus: 'pending' }, storyRevision: 1, evidence: { events: [], artifacts: [], nextEventCursor: null, nextArtifactCursor: null } }) })
+      .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: 'conflict' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ story: changedStory, storyMeta: { source: 'ai', sessionId: '00000000-0000-4000-8000-000000000801', generatedAt: '2026-07-11T12:00:00.000Z', lastEditedByProfileId: '00000000-0000-4000-8000-000000000902', lastEditedAt: '2026-07-11T12:02:00.000Z', reviewStatus: 'pending' }, storyRevision: 2, evidence: { events: [], artifacts: [], nextEventCursor: null, nextArtifactCursor: null } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ changed: true, story: { ...changedStory, whatWeFound: 'My preserved draft.' }, storyMeta: { source: 'ai', sessionId: '00000000-0000-4000-8000-000000000801', generatedAt: '2026-07-11T12:00:00.000Z', lastEditedAt: '2026-07-11T12:03:00.000Z', reviewStatus: 'reviewed', storyRevision: 3, reviewedAt: '2026-07-11T12:03:00.000Z' }, storyRevision: 3 }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: builder('ordinary_locked_tree', { content: { ...changedStory, whatWeFound: 'My preserved draft.' }, source: 'ai', reviewStatus: 'reviewed', revision: 3 }) }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder('ordinary_locked_tree', { content: story, source: 'ai', reviewStatus: 'pending', revision: 1 })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open diagnostic story' }))
+    const found = await screen.findByLabelText('What we found')
+    fireEvent.change(found, { target: { value: 'My preserved draft.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save reviewed story' }))
+    expect(await screen.findByText('Story refreshed. Your draft is preserved; review current proof and retry.')).toBeInTheDocument()
+    expect(found).toHaveValue('My preserved draft.')
+    expect(screen.getByText('Updated concern from the ticket.')).toBeInTheDocument()
+    expect(screen.getByText('New server proof.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save reviewed story' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
+    const firstKey = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).clientKey
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[3][1]?.body))
+    expect(retryBody).toMatchObject({ clientKey: firstKey, expectedStoryRevision: 2, whatWeFound: 'My preserved draft.' })
+  })
+
+  it('declares story-editor mobile overlay demotion', () => {
+    const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'), 'utf8')
+    expect(css).toMatch(/\.workspace:has\(\.storyEditor:focus-within\) \.prepareAction/)
   })
 })
