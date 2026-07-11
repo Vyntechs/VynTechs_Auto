@@ -1,0 +1,740 @@
+import { createHash } from 'node:crypto'
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
+import { z } from 'zod'
+import type { AppDb } from '@/lib/db/queries'
+import {
+  artifacts,
+  profiles,
+  quoteVersions,
+  sessionEvents,
+  sessions,
+  ticketJobs,
+  tickets,
+  type CustomerStory,
+  type CustomerStoryMeta,
+  type TreeState,
+} from '@/lib/db/schema'
+import {
+  CustomerStoryProviderError,
+  type CustomerStoryGenerationInput,
+  type GenerateCustomerStoryFn,
+  type GeneratedEvidenceSelection,
+} from '@/lib/ai/customer-story'
+import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+
+const MAX_SELECTED = 20
+const PAGE_SIZE = 25
+const MAX_LOCK_FUTURE_MS = 5 * 60 * 1000
+const MAX_CANONICAL_FIELD_BYTES = 5_000
+const MAX_EVENT_BYTES = 2_000
+const MAX_ARTIFACT_TEXT_BYTES = 10_000
+const MAX_STRUCTURED_BYTES = 20_000
+const MAX_PROVIDER_BYTES = 64_000
+const WORKSPACE_SCAN_CHUNK = 50
+const MAX_WORKSPACE_SCAN_CHUNKS = 4
+const WAIVER = 'If you choose not to proceed, the diagnosed issue remains unresolved.'
+const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
+const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
+const idListSchema = z.array(uuidSchema).max(MAX_SELECTED).superRefine((ids, ctx) => {
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', message: 'IDs must be unique' })
+})
+
+export type CustomerStoryActor = { profileId: string }
+export type CustomerStoryError =
+  | 'invalid_input'
+  | 'not_found'
+  | 'forbidden'
+  | 'state_conflict'
+  | 'unsupported_path'
+  | 'invalid_evidence'
+  | 'conflict'
+  | 'provider_timeout'
+  | 'provider_failed'
+
+type Failure = { ok: false; error: CustomerStoryError; retryable?: boolean }
+type SafeStoryMeta = Pick<CustomerStoryMeta, 'source' | 'sessionId' | 'generatedAt' | 'lastEditedByProfileId' | 'lastEditedAt' | 'reviewStatus'>
+type EvidenceListItem = {
+  id: string
+  kind: string
+  createdAt: string
+  label: string
+}
+
+export type CustomerStoryWorkspaceResult =
+  | {
+      ok: true
+      workspace: {
+        story: CustomerStory | null
+        storyMeta: SafeStoryMeta | null
+        storyRevision: number
+        evidence: {
+          events: EvidenceListItem[]
+          artifacts: EvidenceListItem[]
+          nextEventCursor: string | null
+          nextArtifactCursor: string | null
+        }
+      }
+    }
+  | Failure
+
+export type CustomerStoryGenerationResult =
+  | {
+      ok: true
+      changed: boolean
+      story: CustomerStory
+      storyMeta: CustomerStoryMeta
+      storyRevision: number
+    }
+  | Failure
+
+export type CustomerStoryGenerationDependencies = {
+  generateCustomerStory: GenerateCustomerStoryFn
+  beforeFinalTransaction?: () => Promise<void>
+  afterLocks?: () => Promise<void>
+  captureLockSql?: (statements: string[]) => void
+}
+
+export type CustomerStoryWorkspaceDependencies = {
+  onEvidenceQuery?: (kind: 'event' | 'artifact') => void
+}
+
+const workspaceInputSchema = z.strictObject({
+  actor: z.strictObject({ profileId: uuidSchema }),
+  ticketId: uuidSchema,
+  jobId: uuidSchema,
+  eventCursor: z.string().max(1_000).optional(),
+  artifactCursor: z.string().max(1_000).optional(),
+})
+
+const generationInputSchema = z.strictObject({
+  actor: z.strictObject({ profileId: uuidSchema }),
+  ticketId: uuidSchema,
+  jobId: uuidSchema,
+  clientKey: uuidSchema,
+  expectedStoryRevision: z.number().int().nonnegative(),
+  sourceEventIds: idListSchema,
+  sourceArtifactIds: idListSchema,
+})
+
+type GenerationInput = z.infer<typeof generationInputSchema>
+type SelectedEvent = typeof sessionEvents.$inferSelect
+type SelectedArtifact = typeof artifacts.$inferSelect
+type Context = {
+  actor: Pick<typeof profiles.$inferSelect, 'id' | 'shopId' | 'role' | 'membershipStatus' | 'deactivatedAt'>
+  ticket: typeof tickets.$inferSelect
+  targetJob: typeof ticketJobs.$inferSelect
+  jobs: Array<typeof ticketJobs.$inferSelect>
+  versions: Array<typeof quoteVersions.$inferSelect>
+  session: typeof sessions.$inferSelect
+  wizardEvents: SelectedEvent[]
+  selectedEvents: SelectedEvent[]
+  selectedArtifacts: SelectedArtifact[]
+  providerInput: CustomerStoryGenerationInput
+  lockAt: Date
+  now: Date
+  concern: string
+  rootCause: string
+  action: string
+  confidence: number
+}
+
+type LoadedContext = { ok: true; context: Context } | { ok: false; failure: Failure }
+
+const fail = (error: CustomerStoryError, retryable?: boolean): Failure =>
+  retryable === undefined ? { ok: false, error } : { ok: false, error, retryable }
+
+export function customerStoryDomainStatus(result: { ok: boolean; error?: CustomerStoryError }): number {
+  if (result.ok) return 200
+  if (result.error === 'invalid_input' || result.error === 'invalid_evidence') return 422
+  if (result.error === 'not_found') return 404
+  if (result.error === 'forbidden') return 403
+  if (result.error === 'provider_timeout') return 504
+  if (result.error === 'provider_failed') return 502
+  return 409
+}
+
+export function customerStoryErrorBody(result: Failure): { error: CustomerStoryError; retryable?: true } {
+  return result.retryable ? { error: result.error, retryable: true } : { error: result.error }
+}
+
+function stableValue(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) return value.map(stableValue)
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new TypeError('non-finite value')
+    return value
+  }
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => [key, stableValue((value as Record<string, unknown>)[key])]),
+  )
+}
+
+function fingerprint(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex')
+}
+
+function boundedRequiredText(value: unknown, max = MAX_CANONICAL_FIELD_BYTES): value is string {
+  return typeof value === 'string' && value.length > 0 && utf8Bytes(value) <= max
+}
+
+function validateStructuredValue(value: unknown): boolean {
+  let keys = 0
+  let items = 0
+  const visit = (current: unknown, depth: number): boolean => {
+    if (depth > 8) return false
+    if (current === null || typeof current === 'string' || typeof current === 'boolean') return true
+    if (typeof current === 'number') return Number.isFinite(current)
+    if (Array.isArray(current)) {
+      items += current.length
+      return items <= 200 && current.every((item) => visit(item, depth + 1))
+    }
+    if (!current || typeof current !== 'object') return false
+    const entries = Object.entries(current as Record<string, unknown>)
+    keys += entries.length
+    return keys <= 200 && entries.every(([, item]) => visit(item, depth + 1))
+  }
+  try {
+    return visit(value, 0) && utf8Bytes(JSON.stringify(stableValue(value))) <= MAX_STRUCTURED_BYTES
+  } catch {
+    return false
+  }
+}
+
+function artifactContent(row: SelectedArtifact): string | null {
+  if (row.extractionStatus !== 'done' || !row.extraction || typeof row.extraction !== 'object') return null
+  const extraction = row.extraction as { text?: unknown; summary?: unknown; structured?: unknown }
+  if (extraction.text !== undefined && !boundedRequiredText(extraction.text, MAX_ARTIFACT_TEXT_BYTES)) return null
+  if (extraction.summary !== undefined && !boundedRequiredText(extraction.summary, MAX_ARTIFACT_TEXT_BYTES)) return null
+  if (extraction.structured !== undefined && !validateStructuredValue(extraction.structured)) return null
+  const pieces: string[] = []
+  if (typeof extraction.summary === 'string') pieces.push(`Summary: ${extraction.summary}`)
+  if (typeof extraction.text === 'string') pieces.push(`Text: ${extraction.text}`)
+  if (extraction.structured !== undefined) pieces.push(`Structured: ${JSON.stringify(stableValue(extraction.structured))}`)
+  return pieces.length > 0 ? pieces.join('\n') : null
+}
+
+function evidenceLabel(value: string): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim()
+  return normalized.length <= 160 ? normalized : `${normalized.slice(0, 157)}...`
+}
+
+function providerEvidence(events: SelectedEvent[], artifactRows: SelectedArtifact[]): CustomerStoryGenerationInput | null {
+  const evidence: CustomerStoryGenerationInput['evidence'] = []
+  for (const row of events) {
+    if (row.eventType !== 'observation' || !boundedRequiredText(row.observationText, MAX_EVENT_BYTES)) return null
+    evidence.push({
+      sourceKind: 'event', sourceId: row.id,
+      label: evidenceLabel(row.observationText), content: row.observationText,
+    })
+  }
+  for (const row of artifactRows) {
+    const content = artifactContent(row)
+    if (!content || utf8Bytes(content) > 20_000) return null
+    evidence.push({ sourceKind: 'artifact', sourceId: row.id, label: row.kind, content })
+  }
+  const input = { evidence }
+  return utf8Bytes(JSON.stringify(input)) <= MAX_PROVIDER_BYTES ? input : null
+}
+
+async function databaseNow(db: AppDb): Promise<Date> {
+  const result = await db.execute<{ now: string | Date }>(sql`select now() as "now"`)
+  const rows = ('rows' in result ? result.rows : result) as Array<{ now: string | Date }>
+  return new Date(rows[0].now)
+}
+
+async function loadGenerationContext(
+  db: AppDb,
+  input: Pick<GenerationInput, 'actor' | 'ticketId' | 'jobId' | 'sourceEventIds' | 'sourceArtifactIds'>,
+): Promise<LoadedContext> {
+  const [actor] = await db.select({
+    id: profiles.id, shopId: profiles.shopId, role: profiles.role,
+    membershipStatus: profiles.membershipStatus, deactivatedAt: profiles.deactivatedAt,
+  }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1)
+  if (!actor?.shopId) return { ok: false, failure: fail('not_found') }
+
+  const [ticket] = await db.select().from(tickets).where(and(
+    eq(tickets.id, input.ticketId), eq(tickets.shopId, actor.shopId),
+  )).limit(1)
+  const [targetJob] = await db.select().from(ticketJobs).where(and(
+    eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, actor.shopId),
+  )).limit(1)
+  if (!ticket || !targetJob || !targetJob.sessionId) return { ok: false, failure: fail('not_found') }
+  const [session] = await db.select().from(sessions).where(and(
+    eq(sessions.id, targetJob.sessionId), eq(sessions.shopId, actor.shopId),
+  )).limit(1)
+  if (!session) return { ok: false, failure: fail('not_found') }
+  if (actor.membershipStatus !== 'active' || actor.deactivatedAt || !['tech', 'advisor', 'owner'].includes(actor.role)) {
+    return { ok: false, failure: fail('forbidden') }
+  }
+  if (ticket.status !== 'open' || targetJob.kind !== 'diagnostic' || session.status !== 'open') {
+    return { ok: false, failure: fail('state_conflict', false) }
+  }
+
+  const tree = session.treeState as TreeState
+  const lockAt = typeof tree?.diagnosisLockedAt === 'string' ? new Date(tree.diagnosisLockedAt) : new Date(Number.NaN)
+  const now = await databaseNow(db)
+  if (
+    tree?.phase !== 'repairing' || tree.currentNodeId === '_topology' ||
+    Number.isNaN(lockAt.getTime()) || lockAt.toISOString() !== tree.diagnosisLockedAt ||
+    lockAt.getTime() > now.getTime() + MAX_LOCK_FUTURE_MS ||
+    !boundedRequiredText(ticket.concern) || !boundedRequiredText(tree.rootCauseSummary) ||
+    !boundedRequiredText(tree.proposedAction?.description) ||
+    typeof tree.proposedAction?.confidence !== 'number' || !Number.isFinite(tree.proposedAction.confidence) ||
+    tree.proposedAction.confidence < 0 || tree.proposedAction.confidence > 1
+  ) return { ok: false, failure: fail('state_conflict', false) }
+
+  const wizardEvents = await db.select().from(sessionEvents).where(and(
+    eq(sessionEvents.sessionId, session.id), eq(sessionEvents.eventType, 'wizard_lock_in'),
+  )).orderBy(sessionEvents.id)
+  if (wizardEvents.length > 0) return { ok: false, failure: fail('unsupported_path', false) }
+  if (tree.done !== true) return { ok: false, failure: fail('state_conflict', false) }
+
+  const selectedEvents = input.sourceEventIds.length === 0 ? [] : await db.select().from(sessionEvents)
+    .where(inArray(sessionEvents.id, input.sourceEventIds)).orderBy(sessionEvents.id)
+  const selectedArtifacts = input.sourceArtifactIds.length === 0 ? [] : await db.select().from(artifacts)
+    .where(inArray(artifacts.id, input.sourceArtifactIds)).orderBy(artifacts.id)
+  if (selectedEvents.length !== input.sourceEventIds.length || selectedArtifacts.length !== input.sourceArtifactIds.length) {
+    return { ok: false, failure: fail('not_found') }
+  }
+  if (
+    selectedEvents.some((row) => row.sessionId !== session.id || row.createdAt.getTime() > lockAt.getTime()) ||
+    selectedArtifacts.some((row) => row.sessionId !== session.id || row.createdAt.getTime() > lockAt.getTime())
+  ) return { ok: false, failure: fail('not_found') }
+  const safeProviderInput = providerEvidence(selectedEvents, selectedArtifacts)
+  if (!safeProviderInput) return { ok: false, failure: fail('invalid_evidence') }
+
+  const jobs = await db.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, actor.shopId), eq(ticketJobs.ticketId, ticket.id),
+  )).orderBy(ticketJobs.id)
+  const versions = await db.select().from(quoteVersions).where(and(
+    eq(quoteVersions.shopId, actor.shopId), eq(quoteVersions.ticketId, ticket.id),
+  )).orderBy(quoteVersions.id)
+  if (versions.filter((version) => version.supersededAt === null).length > 1) {
+    return { ok: false, failure: fail('conflict', false) }
+  }
+  return {
+    ok: true,
+    context: {
+      actor, ticket, targetJob, jobs, versions, session, wizardEvents, selectedEvents, selectedArtifacts,
+      providerInput: safeProviderInput, lockAt, now, concern: ticket.concern,
+      rootCause: tree.rootCauseSummary, action: tree.proposedAction.description,
+      confidence: tree.proposedAction.confidence,
+    },
+  }
+}
+
+function requestFingerprint(context: Context, input: GenerationInput): string {
+  return fingerprint({
+    actorProfileId: context.actor.id,
+    clientKey: input.clientKey,
+    sourceEventIds: [...input.sourceEventIds].sort(),
+    sourceArtifactIds: [...input.sourceArtifactIds].sort(),
+    concern: context.concern,
+    rootCause: context.rootCause,
+    action: context.action,
+    confidence: context.confidence,
+    diagnosisLockedAt: context.lockAt,
+    evidence: context.providerInput.evidence,
+    reviewStatus: 'pending',
+  })
+}
+
+function casFingerprint(context: Context): string {
+  return fingerprint({
+    actor: context.actor,
+    ticket: context.ticket,
+    jobs: context.jobs,
+    versions: context.versions,
+    session: context.session,
+    wizardEvents: context.wizardEvents,
+    selectedEvents: context.selectedEvents,
+    selectedArtifacts: context.selectedArtifacts,
+  })
+}
+
+const safeTextSchema = (maxBytes: number) => z.string().refine((value) => boundedRequiredText(value, maxBytes))
+
+function safeStory(value: unknown): CustomerStory | null {
+  const evidence = z.strictObject({
+    claim: safeTextSchema(2_000), sourceEventIds: z.array(uuidSchema).max(5), sourceArtifactIds: z.array(uuidSchema).max(5),
+  })
+  const schema = z.strictObject({
+    whatYouToldUs: safeTextSchema(5_000), whatWeFound: safeTextSchema(5_000), howWeKnow: z.array(evidence).max(5),
+    whatItMeansIfWaived: safeTextSchema(5_000), whatWeRecommend: safeTextSchema(5_000),
+  })
+  const parsed = schema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+const baseMetaSchema = z.strictObject({
+  source: z.enum(['ai', 'manual', 'template']),
+  sessionId: uuidSchema.optional(),
+  generatedAt: z.iso.datetime({ offset: true }).optional(),
+  lastEditedByProfileId: uuidSchema,
+  lastEditedAt: z.iso.datetime({ offset: true }),
+  reviewStatus: z.enum(['pending', 'reviewed']).optional(),
+})
+const generationMetaSchema = z.strictObject({
+  source: z.literal('ai'),
+  sessionId: uuidSchema,
+  generatedAt: z.iso.datetime({ offset: true }),
+  lastEditedByProfileId: uuidSchema,
+  lastEditedAt: z.iso.datetime({ offset: true }),
+  generationClientKey: uuidSchema,
+  generationRequestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  generatedByProfileId: uuidSchema,
+  storyRevision: z.number().int().nonnegative(),
+  reviewStatus: z.enum(['pending', 'reviewed']),
+})
+
+function safePersistedMeta(value: unknown): CustomerStoryMeta | null {
+  const generated = generationMetaSchema.safeParse(value)
+  if (generated.success) return generated.data
+  const base = baseMetaSchema.safeParse(value)
+  return base.success ? base.data : null
+}
+
+function workspaceMeta(value: CustomerStoryMeta): SafeStoryMeta {
+  return {
+    source: value.source,
+    ...(value.sessionId ? { sessionId: value.sessionId } : {}),
+    ...(value.generatedAt ? { generatedAt: value.generatedAt } : {}),
+    lastEditedByProfileId: value.lastEditedByProfileId,
+    lastEditedAt: value.lastEditedAt,
+    ...(value.reviewStatus ? { reviewStatus: value.reviewStatus } : {}),
+  }
+}
+
+function persistedRevision(meta: unknown): number {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return 0
+  const revision = (meta as Partial<CustomerStoryMeta>).storyRevision
+  return typeof revision === 'number' && Number.isInteger(revision) && revision >= 0 ? revision : 0
+}
+
+type Cursor = { kind: 'event' | 'artifact'; sessionId: string; createdAt: Date; id: string }
+function encodeCursor(cursor: Cursor): string {
+  return Buffer.from(JSON.stringify({ v: 1, k: cursor.kind, s: cursor.sessionId, t: cursor.createdAt.toISOString(), i: cursor.id })).toString('base64url')
+}
+
+function parseCursor(raw: string | undefined, kind: Cursor['kind']): Cursor | null | false {
+  if (raw === undefined) return null
+  try {
+    const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Record<string, unknown>
+    if (Object.keys(value).sort().join(',') !== 'i,k,s,t,v' || value.v !== 1 || value.k !== kind || typeof value.s !== 'string' || typeof value.t !== 'string' || typeof value.i !== 'string') return false
+    const id = uuidSchema.safeParse(value.i)
+    const sessionId = uuidSchema.safeParse(value.s)
+    const createdAt = new Date(value.t)
+    if (!id.success || !sessionId.success || Number.isNaN(createdAt.getTime()) || createdAt.toISOString() !== value.t) return false
+    if (encodeCursor({ kind, sessionId: sessionId.data, createdAt, id: id.data }) !== raw) return false
+    return { kind, sessionId: sessionId.data, createdAt, id: id.data }
+  } catch {
+    return false
+  }
+}
+
+function cursorCondition(columnDate: typeof sessionEvents.createdAt | typeof artifacts.createdAt, columnId: typeof sessionEvents.id | typeof artifacts.id, cursor: Cursor | null) {
+  return cursor ? or(lt(columnDate, cursor.createdAt), and(eq(columnDate, cursor.createdAt), lt(columnId, cursor.id))) : undefined
+}
+
+type EligiblePage<T> = { rows: T[]; nextCursor: string | null }
+
+async function eligibleEventPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null, dependencies: CustomerStoryWorkspaceDependencies): Promise<EligiblePage<SelectedEvent>> {
+  const eligible: SelectedEvent[] = []
+  let scanCursor = initialCursor
+  let lastRaw: SelectedEvent | null = null
+  let capped = false
+  let exhausted = false
+  for (let chunk = 0; chunk < MAX_WORKSPACE_SCAN_CHUNKS && eligible.length < PAGE_SIZE + 1; chunk += 1) {
+    dependencies.onEvidenceQuery?.('event')
+    const rows = await db.select().from(sessionEvents).where(and(
+      eq(sessionEvents.sessionId, sessionId), eq(sessionEvents.eventType, 'observation'),
+      sql`${sessionEvents.createdAt} <= ${lockAt}`,
+      cursorCondition(sessionEvents.createdAt, sessionEvents.id, scanCursor),
+    )).orderBy(desc(sessionEvents.createdAt), desc(sessionEvents.id)).limit(WORKSPACE_SCAN_CHUNK)
+    lastRaw = rows.at(-1) ?? lastRaw
+    eligible.push(...rows.filter((row) => providerEvidence([row], []) !== null))
+    if (rows.length < WORKSPACE_SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
+    const last = rows[rows.length - 1]
+    scanCursor = { kind: 'event', sessionId, createdAt: last.createdAt, id: last.id }
+    capped = chunk === MAX_WORKSPACE_SCAN_CHUNKS - 1
+  }
+  const rows = eligible.slice(0, PAGE_SIZE)
+  const nextCursor = eligible.length > PAGE_SIZE
+    ? encodeCursor({ kind: 'event', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+    : capped && eligible.length < PAGE_SIZE && lastRaw
+      ? encodeCursor({ kind: 'event', sessionId, createdAt: lastRaw.createdAt, id: lastRaw.id })
+      : eligible.length === PAGE_SIZE && !exhausted
+        ? encodeCursor({ kind: 'event', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+        : null
+  return { rows, nextCursor }
+}
+
+async function eligibleArtifactPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null, dependencies: CustomerStoryWorkspaceDependencies): Promise<EligiblePage<SelectedArtifact>> {
+  const eligible: SelectedArtifact[] = []
+  let scanCursor = initialCursor
+  let lastRaw: SelectedArtifact | null = null
+  let capped = false
+  let exhausted = false
+  for (let chunk = 0; chunk < MAX_WORKSPACE_SCAN_CHUNKS && eligible.length < PAGE_SIZE + 1; chunk += 1) {
+    dependencies.onEvidenceQuery?.('artifact')
+    const rows = await db.select().from(artifacts).where(and(
+      eq(artifacts.sessionId, sessionId), eq(artifacts.extractionStatus, 'done'),
+      sql`${artifacts.createdAt} <= ${lockAt}`,
+      cursorCondition(artifacts.createdAt, artifacts.id, scanCursor),
+    )).orderBy(desc(artifacts.createdAt), desc(artifacts.id)).limit(WORKSPACE_SCAN_CHUNK)
+    lastRaw = rows.at(-1) ?? lastRaw
+    eligible.push(...rows.filter((row) => providerEvidence([], [row]) !== null))
+    if (rows.length < WORKSPACE_SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
+    const last = rows[rows.length - 1]
+    scanCursor = { kind: 'artifact', sessionId, createdAt: last.createdAt, id: last.id }
+    capped = chunk === MAX_WORKSPACE_SCAN_CHUNKS - 1
+  }
+  const rows = eligible.slice(0, PAGE_SIZE)
+  const nextCursor = eligible.length > PAGE_SIZE
+    ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+    : capped && eligible.length < PAGE_SIZE && lastRaw
+      ? encodeCursor({ kind: 'artifact', sessionId, createdAt: lastRaw.createdAt, id: lastRaw.id })
+      : eligible.length === PAGE_SIZE && !exhausted
+        ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+        : null
+  return { rows, nextCursor }
+}
+
+export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown, dependencies: CustomerStoryWorkspaceDependencies = {}): Promise<CustomerStoryWorkspaceResult> {
+  const parsed = workspaceInputSchema.safeParse(rawInput)
+  if (!parsed.success) return fail('invalid_input')
+  const eventCursor = parseCursor(parsed.data.eventCursor, 'event')
+  const artifactCursor = parseCursor(parsed.data.artifactCursor, 'artifact')
+  if (eventCursor === false || artifactCursor === false) return fail('invalid_input')
+  const loaded = await loadGenerationContext(db, { ...parsed.data, sourceEventIds: [], sourceArtifactIds: [] })
+  if (!loaded.ok) return loaded.failure
+  const context = loaded.context
+  if ((eventCursor && eventCursor.sessionId !== context.session.id) || (artifactCursor && artifactCursor.sessionId !== context.session.id)) return fail('invalid_input')
+
+  const [eventPage, artifactPage] = await Promise.all([
+    eligibleEventPage(db, context.session.id, context.lockAt, eventCursor, dependencies),
+    eligibleArtifactPage(db, context.session.id, context.lockAt, artifactCursor, dependencies),
+  ])
+  const pageEvents = eventPage.rows
+  const pageArtifacts = artifactPage.rows
+  const story = context.targetJob.customerStory === null ? null : safeStory(context.targetJob.customerStory)
+  const persistedMeta = context.targetJob.storyMeta === null ? null : safePersistedMeta(context.targetJob.storyMeta)
+  const storyMeta = persistedMeta === null ? null : workspaceMeta(persistedMeta)
+  if ((context.targetJob.customerStory !== null && !story) || (context.targetJob.storyMeta !== null && !storyMeta)) return fail('conflict', false)
+  return {
+    ok: true,
+    workspace: {
+      story,
+      storyMeta,
+      storyRevision: persistedRevision(context.targetJob.storyMeta),
+      evidence: {
+        events: pageEvents.map((row) => ({ id: row.id, kind: 'observation', createdAt: row.createdAt.toISOString(), label: evidenceLabel(row.observationText!) })),
+        artifacts: pageArtifacts.map((row) => ({ id: row.id, kind: row.kind, createdAt: row.createdAt.toISOString(), label: evidenceLabel((row.extraction as { summary?: string }).summary ?? artifactContent(row)!) })),
+        nextEventCursor: eventPage.nextCursor,
+        nextArtifactCursor: artifactPage.nextCursor,
+      },
+    },
+  }
+}
+
+function commonWordOnly(value: string): boolean {
+  const common = new Set([
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'for', 'from', 'had', 'has',
+    'have', 'he', 'her', 'his', 'i', 'if', 'in', 'is', 'it', 'its', 'not', 'of', 'on', 'or',
+    'our', 'she', 'so', 'that', 'the', 'their', 'them', 'then', 'there', 'they', 'this', 'to',
+    'was', 'we', 'were', 'with', 'you', 'your',
+  ])
+  const words = value.match(/[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*/gu) ?? []
+  return words.length === 0 || words.every((word) => common.has(word.toLocaleLowerCase()))
+}
+
+function assembleStory(context: Context, selected: GeneratedEvidenceSelection): CustomerStory | null {
+  const parsedSelection = z.strictObject({
+    selections: z.array(z.strictObject({
+      sourceKind: z.enum(['event', 'artifact']), sourceId: uuidSchema, excerpt: z.string(),
+    })).max(5),
+  }).safeParse(selected)
+  if (!parsedSelection.success) return null
+  const sources = new Map(context.providerInput.evidence.map((row) => [`${row.sourceKind}:${row.sourceId}`, row.content]))
+  const rawSources = new Map<string, readonly string[]>([
+    ...context.selectedEvents.map((row) => [`event:${row.id}`, [row.observationText!]] as const),
+    ...context.selectedArtifacts.map((row) => {
+      const extraction = row.extraction as { text?: string; summary?: string; structured?: unknown }
+      return [`artifact:${row.id}`, [
+        ...(typeof extraction.summary === 'string' ? [extraction.summary] : []),
+        ...(typeof extraction.text === 'string' ? [extraction.text] : []),
+        ...(extraction.structured !== undefined ? [JSON.stringify(stableValue(extraction.structured))] : []),
+      ]] as const
+    }),
+  ])
+  const identities = new Set<string>()
+  const howWeKnow: CustomerStory['howWeKnow'] = []
+  for (const selection of parsedSelection.data.selections) {
+    const identity = `${selection.sourceKind}:${selection.sourceId}`
+    const source = sources.get(identity)
+    const words = selection.excerpt.trim().split(/\s+/u)
+    if (
+      identities.has(identity) || !source ||
+      !rawSources.get(identity)?.some((raw) => raw.includes(selection.excerpt)) ||
+      utf8Bytes(selection.excerpt) < 12 || utf8Bytes(selection.excerpt) > 2_000 ||
+      words.length < 3 || commonWordOnly(selection.excerpt) || !source.includes(selection.excerpt)
+    ) return null
+    identities.add(identity)
+    howWeKnow.push({
+      claim: selection.excerpt,
+      sourceEventIds: selection.sourceKind === 'event' ? [selection.sourceId] : [],
+      sourceArtifactIds: selection.sourceKind === 'artifact' ? [selection.sourceId] : [],
+    })
+  }
+  return {
+    whatYouToldUs: context.concern,
+    whatWeFound: context.rootCause,
+    howWeKnow,
+    whatItMeansIfWaived: WAIVER,
+    whatWeRecommend: context.action,
+  }
+}
+
+class AbortGeneration extends Error {
+  constructor(readonly failure: Failure) {
+    super('abort_customer_story_generation')
+  }
+}
+
+async function lockGenerationContext(db: AppDb, input: GenerationInput, preflight: Context, dependencies: CustomerStoryGenerationDependencies): Promise<void> {
+  const ticketQuery = db.select().from(tickets).where(eq(tickets.id, input.ticketId)).limit(1).for('update', { noWait: true })
+  const jobsQuery = db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, input.ticketId)).orderBy(ticketJobs.id).for('update', { noWait: true })
+  const versionsQuery = db.select().from(quoteVersions).where(eq(quoteVersions.ticketId, input.ticketId)).orderBy(quoteVersions.id).for('update', { noWait: true })
+  const sessionQuery = db.select().from(sessions).where(eq(sessions.id, preflight.session.id)).limit(1).for('update', { noWait: true })
+  const eventQuery = input.sourceEventIds.length > 0 ? db.select().from(sessionEvents).where(inArray(sessionEvents.id, input.sourceEventIds)).orderBy(sessionEvents.id).for('update', { noWait: true }) : null
+  const artifactQuery = input.sourceArtifactIds.length > 0 ? db.select().from(artifacts).where(inArray(artifacts.id, input.sourceArtifactIds)).orderBy(artifacts.id).for('update', { noWait: true }) : null
+  const actorQuery = db.select().from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1).for('update', { noWait: true })
+  dependencies.captureLockSql?.(
+    [ticketQuery, jobsQuery, versionsQuery, sessionQuery, eventQuery, artifactQuery, actorQuery]
+      .filter((query): query is Exclude<typeof query, null> => query !== null)
+      .map((query) => query.toSQL().sql),
+  )
+  await ticketQuery
+  await jobsQuery
+  await versionsQuery
+  await sessionQuery
+  if (eventQuery) await eventQuery
+  if (artifactQuery) await artifactQuery
+  await actorQuery
+}
+
+function providerFailure(error: unknown): Failure {
+  return error instanceof CustomerStoryProviderError && error.kind === 'timeout'
+    ? fail('provider_timeout')
+    : fail('provider_failed')
+}
+
+function lockUnavailable(error: unknown): boolean {
+  let current: unknown = error
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    if (typeof current === 'object' && 'code' in current && current.code === '55P03') return true
+    current = typeof current === 'object' && 'cause' in current ? current.cause : null
+  }
+  return false
+}
+
+export async function generateAndSaveCustomerStory(
+  db: AppDb,
+  rawInput: unknown,
+  dependencies: CustomerStoryGenerationDependencies,
+): Promise<CustomerStoryGenerationResult> {
+  const parsed = generationInputSchema.safeParse(rawInput)
+  if (!parsed.success) return fail('invalid_input')
+  const input = parsed.data
+  const preflight = await loadGenerationContext(db, input)
+  if (!preflight.ok) return preflight.failure
+  const initial = preflight.context
+  const request = requestFingerprint(initial, input)
+  const rawCurrentMeta = initial.targetJob.storyMeta
+  const currentMeta = rawCurrentMeta === null ? null : safePersistedMeta(rawCurrentMeta)
+  if (rawCurrentMeta !== null && !currentMeta) return fail('conflict', false)
+  if (currentMeta && 'generationClientKey' in currentMeta && currentMeta.generationClientKey === input.clientKey) {
+    if (currentMeta.generatedByProfileId !== initial.actor.id || currentMeta.generationRequestFingerprint !== request) return fail('conflict', false)
+    const story = safeStory(initial.targetJob.customerStory)
+    if (!story) return fail('conflict', false)
+    return { ok: true, changed: false, story, storyMeta: currentMeta, storyRevision: persistedRevision(currentMeta) }
+  }
+  const revision = persistedRevision(currentMeta)
+  if (revision !== input.expectedStoryRevision) return fail('conflict', false)
+  const initialCas = casFingerprint(initial)
+
+  let selections: GeneratedEvidenceSelection
+  try {
+    selections = initial.providerInput.evidence.length === 0
+      ? { selections: [] }
+      : await dependencies.generateCustomerStory(initial.providerInput)
+  } catch (error) {
+    return providerFailure(error)
+  }
+  const story = assembleStory(initial, selections)
+  if (!story) return fail('provider_failed')
+  await dependencies.beforeFinalTransaction?.()
+
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      await lockGenerationContext(transactionDb, input, initial, dependencies)
+      await dependencies.afterLocks?.()
+      const reloaded = await loadGenerationContext(transactionDb, input)
+      if (!reloaded.ok) {
+        throw new AbortGeneration(
+          reloaded.failure.error === 'conflict' ? reloaded.failure : fail('conflict', true),
+        )
+      }
+      if (requestFingerprint(reloaded.context, input) !== request || casFingerprint(reloaded.context) !== initialCas) {
+        throw new AbortGeneration(fail('conflict', true))
+      }
+      const rawLockedMeta = reloaded.context.targetJob.storyMeta
+      const lockedMeta = rawLockedMeta === null ? null : safePersistedMeta(rawLockedMeta)
+      if (rawLockedMeta !== null && !lockedMeta) throw new AbortGeneration(fail('conflict', false))
+      if (lockedMeta && 'generationClientKey' in lockedMeta && lockedMeta.generationClientKey === input.clientKey) {
+        if (lockedMeta.generatedByProfileId !== reloaded.context.actor.id || lockedMeta.generationRequestFingerprint !== request) throw new AbortGeneration(fail('conflict', false))
+        const lockedStory = safeStory(reloaded.context.targetJob.customerStory)
+        if (!lockedStory) throw new AbortGeneration(fail('conflict', false))
+        return { ok: true as const, changed: false, story: lockedStory, storyMeta: lockedMeta, storyRevision: persistedRevision(lockedMeta) }
+      }
+      const lockedRevision = persistedRevision(lockedMeta)
+      if (lockedRevision !== input.expectedStoryRevision) throw new AbortGeneration(fail('conflict', false))
+      const previousStory = reloaded.context.targetJob.customerStory === null ? null : safeStory(reloaded.context.targetJob.customerStory)
+      if (reloaded.context.targetJob.customerStory !== null && !previousStory) throw new AbortGeneration(fail('conflict', false))
+      const changed = previousStory === null || fingerprint(previousStory) !== fingerprint(story)
+      const nextRevision = changed ? lockedRevision + 1 : lockedRevision
+      const generatedAt = reloaded.context.now.toISOString()
+      const storyMeta: CustomerStoryMeta = {
+        source: 'ai', sessionId: reloaded.context.session.id, generatedAt,
+        lastEditedByProfileId: reloaded.context.actor.id, lastEditedAt: generatedAt,
+        generationClientKey: input.clientKey, generationRequestFingerprint: request,
+        generatedByProfileId: reloaded.context.actor.id, storyRevision: nextRevision,
+        reviewStatus: 'pending',
+      }
+      await transactionDb.update(ticketJobs).set({ customerStory: story, storyMeta, updatedAt: reloaded.context.now })
+        .where(and(eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, reloaded.context.actor.shopId!)))
+      if (changed) {
+        const invalidation = await invalidateActiveQuoteVersion(transactionDb, {
+          shopId: reloaded.context.actor.shopId!, ticketId: input.ticketId,
+          jobIds: reloaded.context.jobs.map((job) => job.id),
+          activeVersions: reloaded.context.versions.filter((version) => version.supersededAt === null),
+        })
+        if (invalidation) throw new AbortGeneration(invalidation as Failure)
+      }
+      return { ok: true as const, changed, story, storyMeta, storyRevision: nextRevision }
+    })
+  } catch (error) {
+    if (error instanceof AbortGeneration) return error.failure
+    if (lockUnavailable(error)) return fail('conflict', true)
+    throw error
+  }
+}
