@@ -26,7 +26,7 @@
 - [x] Record PR #126 merge/tree equality and close row 15's final shipping checkbox.
 - [x] Audit the approved row, master schema contract, current Drizzle declarations, official migration chain, RLS pattern, and known snapshot-generation constraint.
 - [x] Choose one additive quote-foundation migration with five server-only tables and narrow existing-table columns.
-- [ ] Commit/push this packet, mark row 16 `in progress`, and open draft PR #127 before implementation.
+- [x] Commit/push this packet, mark row 16 `in progress`, and open draft PR #127 before implementation.
 
 ## Task 2: Declare the quote foundation in Drizzle
 
@@ -61,11 +61,13 @@
 
 ## Task 4: Verify, reconcile, and ship row 16
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff checks.
-- [ ] Inspect the full diff for tenant/ticket leaks, mutable quote history, money precision drift, destructive DDL, future-row scope, and unrelated changes.
-- [ ] Obtain task reviews and one whole-branch review; correct every validated finding through tests.
-- [ ] Add the Phase-3 schema implementation correction, mark row 16 complete, preserve production/external gates, and identify row 17 as next.
+- [x] Run focused tests, full suite, TypeScript, production build, and diff checks: 3 focused files/25 tests and 210 files/1,876 tests pass.
+- [x] Inspect the full diff for tenant/ticket leaks, mutable quote history, money precision drift, destructive DDL, future-row scope, and unrelated changes; none remain.
+- [x] Obtain declaration, migration/security, and whole-branch reviews; resolve FK-index, lineage-proof, privilege-policy-proof, and supersession-mutation-proof findings through tests; final reviews approve with zero findings.
+- [x] Add the Phase-3 schema implementation correction, mark row 16 complete, preserve production/external gates, and identify row 17 as next.
 - [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 17.
+
+**Implementation correction — quote foundation proved 2026-07-10.** The source now adds nullable shop labor/tax configuration, typed job stories, exact approved-version references, and five server-only quote/work tables with same-shop and same-ticket composite lineage. Bigint values remain JavaScript-safe, JSON containers and approval-event invariants are database-checked, quote events are append-only, and quote-version content is immutable except for one supersession timestamp. The required generator attempt failed only on the pre-existing malformed `0011b_snapshot.json`, so the established hand-written migration/journal pattern was used without changing historical snapshots. A formal four-file security scan found zero reportable row-16 issues and transferred projection/event atomicity to row 17. Three focused files/25 tests and the complete 210-file/1,876-test suite pass with TypeScript, production build, clean GitHub checks, task reviews, and a whole-branch approval. No production migration, handler, UI, external send/vendor, feature enablement, repair authorization, or diagnostic-engine behavior changed.
 
 ## Verification
 

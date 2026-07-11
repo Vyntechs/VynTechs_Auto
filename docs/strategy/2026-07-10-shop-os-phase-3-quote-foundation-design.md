@@ -10,7 +10,7 @@ Add the relational foundation required for manual quote building, immutable appr
 
 Ship one additive source migration and matching Drizzle declarations:
 
-- Add safe shop defaults for `laborRateCents` and `taxRateBps`.
+- Add nullable, no-default shop configuration fields for `laborRateCents` and `taxRateBps`.
 - Add `customerStory`, `storyMeta`, and `approvedQuoteVersionId` to ticket jobs.
 - Add shop-scoped `job_attachments`, `job_lines`, `canned_jobs`, `quote_versions`, and `quote_events`.
 - Add composite uniqueness to existing ticket jobs so every child can enforce the same shop and, where relevant, the same ticket.
