@@ -24,6 +24,13 @@
 import { describe, it, expect } from 'vitest'
 import { assembleScene } from '@/lib/diagnostics/diagram/slot-resolver'
 import { selectStepShape } from '@/lib/diagnostics/diagram/show-rule'
+import {
+  buildStepSequence,
+  selectCurrentStep,
+  stepKeyOf,
+  stepReducer,
+  stepReducerInit,
+} from '@/lib/diagnostics/diagram/step-sequence'
 import type {
   SystemTopology,
   TopologyComponent,
@@ -143,6 +150,36 @@ describe('diagnostic scene assembly — scaffold', () => {
     expect(Array.isArray(scene.elements)).toBe(true)
     expect(scene.focus.selectedPartId).toBe('cp4')
     expect(scene.elements.some((e) => e.elementKind === 'part' && e.partId === 'cp4')).toBe(true)
+  })
+
+  it('keeps first-step ordering and slug-key reducer behavior when IDs are present', () => {
+    const first = syntheticStep({
+      id: '11111111-1111-4111-8111-111111111111',
+      slug: 'first-by-priority',
+      priority: 1,
+    })
+    const second = syntheticStep({
+      id: '22222222-2222-4222-8222-222222222222',
+      slug: 'second-by-priority',
+      priority: 2,
+    })
+    const topo = syntheticTopology('fuel', component({ testActions: [second, first] }))
+    const sequence = buildStepSequence(topo)
+
+    expect(selectCurrentStep(stepReducerInit(sequence))).toBe(first)
+    expect(stepKeyOf(first)).toBe('first-by-priority')
+
+    const byDatabaseId = stepReducer(stepReducerInit(sequence), {
+      type: 'goTo',
+      stepKey: '22222222-2222-4222-8222-222222222222',
+    })
+    expect(selectCurrentStep(byDatabaseId)).toBe(first)
+
+    const byLegacySlug = stepReducer(byDatabaseId, {
+      type: 'goTo',
+      stepKey: 'second-by-priority',
+    })
+    expect(selectCurrentStep(byLegacySlug)).toBe(second)
   })
 })
 
