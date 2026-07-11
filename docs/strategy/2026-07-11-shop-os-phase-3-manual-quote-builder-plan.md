@@ -24,9 +24,9 @@
 
 **Files:** Create `app/(app)/tickets/[id]/quote/page.tsx`; extend ticket detail component/CSS and tests.
 
-- [ ] Authenticate, apply `checkAccess`-equivalent subscription/deactivation policy, require `canBuildQuotes`, then load tenant-safe ticket identity plus builder truth directly through the injected handlers; never self-fetch HTTP.
-- [ ] Add one 44px `Build quote` action only for open tickets and authorized paid actors; correct provisional copy to allow drafting while preparation and downstream actions remain blocked.
-- [ ] Prove auth, unsupported role, unpaid/deactivated access, cross-boundary failure, open/provisional entry, no dead link, and unchanged ticket-detail behavior.
+- [x] Authenticate, apply `checkAccess`-equivalent subscription/deactivation policy, require `canBuildQuotes`, then load tenant-safe ticket identity plus builder truth directly through the injected handlers; never self-fetch HTTP.
+- [x] Add one 44px `Build quote` action only for open tickets and authorized paid actors; correct provisional copy to allow drafting while preparation and downstream actions remain blocked.
+- [x] Prove auth, unsupported role, unpaid/deactivated access, cross-boundary failure, open/provisional entry, no dead link, and unchanged ticket-detail behavior.
 
 ## Task 3: Quote ledger and deterministic totals
 

@@ -1,13 +1,14 @@
 import { notFound, redirect } from 'next/navigation'
-import { TicketDetailScreen } from '@/components/screens/ticket-detail'
+import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { getQuoteBuilder, quoteActorFromProfile } from '@/lib/shop-os/quotes'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
 
-export default async function TicketPage({
+export default async function QuotePage({
   params,
 }: {
   params: Promise<{ id: string }>
@@ -21,18 +22,25 @@ export default async function TicketPage({
   const access = await checkAccess(db, ctx.user.id)
   if (access.kind === 'deactivated') redirect('/deactivated')
   if (access.kind === 'paywall') redirect('/subscribe')
+  if (!canBuildQuotes(ctx.profile.role)) notFound()
 
   const { id } = await params
-  const result = await getTicketDetail(db, {
+  const ticketResult = await getTicketDetail(db, {
     actor: ticketActorFromProfile(ctx.profile),
     ticketId: id,
   })
-  if (!result.ok) notFound()
+  if (!ticketResult.ok) notFound()
+
+  const builderResult = await getQuoteBuilder(db, {
+    actor: quoteActorFromProfile(ctx.profile),
+    ticketId: id,
+  })
+  if (!builderResult.ok) notFound()
 
   return (
-    <TicketDetailScreen
-      ticket={result.ticket}
-      canBuildQuote={canBuildQuotes(ctx.profile.role)}
+    <ManualQuoteBuilder
+      ticket={ticketResult.ticket}
+      builder={builderResult.builder}
     />
   )
 }

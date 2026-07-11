@@ -123,6 +123,7 @@ describe('TicketDetailScreen', () => {
   it('renders an honest provisional tech-quick state without invented actions or identity', () => {
     render(
       <TicketDetailScreen
+        canBuildQuote
         ticket={ticket({
           source: 'tech_quick',
           customer: null,
@@ -141,13 +142,48 @@ describe('TicketDetailScreen', () => {
     })
     expect(
       within(provisional).getByText(
-        'Quoting, sending, delivery, and closeout stay blocked until this ticket is reconciled.',
+        'Draft quote lines now. Prepare, send, approval, delivery, and closeout stay blocked until this ticket is reconciled.',
       ),
     ).toBeInTheDocument()
-    expect(within(provisional).queryByRole('link')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Build quote' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-1/quote',
+    )
     expect(within(provisional).queryByRole('button')).toBeNull()
     expect(screen.queryByText('Marisol Vega')).toBeNull()
     expect(screen.queryByText('2019 Ford F-150')).toBeNull()
+  })
+
+  it('offers one 44px quote entry only for an authorized open ticket', () => {
+    const { rerender } = render(
+      <TicketDetailScreen ticket={ticket()} canBuildQuote />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Build quote' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-1/quote',
+    )
+
+    rerender(<TicketDetailScreen ticket={ticket()} canBuildQuote={false} />)
+    expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+
+    rerender(
+      <TicketDetailScreen
+        ticket={ticket({ status: 'closed' })}
+        canBuildQuote
+      />,
+    )
+    expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+  })
+
+  it('keeps the quote entry at least 44px with a visible focus treatment', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/screens/ticket-detail.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/\.quoteAction[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/\.quoteAction:focus-visible[\s\S]*outline:/)
   })
 
   it('labels quick_quote source as Quick ticket, not a completed quote', () => {

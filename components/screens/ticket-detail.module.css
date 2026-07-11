@@ -81,6 +81,36 @@
   letter-spacing: 0.02em;
 }
 
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.quoteAction {
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-2);
+  padding: 0 18px;
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.quoteAction:hover {
+  background: var(--vt-signal-700);
+}
+
+.quoteAction:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
 .identityGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

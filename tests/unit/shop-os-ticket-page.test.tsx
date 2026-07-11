@@ -27,6 +27,10 @@ vi.mock('@/lib/auth', () => ({
   requireUserAndProfile: vi.fn(),
 }))
 
+vi.mock('@/lib/auth-access', () => ({
+  checkAccess: vi.fn(),
+}))
+
 vi.mock('@/lib/supabase-server', () => ({
   getServerSupabase: vi.fn(async () => ({})),
 }))
@@ -42,16 +46,18 @@ vi.mock('@/lib/tickets', async (importOriginal) => {
 })
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket }: { ticket: TicketDetail }) => (
-    <div>Ticket screen {ticket.ticketNumber}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote }: { ticket: TicketDetail; canBuildQuote: boolean }) => (
+    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}</div>
   ),
 }))
 
 import TicketPage from '@/app/(app)/tickets/[id]/page'
 import { requireUserAndProfile } from '@/lib/auth'
+import { checkAccess } from '@/lib/auth-access'
 import { getTicketDetail } from '@/lib/tickets'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
+const checkAccessMock = vi.mocked(checkAccess)
 const getTicketMock = vi.mocked(getTicketDetail)
 
 const TICKET_ID = '00000000-0000-0000-0000-000000000101'
@@ -106,6 +112,7 @@ describe('TicketPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     requireUserMock.mockResolvedValue(authContext)
+    checkAccessMock.mockResolvedValue({ kind: 'allow' })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
   })
 
@@ -115,6 +122,20 @@ describe('TicketPage', () => {
     await expect(TicketPage(pageProps())).rejects.toBe(redirectError)
 
     expect(redirectMock).toHaveBeenCalledWith('/sign-in')
+    expect(getTicketMock).not.toHaveBeenCalled()
+    expect(checkAccessMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ kind: 'deactivated' } as const, '/deactivated'],
+    [{ kind: 'paywall', reason: 'past_due' } as const, '/subscribe'],
+  ])('applies the access boundary before reading the ticket', async (access, target) => {
+    checkAccessMock.mockResolvedValue(access)
+
+    await expect(TicketPage(pageProps())).rejects.toBe(redirectError)
+
+    expect(checkAccessMock).toHaveBeenCalledWith({}, profile.userId)
+    expect(redirectMock).toHaveBeenCalledWith(target)
     expect(getTicketMock).not.toHaveBeenCalled()
   })
 
@@ -130,7 +151,18 @@ describe('TicketPage', () => {
   it('renders the ticket detail screen on success', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText('Ticket screen 101')).toBeInTheDocument()
+    expect(screen.getByText('Ticket screen 101; quote true')).toBeInTheDocument()
+  })
+
+  it('keeps the ticket readable but omits quote entry for an unsupported role', async () => {
+    requireUserMock.mockResolvedValue({
+      ...authContext,
+      profile: { ...profile, role: 'legacy_role' as typeof profile.role },
+    })
+
+    render(await TicketPage(pageProps()))
+
+    expect(screen.getByText('Ticket screen 101; quote false')).toBeInTheDocument()
   })
 
   it.each<TicketDomainError>([
