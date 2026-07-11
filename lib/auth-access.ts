@@ -38,6 +38,8 @@ const EXEMPT_EXACT = new Set<string>([
   // also signs the contract every shop accepts on sign-up, so it must be
   // readable without auth at any point.
   '/terms',
+  // The browser must fetch the service worker before any session exists.
+  '/sw.js',
   '/api/health',
 ])
 

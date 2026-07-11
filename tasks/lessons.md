@@ -7,3 +7,8 @@ Reason: Double-quoted backticks execute command substitution and silently corrup
 Trigger: Parallel reviewers launched Vitest while the control lane ran the full suite, causing resource contention and a false timeout.
 Rule: One lane owns heavy tests; reviewers perform static review or wait for shared verification evidence.
 Reason: Concurrent suites distort timing, waste compute, and weaken verification signal.
+
+### production-schema-before-deploy
+Trigger: Production code queries columns from an unapplied source migration.
+Rule: Block production promotion until required migrations are applied or backward-compatible code is proven.
+Reason: Successful authentication can still fail immediately when middleware reads missing schema.
