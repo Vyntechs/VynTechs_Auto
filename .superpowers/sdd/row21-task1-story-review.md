@@ -23,7 +23,7 @@ Implemented only the approved Task 1 domain, JSONB metadata type, and existing s
 
 ## TypeScript
 
-`pnpm exec tsc --noEmit` was run. It reported only concurrently edited Task 2 quote-projection fixture errors in `shop-os-manual-quote-builder.test.tsx` and `shop-os-quote-page.test.tsx`; it reported no Task 1 file error. The control lane owns the clean shared-worktree rerun after Task 2 converges.
+`pnpm exec tsc --noEmit` passes after Task 1 and Task 2 domain convergence.
 
 ## Assumptions
 
@@ -34,4 +34,20 @@ Implemented only the approved Task 1 domain, JSONB metadata type, and existing s
 ## Skipped/failed
 
 - Full suite and build: intentionally reserved for the control lane.
-- Clean TypeScript: temporarily blocked by the disjoint in-progress Task 2 test fixtures described above.
+- None within Task 1; the full suite and build remain intentionally reserved for the control lane.
+
+## Independent-review follow-up
+
+Commit follow-up hardens canonical replay and introduces the shared authoritative story contract requested during Task 1/2 convergence.
+
+- Canonical replay now revalidates the current session path, exact concern/waiver/proof, source, session binding, and AI generation binding before returning committed truth.
+- The request fingerprint includes the originally submitted expected revision; its now-stale original value replays, while changed revision/key reuse conflicts.
+- Review narratives normalize CRLF, surrounding whitespace, NFC, and zero-width separators; whitespace/control-only payloads fail at route and domain boundaries.
+- PUT returns a bounded safe metadata projection without request fingerprints, client keys, or actor IDs.
+- Existing manual stories require complete row-21 review audit, positive revision, and exact UUID session binding.
+- Review locks now include tenant predicates on ticket, jobs, versions, session, and actor.
+- `lib/shop-os/customer-story-contracts.ts` is the shared strict parser/projection seam for persisted stories, full metadata, and immutable snapshot metadata.
+
+Follow-up RED: nine route/domain regressions failed plus the shared-contract suite failed to resolve before implementation.
+
+Follow-up GREEN: five focused files / 108 tests pass; `pnpm exec tsc --noEmit` passes; targeted diff check passes.

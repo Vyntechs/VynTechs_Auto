@@ -63,6 +63,11 @@ const storyMeta = {
   generationRequestFingerprint: 'private-fingerprint',
   generatedByProfileId: profile.id,
   storyRevision: 1,
+  reviewStatus: 'reviewed' as const,
+  reviewClientKey: CLIENT_KEY,
+  reviewRequestFingerprint: 'b'.repeat(64),
+  reviewedByProfileId: profile.id,
+  reviewedAt: '2026-07-11T12:02:00.000Z',
 }
 
 const authMock = vi.mocked(requireUserAndProfile)
@@ -228,6 +233,9 @@ describe('customer story route', () => {
     { ...reviewBody, expectedStoryRevision: -1 },
     { ...reviewBody, whatWeFound: '' },
     { ...reviewBody, whatWeRecommend: 'x'.repeat(5_001) },
+    { ...reviewBody, whatWeFound: '  \n\t' },
+    { ...reviewBody, whatWeFound: '\u200b\u200c\u2060' },
+    { ...reviewBody, whatWeRecommend: '\u0000\u0007' },
   ])('rejects a non-contract PUT envelope before domain access', async (body) => {
     const response = await PUT(request('PUT', body), params())
     expect(response.status).toBe(422)
@@ -235,14 +243,40 @@ describe('customer story route', () => {
     expect(reviewMock).not.toHaveBeenCalled()
   })
 
+  it('rejects malformed PUT JSON before domain access', async () => {
+    const response = await PUT(request('PUT', undefined, 'not-json{'), params())
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
+    expect(reviewMock).not.toHaveBeenCalled()
+  })
+
   it('passes only the reviewed narrative contract and maps committed server truth', async () => {
     reviewMock.mockResolvedValue({ ok: true, changed: true, story, storyMeta, storyRevision: 2 })
-    const response = await PUT(request('PUT', reviewBody), params())
+    const response = await PUT(request('PUT', {
+      ...reviewBody,
+      whatWeFound: '  Alternator output is below specification.\r\n\u200b ',
+      whatWeRecommend: '\u200b Replace the alternator. ',
+    }), params())
     expect(reviewMock).toHaveBeenCalledWith({}, {
       actor, ticketId: TICKET_ID, jobId: JOB_ID, ...reviewBody,
     })
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ changed: true, story, storyMeta, storyRevision: 2 })
+    const responseBody = await response.json()
+    expect(responseBody).toEqual({
+      changed: true,
+      story,
+      storyMeta: {
+        source: 'ai',
+        sessionId: storyMeta.sessionId,
+        generatedAt: storyMeta.generatedAt,
+        lastEditedAt: storyMeta.lastEditedAt,
+        reviewStatus: 'reviewed',
+        storyRevision: 1,
+        reviewedAt: storyMeta.reviewedAt,
+      },
+      storyRevision: 2,
+    })
+    expect(JSON.stringify(responseBody)).not.toMatch(/Fingerprint|ProfileId|ClientKey/)
     expect(providerMock).not.toHaveBeenCalled()
   })
 

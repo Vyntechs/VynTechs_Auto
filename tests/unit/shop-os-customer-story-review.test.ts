@@ -188,11 +188,60 @@ describe('Shop OS reviewed customer stories', () => {
 
   it('returns a canonical same-key retry before stale revision and rejects changed or cross-actor reuse', async () => {
     expect(await save()).toMatchObject({ ok: true, changed: true, storyRevision: 2 })
-    expect(await save({ expectedStoryRevision: 999 })).toMatchObject({ ok: true, changed: false, storyRevision: 2 })
+    expect(await save()).toMatchObject({ ok: true, changed: false, storyRevision: 2 })
+    expect(await save({ expectedStoryRevision: 999 }))
+      .toEqual({ ok: false, error: 'conflict', retryable: false })
     expect(await save({ expectedStoryRevision: 2, whatWeFound: 'Different reuse.' }))
       .toEqual({ ok: false, error: 'conflict', retryable: false })
     expect(await save({ actor: { profileId: advisorId }, expectedStoryRevision: 2 }))
       .toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it('revalidates supported path and server-owned truth before canonical replay', async () => {
+    expect(await save()).toMatchObject({ ok: true, storyRevision: 2 })
+    await db.update(tickets).set({ concern: 'The customer concern changed.' }).where(eq(tickets.id, ticketId))
+    expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+
+    await db.update(tickets).set({ concern: story.whatYouToldUs }).where(eq(tickets.id, ticketId))
+    await db.insert(sessionEvents).values({
+      id: uuid(50), sessionId, nodeId: 'wizard', eventType: 'wizard_lock_in',
+      aiResponse: { wizardLockIn: { flowVersionId: uuid(51) } },
+    })
+    expect(await save()).toEqual({ ok: false, error: 'unsupported_path', retryable: false })
+    await db.delete(sessionEvents).where(eq(sessionEvents.id, uuid(50)))
+
+    await db.update(sessions).set({ treeState: topologyTree() }).where(eq(sessions.id, sessionId))
+    expect(await save()).toEqual({ ok: false, error: 'unsupported_path', retryable: false })
+    await db.update(sessions).set({ treeState: lockedTree() }).where(eq(sessions.id, sessionId))
+
+    const [stored] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    await db.update(ticketJobs).set({
+      customerStory: { ...stored.customerStory!, howWeKnow: [{ claim: 'Corrupt proof.', sourceEventIds: [uuid(52)], sourceArtifactIds: [] }] },
+    }).where(eq(ticketJobs.id, jobId))
+    expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({ customerStory: stored.customerStory, storyMeta: { ...stored.storyMeta!, generationRequestFingerprint: 'bad' } as never })
+      .where(eq(ticketJobs.id, jobId))
+    expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it('normalizes visible review text and rejects invisible or control-only narratives', async () => {
+    const result = await save({
+      whatWeFound: '  The alternator output is low.\r\n\u200b  ',
+      whatWeRecommend: '\u200b Replace the alternator.  ',
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      story: {
+        whatWeFound: 'The alternator output is low.',
+        whatWeRecommend: 'Replace the alternator.',
+      },
+    })
+    for (const invisible of ['   \n\t', '\u200b\u200c\u2060', '\u0000\u0007']) {
+      expect(await save({ clientKey: uuid(60), expectedStoryRevision: 2, whatWeFound: invisible }))
+        .toEqual({ ok: false, error: 'invalid_input' })
+      expect(await save({ clientKey: uuid(61), expectedStoryRevision: 2, whatWeRecommend: invisible }))
+        .toEqual({ ok: false, error: 'invalid_input' })
+    }
   })
 
   it('creates an honest reviewed manual story only for a topology session', async () => {
@@ -222,6 +271,31 @@ describe('Shop OS reviewed customer stories', () => {
     })
     expect(await save({ clientKey: uuid(22), expectedStoryRevision: 0 }))
       .toEqual({ ok: false, error: 'unsupported_path', retryable: false })
+  })
+
+  it('requires exact row-21 session, revision, and review audit on existing manual metadata', async () => {
+    await db.update(sessions).set({ treeState: topologyTree() }).where(eq(sessions.id, sessionId))
+    await db.update(ticketJobs).set({ customerStory: null, storyMeta: null }).where(eq(ticketJobs.id, jobId))
+    expect(await save({ expectedStoryRevision: 0 })).toMatchObject({ ok: true, storyRevision: 1 })
+    const [stored] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const manualMeta = stored.storyMeta!
+    for (const corrupt of [
+      { ...manualMeta, sessionId: undefined },
+      { ...manualMeta, sessionId: uuid(999) },
+      { ...manualMeta, storyRevision: undefined },
+      { ...manualMeta, reviewClientKey: undefined },
+      { ...manualMeta, reviewedByProfileId: undefined },
+    ]) {
+      await db.update(ticketJobs).set({ storyMeta: corrupt as never }).where(eq(ticketJobs.id, jobId))
+      expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+    }
+  })
+
+  it('allows active advisor and owner reviewers', async () => {
+    expect(await save({ actor: { profileId: advisorId }, clientKey: uuid(70) }))
+      .toMatchObject({ ok: true, storyMeta: { reviewedByProfileId: advisorId }, storyRevision: 2 })
+    expect(await save({ actor: { profileId: ownerId }, clientKey: uuid(71), expectedStoryRevision: 2 }))
+      .toMatchObject({ ok: true, storyMeta: { reviewedByProfileId: ownerId }, storyRevision: 3 })
   })
 
   it('invalidates an active version only when public story content changes', async () => {
@@ -292,11 +366,11 @@ describe('Shop OS reviewed customer stories', () => {
     const statements: string[] = []
     expect(await save({}, { captureLockSql: (rows) => statements.push(...rows) })).toMatchObject({ ok: true })
     expect(statements.map((statement) => statement.replace(/\s+/g, ' '))).toEqual([
-      expect.stringMatching(/from "tickets".*where "tickets"\."id" = \$1.*for update nowait/i),
-      expect.stringMatching(/from "ticket_jobs".*where "ticket_jobs"\."ticket_id" = \$1.*order by "ticket_jobs"\."id".*for update nowait/i),
-      expect.stringMatching(/from "quote_versions".*where "quote_versions"\."ticket_id" = \$1.*order by "quote_versions"\."id".*for update nowait/i),
-      expect.stringMatching(/from "sessions".*where "sessions"\."id" = \$1.*for update nowait/i),
-      expect.stringMatching(/from "profiles".*where "profiles"\."id" = \$1.*for update nowait/i),
+      expect.stringMatching(/from "tickets".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
+      expect.stringMatching(/from "ticket_jobs".*"ticket_id" = \$1.*"shop_id" = \$2.*order by "ticket_jobs"\."id".*for update nowait/i),
+      expect.stringMatching(/from "quote_versions".*"ticket_id" = \$1.*"shop_id" = \$2.*order by "quote_versions"\."id".*for update nowait/i),
+      expect.stringMatching(/from "sessions".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
+      expect.stringMatching(/from "profiles".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
     ])
   })
 })

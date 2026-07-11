@@ -12,6 +12,10 @@ import {
   saveReviewedCustomerStory,
 } from '@/lib/shop-os/customer-stories'
 import { getServerSupabase } from '@/lib/supabase-server'
+import {
+  customerStoryReviewTextSchema,
+  safeCustomerStoryMeta,
+} from '@/lib/shop-os/customer-story-contracts'
 
 const cursorQuery = z.strictObject({
   eventCursor: z.string().min(1).max(1_000).optional(),
@@ -31,8 +35,8 @@ const generationEnvelope = z.strictObject({
 const reviewEnvelope = z.strictObject({
   clientKey: z.uuid(),
   expectedStoryRevision: z.number().int().nonnegative(),
-  whatWeFound: z.string().min(1).max(5_000),
-  whatWeRecommend: z.string().min(1).max(5_000),
+  whatWeFound: customerStoryReviewTextSchema,
+  whatWeRecommend: customerStoryReviewTextSchema,
 })
 
 type RouteContext = {
@@ -142,7 +146,7 @@ export async function PUT(req: Request, { params }: RouteContext) {
   return NextResponse.json({
     changed: result.changed,
     story: result.story,
-    storyMeta: result.storyMeta,
+    storyMeta: safeCustomerStoryMeta(result.storyMeta),
     storyRevision: result.storyRevision,
   }, { status: 200 })
 }
