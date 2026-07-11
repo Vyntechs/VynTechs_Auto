@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { jobAttachments, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
-import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
+import { canBuildQuotes, canRecordCustomerApproval } from '@/lib/shop-os/capabilities'
 import {
   formatScaledDecimal,
   buildQuoteStoryMeta,
@@ -63,6 +63,24 @@ const manualLineSchema = z.discriminatedUnion('kind', [
   feeLineSchema,
 ])
 
+const quoteApprovalDecisionSchema = z.strictObject({
+  requestKey: uuidSchema,
+  jobId: uuidSchema,
+  quoteVersionId: uuidSchema,
+  decision: z.literal('approved'),
+  approvedVia: z.enum(['phone', 'in_person']),
+})
+const quoteDeclineDecisionSchema = z.strictObject({
+  requestKey: uuidSchema,
+  jobId: uuidSchema,
+  quoteVersionId: uuidSchema,
+  decision: z.literal('declined'),
+})
+const quoteDecisionSchema = z.discriminatedUnion('decision', [
+  quoteApprovalDecisionSchema,
+  quoteDeclineDecisionSchema,
+])
+
 export type QuoteActor = { profileId: string }
 export type SafeManualDraftLine = Pick<
   typeof jobLines.$inferSelect,
@@ -88,6 +106,29 @@ export type QuoteDraftResult =
 
 export type QuoteDraftDependencies = {
   beforeMutation?: () => Promise<void>
+}
+
+export type QuoteDecisionResult =
+  | {
+    ok: true
+    changed: boolean
+    event: {
+      id: string
+      kind: 'approved' | 'declined'
+      quoteVersionId: string
+      jobId: string
+      approvedVia: 'phone' | 'in_person' | null
+    }
+    projection: {
+      approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+      approvedQuoteVersionId: string | null
+    }
+  }
+  | { ok: false; error: 'invalid_input' | 'not_found' | 'conflict'; retryable?: boolean }
+
+export type QuoteDecisionDependencies = {
+  afterTicketLock?: () => Promise<void>
+  afterEventInsert?: () => Promise<void>
 }
 
 type Failure = Extract<QuoteDraftResult, { ok: false }>
@@ -635,17 +676,87 @@ function safeVersionProjection(version: typeof quoteVersions.$inferSelect): Crea
   }
 }
 
+function validatedQuoteSnapshot(
+  snapshotValue: unknown,
+  expectedTicket?: Pick<
+    typeof tickets.$inferSelect,
+    'id' | 'ticketNumber' | 'customerId' | 'vehicleId'
+  >,
+): QuoteSnapshotV1 {
+  const parsed = quoteSnapshotSchema.safeParse(snapshotValue)
+  if (!parsed.success) throw new TypeError('quote snapshot is invalid')
+  const snapshot = parsed.data as QuoteSnapshotV1
+  if (snapshot.jobs.length === 0) throw new TypeError('quote snapshot is empty')
+  if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_SNAPSHOT_BYTES) {
+    throw new RangeError('quote snapshot is oversized')
+  }
+  if (expectedTicket && (
+    snapshot.ticket.id !== expectedTicket.id
+    || snapshot.ticket.number !== expectedTicket.ticketNumber
+    || snapshot.ticket.customerId !== expectedTicket.customerId
+    || snapshot.ticket.vehicleId !== expectedTicket.vehicleId
+  )) {
+    throw new TypeError('quote snapshot ticket does not match')
+  }
+
+  const jobIds = new Set<string>()
+  const lineIds = new Set<string>()
+  const attachmentIds = new Set<string>()
+  const ticketLines: Array<{ extendedCents: number; taxable: boolean }> = []
+  for (const job of snapshot.jobs) {
+    if (jobIds.has(job.id) || job.lines.length === 0) {
+      throw new TypeError('quote snapshot job structure is invalid')
+    }
+    jobIds.add(job.id)
+    const jobLinesForTotals: Array<{ extendedCents: number; taxable: boolean }> = []
+    for (const line of job.lines) {
+      if (lineIds.has(line.id)) throw new TypeError('quote snapshot line ID is duplicated')
+      lineIds.add(line.id)
+      const quantity = formatScaledDecimal(parseScaledDecimal(line.quantity, 3), 3)
+      if (quantity !== line.quantity || parseScaledDecimal(quantity, 3) === 0n) {
+        throw new TypeError('quote snapshot quantity is invalid')
+      }
+      if (line.kind !== 'part' && quantity !== '1') {
+        throw new TypeError('quote snapshot non-part quantity is invalid')
+      }
+      if (line.laborHours !== null) {
+        const hours = formatScaledDecimal(parseScaledDecimal(line.laborHours, 2), 2)
+        if (hours !== line.laborHours) throw new TypeError('quote snapshot labor hours are invalid')
+      }
+      const totalsLine = { extendedCents: line.priceCents, taxable: line.taxable }
+      jobLinesForTotals.push(totalsLine)
+      ticketLines.push(totalsLine)
+    }
+    for (const attachment of job.attachments) {
+      if (attachmentIds.has(attachment.id) || attachment.jobId !== job.id) {
+        throw new TypeError('quote snapshot attachment structure is invalid')
+      }
+      attachmentIds.add(attachment.id)
+    }
+    const jobTotals = calculateTicketTotals(jobLinesForTotals, 0)
+    if (job.totals.subtotalCents !== jobTotals.subtotalCents
+      || job.totals.taxableSubtotalCents !== jobTotals.taxableSubtotalCents) {
+      throw new TypeError('quote snapshot job totals are invalid')
+    }
+  }
+  const ticketTotals = calculateTicketTotals(ticketLines, snapshot.ticket.taxRateBps)
+  if (snapshot.totals.subtotalCents !== ticketTotals.subtotalCents
+    || snapshot.totals.taxableSubtotalCents !== ticketTotals.taxableSubtotalCents
+    || snapshot.totals.taxCents !== ticketTotals.taxCents
+    || snapshot.totals.totalCents !== ticketTotals.totalCents) {
+    throw new TypeError('quote snapshot ticket totals are invalid')
+  }
+  return snapshot
+}
+
 function validatedActiveSnapshot(
   context: VersionContext,
   version: typeof quoteVersions.$inferSelect,
 ): QuoteSnapshotV1 {
-  const parsed = quoteSnapshotSchema.safeParse(version.snapshot)
-  if (!parsed.success) throw new AbortVersionCreation(conflict())
-  const snapshot = parsed.data as QuoteSnapshotV1
-  if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_SNAPSHOT_BYTES) {
-    throw new AbortVersionCreation(conflict())
-  }
-  if (snapshot.ticket.id !== context.ticket.id || snapshot.jobs.length === 0) {
+  let snapshot: QuoteSnapshotV1
+  try {
+    snapshot = validatedQuoteSnapshot(version.snapshot, context.ticket)
+  } catch {
     throw new AbortVersionCreation(conflict())
   }
   const currentJobIds = new Set(context.jobs.map((job) => job.id))
@@ -742,6 +853,233 @@ export async function createQuoteVersion(
     if (error instanceof AbortVersionCreation) return error.failure
     if (isLockUnavailable(error)) return conflict(true)
     if (isUniqueViolation(error)) return conflict(true)
+    throw error
+  }
+}
+
+type DecisionFailure = Extract<QuoteDecisionResult, { ok: false }>
+
+class AbortQuoteDecision extends Error {
+  constructor(readonly failure: DecisionFailure) {
+    super('abort_quote_decision')
+  }
+}
+
+function decisionNotFound(): DecisionFailure {
+  return { ok: false, error: 'not_found' }
+}
+
+function decisionConflict(retryable = false): DecisionFailure {
+  return { ok: false, error: 'conflict', retryable }
+}
+
+function safeDecisionResult(
+  event: typeof quoteEvents.$inferSelect,
+  job: Pick<typeof ticketJobs.$inferSelect, 'approvalState' | 'approvedQuoteVersionId'>,
+  changed: boolean,
+): QuoteDecisionResult {
+  if (event.kind !== 'approved' && event.kind !== 'declined') throw new TypeError('invalid decision event')
+  return {
+    ok: true,
+    changed,
+    event: {
+      id: event.id,
+      kind: event.kind,
+      quoteVersionId: event.quoteVersionId,
+      jobId: event.jobId as string,
+      approvedVia: event.approvedVia === 'phone' || event.approvedVia === 'in_person'
+        ? event.approvedVia
+        : null,
+    },
+    projection: {
+      approvalState: job.approvalState,
+      approvedQuoteVersionId: job.approvedQuoteVersionId,
+    },
+  }
+}
+
+function isMatchingDecisionEvent(
+  event: typeof quoteEvents.$inferSelect,
+  input: z.infer<typeof quoteDecisionSchema>,
+  actorId: string,
+): boolean {
+  return event.actorProfileId === actorId
+    && event.jobId === input.jobId
+    && event.quoteVersionId === input.quoteVersionId
+    && event.kind === input.decision
+    && event.approvedVia === (input.decision === 'approved' ? input.approvedVia : null)
+}
+
+function snapshotContainsDecisionJob(
+  snapshotValue: unknown,
+  ticket: Pick<typeof tickets.$inferSelect, 'id' | 'ticketNumber' | 'customerId' | 'vehicleId'>,
+  currentJobs: ReadonlyArray<Pick<typeof ticketJobs.$inferSelect, 'id'>>,
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus'>,
+): boolean {
+  let snapshot: QuoteSnapshotV1
+  try {
+    snapshot = validatedQuoteSnapshot(snapshotValue, ticket)
+  } catch {
+    return false
+  }
+  const currentJobIds = new Set(currentJobs.map((candidate) => candidate.id))
+  if (snapshot.jobs.some((candidate) => !currentJobIds.has(candidate.id))) return false
+  const snapshotJob = snapshot.jobs.find((candidate) => candidate.id === job.id)
+  return Boolean(
+    snapshotJob
+    && (job.kind === 'repair' || job.kind === 'maintenance')
+    && snapshotJob.kind === job.kind
+    && job.workStatus === 'open',
+  )
+}
+
+export async function recordQuoteDecision(
+  db: AppDb,
+  input: { actor: QuoteActor; ticketId: unknown; body: unknown },
+  dependencies: QuoteDecisionDependencies = {},
+): Promise<QuoteDecisionResult> {
+  const parsedTicket = uuidSchema.safeParse(input.ticketId)
+  const parsedDecision = quoteDecisionSchema.safeParse(input.body)
+  const parsedActor = uuidSchema.safeParse(input.actor.profileId)
+  if (!parsedTicket.success || !parsedDecision.success || !parsedActor.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  const [persistedActor] = await db
+    .select({ id: profiles.id, shopId: profiles.shopId, role: profiles.role })
+    .from(profiles)
+    .where(and(
+      eq(profiles.id, parsedActor.data),
+      eq(profiles.membershipStatus, 'active'),
+      isNull(profiles.deactivatedAt),
+    ))
+    .limit(1)
+  if (!persistedActor?.shopId || !canRecordCustomerApproval(persistedActor.role)) {
+    return decisionNotFound()
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const [ticket] = await transactionDb
+        .select({
+          id: tickets.id,
+          ticketNumber: tickets.ticketNumber,
+          status: tickets.status,
+          customerId: tickets.customerId,
+          vehicleId: tickets.vehicleId,
+        })
+        .from(tickets)
+        .where(and(eq(tickets.shopId, persistedActor.shopId as string), eq(tickets.id, parsedTicket.data)))
+        .limit(1)
+        .for('update', { noWait: true })
+      if (!ticket) return decisionNotFound()
+      await dependencies.afterTicketLock?.()
+
+      const jobs = await transactionDb
+        .select({
+          id: ticketJobs.id,
+          kind: ticketJobs.kind,
+          workStatus: ticketJobs.workStatus,
+          approvalState: ticketJobs.approvalState,
+          approvedQuoteVersionId: ticketJobs.approvedQuoteVersionId,
+        })
+        .from(ticketJobs)
+        .where(and(
+          eq(ticketJobs.shopId, persistedActor.shopId as string),
+          eq(ticketJobs.ticketId, ticket.id),
+        ))
+        .orderBy(ticketJobs.id)
+        .for('update', { noWait: true })
+      const targetJob = jobs.find((job) => job.id === parsedDecision.data.jobId)
+
+      const versions = await transactionDb
+        .select()
+        .from(quoteVersions)
+        .where(and(
+          eq(quoteVersions.shopId, persistedActor.shopId as string),
+          eq(quoteVersions.ticketId, ticket.id),
+        ))
+        .orderBy(quoteVersions.id)
+        .for('update', { noWait: true })
+      const version = versions.find((candidate) => candidate.id === parsedDecision.data.quoteVersionId)
+
+      const [existingEvent] = await transactionDb
+        .select()
+        .from(quoteEvents)
+        .where(and(
+          eq(quoteEvents.shopId, persistedActor.shopId as string),
+          eq(quoteEvents.requestKey, parsedDecision.data.requestKey),
+        ))
+        .limit(1)
+        .for('update', { noWait: true })
+
+      const [freshActor] = await transactionDb
+        .select({ id: profiles.id, role: profiles.role })
+        .from(profiles)
+        .where(and(
+          eq(profiles.id, persistedActor.id),
+          eq(profiles.shopId, persistedActor.shopId as string),
+          eq(profiles.membershipStatus, 'active'),
+          isNull(profiles.deactivatedAt),
+        ))
+        .limit(1)
+        .for('update', { noWait: true })
+      if (!freshActor || !canRecordCustomerApproval(freshActor.role)) return decisionNotFound()
+
+      if (existingEvent) {
+        if (!targetJob || !isMatchingDecisionEvent(existingEvent, parsedDecision.data, freshActor.id)) {
+          throw new AbortQuoteDecision(decisionConflict())
+        }
+        return safeDecisionResult(existingEvent, targetJob, false)
+      }
+
+      if (ticket.status !== 'open' || !ticket.customerId || !ticket.vehicleId) {
+        return decisionNotFound()
+      }
+      const activeVersions = versions.filter((candidate) => candidate.supersededAt === null)
+      if (!targetJob || !version || activeVersions.length !== 1 || activeVersions[0]?.id !== version.id) {
+        return decisionNotFound()
+      }
+      if (!snapshotContainsDecisionJob(version.snapshot, ticket, jobs, targetJob)) {
+        return decisionNotFound()
+      }
+
+      const approvedVia = parsedDecision.data.decision === 'approved'
+        ? parsedDecision.data.approvedVia
+        : null
+      const [event] = await transactionDb.insert(quoteEvents).values({
+        shopId: persistedActor.shopId as string,
+        ticketId: ticket.id,
+        jobId: targetJob.id,
+        quoteVersionId: version.id,
+        kind: parsedDecision.data.decision,
+        actorProfileId: freshActor.id,
+        approvedVia,
+        requestKey: parsedDecision.data.requestKey,
+      }).returning()
+
+      await dependencies.afterEventInsert?.()
+      const [updatedJob] = await transactionDb
+        .update(ticketJobs)
+        .set({
+          approvalState: parsedDecision.data.decision,
+          approvedQuoteVersionId: parsedDecision.data.decision === 'approved' ? version.id : null,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(ticketJobs.shopId, persistedActor.shopId as string),
+          eq(ticketJobs.ticketId, ticket.id),
+          eq(ticketJobs.id, targetJob.id),
+        ))
+        .returning()
+      if (!updatedJob) throw new AbortQuoteDecision(decisionConflict(true))
+      return safeDecisionResult(event, updatedJob, true)
+    })
+  } catch (error) {
+    if (error instanceof AbortQuoteDecision) return error.failure
+    if (isLockUnavailable(error)) return decisionConflict(true)
+    if (isUniqueViolation(error)) return decisionConflict(true)
     throw error
   }
 }

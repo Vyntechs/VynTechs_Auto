@@ -56,11 +56,13 @@
 
 ## Task 5: Idempotent phone/in-person decision
 
-- [ ] Require advisor/owner capability and current exact version containing the named job.
-- [ ] Use discriminated approval/decline input; append event plus update projection atomically, and serialize new-key approve→decline or decline→approve so the projection follows the latest event before any work-execution path exists.
-- [ ] After actor authorization, return exact actor-bound request-key retries before stale checks and conflict on changed/cross-actor reuse.
-- [ ] Prove held diagnostic job, event-then-projection rollback, same/different concurrent keys, both authorized decision reversals, cross-boundary/stale/role/channel failures, and forbidden direct repoint/clear.
-- [ ] Independently security-review the event/projection seam.
+- [x] Require advisor/owner capability and current exact version containing the named job.
+- [x] Use discriminated approval/decline input; append event plus update projection atomically, and serialize new-key approve→decline or decline→approve so the projection follows the latest event before any work-execution path exists.
+- [x] After actor authorization, return exact actor-bound request-key retries before stale checks and conflict on changed/cross-actor reuse.
+- [x] Prove held diagnostic job, event-then-projection rollback, same/different concurrent keys, both authorized decision reversals, cross-boundary/stale/role/channel failures, and forbidden direct repoint/clear.
+- [x] Independently security-review the event/projection seam; resolve semantic snapshot-validation and concurrency-proof findings through tests.
+
+**Task-5 verification boundary:** PGlite proves deterministic same-client convergence, generated `NOWAIT` lock order, and injected post-ticket-lock `55P03` rollback/classification. True two-connection PostgreSQL wait timing remains deferred to PostgreSQL integration proof.
 
 ## Task 6: Thin route shims
 

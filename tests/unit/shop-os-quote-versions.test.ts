@@ -266,6 +266,21 @@ describe('Shop OS immutable quote version creation', () => {
     await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
+  it('rejects an empty active-history snapshot while persisted quote lines remain', async () => {
+    const first = await create()
+    if (!first.ok) throw new Error('missing first version')
+    const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, first.version.id))
+    const emptyHistory = { ...(stored.snapshot as Record<string, unknown>), jobs: [] }
+    await db.execute(sql`alter table quote_versions disable trigger quote_versions_immutable_update`)
+    await db.update(quoteVersions).set({ snapshot: emptyHistory }).where(eq(quoteVersions.id, first.version.id))
+    await db.execute(sql`alter table quote_versions enable trigger quote_versions_immutable_update`)
+
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await db.select().from(jobLines)).toHaveLength(3)
+    const [unchanged] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, first.version.id))
+    expect(unchanged.supersededAt).toBeNull()
+  })
+
   it.each(['wrong-ticket', 'duplicate-job', 'foreign-job'] as const)(
     'rejects semantically corrupt active snapshot history: %s',
     async (corruption) => {
