@@ -50,10 +50,10 @@
 
 ## Task 4: Verify, review, reconcile, and ship row 13
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff check; record exact counts.
-- [ ] Inspect the complete diff for non-atomic writes, identity leaks, tier/tenant bypass, work-start drift, and unrelated changes.
-- [ ] Obtain task reviews and one whole-branch review; resolve every Critical/Important/Minor finding and re-review.
-- [ ] Add the Phase-2 assignment implementation correction, mark row 13 complete, preserve every owner gate, and identify row 14 as next.
+- [x] Run focused tests (4 files/67 tests), full suite (203 files/1,750 tests), TypeScript, production build, and diff check; all pass.
+- [x] Inspect the complete diff for non-atomic writes, identity leaks, tier/tenant bypass, work-start drift, and unrelated changes; none remain.
+- [x] Obtain two task reviews and one whole-branch review; resolve two Important tier-confirmation and supported-target-role TOCTOU findings through TDD and receive final approvals with zero findings.
+- [x] Add the Phase-2 assignment implementation correction, mark row 13 complete, preserve every owner gate, and identify row 14 as next.
 - [ ] Push final head, wait for GitHub checks, mark ready, squash-merge, verify `origin/main` tree equality, and immediately continue row 14.
 
 ## Verification
