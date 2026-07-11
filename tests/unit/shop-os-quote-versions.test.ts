@@ -180,6 +180,15 @@ describe('Shop OS immutable quote version creation', () => {
     expect((stored.snapshot as { jobs: Array<{ storyMeta: unknown }> }).jobs[0].storyMeta).toEqual({ source: 'ai', sessionId: uuid(70) })
   })
 
+  it.each([
+    ['null', null],
+    ['malformed object', { source: 'unknown' }],
+  ])('rejects a non-null story with %s metadata before writing a version', async (_label, storyMeta) => {
+    await db.update(ticketJobs).set({ storyMeta: storyMeta as never }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await db.select().from(quoteVersions)).toHaveLength(0)
+  })
+
   it('leaves manual and template story versioning unchanged', async () => {
     await expect(create()).resolves.toMatchObject({ ok: true })
     await db.update(quoteVersions).set({ supersededAt: new Date() })

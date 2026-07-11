@@ -726,7 +726,10 @@ function safeCustomerStory(value: unknown): QuoteCustomerStoryV1 | null {
 }
 
 function requireReviewedAiStory(story: unknown, meta: unknown): void {
-  if (story === null || !meta || typeof meta !== 'object' || Array.isArray(meta)) return
+  if (story === null) return
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new TypeError('customer story metadata is required')
+  }
   const record = meta as Record<string, unknown>
   if (record.source === 'ai' && record.reviewStatus !== 'reviewed') {
     throw new TypeError('AI customer story requires human review')
