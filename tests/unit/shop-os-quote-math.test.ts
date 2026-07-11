@@ -215,6 +215,10 @@ describe('Shop OS immutable quote snapshot identity', () => {
       sessionId: 'session-1',
       generatedAt: '2026-01-01',
       lastEditedByProfileId: 'actor-1',
+      generationClientKey: 'key-1',
+      generationRequestFingerprint: 'request-1',
+      generatedByProfileId: 'generator-1',
+      storyRevision: 1,
     })
     const second = snapshot({ offer: { amount: 1 } })
     second.jobs[0].storyMeta = buildQuoteStoryMeta({
@@ -222,6 +226,10 @@ describe('Shop OS immutable quote snapshot identity', () => {
       sessionId: 'session-1',
       generatedAt: '2026-07-10',
       lastEditedByProfileId: 'actor-2',
+      generationClientKey: 'key-2',
+      generationRequestFingerprint: 'request-2',
+      generatedByProfileId: 'generator-2',
+      storyRevision: 99,
     })
     expect(first.jobs[0].storyMeta).toEqual({
       source: 'ai',
