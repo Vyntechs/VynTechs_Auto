@@ -12,6 +12,7 @@ type Builder = Extract<QuoteBuilderResult, { ok: true }>['builder']
 const TICKET = '00000000-0000-4000-8000-000000000101'
 const JOB = '00000000-0000-4000-8000-000000000201'
 const VERSION = '00000000-0000-4000-8000-000000000401'
+const NEWER_VERSION = '00000000-0000-4000-8000-000000000402'
 const REQUEST = '00000000-0000-4000-8000-000000000901'
 const ticket = { id: TICKET, ticketNumber: 42, customer: { name: 'Marisol Vega' }, vehicle: { year: 2019, make: 'Ford', model: 'F-150' } }
 function builder(canApprove = true, approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null }): Builder {
@@ -50,7 +51,8 @@ describe('Shop OS exact-version approval UI', () => {
     expect(first.requestKey).toBe(REQUEST)
     expect(retry.requestKey).toBe(REQUEST)
     expect(first).toMatchObject({ jobId: JOB, quoteVersionId: VERSION, decision: 'approved', approvedVia: 'phone' })
-    expect(await screen.findByText('Approved · Phone · V3')).toBeInTheDocument()
+    expect(await screen.findByText('Approved · V3')).toBeInTheDocument()
+    expect(screen.queryByText('Approved · Phone · V3')).toBeNull()
   })
 
   it('shows decision truth without enabled controls for tech or parts capability', () => {
@@ -69,6 +71,21 @@ describe('Shop OS exact-version approval UI', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Record approval' }))
     expect(await screen.findByText('Declined · V3')).toBeInTheDocument()
     expect(screen.queryByText(/Approved · Phone/)).toBeNull()
+  })
+
+  it('refreshes an exact retry on a newer version without labeling the attempted version', async () => {
+    const newer = builder(true, { state: 'approved', quoteVersionId: NEWER_VERSION })
+    newer.activeVersion = { id: NEWER_VERSION, versionNumber: 4, totalCents: 92500, jobs: [{ jobId: JOB, subtotalCents: 85000 }] }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ changed: false, event: { id: '00000000-0000-4000-8000-000000000501', kind: 'approved', quoteVersionId: NEWER_VERSION, jobId: JOB, approvedVia: 'in_person' }, projection: { approvalState: 'approved', approvedQuoteVersionId: NEWER_VERSION } }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: newer }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Phone approval' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Record approval' }))
+    expect(await screen.findByText('Approved · V4')).toBeInTheDocument()
+    expect(screen.queryByText(/Approved · Phone · V3|Approved · In person · V3/)).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('records an in-person decline intent against the exact version and exposes bay-safe CSS', async () => {

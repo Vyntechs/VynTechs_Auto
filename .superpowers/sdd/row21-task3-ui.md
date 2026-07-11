@@ -39,3 +39,10 @@
 - A 409 reloads current server-owned story/proof/revision while retaining the technician's draft and retry identity; mounted cards also synchronize without overwriting dirty text.
 - Mobile Prepare demotion now covers story-editor focus as well as line-editor focus.
 - RED: five focused regressions failed before the corrections. GREEN: four focused files, 70 tests passed; TypeScript and diff checks passed.
+
+## Final decision-truth correction
+
+- A local channel verdict now exists only for a newly changed response that exactly proves the attempted decision and version.
+- Canonical retries on a newer version skip optimistic labeling, refresh the builder, and render that newer server truth.
+- Any successful builder refresh clears the temporary local verdict override.
+- RED: two approval regressions failed before correction. GREEN: four focused files, 71 tests passed; TypeScript and diff checks passed.

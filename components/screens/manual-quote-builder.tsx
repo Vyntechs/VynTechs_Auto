@@ -406,27 +406,40 @@ export function ManualQuoteBuilder({
         return
       }
       const parsed = parseQuoteDecisionResponse(response.status, body)
+      const changedApprovalMatches = parsed?.changed === true
+        && pending.kind !== 'declined'
+        && parsed.event.kind === 'approved'
+        && parsed.event.approvedVia === pending.kind
+        && parsed.event.quoteVersionId === pending.versionId
+        && parsed.projection.approvalState === 'approved'
+        && parsed.projection.approvedQuoteVersionId === pending.versionId
+      const changedDeclineMatches = parsed?.changed === true
+        && pending.kind === 'declined'
+        && parsed.event.kind === 'declined'
+        && parsed.event.quoteVersionId === pending.versionId
+        && parsed.projection.approvalState === 'declined'
+        && parsed.projection.approvedQuoteVersionId === null
       if (!parsed || parsed.event.jobId !== pending.jobId
-        || parsed.event.quoteVersionId !== pending.versionId) {
+        || (parsed.changed && !changedApprovalMatches && !changedDeclineMatches)) {
         setDecision({ ...pending, busy: false, error: 'Server truth did not match this decision. Refresh and retry.' })
         return
       }
-      setCurrent((active) => ({
-        ...active,
-        jobs: active.jobs.map((job) => job.id === pending.jobId
-          ? { ...job, approval: {
-            state: parsed.projection.approvalState,
-            quoteVersionId: parsed.projection.approvedQuoteVersionId,
-          } } : job),
-      }))
+      if (parsed.changed) {
+        setCurrent((active) => ({
+          ...active,
+          jobs: active.jobs.map((job) => job.id === pending.jobId
+            ? { ...job, approval: {
+              state: parsed.projection.approvalState,
+              quoteVersionId: parsed.projection.approvedQuoteVersionId,
+            } } : job),
+        }))
+      }
       setDecisionVerdicts((verdicts) => {
         const next = { ...verdicts }
-        if (parsed.projection.approvalState === 'declined') {
+        if (changedDeclineMatches) {
           next[pending.jobId] = `Declined · V${pending.versionNumber}`
-        } else if (parsed.projection.approvalState === 'approved') {
-          next[pending.jobId] = parsed.changed && parsed.event.kind === 'approved'
-            ? `Approved · ${parsed.event.approvedVia === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}`
-            : `Approved · V${pending.versionNumber}`
+        } else if (changedApprovalMatches) {
+          next[pending.jobId] = `Approved · ${parsed.event.approvedVia === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}`
         } else {
           delete next[pending.jobId]
         }
@@ -434,7 +447,14 @@ export function ManualQuoteBuilder({
       })
       setDecision(null)
       setFocusTarget(`decision:${pending.jobId}`)
-      await refreshQuote(`decision:${pending.jobId}`, false, true)
+      const refreshed = await refreshQuote(`decision:${pending.jobId}`, false, true)
+      if (refreshed) {
+        setDecisionVerdicts((verdicts) => {
+          const next = { ...verdicts }
+          delete next[pending.jobId]
+          return next
+        })
+      }
     } catch {
       setDecision({ ...pending, busy: false, error: 'Connection interrupted. Retry with the same decision.' })
     }
