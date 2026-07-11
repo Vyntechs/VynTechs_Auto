@@ -17,45 +17,47 @@ Ship one additive source migration and matching Drizzle declarations:
 - Keep public-schema access server-only with RLS, revoked direct-client DML, deny-all direct policies, and service-role grants.
 - Enforce append-only quote events and immutable quote-version content in SQL. A quote version may only transition `supersededAt` from null to one timestamp; its snapshot never changes.
 
-The repository's Drizzle snapshot chain contains a known malformed historical snapshot, so row 16 follows the established hand-written SQL plus journal-entry pattern used by rows 5 and 8. Nothing runs against production.
+Row 16 must first run `drizzle-kit generate` as required by project instructions. If the known malformed historical snapshot still blocks generation, the exact command/error is recorded as an implementation correction before following the established hand-written SQL plus journal-entry pattern used by rows 5 and 8. Nothing runs against production.
 
 ## Money and quantity representation
 
-- Customer prices, costs, core charges, and labor rates are integer cents stored as bigint/number and constrained non-negative.
+- Customer prices, costs, core charges, labor rates, and attachment bytes are stored as bigint/number and constrained to `0..9_007_199_254_740_991`, so JavaScript number mapping cannot lose integer precision.
 - Tax is basis points constrained to `0..10_000`.
 - Parts quantity is `numeric(12,3)` and labor hours is `numeric(8,2)`, matching the approved precision contract without floating-point storage.
 - `priceCents` is the extended customer price. Quantity and hours/rate remain pinned context for later deterministic quote math.
-- Existing shops receive zero rate/tax defaults. Later settings and quote handlers must require deliberate configuration where zero is not a valid business choice; this migration invents no shop price.
+- Shop labor rate and tax basis points are nullable with no default. Existing and new shops remain explicitly unconfigured until a later owner-only settings flow writes both; zero can then remain a deliberate configured value rather than an invented migration default.
 
 ## Table boundaries
 
 ### Job attachments
 
-Stores job-owned storage metadata only: shop, job, storage key, kind, MIME type, byte size, uploader, and creation time. `(shopId, jobId)` and `(shopId, uploadedByProfileId)` are enforced. Storage keys are unique per shop. No upload handler or bucket mutation is included.
+Stores job-owned storage metadata only: shop, job, storage key, kind, MIME type, byte size, uploader, and creation time. `(shopId, jobId)` and `(shopId, uploadedByProfileId)` are enforced with `RESTRICT` lineage. Storage keys are unique per shop; uploader and job chronology are indexed. No upload handler or bucket mutation is included.
 
 ### Job lines
 
-Stores manual quote inputs and future vendor snapshots: kind (`part|labor|fee`), description, sort, quantity, extended price, taxable flag, optional part/vendor context, optional labor context, part status, lifecycle actors/timestamps, and source (`manual|vendor_offer|diagnosis_seed|guide`). Every line belongs to a same-shop job. Future `vendorAccountId` and external offer values remain nullable identifiers with no premature foreign key to the row-27 table.
+Stores manual quote inputs and future vendor snapshots: kind (`part|labor|fee`), description, sort, quantity, extended price, taxable flag, optional part/vendor context, optional labor context, part status, lifecycle actors/timestamps, and source (`manual|vendor_offer|diagnosis_seed|guide`). Every line belongs to a same-shop job through `RESTRICT` lineage and job/sort access is indexed. Future `vendorAccountId` and external offer values remain nullable identifiers with no premature foreign key to the row-27 table. A non-null vendor snapshot must be a JSON object.
 
 ### Canned jobs
 
-Stores shallow same-shop repair/maintenance templates with default tier, JSON default lines, sort, and retirement timestamp. No nesting, vehicle matrix, inventory, or handler is added.
+Stores shallow same-shop repair/maintenance templates with default tier, JSON default lines constrained to an array, sort, and retirement timestamp. Shop/sort/retirement access is indexed. No nesting, vehicle matrix, inventory, or handler is added.
 
 ### Quote versions
 
-Stores one immutable JSON snapshot per `(shopId, ticketId, versionNumber)`, creator, creation time, and optional supersession time. Composite uniqueness supports exact-version references from jobs/events. The snapshot shape is intentionally opaque at the schema row; row 17 owns its validated typed contract and deterministic totals.
+Stores one immutable JSON-object snapshot per `(shopId, ticketId, versionNumber)`, creator, creation time, and optional supersession time. Composite uniqueness `(shopId,ticketId,id)` supports exact-version references from jobs/events; ticket/version chronology is indexed and lineage is `RESTRICT`. The snapshot shape is intentionally opaque at the schema row; row 17 owns its validated typed contract and deterministic totals.
 
 ### Quote events
 
-Stores append-only exact-version audit events with same-shop ticket/version, optional same-ticket job, future nullable send ID, event kind, optional actor/approval channel, tenant-unique request key, tenant-unique non-null provider event ID, body, user agent, and creation time. Approval events require `approvedVia`; non-approval events forbid it. IP is not stored.
+Stores append-only exact-version audit events with same-shop ticket/version, optional same-ticket job, future nullable send ID, event kind, optional actor/approval channel, tenant-unique request key, tenant-unique non-null provider event ID, body, user agent, and creation time. Approved and declined events require a job. Approval requires `approvedVia`; other kinds forbid it. Phone/in-person approval also requires a same-shop actor, while page approval may remain customer-authored. Ticket/version/job/actor lineage is `RESTRICT`; ticket/version chronology plus future send/provider lookups are indexed. IP is not stored.
 
 ## Integrity and security
 
 - Every new tenant-owned table carries `shopId` and a composite same-shop parent foreign key.
 - Job/event references cannot cross tickets; approved job versions cannot reference another ticket's version.
 - Non-negative/precision/range checks reject malformed money, quantity, byte, sort, tier, and version inputs.
+- Story and story-metadata values must be JSON objects when non-null; quote/vendor snapshots must be objects and canned default lines must be arrays.
 - Quote events reject update/delete. Quote versions reject delete and all updates except one null-to-timestamp supersession.
 - No raw public token, phone, credential, secret, IP address, provider transport, or production data is introduced.
+- Before any live apply, reverting the source branch/migration is safe. After durable quote history exists, dropping or rewriting these tables becomes a destructive owner/data gate; this row supplies no live rollback/apply.
 
 ## Alternatives rejected
 

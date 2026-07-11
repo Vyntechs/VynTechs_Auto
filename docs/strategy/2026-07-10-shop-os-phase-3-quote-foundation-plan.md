@@ -12,11 +12,14 @@
 
 - Source migration and local proof only. Never apply DDL or inspect/change production in this row.
 - Integer cents and basis points only; numeric quantity/hours only at approved precision.
+- Shop labor/tax fields remain nullable/no-default until deliberately configured. Every bigint mapped to JavaScript number is checked within `0..9_007_199_254_740_991`.
 - Every new tenant table has direct `shopId` plus composite same-shop parents. Quote job references also bind the same ticket.
 - Quote events are append-only. Quote-version snapshots are immutable; only a one-time supersession timestamp may change.
 - New tables are server-only: RLS enabled, direct anon/authenticated DML revoked, deny-all direct policies, service-role DML granted.
+- JSON container shape is enforced in PostgreSQL: story/meta/snapshots are objects and canned default lines is an array.
 - No send/token, vendor-account FK, transport, handler, UI, quote math, story AI, upload, repair mutation, or engine work.
 - Preserve all existing migration entry states and data. Defaults must be safe for current shops/jobs.
+- Immutable lineage uses `RESTRICT`. Approval/decline requires a job; approval channel rules and phone/in-person actor presence are database-checked.
 
 ## Task 1: Claim and publish row 16
 
@@ -34,7 +37,7 @@
 
 - [ ] Write failing source-schema tests for shop rate/tax, job story/approved-version fields, and all five tables.
 - [ ] Add exported story/default-line types without defining row-17 snapshot math.
-- [ ] Add money, precision, enum, range, composite uniqueness, same-shop, same-ticket, and exact-version declarations.
+- [ ] Add money/safe-integer, precision, JSON-container, event, enum, range, composite uniqueness, same-shop, same-ticket, and exact-version declarations plus required access/FK indexes.
 - [ ] Prove forward references/circular job-version FKs load through the real schema module.
 - [ ] Independently review the declaration task and resolve all findings.
 
@@ -49,7 +52,7 @@
 - [ ] Write failing PGlite tests for safe existing-row defaults and successful empty-table creation through the complete source chain.
 - [ ] Prove composite cross-shop/cross-ticket violations, money/precision/range violations, and exact approved-version ownership fail.
 - [ ] Prove RLS, deny policies, revoked direct DML, service grants, event append-only triggers, and version snapshot immutability.
-- [ ] Add only the hand-written migration and journal entry; do not generate or repair historical snapshots in this row.
+- [ ] Run `pnpm drizzle-kit generate`. If the known historical snapshot blocks it, capture the exact failure and record the explicit implementation correction before adding the hand-written migration/journal entry; do not repair unrelated historical snapshots in this row.
 - [ ] Independently review the migration/security task and resolve all findings.
 
 ## Task 4: Verify, reconcile, and ship row 16
@@ -75,3 +78,4 @@ git diff --check origin/main...HEAD
 - Stop before any production migration/apply, live Supabase mutation, advisor-clean claim, destructive reconciliation, external account/credential, spend, deployment enablement, or irreversible action.
 - Stop if an approved-version reference cannot be constrained to the same shop and ticket without changing the canonical ticket spine.
 - Stop if the row requires quote math, sends, vendors, handlers, UI, story generation, or diagnostic-engine changes; those belong to later rows.
+- Stop before any live rollback. Before live apply this additive source migration is reversible by branch revert; after durable quote history, removal/rewrite is a destructive owner/data gate.
