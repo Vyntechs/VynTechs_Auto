@@ -6,6 +6,7 @@ import {
   type CustomerStoryAnthropicLike,
   type CustomerStoryGenerationInput,
 } from '@/lib/ai/customer-story'
+import { MODEL } from '@/lib/ai/client'
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111'
 const ARTIFACT_ID = '22222222-2222-4222-8222-222222222222'
@@ -42,7 +43,7 @@ describe('generateCustomerStory', () => {
     )
 
     const [request, options] = create.mock.calls[0]
-    expect(request.model).toBe('claude-sonnet-4-6')
+    expect(request.model).toBe(MODEL)
     expect(request.tools).toHaveLength(1)
     expect(request.tool_choice).toEqual({ type: 'tool', name: 'select_customer_story_evidence' })
     expect(request.system).toMatch(/untrusted data/i)
@@ -108,11 +109,45 @@ describe('generateCustomerStory', () => {
     ['overlong excerpts', 'x'.repeat(2_001), EVENT_ID, 'event'],
     ['unselected IDs', EVENT_TEXT, '33333333-3333-4333-8333-333333333333', 'event'],
     ['wrong source kind for an ID', EVENT_TEXT, EVENT_ID, 'artifact'],
-    ['common-word anchors', 'the and for', EVENT_ID, 'event'],
     ['non-verbatim excerpts', 'Voltage measured 10.8 volts', EVENT_ID, 'event'],
   ])('rejects %s', async (_name, excerpt, sourceId, sourceKind) => {
     const { client } = clientWith(response({ selections: [{ sourceKind, sourceId, excerpt }] }))
     await expect(generateCustomerStory(input, client)).rejects.toMatchObject({
+      kind: 'invalid_output',
+    })
+  })
+
+  it('rejects an exact excerpt containing only common-word anchors', async () => {
+    const excerpt = 'the and for the'
+    const { client } = clientWith(
+      response({ selections: [{ sourceKind: 'event', sourceId: EVENT_ID, excerpt }] }),
+    )
+    await expect(
+      generateCustomerStory(
+        { evidence: [{ ...input.evidence[0], content: `Prefix ${excerpt} suffix` }] },
+        client,
+      ),
+    ).rejects.toMatchObject({ kind: 'invalid_output' })
+  })
+
+  it('rejects a punctuation-separated excerpt with only one non-whitespace word', async () => {
+    const excerpt = 'voltage,battery,test'
+    const { client } = clientWith(
+      response({ selections: [{ sourceKind: 'event', sourceId: EVENT_ID, excerpt }] }),
+    )
+    await expect(
+      generateCustomerStory({ evidence: [{ ...input.evidence[0], content: excerpt }] }, client),
+    ).rejects.toMatchObject({ kind: 'invalid_output' })
+  })
+
+  it.each([
+    ['undefined response', undefined],
+    ['missing content', {}],
+    ['null content block', { content: [null] }],
+  ])('maps %s to typed invalid output', async (_name, providerResponse) => {
+    const { client } = clientWith(providerResponse)
+    await expect(generateCustomerStory(input, client)).rejects.toMatchObject({
+      name: 'CustomerStoryProviderError',
       kind: 'invalid_output',
     })
   })

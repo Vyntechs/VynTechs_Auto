@@ -75,20 +75,28 @@ export class CustomerStoryProviderError extends Error {
   }
 }
 
-type CustomerStoryToolBlock = {
-  type: string
-  name?: string
-  input?: unknown
-}
-
 export type CustomerStoryAnthropicLike = {
   messages: {
     create: (
       request: unknown,
       options?: { timeout?: number; maxRetries?: number },
-    ) => Promise<{ content: CustomerStoryToolBlock[] }>
+    ) => Promise<unknown>
   }
 }
+
+const ProviderResponseSchema = z
+  .object({
+    content: z.array(
+      z
+        .object({
+          type: z.string(),
+          name: z.string().optional(),
+          input: z.unknown().optional(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough()
 
 const SYSTEM_PROMPT = `Select only the strongest direct proof from the server-provided evidence for a calm customer repair summary.
 
@@ -131,7 +139,11 @@ const COMMON_WORDS = new Set([
 
 function hasSubstantiveAnchor(excerpt: string): boolean {
   const words = excerpt.match(/[\p{L}\p{N}]+(?:[.-][\p{L}\p{N}]+)*/gu) ?? []
-  return words.length >= 3 && words.some((word) => !COMMON_WORDS.has(word.toLocaleLowerCase()))
+  return words.some((word) => !COMMON_WORDS.has(word.toLocaleLowerCase()))
+}
+
+function hasMinimumWords(excerpt: string): boolean {
+  return excerpt.trim().split(/\s+/u).length >= 3
 }
 
 function invalidOutput(): never {
@@ -159,6 +171,7 @@ function validateSelections(
       selectedIds.has(identity) ||
       excerptBytes < MIN_EXCERPT_BYTES ||
       excerptBytes > MAX_EXCERPT_BYTES ||
+      !hasMinimumWords(selection.excerpt) ||
       !hasSubstantiveAnchor(selection.excerpt) ||
       !source.includes(selection.excerpt)
     ) {
@@ -185,9 +198,9 @@ export async function generateCustomerStory(
   if (!parsedInput.success) invalidOutput()
   if (parsedInput.data.evidence.length === 0) return { selections: [] }
 
-  let response: { content: CustomerStoryToolBlock[] }
+  let rawResponse: unknown
   try {
-    response = await client.messages.create(
+    rawResponse = await client.messages.create(
       {
         model: MODEL,
         max_tokens: 4_096,
@@ -202,8 +215,9 @@ export async function generateCustomerStory(
     throw new CustomerStoryProviderError(isTimeout(error) ? 'timeout' : 'failure')
   }
 
-  if (!Array.isArray(response.content)) invalidOutput()
-  const toolBlocks = response.content.filter((block) => block.type === 'tool_use')
+  const response = ProviderResponseSchema.safeParse(rawResponse)
+  if (!response.success) invalidOutput()
+  const toolBlocks = response.data.content.filter((block) => block.type === 'tool_use')
   if (toolBlocks.length !== 1 || toolBlocks[0].name !== TOOL_NAME) invalidOutput()
 
   return validateSelections(toolBlocks[0].input, parsedInput.data.evidence)
