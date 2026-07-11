@@ -54,12 +54,12 @@
 
 **Consumes:** `listTodayTicketJobs` and row 13's assignment route.
 
-- [ ] Write failing DOM/page tests proving existing Today sections remain, ticket-backed sessions de-duplicate, and My/Open sections render persisted facts.
-- [ ] Render quiet repair-order cards with ticket number, persisted customer/vehicle fallback, job title/kind/tier/status, and canonical ticket link.
-- [ ] Show `Open diagnosis` only for persisted linked diagnostic sessions; show `Quote and approval required` as a disabled 44px control for repair/maintenance; do not invent an unlinked diagnostic start.
-- [ ] Claim in one explicit control, announce pending/success/race/error state, display only the safe race winner, and refresh from server truth.
-- [ ] Preserve keyboard focus, 44px controls, reduced motion, all-width layout, and 375px single-column composition.
-- [ ] Independently review the UI/page task and resolve every finding.
+- [x] Write failing DOM/page tests proving existing Today sections remain, ticket-backed sessions de-duplicate, and My/Open sections render persisted facts.
+- [x] Render quiet repair-order cards with ticket number, persisted customer/vehicle fallback, job title/kind/tier/status, and canonical ticket link.
+- [x] Show `Open diagnosis` only for persisted linked diagnostic sessions; show `Quote and approval required` as a disabled 44px control for repair/maintenance; do not invent an unlinked diagnostic start.
+- [x] Claim in one explicit control, announce pending/success/race/error state, display only the safe race winner, and refresh from server truth.
+- [x] Preserve keyboard focus, 44px controls, reduced motion, all-width layout, and 375px single-column composition.
+- [x] Independently review the UI/page task; resolve three feedback, focus, and 44px-target findings through TDD and receive final approval with zero findings.
 
 ## Task 4: Verify, review, reconcile, and ship row 14
 

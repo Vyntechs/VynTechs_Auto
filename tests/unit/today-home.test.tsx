@@ -1,8 +1,15 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TodayHome } from '@/components/screens/today-home'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
+import type { TodayTicketJobs } from '@/lib/tickets'
+import type { ImgHTMLAttributes } from 'react'
+
+vi.mock('next/image', () => ({
+  default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
+}))
+vi.mock('@/components/vt/whats-new-badge', () => ({ WhatsNewBadge: () => null }))
 
 // The AppHeader subtree pulls in WhatsNewBadge (usePathname) and curator
 // sidebar (useSearchParams indirectly via sibling routes), so the mock
@@ -56,7 +63,43 @@ const dueFollowUp: DueFollowUp = {
   intake: baseSession.intake,
 }
 
+const todayJobs: TodayTicketJobs = {
+  myJobs: [
+    {
+      id: 'job-mine',
+      ticketId: 'ticket-mine',
+      ticketNumber: 41,
+      customerName: 'Morgan Lee',
+      vehicle: { year: 2018, make: 'Honda', model: 'Accord' },
+      title: 'Trace intermittent no-start',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      sessionId: 'session-linked',
+      workStatus: 'in_progress',
+    },
+  ],
+  openJobs: [
+    {
+      id: 'job-open',
+      ticketId: 'ticket-open',
+      ticketNumber: 42,
+      customerName: null,
+      vehicle: null,
+      title: 'Replace front brake pads',
+      kind: 'repair',
+      requiredSkillTier: 1,
+      sessionId: null,
+      workStatus: 'open',
+    },
+  ],
+  linkedSessionIds: ['session-linked'],
+}
+
 describe('TodayHome', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('renders persistent New diagnosis CTA in header when sessions exist', () => {
     render(
       <TodayHome
@@ -97,6 +140,101 @@ describe('TodayHome', () => {
     expect(moduleLabels[1]).toMatch(/^Check-ins · 1$/i)
     expect(moduleLabels[2]).toMatch(/^Closed today · 1$/i)
   })
+
+  it('adds persisted My Jobs and Open Jobs without removing legacy Today sections', () => {
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[baseSession]}
+        closedToday={[closedSession]}
+        dueFollowUps={[dueFollowUp]}
+        todayJobs={todayJobs}
+      />,
+    )
+
+    expect(screen.getByRole('region', { name: 'Ticket jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'My jobs' })).toBeInTheDocument()
+    expect(screen.getByText('Trace intermittent no-start')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Open jobs' })).toBeInTheDocument()
+    expect(screen.getByText('Replace front brake pads')).toBeInTheDocument()
+    expect(screen.getByText(/Check-ins · 1/i)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
+    expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /new diagnosis/i })).toBeInTheDocument()
+  })
+
+  it('does not show legacy empty guidance when ticket work exists', () => {
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        todayJobs={todayJobs}
+      />,
+    )
+
+    expect(screen.queryByText(/No work orders yet/i)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      label: 'safe winner',
+      response: {
+        error: 'assignment_conflict',
+        currentAssignee: { fullName: 'Winner Tech' },
+      },
+      announcement: 'Already claimed by Winner Tech',
+    },
+    {
+      label: 'generic winner',
+      response: { error: 'assignment_conflict' },
+      announcement: 'This job was already claimed',
+    },
+  ])(
+    'keeps the $label race announcement mounted after refreshed jobs become empty',
+    async ({ response, announcement }) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => response,
+      }))
+      const openOnly: TodayTicketJobs = {
+        myJobs: [],
+        openJobs: [todayJobs.openJobs[0]],
+        linkedSessionIds: [],
+      }
+      const emptyJobs: TodayTicketJobs = {
+        myJobs: [],
+        openJobs: [],
+        linkedSessionIds: [],
+      }
+      const { rerender } = render(
+        <TodayHome
+          techName="Brandon"
+          inProgress={[]}
+          closedToday={[]}
+          todayJobs={openOnly}
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(announcement)
+      })
+
+      rerender(
+        <TodayHome
+          techName="Brandon"
+          inProgress={[]}
+          closedToday={[]}
+          todayJobs={emptyJobs}
+        />,
+      )
+
+      expect(screen.queryByRole('article')).toBeNull()
+      expect(screen.getByRole('status')).toHaveTextContent(announcement)
+    },
+  )
 
   it('does not render a Queued module', () => {
     const { container } = render(
