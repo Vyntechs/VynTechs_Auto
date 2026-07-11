@@ -50,6 +50,7 @@ export type CustomerStoryMeta = {
   generationRequestFingerprint?: string
   generatedByProfileId?: string
   storyRevision?: number
+  reviewStatus?: 'pending' | 'reviewed'
 }
 
 export type CannedJobDefaultLine = {

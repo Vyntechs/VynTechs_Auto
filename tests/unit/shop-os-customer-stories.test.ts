@@ -156,14 +156,32 @@ describe('Shop OS customer story domain', () => {
     expect(serialized).not.toContain('private/raw-key')
   })
 
-  it('accepts one valid wizard provenance event but rejects ordinary incomplete trees', async () => {
+  it('preserves a contradictory exact excerpt only as a pending mutable draft', async () => {
+    const contradiction = 'Charging voltage held at 14.4 volts during the loaded retest.'
+    await db.update(sessionEvents).set({ observationText: contradiction }).where(eq(sessionEvents.id, eventId))
+    const result = await generate({ sourceArtifactIds: [] }, vi.fn(async () => ({ selections: [{
+      sourceKind: 'event' as const, sourceId: eventId, excerpt: contradiction,
+    }] })))
+    expect(result).toMatchObject({
+      ok: true,
+      story: { howWeKnow: [{ claim: contradiction }] },
+      storyMeta: { reviewStatus: 'pending' },
+    })
+    const [stored] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(stored.storyMeta).toMatchObject({ reviewStatus: 'pending' })
+  })
+
+  it('rejects ordinary incomplete trees and all wizard provenance without invoking the provider', async () => {
+    const provider = vi.fn(async () => ({ selections: [] }))
     await db.update(sessions).set({ treeState: lockedTree({ done: false }) }).where(eq(sessions.id, sessionId))
-    expect(await generate()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
+    expect(await generate({}, provider)).toEqual({ ok: false, error: 'state_conflict', retryable: false })
     await db.insert(sessionEvents).values({
       id: uuid(11), sessionId, nodeId: 'wizard', eventType: 'wizard_lock_in',
       aiResponse: { wizardLockIn: { flowVersionId: uuid(400) } }, createdAt: new Date(lockedAt),
     })
-    expect(await generate()).toMatchObject({ ok: true, changed: true })
+    await db.update(sessions).set({ treeState: lockedTree() }).where(eq(sessions.id, sessionId))
+    expect(await generate({}, provider)).toEqual({ ok: false, error: 'unsupported_path', retryable: false })
+    expect(provider).not.toHaveBeenCalled()
   })
 
   it('rejects closed, topology, future-lock, confidence, and canonical-field state drift', async () => {
@@ -434,6 +452,76 @@ describe('Shop OS customer story domain', () => {
     })
     expect(artifactSecond.ok && artifactSecond.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(2129 - index)))
     expect(artifactSecond.ok && artifactSecond.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 5 }, (_, index) => uuid(3104 - index)))
+  })
+
+  it('caps each evidence scan at four chunks and returns bound continuations that eventually reach older evidence', async () => {
+    await db.delete(sessionEvents).where(and(eq(sessionEvents.sessionId, sessionId), eq(sessionEvents.eventType, 'observation')))
+    await db.delete(artifacts).where(eq(artifacts.sessionId, sessionId))
+    const invalidAt = new Date('2026-07-11T11:59:00Z')
+    const validAt = new Date('2026-07-11T11:57:00Z')
+    await db.insert(sessionEvents).values([
+      ...Array.from({ length: 205 }, (_, index) => ({
+        id: uuid(4000 + index), sessionId, nodeId: 'root', eventType: 'observation' as const,
+        observationText: '', createdAt: invalidAt,
+      })),
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: uuid(4300 + index), sessionId, nodeId: 'root', eventType: 'observation' as const,
+        observationText: `Older valid event ${index} measured a stable charging value.`, createdAt: validAt,
+      })),
+    ])
+    await db.insert(artifacts).values([
+      ...Array.from({ length: 205 }, (_, index) => ({
+        id: uuid(5000 + index), sessionId, nodeId: 'root', kind: 'scan_screen' as const,
+        storageKey: `cap-invalid-${index}`, mimeType: 'image/jpeg', bytes: 1,
+        extractionStatus: 'done' as const, extraction: {}, createdAt: invalidAt,
+      })),
+      ...Array.from({ length: 30 }, (_, index) => ({
+        id: uuid(5300 + index), sessionId, nodeId: 'root', kind: 'scan_screen' as const,
+        storageKey: `cap-valid-${index}`, mimeType: 'image/jpeg', bytes: 1,
+        extractionStatus: 'done' as const,
+        extraction: { text: `Older valid artifact ${index} measured a stable charging value.` }, createdAt: validAt,
+      })),
+    ])
+    const queryCounts = { event: 0, artifact: 0 }
+    const first = await getCustomerStoryWorkspace(db, { actor, ticketId, jobId }, {
+      onEvidenceQuery: (kind: 'event' | 'artifact') => { queryCounts[kind] += 1 },
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(queryCounts).toEqual({ event: 4, artifact: 4 })
+    expect(first.workspace.evidence.events).toHaveLength(0)
+    expect(first.workspace.evidence.artifacts).toHaveLength(0)
+    expect(first.workspace.evidence.nextEventCursor).toEqual(expect.any(String))
+    expect(first.workspace.evidence.nextArtifactCursor).toEqual(expect.any(String))
+
+    const secondCounts = { event: 0, artifact: 0 }
+    const second = await getCustomerStoryWorkspace(db, {
+      actor, ticketId, jobId,
+      eventCursor: first.workspace.evidence.nextEventCursor!,
+      artifactCursor: first.workspace.evidence.nextArtifactCursor!,
+    }, { onEvidenceQuery: (kind: 'event' | 'artifact') => { secondCounts[kind] += 1 } })
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(secondCounts).toEqual({ event: 1, artifact: 1 })
+    expect(second.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(4329 - index)))
+    expect(second.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(5329 - index)))
+  })
+
+  it('binds canonical cursors to evidence kind and linked session', async () => {
+    await db.insert(sessionEvents).values(Array.from({ length: 26 }, (_, index) => ({
+      id: uuid(6000 + index), sessionId, nodeId: 'root', eventType: 'observation' as const,
+      observationText: `Cursor binding observation ${index} contains measured voltage.`,
+      createdAt: new Date('2026-07-11T11:57:00Z'),
+    })))
+    const first = await getCustomerStoryWorkspace(db, { actor, ticketId, jobId })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const eventCursor = first.workspace.evidence.nextEventCursor!
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId, artifactCursor: eventCursor })).toEqual({ ok: false, error: 'invalid_input' })
+    const decoded = JSON.parse(Buffer.from(eventCursor, 'base64url').toString('utf8')) as Record<string, unknown>
+    decoded.s = uuid(999)
+    const crossSession = Buffer.from(JSON.stringify(decoded)).toString('base64url')
+    expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId, eventCursor: crossSession })).toEqual({ ok: false, error: 'invalid_input' })
   })
 
   it('rejects unsafe persisted story and metadata instead of returning raw JSONB', async () => {

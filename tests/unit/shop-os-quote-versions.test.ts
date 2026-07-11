@@ -155,6 +155,41 @@ describe('Shop OS immutable quote version creation', () => {
     expect(jobs.find((job) => job.id === canceledJobId)?.approvalState).toBe('pending_quote')
   })
 
+  it('requires explicit human review before an AI story can enter a quote snapshot', async () => {
+    const aiMeta = {
+      source: 'ai' as const,
+      sessionId: uuid(70),
+      generatedAt: '2026-07-11T12:00:00.000Z',
+      lastEditedByProfileId: uuid(1),
+      lastEditedAt: '2026-07-11T12:00:00.000Z',
+      generationClientKey: uuid(71),
+      generationRequestFingerprint: 'a'.repeat(64),
+      generatedByProfileId: uuid(1),
+      storyRevision: 1,
+    }
+    await db.update(ticketJobs).set({ storyMeta: { ...aiMeta, reviewStatus: 'pending' } }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await db.select().from(quoteVersions)).toHaveLength(0)
+    await db.update(ticketJobs).set({ storyMeta: aiMeta }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({ storyMeta: { ...aiMeta, reviewStatus: 'reviewed' } }).where(eq(ticketJobs.id, jobId))
+    const reviewed = await create()
+    expect(reviewed).toMatchObject({ ok: true, changed: true })
+    if (!reviewed.ok) return
+    const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, reviewed.version.id))
+    expect((stored.snapshot as { jobs: Array<{ storyMeta: unknown }> }).jobs[0].storyMeta).toEqual({ source: 'ai', sessionId: uuid(70) })
+  })
+
+  it('leaves manual and template story versioning unchanged', async () => {
+    await expect(create()).resolves.toMatchObject({ ok: true })
+    await db.update(quoteVersions).set({ supersededAt: new Date() })
+    await db.update(ticketJobs).set({ storyMeta: {
+      source: 'template', sessionId: 'template-session', generatedAt: 'volatile',
+      lastEditedByProfileId: uuid(1), lastEditedAt: 'volatile',
+    } }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toMatchObject({ ok: true })
+  })
+
   it('returns the sole identical active version unchanged', async () => {
     const first = await create()
     const second = await create()

@@ -725,6 +725,14 @@ function safeCustomerStory(value: unknown): QuoteCustomerStoryV1 | null {
   return canonicalizeJson(parsed.data) as unknown as QuoteCustomerStoryV1
 }
 
+function requireReviewedAiStory(story: unknown, meta: unknown): void {
+  if (story === null || !meta || typeof meta !== 'object' || Array.isArray(meta)) return
+  const record = meta as Record<string, unknown>
+  if (record.source === 'ai' && record.reviewStatus !== 'reviewed') {
+    throw new TypeError('AI customer story requires human review')
+  }
+}
+
 function requireBoundedJson(value: unknown, maxBytes: number): void {
   if (value === null) return
   const canonical = canonicalizeJson(value)
@@ -769,6 +777,7 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
     .filter((job) => job.workStatus !== 'canceled' && (linesByJob.get(job.id)?.length ?? 0) > 0)
     .map((job) => {
       if (!job.title) throw new TypeError('job title is empty')
+      requireReviewedAiStory(job.customerStory, job.storyMeta)
       const totalsInput: Array<{ extendedCents: number; taxable: boolean }> = []
       const lines = sortBySnapshotOrder(linesByJob.get(job.id) ?? []).map((line) => {
         if (!line.description) throw new TypeError('line description is empty')

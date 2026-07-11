@@ -31,6 +31,7 @@ const MAX_ARTIFACT_TEXT_BYTES = 10_000
 const MAX_STRUCTURED_BYTES = 20_000
 const MAX_PROVIDER_BYTES = 64_000
 const WORKSPACE_SCAN_CHUNK = 50
+const MAX_WORKSPACE_SCAN_CHUNKS = 4
 const WAIVER = 'If you choose not to proceed, the diagnosed issue remains unresolved.'
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
@@ -44,13 +45,14 @@ export type CustomerStoryError =
   | 'not_found'
   | 'forbidden'
   | 'state_conflict'
+  | 'unsupported_path'
   | 'invalid_evidence'
   | 'conflict'
   | 'provider_timeout'
   | 'provider_failed'
 
 type Failure = { ok: false; error: CustomerStoryError; retryable?: boolean }
-type SafeStoryMeta = Pick<CustomerStoryMeta, 'source' | 'sessionId' | 'generatedAt' | 'lastEditedByProfileId' | 'lastEditedAt'>
+type SafeStoryMeta = Pick<CustomerStoryMeta, 'source' | 'sessionId' | 'generatedAt' | 'lastEditedByProfileId' | 'lastEditedAt' | 'reviewStatus'>
 type EvidenceListItem = {
   id: string
   kind: string
@@ -90,6 +92,10 @@ export type CustomerStoryGenerationDependencies = {
   beforeFinalTransaction?: () => Promise<void>
   afterLocks?: () => Promise<void>
   captureLockSql?: (statements: string[]) => void
+}
+
+export type CustomerStoryWorkspaceDependencies = {
+  onEvidenceQuery?: (kind: 'event' | 'artifact') => void
 }
 
 const workspaceInputSchema = z.strictObject({
@@ -232,11 +238,6 @@ function providerEvidence(events: SelectedEvent[], artifactRows: SelectedArtifac
   return utf8Bytes(JSON.stringify(input)) <= MAX_PROVIDER_BYTES ? input : null
 }
 
-function isValidWizardEvent(row: SelectedEvent): boolean {
-  const value = row.aiResponse?.wizardLockIn?.flowVersionId
-  return row.eventType === 'wizard_lock_in' && typeof value === 'string' && uuidSchema.safeParse(value).success
-}
-
 async function databaseNow(db: AppDb): Promise<Date> {
   const result = await db.execute<{ now: string | Date }>(sql`select now() as "now"`)
   const rows = ('rows' in result ? result.rows : result) as Array<{ now: string | Date }>
@@ -287,10 +288,8 @@ async function loadGenerationContext(
   const wizardEvents = await db.select().from(sessionEvents).where(and(
     eq(sessionEvents.sessionId, session.id), eq(sessionEvents.eventType, 'wizard_lock_in'),
   )).orderBy(sessionEvents.id)
-  if (wizardEvents.length > 1 || (wizardEvents.length === 1 && !isValidWizardEvent(wizardEvents[0]))) {
-    return { ok: false, failure: fail('state_conflict', false) }
-  }
-  if (wizardEvents.length === 0 && tree.done !== true) return { ok: false, failure: fail('state_conflict', false) }
+  if (wizardEvents.length > 0) return { ok: false, failure: fail('unsupported_path', false) }
+  if (tree.done !== true) return { ok: false, failure: fail('state_conflict', false) }
 
   const selectedEvents = input.sourceEventIds.length === 0 ? [] : await db.select().from(sessionEvents)
     .where(inArray(sessionEvents.id, input.sourceEventIds)).orderBy(sessionEvents.id)
@@ -338,6 +337,7 @@ function requestFingerprint(context: Context, input: GenerationInput): string {
     confidence: context.confidence,
     diagnosisLockedAt: context.lockAt,
     evidence: context.providerInput.evidence,
+    reviewStatus: 'pending',
   })
 }
 
@@ -374,6 +374,7 @@ const baseMetaSchema = z.strictObject({
   generatedAt: z.iso.datetime({ offset: true }).optional(),
   lastEditedByProfileId: uuidSchema,
   lastEditedAt: z.iso.datetime({ offset: true }),
+  reviewStatus: z.enum(['pending', 'reviewed']).optional(),
 })
 const generationMetaSchema = z.strictObject({
   source: z.literal('ai'),
@@ -385,6 +386,7 @@ const generationMetaSchema = z.strictObject({
   generationRequestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   generatedByProfileId: uuidSchema,
   storyRevision: z.number().int().nonnegative(),
+  reviewStatus: z.enum(['pending', 'reviewed']),
 })
 
 function safePersistedMeta(value: unknown): CustomerStoryMeta | null {
@@ -401,6 +403,7 @@ function workspaceMeta(value: CustomerStoryMeta): SafeStoryMeta {
     ...(value.generatedAt ? { generatedAt: value.generatedAt } : {}),
     lastEditedByProfileId: value.lastEditedByProfileId,
     lastEditedAt: value.lastEditedAt,
+    ...(value.reviewStatus ? { reviewStatus: value.reviewStatus } : {}),
   }
 }
 
@@ -410,21 +413,22 @@ function persistedRevision(meta: unknown): number {
   return typeof revision === 'number' && Number.isInteger(revision) && revision >= 0 ? revision : 0
 }
 
-type Cursor = { kind: 'event' | 'artifact'; createdAt: Date; id: string }
+type Cursor = { kind: 'event' | 'artifact'; sessionId: string; createdAt: Date; id: string }
 function encodeCursor(cursor: Cursor): string {
-  return Buffer.from(JSON.stringify({ v: 1, k: cursor.kind, t: cursor.createdAt.toISOString(), i: cursor.id })).toString('base64url')
+  return Buffer.from(JSON.stringify({ v: 1, k: cursor.kind, s: cursor.sessionId, t: cursor.createdAt.toISOString(), i: cursor.id })).toString('base64url')
 }
 
 function parseCursor(raw: string | undefined, kind: Cursor['kind']): Cursor | null | false {
   if (raw === undefined) return null
   try {
     const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Record<string, unknown>
-    if (Object.keys(value).sort().join(',') !== 'i,k,t,v' || value.v !== 1 || value.k !== kind || typeof value.t !== 'string' || typeof value.i !== 'string') return false
+    if (Object.keys(value).sort().join(',') !== 'i,k,s,t,v' || value.v !== 1 || value.k !== kind || typeof value.s !== 'string' || typeof value.t !== 'string' || typeof value.i !== 'string') return false
     const id = uuidSchema.safeParse(value.i)
+    const sessionId = uuidSchema.safeParse(value.s)
     const createdAt = new Date(value.t)
-    if (!id.success || Number.isNaN(createdAt.getTime()) || createdAt.toISOString() !== value.t) return false
-    if (encodeCursor({ kind, createdAt, id: id.data }) !== raw) return false
-    return { kind, createdAt, id: id.data }
+    if (!id.success || !sessionId.success || Number.isNaN(createdAt.getTime()) || createdAt.toISOString() !== value.t) return false
+    if (encodeCursor({ kind, sessionId: sessionId.data, createdAt, id: id.data }) !== raw) return false
+    return { kind, sessionId: sessionId.data, createdAt, id: id.data }
   } catch {
     return false
   }
@@ -434,41 +438,77 @@ function cursorCondition(columnDate: typeof sessionEvents.createdAt | typeof art
   return cursor ? or(lt(columnDate, cursor.createdAt), and(eq(columnDate, cursor.createdAt), lt(columnId, cursor.id))) : undefined
 }
 
-async function eligibleEventPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null): Promise<SelectedEvent[]> {
+type EligiblePage<T> = { rows: T[]; nextCursor: string | null }
+
+async function eligibleEventPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null, dependencies: CustomerStoryWorkspaceDependencies): Promise<EligiblePage<SelectedEvent>> {
   const eligible: SelectedEvent[] = []
   let scanCursor = initialCursor
-  while (eligible.length < PAGE_SIZE + 1) {
+  let lastRaw: SelectedEvent | null = null
+  let capped = false
+  let exhausted = false
+  for (let chunk = 0; chunk < MAX_WORKSPACE_SCAN_CHUNKS && eligible.length < PAGE_SIZE + 1; chunk += 1) {
+    dependencies.onEvidenceQuery?.('event')
     const rows = await db.select().from(sessionEvents).where(and(
       eq(sessionEvents.sessionId, sessionId), eq(sessionEvents.eventType, 'observation'),
       sql`${sessionEvents.createdAt} <= ${lockAt}`,
       cursorCondition(sessionEvents.createdAt, sessionEvents.id, scanCursor),
     )).orderBy(desc(sessionEvents.createdAt), desc(sessionEvents.id)).limit(WORKSPACE_SCAN_CHUNK)
+    lastRaw = rows.at(-1) ?? lastRaw
     eligible.push(...rows.filter((row) => providerEvidence([row], []) !== null))
-    if (rows.length < WORKSPACE_SCAN_CHUNK) break
+    if (rows.length < WORKSPACE_SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
     const last = rows[rows.length - 1]
-    scanCursor = { kind: 'event', createdAt: last.createdAt, id: last.id }
+    scanCursor = { kind: 'event', sessionId, createdAt: last.createdAt, id: last.id }
+    capped = chunk === MAX_WORKSPACE_SCAN_CHUNKS - 1
   }
-  return eligible.slice(0, PAGE_SIZE + 1)
+  const rows = eligible.slice(0, PAGE_SIZE)
+  const nextCursor = eligible.length > PAGE_SIZE
+    ? encodeCursor({ kind: 'event', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+    : capped && eligible.length < PAGE_SIZE && lastRaw
+      ? encodeCursor({ kind: 'event', sessionId, createdAt: lastRaw.createdAt, id: lastRaw.id })
+      : eligible.length === PAGE_SIZE && !exhausted
+        ? encodeCursor({ kind: 'event', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+        : null
+  return { rows, nextCursor }
 }
 
-async function eligibleArtifactPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null): Promise<SelectedArtifact[]> {
+async function eligibleArtifactPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null, dependencies: CustomerStoryWorkspaceDependencies): Promise<EligiblePage<SelectedArtifact>> {
   const eligible: SelectedArtifact[] = []
   let scanCursor = initialCursor
-  while (eligible.length < PAGE_SIZE + 1) {
+  let lastRaw: SelectedArtifact | null = null
+  let capped = false
+  let exhausted = false
+  for (let chunk = 0; chunk < MAX_WORKSPACE_SCAN_CHUNKS && eligible.length < PAGE_SIZE + 1; chunk += 1) {
+    dependencies.onEvidenceQuery?.('artifact')
     const rows = await db.select().from(artifacts).where(and(
       eq(artifacts.sessionId, sessionId), eq(artifacts.extractionStatus, 'done'),
       sql`${artifacts.createdAt} <= ${lockAt}`,
       cursorCondition(artifacts.createdAt, artifacts.id, scanCursor),
     )).orderBy(desc(artifacts.createdAt), desc(artifacts.id)).limit(WORKSPACE_SCAN_CHUNK)
+    lastRaw = rows.at(-1) ?? lastRaw
     eligible.push(...rows.filter((row) => providerEvidence([], [row]) !== null))
-    if (rows.length < WORKSPACE_SCAN_CHUNK) break
+    if (rows.length < WORKSPACE_SCAN_CHUNK) {
+      exhausted = true
+      break
+    }
     const last = rows[rows.length - 1]
-    scanCursor = { kind: 'artifact', createdAt: last.createdAt, id: last.id }
+    scanCursor = { kind: 'artifact', sessionId, createdAt: last.createdAt, id: last.id }
+    capped = chunk === MAX_WORKSPACE_SCAN_CHUNKS - 1
   }
-  return eligible.slice(0, PAGE_SIZE + 1)
+  const rows = eligible.slice(0, PAGE_SIZE)
+  const nextCursor = eligible.length > PAGE_SIZE
+    ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+    : capped && eligible.length < PAGE_SIZE && lastRaw
+      ? encodeCursor({ kind: 'artifact', sessionId, createdAt: lastRaw.createdAt, id: lastRaw.id })
+      : eligible.length === PAGE_SIZE && !exhausted
+        ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
+        : null
+  return { rows, nextCursor }
 }
 
-export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown): Promise<CustomerStoryWorkspaceResult> {
+export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown, dependencies: CustomerStoryWorkspaceDependencies = {}): Promise<CustomerStoryWorkspaceResult> {
   const parsed = workspaceInputSchema.safeParse(rawInput)
   if (!parsed.success) return fail('invalid_input')
   const eventCursor = parseCursor(parsed.data.eventCursor, 'event')
@@ -477,15 +517,14 @@ export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown): P
   const loaded = await loadGenerationContext(db, { ...parsed.data, sourceEventIds: [], sourceArtifactIds: [] })
   if (!loaded.ok) return loaded.failure
   const context = loaded.context
+  if ((eventCursor && eventCursor.sessionId !== context.session.id) || (artifactCursor && artifactCursor.sessionId !== context.session.id)) return fail('invalid_input')
 
-  const [safeEvents, safeArtifacts] = await Promise.all([
-    eligibleEventPage(db, context.session.id, context.lockAt, eventCursor),
-    eligibleArtifactPage(db, context.session.id, context.lockAt, artifactCursor),
+  const [eventPage, artifactPage] = await Promise.all([
+    eligibleEventPage(db, context.session.id, context.lockAt, eventCursor, dependencies),
+    eligibleArtifactPage(db, context.session.id, context.lockAt, artifactCursor, dependencies),
   ])
-  const pageEvents = safeEvents.slice(0, PAGE_SIZE)
-  const pageArtifacts = safeArtifacts.slice(0, PAGE_SIZE)
-  const eventHasMore = safeEvents.length > PAGE_SIZE
-  const artifactHasMore = safeArtifacts.length > PAGE_SIZE
+  const pageEvents = eventPage.rows
+  const pageArtifacts = artifactPage.rows
   const story = context.targetJob.customerStory === null ? null : safeStory(context.targetJob.customerStory)
   const persistedMeta = context.targetJob.storyMeta === null ? null : safePersistedMeta(context.targetJob.storyMeta)
   const storyMeta = persistedMeta === null ? null : workspaceMeta(persistedMeta)
@@ -499,8 +538,8 @@ export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown): P
       evidence: {
         events: pageEvents.map((row) => ({ id: row.id, kind: 'observation', createdAt: row.createdAt.toISOString(), label: evidenceLabel(row.observationText!) })),
         artifacts: pageArtifacts.map((row) => ({ id: row.id, kind: row.kind, createdAt: row.createdAt.toISOString(), label: evidenceLabel((row.extraction as { summary?: string }).summary ?? artifactContent(row)!) })),
-        nextEventCursor: eventHasMore ? encodeCursor({ kind: 'event', createdAt: pageEvents[PAGE_SIZE - 1].createdAt, id: pageEvents[PAGE_SIZE - 1].id }) : null,
-        nextArtifactCursor: artifactHasMore ? encodeCursor({ kind: 'artifact', createdAt: pageArtifacts[PAGE_SIZE - 1].createdAt, id: pageArtifacts[PAGE_SIZE - 1].id }) : null,
+        nextEventCursor: eventPage.nextCursor,
+        nextArtifactCursor: artifactPage.nextCursor,
       },
     },
   }
@@ -679,6 +718,7 @@ export async function generateAndSaveCustomerStory(
         lastEditedByProfileId: reloaded.context.actor.id, lastEditedAt: generatedAt,
         generationClientKey: input.clientKey, generationRequestFingerprint: request,
         generatedByProfileId: reloaded.context.actor.id, storyRevision: nextRevision,
+        reviewStatus: 'pending',
       }
       await transactionDb.update(ticketJobs).set({ customerStory: story, storyMeta, updatedAt: reloaded.context.now })
         .where(and(eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, reloaded.context.actor.shopId!)))

@@ -219,6 +219,7 @@ describe('Shop OS immutable quote snapshot identity', () => {
       generationRequestFingerprint: 'request-1',
       generatedByProfileId: 'generator-1',
       storyRevision: 1,
+      reviewStatus: 'pending',
     })
     const second = snapshot({ offer: { amount: 1 } })
     second.jobs[0].storyMeta = buildQuoteStoryMeta({
@@ -230,6 +231,7 @@ describe('Shop OS immutable quote snapshot identity', () => {
       generationRequestFingerprint: 'request-2',
       generatedByProfileId: 'generator-2',
       storyRevision: 99,
+      reviewStatus: 'reviewed',
     })
     expect(first.jobs[0].storyMeta).toEqual({
       source: 'ai',
