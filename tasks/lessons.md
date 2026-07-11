@@ -13,6 +13,11 @@ Trigger: Authenticated verification required Brandon to sign in manually from an
 Rule: Maintain an isolated QA identity with secrets outside Git; agents own routine authenticated verification.
 Reason: Verification infrastructure must not become recurring founder labor.
 
+### absent-provenance-means-refusal
+Trigger: Coverage logic treated complete but provenance-free scenarios and equivalence summaries as verified guidance.
+Rule: Missing structured provenance or axis mappings fail closed; labels, slugs, completeness, and summary verdicts never substitute.
+Reason: Diagnostic instructions must be independently revalidatable before reducing technician judgment.
+
 ### production-schema-before-deploy
 Trigger: Production code queries columns from an unapplied source migration.
 Rule: Block production promotion until required migrations are applied or backward-compatible code is proven.
