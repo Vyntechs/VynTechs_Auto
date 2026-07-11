@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -30,6 +30,8 @@ export type TicketDomainError =
   | 'invalid_assignee'
   | 'tier_confirmation_required'
   | 'ticket_not_open'
+  | 'job_not_open'
+  | 'assignment_conflict'
 
 export type AssignmentTierWarning = {
   code: 'below_required_tier'
@@ -122,6 +124,8 @@ export function ticketDomainStatus(
       return 404
     case 'tier_confirmation_required':
     case 'ticket_not_open':
+    case 'job_not_open':
+    case 'assignment_conflict':
       return 409
   }
 }
@@ -138,6 +142,18 @@ const ticketJobBodySchema = z
     confirmBelowTier: z.boolean().optional(),
   })
   .strict()
+
+const assignmentBodySchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('claim') }).strict(),
+  z.object({ action: z.literal('unclaim') }).strict(),
+  z
+    .object({
+      action: z.literal('reassign'),
+      assignedTechId: z.uuid(),
+      confirmBelowTier: z.boolean().optional(),
+    })
+    .strict(),
+])
 
 const createTicketBodySchema = z
   .object({
@@ -408,6 +424,7 @@ async function validateAssignment(
   const [assignee] = await db
     .select({
       id: profiles.id,
+      role: profiles.role,
       skillTier: profiles.skillTier,
       membershipStatus: profiles.membershipStatus,
       deactivatedAt: profiles.deactivatedAt,
@@ -428,6 +445,7 @@ async function validateAssignment(
   if (
     assignee.membershipStatus !== 'active' ||
     assignee.deactivatedAt ||
+    !canCreateTickets(assignee.role) ||
     assignee.skillTier === null ||
     ![1, 2, 3].includes(assignee.skillTier)
   ) {
@@ -595,4 +613,422 @@ export async function addTicketJob(
     if (!detail) throw new Error('updated_ticket_not_found')
     return { ok: true, ticket: detail }
   })
+}
+
+export type SafeTicketAssignee = NonNullable<TicketDetail['jobs'][number]['assignedTech']>
+
+export type TicketJobAssignmentResult =
+  | { ok: true; ticket: TicketDetail }
+  | {
+      ok: false
+      error: TicketDomainError
+      warning?: AssignmentTierWarning
+      currentAssignee?: SafeTicketAssignee
+    }
+
+export type TicketJobAssignmentDependencies = {
+  beforeReassignUpdate?: () => Promise<void>
+}
+
+type AssignmentContext = {
+  ticketStatus: string
+  workStatus: string
+  requiredSkillTier: number
+  assignedTechId: string | null
+  assignedTechFullName: string | null
+  assignedTechRole: string | null
+  assignedTechSkillTier: number | null
+}
+
+async function loadAssignmentContext(
+  db: AppDb,
+  shopId: string,
+  ticketId: string,
+  jobId: string,
+): Promise<AssignmentContext | null> {
+  const [context] = await db
+    .select({
+      ticketStatus: tickets.status,
+      workStatus: ticketJobs.workStatus,
+      requiredSkillTier: ticketJobs.requiredSkillTier,
+      assignedTechId: ticketJobs.assignedTechId,
+      assignedTechFullName: profiles.fullName,
+      assignedTechRole: profiles.role,
+      assignedTechSkillTier: profiles.skillTier,
+    })
+    .from(ticketJobs)
+    .innerJoin(
+      tickets,
+      and(
+        eq(tickets.shopId, ticketJobs.shopId),
+        eq(tickets.id, ticketJobs.ticketId),
+      ),
+    )
+    .leftJoin(profiles, eq(profiles.id, ticketJobs.assignedTechId))
+    .where(
+      and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, ticketId),
+        eq(ticketJobs.id, jobId),
+      ),
+    )
+    .limit(1)
+  return context ?? null
+}
+
+function safeCurrentAssignee(
+  context: AssignmentContext,
+): SafeTicketAssignee | null {
+  if (!context.assignedTechId || !context.assignedTechRole) return null
+  return {
+    id: context.assignedTechId,
+    fullName: context.assignedTechFullName,
+    role: context.assignedTechRole,
+    skillTier: context.assignedTechSkillTier,
+  }
+}
+
+async function persistedActorError(
+  db: AppDb,
+  actor: TicketActor,
+): Promise<{ ok: false; error: TicketDomainError } | null> {
+  const [profile] = await db
+    .select({
+      role: profiles.role,
+      membershipStatus: profiles.membershipStatus,
+      deactivatedAt: profiles.deactivatedAt,
+    })
+    .from(profiles)
+    .where(
+      and(
+        eq(profiles.shopId, actor.shopId as string),
+        eq(profiles.id, actor.profileId),
+      ),
+    )
+    .limit(1)
+  if (!profile || !canCreateTickets(profile.role)) return { ok: false, error: 'forbidden' }
+  if (profile.membershipStatus !== 'active' || profile.deactivatedAt) {
+    return { ok: false, error: 'inactive_profile' }
+  }
+  return null
+}
+
+async function persistedClaimActorError(
+  db: AppDb,
+  actor: TicketActor,
+  requiredSkillTier: number,
+): Promise<{ ok: false; error: TicketDomainError } | null> {
+  const [profile] = await db
+    .select({
+      role: profiles.role,
+      skillTier: profiles.skillTier,
+      membershipStatus: profiles.membershipStatus,
+      deactivatedAt: profiles.deactivatedAt,
+    })
+    .from(profiles)
+    .where(
+      and(
+        eq(profiles.shopId, actor.shopId as string),
+        eq(profiles.id, actor.profileId),
+      ),
+    )
+    .limit(1)
+  if (!profile || !canCreateTickets(profile.role)) return { ok: false, error: 'forbidden' }
+  if (profile.membershipStatus !== 'active' || profile.deactivatedAt) {
+    return { ok: false, error: 'inactive_profile' }
+  }
+  if (
+    profile.skillTier === null ||
+    ![1, 2, 3].includes(profile.skillTier) ||
+    profile.skillTier < requiredSkillTier
+  ) {
+    return { ok: false, error: 'invalid_assignee' }
+  }
+  return null
+}
+
+function assignmentStateError(
+  context: AssignmentContext | null,
+): { ok: false; error: TicketDomainError } | null {
+  if (!context) return { ok: false, error: 'not_found' }
+  if (context.ticketStatus !== 'open') return { ok: false, error: 'ticket_not_open' }
+  if (context.workStatus !== 'open') return { ok: false, error: 'job_not_open' }
+  return null
+}
+
+async function updatedAssignmentTicket(
+  db: AppDb,
+  shopId: string,
+  ticketId: string,
+): Promise<TicketJobAssignmentResult> {
+  const ticket = await loadTicketDetail(db, shopId, ticketId)
+  if (!ticket) throw new Error('updated_ticket_not_found')
+  return { ok: true, ticket }
+}
+
+async function claimTicketJob(
+  db: AppDb,
+  actor: TicketActor,
+  shopId: string,
+  ticketId: string,
+  jobId: string,
+): Promise<TicketJobAssignmentResult> {
+  const [claimed] = await db
+    .update(ticketJobs)
+    .set({
+      assignedTechId: actor.profileId,
+      claimedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, ticketId),
+        eq(ticketJobs.id, jobId),
+        eq(ticketJobs.workStatus, 'open'),
+        isNull(ticketJobs.assignedTechId),
+        sql`exists (
+          select 1 from ${tickets}
+          where ${tickets.shopId} = ${ticketJobs.shopId}
+            and ${tickets.id} = ${ticketJobs.ticketId}
+            and ${tickets.status} = 'open'
+        )`,
+        sql`exists (
+          select 1 from ${profiles}
+          where ${profiles.shopId} = ${ticketJobs.shopId}
+            and ${profiles.id} = ${actor.profileId}
+            and ${profiles.membershipStatus} = 'active'
+            and ${profiles.deactivatedAt} is null
+            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+            and ${profiles.skillTier} between 1 and 3
+            and ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}
+        )`,
+      ),
+    )
+    .returning()
+
+  if (claimed) return updatedAssignmentTicket(db, shopId, ticketId)
+
+  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
+  const stateError = assignmentStateError(context)
+  if (stateError) return stateError
+  const actorError = await persistedClaimActorError(
+    db,
+    actor,
+    (context as AssignmentContext).requiredSkillTier,
+  )
+  if (actorError) return actorError
+  const assignee = safeCurrentAssignee(context as AssignmentContext)
+  if (assignee) {
+    return { ok: false, error: 'assignment_conflict', currentAssignee: assignee }
+  }
+  return { ok: false, error: 'invalid_assignee' }
+}
+
+async function unclaimTicketJob(
+  db: AppDb,
+  actor: TicketActor,
+  shopId: string,
+  ticketId: string,
+  jobId: string,
+): Promise<TicketJobAssignmentResult> {
+  const [unclaimed] = await db
+    .update(ticketJobs)
+    .set({ assignedTechId: null, claimedAt: null, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, ticketId),
+        eq(ticketJobs.id, jobId),
+        eq(ticketJobs.workStatus, 'open'),
+        sql`exists (
+          select 1 from ${tickets}
+          where ${tickets.shopId} = ${ticketJobs.shopId}
+            and ${tickets.id} = ${ticketJobs.ticketId}
+            and ${tickets.status} = 'open'
+        )`,
+        sql`exists (
+          select 1 from ${profiles}
+          where ${profiles.shopId} = ${ticketJobs.shopId}
+            and ${profiles.id} = ${actor.profileId}
+            and ${profiles.membershipStatus} = 'active'
+            and ${profiles.deactivatedAt} is null
+            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+        )`,
+        or(
+          eq(ticketJobs.assignedTechId, actor.profileId),
+          sql`exists (
+            select 1 from ${profiles}
+            where ${profiles.shopId} = ${ticketJobs.shopId}
+              and ${profiles.id} = ${actor.profileId}
+              and ${profiles.role} in ('advisor', 'owner')
+          )`,
+        ),
+      ),
+    )
+    .returning()
+
+  if (unclaimed) return updatedAssignmentTicket(db, shopId, ticketId)
+  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
+  const stateError = assignmentStateError(context)
+  if (stateError) return stateError
+  const actorError = await persistedActorError(db, actor)
+  if (actorError) return actorError
+  return { ok: false, error: 'forbidden' }
+}
+
+async function reassignTicketJob(
+  db: AppDb,
+  actor: TicketActor,
+  shopId: string,
+  ticketId: string,
+  jobId: string,
+  body: { assignedTechId: string; confirmBelowTier?: boolean },
+  dependencies: TicketJobAssignmentDependencies,
+): Promise<TicketJobAssignmentResult> {
+  const actorError = await persistedActorError(db, actor)
+  if (actorError) return actorError
+
+  const [persistedActor] = await db
+    .select({ role: profiles.role })
+    .from(profiles)
+    .where(and(eq(profiles.shopId, shopId), eq(profiles.id, actor.profileId)))
+    .limit(1)
+  if (!persistedActor || !canAssignWork(persistedActor.role)) {
+    return { ok: false, error: 'forbidden' }
+  }
+
+  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
+  const stateError = assignmentStateError(context)
+  if (stateError) return stateError
+
+  const assignment = await validateAssignment(db, { ...actor, role: persistedActor.role }, {
+    title: 'assignment',
+    kind: 'repair',
+    requiredSkillTier: (context as AssignmentContext).requiredSkillTier as 1 | 2 | 3,
+    assignedTechId: body.assignedTechId,
+    confirmBelowTier: body.confirmBelowTier,
+  })
+  if (!assignment.ok) return assignment
+
+  await dependencies.beforeReassignUpdate?.()
+
+  const [reassigned] = await db
+    .update(ticketJobs)
+    .set({
+      assignedTechId: assignment.assignedTechId,
+      claimedAt: null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, ticketId),
+        eq(ticketJobs.id, jobId),
+        eq(ticketJobs.workStatus, 'open'),
+        sql`exists (
+          select 1 from ${tickets}
+          where ${tickets.shopId} = ${ticketJobs.shopId}
+            and ${tickets.id} = ${ticketJobs.ticketId}
+            and ${tickets.status} = 'open'
+        )`,
+        sql`exists (
+          select 1 from ${profiles}
+          where ${profiles.shopId} = ${ticketJobs.shopId}
+            and ${profiles.id} = ${actor.profileId}
+            and ${profiles.membershipStatus} = 'active'
+            and ${profiles.deactivatedAt} is null
+            and ${profiles.role} in ('advisor', 'owner')
+        )`,
+        sql`exists (
+          select 1 from ${profiles}
+          where ${profiles.shopId} = ${ticketJobs.shopId}
+            and ${profiles.id} = ${assignment.assignedTechId as string}
+            and ${profiles.membershipStatus} = 'active'
+            and ${profiles.deactivatedAt} is null
+            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+            and ${profiles.skillTier} between 1 and 3
+            and (
+              ${body.confirmBelowTier === true}
+              or ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}
+            )
+        )`,
+      ),
+    )
+    .returning()
+  if (reassigned) return updatedAssignmentTicket(db, shopId, ticketId)
+
+  const currentContext = await loadAssignmentContext(db, shopId, ticketId, jobId)
+  const currentStateError = assignmentStateError(currentContext)
+  if (currentStateError) return currentStateError
+
+  const currentActorError = await persistedActorError(db, actor)
+  if (currentActorError) return currentActorError
+  const [currentActor] = await db
+    .select({ role: profiles.role })
+    .from(profiles)
+    .where(and(eq(profiles.shopId, shopId), eq(profiles.id, actor.profileId)))
+    .limit(1)
+  if (!currentActor || !canAssignWork(currentActor.role)) {
+    return { ok: false, error: 'forbidden' }
+  }
+
+  const currentAssignment = await validateAssignment(
+    db,
+    { ...actor, role: currentActor.role },
+    {
+      title: 'assignment',
+      kind: 'repair',
+      requiredSkillTier: (currentContext as AssignmentContext).requiredSkillTier as 1 | 2 | 3,
+      assignedTechId: body.assignedTechId,
+      confirmBelowTier: body.confirmBelowTier,
+    },
+  )
+  if (!currentAssignment.ok) return currentAssignment
+  return { ok: false, error: 'not_found' }
+}
+
+export async function mutateTicketJobAssignment(
+  db: AppDb,
+  input: { actor: TicketActor; ticketId: unknown; jobId: unknown; body: unknown },
+  dependencies: TicketJobAssignmentDependencies = {},
+): Promise<TicketJobAssignmentResult> {
+  const denied = actorGate(input.actor)
+  if (denied) return denied
+
+  const parsedTicketId = z.uuid().safeParse(input.ticketId)
+  const parsedJobId = z.uuid().safeParse(input.jobId)
+  const parsedBody = assignmentBodySchema.safeParse(input.body)
+  if (!parsedTicketId.success || !parsedJobId.success || !parsedBody.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  const shopId = input.actor.shopId as string
+  if (parsedBody.data.action === 'claim') {
+    return claimTicketJob(
+      db,
+      input.actor,
+      shopId,
+      parsedTicketId.data,
+      parsedJobId.data,
+    )
+  }
+  if (parsedBody.data.action === 'unclaim') {
+    return unclaimTicketJob(
+      db,
+      input.actor,
+      shopId,
+      parsedTicketId.data,
+      parsedJobId.data,
+    )
+  }
+  return reassignTicketJob(
+    db,
+    input.actor,
+    shopId,
+    parsedTicketId.data,
+    parsedJobId.data,
+    parsedBody.data,
+    dependencies,
+  )
 }

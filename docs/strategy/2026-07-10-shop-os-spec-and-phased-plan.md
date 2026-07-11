@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, 9, 10, 11, and 12 are complete in source; row 13 is the next safe source-code lane.** Production application and counter feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 rows 5, 7, 8, 9, 10, 11, and 12 plus Phase 2 row 13 are complete in source; row 14 is the next safe source-code lane.** Production application and counter feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -586,6 +586,8 @@ Tree/published-wizard starts reuse the full existing initialization behavior. To
 
 **Done when:** eligible tech claims in two taps and reaches the existing diagnostic on the third; losing/below-tier/cross-shop claims fail safely; concurrent/user retries create one session and at most one provider call; an expired ambiguous attempt never auto-regenerates; simple work cannot start through UI or API without an approved version; current Today follow-ups/history remain observable.
 
+**Implementation correction — atomic job assignment proved 2026-07-10.** [Row-13 packet](./2026-07-10-shop-os-phase-2-job-assignment-plan.md) adds one domain mutation seam and one thin `/api/tickets/[id]/jobs/[jobId]/assignment` route for claim, unclaim, and reassign. Self-claim is one conditional update over the named same-shop open ticket/job, null assignment, and the current active supported actor's sufficient tier; it stamps the database claim time. Losing racers receive only the safe current assignee. Self/admin unclaim clears assignment and claim time; advisor/owner reassign atomically rechecks current actor authority, target shop/activity/supported role/tier, current required tier, and explicit below-tier confirmation. Four focused files/67 tests and the complete 203-file/1,750-test suite pass with TypeScript, production build, clean diff checks, two task reviews, and a whole-branch review. PGlite exercises deterministic conflict paths but not two-connection PostgreSQL timing; SQL predicates own the race. No UI, work-start/status transition, schema, production, quote/approval, provider, session, or diagnostic-engine behavior changed.
+
 ### Phase 3 — Immutable quote, story, and phone approval (L)
 
 **Ships:** manual `job_lines`; `canned_jobs`; `job_attachments`; shop rate/tax; quote math; immutable `quote_versions`; approval `quote_events`; evidence-bound story generator/review; exact-version phone/in-person approval; completed Door C; diagnostic fee line; ticket-backed repair authorization plus explicit declined/no-repair closeout guards; simple work view; and "found something" diagnostic escalation.
@@ -714,7 +716,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 10 | 1 | Counter intake v2: VIN, roster, true-open, concern, redirect | A | 7,8,9 | complete | PR #121; 8 focused files/105 tests + 195 files/1,618 full tests; [execution packet](./2026-07-10-shop-os-phase-1-counter-intake-v2-plan.md); feature enable remains owner gate |
 | 11 | 1 | Door C minimal create | A | 8,9 | complete | PR #122; 5 focused files/67 tests + 198 files/1,668 full tests; [execution packet](./2026-07-10-shop-os-phase-1-door-c-minimal-create-plan.md) |
 | 12 | 1 | Door B provisional ticket/job wrapper | I | 8 | complete | PR #123; 9 focused files/90 tests + 201 files/1,715 full tests; [execution packet](./2026-07-10-shop-os-phase-1-door-b-provisional-plan.md); creation seam only |
-| 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | pending | — |
+| 13 | 2 | Atomic claim/unclaim/reassign handlers + tests | LT | 7,8 | complete | PR #124; 4 focused files/67 tests + 203 files/1,750 full tests; [execution packet](./2026-07-10-shop-os-phase-2-job-assignment-plan.md) |
 | 14 | 2 | My/Open Jobs composed into Today; simple work disabled pending approval | T | 13 | pending | — |
 | 15 | 2 | Leased/idempotent full diagnostic bootstrap + unique session link | I | 8,12 | pending | Creation seam; diagnostic semantics unchanged |
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | pending | — |
