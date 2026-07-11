@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -10,7 +10,11 @@ import {
   vehicles,
   type Profile,
 } from '@/lib/db/schema'
-import { canAssignWork, canCreateTickets } from '@/lib/shop-os/capabilities'
+import {
+  canAssignWork,
+  canCreateTickets,
+  isShopRole,
+} from '@/lib/shop-os/capabilities'
 
 export type TicketActor = {
   profileId: string
@@ -104,6 +108,124 @@ export function ticketActorFromProfile(profile: TicketActorProfile): TicketActor
     membershipStatus: profile.membershipStatus,
     deactivatedAt: profile.deactivatedAt,
   }
+}
+
+export type TodayTicketJob = {
+  id: string
+  ticketId: string
+  ticketNumber: number
+  customerName: string | null
+  vehicle: { year: number; make: string; model: string } | null
+  title: string
+  kind: 'diagnostic' | 'repair' | 'maintenance'
+  requiredSkillTier: number
+  sessionId: string | null
+  workStatus: 'open' | 'in_progress' | 'blocked'
+}
+
+export type TodayTicketJobs = {
+  myJobs: TodayTicketJob[]
+  openJobs: TodayTicketJob[]
+  linkedSessionIds: string[]
+}
+
+const emptyTodayTicketJobs = (): TodayTicketJobs => ({
+  myJobs: [],
+  openJobs: [],
+  linkedSessionIds: [],
+})
+
+export async function listTodayTicketJobs(
+  db: AppDb,
+  input: { actor: TicketActor },
+): Promise<TodayTicketJobs> {
+  const { actor } = input
+  if (
+    !actor.shopId ||
+    !isShopRole(actor.role) ||
+    actor.membershipStatus !== 'active' ||
+    actor.deactivatedAt
+  ) {
+    return emptyTodayTicketJobs()
+  }
+
+  const claimable =
+    actor.skillTier !== null && [1, 2, 3].includes(actor.skillTier)
+      ? and(
+          isNull(ticketJobs.assignedTechId),
+          eq(ticketJobs.workStatus, 'open'),
+          lte(ticketJobs.requiredSkillTier, actor.skillTier),
+        )
+      : undefined
+
+  const rows = await db
+    .select({
+      id: ticketJobs.id,
+      ticketId: tickets.id,
+      ticketNumber: tickets.ticketNumber,
+      customerName: customers.name,
+      vehicleYear: vehicles.year,
+      vehicleMake: vehicles.make,
+      vehicleModel: vehicles.model,
+      title: ticketJobs.title,
+      kind: ticketJobs.kind,
+      requiredSkillTier: ticketJobs.requiredSkillTier,
+      assignedTechId: ticketJobs.assignedTechId,
+      sessionId: ticketJobs.sessionId,
+      workStatus: ticketJobs.workStatus,
+    })
+    .from(ticketJobs)
+    .innerJoin(
+      tickets,
+      and(
+        eq(tickets.shopId, ticketJobs.shopId),
+        eq(tickets.id, ticketJobs.ticketId),
+      ),
+    )
+    .leftJoin(customers, eq(tickets.customerId, customers.id))
+    .leftJoin(vehicles, eq(tickets.vehicleId, vehicles.id))
+    .where(
+      and(
+        eq(ticketJobs.shopId, actor.shopId),
+        eq(tickets.status, 'open'),
+        or(
+          and(
+            eq(ticketJobs.assignedTechId, actor.profileId),
+            inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
+          ),
+          claimable,
+        ),
+      ),
+    )
+    .orderBy(asc(tickets.ticketNumber), asc(ticketJobs.createdAt), asc(ticketJobs.id))
+
+  const myJobs: TodayTicketJob[] = []
+  const openJobs: TodayTicketJob[] = []
+  const linkedSessionIds: string[] = []
+
+  for (const row of rows) {
+    const job: TodayTicketJob = {
+      id: row.id,
+      ticketId: row.ticketId,
+      ticketNumber: row.ticketNumber,
+      customerName: row.customerName,
+      vehicle:
+        row.vehicleYear !== null && row.vehicleMake !== null && row.vehicleModel !== null
+          ? { year: row.vehicleYear, make: row.vehicleMake, model: row.vehicleModel }
+          : null,
+      title: row.title,
+      kind: row.kind,
+      requiredSkillTier: row.requiredSkillTier,
+      sessionId: row.sessionId,
+      workStatus: row.workStatus as TodayTicketJob['workStatus'],
+    }
+
+    if (row.assignedTechId === actor.profileId) myJobs.push(job)
+    else openJobs.push(job)
+    if (row.sessionId) linkedSessionIds.push(row.sessionId)
+  }
+
+  return { myJobs, openJobs, linkedSessionIds }
 }
 
 export function ticketDomainStatus(

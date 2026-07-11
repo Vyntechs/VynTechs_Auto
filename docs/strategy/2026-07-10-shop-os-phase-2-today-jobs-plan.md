@@ -35,10 +35,10 @@
 
 **Produces:** `listTodayTicketJobs(db, { actor })` returning `{ myJobs, openJobs, linkedSessionIds }` with ticket/job/customer/vehicle labels only from persisted safe fields.
 
-- [ ] Write failing tests for assigned diagnostic/repair/maintenance jobs, eligible open jobs, persisted ordering, and linked-session IDs.
-- [ ] Prove tenant isolation, active Shop-role actor gating, sufficient-tier Open Jobs filtering, null-tier behavior, terminal ticket/job exclusion, and no profile user/shop leakage.
-- [ ] Include blocked/in-progress assigned jobs in My Jobs but only open/unassigned/sufficient-tier jobs in Open Jobs.
-- [ ] Independently review the query task and resolve every finding.
+- [x] Write failing tests for assigned diagnostic/repair/maintenance jobs, eligible open jobs, persisted ordering, and linked-session IDs.
+- [x] Prove tenant isolation, active Shop-role actor gating, sufficient-tier Open Jobs filtering, null-tier behavior, terminal ticket/job exclusion, and no profile user/shop leakage.
+- [x] Include blocked/in-progress assigned jobs in My Jobs but only open/unassigned/sufficient-tier jobs in Open Jobs.
+- [x] Independently review the query task and receive spec/code-quality approval with zero findings.
 
 ## Task 3: Compose the Today board and claim interaction
 

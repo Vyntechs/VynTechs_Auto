@@ -1,0 +1,338 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import {
+  listTodayTicketJobs,
+  ticketActorFromProfile,
+  type TicketActor,
+} from '@/lib/tickets'
+import {
+  customers,
+  profiles,
+  sessions,
+  shops,
+  ticketJobs,
+  tickets,
+  vehicles,
+} from '@/lib/db/schema'
+import { createTestDb, type TestDb } from '@/tests/helpers/db'
+
+const uuid = (suffix: number) =>
+  `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
+
+const treeState = {
+  nodes: [{ id: 'root', label: 'Initial scan', status: 'pending' as const }],
+  currentNodeId: 'root',
+  message: 'Starting',
+}
+
+describe('Today ticket jobs read model', () => {
+  let db: TestDb
+  let close: () => Promise<void>
+  let shopId: string
+  let otherShopId: string
+  let actor: TicketActor
+  let actorProfileId: string
+  let otherProfileId: string
+  let ticketId: string
+  let customerId: string
+  let vehicleId: string
+
+  beforeEach(async () => {
+    ;({ db, close } = await createTestDb())
+    const [shop, otherShop] = await db
+      .insert(shops)
+      .values([{ name: 'North Shop' }, { name: 'South Shop' }])
+      .returning()
+    shopId = shop.id
+    otherShopId = otherShop.id
+
+    const [actorProfile, otherProfile] = await db
+      .insert(profiles)
+      .values([
+        {
+          id: uuid(1),
+          userId: uuid(101),
+          shopId,
+          fullName: 'Taylor Tech',
+          role: 'tech',
+          skillTier: 2,
+        },
+        {
+          id: uuid(2),
+          userId: uuid(102),
+          shopId: otherShopId,
+          fullName: 'Hidden Technician',
+          role: 'tech',
+          skillTier: 3,
+        },
+      ])
+      .returning()
+    actorProfileId = actorProfile.id
+    otherProfileId = otherProfile.id
+    actor = ticketActorFromProfile(actorProfile)
+
+    const [customer] = await db
+      .insert(customers)
+      .values({
+        id: uuid(10),
+        shopId,
+        name: 'Ada Driver',
+        phone: '555-0101',
+        email: 'private@example.com',
+      })
+      .returning()
+    customerId = customer.id
+    const [vehicle] = await db
+      .insert(vehicles)
+      .values({
+        id: uuid(11),
+        customerId,
+        year: 2020,
+        make: 'Honda',
+        model: 'Civic',
+        engine: 'private engine detail',
+        vin: 'PRIVATEVIN',
+        mileage: 42_000,
+        plate: 'PRIVATE',
+      })
+      .returning()
+    vehicleId = vehicle.id
+
+    const [ticket] = await db
+      .insert(tickets)
+      .values({
+        id: uuid(20),
+        shopId,
+        ticketNumber: 7,
+        source: 'counter',
+        customerId,
+        vehicleId,
+        concern: 'Persisted concern is not a Today card label',
+        createdByProfileId: actorProfileId,
+      })
+      .returning()
+    ticketId = ticket.id
+  })
+
+  afterEach(async () => close())
+
+  it('returns assigned diagnostic, repair, and maintenance jobs plus eligible open jobs in persisted order', async () => {
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        id: uuid(30),
+        shopId,
+        techId: actorProfileId,
+        intake: {
+          vehicleYear: 2020,
+          vehicleMake: 'Honda',
+          vehicleModel: 'Civic',
+          customerComplaint: 'No start',
+        },
+        treeState,
+      })
+      .returning()
+    await db.insert(ticketJobs).values([
+      {
+        id: uuid(43),
+        shopId,
+        ticketId,
+        title: 'Rotate tires',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+        assignedTechId: actorProfileId,
+        workStatus: 'blocked',
+        createdAt: new Date('2026-07-10T10:03:00Z'),
+      },
+      {
+        id: uuid(41),
+        shopId,
+        ticketId,
+        title: 'Diagnose no start',
+        kind: 'diagnostic',
+        requiredSkillTier: 2,
+        assignedTechId: actorProfileId,
+        sessionId: session.id,
+        workStatus: 'open',
+        createdAt: new Date('2026-07-10T10:01:00Z'),
+      },
+      {
+        id: uuid(42),
+        shopId,
+        ticketId,
+        title: 'Replace starter',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: actorProfileId,
+        workStatus: 'in_progress',
+        createdAt: new Date('2026-07-10T10:02:00Z'),
+      },
+      {
+        id: uuid(45),
+        shopId,
+        ticketId,
+        title: 'Tier two open diagnosis',
+        kind: 'diagnostic',
+        requiredSkillTier: 2,
+        createdAt: new Date('2026-07-10T10:05:00Z'),
+      },
+      {
+        id: uuid(44),
+        shopId,
+        ticketId,
+        title: 'Tier one open maintenance',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+        createdAt: new Date('2026-07-10T10:04:00Z'),
+      },
+      {
+        id: uuid(46),
+        shopId,
+        ticketId,
+        title: 'Tier three hidden repair',
+        kind: 'repair',
+        requiredSkillTier: 3,
+        createdAt: new Date('2026-07-10T10:06:00Z'),
+      },
+    ])
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result.myJobs.map((job) => [job.title, job.kind, job.workStatus])).toEqual([
+      ['Diagnose no start', 'diagnostic', 'open'],
+      ['Replace starter', 'repair', 'in_progress'],
+      ['Rotate tires', 'maintenance', 'blocked'],
+    ])
+    expect(result.openJobs.map((job) => job.title)).toEqual([
+      'Tier one open maintenance',
+      'Tier two open diagnosis',
+    ])
+    expect(result.myJobs[0]).toEqual({
+      id: uuid(41),
+      ticketId,
+      ticketNumber: 7,
+      customerName: 'Ada Driver',
+      vehicle: { year: 2020, make: 'Honda', model: 'Civic' },
+      title: 'Diagnose no start',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      sessionId: session.id,
+      workStatus: 'open',
+    })
+    expect(result.linkedSessionIds).toEqual([session.id])
+  })
+
+  it('excludes other tenants and terminal tickets or jobs without leaking profile or private customer/vehicle fields', async () => {
+    const [otherTicket] = await db
+      .insert(tickets)
+      .values({
+        id: uuid(50),
+        shopId: otherShopId,
+        ticketNumber: 1,
+        source: 'tech_quick',
+        concern: 'Hidden concern',
+        createdByProfileId: otherProfileId,
+      })
+      .returning()
+    await db.insert(ticketJobs).values([
+      {
+        id: uuid(51),
+        shopId: otherShopId,
+        ticketId: otherTicket.id,
+        title: 'Hidden cross-shop job',
+        kind: 'diagnostic',
+        requiredSkillTier: 1,
+      },
+      {
+        id: uuid(52),
+        shopId,
+        ticketId,
+        title: 'Done job',
+        kind: 'repair',
+        requiredSkillTier: 1,
+        assignedTechId: actorProfileId,
+        workStatus: 'done',
+      },
+      {
+        id: uuid(53),
+        shopId,
+        ticketId,
+        title: 'Canceled job',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+        workStatus: 'canceled',
+      },
+    ])
+    const [closedTicket] = await db
+      .insert(tickets)
+      .values({
+        id: uuid(54),
+        shopId,
+        ticketNumber: 8,
+        source: 'counter',
+        customerId,
+        vehicleId,
+        concern: 'Closed ticket',
+        status: 'closed',
+        createdByProfileId: actorProfileId,
+      })
+      .returning()
+    await db.insert(ticketJobs).values({
+      id: uuid(55),
+      shopId,
+      ticketId: closedTicket.id,
+      title: 'Open job on closed ticket',
+      kind: 'diagnostic',
+      requiredSkillTier: 1,
+      assignedTechId: actorProfileId,
+    })
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result).toEqual({ myJobs: [], openJobs: [], linkedSessionIds: [] })
+    expect(JSON.stringify(result)).not.toMatch(
+      /Taylor Tech|Hidden Technician|00000000-0000-4000-8000-00000000010[12]|North Shop|South Shop|private@example|PRIVATEVIN|PRIVATE|engine detail|Persisted concern|Hidden concern/,
+    )
+  })
+
+  it('gates all jobs to active same-shop Shop roles and gives null-tier actors assigned jobs but no Open Jobs', async () => {
+    await db.insert(ticketJobs).values([
+      {
+        shopId,
+        ticketId,
+        title: 'Assigned job',
+        kind: 'repair',
+        requiredSkillTier: 3,
+        assignedTechId: actorProfileId,
+        workStatus: 'blocked',
+      },
+      {
+        shopId,
+        ticketId,
+        title: 'Open job',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+      },
+    ])
+
+    await expect(
+      listTodayTicketJobs(db, { actor: { ...actor, skillTier: null } }),
+    ).resolves.toMatchObject({
+      myJobs: [{ title: 'Assigned job' }],
+      openJobs: [],
+    })
+
+    const deniedActors: TicketActor[] = [
+      { ...actor, shopId: null },
+      { ...actor, role: 'curator' },
+      { ...actor, membershipStatus: 'pending' },
+      { ...actor, deactivatedAt: new Date('2026-07-10T12:00:00Z') },
+    ]
+    for (const deniedActor of deniedActors) {
+      await expect(listTodayTicketJobs(db, { actor: deniedActor })).resolves.toEqual({
+        myJobs: [],
+        openJobs: [],
+        linkedSessionIds: [],
+      })
+    }
+  })
+})
