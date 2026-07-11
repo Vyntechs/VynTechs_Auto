@@ -103,11 +103,31 @@ describe('Shop OS quote draft mutations', () => {
     expect(result.line.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(result.line).not.toHaveProperty('shopId')
     expect(result.line).not.toHaveProperty('jobId')
+    expect(result.line).not.toHaveProperty('unitCostCents')
     expect(result.line).not.toHaveProperty('source')
     expect(result.line).not.toHaveProperty('partStatus')
     expect(result.line).not.toHaveProperty('vendorAccountId')
     expect(result.line).not.toHaveProperty('vendorSnapshot')
     expect(result.line).not.toHaveProperty('orderedAt')
+  })
+
+  it('never returns internal cost or vendor lifecycle fields from create or replace', async () => {
+    const created = await create(uuid(109))
+    if (!created.ok || !created.line) throw new Error('missing created line')
+    const replaced = await replaceDraftLine(db, {
+      actor, ticketId, jobId, lineId: created.line.id,
+      body: partBody({ description: 'Updated pads', unitCostCents: 8_000 }),
+    })
+    for (const result of [created, replaced]) {
+      const serialized = JSON.stringify(result)
+      expect(serialized).not.toContain('unitCostCents')
+      expect(serialized).not.toContain('vendorAccountId')
+      expect(serialized).not.toContain('externalOfferId')
+      expect(serialized).not.toContain('vendorSnapshot')
+      expect(serialized).not.toContain('partStatus')
+      expect(serialized).not.toContain('orderedAt')
+      expect(serialized).not.toContain('receivedAt')
+    }
   })
 
   it('reauthorizes the persisted actor and hides role, tenant, ticket, and job boundaries', async () => {

@@ -82,6 +82,28 @@ const quoteDecisionSchema = z.discriminatedUnion('decision', [
 ])
 
 export type QuoteActor = { profileId: string }
+export function quoteActorFromProfile(profile: { id: string }): QuoteActor {
+  return { profileId: profile.id }
+}
+
+export function quoteDomainStatus(
+  result: { ok: boolean; error?: 'invalid_input' | 'not_found' | 'conflict' },
+  successStatus = 200,
+): number {
+  if (result.ok) return successStatus
+  if (result.error === 'invalid_input') return 422
+  if (result.error === 'not_found') return 404
+  return 409
+}
+
+export function quoteErrorBody(result: {
+  error: 'invalid_input' | 'not_found' | 'conflict'
+  retryable?: boolean
+}): { error: typeof result.error; retryable?: true } {
+  return result.retryable
+    ? { error: result.error, retryable: true }
+    : { error: result.error }
+}
 export type SafeManualDraftLine = Pick<
   typeof jobLines.$inferSelect,
   | 'id'
@@ -93,7 +115,6 @@ export type SafeManualDraftLine = Pick<
   | 'taxable'
   | 'partNumber'
   | 'brand'
-  | 'unitCostCents'
   | 'coreChargeCents'
   | 'fitment'
   | 'laborHours'
@@ -106,6 +127,36 @@ export type QuoteDraftResult =
 
 export type QuoteDraftDependencies = {
   beforeMutation?: () => Promise<void>
+}
+
+export type QuoteBuilderResult =
+  | {
+    ok: true
+    builder: {
+      ticket: { id: string; status: 'open'; reconciled: boolean }
+      configuration: {
+        laborRateCents: number | null
+        taxRateBps: number | null
+        laborRateConfigured: boolean
+        taxRateConfigured: boolean
+      }
+      jobs: Array<{
+        id: string
+        title: string
+        kind: 'diagnostic' | 'repair' | 'maintenance'
+        workStatus: 'open' | 'in_progress' | 'blocked'
+        lines: Array<
+          Omit<SafeManualDraftLine, 'quantity' | 'laborHours'>
+          & { quantity: string; laborHours: string | null }
+        >
+      }>
+      activeVersion: { id: string; versionNumber: number } | null
+    }
+  }
+  | { ok: false; error: 'invalid_input' | 'not_found' | 'conflict'; retryable?: boolean }
+
+export type QuoteBuilderDependencies = {
+  afterTicketLock?: () => Promise<void>
 }
 
 export type QuoteDecisionResult =
@@ -258,11 +309,149 @@ function safeManualDraftLine(line: typeof jobLines.$inferSelect): SafeManualDraf
     taxable: line.taxable,
     partNumber: line.partNumber,
     brand: line.brand,
-    unitCostCents: line.unitCostCents,
     coreChargeCents: line.coreChargeCents,
     fitment: line.fitment,
     laborHours: line.laborHours,
     laborRateCents: line.laborRateCents,
+  }
+}
+
+export function publicManualDraftLine(line: SafeManualDraftLine): SafeManualDraftLine {
+  return {
+    id: line.id,
+    kind: line.kind,
+    description: line.description,
+    sort: line.sort,
+    quantity: line.quantity,
+    priceCents: line.priceCents,
+    taxable: line.taxable,
+    partNumber: line.partNumber,
+    brand: line.brand,
+    coreChargeCents: line.coreChargeCents,
+    fitment: line.fitment,
+    laborHours: line.laborHours,
+    laborRateCents: line.laborRateCents,
+  }
+}
+
+function safeBuilderLine(
+  line: typeof jobLines.$inferSelect,
+): Omit<SafeManualDraftLine, 'quantity' | 'laborHours'>
+  & { quantity: string; laborHours: string | null } {
+  const safe = safeManualDraftLine(line)
+  return {
+    ...safe,
+    quantity: canonicalStoredDecimal(line.quantity, 3),
+    laborHours: line.laborHours === null ? null : canonicalStoredDecimal(line.laborHours, 2),
+  }
+}
+
+class BuilderDataError extends Error {
+  constructor() {
+    super('invalid_quote_builder_data')
+  }
+}
+
+export async function getQuoteBuilder(
+  db: AppDb,
+  input: { actor: QuoteActor; ticketId: unknown },
+  dependencies: QuoteBuilderDependencies = {},
+): Promise<QuoteBuilderResult> {
+  const parsedTicket = uuidSchema.safeParse(input.ticketId)
+  if (!parsedTicket.success) return { ok: false, error: 'invalid_input' }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const actor = await loadActiveActor(transactionDb, input.actor)
+      if (!actor?.shopId) return { ok: false as const, error: 'not_found' as const }
+      const [ticket] = await transactionDb.select({
+        id: tickets.id,
+        status: tickets.status,
+        customerId: tickets.customerId,
+        vehicleId: tickets.vehicleId,
+      }).from(tickets).where(and(
+        eq(tickets.shopId, actor.shopId as string),
+        eq(tickets.id, parsedTicket.data),
+      )).limit(1).for('update', { noWait: true })
+      if (!ticket || ticket.status !== 'open') return { ok: false as const, error: 'not_found' as const }
+      await dependencies.afterTicketLock?.()
+
+      const [shop] = await transactionDb.select({
+        laborRateCents: shops.laborRateCents,
+        taxRateBps: shops.taxRateBps,
+      }).from(shops).where(eq(shops.id, actor.shopId as string)).limit(1)
+      if (!shop) return { ok: false as const, error: 'not_found' as const }
+
+      const allJobs = await transactionDb.select().from(ticketJobs).where(and(
+        eq(ticketJobs.shopId, actor.shopId as string),
+        eq(ticketJobs.ticketId, ticket.id),
+      )).orderBy(ticketJobs.createdAt, ticketJobs.id)
+      const eligibleJobs = allJobs.filter((job) =>
+        job.workStatus === 'open' || job.workStatus === 'in_progress' || job.workStatus === 'blocked')
+      const eligibleJobIds = eligibleJobs.map((job) => job.id)
+      const lines = eligibleJobIds.length === 0 ? [] : await transactionDb
+        .select()
+        .from(jobLines)
+        .where(and(
+          eq(jobLines.shopId, actor.shopId as string),
+          inArray(jobLines.jobId, eligibleJobIds),
+        ))
+        .orderBy(jobLines.sort, jobLines.createdAt, jobLines.id)
+      const activeVersions = await transactionDb.select({
+        id: quoteVersions.id,
+        versionNumber: quoteVersions.versionNumber,
+      }).from(quoteVersions).where(and(
+        eq(quoteVersions.shopId, actor.shopId as string),
+        eq(quoteVersions.ticketId, ticket.id),
+        isNull(quoteVersions.supersededAt),
+      )).orderBy(quoteVersions.id)
+      if (activeVersions.length > 1) {
+        return { ok: false as const, error: 'conflict' as const, retryable: false }
+      }
+
+      try {
+        return {
+          ok: true as const,
+          builder: {
+            ticket: {
+              id: safeUuid(ticket.id),
+              status: 'open' as const,
+              reconciled: ticket.customerId !== null && ticket.vehicleId !== null,
+            },
+            configuration: {
+              laborRateCents: safeMoney(shop.laborRateCents, true),
+              taxRateBps: shop.taxRateBps,
+              laborRateConfigured: shop.laborRateCents !== null,
+              taxRateConfigured: shop.taxRateBps !== null,
+            },
+            jobs: eligibleJobs.map((job) => ({
+              id: safeUuid(job.id),
+              title: job.title,
+              kind: job.kind,
+              workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
+              lines: lines
+                .filter((line) => line.jobId === job.id && isMutableManualLine(line))
+                .map(safeBuilderLine),
+            })),
+            activeVersion: activeVersions[0]
+              ? { id: safeUuid(activeVersions[0].id), versionNumber: activeVersions[0].versionNumber }
+              : null,
+          },
+        }
+      } catch (error) {
+        if (error instanceof TypeError || error instanceof RangeError) {
+          throw new BuilderDataError()
+        }
+        throw error
+      }
+    })
+  } catch (error) {
+    if (error instanceof BuilderDataError) {
+      return { ok: false, error: 'conflict', retryable: false }
+    }
+    if (isLockUnavailable(error)) return { ok: false, error: 'conflict', retryable: true }
+    throw error
   }
 }
 

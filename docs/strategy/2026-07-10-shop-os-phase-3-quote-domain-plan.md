@@ -66,9 +66,11 @@
 
 ## Task 6: Thin route shims
 
-- [ ] Add the safe builder GET plus line, version, and phone/in-person decision routes required by row 18.
-- [ ] Authenticate, paywall-check, validate strict JSON, translate current profile, and map discriminated outcomes.
-- [ ] Prove route verbs, malformed JSON, auth/paywall, privacy-safe 404, conflict, and success mappings.
+- [x] Add the safe builder GET plus line, version, and phone/in-person decision routes required by row 18.
+- [x] Authenticate, paywall-check, validate strict JSON, translate current profile, and map discriminated outcomes.
+- [x] Prove route verbs, malformed JSON, auth/paywall, privacy-safe 404, conflict, and success mappings.
+
+**Task-6 verification boundary:** PGlite proves ticket-first generated `NOWAIT` ordering and injected `55P03` rollback/classification. True two-connection PostgreSQL wait timing remains deferred to PostgreSQL integration proof.
 
 ## Task 7: Verify, reconcile, and ship
 
