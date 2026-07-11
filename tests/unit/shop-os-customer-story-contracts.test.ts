@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CUSTOMER_STORY_WAIVER,
   parsePersistedCustomerStory,
   parsePersistedCustomerStoryMeta,
   parseQuoteStorySnapshotMeta,
@@ -26,6 +27,12 @@ const reviewedAudit = {
 }
 
 describe('customer story persisted contracts', () => {
+  it('owns the exact neutral waiver used by every persisted story path', () => {
+    expect(CUSTOMER_STORY_WAIVER).toBe(
+      'If you choose not to proceed, the diagnosed issue remains unresolved.',
+    )
+  })
+
   it('normalizes review input and rejects invisible/control narratives', () => {
     expect(customerStoryReviewTextSchema.parse('  Visible finding.\r\n\u200b ')).toBe('Visible finding.')
     for (const value of ['', ' \n\t ', '\u200b\u200c\u2060', '\u0000\u0007']) {

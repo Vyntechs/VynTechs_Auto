@@ -22,6 +22,7 @@ import {
 } from '@/lib/ai/customer-story'
 import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
 import {
+  CUSTOMER_STORY_WAIVER,
   customerStoryReviewTextSchema,
   parsePersistedCustomerStory,
   parsePersistedCustomerStoryMeta,
@@ -37,7 +38,6 @@ const MAX_STRUCTURED_BYTES = 20_000
 const MAX_PROVIDER_BYTES = 64_000
 const WORKSPACE_SCAN_CHUNK = 50
 const MAX_WORKSPACE_SCAN_CHUNKS = 4
-const WAIVER = 'If you choose not to proceed, the diagnosed issue remains unresolved.'
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const idListSchema = z.array(uuidSchema).max(MAX_SELECTED).superRefine((ids, ctx) => {
@@ -584,7 +584,7 @@ function assembleStory(context: Context, selected: GeneratedEvidenceSelection): 
     whatYouToldUs: context.concern,
     whatWeFound: context.rootCause,
     howWeKnow,
-    whatItMeansIfWaived: WAIVER,
+    whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
     whatWeRecommend: context.action,
   }
 }
@@ -868,7 +868,7 @@ function validateReviewBinding(
       source: 'manual',
       binding: {
         source: 'manual', sessionId: context.session.id, concern: context.ticket.concern,
-        waiver: WAIVER, proof: [], generation: null,
+        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
       },
     }
   }
@@ -880,7 +880,7 @@ function validateReviewBinding(
       meta.sessionId !== context.session.id
     ) return { ok: false, failure: fail('unsupported_path', false) }
     if (
-      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== WAIVER ||
+      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
       !meta.generatedAt || !meta.generationClientKey || !meta.generationRequestFingerprint ||
       !meta.generatedByProfileId
     ) return { ok: false, failure: fail('conflict', false) }
@@ -889,7 +889,7 @@ function validateReviewBinding(
       source: 'ai',
       binding: {
         source: 'ai', sessionId: context.session.id, concern: context.ticket.concern,
-        waiver: WAIVER, proof: story.howWeKnow,
+        waiver: CUSTOMER_STORY_WAIVER, proof: story.howWeKnow,
         generation: {
           generatedAt: meta.generatedAt,
           generationClientKey: meta.generationClientKey,
@@ -910,7 +910,7 @@ function validateReviewBinding(
     if (
       meta.reviewStatus !== 'reviewed' || meta.storyRevision === undefined || meta.storyRevision < 1 ||
       !meta.reviewClientKey || !meta.reviewRequestFingerprint || !meta.reviewedByProfileId || !meta.reviewedAt ||
-      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== WAIVER ||
+      story.whatYouToldUs !== context.ticket.concern || story.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
       story.howWeKnow.length > 0
     ) return { ok: false, failure: fail('conflict', false) }
     return {
@@ -918,7 +918,7 @@ function validateReviewBinding(
       source: 'manual',
       binding: {
         source: 'manual', sessionId: context.session.id, concern: context.ticket.concern,
-        waiver: WAIVER, proof: [], generation: null,
+        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
       },
     }
   }
@@ -991,7 +991,7 @@ export async function saveReviewedCustomerStory(
           whatYouToldUs: context.ticket.concern,
           whatWeFound: input.whatWeFound,
           howWeKnow: [],
-          whatItMeansIfWaived: WAIVER,
+          whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
           whatWeRecommend: input.whatWeRecommend,
         }
       } else {

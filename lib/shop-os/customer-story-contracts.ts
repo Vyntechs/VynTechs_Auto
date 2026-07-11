@@ -4,6 +4,8 @@ import type { CustomerStory, CustomerStoryMeta } from '@/lib/db/schema'
 
 const MAX_STORY_BYTES = 5_000
 const MAX_CLAIM_BYTES = 2_000
+export const CUSTOMER_STORY_WAIVER =
+  'If you choose not to proceed, the diagnosed issue remains unresolved.'
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
 const zeroWidth = /[\u200B-\u200D\u2060\uFEFF]/gu
 const forbiddenControl = /[\p{Cc}\p{Cf}]/u
