@@ -47,9 +47,9 @@
 
 ## Task 5: Prepare immutable quote
 
-- [ ] Enable `Prepare quote` only when the visible state can form a reconciled nonempty quote with configured tax and valid persisted line prices; do not require a global labor rate when labor has explicit pricing.
-- [ ] POST the bodyless version route, render created/retried version truth, and refresh exact server state.
-- [ ] Prove blocked reasons, no-rate explicit-price success, no-rate calculated-price failure, 201/200 behavior, busy conflict, active-version invalidation after a line change, and no send/approval/authorization wording.
+- [x] Enable `Prepare quote` only when the visible state can form a reconciled nonempty quote with configured tax and valid persisted line prices; do not require a global labor rate when labor has explicit pricing.
+- [x] POST the bodyless version route, render created/retried version truth, and refresh exact server state.
+- [x] Prove blocked reasons, no-rate explicit-price success, no-rate calculated-price failure, 201/200 behavior, busy conflict, active-version invalidation after a line change, and no send/approval/authorization wording.
 
 ## Task 6: Visual, accessibility, and independent review
 

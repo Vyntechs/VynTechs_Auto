@@ -7,7 +7,9 @@ import {
   buildManualLineInput,
   classifyQuoteFailure,
   formatMoneyCents,
+  getQuotePreparationState,
   parseQuoteBuilderProjection,
+  parsePreparedVersionResponse,
   summarizeQuoteMoney,
   type ManualLineFormValues,
   type ManualLineKind,
@@ -49,6 +51,13 @@ export function ManualQuoteBuilder({
 
   const lines = current.jobs.flatMap((job) => job.lines)
   const totals = summarizeQuoteMoney(lines, current.configuration.taxRateBps)
+  const preparation = getQuotePreparationState({
+    builder: current,
+    totals,
+    editorOpen: editor !== null,
+    modalOpen: modal !== null,
+    busy,
+  })
 
   function beginOperation(): boolean {
     if (inFlightRef.current) return false
@@ -114,6 +123,7 @@ export function ManualQuoteBuilder({
     nextFocus?: string,
     closeEditor = false,
     nested = false,
+    expectedVersion?: { id: string; versionNumber: number },
   ): Promise<boolean> {
     const ownsOperation = !nested
     if (ownsOperation && !beginOperation()) return false
@@ -130,7 +140,14 @@ export function ManualQuoteBuilder({
         ? parseQuoteBuilderProjection((body as { builder: unknown }).builder)
         : null
       if (!refreshed || refreshed.ticket.id !== ticket.id.toLowerCase()) {
-        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: false })
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return false
+      }
+      if (expectedVersion && (
+        refreshed.activeVersion?.id !== expectedVersion.id
+        || refreshed.activeVersion.versionNumber !== expectedVersion.versionNumber
+      )) {
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return false
       }
       setCurrent(refreshed)
@@ -230,6 +247,32 @@ export function ManualQuoteBuilder({
       await refreshQuote(`add:${jobId}:part`, false, true)
     } catch {
       closeModal()
+      setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
+    } finally {
+      endOperation()
+    }
+  }
+
+  async function prepareQuote(): Promise<void> {
+    if (preparation.kind !== 'ready' || !beginOperation()) return
+    setError(null)
+    try {
+      const response = await fetch(`/api/tickets/${ticket.id}/quote/versions`, {
+        method: 'POST',
+        headers: { accept: 'application/json' },
+      })
+      const body = await readJson(response)
+      if (!response.ok) {
+        applyFailure(response.status, body)
+        return
+      }
+      const prepared = parsePreparedVersionResponse(response.status, body)
+      if (!prepared) {
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return
+      }
+      await refreshQuote('prepared', false, true, prepared.version)
+    } catch {
       setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
     } finally {
       endOperation()
@@ -455,11 +498,37 @@ export function ManualQuoteBuilder({
               </div>
             </dl>
           )}
-          <p className={styles.version}>
-            {current.activeVersion
-              ? `Current prepared version · V${current.activeVersion.versionNumber}`
-              : 'No prepared version'}
-          </p>
+          {!current.activeVersion && <p className={styles.version}>No prepared version</p>}
+          {preparation.kind === 'prepared' ? (
+            <p
+              className={styles.preparedState}
+              role="status"
+              aria-live="polite"
+              tabIndex={-1}
+              ref={(element) => {
+                if (element) focusRefs.current.set('prepared', element)
+                else focusRefs.current.delete('prepared')
+              }}
+            >
+              Prepared version V{preparation.version.versionNumber}
+            </p>
+          ) : (
+            <div className={styles.prepareState}>
+              {preparation.kind === 'blocked' && (
+                <ul>
+                  {preparation.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              )}
+              <button
+                type="button"
+                className={styles.prepareAction}
+                disabled={preparation.kind !== 'ready'}
+                onClick={prepareQuote}
+              >
+                {busy ? 'Preparing…' : 'Prepare quote'}
+              </button>
+            </div>
+          )}
         </aside>
       </div>
 

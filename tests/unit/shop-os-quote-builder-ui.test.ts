@@ -3,10 +3,77 @@ import {
   buildManualLineInput,
   classifyQuoteFailure,
   formatMoneyCents,
+  getQuotePreparationState,
   parseMoneyToCents,
   parseQuoteBuilderProjection,
+  parsePreparedVersionResponse,
   summarizeQuoteMoney,
 } from '@/lib/shop-os/quote-builder-ui'
+
+describe('quote preparation readiness', () => {
+  const readyBuilder = parseQuoteBuilderProjection({
+    ticket: { id: '00000000-0000-4000-8000-000000000101', status: 'open', reconciled: true },
+    configuration: {
+      laborRateCents: null, taxRateBps: 825,
+      laborRateConfigured: false, taxRateConfigured: true,
+    },
+    jobs: [{
+      id: '00000000-0000-4000-8000-000000000201', title: 'Labor', kind: 'repair', workStatus: 'open',
+      lines: [{
+        id: '00000000-0000-4000-8000-000000000301', kind: 'labor', description: 'Explicit labor',
+        sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
+        partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+        laborHours: '1', laborRateCents: null,
+      }],
+    }],
+    activeVersion: null,
+  })!
+
+  it('allows explicitly priced persisted labor without a global labor rate', () => {
+    expect(getQuotePreparationState({
+      builder: readyBuilder,
+      totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
+      editorOpen: false, modalOpen: false, busy: false,
+    })).toEqual({ kind: 'ready', reasons: [] })
+  })
+
+  it('lists every actionable block without adding a labor-rate requirement', () => {
+    const blocked = {
+      ...readyBuilder,
+      ticket: { ...readyBuilder.ticket, reconciled: false },
+      configuration: { ...readyBuilder.configuration, taxRateBps: null, taxRateConfigured: false },
+      jobs: [{ ...readyBuilder.jobs[0], lines: [] }],
+    }
+    expect(getQuotePreparationState({
+      builder: blocked,
+      totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
+    })).toEqual({ kind: 'blocked', reasons: [
+      'Add customer and vehicle.', 'Configure a tax rate.', 'Add at least one quote line.',
+      'Review stored quote amounts.', 'Finish or cancel the open line editor.',
+      'Finish the open confirmation.', 'Wait for the current quote update.',
+    ] })
+  })
+
+  it('treats an active version as already prepared', () => {
+    const active = {
+      ...readyBuilder,
+      activeVersion: { id: '00000000-0000-4000-8000-000000000401', versionNumber: 4 },
+    }
+    expect(getQuotePreparationState({
+      builder: active, totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
+    })).toEqual({ kind: 'prepared', version: active.activeVersion })
+  })
+
+  it('strictly validates 201-created and 200-existing version responses', () => {
+    const version = { id: '00000000-0000-4000-8000-000000000401', versionNumber: 1 }
+    expect(parsePreparedVersionResponse(201, { changed: true, version })).toEqual({ changed: true, version })
+    expect(parsePreparedVersionResponse(200, { changed: false, version })).toEqual({ changed: false, version })
+    expect(parsePreparedVersionResponse(200, { changed: true, version })).toBeNull()
+    expect(parsePreparedVersionResponse(201, { changed: false, version })).toBeNull()
+    expect(parsePreparedVersionResponse(201, { changed: true, version, extra: true })).toBeNull()
+    expect(parsePreparedVersionResponse(201, { changed: true, version: { ...version, versionNumber: 0 } })).toBeNull()
+  })
+})
 
 describe('quote builder refresh projection validation', () => {
   const valid = {

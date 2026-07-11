@@ -97,7 +97,7 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.getByText('PAD-1 · ACME')).toBeInTheDocument()
     expect(screen.getByText('Fitment · Front axle')).toBeInTheDocument()
     expect(screen.getByText('Included in line price · $25.00')).toBeInTheDocument()
-    expect(screen.getByText('Current prepared version · V3')).toBeInTheDocument()
+    expect(screen.getAllByText('Prepared version V3')).toHaveLength(1)
 
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(within(tape).getByText('$312.50')).toBeInTheDocument()
@@ -247,6 +247,7 @@ describe('ManualQuoteBuilder line mutations', () => {
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/tickets/${TICKET_ID}/quote`, expect.objectContaining({ method: 'GET' }))
     expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
     expect(document.activeElement).toHaveTextContent('Premium pad set')
   })
 
@@ -486,6 +487,7 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.change(screen.getByLabelText('Line price'), { target: { value: '5.00' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Add fee line' })).toBeInTheDocument()
     expect(screen.getByText('Front pad set')).toBeInTheDocument()
   })
@@ -519,6 +521,170 @@ describe('ManualQuoteBuilder line mutations', () => {
     const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'), 'utf8')
     expect(css).toMatch(/\.lineAction[\s\S]*min-height:\s*44px/)
     expect(css).toMatch(/\.editor input[\s\S]*min-height:\s*44px/)
+  })
+})
+
+describe('ManualQuoteBuilder preparation', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    router.push.mockReset()
+    router.replace.mockReset()
+  })
+
+  function ready(overrides: Partial<Builder> = {}): Builder {
+    return builder({ activeVersion: null, ...overrides })
+  }
+
+  it('lists visible reasons and disables preparation until persisted truth is ready', () => {
+    render(<ManualQuoteBuilder ticket={{ ...ticket, customer: null, vehicle: null }} builder={ready({
+      ticket: { id: TICKET_ID, status: 'open', reconciled: false },
+      configuration: {
+        laborRateCents: null, taxRateBps: null,
+        laborRateConfigured: false, taxRateConfigured: false,
+      },
+      jobs: [{ ...builder().jobs[0], lines: [] }],
+    })} />)
+    expect(screen.getByText('Add customer and vehicle.')).toBeInTheDocument()
+    expect(screen.getByText('Configure a tax rate.')).toBeInTheDocument()
+    expect(screen.getByText('Add at least one quote line.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
+  })
+
+  it('does not require a global labor rate for explicitly priced persisted labor', () => {
+    const explicitLabor = line({
+      id: PINNED_LINE_ID, kind: 'labor', description: 'Explicit labor', quantity: '1',
+      laborHours: '1', laborRateCents: null, priceCents: 10_000,
+      partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+    })
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready({
+      configuration: {
+        laborRateCents: null, taxRateBps: 825,
+        laborRateConfigured: false, taxRateConfigured: true,
+      },
+      jobs: [{ ...builder().jobs[0], lines: [explicitLabor] }],
+    })} />)
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+    expect(screen.queryByText(/Configure a labor rate/i)).toBeNull()
+  })
+
+  it('blocks preparation while a no-rate labor editor has no explicit line price', () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready({
+      configuration: {
+        laborRateCents: null, taxRateBps: 825,
+        laborRateConfigured: false, taxRateConfigured: true,
+      },
+    })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))
+    expect(screen.getByText('Finish or cancel the open line editor.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Labor' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    expect(screen.getByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [201, true],
+    [200, false],
+  ])('prepares through a bodyless %i response then mandatory refreshed truth', async (status, changed) => {
+    const active = { id: VERSION_ID, versionNumber: 4 }
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(status, { changed, version: active }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    const preparedStatus = await screen.findByRole('status')
+    expect(preparedStatus).toHaveTextContent('Prepared version V4')
+    expect(preparedStatus).toHaveAttribute('aria-live', 'polite')
+    expect(document.activeElement).toBe(preparedStatus)
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/tickets/${TICKET_ID}/quote/versions`)
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'POST', headers: { accept: 'application/json' },
+    })
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/tickets/${TICKET_ID}/quote`)
+    expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
+  })
+
+  it.each([
+    [201, { changed: false, version: { id: VERSION_ID, versionNumber: 1 } }],
+    [200, { changed: false, version: { id: 'bad', versionNumber: 1 } }],
+    [201, { changed: true, version: { id: VERSION_ID, versionNumber: 1 }, extra: true }],
+  ])('rejects malformed successful version response without replacing truth', async (status, body) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(status, body))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers a malformed version success through a validated refresh', async () => {
+    const active = { id: VERSION_ID, versionNumber: 4 }
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, { changed: true, version: active, extra: true }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    await screen.findByText('Review the visible fields, then refresh and retry.')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared version V4')
+  })
+
+  it('rejects refreshed truth that does not contain the exact prepared version', async () => {
+    const version = { id: VERSION_ID, versionNumber: 4 }
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, { changed: true, version }))
+      .mockResolvedValueOnce(response(200, { builder: ready() }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: version }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared version V4')
+  })
+
+  it.each([
+    [401, { error: 'unauthenticated' }, `/sign-in?next=${encodeURIComponent(`/tickets/${TICKET_ID}/quote`)}`],
+    [403, { error: 'deactivated' }, '/deactivated'],
+    [403, { error: 'paywall' }, '/subscribe'],
+  ])('maps prepare access %i without issuing a refresh', async (status, body, destination) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(status, body))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith(destination))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes rapid preparation and exposes retryable busy failure', async () => {
+    let resolvePrepare!: (value: Response) => void
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolvePrepare = resolve }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    const prepare = screen.getByRole('button', { name: 'Prepare quote' })
+    fireEvent.click(prepare)
+    fireEvent.click(prepare)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    resolvePrepare(response(409, { error: 'conflict', retryable: true }))
+    expect(await screen.findByText('Quote is busy. Refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
+  })
+
+  it('shows network failure without inventing a cause or forbidden action wording', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('offline'))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    expect(await screen.findByText('Connection interrupted. Retry with the same details.')).toBeInTheDocument()
+    const actionCopy = screen.getAllByRole('button').map((button) => button.textContent).join(' ')
+    expect(actionCopy).not.toMatch(/send|approve|authorize|start work/i)
+  })
+
+  it('keeps preparation at least 44px', () => {
+    const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'), 'utf8')
+    expect(css).toMatch(/\.prepareAction[\s\S]*min-height:\s*44px/)
   })
 })
 

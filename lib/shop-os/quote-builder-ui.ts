@@ -102,6 +102,26 @@ export function parseQuoteBuilderProjection(value: unknown): QuoteBuilderProject
   return parsed.success ? parsed.data as QuoteBuilderProjection : null
 }
 
+const preparedVersionResponseSchema = z.strictObject({
+  changed: z.boolean(),
+  version: z.strictObject({
+    id: uuidSchema,
+    versionNumber: z.number().int().min(1).max(2_147_483_647),
+  }),
+})
+
+export function parsePreparedVersionResponse(
+  status: number,
+  value: unknown,
+): { changed: boolean; version: { id: string; versionNumber: number } } | null {
+  const parsed = preparedVersionResponseSchema.safeParse(value)
+  if (!parsed.success) return null
+  if (status === 201 && parsed.data.changed !== true) return null
+  if (status === 200 && parsed.data.changed !== false) return null
+  if (status !== 200 && status !== 201) return null
+  return parsed.data
+}
+
 export function parseMoneyToCents(value: string): number {
   const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value)
   if (!match) throw new RangeError('money must be a nonnegative plain decimal')
@@ -139,6 +159,34 @@ export type QuoteMoneySummary =
     taxConfigured: false
   }
   | { ok: false }
+
+export type QuotePreparationState =
+  | { kind: 'prepared'; version: { id: string; versionNumber: number } }
+  | { kind: 'ready'; reasons: [] }
+  | { kind: 'blocked'; reasons: string[] }
+
+export function getQuotePreparationState(input: {
+  builder: QuoteBuilderProjection
+  totals: QuoteMoneySummary
+  editorOpen: boolean
+  modalOpen: boolean
+  busy: boolean
+}): QuotePreparationState {
+  if (input.builder.activeVersion) {
+    return { kind: 'prepared', version: input.builder.activeVersion }
+  }
+  const reasons: string[] = []
+  if (!input.builder.ticket.reconciled) reasons.push('Add customer and vehicle.')
+  if (input.builder.configuration.taxRateBps === null) reasons.push('Configure a tax rate.')
+  if (!input.builder.jobs.some((job) => job.lines.length > 0)) {
+    reasons.push('Add at least one quote line.')
+  }
+  if (!input.totals.ok) reasons.push('Review stored quote amounts.')
+  if (input.editorOpen) reasons.push('Finish or cancel the open line editor.')
+  if (input.modalOpen) reasons.push('Finish the open confirmation.')
+  if (input.busy) reasons.push('Wait for the current quote update.')
+  return reasons.length === 0 ? { kind: 'ready', reasons: [] } : { kind: 'blocked', reasons }
+}
 
 export function summarizeQuoteMoney(
   lines: readonly { priceCents: number; taxable: boolean }[],
