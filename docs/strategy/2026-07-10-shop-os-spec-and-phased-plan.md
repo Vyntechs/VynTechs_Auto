@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 rows 16–18 are complete; row 19 is active on `feat/shop-os-p3-canned-jobs`.** Production application, production migrations, external access, and feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 rows 16–19 are complete; row 20 is next.** The approved production migrations through quote foundation were applied and verified on 2026-07-11. External access, spend, and later feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -674,7 +674,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Source rows 1–5 and 7–18 are complete. Row 19 is active on `feat/shop-os-p3-canned-jobs`; row 6, production migration/app enablement, and external account/spend rows remain owner gates.
+3. Rows 1–3 and 5–19 are complete. Row 20 is next; later production feature enablement and external account/spend rows remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -717,7 +717,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 3 | 0 | Reconciliation migration + rollback draft, RLS/grants, local proof | S | 2 | complete | [Phase-0 packet](./2026-07-10-shop-os-phase-0-reconciliation-plan.md) + 11 tests; no production apply |
 | 4 | 0 | Vendor identity/access discovery: PartsTech, O'Reilly, Tri State, RepairPal | X | 1 | owner_gate | External representation/account access |
 | 5 | 1 | Source schema/migration: canonical tickets/jobs, legacy mapping, numbering, tier/roles | S | 3 | complete | PR #117; 15 focused + 1,495 full tests; no production apply |
-| 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | owner_gate | Brandon approves production data/schema change |
+| 6 | 1 | Apply approved reconciliation migration + verify live advisors | S | 5 | complete | Brandon approved 2026-07-11; applied `shop_os_ticket_spine`, `team_membership_lifecycle`, and `shop_os_quote_foundation`; live data/schema invariants passed; advisor follow-up recorded |
 | 7 | 1 | Capability helpers + team/invite/update APIs and last-owner guard | R | 5 | complete | PR #118; 65 focused + 1,519 full tests; no production apply |
 | 8 | 1 | Ticket/job handlers, queries, API, and access tests | LT | 5 | complete | PR #119; 40 focused + 1,559 full tests; no production apply |
 | 9 | 1 | Real ticket detail/read surface | A | 8 | complete | PR #120; 18 focused + 1,577 full tests; [execution packet](./2026-07-10-shop-os-phase-1-ticket-detail-plan.md) |
@@ -730,7 +730,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | complete | PR #127; 3 focused files/25 tests + 210 files/1,876 full tests; source/local proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
 | 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | complete | PR #128; 6 focused files/113 tests + 216 files/1,989 full tests; [execution packet](./2026-07-10-shop-os-phase-3-quote-domain-plan.md); no production apply |
 | 18 | 3 | Manual quote builder + totals | A | 17 | complete | PR #129; 11 focused files/216 tests + 219 files/2,073 full tests; [execution packet](./2026-07-11-shop-os-phase-3-manual-quote-builder-plan.md) |
-| 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | in progress | PR #130; `feat/shop-os-p3-canned-jobs`; [execution packet](./2026-07-11-shop-os-phase-3-canned-jobs-plan.md); copied lines remain complete visible manual truth |
+| 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | complete | PR #130; [execution packet](./2026-07-11-shop-os-phase-3-canned-jobs-plan.md); copied lines remain complete visible manual truth |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | pending | Tree/published-wizard only |
 | 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | pending | — |
 | 22 | 3 | Ticket-aware repair + declined/no-repair closeout guards across handler/API/UI | I | 15,17 | pending | Authorization seam; legacy sessions unchanged |

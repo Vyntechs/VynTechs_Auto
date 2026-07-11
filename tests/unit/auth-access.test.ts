@@ -197,6 +197,7 @@ describe('isPaywallExempt', () => {
       '/reset-password',
       '/privacy',
       '/terms',
+      '/sw.js',
     ])('exempts %s', (path) => {
       expect(isPaywallExempt(path)).toBe(true)
     })
