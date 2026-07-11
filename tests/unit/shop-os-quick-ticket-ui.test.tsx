@@ -285,11 +285,14 @@ describe('QuickTicket', () => {
     expect(keys[2]).not.toBe(keys[0])
   })
 
-  it('refreshes definitive stale canned context, reconciles selection, rotates identity, and restores focus', async () => {
+  it.each([
+    ['conflict', 409, { error: 'conflict', retryable: false }],
+    ['retired template', 404, { error: 'not_found' }],
+  ] as const)('refreshes %s canned context, reconciles selection, rotates identity, and restores focus', async (_case, status, errorBody) => {
     const refreshedJob = { ...cannedJob, title: 'Updated oil service', fingerprint: 'b'.repeat(64) }
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce({
-        ok: false, status: 409, json: async () => ({ error: 'conflict' }),
+        ok: false, status, json: async () => errorBody,
       } as Response)
       .mockResolvedValueOnce({
         ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }),

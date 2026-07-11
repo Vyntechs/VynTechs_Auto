@@ -237,7 +237,10 @@ export function QuickTicket({
       try { payload = await response.json() } catch { payload = null }
       const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
       const ticketId = response.status === 201 ? ticketIdFromResponse(payload) : null
-      if (response.status === 409 && record.retryable !== true) {
+      if (
+        (response.status === 409 && record.retryable !== true)
+        || (response.status === 404 && quoteMode === 'canned')
+      ) {
         setCatalogRefreshRequired(true)
         setError('Quote or canned-job context changed. Refresh canned jobs and choose again.')
         setBusy(false)

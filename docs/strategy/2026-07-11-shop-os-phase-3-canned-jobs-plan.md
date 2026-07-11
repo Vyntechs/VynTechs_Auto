@@ -55,11 +55,11 @@
 
 ## Task 7: Visual, accessibility, and independent review
 
-- [ ] Prove changed Quick Quote controls at desktop and 375px: native labels, visible focus, 44px targets, stale-refresh focus, safe-area footer, keyboard clearance, mode switching, and calm errors.
-- [ ] Run the loaded configured-tax existing-vehicle canned fixture from first interaction through visible Prepared V1, recording elapsed time, tap/key count, and exact preview/display/snapshot total equality; if browser authentication/environment blocks it, record the exact gate without claiming elapsed success.
-- [ ] Independently review product truth, money, tenant/privacy, idempotency, accessibility, and future-row scope; resolve every finding.
+- [x] Prove changed Quick Quote controls at desktop and 375px: native labels, visible focus, 44px targets, stale-refresh focus, safe-area footer, keyboard clearance, mode switching, and calm errors.
+- [x] Run the loaded configured-tax existing-vehicle canned fixture from first interaction through visible Prepared V1, recording elapsed time, tap/key count, and exact preview/display/snapshot total equality; if browser authentication/environment blocks it, record the exact gate without claiming elapsed success.
+- [x] Independently review product truth, money, tenant/privacy, idempotency, accessibility, and future-row scope; resolve every finding.
 
-Browser proof gate recorded 2026-07-11: Chrome and the ChatGPT Chrome Extension are installed, but Chrome is not running. The browser-control contract requires Brandon's explicit permission to launch it, so no elapsed-time or rendered-browser success is claimed.
+Browser proof gate recorded 2026-07-11: the ready Vercel preview was opened through the in-app browser at `/tickets/new` and redirected to `/sign-in?next=%2Ftickets%2Fnew`. Completing the loaded shop fixture requires an authenticated shop account; no credentials were requested or transmitted, and no elapsed-time or rendered-feature success is claimed. The earlier Chrome path also remains gated because Chrome is not running and explicit launch permission is required.
 
 ## Task 8: Verify, reconcile, and ship
 
