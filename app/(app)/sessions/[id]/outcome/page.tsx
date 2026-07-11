@@ -5,6 +5,8 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { getSessionForUser } from '@/lib/sessions'
 import { OutcomeCapture } from '@/components/screens/outcome-capture'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
+import { resolveDiagnosticRepairAccess } from '@/lib/shop-os/repair-authorization'
+import { DeclinedNoRepairClose } from '@/components/screens/declined-no-repair-close'
 
 export default async function OutcomePage({
   params,
@@ -26,6 +28,22 @@ export default async function OutcomePage({
   // already closed (server returns 400 'session is not open' but the form
   // looks alive).
   if (session.status === 'closed') {
+    redirect(`/sessions/${session.id}`)
+  }
+
+  const repairAccess = await resolveDiagnosticRepairAccess(db, {
+    shopId: session.shopId,
+    sessionId: session.id,
+  })
+  if (repairAccess.state === 'declined') {
+    return (
+      <DeclinedNoRepairClose
+        sessionId={session.id}
+        vehicleName={formatVehicleName(session.intake)}
+      />
+    )
+  }
+  if (repairAccess.state !== 'legacy' && repairAccess.state !== 'approved') {
     redirect(`/sessions/${session.id}`)
   }
 

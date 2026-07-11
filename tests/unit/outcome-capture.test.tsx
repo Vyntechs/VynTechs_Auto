@@ -121,6 +121,28 @@ describe('OutcomeCapture (wired)', () => {
     expect(hrefSetter).not.toHaveBeenCalled()
   })
 
+  it('turns a revoked approval race into technician-facing guidance', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'repair_not_authorized' }),
+        text: async () => '{"error":"repair_not_authorized"}',
+      }),
+    )
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    fillSpecificRootCause()
+    fireEvent.change(screen.getByLabelText(/part name/i), {
+      target: { value: 'Vacuum line' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Repair approval changed. Return to the diagnosis and refresh before continuing.',
+    )
+  })
+
   it('omits partInfo from payload when actionType is not part_replacement', async () => {
     vi.stubGlobal(
       'fetch',

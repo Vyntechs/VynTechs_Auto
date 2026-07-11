@@ -29,7 +29,13 @@ export function RepairAskForm({ sessionId }: Props) {
     if (!res.ok) {
       setBusy(false)
       const data = await res.json().catch(() => ({}))
-      setError(data?.error || 'Could not submit. Try again?')
+      setError(
+        data?.error === 'repair_not_authorized'
+          ? 'Repair approval changed. Refresh the diagnosis before continuing.'
+          : data?.error === 'conflict'
+            ? 'Repair order changed. Refresh and try again.'
+            : data?.error || 'Could not submit. Try again?',
+      )
       return
     }
 

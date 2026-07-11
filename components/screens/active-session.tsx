@@ -14,18 +14,20 @@ import { AbandonButton } from './abandon-button'
 import { AiUnverifiedBanner } from './ai-unverified-banner'
 import { DiagnosisProposedReview } from './diagnosis-proposed-review'
 import { RepairPhaseView } from './repair-phase-view'
+import type { DiagnosticRepairAccess } from '@/lib/shop-os/repair-authorization'
 
 type Props = {
   session: Session
   events?: SessionEvent[]
+  repairAccess?: DiagnosticRepairAccess
 }
 
-export function ActiveSession({ session, events = [] }: Props) {
+export function ActiveSession({ session, events = [], repairAccess }: Props) {
   const phase = session.treeState.phase ?? 'diagnosing'
   const done = session.treeState.done === true
 
   if (phase === 'repairing') {
-    return <RepairPhaseView session={session} events={events} />
+    return <RepairPhaseView session={session} events={events} repairAccess={repairAccess} />
   }
   if (phase === 'diagnosing' && done) {
     return <DiagnosisProposedReview session={session} />

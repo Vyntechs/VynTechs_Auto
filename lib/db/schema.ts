@@ -210,6 +210,7 @@ export type OutcomePayload = {
   diagMinutes: number
   repairMinutes: number
   notes?: string
+  closeout?: { kind: 'declined_no_repair' }
   override?: { at: string; lastFeedback: string }
 }
 
