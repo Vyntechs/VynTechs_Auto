@@ -54,9 +54,6 @@ export const outcomeSchema = z.object({
   diagMinutes: z.number().nonnegative(),
   repairMinutes: z.number().nonnegative(),
   notes: z.string().max(2000).optional(),
-  closeout: z
-    .strictObject({ kind: z.literal('declined_no_repair') })
-    .optional(),
   override: z
     .object({
       at: z.string().datetime({ offset: true }),

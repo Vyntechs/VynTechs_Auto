@@ -23,20 +23,25 @@ export function DeclinedNoRepairClose({
     if (busy) return
     setBusy(true)
     setError(null)
-    const response = await fetch(`/api/sessions/${sessionId}/close`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        mode: 'declined_no_repair',
-        ...(note.trim() ? { note: note.trim() } : {}),
-      }),
-    })
-    if (!response.ok) {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/close`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'declined_no_repair',
+          ...(note.trim() ? { note: note.trim() } : {}),
+        }),
+      })
+      if (!response.ok) {
+        setBusy(false)
+        setError((await response.text().catch(() => '')) || 'Closeout could not be recorded. Refresh and try again.')
+        return
+      }
+      window.location.href = successHref
+    } catch {
       setBusy(false)
-      setError((await response.text().catch(() => '')) || 'Closeout could not be recorded. Refresh and try again.')
-      return
+      setError('Closeout could not be recorded. Refresh and try again.')
     }
-    window.location.href = successHref
   }
 
   return (

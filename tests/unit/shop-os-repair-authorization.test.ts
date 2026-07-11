@@ -7,6 +7,7 @@ import {
   profiles,
   quoteEvents,
   quoteVersions,
+  sessions,
   shops,
   ticketJobs,
   tickets,
@@ -274,5 +275,33 @@ describe('Shop OS diagnostic repair authorization', () => {
     expect(await db.transaction((tx) => lockDiagnosticRepairAccess(tx as TestDb, {
       shopId, sessionId, actorProfileId: techId,
     }))).toEqual({ state: 'unavailable' })
+  })
+
+  it('fails the read projection closed for non-repairing, terminal, reassigned, or inactive sessions', async () => {
+    await setApproved()
+    const [original] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+
+    await db.update(sessions).set({
+      treeState: { ...original.treeState, phase: 'diagnosing' },
+    }).where(eq(sessions.id, sessionId))
+    expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId }))
+      .toEqual({ state: 'unavailable' })
+
+    await db.update(sessions).set({
+      treeState: original.treeState,
+      status: 'deferred',
+    }).where(eq(sessions.id, sessionId))
+    expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId }))
+      .toEqual({ state: 'unavailable' })
+
+    await db.update(sessions).set({ status: 'open', techId: advisorId })
+      .where(eq(sessions.id, sessionId))
+    expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId }))
+      .toEqual({ state: 'unavailable' })
+
+    await db.update(sessions).set({ techId }).where(eq(sessions.id, sessionId))
+    await db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, techId))
+    expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId }))
+      .toEqual({ state: 'unavailable' })
   })
 })

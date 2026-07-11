@@ -39,12 +39,6 @@ export default async function SessionPage({
 
   const { session } = result
   const route = routeForSession(session)
-  const repairAccess = session.treeState.phase === 'repairing'
-    ? await resolveDiagnosticRepairAccess(db, {
-        shopId: session.shopId,
-        sessionId: session.id,
-      })
-    : undefined
 
   if (route.kind === 'tree-generating') {
     return (
@@ -156,7 +150,13 @@ export default async function SessionPage({
       .where(eq(sessionEvents.sessionId, session.id))
       .orderBy(sessionEvents.createdAt)
 
-    return <ActiveSession session={session} events={adaptiveEvents} repairAccess={repairAccess} />
+    const adaptiveRepairAccess = session.treeState?.phase === 'repairing'
+      ? await resolveDiagnosticRepairAccess(db, {
+          shopId: session.shopId,
+          sessionId: session.id,
+        })
+      : undefined
+    return <ActiveSession session={session} events={adaptiveEvents} repairAccess={adaptiveRepairAccess} />
   }
 
   // ---- Topology diagnostic gate ----------------------------------------
@@ -214,5 +214,11 @@ export default async function SessionPage({
     .where(eq(sessionEvents.sessionId, session.id))
     .orderBy(sessionEvents.createdAt)
 
+  const repairAccess = session.treeState?.phase === 'repairing'
+    ? await resolveDiagnosticRepairAccess(db, {
+        shopId: session.shopId,
+        sessionId: session.id,
+      })
+    : undefined
   return <ActiveSession session={session} events={events} repairAccess={repairAccess} />
 }

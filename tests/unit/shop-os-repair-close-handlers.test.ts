@@ -278,4 +278,63 @@ describe('Shop OS ticket-backed repair and close handlers', () => {
     expect(result).toEqual({ ok: false, status: 409, error: 'repair_not_authorized' })
     expect((await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0].status).toBe('open')
   })
+
+  it('strips a client-forged no-repair marker from an approved performed outcome', async () => {
+    await decide('approved')
+    const result = await closeSessionForUser({
+      db,
+      userId: techUserId,
+      sessionId,
+      body: { ...performedOutcome, closeout: { kind: 'declined_no_repair' } },
+      validateSpecificity: vi.fn().mockResolvedValue({ ok: true }),
+    })
+    expect(result).toEqual({ ok: true })
+    const stored = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0]
+    expect(stored.outcome?.closeout).toBeUndefined()
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].workStatus).toBe('done')
+  })
+
+  it('uses locked diagnosis truth for declined closeout', async () => {
+    await decide('declined')
+    const freshRootCause = 'Locked fresh root cause after concurrent state refresh.'
+    const result = await closeSessionForUser({
+      db,
+      userId: techUserId,
+      sessionId,
+      body: { mode: 'declined_no_repair' },
+      validateSpecificity: vi.fn(),
+      beforeTicketedCloseLock: async () => {
+        const [current] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+        await db.update(sessions).set({
+          treeState: { ...current.treeState, rootCauseSummary: freshRootCause },
+        }).where(eq(sessions.id, sessionId))
+      },
+    })
+    expect(result).toEqual({ ok: true })
+    expect((await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0].outcome?.rootCause)
+      .toBe(freshRootCause)
+  })
+
+  it('runs a locked approval preflight before specificity AI', async () => {
+    await decide('approved')
+    const validateSpecificity = vi.fn().mockResolvedValue({ ok: true })
+    const result = await closeSessionForUser({
+      db,
+      userId: techUserId,
+      sessionId,
+      body: performedOutcome,
+      validateSpecificity,
+      beforeAuthorizationPreflight: async () => {
+        await db.update(ticketJobs).set({
+          approvalState: 'declined', approvedQuoteVersionId: null,
+        }).where(eq(ticketJobs.id, jobId))
+        await db.insert(quoteEvents).values({
+          id: uuid(62), shopId, ticketId, jobId, quoteVersionId: versionId,
+          kind: 'declined', actorProfileId: advisorId, approvedVia: null, requestKey: uuid(72),
+        })
+      },
+    })
+    expect(result).toEqual({ ok: false, status: 409, error: 'repair_not_authorized' })
+    expect(validateSpecificity).not.toHaveBeenCalled()
+  })
 })

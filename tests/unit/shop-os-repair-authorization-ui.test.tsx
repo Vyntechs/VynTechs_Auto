@@ -126,6 +126,19 @@ describe('ticket-backed repair authorization UI', () => {
     expect(hrefSetter).toHaveBeenCalledWith('/today')
   })
 
+  it('recovers from a declined-close network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    render(<DeclinedNoRepairClose sessionId={session.id} vehicleName="2018 Ford F-250" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Close without repair' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm no repair' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Closeout could not be recorded. Refresh and try again.',
+    )
+    expect(screen.getByRole('button', { name: 'Confirm no repair' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Keep open' })).toBeEnabled()
+  })
+
   it('turns a revoked repair-guidance race into a refresh instruction', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,

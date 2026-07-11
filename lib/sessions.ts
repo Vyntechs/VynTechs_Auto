@@ -21,7 +21,7 @@ import type {
   DeclineLanguage,
   DeclineLanguageInput,
 } from './gating/decline-language'
-import type { Artifact, NewArtifact } from './db/schema'
+import type { Artifact, NewArtifact, OutcomePayload as StoredOutcomePayload } from './db/schema'
 import { sessions, sessionEvents, ticketJobs, tickets } from './db/schema'
 import {
   createTechQuickTicketInTransaction,
@@ -525,6 +525,9 @@ export async function closeSessionForUser(opts: {
   /** Proof-of-fix writer. Optional — when omitted, no diagnostic_sessions row is
    *  written. Failures are non-fatal; the session still closes regardless. */
   recordDiagnosticOutcome?: RecordDiagnosticOutcomeFn
+  /** Test-only race seams around the two ticket authorization locks. */
+  beforeAuthorizationPreflight?: () => Promise<void>
+  beforeTicketedCloseLock?: () => Promise<void>
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -547,27 +550,8 @@ export async function closeSessionForUser(opts: {
     if (repairAccess.state !== 'declined') {
       return { ok: false, status: 409, error: 'repair_not_authorized' }
     }
-    const rootCause = session.treeState.rootCauseSummary?.trim()
-    if (!rootCause || rootCause.length < 10) {
-      return { ok: false, status: 409, error: 'repair_not_authorized' }
-    }
-    const outcome = outcomeSchema.parse({
-      rootCause,
-      actionType: 'no_fix',
-      verification: {
-        codesCleared: false,
-        testDrive: false,
-        symptomsResolved: 'no',
-      },
-      diagMinutes: Math.max(
-        0,
-        Math.floor((Date.now() - new Date(session.createdAt).getTime()) / 60_000),
-      ),
-      repairMinutes: 0,
-      ...(declinedNoRepair.data.note ? { notes: declinedNoRepair.data.note } : {}),
-      closeout: { kind: 'declined_no_repair' },
-    })
     try {
+      await opts.beforeTicketedCloseLock?.()
       const committed = await opts.db.transaction(async (tx) => {
         const transactionDb = tx as AppDb
         const locked = await lockDiagnosticRepairAccess(transactionDb, {
@@ -576,6 +560,24 @@ export async function closeSessionForUser(opts: {
           actorProfileId: profile.id,
         })
         if (locked.state !== 'declined') return false
+        const rootCause = locked.lockedDiagnosis.rootCauseSummary?.trim()
+        if (!rootCause || rootCause.length < 10) return false
+        const outcome: StoredOutcomePayload = {
+          rootCause,
+          actionType: 'no_fix',
+          verification: {
+            codesCleared: false,
+            testDrive: false,
+            symptomsResolved: 'no',
+          },
+          diagMinutes: Math.max(
+            0,
+            Math.floor((Date.now() - locked.lockedDiagnosis.createdAt.getTime()) / 60_000),
+          ),
+          repairMinutes: 0,
+          ...(declinedNoRepair.data.note ? { notes: declinedNoRepair.data.note } : {}),
+          closeout: { kind: 'declined_no_repair' },
+        }
         await closeSession(transactionDb, session.id, outcome)
         await appendSessionEvent(transactionDb, {
           sessionId: session.id,
@@ -613,6 +615,28 @@ export async function closeSessionForUser(opts: {
   const parsed = outcomeSchema.safeParse(opts.body)
   if (!parsed.success) {
     return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  if (repairAccess.state === 'approved') {
+    try {
+      await opts.beforeAuthorizationPreflight?.()
+      const authorized = await opts.db.transaction(async (tx) => {
+        const locked = await lockDiagnosticRepairAccess(tx as AppDb, {
+          shopId: session.shopId,
+          sessionId: session.id,
+          actorProfileId: profile.id,
+        })
+        return locked.state === 'approved'
+      })
+      if (!authorized) {
+        return { ok: false, status: 409, error: 'repair_not_authorized' }
+      }
+    } catch (error) {
+      if (isLockUnavailable(error)) {
+        return { ok: false, status: 409, error: 'conflict', retryable: true }
+      }
+      throw error
+    }
   }
 
   // Override path: tech retried after one rejection. Skip the validator entirely;

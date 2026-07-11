@@ -17,6 +17,15 @@ export type DiagnosticRepairAccess =
   | { state: 'awaiting_approval'; ticketId: string; jobId: string }
   | { state: 'unavailable' }
 
+export type LockedDiagnosticRepairAccess =
+  | Exclude<DiagnosticRepairAccess, { state: 'declined' }>
+  | {
+      state: 'declined'
+      ticketId: string
+      jobId: string
+      lockedDiagnosis: { rootCauseSummary?: string; createdAt: Date }
+    }
+
 type JobTruth = Pick<
   typeof ticketJobs.$inferSelect,
   | 'id'
@@ -50,6 +59,7 @@ function latestDecision(events: DecisionTruth[]): DecisionTruth | null {
 function classifyAccess(input: {
   expectedShopId: string
   ticketOpen: boolean
+  sessionActionable: boolean
   job: JobTruth
   versions: VersionTruth[]
   decisions: DecisionTruth[]
@@ -58,6 +68,7 @@ function classifyAccess(input: {
   if (
     job.shopId !== input.expectedShopId
     || !input.ticketOpen
+    || !input.sessionActionable
     || job.kind !== 'diagnostic'
     || job.sessionId === null
     || job.assignedTechId === null
@@ -152,6 +163,24 @@ export async function resolveDiagnosticRepairAccess(
     return { state: 'unavailable' }
   }
   const job = linkedJobs[0]
+  if (job.assignedTechId === null) return { state: 'unavailable' }
+  const [[session], [assignedTech]] = await Promise.all([
+    db
+      .select({ status: sessions.status, techId: sessions.techId, treeState: sessions.treeState })
+      .from(sessions)
+      .where(and(eq(sessions.shopId, input.shopId), eq(sessions.id, input.sessionId)))
+      .limit(1),
+    db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(and(
+        eq(profiles.id, job.assignedTechId),
+        eq(profiles.shopId, input.shopId),
+        eq(profiles.membershipStatus, 'active'),
+        isNull(profiles.deactivatedAt),
+      ))
+      .limit(1),
+  ])
   const [ticket] = await db
     .select({ status: tickets.status })
     .from(tickets)
@@ -174,6 +203,10 @@ export async function resolveDiagnosticRepairAccess(
   return classifyAccess({
     expectedShopId: input.shopId,
     ticketOpen: ticket?.status === 'open',
+    sessionActionable: session?.status === 'open'
+      && session.treeState.phase === 'repairing'
+      && session.techId === job.assignedTechId
+      && assignedTech?.id === job.assignedTechId,
     job,
     versions,
     decisions,
@@ -183,7 +216,7 @@ export async function resolveDiagnosticRepairAccess(
 export async function lockDiagnosticRepairAccess(
   db: AppDb,
   input: { shopId: string; sessionId: string; actorProfileId: string },
-): Promise<DiagnosticRepairAccess> {
+): Promise<LockedDiagnosticRepairAccess> {
   const discovered = await db
     .select({ ticketId: ticketJobs.ticketId })
     .from(ticketJobs)
@@ -232,7 +265,13 @@ export async function lockDiagnosticRepairAccess(
     .for('update', { noWait: true })
 
   const [session] = await db
-    .select({ id: sessions.id, status: sessions.status, techId: sessions.techId, treeState: sessions.treeState })
+    .select({
+      id: sessions.id,
+      status: sessions.status,
+      techId: sessions.techId,
+      treeState: sessions.treeState,
+      createdAt: sessions.createdAt,
+    })
     .from(sessions)
     .where(and(eq(sessions.shopId, input.shopId), eq(sessions.id, input.sessionId)))
     .limit(1)
@@ -264,11 +303,21 @@ export async function lockDiagnosticRepairAccess(
     ticketId: ticket.id,
     jobId: job.id,
   })
-  return classifyAccess({
+  const access = classifyAccess({
     expectedShopId: input.shopId,
     ticketOpen: ticket.status === 'open',
+    sessionActionable: true,
     job,
     versions,
     decisions,
   })
+  return access.state === 'declined'
+    ? {
+        ...access,
+        lockedDiagnosis: {
+          rootCauseSummary: session.treeState.rootCauseSummary,
+          createdAt: session.createdAt,
+        },
+      }
+    : access
 }
