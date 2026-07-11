@@ -17,7 +17,7 @@
 
 - [x] Base the branch on merged row 18 and preserve its exact green source tree.
 - [x] Run independent pre-code reviews of canned-domain safety and the Door C interaction.
-- [ ] Mark row 19 active in the master plan, publish this packet, and open a draft PR.
+- [x] Mark row 19 active in the master plan, publish this packet, and open draft PR #130.
 - [x] Independently review this design for simpler seams, hidden totals, authority, concurrency, test gaps, and rollback.
 
 ## Task 2: Strict canned library domain and API

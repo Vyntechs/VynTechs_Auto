@@ -730,7 +730,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 16 | 3 | Schema: attachments, lines, canned jobs, stories, quote versions/events, rates | S | 5 | complete | PR #127; 3 focused files/25 tests + 210 files/1,876 full tests; source/local proof only; [execution packet](./2026-07-10-shop-os-phase-3-quote-foundation-plan.md) |
 | 17 | 3 | Quote math, CRUD, versioning, invalidation, approval idempotency | LQ | 16 | complete | PR #128; 6 focused files/113 tests + 216 files/1,989 full tests; [execution packet](./2026-07-10-shop-os-phase-3-quote-domain-plan.md); no production apply |
 | 18 | 3 | Manual quote builder + totals | A | 17 | complete | PR #129; 11 focused files/216 tests + 219 files/2,073 full tests; [execution packet](./2026-07-11-shop-os-phase-3-manual-quote-builder-plan.md) |
-| 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | in progress | `feat/shop-os-p3-canned-jobs`; [execution packet](./2026-07-11-shop-os-phase-3-canned-jobs-plan.md); copied lines remain complete visible manual truth |
+| 19 | 3 | Canned jobs + completed Door C quote | A | 17,18 | in progress | PR #130; `feat/shop-os-p3-canned-jobs`; [execution packet](./2026-07-11-shop-os-phase-3-canned-jobs-plan.md); copied lines remain complete visible manual truth |
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | pending | Tree/published-wizard only |
 | 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | pending | — |
 | 22 | 3 | Ticket-aware repair + declined/no-repair closeout guards across handler/API/UI | I | 15,17 | pending | Authorization seam; legacy sessions unchanged |
