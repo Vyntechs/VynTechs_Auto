@@ -477,6 +477,8 @@ describe('Shop OS leased diagnostic start', () => {
       },
       treeState,
       maxCorpusSimilarity: 0.78,
+      adaptiveDiagnosticState: null,
+      adaptiveRevision: 0,
     })
     const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
     expect(job).toMatchObject({

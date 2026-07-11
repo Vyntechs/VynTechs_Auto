@@ -2,10 +2,11 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { vector } from '@electric-sql/pglite/vector'
-import { getTableColumns } from 'drizzle-orm'
+import { getTableColumns, sql } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sessionEvents, sessions } from '@/lib/db/schema'
+import { createTestDb } from '@/tests/helpers/db'
 
 const closeCallbacks: Array<() => Promise<void>> = []
 
@@ -68,6 +69,24 @@ async function applyAdaptiveMigration(client: PGlite) {
 }
 
 describe('adaptive diagnostic state source migration', () => {
+  it('keeps the ephemeral database aligned while migration metadata is unreconciled', async () => {
+    const { db, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    const columns = await db.execute<{ column_name: string }>(sql`
+      select column_name
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'sessions'
+        and column_name in ('adaptive_diagnostic_state', 'adaptive_revision')
+      order by column_name
+    `)
+    expect(columns.rows).toEqual([
+      { column_name: 'adaptive_diagnostic_state' },
+      { column_name: 'adaptive_revision' },
+    ])
+  })
+
   it('declares the deployed adaptive session and actor-bound request schema', () => {
     const sessionColumns = getTableColumns(sessions)
     expect(sessionColumns).toMatchObject({

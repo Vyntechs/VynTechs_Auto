@@ -9,3 +9,7 @@ export function isDesktopIntakeEnabled(): boolean {
 export function isColdCaseSynthesisEnabled(): boolean {
   return process.env.COLD_CASE_SYNTHESIS_ENABLED === 'true'
 }
+
+export function isAdaptiveCanvasEnabled(): boolean {
+  return process.env.SHOP_OS_ADAPTIVE_CANVAS_ENABLED === 'true'
+}
