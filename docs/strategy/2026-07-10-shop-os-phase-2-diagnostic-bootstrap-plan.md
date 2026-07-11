@@ -26,7 +26,7 @@
 - [x] Record PR #125 merge/tree equality and close row 14's final shipping checkbox.
 - [x] Audit the approved spec, shipped schema, session creation route/domain, Today board, authorization, and test harness.
 - [x] Choose the two-transaction leased state machine and unchanged initialization seam; document alternatives and failure rules.
-- [ ] Commit/push this packet, mark row 15 `in progress`, and open draft PR #126 before implementation.
+- [x] Commit/push this packet, mark row 15 `in progress`, and open draft PR #126 before implementation.
 
 ## Task 2: Build the leased diagnostic-start domain
 
@@ -83,10 +83,10 @@
 
 ## Task 5: Verify, review, reconcile, and ship row 15
 
-- [ ] Run focused tests, full suite, TypeScript, production build, and diff check.
-- [ ] Inspect the full diff for provider duplication, authorization leaks, stale-lease auto-retry, empty-tree persistence, session ownership drift, simple-work start, and unrelated changes.
-- [ ] Obtain task reviews and a whole-branch review; correct all validated findings through tests.
-- [ ] Add the Phase-2 diagnostic-bootstrap implementation correction, mark row 15 complete, preserve owner gates, and identify row 16 as next.
+- [x] Run focused tests (10 files/176 tests), full suite (209 files/1,866 tests), TypeScript, production build, and diff check; all pass.
+- [x] Inspect the full diff for provider duplication, authorization leaks, stale-lease auto-retry, empty-tree persistence, session ownership drift, simple-work start, and unrelated changes; none remain.
+- [x] Obtain task reviews and a whole-branch review; resolve initializer isolation/typing, snapshot drift, stale-state privacy, settlement containment, local/server truth, assignment/provider interleaving, finalize TOCTOU, and expiry-recovery findings through TDD; final reviews approve with zero findings.
+- [x] Add the Phase-2 diagnostic-bootstrap implementation correction, mark row 15 complete, preserve owner gates, and identify row 16 as next.
 - [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 16.
 
 ## Verification
