@@ -20,6 +20,7 @@ import { RedditAdapter } from '@/lib/retrieval/adapters/reddit'
 import { WebSearchAdapter } from '@/lib/retrieval/adapters/web-search'
 import { intakeSchema } from '@/lib/types'
 import { isShopRole } from '@/lib/shop-os/capabilities'
+import { MAX_OPEN_SESSIONS_PER_TECH } from '@/lib/session-limits'
 import { z } from 'zod'
 import {
   countOpenSessionsForTech,
@@ -44,7 +45,6 @@ const ADAPTERS = [
 // constantly (parts wait, customer phone tag, mid-bay interruptions). The
 // cap keeps the queue manageable without forcing a one-at-a-time workflow
 // that doesn't match shop reality. Bumped from 1 → 5 on 2026-05-08.
-const MAX_OPEN_SESSIONS_PER_TECH = 5
 const requestSchema = intakeSchema.extend({ requestKey: z.uuid() }).strict()
 
 export async function POST(req: Request) {

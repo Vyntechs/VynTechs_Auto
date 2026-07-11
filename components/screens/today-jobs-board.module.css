@@ -166,6 +166,40 @@
   cursor: pointer;
 }
 
+.secondary {
+  border-color: var(--vt-accent);
+  background: var(--vt-bg);
+  color: var(--vt-accent);
+  cursor: pointer;
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--vt-accent-hover);
+  color: var(--vt-accent-hover);
+}
+
+.secondary:disabled {
+  border-color: var(--vt-rule);
+  color: var(--vt-fg-disabled);
+  cursor: not-allowed;
+}
+
+.ambiguity {
+  display: grid;
+  justify-items: end;
+  gap: var(--vt-space-2);
+  max-width: 320px;
+}
+
+.warning {
+  margin: 0;
+  color: var(--vt-amber-600);
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  line-height: var(--vt-lh-normal);
+  text-align: right;
+}
+
 .claim:hover:not(:disabled),
 .openDiagnosis:hover {
   border-color: var(--vt-accent-hover);
@@ -230,6 +264,16 @@
 
   .control {
     width: 100%;
+  }
+
+  .ambiguity {
+    justify-items: stretch;
+    max-width: none;
+    width: 100%;
+  }
+
+  .warning {
+    text-align: left;
   }
 }
 

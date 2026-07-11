@@ -46,6 +46,25 @@ describe('atomic ticket-job assignment SQL contract', () => {
     expect(body).toContain('${body.confirmBelowTier === true} or')
     expect(body).toContain("${profiles.role} in ('tech', 'advisor', 'parts', 'owner')")
   })
+
+  it('owns the initializing-diagnostic guard inside unclaim and reassign updates', async () => {
+    const source = await readFile(path.join(process.cwd(), 'lib/tickets.ts'), 'utf8')
+    const unclaim = source.slice(
+      source.indexOf('async function unclaimTicketJob'),
+      source.indexOf('async function reassignTicketJob'),
+    ).replace(/\s+/g, ' ')
+    const reassign = source.slice(
+      source.indexOf('async function reassignTicketJob'),
+      source.indexOf('export async function mutateTicketJobAssignment'),
+    ).replace(/\s+/g, ' ')
+
+    expect(unclaim).toContain("ne(ticketJobs.diagnosticStartState, 'initializing')")
+    expect(reassign).toContain("ne(ticketJobs.diagnosticStartState, 'initializing')")
+    expect(unclaim).toContain('isNull(ticketJobs.diagnosticStartLeaseUntil)')
+    expect(reassign).toContain('isNull(ticketJobs.diagnosticStartLeaseUntil)')
+    expect(unclaim).toContain('lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`)')
+    expect(reassign).toContain('lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`)')
+  })
 })
 
 describe('ticket-job assignment mutations', () => {
@@ -162,6 +181,27 @@ describe('ticket-job assignment mutations', () => {
     }
   })
 
+  it('blocks self and privileged unclaim while a diagnostic provider lease is initializing', async () => {
+    for (const who of [actor.tech, actor.advisor, actor.owner]) {
+      await db.update(ticketJobs).set({
+        assignedTechId: actor.tech.profileId,
+        claimedAt: new Date('2026-07-10T12:00:00Z'),
+        diagnosticStartState: 'initializing',
+        diagnosticStartAttemptKey: userId(90),
+        diagnosticStartLeaseUntil: new Date('2099-01-01T00:00:00Z'),
+      }).where(eq(ticketJobs.id, jobId))
+
+      await expect(call(who, { action: 'unclaim' }))
+        .resolves.toEqual({ ok: false, error: 'job_not_open' })
+      expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+        .toMatchObject({
+          assignedTechId: actor.tech.profileId,
+          diagnosticStartState: 'initializing',
+          diagnosticStartAttemptKey: userId(90),
+        })
+    }
+  })
+
   it('lets an advisor reassign an active same-shop sufficient-tier profile and clears claimedAt', async () => {
     await db.update(ticketJobs).set({
       assignedTechId: actor.tech.profileId,
@@ -178,6 +218,98 @@ describe('ticket-job assignment mutations', () => {
     })
     const [row] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
     expect(row.claimedAt).toBeNull()
+  })
+
+  it('blocks advisor and owner reassign while a diagnostic provider lease is initializing', async () => {
+    for (const who of [actor.advisor, actor.owner]) {
+      await db.update(ticketJobs).set({
+        assignedTechId: actor.tech.profileId,
+        diagnosticStartState: 'initializing',
+        diagnosticStartAttemptKey: userId(91),
+        diagnosticStartLeaseUntil: new Date('2099-01-01T00:00:00Z'),
+      }).where(eq(ticketJobs.id, jobId))
+
+      await expect(call(who, {
+        action: 'reassign',
+        assignedTechId: actor.otherTech.profileId,
+      })).resolves.toEqual({ ok: false, error: 'job_not_open' })
+      expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+        .toMatchObject({
+          assignedTechId: actor.tech.profileId,
+          diagnosticStartState: 'initializing',
+          diagnosticStartAttemptKey: userId(91),
+        })
+    }
+  })
+
+  it('loses a reassign race when the diagnostic lease starts after prevalidation', async () => {
+    for (const who of [actor.advisor, actor.owner]) {
+      await db.update(ticketJobs).set({
+        assignedTechId: actor.tech.profileId,
+        diagnosticStartState: 'idle',
+        diagnosticStartAttemptKey: null,
+        diagnosticStartLeaseUntil: null,
+      }).where(eq(ticketJobs.id, jobId))
+
+      const result = await call(
+        who,
+        { action: 'reassign', assignedTechId: actor.otherTech.profileId },
+        {},
+        {
+          beforeReassignUpdate: async () => {
+            await db.update(ticketJobs).set({
+              diagnosticStartState: 'initializing',
+              diagnosticStartAttemptKey: userId(92),
+              diagnosticStartLeaseUntil: new Date('2099-01-01T00:00:00Z'),
+            }).where(eq(ticketJobs.id, jobId))
+          },
+        },
+      )
+
+      expect(result).toEqual({ ok: false, error: 'job_not_open' })
+      expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
+        .toMatchObject({
+          assignedTechId: actor.tech.profileId,
+          diagnosticStartState: 'initializing',
+        })
+    }
+  })
+
+  it('keeps idle, failed, and ambiguous diagnostic jobs assignable', async () => {
+    for (const diagnosticStartState of ['idle', 'failed', 'ambiguous'] as const) {
+      await db.update(ticketJobs).set({
+        assignedTechId: actor.tech.profileId,
+        diagnosticStartState,
+      }).where(eq(ticketJobs.id, jobId))
+      expect((await call(actor.tech, { action: 'unclaim' })).ok).toBe(true)
+
+      await db.update(ticketJobs).set({ assignedTechId: actor.tech.profileId })
+        .where(eq(ticketJobs.id, jobId))
+      expect((await call(actor.advisor, {
+        action: 'reassign',
+        assignedTechId: actor.otherTech.profileId,
+      })).ok).toBe(true)
+    }
+  })
+
+  it.each([
+    ['expired', new Date('2000-01-01T00:00:00Z')],
+    ['missing', null],
+  ] as const)('keeps %s initializing leases assignable', async (_leaseKind, leaseUntil) => {
+    await db.update(ticketJobs).set({
+      assignedTechId: actor.tech.profileId,
+      diagnosticStartState: 'initializing',
+      diagnosticStartAttemptKey: userId(93),
+      diagnosticStartLeaseUntil: leaseUntil,
+    }).where(eq(ticketJobs.id, jobId))
+    expect((await call(actor.tech, { action: 'unclaim' })).ok).toBe(true)
+
+    await db.update(ticketJobs).set({ assignedTechId: actor.tech.profileId })
+      .where(eq(ticketJobs.id, jobId))
+    expect((await call(actor.advisor, {
+      action: 'reassign',
+      assignedTechId: actor.otherTech.profileId,
+    })).ok).toBe(true)
   })
 
   it('warns before a below-tier reassign and changes nothing until explicitly confirmed', async () => {

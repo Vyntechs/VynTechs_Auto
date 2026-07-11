@@ -68,7 +68,7 @@
 - [x] Inspect the complete diff for removed Today content, duplicate sessions, tenant/tier leaks, fabricated facts, work-start drift, and unrelated changes; none remain.
 - [x] Obtain two task reviews and one whole-branch review; resolve four feedback, focus, target-size, and linked-session authorization findings through TDD and receive final approvals with zero findings.
 - [x] Add the Phase-2 Today implementation correction, mark row 14 complete, preserve owner gates, and identify row 15 as next.
-- [ ] Push final head, pass GitHub checks, mark ready, squash-merge, verify tree equality, and immediately continue row 15.
+- [x] Push final head, pass GitHub checks, mark ready, squash-merge PR #125, verify source/merge tree equality at `ef4de933c977c5c15c6351e0d23cee3a01caabbd`, and immediately continue row 15.
 
 ## Verification
 

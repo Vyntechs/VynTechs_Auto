@@ -5,11 +5,18 @@ import { join } from 'node:path'
 import { TodayJobsBoard } from '@/components/screens/today-jobs-board'
 import type { TodayTicketJob } from '@/lib/tickets'
 
-const { refreshMock } = vi.hoisted(() => ({ refreshMock: vi.fn() }))
+const { pushMock, refreshMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  refreshMock: vi.fn(),
+}))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: refreshMock }),
+  useRouter: () => ({ push: pushMock, refresh: refreshMock }),
 }))
+
+const ATTEMPT_ONE = '00000000-0000-4000-8000-000000000081'
+const ATTEMPT_TWO = '00000000-0000-4000-8000-000000000082'
+const RETURNED_SESSION = '00000000-0000-4000-8000-000000000083'
 
 const linkedDiagnostic: TodayTicketJob = {
   id: 'job-linked',
@@ -22,6 +29,8 @@ const linkedDiagnostic: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: 'session-41',
   workStatus: 'in_progress',
+  diagnosticStartState: 'ready',
+  diagnosticStartErrorCode: null,
 }
 
 const unlinkedDiagnostic: TodayTicketJob = {
@@ -34,6 +43,8 @@ const unlinkedDiagnostic: TodayTicketJob = {
   title: 'Confirm charging fault',
   sessionId: null,
   workStatus: 'open',
+  diagnosticStartState: 'idle',
+  diagnosticStartErrorCode: null,
 }
 
 const repair: TodayTicketJob = {
@@ -62,6 +73,11 @@ const maintenance: TodayTicketJob = {
 describe('TodayJobsBoard persisted ledger', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn()
+        .mockReturnValueOnce(ATTEMPT_ONE)
+        .mockReturnValueOnce(ATTEMPT_TWO),
+    })
   })
 
   afterEach(() => {
@@ -93,7 +109,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(within(row).getByText('Vehicle not recorded')).toBeInTheDocument()
   })
 
-  it('opens only an already-linked diagnostic and never invents an unlinked start', () => {
+  it('opens a ready owned diagnostic and starts an idle unlinked diagnostic', () => {
     render(
       <TodayJobsBoard
         myJobs={[linkedDiagnostic, unlinkedDiagnostic]}
@@ -112,8 +128,22 @@ describe('TodayJobsBoard persisted ledger', () => {
     const unlinkedRow = screen.getByRole('article', {
       name: 'Ticket 42: Confirm charging fault',
     })
-    expect(within(unlinkedRow).queryByRole('link', { name: /diagnosis/i })).toBeNull()
-    expect(within(unlinkedRow).queryByRole('button', { name: /diagnosis/i })).toBeNull()
+    expect(within(unlinkedRow).getByRole('button', { name: 'Start diagnosis' })).toBeEnabled()
+  })
+
+  it('opens a safely accessible legacy session even when bootstrap state is still idle', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...linkedDiagnostic, diagnosticStartState: 'idle' }]}
+        openJobs={[]}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
+      'href',
+      '/sessions/session-41',
+    )
+    expect(screen.queryByRole('button', { name: 'Start diagnosis' })).toBeNull()
   })
 
   it.each([repair, maintenance])(
@@ -126,6 +156,389 @@ describe('TodayJobsBoard persisted ledger', () => {
       expect(control).toHaveStyle({ minHeight: '44px' })
     },
   )
+
+  it.each(['idle', 'failed'] as const)(
+    'posts one fresh attempt for a %s diagnostic and navigates only to the returned session',
+    async (diagnosticStartState) => {
+      let resolveResponse: ((response: Response) => void) | undefined
+      const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+        resolveResponse = resolve
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      render(
+        <TodayJobsBoard
+          myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState }]}
+          openJobs={[]}
+        />,
+      )
+
+      const start = screen.getByRole('button', { name: 'Start diagnosis' })
+      fireEvent.click(start)
+
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Starting diagnosis for ticket 42',
+      )
+      expect(screen.getByRole('button', { name: 'Starting diagnosis…' })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Starting diagnosis…' }))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/tickets/ticket-42/jobs/job-unlinked/diagnostic/start',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ attemptKey: ATTEMPT_ONE }),
+        },
+      )
+      resolveResponse?.({
+        ok: true,
+        status: 200,
+        json: async () => ({ state: 'ready', sessionId: RETURNED_SESSION }),
+      } as Response)
+      await waitFor(() => {
+        expect(pushMock).toHaveBeenCalledWith(`/sessions/${RETURNED_SESSION}`)
+      })
+      expect(refreshMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('waits on an initializing diagnostic and refreshes server truth without posting again', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ state: 'initializing', retryAfterSeconds: 5 }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Diagnosis is already starting. Refreshing status.',
+      )
+      expect(refreshMock).toHaveBeenCalledTimes(1)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('checks persisted initializing state once with an exact status-only payload', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveResponse = resolve
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'initializing' }]}
+        openJobs={[]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Diagnosis starting…' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Checking diagnosis status for ticket 42',
+    )
+    expect(screen.getByRole('button', { name: 'Checking status…' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Checking status…' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-42/jobs/job-unlinked/diagnostic/start',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ attemptKey: ATTEMPT_ONE, statusOnly: true }),
+      },
+    )
+    resolveResponse?.({
+      ok: true,
+      status: 202,
+      json: async () => ({ state: 'initializing', retryAfterSeconds: 5 }),
+    } as Response)
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Diagnosis is still starting. Refreshing status.',
+      )
+      expect(refreshMock).toHaveBeenCalledTimes(1)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('turns a status-only ambiguity response into explicit confirmation without auto-retry', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ state: 'ambiguous', warning: 'possible_duplicate_cost' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'initializing' }]}
+        openJobs={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
+
+    expect(await screen.findByText(/already have used a paid provider call/i)).toBeVisible()
+    expect(screen.getByRole('button', {
+      name: 'Start again despite possible duplicate cost',
+    })).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      attemptKey: ATTEMPT_ONE,
+      statusOnly: true,
+    }))
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('opens only a valid owned session returned by a status-only check', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ state: 'ready', sessionId: RETURNED_SESSION }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'initializing' }]}
+        openJobs={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith(
+      `/sessions/${RETURNED_SESSION}`,
+    ))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      attemptKey: ATTEMPT_ONE,
+      statusOnly: true,
+    }))
+  })
+
+  it('refreshes a failed status check without auto-starting another attempt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ state: 'failed', error: 'start_failed' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'initializing' }]}
+        openJobs={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Diagnosis did not start. Refreshing status.',
+      )
+      expect(refreshMock).toHaveBeenCalledTimes(1)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('requires explicit possible-duplicate-cost confirmation with a fresh attempt key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ state: 'ready', sessionId: RETURNED_SESSION }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'ambiguous' }]}
+        openJobs={[]}
+      />,
+    )
+
+    expect(screen.getByText(
+      'This diagnostic may already have used a paid provider call. Starting again could create a duplicate cost.',
+    )).toBeVisible()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start again despite possible duplicate cost' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-42/jobs/job-unlinked/diagnostic/start',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          attemptKey: ATTEMPT_ONE,
+          confirmAmbiguousRetry: true,
+        }),
+      },
+    ))
+  })
+
+  it('turns a 409 ambiguity response into the explicit confirmation without auto-retrying', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ state: 'ambiguous', warning: 'possible_duplicate_cost' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+
+    expect(await screen.findByText(/already have used a paid provider call/i)).toBeVisible()
+    expect(screen.getByRole('button', {
+      name: 'Start again despite possible duplicate cost',
+    })).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('lets every newer server state replace local ambiguity', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ state: 'ambiguous', warning: 'possible_duplicate_cost' }),
+    }))
+    const { rerender } = render(
+      <TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+    expect(await screen.findByText(/already have used a paid provider call/i)).toBeVisible()
+
+    rerender(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'initializing' }]}
+        openJobs={[]}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Diagnosis starting…' })).toBeDisabled()
+    expect(screen.queryByText(/duplicate cost/i)).toBeNull()
+
+    rerender(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'failed' }]}
+        openJobs={[]}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Start diagnosis' })).toBeEnabled()
+    expect(screen.queryByText(/duplicate cost/i)).toBeNull()
+
+    rerender(
+      <TodayJobsBoard
+        myJobs={[{
+          ...unlinkedDiagnostic,
+          diagnosticStartState: 'ready',
+          sessionId: 'session-42',
+        }]}
+        openJobs={[]}
+      />,
+    )
+    expect(screen.getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
+      'href',
+      '/sessions/session-42',
+    )
+    expect(screen.queryByText(/duplicate cost/i)).toBeNull()
+  })
+
+  it('uses a fresh second attempt only after explicit ambiguous retry confirmation', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ state: 'ambiguous', warning: 'possible_duplicate_cost' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ state: 'ready', sessionId: RETURNED_SESSION }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+    const confirm = await screen.findByRole('button', {
+      name: 'Start again despite possible duplicate cost',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      '/api/tickets/ticket-42/jobs/job-unlinked/diagnostic/start',
+      expect.objectContaining({
+        body: JSON.stringify({ attemptKey: ATTEMPT_ONE }),
+      }),
+    )
+
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(2,
+      '/api/tickets/ticket-42/jobs/job-unlinked/diagnostic/start',
+      expect.objectContaining({
+        body: JSON.stringify({
+          attemptKey: ATTEMPT_TWO,
+          confirmAmbiguousRetry: true,
+        }),
+      }),
+    ))
+    expect(pushMock).toHaveBeenCalledWith(`/sessions/${RETURNED_SESSION}`)
+  })
+
+  it('keeps an inconsistent ready diagnostic unavailable and offers only a server refresh', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartState: 'ready' }]}
+        openJobs={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
+
+    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('announces a generic start error without exposing route or persisted error details', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'open_session_limit', privateDetail: 'provider-secret' }),
+    }))
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...unlinkedDiagnostic, diagnosticStartErrorCode: 'rate_limited' }]}
+        openJobs={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent("Couldn't start diagnosis for ticket 42. Try again.")
+    expect(alert).not.toHaveTextContent(/open_session_limit|provider-secret|rate_limited/)
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses to navigate to a malformed ready-session identifier', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ state: 'ready', sessionId: '../../private-route' }),
+    }))
+    render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't start diagnosis for ticket 42. Try again.",
+    )
+    expect(pushMock).not.toHaveBeenCalled()
+  })
 
   it('renders one explicit claim control for an open row and posts to the exact assignment route', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
