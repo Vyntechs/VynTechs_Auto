@@ -39,11 +39,11 @@
 
 ## Task 4: Manual line create/edit/remove
 
-- [ ] Add strict kind-specific part/labor/fee forms with honest `Line price`, taxability, configured-rate labor calculation or explicit no-rate price, and one open editor.
-- [ ] Preserve one create UUID across same-input/ambiguous retries; rotate it after success or input change.
-- [ ] Map 401 to sign-in, 403 to subscription/deactivation, 404 to the privacy-safe ticket boundary, retryable 409 to busy/refresh, and opaque 409/422/network outcomes without inventing causes; reload server truth after success and restore useful focus.
-- [ ] Treat same-line concurrent edits as last-write-wins v1 followed by mandatory refresh; do not claim stale-write detection.
-- [ ] Require explicit discard before switching a dirty editor; prove clean/dirty switching, create retry, no-op/edit/remove, invalid input, contention, access/network failure, focus, keyboard, decimal `inputMode`, 44px controls, and no optimistic/fake-save state.
+- [x] Add strict kind-specific part/labor/fee forms with honest `Line price`, taxability, configured-rate labor calculation or explicit no-rate price, and one open editor.
+- [x] Preserve one create UUID across same-input/ambiguous retries; rotate it after success or input change.
+- [x] Map 401 to sign-in, 403 to subscription/deactivation, 404 to the privacy-safe ticket boundary, retryable 409 to busy/refresh, and opaque 409/422/network outcomes without inventing causes; reload server truth after success and restore useful focus.
+- [x] Treat same-line concurrent edits as last-write-wins v1 followed by mandatory refresh; do not claim stale-write detection.
+- [x] Require explicit discard before switching a dirty editor; prove clean/dirty switching, create retry, no-op/edit/remove, invalid input, contention, access/network failure, focus, keyboard, decimal `inputMode`, 44px controls, and no optimistic/fake-save state.
 
 ## Task 5: Prepare immutable quote
 
