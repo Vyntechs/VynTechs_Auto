@@ -6,13 +6,15 @@ import { AbandonButton } from './abandon-button'
 import { AiUnverifiedBanner } from './ai-unverified-banner'
 import { RepairConversation } from './repair-conversation'
 import { RepairAskForm } from './repair-ask-form'
+import type { DiagnosticRepairAccess } from '@/lib/shop-os/repair-authorization'
 
 type Props = {
   session: Session
   events: SessionEvent[]
+  repairAccess?: DiagnosticRepairAccess
 }
 
-export function RepairPhaseView({ session, events }: Props) {
+export function RepairPhaseView({ session, events, repairAccess }: Props) {
   const elapsed = formatElapsed(new Date(session.createdAt))
   const proposedAction = session.treeState.proposedAction
   const lockedAt = session.treeState.diagnosisLockedAt
@@ -23,6 +25,8 @@ export function RepairPhaseView({ session, events }: Props) {
   const repairEvents = events.filter(
     e => e.eventType === 'repair_observation' || e.eventType === 'repair_guidance',
   )
+  const access = repairAccess ?? { state: 'legacy' as const }
+  const repairEnabled = access.state === 'legacy' || access.state === 'approved'
 
   return (
     <div className="app">
@@ -96,7 +100,63 @@ export function RepairPhaseView({ session, events }: Props) {
           )}
         </Module>
 
-        <Module num="—" label="Repair conversation">
+        {access.state === 'approved' && (
+          <Module
+            num="—"
+            label="Repair authorization"
+            status={<Pill kind="active">Approved work</Pill>}
+          >
+            <p style={{ margin: 0, fontFamily: 'var(--vt-font-serif)', lineHeight: 1.5 }}>
+              The exact prepared quote is approved. Repair notes and outcome capture are unlocked.
+            </p>
+          </Module>
+        )}
+
+        {!repairEnabled && (
+          <Module num="—" label="Repair authorization">
+            {access.state === 'awaiting_approval' && (
+              <>
+                <h2 style={{ margin: '0 0 8px', fontFamily: 'var(--vt-font-serif)', fontWeight: 400 }}>
+                  Quote approval required
+                </h2>
+                <p style={{ margin: '0 0 14px', color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+                  The diagnosis is locked. Do not begin repair until the customer approves the exact quote.
+                </p>
+                <Link href={`/tickets/${access.ticketId}/quote`} className="btn btn-primary">
+                  Open quote
+                </Link>
+              </>
+            )}
+            {access.state === 'declined' && (
+              <>
+                <h2 style={{ margin: '0 0 8px', fontFamily: 'var(--vt-font-serif)', fontWeight: 400 }}>
+                  No repair authorized
+                </h2>
+                <p style={{ margin: '0 0 14px', color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+                  The customer declined this work. Close the diagnosis without recording a repair or verification.
+                </p>
+                <Link href={`/sessions/${session.id}/outcome`} className="btn btn-primary">
+                  Close without repair
+                </Link>
+              </>
+            )}
+            {access.state === 'unavailable' && (
+              <>
+                <h2 style={{ margin: '0 0 8px', fontFamily: 'var(--vt-font-serif)', fontWeight: 400 }}>
+                  Repair authorization unavailable
+                </h2>
+                <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+                  Repair controls are locked because the current approval record cannot be verified. Refresh the repair order before continuing.
+                </p>
+              </>
+            )}
+            <div style={{ marginTop: 16 }}>
+              <AbandonButton sessionId={session.id} />
+            </div>
+          </Module>
+        )}
+
+        {repairEnabled && <Module num="—" label="Repair conversation">
           {repairEvents.length === 0 ? (
             <p
               style={{
@@ -112,13 +172,13 @@ export function RepairPhaseView({ session, events }: Props) {
           ) : (
             <RepairConversation events={events} />
           )}
-        </Module>
+        </Module>}
 
-        <Module num="—" label="Ask the AI">
+        {repairEnabled && <Module num="—" label="Ask the AI">
           <RepairAskForm sessionId={session.id} />
-        </Module>
+        </Module>}
 
-        <Module num="—" label="Close case">
+        {repairEnabled && <Module num="—" label="Close case">
           <p
             style={{
               fontFamily: 'var(--vt-font-serif)',
@@ -153,7 +213,7 @@ export function RepairPhaseView({ session, events }: Props) {
             Hit a wall? Mark this case incomplete and start fresh.
           </p>
           <AbandonButton sessionId={session.id} />
-        </Module>
+        </Module>}
       </div>
     </div>
   )

@@ -21,7 +21,7 @@ import type {
   DeclineLanguage,
   DeclineLanguageInput,
 } from './gating/decline-language'
-import type { Artifact, NewArtifact } from './db/schema'
+import type { Artifact, NewArtifact, OutcomePayload as StoredOutcomePayload } from './db/schema'
 import { sessions, sessionEvents, ticketJobs, tickets } from './db/schema'
 import {
   createTechQuickTicketInTransaction,
@@ -41,6 +41,11 @@ import type { AdvanceStreamEvent } from './advance-stream-events'
 import type { Finding, WizardState } from './flows/types'
 import { synthesizeHandoffFromFinding } from './wizard-state'
 import { isShopRole } from './shop-os/capabilities'
+import {
+  lockDiagnosticRepairAccess,
+  resolveDiagnosticRepairAccess,
+} from './shop-os/repair-authorization'
+import { isLockUnavailable } from './shop-os/quotes'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
@@ -487,8 +492,13 @@ export async function advanceSession(opts: {
 
 export type CloseSessionResult =
   | { ok: true }
-  | { ok: false; status: 400 | 404; error: string }
+  | { ok: false; status: 400 | 404 | 409; error: string; retryable?: true }
   | { ok: false; status: 422; error: 'specificity_required'; feedback: string }
+
+const declinedNoRepairSchema = z.object({
+  mode: z.literal('declined_no_repair'),
+  note: z.string().trim().min(1).max(2000).optional(),
+})
 
 export async function closeSessionForUser(opts: {
   db: AppDb
@@ -515,6 +525,9 @@ export async function closeSessionForUser(opts: {
   /** Proof-of-fix writer. Optional — when omitted, no diagnostic_sessions row is
    *  written. Failures are non-fatal; the session still closes regardless. */
   recordDiagnosticOutcome?: RecordDiagnosticOutcomeFn
+  /** Test-only race seams around the two ticket authorization locks. */
+  beforeAuthorizationPreflight?: () => Promise<void>
+  beforeTicketedCloseLock?: () => Promise<void>
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -527,9 +540,103 @@ export async function closeSessionForUser(opts: {
     return { ok: false, status: 400, error: 'session is not open' }
   }
 
+  const repairAccess = await resolveDiagnosticRepairAccess(opts.db, {
+    shopId: session.shopId,
+    sessionId: session.id,
+  })
+  const declinedNoRepair = declinedNoRepairSchema.safeParse(opts.body)
+
+  if (declinedNoRepair.success) {
+    if (repairAccess.state !== 'declined') {
+      return { ok: false, status: 409, error: 'repair_not_authorized' }
+    }
+    try {
+      await opts.beforeTicketedCloseLock?.()
+      const committed = await opts.db.transaction(async (tx) => {
+        const transactionDb = tx as AppDb
+        const locked = await lockDiagnosticRepairAccess(transactionDb, {
+          shopId: session.shopId,
+          sessionId: session.id,
+          actorProfileId: profile.id,
+        })
+        if (locked.state !== 'declined') return false
+        const rootCause = locked.lockedDiagnosis.rootCauseSummary?.trim()
+        if (!rootCause || rootCause.length < 10) return false
+        const outcome: StoredOutcomePayload = {
+          rootCause,
+          actionType: 'no_fix',
+          verification: {
+            codesCleared: false,
+            testDrive: false,
+            symptomsResolved: 'no',
+          },
+          diagMinutes: Math.max(
+            0,
+            Math.floor((Date.now() - locked.lockedDiagnosis.createdAt.getTime()) / 60_000),
+          ),
+          repairMinutes: 0,
+          ...(declinedNoRepair.data.note ? { notes: declinedNoRepair.data.note } : {}),
+          closeout: { kind: 'declined_no_repair' },
+        }
+        await closeSession(transactionDb, session.id, outcome)
+        await appendSessionEvent(transactionDb, {
+          sessionId: session.id,
+          nodeId: session.treeState.currentNodeId,
+          eventType: 'close',
+          aiResponse: {
+            shopOsCloseout: { kind: 'declined_no_repair', jobId: locked.jobId },
+          },
+        })
+        await transactionDb
+          .update(ticketJobs)
+          .set({ workStatus: 'canceled', updatedAt: new Date() })
+          .where(and(
+            eq(ticketJobs.shopId, session.shopId),
+            eq(ticketJobs.id, locked.jobId),
+            eq(ticketJobs.sessionId, session.id),
+          ))
+        return true
+      })
+      return committed
+        ? { ok: true }
+        : { ok: false, status: 409, error: 'repair_not_authorized' }
+    } catch (error) {
+      if (isLockUnavailable(error)) {
+        return { ok: false, status: 409, error: 'conflict', retryable: true }
+      }
+      throw error
+    }
+  }
+
+  if (repairAccess.state !== 'legacy' && repairAccess.state !== 'approved') {
+    return { ok: false, status: 409, error: 'repair_not_authorized' }
+  }
+
   const parsed = outcomeSchema.safeParse(opts.body)
   if (!parsed.success) {
     return { ok: false, status: 400, error: parsed.error.message }
+  }
+
+  if (repairAccess.state === 'approved') {
+    try {
+      await opts.beforeAuthorizationPreflight?.()
+      const authorized = await opts.db.transaction(async (tx) => {
+        const locked = await lockDiagnosticRepairAccess(tx as AppDb, {
+          shopId: session.shopId,
+          sessionId: session.id,
+          actorProfileId: profile.id,
+        })
+        return locked.state === 'approved'
+      })
+      if (!authorized) {
+        return { ok: false, status: 409, error: 'repair_not_authorized' }
+      }
+    } catch (error) {
+      if (isLockUnavailable(error)) {
+        return { ok: false, status: 409, error: 'conflict', retryable: true }
+      }
+      throw error
+    }
   }
 
   // Override path: tech retried after one rejection. Skip the validator entirely;
@@ -549,12 +656,49 @@ export async function closeSessionForUser(opts: {
     }
   }
 
-  await closeSession(opts.db, opts.sessionId, parsed.data)
-  await appendSessionEvent(opts.db, {
-    sessionId: opts.sessionId,
-    nodeId: session.treeState.currentNodeId,
-    eventType: 'close',
-  })
+  if (repairAccess.state === 'approved') {
+    try {
+      const committed = await opts.db.transaction(async (tx) => {
+        const transactionDb = tx as AppDb
+        const locked = await lockDiagnosticRepairAccess(transactionDb, {
+          shopId: session.shopId,
+          sessionId: session.id,
+          actorProfileId: profile.id,
+        })
+        if (locked.state !== 'approved') return false
+        await closeSession(transactionDb, opts.sessionId, parsed.data)
+        await appendSessionEvent(transactionDb, {
+          sessionId: opts.sessionId,
+          nodeId: session.treeState.currentNodeId,
+          eventType: 'close',
+        })
+        await transactionDb
+          .update(ticketJobs)
+          .set({ workStatus: 'done', updatedAt: new Date() })
+          .where(and(
+            eq(ticketJobs.shopId, session.shopId),
+            eq(ticketJobs.id, locked.jobId),
+            eq(ticketJobs.sessionId, session.id),
+          ))
+        return true
+      })
+      if (!committed) {
+        return { ok: false, status: 409, error: 'repair_not_authorized' }
+      }
+    } catch (error) {
+      if (isLockUnavailable(error)) {
+        return { ok: false, status: 409, error: 'conflict', retryable: true }
+      }
+      throw error
+    }
+  } else {
+    await closeSession(opts.db, opts.sessionId, parsed.data)
+    await appendSessionEvent(opts.db, {
+      sessionId: opts.sessionId,
+      nodeId: session.treeState.currentNodeId,
+      eventType: 'close',
+    })
+  }
 
   if (opts.promoteToCorpus) {
     try {
@@ -1162,7 +1306,7 @@ const repairObservationSchema = z.object({
 
 export type SubmitRepairObservationResult =
   | { ok: true; guidance: RepairGuidanceResult }
-  | { ok: false; status: 400 | 404 | 502; error: string }
+  | { ok: false; status: 400 | 404 | 409 | 502; error: string; retryable?: true }
 
 export type GetRepairGuidanceFn = (
   input: RepairGuidancePromptInput,
@@ -1206,13 +1350,33 @@ export async function submitRepairObservationForUser(opts: {
     return { ok: false, status: 400, error: parsed.error.message }
   }
 
-  // Persist the tech's observation FIRST so it's not lost if the AI call fails.
-  await appendSessionEvent(opts.db, {
-    sessionId: opts.sessionId,
-    nodeId: session.treeState.currentNodeId,
-    eventType: 'repair_observation',
-    observationText: parsed.data.observation,
-  })
+  try {
+    const committed = await opts.db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const access = await lockDiagnosticRepairAccess(transactionDb, {
+        shopId: session.shopId,
+        sessionId: session.id,
+        actorProfileId: profile.id,
+      })
+      if (access.state !== 'legacy' && access.state !== 'approved') return false
+      // Persist the tech's observation FIRST so it is retained if guidance fails.
+      await appendSessionEvent(transactionDb, {
+        sessionId: opts.sessionId,
+        nodeId: session.treeState.currentNodeId,
+        eventType: 'repair_observation',
+        observationText: parsed.data.observation,
+      })
+      return true
+    })
+    if (!committed) {
+      return { ok: false, status: 409, error: 'repair_not_authorized' }
+    }
+  } catch (error) {
+    if (isLockUnavailable(error)) {
+      return { ok: false, status: 409, error: 'conflict', retryable: true }
+    }
+    throw error
+  }
 
   // Fetch prior repair events for AI context (the just-inserted observation is excluded).
   const allEvents = await opts.db

@@ -22,6 +22,7 @@ import { symptomLabel } from '@/lib/diagnostics/symptom-label'
 import { getAdaptiveEligibility } from '@/lib/diagnostics/adaptive/eligibility'
 import { resolveAdaptiveCoverage } from '@/lib/diagnostics/adaptive/coverage'
 import { AdaptiveDiagnosticEntry } from '@/components/screens/adaptive-diagnostic-entry'
+import { resolveDiagnosticRepairAccess } from '@/lib/shop-os/repair-authorization'
 
 export default async function SessionPage({
   params,
@@ -149,7 +150,13 @@ export default async function SessionPage({
       .where(eq(sessionEvents.sessionId, session.id))
       .orderBy(sessionEvents.createdAt)
 
-    return <ActiveSession session={session} events={adaptiveEvents} />
+    const adaptiveRepairAccess = session.treeState?.phase === 'repairing'
+      ? await resolveDiagnosticRepairAccess(db, {
+          shopId: session.shopId,
+          sessionId: session.id,
+        })
+      : undefined
+    return <ActiveSession session={session} events={adaptiveEvents} repairAccess={adaptiveRepairAccess} />
   }
 
   // ---- Topology diagnostic gate ----------------------------------------
@@ -207,5 +214,11 @@ export default async function SessionPage({
     .where(eq(sessionEvents.sessionId, session.id))
     .orderBy(sessionEvents.createdAt)
 
-  return <ActiveSession session={session} events={events} />
+  const repairAccess = session.treeState?.phase === 'repairing'
+    ? await resolveDiagnosticRepairAccess(db, {
+        shopId: session.shopId,
+        sessionId: session.id,
+      })
+    : undefined
+  return <ActiveSession session={session} events={events} repairAccess={repairAccess} />
 }

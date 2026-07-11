@@ -150,7 +150,20 @@ export function OutcomeCapture({
       return
     }
     if (!res.ok) {
-      setError((await res.text().catch(() => '')) || 'Failed to close session')
+      const raw = await res.text().catch(() => '')
+      let code = ''
+      try {
+        code = JSON.parse(raw).error ?? ''
+      } catch {
+        code = raw
+      }
+      setError(
+        code === 'repair_not_authorized'
+          ? 'Repair approval changed. Return to the diagnosis and refresh before continuing.'
+          : code === 'conflict'
+            ? 'Repair order changed while closing. Refresh and try again.'
+            : raw || 'Failed to close session',
+      )
       return
     }
     window.location.href = successHref

@@ -12,6 +12,7 @@ export function ClosedCaseSummary({ session }: Props) {
   const closedAgo = session.closedAt ? formatElapsed(new Date(session.closedAt)) : '—'
   const outcome = session.outcome
   const tree = session.treeState
+  const declinedNoRepair = outcome?.closeout?.kind === 'declined_no_repair'
 
   return (
     <div className="app">
@@ -78,7 +79,7 @@ export function ClosedCaseSummary({ session }: Props) {
           </Module>
         )}
 
-        {outcome && (
+        {outcome && !declinedNoRepair && (
           <Module num="—" label="Repair">
             <dl
               style={{
@@ -114,6 +115,17 @@ export function ClosedCaseSummary({ session }: Props) {
                 diag {outcome.diagMinutes} min · repair {outcome.repairMinutes} min
               </dd>
             </dl>
+          </Module>
+        )}
+
+        {declinedNoRepair && (
+          <Module num="—" label="Closeout">
+            <h2 style={{ margin: '0 0 8px', fontFamily: 'var(--vt-font-serif)', fontWeight: 400 }}>
+              No repair performed
+            </h2>
+            <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
+              Customer declined the quoted work. This case records no repair or verification.
+            </p>
           </Module>
         )}
 

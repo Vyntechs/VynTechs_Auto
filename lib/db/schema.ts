@@ -210,6 +210,7 @@ export type OutcomePayload = {
   diagMinutes: number
   repairMinutes: number
   notes?: string
+  closeout?: { kind: 'declined_no_repair' }
   override?: { at: string; lastFeedback: string }
 }
 
@@ -752,6 +753,10 @@ export const sessionEvents = pgTable(
       abandon?: {
         reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
         note?: string
+      }
+      shopOsCloseout?: {
+        kind: 'declined_no_repair'
+        jobId: string
       }
       repairGuidance?: {
         text: string

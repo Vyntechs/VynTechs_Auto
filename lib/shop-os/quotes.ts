@@ -303,6 +303,16 @@ const quoteSnapshotSchema = z.strictObject({
   }),
 })
 
+export function quoteSnapshotContainsJob(
+  snapshot: unknown,
+  input: { ticketId: string; jobId: string },
+): boolean {
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  return parsed.success
+    && parsed.data.ticket.id === input.ticketId
+    && parsed.data.jobs.some((job) => job.id === input.jobId)
+}
+
 function notFound(): Failure {
   return { ok: false, error: 'not_found' }
 }
@@ -583,7 +593,7 @@ export async function getQuoteBuilder(
   }
 }
 
-function isLockUnavailable(error: unknown): boolean {
+export function isLockUnavailable(error: unknown): boolean {
   let current: unknown = error
   for (let depth = 0; current && depth < 5; depth += 1) {
     if (typeof current === 'object' && 'code' in current && current.code === '55P03') return true
