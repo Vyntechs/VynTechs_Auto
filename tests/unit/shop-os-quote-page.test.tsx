@@ -77,7 +77,7 @@ const builder = {
     laborRateCents: 12500, taxRateBps: 825,
     laborRateConfigured: true, taxRateConfigured: true,
   },
-  jobs: [], activeVersion: null,
+  jobs: [], capabilities: { canRecordCustomerApproval: true }, activeVersion: null,
 } satisfies QuoteBuilder
 const props = () => ({ params: Promise.resolve({ id: ticketId }) })
 

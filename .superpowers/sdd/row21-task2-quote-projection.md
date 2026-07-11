@@ -23,3 +23,12 @@
 ## Skipped
 
 - Full suite, build, browser verification, schema/DDL, routes, UI components, production, and live data, per Task 2 lane limits.
+
+## Review follow-up
+
+- Replaced duplicate story/meta validation with the authoritative shared customer-story contracts.
+- Diagnostic manual stories now require empty proof; malformed, blank, oversized, noncanonical, or incomplete reviewed truth fails closed.
+- Approved projections must match the sole validated active version and a job inside its immutable snapshot.
+- Added bounded server-derived diagnostic story modes and strict private-free workspace/POST/PUT response parsers.
+- Made the expanded server result fields required. Changes in `shop-os-manual-quote-builder.test.tsx` and `shop-os-quote-page.test.tsx` are mechanical fixture-shape updates only; no UI behavior assertion changed.
+- GREEN: seven focused files, 164 tests passed; TypeScript and diff checks passed.

@@ -50,12 +50,15 @@ describe('Shop OS immutable quote version creation', () => {
         id: jobId, shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
         customerStory: {
           whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn',
-          howWeKnow: [{ claim: 'Pad thickness is low', sourceEventIds: ['event-2', 'event-1'], sourceArtifactIds: ['artifact-1'] }],
+          howWeKnow: [{ claim: 'Pad thickness is low', sourceEventIds: [uuid(81), uuid(80)], sourceArtifactIds: [uuid(82)] }],
           whatItMeansIfWaived: 'Stopping distance may increase', whatWeRecommend: 'Replace front pads',
         },
         storyMeta: {
-          source: 'manual', sessionId: 'stable-session', generatedAt: 'volatile',
-          lastEditedByProfileId: uuid(1), lastEditedAt: 'volatile',
+          source: 'manual', sessionId: uuid(70),
+          lastEditedByProfileId: uuid(1), lastEditedAt: '2026-07-11T12:00:00.000Z',
+          storyRevision: 1, reviewStatus: 'reviewed', reviewClientKey: uuid(72),
+          reviewRequestFingerprint: 'b'.repeat(64), reviewedByProfileId: uuid(1),
+          reviewedAt: '2026-07-11T12:01:00.000Z',
         },
       },
       { id: excludedJobId, shopId, ticketId, title: 'No lines', kind: 'maintenance', requiredSkillTier: 1 },
@@ -117,11 +120,11 @@ describe('Shop OS immutable quote version creation', () => {
       jobs: [{
         id: jobId, title: 'Front brakes', kind: 'repair',
         customerStory: {
-          howWeKnow: [{ claim: 'Pad thickness is low', sourceArtifactIds: ['artifact-1'], sourceEventIds: ['event-2', 'event-1'] }],
+          howWeKnow: [{ claim: 'Pad thickness is low', sourceArtifactIds: [uuid(82)], sourceEventIds: [uuid(81), uuid(80)] }],
           whatItMeansIfWaived: 'Stopping distance may increase',
           whatWeFound: 'Pads are worn', whatWeRecommend: 'Replace front pads', whatYouToldUs: 'Brake noise',
         },
-        storyMeta: { source: 'manual', sessionId: 'stable-session' },
+        storyMeta: { source: 'manual', sessionId: uuid(70) },
         lines: [
           {
             id: uuid(41), kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
@@ -204,6 +207,34 @@ describe('Shop OS immutable quote version creation', () => {
     await db.update(ticketJobs).set({ storyMeta: {
       source: 'template', lastEditedByProfileId: uuid(1), lastEditedAt: '2026-07-11T12:00:00.000Z',
     } }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it('rejects incomplete reviewed metadata and dishonest manual diagnostic proof', async () => {
+    const story = {
+      whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn', howWeKnow: [],
+      whatItMeansIfWaived: 'The diagnosed issue remains unresolved.', whatWeRecommend: 'Replace pads',
+    }
+    await db.update(ticketJobs).set({ kind: 'diagnostic', customerStory: story }).where(eq(ticketJobs.id, jobId))
+    for (const meta of [
+      { source: 'ai', sessionId: uuid(70), storyRevision: 1, reviewStatus: 'reviewed' },
+      { source: 'manual', sessionId: uuid(70), storyRevision: 1, reviewStatus: 'reviewed' },
+    ]) {
+      await db.update(ticketJobs).set({ storyMeta: meta as never }).where(eq(ticketJobs.id, jobId))
+      await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    }
+    const manualMeta = {
+      source: 'manual' as const, sessionId: uuid(70), lastEditedByProfileId: uuid(1),
+      lastEditedAt: '2026-07-11T12:00:00.000Z', storyRevision: 1, reviewStatus: 'reviewed' as const,
+      reviewClientKey: uuid(72), reviewRequestFingerprint: 'b'.repeat(64),
+      reviewedByProfileId: uuid(1), reviewedAt: '2026-07-11T12:01:00.000Z',
+    }
+    await db.update(ticketJobs).set({
+      storyMeta: manualMeta,
+      customerStory: { ...story, howWeKnow: [{ claim: 'Fabricated proof.', sourceEventIds: [uuid(90)], sourceArtifactIds: [] }] },
+    }).where(eq(ticketJobs.id, jobId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(ticketJobs).set({ customerStory: { ...story, whatWeFound: '   ' } }).where(eq(ticketJobs.id, jobId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 

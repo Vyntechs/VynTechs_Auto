@@ -6,6 +6,11 @@ import {
 } from '@/lib/shop-os/quote-math'
 import { z } from 'zod'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
+import {
+  parsePersistedCustomerStory,
+  parsePersistedCustomerStoryMeta,
+  safeCustomerStoryMeta,
+} from '@/lib/shop-os/customer-story-contracts'
 
 const MAX_SAFE_CENTS = BigInt(Number.MAX_SAFE_INTEGER)
 type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -13,17 +18,13 @@ type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder
 const safeMoneySchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const nullableText = (max: number) => z.string().max(max).nullable()
-const storyEvidenceSchema = z.strictObject({
-  claim: z.string().max(2_000),
-  sourceEventIds: z.array(z.string().max(200)).max(100),
-  sourceArtifactIds: z.array(z.string().max(200)).max(100),
-})
-const customerStorySchema = z.strictObject({
-  whatYouToldUs: z.string().max(5_000),
-  whatWeFound: z.string().max(5_000),
-  howWeKnow: z.array(storyEvidenceSchema).max(50),
-  whatItMeansIfWaived: z.string().max(5_000),
-  whatWeRecommend: z.string().max(5_000),
+const customerStorySchema = z.unknown().transform((value, context) => {
+  const parsed = parsePersistedCustomerStory(value)
+  if (!parsed) {
+    context.addIssue({ code: 'custom', message: 'customer story is invalid' })
+    return z.NEVER
+  }
+  return parsed
 })
 const builderLineSchema = z.strictObject({
   id: uuidSchema,
@@ -109,6 +110,9 @@ const quoteBuilderSchema = z.strictObject({
         context.addIssue({ code: 'custom', message: 'AI story review state is required' })
       }
     }),
+    storyMode: z.enum([
+      'ordinary_locked_tree', 'topology_manual', 'published_wizard_unsupported',
+    ]).nullable(),
     approval: z.strictObject({
       state: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
       quoteVersionId: uuidSchema.nullable(),
@@ -147,6 +151,11 @@ const quoteBuilderSchema = z.strictObject({
     const subtotal = builder.activeVersion.jobs.reduce((sum, job) => sum + BigInt(job.subtotalCents), 0n)
     if (subtotal > BigInt(builder.activeVersion.totalCents)) {
       context.addIssue({ code: 'custom', message: 'active version total is invalid' })
+    }
+  }
+  for (const job of builder.jobs) {
+    if ((job.kind === 'diagnostic') !== (job.storyMode !== null)) {
+      context.addIssue({ code: 'custom', message: 'diagnostic story mode is inconsistent' })
     }
   }
 })
@@ -210,7 +219,104 @@ export function parseQuoteDecisionResponse(
   if (status !== 200 && status !== 201) return null
   if (parsed.data.event.kind === 'approved'
     && parsed.data.projection.approvedQuoteVersionId !== parsed.data.event.quoteVersionId) return null
+  if (status === 201 && parsed.data.event.kind === 'declined'
+    && (parsed.data.projection.approvalState !== 'declined'
+      || parsed.data.projection.approvedQuoteVersionId !== null)) return null
   return parsed.data
+}
+
+const isoTimestamp = z.iso.datetime({ offset: true })
+const workspaceMetaSchema = z.union([
+  z.strictObject({
+    source: z.literal('ai'), sessionId: uuidSchema, generatedAt: isoTimestamp,
+    lastEditedByProfileId: uuidSchema, lastEditedAt: isoTimestamp,
+    reviewStatus: z.enum(['pending', 'reviewed']),
+  }),
+  z.strictObject({
+    source: z.literal('manual'), sessionId: uuidSchema,
+    lastEditedByProfileId: uuidSchema, lastEditedAt: isoTimestamp,
+    reviewStatus: z.literal('reviewed'),
+  }),
+  z.strictObject({
+    source: z.literal('template'), sessionId: z.string().max(200).optional(),
+    generatedAt: z.string().max(200).optional(), lastEditedByProfileId: uuidSchema,
+    lastEditedAt: z.string().max(200), reviewStatus: z.enum(['pending', 'reviewed']).optional(),
+  }),
+])
+const safeMutationMetaSchema = z.union([
+  z.strictObject({
+    source: z.literal('ai'), sessionId: uuidSchema, generatedAt: isoTimestamp,
+    lastEditedAt: isoTimestamp, reviewStatus: z.enum(['pending', 'reviewed']),
+    storyRevision: z.number().int().nonnegative(), reviewedAt: isoTimestamp.optional(),
+  }).superRefine((meta, context) => {
+    if ((meta.reviewStatus === 'reviewed') !== (meta.reviewedAt !== undefined)) {
+      context.addIssue({ code: 'custom', message: 'AI review timestamp is inconsistent' })
+    }
+  }),
+  z.strictObject({
+    source: z.literal('manual'), sessionId: uuidSchema, lastEditedAt: isoTimestamp,
+    reviewStatus: z.literal('reviewed'), storyRevision: z.number().int().positive(),
+    reviewedAt: isoTimestamp,
+  }),
+])
+const evidenceItemSchema = z.strictObject({
+  id: uuidSchema,
+  kind: z.enum(['observation', 'photo', 'video', 'audio', 'scan_screen', 'wiring_diagram']),
+  createdAt: isoTimestamp,
+  label: z.string().trim().min(1).max(160),
+})
+const workspaceResponseSchema = z.strictObject({
+  story: z.unknown().nullable(),
+  storyMeta: z.unknown().nullable(),
+  storyRevision: z.number().int().nonnegative(),
+  evidence: z.strictObject({
+    events: z.array(evidenceItemSchema).max(25),
+    artifacts: z.array(evidenceItemSchema).max(25),
+    nextEventCursor: z.string().min(1).max(1_000).nullable(),
+    nextArtifactCursor: z.string().min(1).max(1_000).nullable(),
+  }),
+})
+
+export function parseCustomerStoryWorkspaceResponse(value: unknown) {
+  const envelope = workspaceResponseSchema.safeParse(value)
+  if (!envelope.success) return null
+  const story = envelope.data.story === null ? null : parsePersistedCustomerStory(envelope.data.story)
+  const storyMeta = envelope.data.storyMeta === null ? null : workspaceMetaSchema.safeParse(envelope.data.storyMeta)
+  if ((envelope.data.story !== null && !story)
+    || (envelope.data.storyMeta !== null && (!storyMeta || !storyMeta.success))
+    || (story === null) !== (storyMeta === null)) return null
+  return {
+    ...envelope.data,
+    story,
+    storyMeta: storyMeta && storyMeta.success ? {
+      source: storyMeta.data.source,
+      ...(storyMeta.data.sessionId ? { sessionId: storyMeta.data.sessionId } : {}),
+      ...('generatedAt' in storyMeta.data && storyMeta.data.generatedAt
+        ? { generatedAt: storyMeta.data.generatedAt } : {}),
+      lastEditedAt: storyMeta.data.lastEditedAt,
+      ...(storyMeta.data.reviewStatus ? { reviewStatus: storyMeta.data.reviewStatus } : {}),
+    } : null,
+  }
+}
+
+const mutationResponseSchema = z.strictObject({
+  changed: z.boolean(),
+  story: z.unknown(),
+  storyMeta: z.unknown(),
+  storyRevision: z.number().int().nonnegative(),
+})
+
+export function parseCustomerStoryMutationResponse(value: unknown) {
+  const envelope = mutationResponseSchema.safeParse(value)
+  if (!envelope.success) return null
+  const story = parsePersistedCustomerStory(envelope.data.story)
+  if (!story) return null
+  const persistedMeta = parsePersistedCustomerStoryMeta(envelope.data.storyMeta)
+  const safeMeta = persistedMeta
+    ? safeCustomerStoryMeta(persistedMeta)
+    : safeMutationMetaSchema.safeParse(envelope.data.storyMeta).data
+  if (!safeMeta || safeMeta.storyRevision !== envelope.data.storyRevision) return null
+  return { ...envelope.data, story, storyMeta: safeMeta }
 }
 
 export function parseMoneyToCents(value: string): number {

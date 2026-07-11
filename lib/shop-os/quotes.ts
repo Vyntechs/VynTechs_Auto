@@ -2,8 +2,16 @@ import { createHash } from 'node:crypto'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
+import {
+  jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
+  ticketJobs, tickets,
+} from '@/lib/db/schema'
 import { canBuildQuotes, canRecordCustomerApproval } from '@/lib/shop-os/capabilities'
+import {
+  parsePersistedCustomerStory,
+  parsePersistedCustomerStoryMeta,
+  parseQuoteStorySnapshotMeta,
+} from '@/lib/shop-os/customer-story-contracts'
 import {
   formatScaledDecimal,
   buildQuoteStoryMeta,
@@ -145,13 +153,14 @@ export type QuoteBuilderResult =
         title: string
         kind: 'diagnostic' | 'repair' | 'maintenance'
         workStatus: 'open' | 'in_progress' | 'blocked'
-        story?: {
+        story: {
           content: QuoteCustomerStoryV1 | null
           source: 'ai' | 'manual' | 'template' | null
           reviewStatus: 'pending' | 'reviewed' | null
           revision: number
         }
-        approval?: {
+        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'published_wizard_unsupported' | null
+        approval: {
           state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
           quoteVersionId: string | null
         }
@@ -160,12 +169,12 @@ export type QuoteBuilderResult =
           & { quantity: string; laborHours: string | null }
         >
       }>
-      capabilities?: { canRecordCustomerApproval: boolean }
+      capabilities: { canRecordCustomerApproval: boolean }
       activeVersion: {
         id: string
         versionNumber: number
-        totalCents?: number
-        jobs?: Array<{ jobId: string; subtotalCents: number }>
+        totalCents: number
+        jobs: Array<{ jobId: string; subtotalCents: number }>
       } | null
     }
   }
@@ -215,17 +224,21 @@ class AbortDraftMutation extends Error {
   }
 }
 
-const storyEvidenceSchema = z.strictObject({
-  claim: boundedText(2_000),
-  sourceEventIds: z.array(boundedText(200)).max(100),
-  sourceArtifactIds: z.array(boundedText(200)).max(100),
+const customerStorySchema = z.unknown().transform((value, context) => {
+  const parsed = parsePersistedCustomerStory(value)
+  if (!parsed) {
+    context.addIssue({ code: 'custom', message: 'customer story is invalid' })
+    return z.NEVER
+  }
+  return parsed
 })
-const customerStorySchema = z.strictObject({
-  whatYouToldUs: boundedText(5_000),
-  whatWeFound: boundedText(5_000),
-  howWeKnow: z.array(storyEvidenceSchema).max(50),
-  whatItMeansIfWaived: boundedText(5_000),
-  whatWeRecommend: boundedText(5_000),
+const quoteStoryMetaSchema = z.unknown().transform((value, context) => {
+  const parsed = parseQuoteStorySnapshotMeta(value)
+  if (!parsed) {
+    context.addIssue({ code: 'custom', message: 'customer story metadata is invalid' })
+    return z.NEVER
+  }
+  return parsed
 })
 const snapshotTotalsSchema = z.strictObject({
   subtotalCents: moneySchema,
@@ -246,10 +259,7 @@ const quoteSnapshotSchema = z.strictObject({
     title: boundedText(500),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
     customerStory: customerStorySchema.nullable(),
-    storyMeta: z.strictObject({
-      source: z.enum(['ai', 'manual', 'template']),
-      sessionId: boundedText(200).optional(),
-    }).nullable(),
+    storyMeta: quoteStoryMetaSchema.nullable(),
     lines: z.array(z.strictObject({
       id: uuidSchema,
       kind: z.enum(['part', 'labor', 'fee']),
@@ -406,6 +416,9 @@ export async function getQuoteBuilder(
       )).orderBy(ticketJobs.createdAt, ticketJobs.id)
       const eligibleJobs = allJobs.filter((job) =>
         job.workStatus === 'open' || job.workStatus === 'in_progress' || job.workStatus === 'blocked')
+      if (eligibleJobs.length > 500) {
+        return { ok: false as const, error: 'conflict' as const, retryable: false }
+      }
       const eligibleJobIds = eligibleJobs.map((job) => job.id)
       const lines = eligibleJobIds.length === 0 ? [] : await transactionDb
         .select()
@@ -415,6 +428,25 @@ export async function getQuoteBuilder(
           inArray(jobLines.jobId, eligibleJobIds),
         ))
         .orderBy(jobLines.sort, jobLines.createdAt, jobLines.id)
+      const diagnosticSessionIds = [...new Set(eligibleJobs
+        .filter((job) => job.kind === 'diagnostic' && job.sessionId !== null)
+        .map((job) => job.sessionId as string))]
+      const linkedSessions = diagnosticSessionIds.length === 0 ? [] : await transactionDb
+        .select({ id: sessions.id, treeState: sessions.treeState })
+        .from(sessions)
+        .where(and(
+          eq(sessions.shopId, actor.shopId as string),
+          inArray(sessions.id, diagnosticSessionIds),
+        ))
+        .orderBy(sessions.id)
+      const wizardEvents = diagnosticSessionIds.length === 0 ? [] : await transactionDb
+        .select({ sessionId: sessionEvents.sessionId })
+        .from(sessionEvents)
+        .where(and(
+          inArray(sessionEvents.sessionId, diagnosticSessionIds),
+          eq(sessionEvents.eventType, 'wizard_lock_in'),
+        ))
+        .orderBy(sessionEvents.sessionId, sessionEvents.id)
       const activeVersions = await transactionDb.select({
         id: quoteVersions.id,
         versionNumber: quoteVersions.versionNumber,
@@ -429,8 +461,25 @@ export async function getQuoteBuilder(
       }
 
       try {
+        const sessionById = new Map(linkedSessions.map((session) => [session.id, session]))
+        if (diagnosticSessionIds.some((sessionId) => !sessionById.has(sessionId))) {
+          throw new TypeError('diagnostic session binding is invalid')
+        }
+        const wizardSessionIds = new Set(wizardEvents.map((event) => event.sessionId))
+        const storyMode = (job: typeof eligibleJobs[number]) => {
+          if (job.kind !== 'diagnostic') return null
+          if (job.sessionId && wizardSessionIds.has(job.sessionId)) return 'published_wizard_unsupported' as const
+          const treeState = job.sessionId ? sessionById.get(job.sessionId)?.treeState : null
+          if (treeState && typeof treeState === 'object'
+            && (treeState as { done?: unknown }).done === true
+            && (treeState as { currentNodeId?: unknown }).currentNodeId === '_topology') {
+            return 'topology_manual' as const
+          }
+          return 'ordinary_locked_tree' as const
+        }
         const activeVersion = activeVersions[0]
         let activeVersionProjection: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'] = null
+        let activeSnapshotJobIds = new Set<string>()
         if (activeVersion) {
           const snapshot = validatedQuoteSnapshot(activeVersion.snapshot, ticket)
           const currentJobIds = new Set(allJobs.map((job) => job.id))
@@ -450,6 +499,7 @@ export async function getQuoteBuilder(
               subtotalCents: job.totals.subtotalCents,
             })),
           }
+          activeSnapshotJobIds = new Set(snapshot.jobs.map((job) => job.id))
         }
         return {
           ok: true as const,
@@ -471,7 +521,14 @@ export async function getQuoteBuilder(
               kind: job.kind,
               workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
               story: safeBuilderStory(job.customerStory, job.storyMeta),
-              approval: safeBuilderApproval(job.approvalState, job.approvedQuoteVersionId),
+              storyMode: storyMode(job),
+              approval: safeBuilderApproval(
+                job.approvalState,
+                job.approvedQuoteVersionId,
+                job.id,
+                activeVersionProjection,
+                activeSnapshotJobIds,
+              ),
               lines: lines
                 .filter((line) => line.jobId === job.id && isMutableManualLine(line))
                 .map(safeBuilderLine),
@@ -761,9 +818,9 @@ function safeMoney(value: number | null, nullable = false): number | null {
 
 function safeCustomerStory(value: unknown): QuoteCustomerStoryV1 | null {
   if (value === null) return null
-  const parsed = customerStorySchema.safeParse(value)
-  if (!parsed.success) throw new TypeError('persisted customer story is invalid')
-  return canonicalizeJson(parsed.data) as unknown as QuoteCustomerStoryV1
+  const parsed = parsePersistedCustomerStory(value)
+  if (!parsed) throw new TypeError('persisted customer story is invalid')
+  return canonicalizeJson(parsed) as unknown as QuoteCustomerStoryV1
 }
 
 function safeBuilderStory(
@@ -773,56 +830,12 @@ function safeBuilderStory(
   if (storyValue === null && metaValue === null) {
     return { content: null, source: null, reviewStatus: null, revision: 0 }
   }
-  if (storyValue === null || !metaValue || typeof metaValue !== 'object' || Array.isArray(metaValue)) {
+  if (storyValue === null) {
     throw new TypeError('customer story and metadata must be paired')
   }
-  const content = safeCustomerStory(storyValue)
-  if (!content) throw new TypeError('customer story is invalid')
-  const meta = metaValue as Record<string, unknown>
-  if (meta.source !== 'ai' && meta.source !== 'manual' && meta.source !== 'template') {
-    throw new TypeError('customer story source is invalid')
-  }
-  if (meta.sessionId !== undefined
-    && (typeof meta.sessionId !== 'string' || meta.sessionId.length > 200)) {
-    throw new TypeError('customer story session is invalid')
-  }
-  if (meta.reviewStatus !== undefined
-    && meta.reviewStatus !== 'pending' && meta.reviewStatus !== 'reviewed') {
-    throw new TypeError('customer story review status is invalid')
-  }
-  if (meta.storyRevision !== undefined && (
-    typeof meta.storyRevision !== 'number'
-    || !Number.isSafeInteger(meta.storyRevision)
-    || meta.storyRevision < 0
-  )) throw new TypeError('customer story revision is invalid')
-  if (meta.source === 'ai'
-    && (meta.reviewStatus === undefined || meta.storyRevision === undefined)) {
-    throw new TypeError('AI customer story review metadata is incomplete')
-  }
-  const reviewAudit = [
-    meta.reviewClientKey,
-    meta.reviewRequestFingerprint,
-    meta.reviewedByProfileId,
-    meta.reviewedAt,
-  ]
-  const auditCount = reviewAudit.filter((value) => value !== undefined).length
-  if ((meta.reviewStatus === 'reviewed' && auditCount !== reviewAudit.length)
-    || (meta.reviewStatus !== 'reviewed' && auditCount !== 0)) {
-    throw new TypeError('customer story review audit is incomplete')
-  }
-  if (auditCount > 0) {
-    safeUuid(String(meta.reviewClientKey))
-    safeUuid(String(meta.reviewedByProfileId))
-    if (typeof meta.reviewRequestFingerprint !== 'string'
-      || !/^[a-f0-9]{64}$/.test(meta.reviewRequestFingerprint)) {
-      throw new TypeError('customer story review fingerprint is invalid')
-    }
-    if (typeof meta.reviewedAt !== 'string'
-      || Number.isNaN(new Date(meta.reviewedAt).getTime())
-      || new Date(meta.reviewedAt).toISOString() !== meta.reviewedAt) {
-      throw new TypeError('customer story review time is invalid')
-    }
-  }
+  const content = parsePersistedCustomerStory(storyValue)
+  const meta = parsePersistedCustomerStoryMeta(metaValue)
+  if (!content || !meta) throw new TypeError('customer story persistence is invalid')
   return {
     content,
     source: meta.source,
@@ -834,6 +847,9 @@ function safeBuilderStory(
 function safeBuilderApproval(
   state: unknown,
   quoteVersionId: unknown,
+  jobId: string,
+  activeVersion: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'],
+  activeSnapshotJobIds: ReadonlySet<string>,
 ): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['approval']> {
   if (state !== 'pending_quote' && state !== 'quote_ready' && state !== 'sent'
     && state !== 'approved' && state !== 'declined') {
@@ -847,6 +863,11 @@ function safeBuilderApproval(
   if ((state === 'approved') !== (safeVersionId !== null)) {
     throw new TypeError('quote approval projection is inconsistent')
   }
+  if (state === 'approved' && (
+    !activeVersion
+    || safeVersionId !== activeVersion.id
+    || !activeSnapshotJobIds.has(jobId)
+  )) throw new TypeError('approved quote projection is stale')
   return { state, quoteVersionId: safeVersionId }
 }
 
@@ -870,6 +891,10 @@ function requireVersionableStory(
   }
   if (kind === 'diagnostic' && safeStory.source === 'manual' && safeStory.reviewStatus !== 'reviewed') {
     throw new TypeError('manual diagnostic story requires human review')
+  }
+  if (kind === 'diagnostic' && safeStory.source === 'manual'
+    && safeStory.content && safeStory.content.howWeKnow.length !== 0) {
+    throw new TypeError('manual diagnostic story cannot claim sourced proof')
   }
 }
 

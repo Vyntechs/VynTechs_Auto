@@ -70,6 +70,19 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
   }
 }
 
+const jobFacts = {
+  story: { content: null, source: null, reviewStatus: null, revision: 0 },
+  storyMode: null,
+  approval: { state: 'pending_quote', quoteVersionId: null },
+} as const
+
+const activeVersion = (versionNumber = 3) => ({
+  id: VERSION_ID,
+  versionNumber,
+  totalCents: 32_281,
+  jobs: [{ jobId: JOB_ID, subtotalCents: 31_250 }],
+})
+
 function builder(overrides: Partial<Builder> = {}): Builder {
   return {
     ticket: { id: TICKET_ID, status: 'open', reconciled: true },
@@ -79,6 +92,7 @@ function builder(overrides: Partial<Builder> = {}): Builder {
     },
     jobs: [{
       id: JOB_ID, title: 'Replace front brakes', kind: 'repair', workStatus: 'open',
+      ...jobFacts,
       lines: [
         line(),
         line({
@@ -93,7 +107,8 @@ function builder(overrides: Partial<Builder> = {}): Builder {
         }),
       ],
     }],
-    activeVersion: { id: VERSION_ID, versionNumber: 3 },
+    capabilities: { canRecordCustomerApproval: true },
+    activeVersion: activeVersion(),
     ...overrides,
   }
 }
@@ -105,6 +120,7 @@ function builderWithAppliedCannedJob(overrides: Partial<Builder> = {}): Builder 
       ...builder().jobs,
       {
         id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', workStatus: 'open',
+        ...jobFacts,
         lines: [
           line({ id: CANNED_PART_LINE_ID, description: 'Oil filter', priceCents: 1_250,
             partNumber: null, brand: null, coreChargeCents: null, fitment: null }),
@@ -161,6 +177,7 @@ describe('ManualQuoteBuilder', () => {
       },
       jobs: [{
         id: JOB_ID, title: 'Inspect brakes', kind: 'maintenance', workStatus: 'open',
+        ...jobFacts,
         lines: [line({
           kind: 'labor', description: 'Inspection labor', priceCents: 9_000,
           partNumber: null, brand: null, coreChargeCents: null, fitment: null,
@@ -194,6 +211,7 @@ describe('ManualQuoteBuilder', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder({
       jobs: [{
         id: JOB_ID, title: 'Overflow quote', kind: 'repair', workStatus: 'open',
+        ...jobFacts,
         lines: [
           line({ id: LINE_ID, priceCents: Number.MAX_SAFE_INTEGER }),
           line({ id: LABOR_LINE_ID, priceCents: 1 }),
@@ -214,7 +232,7 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.getByText('No prepared version')).toBeInTheDocument()
 
     rerender(<ManualQuoteBuilder ticket={ticket} builder={builder({
-      jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [] }],
+      jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [] }],
       activeVersion: null,
     })} />)
     expect(screen.getByText('No quote lines yet.')).toBeInTheDocument()
@@ -349,7 +367,7 @@ describe('ManualQuoteBuilder canned application', () => {
         job: { id: CANNED_JOB_ID, title: 'Oil service', kind: 'maintenance', requiredSkillTier: 1, lineCount: 3 },
       }))
       .mockResolvedValueOnce(response(200, {
-        builder: builderWithAppliedCannedJob({ activeVersion: { id: VERSION_ID, versionNumber: 3 } }),
+        builder: builderWithAppliedCannedJob({ activeVersion: activeVersion() }),
       }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
@@ -429,12 +447,13 @@ describe('ManualQuoteBuilder line mutations', () => {
 
   it('creates with one retry key, waits for refreshed truth, and returns focus to the line', async () => {
     const empty = builder({
-      jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [] }],
-      activeVersion: { id: VERSION_ID, versionNumber: 3 },
+      jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [] }],
+      activeVersion: activeVersion(),
     })
     const refreshed = builder({
       jobs: [{
         id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+        ...jobFacts,
         lines: [line({ id: NEW_LINE_ID, description: 'Premium pad set' })],
       }],
       activeVersion: null,
@@ -492,10 +511,11 @@ describe('ManualQuoteBuilder line mutations', () => {
 
   it('keeps totals on server truth while a mutation is still pending', async () => {
     const empty = builder({ jobs: [{
-      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [],
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [],
     }] })
     const refreshed = builder({ jobs: [{
       id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+      ...jobFacts,
       lines: [line({ id: NEW_LINE_ID, description: 'Server line', priceCents: 10_000 })],
     }] })
     let resolveMutation!: (response: Response) => void
@@ -577,6 +597,7 @@ describe('ManualQuoteBuilder line mutations', () => {
       },
       jobs: [{
         id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [pinned],
+        ...jobFacts,
       }],
     })
     const refreshed = {
@@ -606,7 +627,7 @@ describe('ManualQuoteBuilder line mutations', () => {
       partNumber: null, brand: null, coreChargeCents: null, fitment: null,
     })
     const state = builder({ jobs: [{
-      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [pinned],
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [pinned],
     }] })
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(200, { changed: true, line: { id: pinned.id } }))
@@ -801,9 +822,10 @@ describe('ManualQuoteBuilder preparation', () => {
     [201, true],
     [200, false],
   ])('prepares through a bodyless %i response then mandatory refreshed truth', async (status, changed) => {
-    const active = { id: VERSION_ID, versionNumber: 4 }
+    const prepared = { id: VERSION_ID, versionNumber: 4 }
+    const active = activeVersion(4)
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(response(status, { changed, version: active }))
+      .mockResolvedValueOnce(response(status, { changed, version: prepared }))
       .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
@@ -835,9 +857,10 @@ describe('ManualQuoteBuilder preparation', () => {
   })
 
   it('recovers a malformed version success through a validated refresh', async () => {
-    const active = { id: VERSION_ID, versionNumber: 4 }
+    const prepared = { id: VERSION_ID, versionNumber: 4 }
+    const active = activeVersion(4)
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(response(201, { changed: true, version: active, extra: true }))
+      .mockResolvedValueOnce(response(201, { changed: true, version: prepared, extra: true }))
       .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
@@ -848,10 +871,11 @@ describe('ManualQuoteBuilder preparation', () => {
 
   it('rejects refreshed truth that does not contain the exact prepared version', async () => {
     const version = { id: VERSION_ID, versionNumber: 4 }
+    const active = activeVersion(4)
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(201, { changed: true, version }))
       .mockResolvedValueOnce(response(200, { builder: ready() }))
-      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: version }) }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
