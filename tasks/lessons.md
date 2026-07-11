@@ -8,6 +8,11 @@ Trigger: Parallel reviewers launched Vitest while the control lane ran the full 
 Rule: One lane owns heavy tests; reviewers perform static review or wait for shared verification evidence.
 Reason: Concurrent suites distort timing, waste compute, and weaken verification signal.
 
+### own-verification-identity
+Trigger: Authenticated verification required Brandon to sign in manually from another device.
+Rule: Maintain an isolated QA identity with secrets outside Git; agents own routine authenticated verification.
+Reason: Verification infrastructure must not become recurring founder labor.
+
 ### production-schema-before-deploy
 Trigger: Production code queries columns from an unapplied source migration.
 Rule: Block production promotion until required migrations are applied or backward-compatible code is proven.
