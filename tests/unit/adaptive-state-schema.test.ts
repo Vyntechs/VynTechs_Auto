@@ -2,7 +2,10 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { vector } from '@electric-sql/pglite/vector'
+import { getTableColumns } from 'drizzle-orm'
+import { getTableConfig } from 'drizzle-orm/pg-core'
 import { afterEach, describe, expect, it } from 'vitest'
+import { sessionEvents, sessions } from '@/lib/db/schema'
 
 const closeCallbacks: Array<() => Promise<void>> = []
 
@@ -65,6 +68,55 @@ async function applyAdaptiveMigration(client: PGlite) {
 }
 
 describe('adaptive diagnostic state source migration', () => {
+  it('declares the deployed adaptive session and actor-bound request schema', () => {
+    const sessionColumns = getTableColumns(sessions)
+    expect(sessionColumns).toMatchObject({
+      adaptiveDiagnosticState: expect.objectContaining({
+        name: 'adaptive_diagnostic_state',
+        notNull: false,
+      }),
+      adaptiveRevision: expect.objectContaining({
+        name: 'adaptive_revision',
+        notNull: true,
+        default: 0,
+      }),
+    })
+
+    const eventColumns = getTableColumns(sessionEvents)
+    expect(eventColumns).toMatchObject({
+      requestKey: expect.objectContaining({ name: 'request_key', notNull: false }),
+      requestActorProfileId: expect.objectContaining({
+        name: 'request_actor_profile_id',
+        notNull: false,
+      }),
+      requestFingerprint: expect.objectContaining({
+        name: 'request_fingerprint',
+        notNull: false,
+      }),
+    })
+
+    const eventConfig = getTableConfig(sessionEvents)
+    expect(eventConfig.indexes.map((entry) => ({
+      name: entry.config.name,
+      unique: entry.config.unique,
+      hasPartialPredicate: entry.config.where !== undefined,
+    }))).toContainEqual({
+      name: 'session_events_session_actor_request_key_uq',
+      unique: true,
+      hasPartialPredicate: true,
+    })
+    expect(eventConfig.checks.map((entry) => entry.name)).toContain(
+      'session_events_request_actor_pair',
+    )
+    expect(eventConfig.foreignKeys.map((entry) => ({
+      name: entry.getName(),
+      onDelete: entry.onDelete,
+    }))).toContainEqual({
+      name: 'session_events_request_actor_profile_id_fkey',
+      onDelete: 'restrict',
+    })
+  })
+
   it('adds nullable object state and revision zero without changing existing rows', async () => {
     const client = await createPre0029Db()
     closeCallbacks.push(() => client.close())

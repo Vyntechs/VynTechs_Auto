@@ -23,6 +23,7 @@ import type { Flow, WizardState } from '../flows/types'
 // Type-only import (erased at runtime) — avoids a circular dependency, since
 // lib/diagnostics/promote-system-data.ts imports table VALUES from this file.
 import type { SystemDataDraft } from '../diagnostics/promote-system-data'
+import type { AdaptiveDiagnosticState } from '../diagnostics/adaptive/contracts'
 
 export type { TreeState }
 
@@ -232,8 +233,18 @@ export const sessions = pgTable(
     // Added by migration 0023 (interactive electrical topology). Tracks the
     // last scenario the tech picked, so the topology loader can restore it.
     lastScenarioSlug: text('last_scenario_slug'),
+    adaptiveDiagnosticState: jsonb('adaptive_diagnostic_state')
+      .$type<AdaptiveDiagnosticState | null>(),
+    adaptiveRevision: bigint('adaptive_revision', { mode: 'number' }).notNull().default(0),
   },
-  (table) => [uniqueIndex('sessions_shop_id_id_uq').on(table.shopId, table.id)],
+  (table) => [
+    uniqueIndex('sessions_shop_id_id_uq').on(table.shopId, table.id),
+    check(
+      'sessions_adaptive_diagnostic_state_object',
+      sql`${table.adaptiveDiagnosticState} is null
+        or jsonb_typeof(${table.adaptiveDiagnosticState}) = 'object'`,
+    ),
+  ],
 )
 
 export const tickets = pgTable(
@@ -708,58 +719,83 @@ export const quoteEvents = pgTable(
   ],
 )
 
-export const sessionEvents = pgTable('session_events', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  sessionId: uuid('session_id')
-    .references(() => sessions.id, { onDelete: 'cascade' })
-    .notNull(),
-  nodeId: text('node_id').notNull(),
-  eventType: text('event_type', {
-    enum: [
-      'advance',
-      'observation',
-      'tree_update',
-      'close',
-      'repair_observation',
-      'repair_guidance',
-      'wizard_lock_in',
-    ],
-  }).notNull(),
-  observationText: text('observation_text'),
-  aiResponse: jsonb('ai_response').$type<{
-    nextNodeId?: string
-    /** Full text of the AI's `message` field at this turn. Persisted from
-     *  `advanceSession` so the curator timeline can reconstruct the
-     *  back-and-forth turn-by-turn — `treeState.message` only carries the
-     *  latest reply. Optional for back-compat with rows written before
-     *  2026-05-09. */
-    messageText?: string
-    treeUpdate?: unknown
-    requestedFollowUp?: string
-    abandon?: {
-      reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
-      note?: string
-    }
-    repairGuidance?: {
-      text: string
-      tangentialConcerns?: string[]
-    }
-    declineOrDefer?: {
-      reason: 'decline' | 'defer'
-      gap: string
-      riskClass: 'low' | 'medium' | 'high' | 'destructive'
-      language: {
-        customerMessage: string
-        internalNote: string
-        recommendedReferral?: string
+export const sessionEvents = pgTable(
+  'session_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .references(() => sessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    nodeId: text('node_id').notNull(),
+    eventType: text('event_type', {
+      enum: [
+        'advance',
+        'observation',
+        'tree_update',
+        'close',
+        'repair_observation',
+        'repair_guidance',
+        'wizard_lock_in',
+      ],
+    }).notNull(),
+    observationText: text('observation_text'),
+    aiResponse: jsonb('ai_response').$type<{
+      nextNodeId?: string
+      /** Full text of the AI's `message` field at this turn. Persisted from
+       *  `advanceSession` so the curator timeline can reconstruct the
+       *  back-and-forth turn-by-turn — `treeState.message` only carries the
+       *  latest reply. Optional for back-compat with rows written before
+       *  2026-05-09. */
+      messageText?: string
+      treeUpdate?: unknown
+      requestedFollowUp?: string
+      abandon?: {
+        reason: 'mistake' | 'test' | 'wrong_vehicle' | 'customer_left' | 'other'
+        note?: string
       }
-    }
-    /** Stashes the pinned flow_version a wizard lock-in handed off from, so
-     *  PR-N5's stale-outcomes cron can read ai_response->'wizardLockIn'->>'flowVersionId'. */
-    wizardLockIn?: { flowVersionId: string }
-  }>(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+      repairGuidance?: {
+        text: string
+        tangentialConcerns?: string[]
+      }
+      declineOrDefer?: {
+        reason: 'decline' | 'defer'
+        gap: string
+        riskClass: 'low' | 'medium' | 'high' | 'destructive'
+        language: {
+          customerMessage: string
+          internalNote: string
+          recommendedReferral?: string
+        }
+      }
+      /** Stashes the pinned flow_version a wizard lock-in handed off from, so
+       *  PR-N5's stale-outcomes cron can read ai_response->'wizardLockIn'->>'flowVersionId'. */
+      wizardLockIn?: { flowVersionId: string }
+    }>(),
+    requestKey: uuid('request_key'),
+    requestActorProfileId: uuid('request_actor_profile_id'),
+    requestFingerprint: text('request_fingerprint'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'session_events_request_actor_profile_id_fkey',
+      columns: [table.requestActorProfileId],
+      foreignColumns: [profiles.id],
+    }).onDelete('restrict'),
+    check(
+      'session_events_request_actor_pair',
+      sql`(${table.requestKey} is null
+          and ${table.requestActorProfileId} is null
+          and ${table.requestFingerprint} is null)
+        or (${table.requestKey} is not null
+          and ${table.requestActorProfileId} is not null
+          and ${table.requestFingerprint} is not null)`,
+    ),
+    uniqueIndex('session_events_session_actor_request_key_uq')
+      .on(table.sessionId, table.requestActorProfileId, table.requestKey)
+      .where(sql`${table.requestKey} is not null`),
+  ],
+)
 
 export const confidenceCalibration = pgTable('confidence_calibration', {
   id: uuid('id').primaryKey().defaultRandom(),

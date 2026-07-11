@@ -50,6 +50,8 @@ const fixtureSession: Session = {
   maxCorpusSimilarity: null,
   wizardState: null,
   lastScenarioSlug: null,
+  adaptiveDiagnosticState: null,
+  adaptiveRevision: 0,
 }
 
 const closedSession: Session = {
