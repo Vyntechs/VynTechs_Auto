@@ -14,11 +14,11 @@ const JOB = '00000000-0000-4000-8000-000000000201'
 const VERSION = '00000000-0000-4000-8000-000000000401'
 const NEWER_VERSION = '00000000-0000-4000-8000-000000000402'
 const REQUEST = '00000000-0000-4000-8000-000000000901'
-const ticket = { id: TICKET, ticketNumber: 42, customer: { name: 'Marisol Vega' }, vehicle: { year: 2019, make: 'Ford', model: 'F-150' } }
+const ticket = { id: TICKET, ticketNumber: 42, concern: 'Brake vibration', customer: { name: 'Marisol Vega' }, vehicle: { year: 2019, make: 'Ford', model: 'F-150' } }
 function builder(canApprove = true, approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null }): Builder {
   return {
     ticket: { id: TICKET, status: 'open', reconciled: true }, configuration: { laborRateCents: 12000, taxRateBps: 825, laborRateConfigured: true, taxRateConfigured: true },
-    jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, approval, lines: [] }],
+    jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: true, approval, lines: [] }],
     capabilities: { canRecordCustomerApproval: canApprove },
     activeVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, jobs: [{ jobId: JOB, subtotalCents: 84217 }] },
   }
@@ -58,6 +58,14 @@ describe('Shop OS exact-version approval UI', () => {
   it('shows decision truth without enabled controls for tech or parts capability', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder(false)} />)
     expect(screen.getByText('Advisor or owner records the customer decision.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /approval|declined/i })).toBeNull()
+  })
+
+  it('shows an honest non-action state when the prepared job is not decision eligible', () => {
+    const blocked = builder(true)
+    blocked.jobs[0] = { ...blocked.jobs[0], workStatus: 'in_progress', decisionEligible: false }
+    render(<ManualQuoteBuilder ticket={ticket} builder={blocked} />)
+    expect(screen.getByText('Customer decision is unavailable for this job’s current state.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /approval|declined/i })).toBeNull()
   })
 

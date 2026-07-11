@@ -46,3 +46,11 @@
 - Canonical retries on a newer version skip optimistic labeling, refresh the builder, and render that newer server truth.
 - Any successful builder refresh clears the temporary local verdict override.
 - RED: two approval regressions failed before correction. GREEN: four focused files, 71 tests passed; TypeScript and diff checks passed.
+
+## Whole-branch review follow-up
+
+- Pending-story preparation blocks only priced diagnostic jobs; unpriced diagnostics do not block priced repair work.
+- Authorization actions now require the server-projected `decisionEligible` fact and otherwise show an honest non-action state.
+- Generation conflicts rebase workspace/revision, retain still-valid proof selections, and rotate the conflicted request identity; ambiguous network failures retain it.
+- First topology review shows the exact ticket concern and shared neutral waiver before the deliberate `Review and save story` action.
+- GREEN: four focused files, 76 tests passed; TypeScript and diff checks passed.

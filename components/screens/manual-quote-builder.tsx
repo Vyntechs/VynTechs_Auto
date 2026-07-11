@@ -22,6 +22,7 @@ import {
   type SafeCannedJobTemplate,
 } from '@/lib/shop-os/canned-jobs-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
+import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -29,6 +30,7 @@ type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
 export type QuoteTicketIdentity = {
   id: string
   ticketNumber: number
+  concern: string
   customer: { name: string } | null
   vehicle: { year: number | null; make: string | null; model: string | null } | null
 }
@@ -121,7 +123,7 @@ export function ManualQuoteBuilder({
     busy,
   })
   const pendingStory = !current.activeVersion && current.jobs.some((job) =>
-    job.kind === 'diagnostic'
+    job.kind === 'diagnostic' && job.lines.length > 0
       && (job.story.content === null || job.story.reviewStatus !== 'reviewed'))
   const preparation = basePreparation.kind === 'ready' && pendingStory
     ? { kind: 'blocked' as const, reasons: ['Review every diagnostic story.'] }
@@ -375,7 +377,8 @@ export function ManualQuoteBuilder({
   ): void {
     const version = current.activeVersion
     const versionJob = version?.jobs.find((item) => item.jobId === job.id)
-    if (!version || !versionJob || !current.capabilities.canRecordCustomerApproval) return
+    if (!version || !versionJob || !job.decisionEligible
+      || !current.capabilities.canRecordCustomerApproval) return
     setDecision({
       jobId: job.id, title: job.title, kind, requestKey: crypto.randomUUID(),
       versionId: version.id, versionNumber: version.versionNumber,
@@ -753,6 +756,7 @@ export function ManualQuoteBuilder({
                     {job.kind === 'diagnostic' && (
                       <StoryCard
                         ticketId={ticket.id}
+                        ticketConcern={ticket.concern}
                         job={job}
                         focusRef={(element) => {
                           if (element) focusRefs.current.set(`story:${job.id}`, element)
@@ -938,11 +942,13 @@ type DecisionState = {
 
 function StoryCard({
   ticketId,
+  ticketConcern,
   job,
   focusRef,
   onServerChange,
 }: {
   ticketId: string
+  ticketConcern: string
   job: BuilderJob
   focusRef: (element: HTMLElement | null) => void
   onServerChange: () => Promise<boolean>
@@ -1014,6 +1020,30 @@ function StoryCard({
         body: JSON.stringify({ clientKey: generationKey.current, expectedStoryRevision: revision,
           sourceEventIds: selectedEvents, sourceArtifactIds: selectedArtifacts }),
       })
+      if (response.status === 409) {
+        try {
+          const workspaceResponse = await fetch(endpoint, { headers: { accept: 'application/json' } })
+          const rebased = workspaceResponse.ok
+            ? parseCustomerStoryWorkspaceResponse(await readBody(workspaceResponse)) : null
+          if (!rebased) {
+            setError('Story changed elsewhere. Refresh before choosing proof again.')
+            return
+          }
+          const currentEventIds = new Set(rebased.evidence.events.map((item) => item.id))
+          const currentArtifactIds = new Set(rebased.evidence.artifacts.map((item) => item.id))
+          setSelectedEvents((ids) => ids.filter((id) => currentEventIds.has(id)))
+          setSelectedArtifacts((ids) => ids.filter((id) => currentArtifactIds.has(id)))
+          setStory(rebased.story)
+          setRevision(rebased.storyRevision)
+          setReviewStatus(rebased.storyMeta?.reviewStatus ?? null)
+          setEvidence(rebased.evidence)
+          generationKey.current = null
+          setError('Story refreshed. Your selected proof is preserved; retry generation.')
+        } catch {
+          setError('Story changed elsewhere. Refresh before choosing proof again.')
+        }
+        return
+      }
       const parsed = response.ok ? parseCustomerStoryMutationResponse(await readBody(response)) : null
       if (!parsed) {
         setError('Story generation did not return safe server truth. Retry with the same evidence.')
@@ -1135,11 +1165,15 @@ function StoryCard({
           {(story || job.storyMode === 'topology_manual') && (
             <div className={styles.storyEditor}>
               {story && <><p className={styles.storyLabel}>What you told us</p><p>{story.whatYouToldUs}</p></>}
+              {!story && job.storyMode === 'topology_manual' && <>
+                <p className={styles.storyLabel}>What you told us</p><p>{ticketConcern}</p>
+                <p className={styles.storyLabel}>If deferred</p><p>{CUSTOMER_STORY_WAIVER}</p>
+              </>}
               <label>What we found<textarea value={whatWeFound} maxLength={5000} onChange={(event) => edit('found', event.target.value)} /></label>
               {story && story.howWeKnow.length > 0 && <details className={styles.proof}><summary>Proof · {story.howWeKnow.length} sourced {story.howWeKnow.length === 1 ? 'observation' : 'observations'}</summary>{story.howWeKnow.map((claim) => <p key={claim.claim}>{claim.claim}</p>)}</details>}
               {story && <><p className={styles.storyLabel}>If deferred</p><p>{story.whatItMeansIfWaived}</p></>}
               <label>What we recommend<textarea value={whatWeRecommend} maxLength={5000} onChange={(event) => edit('recommend', event.target.value)} /></label>
-              <button type="button" className={styles.storyAction} disabled={busy || !whatWeFound.trim() || !whatWeRecommend.trim()} onClick={saveReview}>{busy ? 'Saving…' : 'Save reviewed story'}</button>
+              <button type="button" className={styles.storyAction} disabled={busy || !whatWeFound.trim() || !whatWeRecommend.trim()} onClick={saveReview}>{busy ? 'Saving…' : !story && job.storyMode === 'topology_manual' ? 'Review and save story' : 'Save reviewed story'}</button>
             </div>
           )}
           {busy && !story && <p role="status" aria-live="polite">Loading story truth…</p>}
@@ -1168,13 +1202,15 @@ function AuthorizationStrip({ job, versionNumber, jobSubtotalCents, totalCents, 
       <p className={styles.eyebrow}>Quote V{versionNumber} · immutable</p>
       <p className={styles.authorizationTitle}>{job.title}</p>
       <dl><div><dt>Job subtotal before tax</dt><dd className={styles.money}>{formatMoneyCents(jobSubtotalCents)}</dd></div><div><dt>Ticket total</dt><dd className={styles.money}>{formatMoneyCents(totalCents)}</dd></div></dl>
-      {verdict ? <p className={styles.verdict} role="status" aria-live="polite">{verdict}</p> : canDecide ? (
+      {verdict ? <p className={styles.verdict} role="status" aria-live="polite">{verdict}</p> : canDecide && job.decisionEligible ? (
         <div className={styles.decisionActions}>
           <button type="button" onClick={(event) => onDecision('phone', event.currentTarget)}>Phone approval</button>
           <button type="button" onClick={(event) => onDecision('in_person', event.currentTarget)}>In-person approval</button>
           <button type="button" onClick={(event) => onDecision('declined', event.currentTarget)}>Record declined</button>
         </div>
-      ) : <p className={styles.storyTruth}>Advisor or owner records the customer decision.</p>}
+      ) : <p className={styles.storyTruth}>{canDecide
+        ? 'Customer decision is unavailable for this job’s current state.'
+        : 'Advisor or owner records the customer decision.'}</p>}
     </section>
   )
 }
