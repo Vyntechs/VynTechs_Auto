@@ -45,12 +45,14 @@
 
 ## Task 4: Immutable version creation
 
-- [ ] Lock ticket then stable dependent rows with `NOWAIT`; reauthorize/reload the complete quote context and return retryable 409 on contention.
-- [ ] Reject unreconciled tickets, unconfigured tax, missing labor rate when computation is requested, empty quotes, and unsafe snapshot values.
-- [ ] Return an identical sole active snapshot on retry; otherwise supersede once and allocate `max(versionNumber)+1` atomically.
-- [ ] Persist only content-stable typed inputs and move non-canceled jobs with lines to `quote_ready`; leave excluded jobs untouched.
-- [ ] Prove held diagnostic job, add-job serialization, duplicate-active anomaly, same/different concurrent requests, canonical ties/nested JSON, and immutable-trigger behavior.
-- [ ] Independently review version creation.
+- [x] Lock ticket then stable dependent rows with `NOWAIT`; reauthorize/reload the complete quote context and return retryable 409 on contention.
+- [x] Reject unreconciled tickets, unconfigured tax, missing labor rate when computation is requested, empty quotes, and unsafe snapshot values.
+- [x] Return an identical sole active snapshot on retry; otherwise supersede once and allocate `max(versionNumber)+1` atomically.
+- [x] Persist only content-stable typed inputs and move non-canceled jobs with lines to `quote_ready`; leave excluded jobs untouched.
+- [x] Prove diagnostic-held lock structure, add-job serialization, duplicate-active anomaly, deterministic same-client convergence plus later changed-state versioning, canonical ties/nested JSON, and immutable-trigger behavior.
+- [x] Independently review version creation; resolve customer-snapshot privacy/bounds, concurrency-proof, active-history, and PostgreSQL version-range findings through tests.
+
+**Task-4 verification boundary:** PGlite proves deterministic same-client convergence, the generated `NOWAIT` lock order, and injected post-ticket-lock `55P03` rollback/classification. True two-connection wait timing remains deferred to PostgreSQL integration proof.
 
 ## Task 5: Idempotent phone/in-person decision
 

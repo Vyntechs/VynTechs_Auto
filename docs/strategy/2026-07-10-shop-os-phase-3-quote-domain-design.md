@@ -57,7 +57,7 @@ Decimals parse into scaled `bigint`. Labor uses `(hoursHundredths * rateCents + 
 - schema version, ticket ID/number, customer ID, vehicle ID, and configured shop rate/tax inputs;
 - jobs ordered by persisted creation time then ID;
 - each job's title/kind/story plus lines ordered by `sort`, creation time, then ID;
-- line input fields, canonical decimal strings, extended cents, and source/vendor context already stored on the line;
+- customer-safe line fields, canonical decimal strings, extended cents, and source; internal unit cost and arbitrary vendor snapshots stay out until a later row defines a validated customer-safe offer contract;
 - attachments ordered by creation time then ID and limited to stable ID/job/kind metadata, never storage credentials or signed URLs;
 - per-job totals and ticket totals.
 

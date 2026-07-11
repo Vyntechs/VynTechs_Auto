@@ -141,7 +141,7 @@ describe('Shop OS quote totals', () => {
 })
 
 describe('Shop OS immutable quote snapshot identity', () => {
-  const snapshot = (vendorContext: JsonObject): QuoteSnapshotV1 => ({
+  const snapshot = (_vendorContext: JsonObject): QuoteSnapshotV1 => ({
     schemaVersion: 1,
     ticket: {
       id: 'ticket-1',
@@ -156,7 +156,10 @@ describe('Shop OS immutable quote snapshot identity', () => {
         id: 'job-1',
         title: 'Brake service',
         kind: 'repair',
-        customerStory: { concern: 'noise' },
+        customerStory: {
+          whatYouToldUs: 'noise', whatWeFound: 'worn pads', howWeKnow: [],
+          whatItMeansIfWaived: 'longer stopping', whatWeRecommend: 'replace pads',
+        },
         storyMeta: null,
         lines: [
           {
@@ -168,13 +171,12 @@ describe('Shop OS immutable quote snapshot identity', () => {
             taxable: true,
             partNumber: 'PAD-1',
             brand: 'ACME',
-            unitCostCents: 6_000,
             coreChargeCents: null,
             fitment: null,
             laborHours: null,
             laborRateCents: null,
             source: 'manual',
-            vendorContext,
+            vendorContext: null,
           },
         ],
         attachments: [{ id: 'attachment-1', jobId: 'job-1', kind: 'photo' }],
@@ -200,7 +202,7 @@ describe('Shop OS immutable quote snapshot identity', () => {
     )
   })
 
-  it('produces identical content identity for recursively equivalent vendor JSON', () => {
+  it('keeps content identity independent of excluded external vendor JSON', () => {
     const first = snapshot({ offer: { z: 2, a: 1 }, tiers: [{ y: 2, x: 1 }] })
     const second = snapshot({ tiers: [{ x: 1, y: 2 }], offer: { a: 1, z: 2 } })
     expect(quoteSnapshotContentIdentity(first)).toBe(quoteSnapshotContentIdentity(second))

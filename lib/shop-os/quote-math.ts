@@ -21,13 +21,12 @@ export interface QuoteSnapshotLineV1 {
   taxable: boolean
   partNumber: string | null
   brand: string | null
-  unitCostCents: number | null
   coreChargeCents: number | null
   fitment: string | null
   laborHours: string | null
   laborRateCents: number | null
   source: QuoteLineSource
-  vendorContext: JsonObject | null
+  vendorContext: null
 }
 
 export interface QuoteSnapshotAttachmentRefV1 {
@@ -40,7 +39,7 @@ export interface QuoteSnapshotJobV1 {
   id: string
   title: string
   kind: 'diagnostic' | 'repair' | 'maintenance'
-  customerStory: JsonObject | null
+  customerStory: QuoteCustomerStoryV1 | null
   storyMeta: QuoteStoryMetaV1 | null
   lines: QuoteSnapshotLineV1[]
   attachments: QuoteSnapshotAttachmentRefV1[]
@@ -48,6 +47,20 @@ export interface QuoteSnapshotJobV1 {
     subtotalCents: number
     taxableSubtotalCents: number
   }
+}
+
+export interface QuoteCustomerStoryEvidenceV1 {
+  claim: string
+  sourceEventIds: string[]
+  sourceArtifactIds: string[]
+}
+
+export interface QuoteCustomerStoryV1 {
+  whatYouToldUs: string
+  whatWeFound: string
+  howWeKnow: QuoteCustomerStoryEvidenceV1[]
+  whatItMeansIfWaived: string
+  whatWeRecommend: string
 }
 
 export interface QuoteSnapshotV1 {

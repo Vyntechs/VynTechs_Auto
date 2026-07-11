@@ -2,19 +2,29 @@ import { createHash } from 'node:crypto'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
+import { jobAttachments, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import {
   formatScaledDecimal,
+  buildQuoteStoryMeta,
+  calculateTicketTotals,
+  canonicalizeJson,
   parseScaledDecimal,
+  quoteSnapshotContentIdentity,
   resolveLaborPriceCents,
+  sortBySnapshotOrder,
+  type QuoteCustomerStoryV1,
+  type QuoteSnapshotV1,
 } from '@/lib/shop-os/quote-math'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
 const MAX_LABOR_HOURS_SCALED = 99_999_999n
+const MAX_POSTGRES_INTEGER = 2_147_483_647
+const MAX_SNAPSHOT_BYTES = 65_536
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const moneySchema = z.number().int().min(0).max(MAX_SAFE_INTEGER)
+const boundedText = (max: number) => z.string().max(max)
 const commonShape = {
   description: z.string().trim().min(1).max(500),
   sort: z.number().int().min(0).max(1_000_000).default(0),
@@ -97,11 +107,18 @@ class AbortDraftMutation extends Error {
   }
 }
 
-const jsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
-  z.string(), z.number().finite(), z.boolean(), z.null(),
-  z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
-]))
-const jsonObjectSchema = z.record(z.string(), jsonValueSchema)
+const storyEvidenceSchema = z.strictObject({
+  claim: boundedText(2_000),
+  sourceEventIds: z.array(boundedText(200)).max(100),
+  sourceArtifactIds: z.array(boundedText(200)).max(100),
+})
+const customerStorySchema = z.strictObject({
+  whatYouToldUs: boundedText(5_000),
+  whatWeFound: boundedText(5_000),
+  howWeKnow: z.array(storyEvidenceSchema).max(50),
+  whatItMeansIfWaived: boundedText(5_000),
+  whatWeRecommend: boundedText(5_000),
+})
 const snapshotTotalsSchema = z.strictObject({
   subtotalCents: moneySchema,
   taxableSubtotalCents: moneySchema,
@@ -118,37 +135,49 @@ const quoteSnapshotSchema = z.strictObject({
   }),
   jobs: z.array(z.strictObject({
     id: uuidSchema,
-    title: z.string(),
+    title: boundedText(500),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
-    customerStory: jsonObjectSchema.nullable(),
+    customerStory: customerStorySchema.nullable(),
     storyMeta: z.strictObject({
       source: z.enum(['ai', 'manual', 'template']),
-      sessionId: z.string().optional(),
+      sessionId: boundedText(200).optional(),
     }).nullable(),
     lines: z.array(z.strictObject({
       id: uuidSchema,
       kind: z.enum(['part', 'labor', 'fee']),
-      description: z.string(),
+      description: boundedText(500),
       quantity: z.string(),
       priceCents: moneySchema,
       taxable: z.boolean(),
-      partNumber: z.string().nullable(),
-      brand: z.string().nullable(),
-      unitCostCents: moneySchema.nullable(),
+      partNumber: boundedText(200).nullable(),
+      brand: boundedText(200).nullable(),
       coreChargeCents: moneySchema.nullable(),
-      fitment: z.string().nullable(),
+      fitment: boundedText(500).nullable(),
       laborHours: z.string().nullable(),
       laborRateCents: moneySchema.nullable(),
       source: z.enum(['manual', 'vendor_offer', 'diagnosis_seed', 'guide']),
-      vendorContext: jsonObjectSchema.nullable(),
-    })),
+      vendorContext: z.null(),
+    }).superRefine((line, context) => {
+      const partFieldsPresent = line.partNumber !== null || line.brand !== null
+        || line.coreChargeCents !== null || line.fitment !== null
+      const laborFieldsPresent = line.laborHours !== null || line.laborRateCents !== null
+      if (line.kind === 'part' && laborFieldsPresent) {
+        context.addIssue({ code: 'custom', message: 'part line contains labor fields' })
+      }
+      if (line.kind === 'labor' && (partFieldsPresent || line.laborHours === null)) {
+        context.addIssue({ code: 'custom', message: 'labor line fields are corrupt' })
+      }
+      if (line.kind === 'fee' && (partFieldsPresent || laborFieldsPresent)) {
+        context.addIssue({ code: 'custom', message: 'fee line contains typed fields' })
+      }
+    })).max(500),
     attachments: z.array(z.strictObject({
       id: uuidSchema,
       jobId: uuidSchema,
       kind: z.enum(['photo', 'video', 'document']),
-    })),
+    })).max(200),
     totals: snapshotTotalsSchema,
-  })).min(1),
+  })).min(1).max(200),
   totals: snapshotTotalsSchema.extend({
     taxCents: moneySchema,
     totalCents: moneySchema,
@@ -336,6 +365,384 @@ async function invalidateActiveVersion(
         eq(ticketJobs.ticketId, input.ticketId),
         inArray(ticketJobs.id, includedJobIds),
       ))
+  }
+}
+
+export type CreateQuoteVersionResult =
+  | {
+    ok: true
+    changed: boolean
+    version: {
+      id: string
+      versionNumber: number
+    }
+  }
+  | { ok: false; error: 'invalid_input' | 'not_found' | 'conflict'; retryable?: boolean }
+
+export type CreateQuoteVersionDependencies = {
+  beforeWrite?: () => Promise<void>
+  afterTicketLock?: () => Promise<void>
+}
+
+type VersionFailure = Extract<CreateQuoteVersionResult, { ok: false }>
+type VersionContext = {
+  ticket: Pick<typeof tickets.$inferSelect, 'id' | 'ticketNumber' | 'customerId' | 'vehicleId'>
+  shop: Pick<typeof shops.$inferSelect, 'id' | 'laborRateCents' | 'taxRateBps'>
+  jobs: Array<typeof ticketJobs.$inferSelect>
+  lines: Array<typeof jobLines.$inferSelect>
+  attachments: Array<typeof jobAttachments.$inferSelect>
+  versions: Array<typeof quoteVersions.$inferSelect>
+  actorId: string
+}
+
+class AbortVersionCreation extends Error {
+  constructor(readonly failure: VersionFailure) {
+    super('abort_quote_version_creation')
+  }
+}
+
+async function lockVersionContext(
+  db: AppDb,
+  input: { shopId: string; profileId: string; ticketId: string },
+  dependencies: Pick<CreateQuoteVersionDependencies, 'afterTicketLock'>,
+): Promise<VersionContext | null> {
+  const [ticket] = await db
+    .select({
+      id: tickets.id,
+      ticketNumber: tickets.ticketNumber,
+      customerId: tickets.customerId,
+      vehicleId: tickets.vehicleId,
+      status: tickets.status,
+    })
+    .from(tickets)
+    .where(and(eq(tickets.shopId, input.shopId), eq(tickets.id, input.ticketId)))
+    .limit(1)
+    .for('update', { noWait: true })
+  if (!ticket || ticket.status !== 'open') return null
+  await dependencies.afterTicketLock?.()
+
+  const [shop] = await db
+    .select({ id: shops.id, laborRateCents: shops.laborRateCents, taxRateBps: shops.taxRateBps })
+    .from(shops)
+    .where(eq(shops.id, input.shopId))
+    .limit(1)
+    .for('update', { noWait: true })
+  if (!shop) return null
+
+  const jobs = await db
+    .select()
+    .from(ticketJobs)
+    .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
+    .orderBy(ticketJobs.id)
+    .for('update', { noWait: true })
+  const jobIds = jobs.map((job) => job.id)
+  const lines = jobIds.length === 0
+    ? []
+    : await db
+      .select()
+      .from(jobLines)
+      .where(and(eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobIds)))
+      .orderBy(jobLines.id)
+      .for('update', { noWait: true })
+  const attachments = jobIds.length === 0
+    ? []
+    : await db
+      .select()
+      .from(jobAttachments)
+      .where(and(eq(jobAttachments.shopId, input.shopId), inArray(jobAttachments.jobId, jobIds)))
+      .orderBy(jobAttachments.id)
+      .for('update', { noWait: true })
+  const versions = await db
+    .select()
+    .from(quoteVersions)
+    .where(and(eq(quoteVersions.shopId, input.shopId), eq(quoteVersions.ticketId, input.ticketId)))
+    .orderBy(quoteVersions.id)
+    .for('update', { noWait: true })
+  const [actor] = await db
+    .select({ id: profiles.id, role: profiles.role })
+    .from(profiles)
+    .where(and(
+      eq(profiles.id, input.profileId),
+      eq(profiles.shopId, input.shopId),
+      eq(profiles.membershipStatus, 'active'),
+      isNull(profiles.deactivatedAt),
+    ))
+    .limit(1)
+    .for('update', { noWait: true })
+  if (!actor || !canBuildQuotes(actor.role)) return null
+  return { ticket, shop, jobs, lines, attachments, versions, actorId: actor.id }
+}
+
+function safeUuid(value: string): string {
+  const parsed = uuidSchema.safeParse(value)
+  if (!parsed.success) throw new TypeError('persisted UUID is invalid')
+  return parsed.data
+}
+
+function safeMoney(value: number | null, nullable = false): number | null {
+  if (value === null && nullable) return null
+  if (value === null || !Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError('persisted money value is unsafe')
+  }
+  return value
+}
+
+function safeCustomerStory(value: unknown): QuoteCustomerStoryV1 | null {
+  if (value === null) return null
+  const parsed = customerStorySchema.safeParse(value)
+  if (!parsed.success) throw new TypeError('persisted customer story is invalid')
+  return canonicalizeJson(parsed.data) as unknown as QuoteCustomerStoryV1
+}
+
+function requireBoundedJson(value: unknown, maxBytes: number): void {
+  if (value === null) return
+  const canonical = canonicalizeJson(value)
+  if (!canonical || typeof canonical !== 'object' || Array.isArray(canonical)) {
+    throw new TypeError('persisted vendor context is invalid')
+  }
+  if (Buffer.byteLength(JSON.stringify(canonical), 'utf8') > maxBytes) {
+    throw new RangeError('persisted vendor context is oversized')
+  }
+}
+
+function canonicalStoredDecimal(value: number, scale: number): string {
+  if (!Number.isFinite(value)) throw new RangeError('persisted decimal is unsafe')
+  return formatScaledDecimal(parseScaledDecimal(String(value), scale), scale)
+}
+
+function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
+  if (!context.ticket.customerId || !context.ticket.vehicleId) {
+    throw new TypeError('ticket is unreconciled')
+  }
+  if (!Number.isSafeInteger(context.ticket.ticketNumber) || context.ticket.ticketNumber <= 0) {
+    throw new RangeError('ticket number is unsafe')
+  }
+  if (context.shop.taxRateBps === null || !Number.isInteger(context.shop.taxRateBps)
+    || context.shop.taxRateBps < 0 || context.shop.taxRateBps > 10_000) {
+    throw new RangeError('shop tax rate is unconfigured or unsafe')
+  }
+  const shopRate = safeMoney(context.shop.laborRateCents, true)
+  const linesByJob = new Map<string, Array<typeof jobLines.$inferSelect>>()
+  for (const line of context.lines) {
+    const rows = linesByJob.get(line.jobId) ?? []
+    rows.push(line)
+    linesByJob.set(line.jobId, rows)
+  }
+  const attachmentsByJob = new Map<string, Array<typeof jobAttachments.$inferSelect>>()
+  for (const attachment of context.attachments) {
+    const rows = attachmentsByJob.get(attachment.jobId) ?? []
+    rows.push(attachment)
+    attachmentsByJob.set(attachment.jobId, rows)
+  }
+  const jobs = sortBySnapshotOrder(context.jobs)
+    .filter((job) => job.workStatus !== 'canceled' && (linesByJob.get(job.id)?.length ?? 0) > 0)
+    .map((job) => {
+      if (!job.title) throw new TypeError('job title is empty')
+      const totalsInput: Array<{ extendedCents: number; taxable: boolean }> = []
+      const lines = sortBySnapshotOrder(linesByJob.get(job.id) ?? []).map((line) => {
+        if (!line.description) throw new TypeError('line description is empty')
+        const priceCents = safeMoney(line.priceCents)
+        if (priceCents === null) throw new TypeError('line price is missing')
+        const quantity = canonicalStoredDecimal(line.quantity, 3)
+        if (parseScaledDecimal(quantity, 3) === 0n) throw new RangeError('line quantity is zero')
+        const laborHours = line.laborHours === null ? null : canonicalStoredDecimal(line.laborHours, 2)
+        const laborRateCents = safeMoney(line.laborRateCents, true)
+        const partFieldsPresent = line.partNumber !== null || line.brand !== null
+          || line.unitCostCents !== null || line.coreChargeCents !== null || line.fitment !== null
+        const laborFieldsPresent = line.laborHours !== null || line.laborRateCents !== null
+        if (line.kind === 'part' && laborFieldsPresent) throw new TypeError('part line contains labor fields')
+        if (line.kind === 'labor' && (partFieldsPresent || laborHours === null)) {
+          throw new TypeError('labor line fields are corrupt')
+        }
+        if (line.kind === 'fee' && (partFieldsPresent || laborFieldsPresent)) {
+          throw new TypeError('fee line contains typed fields')
+        }
+        if (line.kind !== 'part' && quantity !== '1') throw new TypeError('non-part quantity is corrupt')
+        requireBoundedJson(line.vendorSnapshot, 16_384)
+        totalsInput.push({ extendedCents: priceCents, taxable: line.taxable })
+        return {
+          id: safeUuid(line.id),
+          kind: line.kind,
+          description: line.description,
+          quantity,
+          priceCents,
+          taxable: line.taxable,
+          partNumber: line.partNumber,
+          brand: line.brand,
+          coreChargeCents: safeMoney(line.coreChargeCents, true),
+          fitment: line.fitment,
+          laborHours,
+          laborRateCents,
+          source: line.source,
+          vendorContext: null,
+        }
+      })
+      const totals = calculateTicketTotals(totalsInput, 0)
+      return {
+        id: safeUuid(job.id),
+        title: job.title,
+        kind: job.kind,
+        customerStory: safeCustomerStory(job.customerStory),
+        storyMeta: buildQuoteStoryMeta(job.storyMeta),
+        lines,
+        attachments: sortBySnapshotOrder(attachmentsByJob.get(job.id) ?? []).map((attachment) => ({
+          id: safeUuid(attachment.id),
+          jobId: safeUuid(attachment.jobId),
+          kind: attachment.kind,
+        })),
+        totals: {
+          subtotalCents: totals.subtotalCents,
+          taxableSubtotalCents: totals.taxableSubtotalCents,
+        },
+      }
+    })
+  if (jobs.length === 0) throw new TypeError('quote is empty')
+  const totals = calculateTicketTotals(
+    jobs.flatMap((job) => job.lines.map((line) => ({ extendedCents: line.priceCents, taxable: line.taxable }))),
+    context.shop.taxRateBps,
+  )
+  const snapshot: QuoteSnapshotV1 = {
+    schemaVersion: 1,
+    ticket: {
+      id: safeUuid(context.ticket.id),
+      number: context.ticket.ticketNumber,
+      customerId: safeUuid(context.ticket.customerId),
+      vehicleId: safeUuid(context.ticket.vehicleId),
+      laborRateCents: shopRate,
+      taxRateBps: context.shop.taxRateBps,
+    },
+    jobs,
+    totals,
+  }
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  if (!parsed.success) throw new TypeError('quote snapshot is invalid')
+  if (Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > MAX_SNAPSHOT_BYTES) {
+    throw new RangeError('quote snapshot is oversized')
+  }
+  return parsed.data as QuoteSnapshotV1
+}
+
+function safeVersionProjection(version: typeof quoteVersions.$inferSelect): CreateQuoteVersionResult {
+  const snapshot = quoteSnapshotSchema.safeParse(version.snapshot)
+  if (!snapshot.success) return conflict()
+  return {
+    ok: true,
+    changed: false,
+    version: {
+      id: version.id,
+      versionNumber: version.versionNumber,
+    },
+  }
+}
+
+function validatedActiveSnapshot(
+  context: VersionContext,
+  version: typeof quoteVersions.$inferSelect,
+): QuoteSnapshotV1 {
+  const parsed = quoteSnapshotSchema.safeParse(version.snapshot)
+  if (!parsed.success) throw new AbortVersionCreation(conflict())
+  const snapshot = parsed.data as QuoteSnapshotV1
+  if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > MAX_SNAPSHOT_BYTES) {
+    throw new AbortVersionCreation(conflict())
+  }
+  if (snapshot.ticket.id !== context.ticket.id || snapshot.jobs.length === 0) {
+    throw new AbortVersionCreation(conflict())
+  }
+  const currentJobIds = new Set(context.jobs.map((job) => job.id))
+  const snapshotJobIds = snapshot.jobs.map((job) => job.id)
+  if (new Set(snapshotJobIds).size !== snapshotJobIds.length
+    || snapshotJobIds.some((jobId) => !currentJobIds.has(jobId))) {
+    throw new AbortVersionCreation(conflict())
+  }
+  return snapshot
+}
+
+export async function createQuoteVersion(
+  db: AppDb,
+  input: { actor: QuoteActor; ticketId: unknown },
+  dependencies: CreateQuoteVersionDependencies = {},
+): Promise<CreateQuoteVersionResult> {
+  const parsedTicket = uuidSchema.safeParse(input.ticketId)
+  if (!parsedTicket.success) return { ok: false, error: 'invalid_input' }
+  const persistedActor = await loadActiveActor(db, input.actor)
+  if (!persistedActor?.shopId) return notFound()
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const context = await lockVersionContext(transactionDb, {
+        shopId: persistedActor.shopId as string,
+        profileId: persistedActor.id,
+        ticketId: parsedTicket.data,
+      }, dependencies)
+      if (!context) return notFound()
+      const activeVersions = context.versions.filter((version) => version.supersededAt === null)
+      if (activeVersions.length > 1) throw new AbortVersionCreation(conflict())
+      let snapshot: QuoteSnapshotV1
+      try {
+        snapshot = buildQuoteSnapshot(context)
+      } catch {
+        throw new AbortVersionCreation(conflict())
+      }
+      const active = activeVersions[0]
+      const activeSnapshot = active ? validatedActiveSnapshot(context, active) : null
+      if (active) {
+        if (quoteSnapshotContentIdentity(activeSnapshot!) === quoteSnapshotContentIdentity(snapshot)) {
+          return safeVersionProjection(active)
+        }
+      }
+      await dependencies.beforeWrite?.()
+      if (active) {
+        const [superseded] = await transactionDb
+          .update(quoteVersions)
+          .set({ supersededAt: new Date() })
+          .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
+          .returning()
+        if (!superseded) throw new AbortVersionCreation(conflict(true))
+        const oldJobIds = activeSnapshot!.jobs.map((job) => job.id)
+        if (oldJobIds.length > 0) {
+          await transactionDb.update(ticketJobs).set({
+            approvalState: 'pending_quote',
+            approvedQuoteVersionId: null,
+            updatedAt: new Date(),
+          }).where(and(
+            eq(ticketJobs.shopId, context.shop.id),
+            eq(ticketJobs.ticketId, context.ticket.id),
+            inArray(ticketJobs.id, oldJobIds),
+          ))
+        }
+      }
+      const maxVersion = context.versions.reduce((maximum, version) => Math.max(maximum, version.versionNumber), 0)
+      if (!Number.isInteger(maxVersion) || maxVersion >= MAX_POSTGRES_INTEGER) {
+        throw new AbortVersionCreation(conflict())
+      }
+      const [created] = await transactionDb.insert(quoteVersions).values({
+        shopId: context.shop.id,
+        ticketId: context.ticket.id,
+        versionNumber: maxVersion + 1,
+        snapshot: snapshot as unknown as Record<string, unknown>,
+        createdByProfileId: context.actorId,
+      }).returning()
+      const includedJobIds = snapshot.jobs.map((job) => job.id)
+      await transactionDb.update(ticketJobs).set({
+        approvalState: 'quote_ready',
+        approvedQuoteVersionId: null,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(ticketJobs.shopId, context.shop.id),
+        eq(ticketJobs.ticketId, context.ticket.id),
+        inArray(ticketJobs.id, includedJobIds),
+      ))
+      return {
+        ok: true,
+        changed: true,
+        version: { id: created.id, versionNumber: created.versionNumber },
+      }
+    })
+  } catch (error) {
+    if (error instanceof AbortVersionCreation) return error.failure
+    if (isLockUnavailable(error)) return conflict(true)
+    if (isUniqueViolation(error)) return conflict(true)
+    throw error
   }
 }
 
