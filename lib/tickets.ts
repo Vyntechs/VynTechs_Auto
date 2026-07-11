@@ -4,6 +4,7 @@ import type { AppDb } from '@/lib/db/queries'
 import {
   customers,
   profiles,
+  sessions,
   shops,
   ticketJobs,
   tickets,
@@ -171,7 +172,8 @@ export async function listTodayTicketJobs(
       kind: ticketJobs.kind,
       requiredSkillTier: ticketJobs.requiredSkillTier,
       assignedTechId: ticketJobs.assignedTechId,
-      sessionId: ticketJobs.sessionId,
+      persistedSessionId: ticketJobs.sessionId,
+      accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
     })
     .from(ticketJobs)
@@ -184,6 +186,14 @@ export async function listTodayTicketJobs(
     )
     .leftJoin(customers, eq(tickets.customerId, customers.id))
     .leftJoin(vehicles, eq(tickets.vehicleId, vehicles.id))
+    .leftJoin(
+      sessions,
+      and(
+        eq(sessions.shopId, ticketJobs.shopId),
+        eq(sessions.id, ticketJobs.sessionId),
+        eq(sessions.techId, actor.profileId),
+      ),
+    )
     .where(
       and(
         eq(ticketJobs.shopId, actor.shopId),
@@ -216,13 +226,13 @@ export async function listTodayTicketJobs(
       title: row.title,
       kind: row.kind,
       requiredSkillTier: row.requiredSkillTier,
-      sessionId: row.sessionId,
+      sessionId: row.accessibleSessionId,
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
     }
 
     if (row.assignedTechId === actor.profileId) myJobs.push(job)
     else openJobs.push(job)
-    if (row.sessionId) linkedSessionIds.push(row.sessionId)
+    if (row.persistedSessionId) linkedSessionIds.push(row.persistedSessionId)
   }
 
   return { myJobs, openJobs, linkedSessionIds }

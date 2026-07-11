@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   listTodayTicketJobs,
@@ -334,5 +335,66 @@ describe('Today ticket jobs read model', () => {
         linkedSessionIds: [],
       })
     }
+  })
+
+  it('keeps linked sessions for de-duplication but exposes navigation only to the session owner', async () => {
+    const [otherActorProfile] = await db
+      .insert(profiles)
+      .values({
+        id: uuid(3),
+        userId: uuid(103),
+        shopId,
+        fullName: 'Terry Tech',
+        role: 'tech',
+        skillTier: 2,
+      })
+      .returning()
+    const otherActor = ticketActorFromProfile(otherActorProfile)
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        id: uuid(31),
+        shopId,
+        techId: actorProfileId,
+        intake: {
+          vehicleYear: 2020,
+          vehicleMake: 'Honda',
+          vehicleModel: 'Civic',
+          customerComplaint: 'No start',
+        },
+        treeState,
+      })
+      .returning()
+    const [job] = await db
+      .insert(ticketJobs)
+      .values({
+        id: uuid(47),
+        shopId,
+        ticketId,
+        title: 'Linked diagnosis owned by another tech',
+        kind: 'diagnostic',
+        requiredSkillTier: 2,
+        assignedTechId: otherActor.profileId,
+        sessionId: session.id,
+      })
+      .returning()
+
+    const assignedResult = await listTodayTicketJobs(db, { actor: otherActor })
+
+    expect(assignedResult.myJobs).toMatchObject([{ id: job.id, sessionId: null }])
+    expect(assignedResult.linkedSessionIds).toEqual([session.id])
+
+    await db
+      .update(ticketJobs)
+      .set({ assignedTechId: null })
+      .where(eq(ticketJobs.id, job.id))
+
+    const claimableResult = await listTodayTicketJobs(db, { actor: otherActor })
+    const ownerResult = await listTodayTicketJobs(db, { actor })
+
+    expect(claimableResult.openJobs).toMatchObject([{ id: job.id, sessionId: null }])
+    expect(claimableResult.linkedSessionIds).toEqual([session.id])
+    expect(ownerResult.openJobs).toMatchObject([{ id: job.id, sessionId: session.id }])
+    expect(ownerResult.linkedSessionIds).toEqual([session.id])
   })
 })
