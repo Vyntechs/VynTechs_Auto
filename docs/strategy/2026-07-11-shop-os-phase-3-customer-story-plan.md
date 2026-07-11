@@ -96,7 +96,7 @@
 - [x] Run all row-20 focused tests, then `pnpm test`, `pnpm exec tsc --noEmit`, `pnpm build`, and `git diff --check origin/main...HEAD`.
 - [x] Run independent task reviews after each implementation commit and one whole-branch security/product/code review. Resolve every Critical or Important finding through focused tests and re-review.
 - [x] Add the row-20 implementation correction, record source completion with proof, preserve production/external gates, and record row 21 as the next safe handoff.
-- [ ] Publish, pass GitHub/Vercel/GitGuardian checks, squash-merge, and verify `main`; row 21 executes only under its own reviewed packet.
+- [x] Publish as PR #132, pass GitHub/Vercel/GitGuardian checks, squash-merge as `e9bc780`, verify tree-identical `main`, and observe the Ready production deployment; row 21 executes only under its own reviewed packet.
 
 ## Verification
 
