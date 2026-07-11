@@ -1,9 +1,9 @@
 # Shop OS driver state
 
 - **Outcome:** Ship the approved Shop OS plan into `main`, one tested and independently reviewed PR at a time, without changing diagnostic-engine behavior.
-- **Current slice:** Row 18 / PR #129 — quote ledger and deterministic totals.
-- **Last proof:** Task 2 is APPROVED 0; 31 focused tests, TypeScript, and diff checks pass for protected access, ticket entry, provisional truth, and the minimal builder shell.
-- **Next safe move:** Checkpoint Task 2, then implement Task 3's safe ledger and BigInt/null-tax total model under focused tests.
+- **Current slice:** Row 18 / PR #129 — manual line create/edit/remove interactions.
+- **Last proof:** Task 3 is APPROVED 0 after correcting mobile ledger/tape order; 50 focused tests, TypeScript, and diff checks pass for the safe ledger and exact totals.
+- **Next safe move:** Checkpoint Task 3, then implement Task 4's strict kind-specific editors, retry identity, server refresh, access/error mapping, and focus behavior.
 - **Open gates:** Production database application remains owner-gated. True two-connection PostgreSQL `NOWAIT` timing is deferred to integration proof. No current source-code blocker.
 - **Worker lanes:** The control lane owns row-18 planning and convergence; bounded implementation and independent review lanes will receive disjoint artifacts after plan approval.
 - **Stop only when:** A production database change, external account or credential, spend, irreversible action, or unresolved business decision is required.

@@ -32,10 +32,10 @@
 
 **Files:** Create `components/screens/manual-quote-builder.tsx` and module CSS; add focused component/math tests.
 
-- [ ] Render reconciled/configuration truth, eligible jobs, manual lines, active-version truth, and empty guidance from the safe builder projection only.
-- [ ] Render subtotal and taxable subtotal through row 17's pure integer math; render tax/total only when tax is configured, and fail closed on aggregate overflow/corrupt money.
-- [ ] Parse and format dollar strings with BigInt quotient/remainder, define `Line price` as the complete extended customer charge, omit core editing, and show existing core only as `Included in line price`.
-- [ ] Prove cent-exact near-safe-limit formatting, tax edges, null-tax unavailable total, overflow block, core non-double-counting, current version, privacy omissions, and responsive semantics.
+- [x] Render reconciled/configuration truth, eligible jobs, manual lines, active-version truth, and empty guidance from the safe builder projection only.
+- [x] Render subtotal and taxable subtotal through row 17's pure integer math; render tax/total only when tax is configured, and fail closed on aggregate overflow/corrupt money.
+- [x] Parse and format dollar strings with BigInt quotient/remainder, define `Line price` as the complete extended customer charge, omit core editing, and show existing core only as `Included in line price`.
+- [x] Prove cent-exact near-safe-limit formatting, tax edges, null-tax unavailable total, overflow block, core non-double-counting, current version, privacy omissions, and responsive semantics.
 
 ## Task 4: Manual line create/edit/remove
 
