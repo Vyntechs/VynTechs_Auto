@@ -27,3 +27,8 @@ Reason: Successful authentication can still fail immediately when middleware rea
 Trigger: Marketing, positioning, or landing work anchored on the live page or the 2026-05 doctrine.
 Rule: Position the product as the Shop OS (counter to closeout) with the honest diagnostic engine as its signature, never diagnostics alone.
 Reason: Live page and doctrine predate Shop OS; Brandon corrected a diagnostics-only prototype mid-build 2026-07-11.
+
+### prototypes-carry-personality
+Trigger: Any Brandon-facing prototype, mockup, or customer-facing surface.
+Rule: Structure plus honest copy is not done; carry the named Vyntechs personality, show value visually, answer objections, and close.
+Reason: Brandon rejected a structurally-correct landing v1 as bland and personality-free (2026-07-11); personality doc now governs.

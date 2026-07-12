@@ -26,6 +26,8 @@ Ordered the way trust actually forms for this audience:
 
 ## 4. What the page must feel like (design feeling)
 
+**Resolved 2026-07-11 (Brandon's v1 red-line: "bland… no personality — now is the time to create the feel of Vyntechs"):** the brand personality is defined in `2026-07-11-vyntechs-personality.md` — *the master tech who writes everything down*, expressed as **the paperwork brand** (the page is the shop's own documents: evidence ledger, punch ledger, write-in estimate, work authorization; one ink-dark refusal slab; wit in oxide margin notes; close = a signature line). Prototype v2 embodies it; v1 frames kept in-file, marked superseded.
+
 **Recommended direction — evolve "Workshop Instrument," don't replace it.** The live system (bone paper, single navy signal, instrument serif, mono numerics) is already original and audience-native. Evolved target feeling: **a calibration certificate crossed with an instrument panel — a document that tells the truth and a tool that shows its work.** Paper that means something (spec sheets, torque cards, signed inspection tags) — not SaaS gradient-land, not orange-black "rugged" cliché, not terminal-cosplay.
 
 Must never feel like: a generic AI product (Inter-on-white, purple gradients, sparkles); a Linear/Stripe clone; the influence repo's "Counter-Ready" system (that language belongs to a different product for a different reader); a venture deck; a tool that's smarter than its user. **The anti-familiarity bar:** if a visitor can name another site it feels like, the direction failed.
