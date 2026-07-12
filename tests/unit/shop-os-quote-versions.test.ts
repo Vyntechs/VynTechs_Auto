@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
   customers, jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets, vehicles,
+  vendorAccounts,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -32,6 +33,9 @@ describe('Shop OS immutable quote version creation', () => {
       { id: uuid(2), userId: uuid(102), shopId, role: 'founder' },
       { id: uuid(3), userId: uuid(103), shopId: otherShop.id, role: 'owner' },
     ])
+    await db.insert(vendorAccounts).values({
+      id: uuid(90), shopId, vendor: 'manual', displayName: 'Main supplier', mode: 'manual',
+    })
     actor = { profileId: uuid(1) }
     await db.insert(customers).values({ id: uuid(10), shopId, name: 'Customer', phone: '5551234567' })
     await db.insert(vehicles).values({
@@ -74,7 +78,16 @@ describe('Shop OS immutable quote version creation', () => {
         id: uuid(41), shopId, jobId, kind: 'part', description: 'Pads', sort: 1,
         quantity: 2, priceCents: 12_500, taxable: true, partNumber: 'PAD', brand: 'ACME',
         unitCostCents: 7_000, coreChargeCents: 100, fitment: 'Front', source: 'vendor_offer',
-        vendorSnapshot: { secret: 'never-snapshot-this', accessToken: 'top-secret' }, createdAt: new Date('2026-01-02T00:00:00Z'),
+        vendorAccountId: uuid(90), externalOfferId: 'estimate-42',
+        vendorSnapshot: {
+          schemaVersion: 1, kind: 'manual_offer', vendorAccountId: uuid(90),
+          vendorDisplayName: 'Main supplier', externalOfferId: 'estimate-42', currency: 'USD',
+          quantity: '2', unitCostCents: 7_000, coreChargeCents: 100,
+          availability: 'in_stock', fitment: 'Front',
+          fulfillment: { method: 'pickup', locationLabel: 'Main counter' },
+          fetchedAt: '2026-07-12T04:10:00.000Z', verifiedByProfileId: uuid(1),
+          requestFingerprint: 'a'.repeat(64),
+        }, createdAt: new Date('2026-01-02T00:00:00Z'),
       },
       {
         id: uuid(43), shopId, jobId: canceledJobId, kind: 'fee', description: 'Ignore',
@@ -129,7 +142,7 @@ describe('Shop OS immutable quote version creation', () => {
           {
             id: uuid(41), kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
             taxable: true, partNumber: 'PAD', brand: 'ACME',
-            coreChargeCents: 100, fitment: 'Front', laborHours: null, laborRateCents: null,
+            coreChargeCents: null, fitment: 'Front', laborHours: null, laborRateCents: null,
             source: 'vendor_offer', vendorContext: null,
           },
           {

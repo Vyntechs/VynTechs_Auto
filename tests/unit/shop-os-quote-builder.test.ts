@@ -12,6 +12,16 @@ import { createTestDb, type TestDb } from '@/tests/helpers/db'
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
+const manualOfferSnapshot = () => ({
+  schemaVersion: 1, kind: 'manual_offer', vendorAccountId: uuid(90),
+  vendorDisplayName: 'Test supplier', externalOfferId: 'estimate-42', currency: 'USD',
+  quantity: '2', unitCostCents: 7_000, coreChargeCents: 100,
+  availability: 'in_stock', fitment: 'Front',
+  fulfillment: { method: 'pickup', locationLabel: 'Main counter' },
+  fetchedAt: '2026-07-12T04:10:00.000Z', verifiedByProfileId: uuid(1),
+  requestFingerprint: 'a'.repeat(64),
+})
+
 describe('Shop OS quote builder read model', () => {
   let db: TestDb
   let close: () => Promise<void>
@@ -55,8 +65,7 @@ describe('Shop OS quote builder read model', () => {
       shopId,
       vendor: 'test_vendor',
       displayName: 'Test vendor',
-      mode: 'api',
-      secretRef: 'env:TEST_VENDOR_ACCOUNT_90',
+      mode: 'manual',
     })
     await db.insert(jobLines).values([
       { id: uuid(40), shopId, jobId: uuid(30), kind: 'part', description: 'Pads', quantity: 2,
@@ -64,7 +73,8 @@ describe('Shop OS quote builder read model', () => {
         coreChargeCents: 100, fitment: 'Front', source: 'manual' },
       { id: uuid(41), shopId, jobId: uuid(30), kind: 'part', description: 'Vendor pads', quantity: 2,
         priceCents: 14_000, taxable: true, source: 'vendor_offer', vendorAccountId: uuid(90),
-        externalOfferId: 'secret-offer', vendorSnapshot: { token: 'secret' } },
+        partNumber: 'PAD-V', brand: 'ACME', unitCostCents: 7_000, coreChargeCents: 100,
+        fitment: 'Front', externalOfferId: 'estimate-42', vendorSnapshot: manualOfferSnapshot() },
     ])
   })
 
@@ -111,6 +121,12 @@ describe('Shop OS quote builder read model', () => {
             id: uuid(40), kind: 'part', description: 'Pads', sort: 0, quantity: '2',
             priceCents: 12_500, taxable: true, partNumber: 'PAD', brand: 'ACME',
             coreChargeCents: 100, fitment: 'Front', laborHours: null, laborRateCents: null,
+            source: 'manual', mutable: true,
+          }, {
+            id: uuid(41), kind: 'part', description: 'Vendor pads', sort: 0, quantity: '2',
+            priceCents: 14_000, taxable: true, partNumber: 'PAD-V', brand: 'ACME',
+            coreChargeCents: null, fitment: 'Front', laborHours: null, laborRateCents: null,
+            source: 'vendor_offer', mutable: false,
           }],
         }],
         capabilities: { canRecordCustomerApproval: false },
@@ -120,9 +136,30 @@ describe('Shop OS quote builder read model', () => {
     const serialized = JSON.stringify(result)
     expect(serialized).not.toContain(shopId)
     expect(serialized).not.toContain('unitCost')
-    expect(serialized).not.toContain('vendor')
+    expect(serialized).not.toContain('vendorAccountId')
+    expect(serialized).not.toContain('Test supplier')
+    expect(serialized).not.toContain('unitCost')
+    expect(serialized).not.toContain('estimate-42')
     expect(serialized).not.toContain('lastEditedByProfileId')
     expect(serialized).not.toContain('customerId')
+  })
+
+  it('fails closed instead of hiding malformed sourced truth', async () => {
+    await db.update(jobLines).set({ vendorSnapshot: { token: 'secret' } })
+      .where(eq(jobLines.id, uuid(41)))
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
+  })
+
+  it.each([
+    { laborHours: 1 },
+    { laborRateCents: 15_000 },
+  ])('fails closed when sourced part truth contains labor fields %#', async (corruption) => {
+    await db.update(jobLines).set(corruption).where(eq(jobLines.id, uuid(41)))
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
   })
 
   it('returns validated immutable version totals and fails closed on corrupt or duplicate active versions', async () => {
@@ -166,6 +203,34 @@ describe('Shop OS quote builder read model', () => {
     })
     await db.insert(quoteVersions).values({
       id: uuid(51), shopId, ticketId, versionNumber: 6, snapshot, createdByProfileId: uuid(1),
+    })
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
+  })
+
+  it.each([
+    { kind: 'part' as const, coreChargeCents: 100, laborHours: null, laborRateCents: null },
+    { kind: 'fee' as const, coreChargeCents: null, laborHours: null, laborRateCents: null },
+  ])('rejects unsafe sourced truth in an active immutable snapshot %#', async (lineShape) => {
+    await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) })
+      .where(eq(tickets.id, ticketId))
+    await db.insert(quoteVersions).values({
+      id: uuid(60), shopId, ticketId, versionNumber: 1, createdByProfileId: uuid(1),
+      snapshot: {
+        schemaVersion: 1,
+        ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+        jobs: [{
+          id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+          lines: [{
+            id: uuid(41), description: 'Sourced pads', quantity: '2', priceCents: 14_000,
+            taxable: true, partNumber: null, brand: null, fitment: null,
+            source: 'vendor_offer', vendorContext: null, ...lineShape,
+          }],
+          attachments: [], totals: { subtotalCents: 14_000, taxableSubtotalCents: 14_000 },
+        }],
+        totals: { subtotalCents: 14_000, taxableSubtotalCents: 14_000, taxCents: 1_155, totalCents: 15_155 },
+      },
     })
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
       ok: false, error: 'conflict', retryable: false,

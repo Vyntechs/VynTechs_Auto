@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
+import { parseQuoteBuilderProjection } from '@/lib/shop-os/quote-builder-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import type { TicketDetail } from '@/lib/tickets'
 
@@ -66,6 +67,7 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
     quantity: '1', priceCents: 12_000, taxable: true,
     partNumber: 'PAD-1', brand: 'ACME', coreChargeCents: 2_500,
     fitment: 'Front axle', laborHours: null, laborRateCents: null,
+    source: 'manual', mutable: true,
     ...overrides,
   }
 }
@@ -447,6 +449,26 @@ describe('ManualQuoteBuilder line mutations', () => {
     vi.restoreAllMocks()
     router.push.mockReset()
     router.replace.mockReset()
+  })
+
+  it('renders sourced lines read-only without leaking supplier cost or ordinary controls', () => {
+    const sourced = line({
+      description: 'Sourced pad set', source: 'vendor_offer', mutable: false,
+      coreChargeCents: null,
+    })
+    const strict = parseQuoteBuilderProjection(builder({
+      jobs: [{ ...builder().jobs[0], lines: [sourced] }],
+      activeVersion: null,
+    }))
+    if (!strict) throw new Error('sourced projection rejected')
+    render(<ManualQuoteBuilder ticket={ticket} builder={strict} />)
+
+    expect(screen.getByText('Sourced · read-only')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Sourced pad set' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove Sourced pad set' })).toBeNull()
+    const tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    expect(within(tape).getAllByText('$120.00')).toHaveLength(2)
+    expect(document.body.textContent).not.toMatch(/supplier cost|unit cost|vendor account/i)
   })
 
   it('creates with one retry key, waits for refreshed truth, and returns focus to the line', async () => {

@@ -24,6 +24,7 @@ import {
   type QuoteCustomerStoryV1,
   type QuoteSnapshotV1,
 } from '@/lib/shop-os/quote-math'
+import { validateStoredManualOfferLine } from '@/lib/shop-os/parts-adapters'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
@@ -167,7 +168,12 @@ export type QuoteBuilderResult =
         }
         lines: Array<
           Omit<SafeManualDraftLine, 'quantity' | 'laborHours'>
-          & { quantity: string; laborHours: string | null }
+          & {
+            quantity: string
+            laborHours: string | null
+            source: 'manual' | 'vendor_offer'
+            mutable: boolean
+          }
         >
       }>
       capabilities: { canRecordCustomerApproval: boolean }
@@ -289,6 +295,9 @@ const quoteSnapshotSchema = z.strictObject({
       if (line.kind === 'fee' && (partFieldsPresent || laborFieldsPresent)) {
         context.addIssue({ code: 'custom', message: 'fee line contains typed fields' })
       }
+      if (line.source === 'vendor_offer' && (line.kind !== 'part' || line.coreChargeCents !== null)) {
+        context.addIssue({ code: 'custom', message: 'sourced quote line is not customer-safe' })
+      }
     })).max(500),
     attachments: z.array(z.strictObject({
       id: uuidSchema,
@@ -391,13 +400,37 @@ export function publicManualDraftLine(line: SafeManualDraftLine): SafeManualDraf
 function safeBuilderLine(
   line: typeof jobLines.$inferSelect,
 ): Omit<SafeManualDraftLine, 'quantity' | 'laborHours'>
-  & { quantity: string; laborHours: string | null } {
+  & {
+    quantity: string
+    laborHours: string | null
+    source: 'manual' | 'vendor_offer'
+    mutable: boolean
+  } {
   const safe = safeManualDraftLine(line)
+  const quantity = canonicalStoredDecimal(line.quantity, 3)
+  if (line.source === 'vendor_offer') {
+    if (!validateStoredManualOfferLine(line)) throw new TypeError('persisted manual offer is invalid')
+    return {
+      ...safe,
+      coreChargeCents: null,
+      quantity,
+      laborHours: null,
+      source: 'vendor_offer',
+      mutable: false,
+    }
+  }
+  if (!isMutableManualLine(line)) throw new TypeError('persisted manual line is invalid')
   return {
     ...safe,
-    quantity: canonicalStoredDecimal(line.quantity, 3),
+    quantity,
     laborHours: line.laborHours === null ? null : canonicalStoredDecimal(line.laborHours, 2),
+    source: 'manual',
+    mutable: true,
   }
+}
+
+function isBuilderVisibleLine(line: typeof jobLines.$inferSelect): boolean {
+  return isMutableManualLine(line) || line.source === 'vendor_offer'
 }
 
 class BuilderDataError extends Error {
@@ -600,7 +633,7 @@ export async function getQuoteBuilder(
                 pinnedBuilderApprovalIsValid(job, ticket.id, versions, approvalEvents),
               ),
               lines: lines
-                .filter((line) => line.jobId === job.id && isMutableManualLine(line))
+                .filter((line) => line.jobId === job.id && isBuilderVisibleLine(line))
                 .map(safeBuilderLine),
             })),
             capabilities: { canRecordCustomerApproval: canRecordCustomerApproval(actor.role) },
@@ -1020,6 +1053,13 @@ function canonicalStoredDecimal(value: number, scale: number): string {
   return formatScaledDecimal(parseScaledDecimal(String(value), scale), scale)
 }
 
+function requireManualOfferLine(
+  line: typeof jobLines.$inferSelect,
+  _quantity: string,
+): void {
+  if (!validateStoredManualOfferLine(line)) throw new TypeError('persisted manual offer is invalid')
+}
+
 function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
   if (!context.ticket.customerId || !context.ticket.vehicleId) {
     throw new TypeError('ticket is unreconciled')
@@ -1071,7 +1111,8 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
           throw new TypeError('fee line contains typed fields')
         }
         if (line.kind !== 'part' && quantity !== '1') throw new TypeError('non-part quantity is corrupt')
-        requireBoundedJson(line.vendorSnapshot, 16_384)
+        if (line.source === 'vendor_offer') requireManualOfferLine(line, quantity)
+        else requireBoundedJson(line.vendorSnapshot, 16_384)
         totalsInput.push({ extendedCents: priceCents, taxable: line.taxable })
         return {
           id: safeUuid(line.id),
@@ -1082,7 +1123,9 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
           taxable: line.taxable,
           partNumber: line.partNumber,
           brand: line.brand,
-          coreChargeCents: safeMoney(line.coreChargeCents, true),
+          coreChargeCents: line.source === 'vendor_offer'
+            ? null
+            : safeMoney(line.coreChargeCents, true),
           fitment: line.fitment,
           laborHours,
           laborRateCents,
