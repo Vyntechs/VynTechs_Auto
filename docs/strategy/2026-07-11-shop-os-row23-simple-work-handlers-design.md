@@ -1,7 +1,7 @@
 # Shop OS Row 23 — Simple Work, Attachments, and Escalation Handler Design
 
-**Date:** 2026-07-11  
-**Status:** Approved-plan execution design  
+**Date:** 2026-07-11
+**Status:** Approved-plan execution design
 **Source:** Row 23 in `2026-07-10-shop-os-spec-and-phased-plan.md`
 
 ## Outcome
