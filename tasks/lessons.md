@@ -22,3 +22,8 @@ Reason: Diagnostic instructions must be independently revalidatable before reduc
 Trigger: Production code queries columns from an unapplied source migration.
 Rule: Block production promotion until required migrations are applied or backward-compatible code is proven.
 Reason: Successful authentication can still fail immediately when middleware reads missing schema.
+
+### avoid-self-referential-branch-heads
+Trigger: A driver checkpoint named the branch head inside a commit that changed that head.
+Rule: Record stable source commits or state descriptions, never the current branch-head hash in that branch.
+Reason: Self-referential hashes become false immediately and create avoidable correction commits.
