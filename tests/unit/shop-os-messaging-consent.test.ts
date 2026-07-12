@@ -54,13 +54,13 @@ const disclosureFor = (senderIdentity: string) => Object.freeze({
   stopKeyword: 'STOP',
   helpKeyword: 'HELP',
   consentNotConditionOfPurchase: true,
-  smsTermsUrl: 'https://example.test/sms-terms',
-  privacyPolicyUrl: 'https://example.test/privacy',
+  smsTermsUrl: 'https://example.com/sms-terms',
+  privacyPolicyUrl: 'https://example.com/privacy',
   technologyProvider: 'Vyntechs',
   renderedDisclosure: signedDisclosure(
     senderIdentity,
-    'https://example.test/sms-terms',
-    'https://example.test/privacy',
+    'https://example.com/sms-terms',
+    'https://example.com/privacy',
   ),
 })
 const disclosureSnapshot = disclosureFor('North Shop')
@@ -114,11 +114,11 @@ describe('Shop OS messaging consent truth', () => {
   })
 
   const requestKey = () => uuid(requestSequence++)
-  const signedConsent = (
+  const signedConsentInput = (
     actor: MessagingActor,
     targetCustomerId = customerId,
     overrides: Partial<Parameters<typeof recordMessagingConsentEvent>[0]> = {},
-  ) => recordMessagingConsentEvent({
+  ): Parameters<typeof recordMessagingConsentEvent>[0] => ({
     db,
     actor,
     customerId: targetCustomerId,
@@ -138,6 +138,12 @@ describe('Shop OS messaging consent truth', () => {
     keyRing,
     ...overrides,
   })
+
+  const signedConsent = (
+    actor: MessagingActor,
+    targetCustomerId = customerId,
+    overrides: Partial<Parameters<typeof recordMessagingConsentEvent>[0]> = {},
+  ) => recordMessagingConsentEvent(signedConsentInput(actor, targetCustomerId, overrides))
 
   const revoke = (
     actor: MessagingActor,
@@ -251,6 +257,55 @@ describe('Shop OS messaging consent truth', () => {
       })).toEqual({ ok: false, error: 'invalid_input' })
     }
     expect(getterCalls).toBe(0)
+  })
+
+  it('rejects accessor-backed domain input without reading the accessor', async () => {
+    const input = signedConsentInput(owner) as Record<string, unknown>
+    let getterCalls = 0
+    Object.defineProperty(input, 'eventType', {
+      enumerable: true,
+      get() {
+        getterCalls += 1
+        return getterCalls === 1 ? 'consented' : 'deleted'
+      },
+    })
+
+    expect(await recordMessagingConsentEvent(
+      input as Parameters<typeof recordMessagingConsentEvent>[0],
+    )).toEqual({ ok: false, error: 'invalid_input' })
+    expect(getterCalls).toBe(0)
+  })
+
+  it('uses one immutable input snapshot across awaited database work', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const delayedDb = {
+      transaction: async (callback: Parameters<AppDb['transaction']>[0]) => {
+        await gate
+        return db.transaction(callback as never)
+      },
+    } as unknown as AppDb
+    const mutableActor = { ...owner }
+    const input = signedConsentInput(mutableActor, customerId, { db: delayedDb })
+
+    const pending = recordMessagingConsentEvent(input)
+    mutableActor.profileId = tech.profileId
+    mutableActor.role = tech.role
+    input.customerId = duplicateCustomerId
+    input.eventType = 'deleted' as never
+    input.evidenceRef = 'mutated-after-validation'
+    release()
+
+    expect(await pending).toMatchObject({ ok: true, status: 'consented' })
+    const [stored] = await db.select().from(messagingConsentEvents)
+    expect(stored).toMatchObject({
+      actorProfileId: owner.profileId,
+      customerId,
+      eventType: 'consented',
+      evidenceRef: 'signed-source-42',
+    })
   })
 
   it('persists the one validated immutable disclosure copy and revalidates its hash for eligibility', async () => {
@@ -387,6 +442,53 @@ describe('Shop OS messaging consent truth', () => {
     })).toEqual({ ok: false, error: 'forbidden' })
   })
 
+  it('does not recover a free-form unique-constraint message', async () => {
+    const stableKey = requestKey()
+    expect(await signedConsent(owner, customerId, { requestKey: stableKey })).toMatchObject({ ok: true })
+    let transactions = 0
+    const spoofedDb = {
+      transaction: async () => {
+        transactions += 1
+        throw Object.assign(new Error('messaging_consent_events_shop_request_uq'), {
+          code: '23505',
+        })
+      },
+    } as unknown as AppDb
+
+    expect(await signedConsent(owner, customerId, {
+      db: spoofedDb,
+      requestKey: stableKey,
+    })).toEqual({ ok: false, error: 'compliance_unavailable' })
+    expect(transactions).toBe(1)
+  })
+
+  it.each(['normal', 'race'] as const)(
+    'fails closed when a %s retry spoofs canonical request meaning',
+    async (path) => {
+      const stableKey = requestKey()
+      expect(await signedConsent(owner, customerId, { requestKey: stableKey })).toMatchObject({ ok: true })
+      let transactions = 0
+      const exactRaceDb = {
+        transaction: async (callback: Parameters<AppDb['transaction']>[0]) => {
+          transactions += 1
+          if (transactions === 1) {
+            throw Object.assign(new Error('unique race'), {
+              code: '23505',
+              constraint_name: 'messaging_consent_events_shop_request_uq',
+            })
+          }
+          return db.transaction(callback as never)
+        },
+      } as unknown as AppDb
+
+      expect(await signedConsent(owner, customerId, {
+        db: path === 'race' ? exactRaceDb : db,
+        requestKey: stableKey,
+        evidenceRef: 'different-signed-source',
+      })).toEqual({ ok: false, error: 'request_conflict' })
+    },
+  )
+
   it('does not reinterpret a generic database failure as a successful retry', async () => {
     const stableKey = requestKey()
     expect(await signedConsent(owner, customerId, { requestKey: stableKey })).toMatchObject({ ok: true })
@@ -479,6 +581,73 @@ describe('Shop OS messaging consent truth', () => {
       expect((await db.select().from(smsSuppressions))[0]?.liftedAt).toBeNull()
     },
   )
+
+  it.each(['verified_deletion', 'permanent_failure', 'number_reassigned'] as const)(
+    'preserves every %s suppression byte-for-byte through revocation and re-consent',
+    async (reason) => {
+      await signedConsent(owner)
+      const fingerprints = Object.entries(keyRing.keys).map(([keyVersion, secret], index) => ({
+        id: uuid(200 + index),
+        shopId,
+        destinationFingerprint: fingerprintDestination(destination, keyVersion, secret),
+        fingerprintKeyVersion: keyVersion,
+        sourceEventId: null,
+        reason,
+        suppressedAt: new Date(`2026-07-0${index + 1}T01:02:03.000Z`),
+        liftedAt: null,
+        retainUntil: new Date(`2031-07-0${index + 1}T01:02:03.000Z`),
+        updatedAt: new Date(`2026-07-0${index + 2}T01:02:03.000Z`),
+      }))
+      await db.insert(smsSuppressions).values(fingerprints)
+      const before = await db.select().from(smsSuppressions).orderBy(smsSuppressions.id)
+
+      expect(await revoke(owner, customerId, {
+        now: new Date(now.getTime() + 1),
+      })).toMatchObject({ ok: true, status: 'revoked' })
+      expect(await db.select().from(smsSuppressions).orderBy(smsSuppressions.id)).toEqual(before)
+      expect(await signedConsent(owner, customerId, {
+        eventType: 'reconsented',
+        now: new Date(now.getTime() + 2),
+      })).toEqual({ ok: false, error: 'invalid_transition' })
+    },
+  )
+
+  it.each([
+    'https://localhost./sms-terms',
+    'https://foo.local./sms-terms',
+    'https://.com/sms-terms',
+    'https://invalid/sms-terms',
+    'https://127.0.0.1/sms-terms',
+    'https://10.0.0.1/sms-terms',
+    'https://example.com:444/sms-terms',
+    'https://user@example.com/sms-terms',
+    'https://example.com/sms-terms#fragment',
+  ])('rejects non-public disclosure URL %s', async (smsTermsUrl) => {
+    const snapshot = Object.freeze({
+      ...disclosureSnapshot,
+      smsTermsUrl,
+      renderedDisclosure: signedDisclosure(
+        disclosureSnapshot.senderIdentity,
+        smsTermsUrl,
+        disclosureSnapshot.privacyPolicyUrl,
+      ),
+    })
+    expect(await signedConsent(owner, customerId, {
+      disclosureSnapshot: snapshot,
+      disclosureHash: hashDisclosure(snapshot),
+    })).toEqual({ ok: false, error: 'invalid_input' })
+  })
+
+  it('rejects disclosure versions without a known immutable renderer', async () => {
+    const snapshot = Object.freeze({
+      ...disclosureSnapshot,
+      disclosureVersion: 'invented_disclosure_v99',
+    })
+    expect(await signedConsent(owner, customerId, {
+      disclosureSnapshot: snapshot,
+      disclosureHash: hashDisclosure(snapshot),
+    })).toEqual({ ok: false, error: 'invalid_input' })
+  })
 
   it('preserves one valid legacy projection during key rotation and migrates it on the next event', async () => {
     const legacyOnlyRing: FingerprintKeyRing = {
