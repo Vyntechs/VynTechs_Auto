@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -35,6 +35,7 @@ function props(overrides: Partial<ManualPartSourcingProps> = {}): ManualPartSour
     onBusyChange: vi.fn(),
     onAccountCreated: vi.fn(),
     onSaved: vi.fn(async () => true),
+    onAccessFailure: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   }
@@ -261,6 +262,11 @@ describe('ManualPartSourcing', () => {
 
   it('ignores a stale location label while fulfillment is unknown', async () => {
     const user = userEvent.setup()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ changed: false, unavailable: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
     render(<ManualPartSourcing {...props()} />)
     await user.type(screen.getByLabelText('Part description'), 'Pads')
     await user.type(screen.getByLabelText('Supplier unit cost'), '80')
@@ -271,7 +277,11 @@ describe('ManualPartSourcing', () => {
     await user.click(screen.getByRole('radio', { name: 'Unknown fulfillment' }))
 
     await user.click(screen.getByRole('button', { name: /Add 1 Pads/ }))
-    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).fulfillment).toEqual({
+      method: 'unknown',
+      locationLabel: null,
+    })
     expect(screen.queryByLabelText('Location label')).toBeNull()
   })
 
@@ -290,6 +300,217 @@ describe('ManualPartSourcing', () => {
     expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000902')
     fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Pads set' } })
     expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000903')
+  })
+
+  it('creates a supplier separately, selects it, and never auto-submits the offer', async () => {
+    const user = userEvent.setup()
+    const created = { ...ACCOUNT_TWO, displayName: 'Metro Supply' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      changed: true,
+      vendorAccount: created,
+    }), { status: 201, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onAccountCreated = vi.fn()
+    render(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: true, onAccountCreated })} />)
+
+    await user.type(screen.getByLabelText('Part description'), 'Brake pads')
+    await user.type(screen.getByLabelText('Supplier unit cost'), '80')
+    await user.type(screen.getByLabelText('Customer line price'), '120')
+    await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+    await user.type(screen.getByLabelText('Supplier name'), '  Metro Supply  ')
+    await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(fetchMock).toHaveBeenCalledWith('/api/shop/vendor-accounts', {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientKey: '00000000-0000-4000-8000-000000000901',
+        displayName: 'Metro Supply',
+      }),
+    })
+    expect(onAccountCreated).toHaveBeenCalledWith(created)
+    expect(screen.getByRole('radio', { name: 'Metro Supply' })).toBeChecked()
+    expect(screen.getByLabelText('Part description')).toHaveValue('Brake pads')
+    expect(screen.getByLabelText('Supplier unit cost')).toHaveValue('80')
+    expect(screen.getByLabelText('Customer line price')).toHaveValue('120')
+    expect(screen.getByRole('status')).toHaveTextContent('Supplier saved. Continue with the part details.')
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('captures the exact normalized offer, refreshes by saved line id, and closes only after refresh succeeds', async () => {
+    const user = userEvent.setup()
+    const onSaved = vi.fn(async () => true)
+    const onClose = vi.fn()
+    const onBusyChange = vi.fn()
+    const lineId = '00000000-0000-4000-8000-000000000401'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualPartSourcing {...props({ onSaved, onClose, onBusyChange })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/00000000-0000-4000-8000-000000000201/quote/jobs/00000000-0000-4000-8000-000000000301/parts/manual-offers',
+      {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientKey: '00000000-0000-4000-8000-000000000901',
+          vendorAccountId: ACCOUNT_ONE.id,
+          description: 'Brake pads',
+          partNumber: null,
+          brand: null,
+          quantity: '2',
+          priceCents: 24000,
+          unitCostCents: 8000,
+          coreChargeCents: 0,
+          taxable: true,
+          availability: 'unknown',
+          fitment: null,
+          fulfillment: { method: 'unknown', locationLabel: null },
+          externalOfferId: null,
+        }),
+      },
+    )
+    expect(onBusyChange.mock.calls).toEqual([[true], [false]])
+    expect(onSaved).toHaveBeenCalledWith(lineId)
+  })
+
+  it('retains retry identity after an ambiguous failure and rotates it after normalized quantity or price edits', async () => {
+    const user = userEvent.setup()
+    let uuidSequence = 900
+    vi.mocked(crypto.randomUUID).mockImplementation(() => (
+      `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`
+    ))
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualPartSourcing {...props()} />)
+    await fillRequiredOffer(user)
+    const commit = screen.getByRole('button', { name: /Add 2 Brake pads/ })
+    await user.click(commit)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await user.click(commit)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(second.clientKey).toBe(first.clientKey)
+
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '3' } })
+    await user.click(screen.getByRole('button', { name: /Add 3 Brake pads/ }))
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '250' } })
+    await user.click(screen.getByRole('button', { name: /Customer price \$250/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    const third = JSON.parse(fetchMock.mock.calls[2][1].body as string)
+    const fourth = JSON.parse(fetchMock.mock.calls[3][1].body as string)
+    expect(third.clientKey).not.toBe(second.clientKey)
+    expect(fourth.clientKey).not.toBe(third.clientKey)
+  })
+
+  it('keeps the draft when the supplier reports the part unavailable', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      changed: false,
+      unavailable: true,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const onSaved = vi.fn(async () => true)
+    render(<ManualPartSourcing {...props({ onSaved })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Supplier reports this part unavailable. No quote line was added.')
+    expect(screen.getByLabelText('Part description')).toHaveValue('Brake pads')
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('hands off a saved-but-unrefreshed line to a dedicated refresh action without duplicate capture', async () => {
+    const user = userEvent.setup()
+    const lineId = '00000000-0000-4000-8000-000000000401'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onSaved = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const onClose = vi.fn()
+    render(<ManualPartSourcing {...props({ onSaved, onClose })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(screen.queryByRole('button', { name: /Add 2 Brake pads/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(onSaved).toHaveBeenNthCalledWith(2, lineId)
+  })
+
+  it('reports supplier partial success when later capture fails and preserves every offer field', async () => {
+    const user = userEvent.setup()
+    const created = { ...ACCOUNT_TWO, displayName: 'Metro Supply' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ changed: true, vendorAccount: created }), {
+        status: 201, headers: { 'content-type': 'application/json' },
+      }))
+      .mockRejectedValueOnce(new TypeError('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: true })} />)
+    await fillOfferWithoutSupplier(user)
+    await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+    await user.type(screen.getByLabelText('Supplier name'), 'Metro Supply')
+    await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+    await user.click(await screen.findByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Supplier saved. The part was not added yet.')
+    expect(screen.getByLabelText('Part description')).toHaveValue('Brake pads')
+    expect(screen.getByLabelText('Quantity')).toHaveValue('2')
+    expect(screen.getByLabelText('Supplier unit cost')).toHaveValue('80')
+    expect(screen.getByLabelText('Customer line price')).toHaveValue('240')
+  })
+
+  it.each([
+    ['extra response key', () => ({ ...manualOfferResponse({}), secret: 'do-not-render' })],
+    ['hostile line id', () => manualOfferResponse({ lineId: '<script>bad</script>' })],
+    ['malformed money', () => manualOfferResponse({ priceCents: -1 })],
+    ['wrong changed pairing', () => ({ ...manualOfferResponse({}), changed: false })],
+    ['supplier id mismatch', () => manualOfferResponse({ vendorAccountId: ACCOUNT_TWO.id })],
+  ])('fails closed for %s', async (_label, responseBody) => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(responseBody()), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    })))
+    const onSaved = vi.fn(async () => true)
+    const onClose = vi.fn()
+    render(<ManualPartSourcing {...props({ onSaved, onClose })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('The saved response could not be verified. Refresh before continuing.')
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(document.body).not.toHaveTextContent('do-not-render')
+  })
+
+  it.each([401, 403, 404] as const)('delegates %s access failures without rendering raw server fields', async (status) => {
+    const user = userEvent.setup()
+    const body = { error: 'secret-internal-error', feedback: 'hostile raw feedback' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })))
+    const onAccessFailure = vi.fn()
+    render(<ManualPartSourcing {...props({ onAccessFailure })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    await waitFor(() => expect(onAccessFailure).toHaveBeenCalledWith(status, body))
+    expect(document.body).not.toHaveTextContent('secret-internal-error')
+    expect(document.body).not.toHaveTextContent('hostile raw feedback')
   })
 
   it('contains no fake persistence, provider, order, price, fitment, or visible step claims', () => {
@@ -313,3 +534,48 @@ describe('ManualPartSourcing', () => {
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce/)
   })
 })
+
+async function fillOfferWithoutSupplier(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText('Part description'), 'Brake pads')
+  fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '2' } })
+  await user.type(screen.getByLabelText('Supplier unit cost'), '80')
+  await user.type(screen.getByLabelText('Customer line price'), '240')
+}
+
+async function fillRequiredOffer(user: ReturnType<typeof userEvent.setup>) {
+  await fillOfferWithoutSupplier(user)
+}
+
+function manualOfferResponse(overrides: {
+  lineId?: string
+  vendorAccountId?: string
+  priceCents?: number
+} = {}) {
+  return {
+    changed: true,
+    line: {
+      id: overrides.lineId ?? '00000000-0000-4000-8000-000000000401',
+      jobId: '00000000-0000-4000-8000-000000000301',
+      kind: 'part',
+      description: 'Brake pads',
+      quantity: '2',
+      priceCents: overrides.priceCents ?? 24000,
+      taxable: true,
+      partNumber: null,
+      brand: null,
+      fitment: null,
+      source: 'vendor_offer',
+      mutable: false,
+    },
+    sourcing: {
+      vendorAccountId: overrides.vendorAccountId ?? ACCOUNT_ONE.id,
+      displayName: ACCOUNT_ONE.displayName,
+      externalOfferId: null,
+      unitCostCents: 8000,
+      coreChargeCents: 0,
+      availability: 'unknown',
+      fulfillment: { method: 'unknown', locationLabel: null },
+      fetchedAt: '2026-07-12T12:00:00.000Z',
+    },
+  }
+}

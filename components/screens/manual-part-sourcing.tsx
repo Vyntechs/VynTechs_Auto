@@ -5,8 +5,11 @@ import { parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 import { parseScaledDecimal } from '@/lib/shop-os/quote-math'
 import styles from './manual-part-sourcing.module.css'
 import {
+  buildManualOfferPayload,
   manualPartCommitLabel,
   normalizedManualPartSignature,
+  parseCreatedVendorAccountResponse,
+  parseManualOfferResponse,
   type ManualPartDraft,
   type SafeManualVendorAccount,
 } from '@/lib/shop-os/parts-sourcing-ui'
@@ -25,6 +28,7 @@ export type ManualPartSourcingProps = {
   onBusyChange: (busy: boolean) => void
   onAccountCreated: (account: SafeManualVendorAccount) => void
   onSaved: (lineId: string) => Promise<boolean>
+  onAccessFailure: (status: 401 | 403 | 404, body: unknown) => void
   onClose: () => void
 }
 
@@ -54,6 +58,7 @@ const focusableSelector = 'button:not([disabled]), input:not([disabled]), select
 
 export function ManualPartSourcing({
   open,
+  ticketId,
   ticketLabel,
   vehicleLabel,
   job,
@@ -62,11 +67,21 @@ export function ManualPartSourcing({
   canCreateVendorAccount,
   diagnosisSeed,
   busy,
+  onBusyChange,
+  onAccountCreated,
+  onSaved,
+  onAccessFailure,
   onClose,
 }: ManualPartSourcingProps) {
   const initialAccountId = accounts.length === 1 ? accounts[0].id : ''
   const [draft, setDraft] = useState(() => createManualPartDraft(initialAccountId))
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID())
+  const [localAccounts, setLocalAccounts] = useState(accounts)
+  const [accountFormOpen, setAccountFormOpen] = useState(false)
+  const [accountName, setAccountName] = useState('')
+  const [accountClientKey, setAccountClientKey] = useState<string | null>(null)
+  const [mutationBusy, setMutationBusy] = useState(false)
+  const [savedLineId, setSavedLineId] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const [status, setStatus] = useState('')
@@ -76,8 +91,10 @@ export function ManualPartSourcing({
   const confirmRef = useRef<HTMLElement | null>(null)
   const keepEditingRef = useRef<HTMLButtonElement | null>(null)
   const closeReturnFocusRef = useRef<HTMLElement | null>(null)
+  const supplierCreatedRef = useRef(false)
 
   const dirty = normalizedManualPartSignature(draft) !== initialSignature.current
+  const isBusy = busy || mutationBusy
 
   function updateDraft<K extends DraftKey>(key: K, value: ManualPartDraft[K]) {
     setStatus('')
@@ -97,6 +114,21 @@ export function ManualPartSourcing({
       return
     }
     onClose()
+  }
+
+  function openAccountForm() {
+    setStatus('')
+    setAccountName('')
+    setAccountClientKey(crypto.randomUUID())
+    setAccountFormOpen(true)
+  }
+
+  function updateAccountName(value: string) {
+    setStatus('')
+    setAccountName((previous) => {
+      if (previous.trim() !== value.trim()) setAccountClientKey(crypto.randomUUID())
+      return value
+    })
   }
 
   useEffect(() => {
@@ -144,13 +176,130 @@ export function ManualPartSourcing({
   const requiredError = firstInvalidField(draft, catalogAvailable)
   const commitLabel = manualPartCommitLabel(draft)
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const error = firstInvalidField(draft, catalogAvailable)
-    if (!error) return
-    if (error.details) setDetailsOpen(true)
-    setStatus(error.label)
-    requestAnimationFrame(() => fieldRefs.current[error.key]?.focus())
+    if (error) {
+      if (error.details) setDetailsOpen(true)
+      setStatus(error.label)
+      requestAnimationFrame(() => fieldRefs.current[error.key]?.focus())
+      return
+    }
+    if (savedLineId || isBusy) return
+    await captureOffer()
+  }
+
+  async function readJson(response: Response): Promise<unknown> {
+    try { return await response.json() } catch { return {} }
+  }
+
+  function delegateAccessFailure(status: number, body: unknown): boolean {
+    if (status !== 401 && status !== 403 && status !== 404) return false
+    onAccessFailure(status, body)
+    return true
+  }
+
+  async function createAccount() {
+    const displayName = accountName.trim()
+    if (!accountClientKey || displayName.length === 0 || displayName.length > 120 || isBusy) {
+      setStatus('Supplier name')
+      return
+    }
+    setMutationBusy(true)
+    onBusyChange(true)
+    try {
+      const response = await fetch('/api/shop/vendor-accounts', {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ clientKey: accountClientKey, displayName }),
+      })
+      const body = await readJson(response)
+      if (delegateAccessFailure(response.status, body)) return
+      const parsed = parseCreatedVendorAccountResponse(response.status, body)
+      if (!parsed) {
+        setStatus('The saved response could not be verified. Refresh before continuing.')
+        return
+      }
+      supplierCreatedRef.current = true
+      setLocalAccounts((current) => current.some((account) => account.id === parsed.vendorAccount.id)
+        ? current
+        : [...current, parsed.vendorAccount])
+      setDraft((current) => ({ ...current, vendorAccountId: parsed.vendorAccount.id }))
+      setAccountFormOpen(false)
+      onAccountCreated(parsed.vendorAccount)
+      setStatus('Supplier saved. Continue with the part details.')
+      requestAnimationFrame(() => {
+        const missing = firstInvalidField({ ...draft, vendorAccountId: parsed.vendorAccount.id }, catalogAvailable)
+        fieldRefs.current[missing?.key ?? 'description']?.focus()
+      })
+    } catch {
+      setStatus('Connection interrupted. Retry with the same details.')
+    } finally {
+      setMutationBusy(false)
+      onBusyChange(false)
+    }
+  }
+
+  async function captureOffer() {
+    let payload
+    try {
+      payload = buildManualOfferPayload(draft, clientKey)
+    } catch {
+      setStatus('Review the visible fields, then retry.')
+      return
+    }
+    setMutationBusy(true)
+    onBusyChange(true)
+    try {
+      const response = await fetch(`/api/tickets/${ticketId}/quote/jobs/${job.id}/parts/manual-offers`, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await readJson(response)
+      if (delegateAccessFailure(response.status, body)) return
+      const parsed = parseManualOfferResponse(response.status, body)
+      if (!parsed) {
+        setStatus('The saved response could not be verified. Refresh before continuing.')
+        return
+      }
+      if ('unavailable' in parsed) {
+        setStatus('Supplier reports this part unavailable. No quote line was added.')
+        return
+      }
+      if (parsed.line.jobId !== job.id.toLowerCase()
+        || parsed.sourcing.vendorAccountId !== payload.vendorAccountId) {
+        setStatus('The saved response could not be verified. Refresh before continuing.')
+        return
+      }
+      setSavedLineId(parsed.line.id)
+      const refreshed = await onSaved(parsed.line.id)
+      if (refreshed) {
+        onClose()
+        return
+      }
+      setStatus('Part saved. Refresh the quote to see current totals.')
+    } catch {
+      setStatus(supplierCreatedRef.current
+        ? 'Supplier saved. The part was not added yet.'
+        : 'Connection interrupted. Retry with the same details.')
+    } finally {
+      setMutationBusy(false)
+      onBusyChange(false)
+    }
+  }
+
+  async function refreshSavedLine() {
+    if (!savedLineId || isBusy) return
+    setMutationBusy(true)
+    onBusyChange(true)
+    try {
+      if (await onSaved(savedLineId)) onClose()
+      else setStatus('Part saved. Refresh the quote to see current totals.')
+    } finally {
+      setMutationBusy(false)
+      onBusyChange(false)
+    }
   }
 
   function useDiagnosisSeed() {
@@ -189,12 +338,12 @@ export function ManualPartSourcing({
           ) : (
             <fieldset className={styles.fieldset}>
               <legend>Supplier</legend>
-              {accounts.length > 0 ? (
+              {localAccounts.length > 0 ? (
                 <div className={styles.chips}>
-                  {accounts.map((account) => (
+                  {localAccounts.map((account) => (
                     <label className={styles.chip} key={account.id}>
                       <input
-                        ref={(node) => { if (account.id === accounts[0]?.id) fieldRefs.current.vendorAccountId = node }}
+                        ref={(node) => { if (account.id === localAccounts[0]?.id) fieldRefs.current.vendorAccountId = node }}
                         type="radio"
                         name="vendor-account"
                         value={account.id}
@@ -205,9 +354,21 @@ export function ManualPartSourcing({
                     </label>
                   ))}
                 </div>
-              ) : canCreateVendorAccount ? (
-                <button ref={(node) => { fieldRefs.current.vendorAccountId = node }} type="button" className={styles.secondary}>Add supplier</button>
+              ) : canCreateVendorAccount ? (accountFormOpen ? (
+                <div className={styles.field}>
+                  <label htmlFor="manual-supplier-name">Supplier name</label>
+                  <input
+                    ref={(node) => { fieldRefs.current.vendorAccountId = node }}
+                    id="manual-supplier-name"
+                    value={accountName}
+                    maxLength={121}
+                    onChange={(event) => updateAccountName(event.target.value)}
+                  />
+                  <button type="button" className={styles.secondary} disabled={isBusy} onClick={createAccount}>Save supplier</button>
+                </div>
               ) : (
+                <button ref={(node) => { fieldRefs.current.vendorAccountId = node }} type="button" className={styles.secondary} onClick={openAccountForm}>Add supplier</button>
+              )) : (
                 <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier before this part can be sourced.</p>
               )}
             </fieldset>
@@ -310,9 +471,13 @@ export function ManualPartSourcing({
 
         <footer className={styles.footer}>
           <p role="status" aria-live="polite">{status || (requiredError ? `Needed: ${requiredError.label}` : '')}</p>
-          <button type="submit" className={styles.commit} disabled={busy || !catalogAvailable || accounts.length === 0}>
-            {busy ? 'Adding sourced part…' : commitLabel}
-          </button>
+          {savedLineId ? (
+            <button type="button" className={styles.commit} disabled={isBusy} onClick={refreshSavedLine}>Refresh quote</button>
+          ) : (
+            <button type="submit" className={styles.commit} disabled={isBusy || !catalogAvailable || localAccounts.length === 0}>
+              {isBusy ? 'Adding sourced part…' : commitLabel}
+            </button>
+          )}
         </footer>
         </form>
       </div>
