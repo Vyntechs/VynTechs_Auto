@@ -636,6 +636,8 @@ The public approval route is deliberately exempted from authenticated-app middle
 
 **Done when:** automated fixture/test-number flow sends, opens, approves/declines/questions idempotently against the correct immutable version; stale/revoked/brute-force/cross-shop tokens fail; old sends cannot approve a replacement version; responses appear in-app. Real-customer messaging is owner-run field validation, not an agent test.
 
+**Implementation correction — messaging retention/deletion contract owner-approved 2026-07-12.** [Row-31 design](./2026-07-12-shop-os-row31-messaging-retention-deletion-design.md) selects a balanced policy: five-year privacy-minimized consent/revocation proof, twelve-month delivery metadata, ninety-day notifications, and the existing ninety-day backup age-out. Verified deletion commits suppression before retryable cleanup, removes readable messaging identity and ordinary metadata, and retains only a keyed-destination compliance tombstone for the remaining proof window; expiration never restores consent. Row 31 is scoped to source schema, deterministic lifecycle helpers, one internal retry-safe deletion workflow, one bounded purge worker, and local proof. It adds no provider, public route, UI, published policy, production DDL, message, credential, spend, or diagnostic-engine change. Production migration and production messaging remain separate gates.
+
 ### Phase 6 — Push, order queue, board, and delivery (M)
 
 **Ships:** `push_subscriptions`; explicit permission UX; VAPID subscription/server send/service-worker handlers; capability-routed push with in-app fallback; `parts_orders`/`parts_order_lines`; manual order queue and receive flow; offer staleness re-check; optional API/punchout placement behind transport access; derived ticket board; explicit delivery/closeout; vehicle history extension.
@@ -758,7 +760,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 28 | 4 | Adapter interface + complete manual sourcing mode | LP | 27 | complete | PR #153; 260 files/2,606 tests; TypeScript/build; three independent final approvals; manual-only and provider-free |
 | 29 | 4 | Approved PartsTech/O'Reilly transport + failure tests | LP | 4,28 | blocked | External access required |
 | 30 | 4 | Locked-diagnosis seed + manual/live offer/line-fill UI | A | 21,28 | complete | PR #154; merge `19898cf`; owner-approved [written design](./2026-07-12-shop-os-row30-frictionless-sourcing-design.md) + [execution plan](../superpowers/plans/2026-07-12-shop-os-row30-frictionless-sourcing.md); 262 files/2,718 tests; TypeScript/build; four independent final approvals; production mobile/desktop/API/log proof; manual capture is live, while provider transport controls still wait on Row 29 |
-| 31 | 5 | Schema: consent, sends, SMS log, notification dedupe | S | 16,25 | owner_gate | Owner/legal retention and deletion policy required before implementation |
+| 31 | 5 | Schema: consent, sends, SMS log, notification dedupe | S | 16,25 | in_progress | Owner-approved [retention/deletion design](./2026-07-12-shop-os-row31-messaging-retention-deletion-design.md); written-spec review and execution plan remain before implementation; production migration is a separate gate |
 | 32 | 5 | Public approval token/response handlers + retry/security tests | LM | 17,21,31 | pending | — |
 | 33 | 5 | Public-route middleware exemption + rate-limit policy | P | 32 | pending | Shared middleware owned here |
 | 34 | 5 | Hosted approval page UI | A | 32,33 | pending | — |
