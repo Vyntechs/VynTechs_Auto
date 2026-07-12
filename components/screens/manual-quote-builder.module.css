@@ -5,6 +5,12 @@
   padding: clamp(24px, 5vw, 56px);
 }
 
+.screenWithSourcing {
+  width: min(calc(100% - min(440px, 42vw)), 1240px);
+  margin-left: 0;
+  margin-right: auto;
+}
+
 .header {
   display: flex;
   align-items: end;
@@ -870,6 +876,11 @@
 }
 
 @media (max-width: 800px) {
+  .screenWithSourcing {
+    width: min(100%, 1240px);
+    margin: 0 auto;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
     padding-bottom: calc(76px + env(safe-area-inset-bottom));

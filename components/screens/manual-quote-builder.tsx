@@ -21,8 +21,14 @@ import {
   parseAppliedCannedJobResponse,
   type SafeCannedJobTemplate,
 } from '@/lib/shop-os/canned-jobs-ui'
+import {
+  parseManualOfferRemovalResponse,
+  selectLockedDiagnosisSeed,
+  type SafeManualVendorAccount,
+} from '@/lib/shop-os/parts-sourcing-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
+import { ManualPartSourcing } from './manual-part-sourcing'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -40,11 +46,17 @@ export function ManualQuoteBuilder({
   builder,
   cannedJobs = [],
   cannedCatalogAvailable = true,
+  vendorAccounts = [],
+  vendorCatalogAvailable = false,
+  canCreateVendorAccount = false,
 }: {
   ticket: QuoteTicketIdentity
   builder: QuoteBuilder
   cannedJobs?: SafeCannedJobTemplate[]
   cannedCatalogAvailable?: boolean
+  vendorAccounts?: SafeManualVendorAccount[]
+  vendorCatalogAvailable?: boolean
+  canCreateVendorAccount?: boolean
 }): React.JSX.Element {
   const router = useRouter()
   const [current, setCurrent] = useState(builder)
@@ -56,11 +68,13 @@ export function ManualQuoteBuilder({
     reloadPage?: boolean
   } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | null>(null)
+  const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | 'sourcing' | null>(null)
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
   const [decision, setDecision] = useState<DecisionState | null>(null)
+  const [accounts, setAccounts] = useState(vendorAccounts)
+  const [sourcingJobId, setSourcingJobId] = useState<string | null>(null)
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
@@ -113,12 +127,16 @@ export function ManualQuoteBuilder({
   }, [current, focusTarget])
 
   const lines = current.jobs.flatMap((job) => job.lines)
+  const sourcingJob = sourcingJobId
+    ? current.jobs.find((job) => job.id === sourcingJobId) ?? null
+    : null
+  const diagnosisSeed = selectLockedDiagnosisSeed(current.jobs)
   const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
   const totals = summarizeQuoteMoney(lines, current.configuration.taxRateBps)
   const basePreparation = getQuotePreparationState({
     builder: current,
     totals,
-    editorOpen: editor !== null,
+    editorOpen: editor !== null || sourcingJob !== null,
     modalOpen: modal !== null,
     busy,
   })
@@ -144,7 +162,7 @@ export function ManualQuoteBuilder({
   }
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
-    if (inFlightRef.current || modal) return
+    if (inFlightRef.current || modal || sourcingJobId) return
     if (editor?.dirty) {
       setModal({ kind: 'discard', target, invoker })
       return
@@ -344,6 +362,36 @@ export function ManualQuoteBuilder({
     }
   }
 
+  async function confirmSourcedRemove(): Promise<void> {
+    if (modal?.kind !== 'remove-sourced' || !beginOperation('remove')) return
+    const removeTarget = modal.target
+    setError(null)
+    try {
+      const response = await fetch(
+        `/api/tickets/${ticket.id}/quote/jobs/${removeTarget.jobId}/parts/manual-offers/${removeTarget.line.id}`,
+        { method: 'DELETE', headers: { accept: 'application/json' } },
+      )
+      const body = await readJson(response)
+      if (!response.ok) {
+        closeModal()
+        applyFailure(response.status, body)
+        return
+      }
+      if (!parseManualOfferRemovalResponse(response.status, body)) {
+        closeModal()
+        setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return
+      }
+      setModal(null)
+      await refreshQuote(`source:${removeTarget.jobId}`, false, true)
+    } catch {
+      closeModal()
+      setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
+    } finally {
+      endOperation()
+    }
+  }
+
   async function prepareQuote(): Promise<void> {
     if (preparation.kind !== 'ready' || !beginOperation('prepare')) return
     setError(null)
@@ -464,7 +512,7 @@ export function ManualQuoteBuilder({
   }
 
   async function applyCannedJob(): Promise<void> {
-    if (!selectedCannedJob || !cannedClientKey || editor || modal || inFlightRef.current) return
+    if (!selectedCannedJob || !cannedClientKey || editor || modal || sourcingJobId || inFlightRef.current) return
     if (!beginOperation('canned')) return
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/quote/canned-jobs`, {
@@ -533,9 +581,14 @@ export function ManualQuoteBuilder({
     router.refresh()
   }
 
+  function setSourcingBusy(nextBusy: boolean): void {
+    if (nextBusy) beginOperation('sourcing')
+    else if (inFlightRef.current) endOperation()
+  }
+
   return (
-    <main className={`app ${styles.screen}`}>
-      <div data-testid="quote-background" inert={modal || decision ? true : undefined}>
+    <main className={`app ${styles.screen} ${sourcingJob ? styles.screenWithSourcing : ''}`}>
+      <div data-testid="quote-background" inert={modal || decision || sourcingJob ? true : undefined}>
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}>
@@ -639,7 +692,7 @@ export function ManualQuoteBuilder({
                   <button
                     type="button"
                     className={styles.cannedApply}
-                    disabled={busy || editor !== null || modal !== null}
+                    disabled={busy || editor !== null || modal !== null || sourcingJob !== null}
                     onClick={applyCannedJob}
                   >
                     {operation === 'canned' ? 'Adding…' : 'Add canned job'}
@@ -727,7 +780,28 @@ export function ManualQuoteBuilder({
                               >
                                 Remove {line.description}
                               </button>
-                            </div> : <p className={styles.lineKind}>Sourced · read-only</p>}
+                            </div> : (
+                              <div className={styles.lineControls}>
+                                <p className={styles.lineKind}>Sourced · read-only</p>
+                                {line.source === 'vendor_offer' && (
+                                  <button
+                                    type="button"
+                                    className={styles.lineAction}
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      if (!inFlightRef.current && !modal && !sourcingJobId) {
+                                        setModal({
+                                          kind: 'remove-sourced', target: { jobId: job.id, line },
+                                          invoker: event.currentTarget,
+                                        })
+                                      }
+                                    }}
+                                  >
+                                    Remove sourced part: {line.description}
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -752,6 +826,26 @@ export function ManualQuoteBuilder({
                           Add {kind}
                         </button>
                       ))}
+                      {(job.kind === 'repair' || job.kind === 'maintenance')
+                        && (job.workStatus === 'open' || job.workStatus === 'blocked') && (
+                        <button
+                          type="button"
+                          className={styles.lineAction}
+                          disabled={busy || sourcingJobId !== null || editor !== null || modal !== null}
+                          ref={(element) => {
+                            const key = `source:${job.id}`
+                            if (element) focusRefs.current.set(key, element)
+                            else focusRefs.current.delete(key)
+                          }}
+                          onClick={() => {
+                            if (inFlightRef.current || modal || editor || sourcingJobId) return
+                            setError(null)
+                            setSourcingJobId(job.id)
+                          }}
+                        >
+                          Source part
+                        </button>
+                      )}
                     </div>
                     {job.kind === 'diagnostic' && (
                       <StoryCard
@@ -890,6 +984,30 @@ export function ManualQuoteBuilder({
       )}
       </div>
 
+      {sourcingJob && (
+        <ManualPartSourcing
+          open
+          ticketId={ticket.id}
+          ticketLabel={`Repair order ${String(ticket.ticketNumber).padStart(6, '0')}`}
+          vehicleLabel={ticket.vehicle ? vehicleName(ticket.vehicle) : null}
+          job={{ id: sourcingJob.id, title: sourcingJob.title }}
+          accounts={accounts}
+          catalogAvailable={vendorCatalogAvailable}
+          canCreateVendorAccount={canCreateVendorAccount}
+          diagnosisSeed={diagnosisSeed}
+          busy={busy}
+          onBusyChange={setSourcingBusy}
+          onAccountCreated={(account) => setAccounts((currentAccounts) => (
+            currentAccounts.some((candidate) => candidate.id === account.id)
+              ? currentAccounts
+              : [...currentAccounts, account]
+          ))}
+          onSaved={(lineId) => refreshQuote(`line:${lineId}`, false, true)}
+          onAccessFailure={applyFailure}
+          onClose={() => setSourcingJobId(null)}
+        />
+      )}
+
       {modal && (
         <ConfirmationModal
           modal={modal}
@@ -904,6 +1022,7 @@ export function ManualQuoteBuilder({
             setError(null)
           }}
           onRemove={confirmRemove}
+          onRemoveSourced={confirmSourcedRemove}
         />
       )}
       {decision && (
@@ -1265,6 +1384,11 @@ type ModalState =
     target: { jobId: string; line: BuilderLine }
     invoker: HTMLElement
   }
+  | {
+    kind: 'remove-sourced'
+    target: { jobId: string; line: BuilderLine }
+    invoker: HTMLElement
+  }
 
 function LineEditor({
   editor,
@@ -1345,12 +1469,14 @@ function ConfirmationModal({
   onCancel,
   onDiscard,
   onRemove,
+  onRemoveSourced,
 }: {
   modal: ModalState
   busy: boolean
   onCancel: () => void
   onDiscard: () => void
   onRemove: () => void
+  onRemoveSourced: () => void
 }): React.JSX.Element {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -1388,6 +1514,7 @@ function ConfirmationModal({
   }
 
   const discard = modal.kind === 'discard'
+  const sourced = modal.kind === 'remove-sourced'
   return (
     <div
       ref={dialogRef}
@@ -1399,20 +1526,22 @@ function ConfirmationModal({
       onKeyDown={onKeyDown}
     >
       <strong id={titleId}>
-        {discard ? 'Discard unsaved line changes?' : 'Remove this quote line?'}
+        {discard
+          ? 'Discard unsaved line changes?'
+          : sourced ? 'Remove sourced part?' : 'Remove this quote line?'}
       </strong>
       {!discard && <p>{modal.target.line.description}</p>}
       <div>
         <button ref={cancelRef} type="button" className={styles.lineAction} disabled={busy} onClick={onCancel}>
-          {discard ? 'Keep editing' : 'Keep line'}
+          {discard ? 'Keep editing' : sourced ? 'Keep sourced part' : 'Keep line'}
         </button>
         <button
           type="button"
           className={styles.lineAction}
           disabled={busy}
-          onClick={discard ? onDiscard : onRemove}
+          onClick={discard ? onDiscard : sourced ? onRemoveSourced : onRemove}
         >
-          {discard ? 'Discard changes' : 'Confirm remove'}
+          {discard ? 'Discard changes' : sourced ? 'Confirm removal' : 'Confirm remove'}
         </button>
       </div>
     </div>
