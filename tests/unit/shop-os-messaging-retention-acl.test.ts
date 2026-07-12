@@ -160,7 +160,8 @@ describe('Shop OS messaging retention ACL hardening', () => {
     closeCallbacks.push(close)
     const owners = await client.query<{
       signature: string
-      owner_trusted: boolean
+      owner_exact: boolean
+      owner_superuser: boolean
       client_inherits_owner: boolean
       unexpected_executor_count: number
     }>(`
@@ -169,7 +170,8 @@ describe('Shop OS messaging retention ACL hardening', () => {
           `('${signature}', ${serviceExecute})`).join(', ')}
       )
       select e.signature,
-        owner_role.rolname not in ('service_role', 'anon', 'authenticated') as owner_trusted,
+        owner_role.rolname = 'postgres' as owner_exact,
+        owner_role.rolsuper as owner_superuser,
         pg_has_role('service_role', owner_role.oid, 'usage')
           or pg_has_role('anon', owner_role.oid, 'usage')
           or pg_has_role('authenticated', owner_role.oid, 'usage') as client_inherits_owner,
@@ -186,7 +188,8 @@ describe('Shop OS messaging retention ACL hardening', () => {
       order by e.signature
     `)
     expect(owners.rows).toHaveLength(FUNCTION_EXECUTION.length)
-    expect(owners.rows.every((row) => row.owner_trusted)).toBe(true)
+    expect(owners.rows.every((row) => row.owner_exact)).toBe(true)
+    expect(owners.rows.every((row) => row.owner_superuser)).toBe(true)
     expect(owners.rows.every((row) => !row.client_inherits_owner)).toBe(true)
     expect(owners.rows.every((row) => row.unexpected_executor_count === 0)).toBe(true)
   }, 15_000)
@@ -385,6 +388,19 @@ describe('Shop OS messaging retention ACL hardening', () => {
       grant messaging_inherited_executor to service_role;
     `)
     await expect(ensureMessagingRetentionAclMigration(inheritedExecutor.client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+  }, 15_000)
+
+  it('rejects an unrelated LOGIN role as a Row 31 function owner', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+    await client.exec(`
+      create role messaging_unrelated_login login;
+      alter function public.purge_expired_messaging_retention_hold(uuid, uuid)
+        owner to messaging_unrelated_login;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
       'messaging retention ACL hardening failed in ephemeral database',
     )
   }, 15_000)

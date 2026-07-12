@@ -335,7 +335,8 @@ async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
   const result = await client.query<{
     signature: keyof typeof MESSAGING_RETENTION_FUNCTION_DIGESTS
     prosrc: string
-    owner_trusted: boolean
+    owner_exact: boolean
+    owner_superuser: boolean
     client_inherits_owner: boolean
     unexpected_direct_acl_count: number
     unexpected_effective_executor_count: number
@@ -353,7 +354,8 @@ async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
       ('serialize_messaging_retention_hold_target()', false)
     )
     select e.signature, p.prosrc,
-      owner_role.rolname not in ('service_role', 'anon', 'authenticated') as owner_trusted,
+      owner_role.rolname = 'postgres' as owner_exact,
+      owner_role.rolsuper as owner_superuser,
       pg_has_role('service_role', owner_role.oid, 'usage')
         or pg_has_role('anon', owner_role.oid, 'usage')
         or pg_has_role('authenticated', owner_role.oid, 'usage') as client_inherits_owner,
@@ -379,7 +381,8 @@ async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
     return createHash('sha256').update(normalized).digest('hex')
       === MESSAGING_RETENTION_FUNCTION_DIGESTS[signature]
   }).length
-  const authorityCount = result.rows.filter((row) => row.owner_trusted
+  const authorityCount = result.rows.filter((row) => row.owner_exact
+    && row.owner_superuser
     && !row.client_inherits_owner
     && row.unexpected_direct_acl_count === 0
     && row.unexpected_effective_executor_count === 0).length
