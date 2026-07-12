@@ -179,6 +179,138 @@ create unique index messaging_retention_holds_shop_id_uq on messaging_retention_
 create index messaging_retention_holds_active_subject_idx on messaging_retention_holds (shop_id, subject_key, expires_at) where subject_key is not null and released_at is null;
 --> statement-breakpoint
 
+create table quote_sends (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null,
+  ticket_id uuid not null,
+  quote_version_id uuid not null,
+  customer_id uuid not null,
+  destination_fingerprint text not null,
+  fingerprint_key_version text not null,
+  channel text not null,
+  token_hash text,
+  token_expires_at timestamptz,
+  requesting_actor_profile_id uuid not null,
+  request_key uuid not null,
+  request_fingerprint text not null,
+  state text not null,
+  submitting_at timestamptz,
+  submitted_at timestamptz,
+  terminal_at timestamptz,
+  retain_until timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint quote_sends_shop_fk foreign key (shop_id) references shops(id) on delete cascade,
+  constraint quote_sends_shop_ticket_fk foreign key (shop_id, ticket_id) references tickets(shop_id, id) on delete restrict,
+  constraint quote_sends_shop_ticket_version_fk foreign key (shop_id, ticket_id, quote_version_id) references quote_versions(shop_id, ticket_id, id) on delete restrict,
+  constraint quote_sends_shop_customer_fk foreign key (shop_id, customer_id) references customers(shop_id, id) on delete restrict,
+  constraint quote_sends_shop_actor_fk foreign key (shop_id, requesting_actor_profile_id) references profiles(shop_id, id) on delete restrict,
+  constraint quote_sends_destination_fingerprint_valid check (destination_fingerprint ~ '^[0-9a-f]{64}$'),
+  constraint quote_sends_fingerprint_key_version_valid check (fingerprint_key_version ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
+  constraint quote_sends_channel_valid check (channel = 'sms'),
+  constraint quote_sends_token_hash_valid check (token_hash is null or token_hash ~ '^[0-9a-f]{64}$'),
+  constraint quote_sends_request_fingerprint_valid check (request_fingerprint ~ '^[0-9a-f]{64}$'),
+  constraint quote_sends_state_valid check (
+    state in ('queued', 'claimed', 'submitting', 'submitted', 'cancelled', 'delivered', 'failed', 'responded', 'expired')
+  ),
+  constraint quote_sends_token_action_consistent check (
+    (token_hash is null and token_expires_at is null)
+    or (token_hash is not null and token_expires_at is not null
+      and state in ('queued', 'claimed', 'submitting', 'submitted', 'delivered'))
+  ),
+  constraint quote_sends_submission_timestamps_consistent check (
+    (state in ('queued', 'claimed', 'cancelled') and submitting_at is null and submitted_at is null)
+    or (state = 'submitting' and submitting_at >= created_at and submitted_at is null)
+    or (state in ('submitted', 'delivered', 'failed', 'responded', 'expired')
+      and submitting_at >= created_at and submitted_at is not null and submitted_at >= submitting_at)
+  ),
+  constraint quote_sends_terminal_timestamps_consistent check (
+    (state in ('cancelled', 'failed', 'responded', 'expired') and terminal_at is not null and retain_until is not null)
+    or (state not in ('cancelled', 'failed', 'responded', 'expired') and terminal_at is null and retain_until is null)
+  ),
+  constraint quote_sends_retention_timestamp_valid check (
+    retain_until is null or (terminal_at >= created_at and retain_until >= terminal_at)
+  )
+);
+--> statement-breakpoint
+create unique index quote_sends_shop_id_uq on quote_sends (shop_id, id);
+--> statement-breakpoint
+create unique index quote_sends_shop_ticket_id_uq on quote_sends (shop_id, ticket_id, id);
+--> statement-breakpoint
+create unique index quote_sends_shop_actor_request_uq on quote_sends (shop_id, requesting_actor_profile_id, request_key);
+--> statement-breakpoint
+create index quote_sends_destination_idx on quote_sends (shop_id, destination_fingerprint, fingerprint_key_version);
+--> statement-breakpoint
+create index quote_sends_purge_idx on quote_sends (state, retain_until, id);
+--> statement-breakpoint
+alter table quote_events add constraint quote_events_shop_ticket_send_fk
+  foreign key (shop_id, ticket_id, quote_send_id)
+  references quote_sends(shop_id, ticket_id, id) on delete restrict;
+--> statement-breakpoint
+
+create table sms_log (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null,
+  quote_send_id uuid not null,
+  provider_message_id text,
+  provider_event_id text,
+  template_key text not null,
+  template_version text not null,
+  state text not null,
+  error_code text,
+  provider_occurred_at timestamptz,
+  server_received_at timestamptz not null default now(),
+  retain_until timestamptz not null,
+  constraint sms_log_shop_fk foreign key (shop_id) references shops(id) on delete cascade,
+  constraint sms_log_shop_send_fk foreign key (shop_id, quote_send_id) references quote_sends(shop_id, id) on delete cascade,
+  constraint sms_log_provider_message_id_valid check (provider_message_id is null or char_length(provider_message_id) between 1 and 256),
+  constraint sms_log_provider_event_id_valid check (provider_event_id is null or char_length(provider_event_id) between 1 and 256),
+  constraint sms_log_template_key_valid check (template_key ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
+  constraint sms_log_template_version_valid check (template_version ~ '^[a-z0-9][a-z0-9_.-]{0,62}[a-z0-9]$'),
+  constraint sms_log_state_valid check (state in ('accepted', 'queued', 'sent', 'delivered', 'undelivered', 'failed', 'opt_out', 'help', 'start')),
+  constraint sms_log_error_code_valid check (error_code is null or char_length(error_code) between 1 and 128),
+  constraint sms_log_retention_timestamp_valid check (
+    retain_until >= server_received_at
+    and (provider_occurred_at is null or retain_until >= provider_occurred_at)
+  )
+);
+--> statement-breakpoint
+create unique index sms_log_shop_id_uq on sms_log (shop_id, id);
+--> statement-breakpoint
+create unique index sms_log_shop_provider_event_uq on sms_log (shop_id, provider_event_id) where provider_event_id is not null;
+--> statement-breakpoint
+create index sms_log_send_idx on sms_log (shop_id, quote_send_id);
+--> statement-breakpoint
+create index sms_log_purge_idx on sms_log (state, retain_until, id);
+--> statement-breakpoint
+
+create table notifications (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null,
+  recipient_profile_id uuid not null,
+  event_type text not null,
+  entity_type text not null,
+  entity_id uuid not null,
+  dedupe_key text not null,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  retain_until timestamptz not null,
+  constraint notifications_shop_fk foreign key (shop_id) references shops(id) on delete cascade,
+  constraint notifications_shop_recipient_fk foreign key (shop_id, recipient_profile_id) references profiles(shop_id, id) on delete cascade,
+  constraint notifications_event_type_valid check (event_type ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
+  constraint notifications_entity_type_valid check (entity_type ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
+  constraint notifications_dedupe_key_valid check (char_length(dedupe_key) between 1 and 128),
+  constraint notifications_read_at_valid check (read_at is null or read_at >= created_at),
+  constraint notifications_retention_timestamp_valid check (retain_until >= created_at)
+);
+--> statement-breakpoint
+create unique index notifications_shop_id_uq on notifications (shop_id, id);
+--> statement-breakpoint
+create unique index notifications_shop_recipient_dedupe_uq on notifications (shop_id, recipient_profile_id, dedupe_key);
+--> statement-breakpoint
+create index notifications_purge_idx on notifications (retain_until, id);
+--> statement-breakpoint
+
 create function serialize_messaging_retention_hold_target()
 returns trigger
 language plpgsql
@@ -481,16 +613,19 @@ alter table messaging_consent_state enable row level security;
 alter table sms_suppressions enable row level security;
 alter table messaging_deletion_requests enable row level security;
 alter table messaging_retention_holds enable row level security;
+alter table quote_sends enable row level security;
+alter table sms_log enable row level security;
+alter table notifications enable row level security;
 --> statement-breakpoint
 
 revoke all privileges on table
   messaging_consent_events, messaging_consent_state, sms_suppressions,
-  messaging_deletion_requests, messaging_retention_holds
+  messaging_deletion_requests, messaging_retention_holds, quote_sends, sms_log, notifications
 from public, anon, authenticated;
 --> statement-breakpoint
 grant select, insert, update, delete on table
   messaging_consent_events, messaging_consent_state, sms_suppressions,
-  messaging_deletion_requests, messaging_retention_holds
+  messaging_deletion_requests, messaging_retention_holds, quote_sends, sms_log, notifications
 to service_role;
 --> statement-breakpoint
 
@@ -503,6 +638,12 @@ create policy sms_suppressions_server_only_deny_direct on sms_suppressions
 create policy messaging_deletion_requests_server_only_deny_direct on messaging_deletion_requests
   for all to anon, authenticated using (false) with check (false);
 create policy messaging_retention_holds_server_only_deny_direct on messaging_retention_holds
+  for all to anon, authenticated using (false) with check (false);
+create policy quote_sends_server_only_deny_direct on quote_sends
+  for all to anon, authenticated using (false) with check (false);
+create policy sms_log_server_only_deny_direct on sms_log
+  for all to anon, authenticated using (false) with check (false);
+create policy notifications_server_only_deny_direct on notifications
   for all to anon, authenticated using (false) with check (false);
 --> statement-breakpoint
 

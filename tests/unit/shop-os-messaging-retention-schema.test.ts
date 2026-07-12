@@ -8,6 +8,10 @@ import {
   smsSuppressions,
   messagingDeletionRequests,
   messagingRetentionHolds,
+  quoteEvents,
+  quoteSends,
+  smsLog,
+  notifications,
 } from '@/lib/db/schema'
 import {
   createTestDb,
@@ -31,6 +35,82 @@ async function seedTenant(client: PGlite) {
     [actorId, crypto.randomUUID(), shopId, 'Schema Actor'],
   )
   return { shopId, customerId, actorId }
+}
+
+async function seedOperationalTenant(client: PGlite) {
+  const tenant = await seedTenant(client)
+  const ticketId = crypto.randomUUID()
+  const quoteVersionId = crypto.randomUUID()
+  await client.query(
+    `insert into tickets (
+      id, shop_id, ticket_number, source, concern, created_by_profile_id
+    ) values ($1, $2, 1, 'tech_quick', 'Schema concern', $3)`,
+    [ticketId, tenant.shopId, tenant.actorId],
+  )
+  await client.query(
+    `insert into quote_versions (
+      id, shop_id, ticket_id, version_number, snapshot, created_by_profile_id
+    ) values ($1, $2, $3, 1, '{}'::jsonb, $4)`,
+    [quoteVersionId, tenant.shopId, ticketId, tenant.actorId],
+  )
+  return { ...tenant, ticketId, quoteVersionId }
+}
+
+async function insertQuoteSend(
+  client: PGlite,
+  tenant: Awaited<ReturnType<typeof seedOperationalTenant>>,
+  overrides: Partial<{
+    shopId: string
+    ticketId: string
+    quoteVersionId: string
+    customerId: string
+    actorId: string
+    tokenHash: string | null
+    tokenExpiresAt: string | null
+    state: string
+    submittingAt: string | null
+    submittedAt: string | null
+    terminalAt: string | null
+    retainUntil: string | null
+    requestKey: string
+    requestFingerprint: string
+  }> = {},
+) {
+  const values = {
+    shopId: tenant.shopId,
+    ticketId: tenant.ticketId,
+    quoteVersionId: tenant.quoteVersionId,
+    customerId: tenant.customerId,
+    actorId: tenant.actorId,
+    tokenHash: hex,
+    tokenExpiresAt: "now() + interval '1 day'",
+    state: 'queued',
+    submittingAt: null,
+    submittedAt: null,
+    terminalAt: null,
+    retainUntil: null,
+    requestKey: crypto.randomUUID(),
+    requestFingerprint: otherHex,
+    ...overrides,
+  }
+  const result = await client.query<{ id: string }>(
+    `insert into quote_sends (
+      shop_id, ticket_id, quote_version_id, customer_id,
+      destination_fingerprint, fingerprint_key_version, channel,
+      token_hash, token_expires_at, requesting_actor_profile_id,
+      request_key, request_fingerprint, state, submitting_at,
+      submitted_at, terminal_at, retain_until
+    ) values (
+      $1, $2, $3, $4, $5, 'key_v1', 'sms', $6,
+      ${values.tokenExpiresAt ?? 'null'}, $7, $8, $9, $10,
+      ${values.submittingAt ?? 'null'}, ${values.submittedAt ?? 'null'},
+      ${values.terminalAt ?? 'null'}, ${values.retainUntil ?? 'null'}
+    ) returning id`,
+    [values.shopId, values.ticketId, values.quoteVersionId, values.customerId,
+      hex, values.tokenHash, values.actorId, values.requestKey,
+      values.requestFingerprint, values.state],
+  )
+  return result.rows[0]!.id
 }
 
 async function insertConsentEvent(
@@ -196,6 +276,56 @@ describe('Shop OS messaging retention source schema', () => {
     })
   })
 
+  it('declares the three dormant operation tables and quote-event send reference', () => {
+    expect([quoteSends, smsLog, notifications].map((table) => getTableConfig(table).name))
+      .toEqual(['quote_sends', 'sms_log', 'notifications'])
+    expect(getTableConfig(quoteEvents).foreignKeys.map((key) => key.getName()))
+      .toContain('quote_events_shop_ticket_send_fk')
+    expect(getTableColumns(quoteSends)).toMatchObject({
+      shopId: expect.anything(),
+      ticketId: expect.anything(),
+      quoteVersionId: expect.anything(),
+      customerId: expect.anything(),
+      destinationFingerprint: expect.anything(),
+      fingerprintKeyVersion: expect.anything(),
+      channel: expect.anything(),
+      tokenHash: expect.anything(),
+      tokenExpiresAt: expect.anything(),
+      requestingActorProfileId: expect.anything(),
+      requestKey: expect.anything(),
+      requestFingerprint: expect.anything(),
+      state: expect.anything(),
+      submittingAt: expect.anything(),
+      submittedAt: expect.anything(),
+      terminalAt: expect.anything(),
+      retainUntil: expect.anything(),
+    })
+    expect(getTableColumns(smsLog)).toMatchObject({
+      shopId: expect.anything(),
+      quoteSendId: expect.anything(),
+      providerMessageId: expect.anything(),
+      providerEventId: expect.anything(),
+      templateKey: expect.anything(),
+      templateVersion: expect.anything(),
+      state: expect.anything(),
+      errorCode: expect.anything(),
+      providerOccurredAt: expect.anything(),
+      serverReceivedAt: expect.anything(),
+      retainUntil: expect.anything(),
+    })
+    expect(getTableColumns(notifications)).toMatchObject({
+      shopId: expect.anything(),
+      recipientProfileId: expect.anything(),
+      eventType: expect.anything(),
+      entityType: expect.anything(),
+      entityId: expect.anything(),
+      dedupeKey: expect.anything(),
+      createdAt: expect.anything(),
+      readAt: expect.anything(),
+      retainUntil: expect.anything(),
+    })
+  })
+
   it('applies the guarded migration through the standard fixture and rechecks idempotently', async () => {
     const fixture = await createTestDb()
     try {
@@ -207,10 +337,201 @@ describe('Shop OS messaging retention source schema', () => {
         where n.nspname = 'public'
           and c.relname in (
             'messaging_consent_events', 'messaging_consent_state', 'sms_suppressions',
-            'messaging_deletion_requests', 'messaging_retention_holds'
+            'messaging_deletion_requests', 'messaging_retention_holds', 'quote_sends',
+            'sms_log', 'notifications'
           )
       `)
-      expect(result.rows[0]?.count).toBe(5)
+      expect(result.rows[0]?.count).toBe(8)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('enforces same-shop operation references and quote-event send integrity', async () => {
+    const fixture = await createTestDb()
+    try {
+      const first = await seedOperationalTenant(fixture.client)
+      const second = await seedOperationalTenant(fixture.client)
+      await expect(insertQuoteSend(fixture.client, first, {
+        ticketId: second.ticketId,
+      })).rejects.toThrow(/quote_sends_shop_ticket_fk/)
+      await expect(insertQuoteSend(fixture.client, first, {
+        customerId: second.customerId,
+      })).rejects.toThrow(/quote_sends_shop_customer_fk/)
+      await expect(insertQuoteSend(fixture.client, first, {
+        quoteVersionId: second.quoteVersionId,
+      })).rejects.toThrow(/quote_sends_shop_ticket_version_fk/)
+      await expect(insertQuoteSend(fixture.client, first, {
+        actorId: second.actorId,
+      })).rejects.toThrow(/quote_sends_shop_actor_fk/)
+
+      const sendId = await insertQuoteSend(fixture.client, first)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, template_key, template_version, state,
+          server_received_at, retain_until
+        ) values ($1, $2, 'quote_ready', 'v1', 'accepted', now(), now())`,
+        [second.shopId, sendId],
+      )).rejects.toThrow(/sms_log_shop_send_fk/)
+      await expect(fixture.client.query(
+        `insert into notifications (
+          shop_id, recipient_profile_id, event_type, entity_type,
+          entity_id, dedupe_key, retain_until
+        ) values ($1, $2, 'quote_ready', 'quote_send', $3, 'dedupe_1', now())`,
+        [first.shopId, second.actorId, sendId],
+      )).rejects.toThrow(/notifications_shop_recipient_fk/)
+      await expect(fixture.client.query(
+        `insert into quote_events (
+          shop_id, ticket_id, quote_version_id, quote_send_id, kind, request_key
+        ) values ($1, $2, $3, $4, 'sent', $5)`,
+        [second.shopId, second.ticketId, second.quoteVersionId, sendId, crypto.randomUUID()],
+      )).rejects.toThrow(/quote_events_shop_ticket_send_fk/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('rejects unsafe operation payloads, invalid states, and inconsistent timestamps', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      await expect(insertQuoteSend(fixture.client, tenant, {
+        tokenHash: 'raw-token',
+      })).rejects.toThrow(/quote_sends_token_hash_valid/)
+      await expect(insertQuoteSend(fixture.client, tenant, {
+        tokenHash: 'a'.repeat(65),
+      })).rejects.toThrow(/quote_sends_token_hash_valid/)
+      await expect(insertQuoteSend(fixture.client, tenant, {
+        state: 'sent_later',
+      })).rejects.toThrow(/quote_sends_state_valid/)
+      await expect(insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted',
+      })).rejects.toThrow(/quote_sends_submission_timestamps_consistent/)
+      await expect(insertQuoteSend(fixture.client, tenant, {
+        state: 'cancelled',
+        tokenHash: null,
+        tokenExpiresAt: null,
+        terminalAt: 'now()',
+        retainUntil: "now() - interval '1 second'",
+      })).rejects.toThrow(/quote_sends_retention_timestamp_valid/)
+
+      const sendId = await insertQuoteSend(fixture.client, tenant)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, provider_message_id, template_key,
+          template_version, state, server_received_at, retain_until
+        ) values ($1, $2, $3, 'quote_ready', 'v1', 'accepted', now(), now())`,
+        [tenant.shopId, sendId, 'x'.repeat(257)],
+      )).rejects.toThrow(/sms_log_provider_message_id_valid/)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, provider_event_id, template_key,
+          template_version, state, server_received_at, retain_until
+        ) values ($1, $2, $3, 'quote_ready', 'v1', 'accepted', now(), now())`,
+        [tenant.shopId, sendId, 'x'.repeat(257)],
+      )).rejects.toThrow(/sms_log_provider_event_id_valid/)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, template_key, template_version, state,
+          server_received_at, retain_until
+        ) values ($1, $2, $3, 'v1', 'accepted', now(), now())`,
+        [tenant.shopId, sendId, 'x'.repeat(65)],
+      )).rejects.toThrow(/sms_log_template_key_valid/)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, template_key, template_version, state,
+          error_code, server_received_at, retain_until
+        ) values ($1, $2, 'quote_ready', 'v1', 'accepted', $3, now(), now())`,
+        [tenant.shopId, sendId, 'x'.repeat(129)],
+      )).rejects.toThrow(/sms_log_error_code_valid/)
+      await expect(fixture.client.query(
+        `insert into sms_log (
+          shop_id, quote_send_id, template_key, template_version, state,
+          server_received_at, retain_until
+        ) values ($1, $2, 'quote_ready', 'v1', 'unknown', now(), now())`,
+        [tenant.shopId, sendId],
+      )).rejects.toThrow(/sms_log_state_valid/)
+      await expect(fixture.client.query(
+        `insert into notifications (
+          shop_id, recipient_profile_id, event_type, entity_type,
+          entity_id, dedupe_key, created_at, read_at, retain_until
+        ) values ($1, $2, 'quote_ready', 'quote_send', $3, 'dedupe_2',
+          now(), now() - interval '1 second', now())`,
+        [tenant.shopId, tenant.actorId, sendId],
+      )).rejects.toThrow(/notifications_read_at_valid/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('refuses an operation-table constraint removed from the guarded fixture', async () => {
+    const fixture = await createTestDb()
+    try {
+      await fixture.client.exec(
+        'alter table notifications drop constraint notifications_read_at_valid',
+      )
+      await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('enforces actor request, provider event, and notification deduplication keys', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const requestKey = crypto.randomUUID()
+      await insertQuoteSend(fixture.client, tenant, { requestKey })
+      await expect(insertQuoteSend(fixture.client, tenant, { requestKey }))
+        .rejects.toThrow(/quote_sends_shop_actor_request_uq/)
+      const sendId = await insertQuoteSend(fixture.client, tenant)
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const operation = fixture.client.query(
+          `insert into sms_log (
+            shop_id, quote_send_id, provider_event_id, template_key,
+            template_version, state, server_received_at, retain_until
+          ) values ($1, $2, 'provider_event_1', 'quote_ready', 'v1',
+            'accepted', now(), now())`,
+          [tenant.shopId, sendId],
+        )
+        if (attempt === 0) await operation
+        else await expect(operation).rejects.toThrow(/sms_log_shop_provider_event_uq/)
+      }
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const operation = fixture.client.query(
+          `insert into notifications (
+            shop_id, recipient_profile_id, event_type, entity_type,
+            entity_id, dedupe_key, retain_until
+          ) values ($1, $2, 'quote_ready', 'quote_send', $3, 'dedupe_3', now())`,
+          [tenant.shopId, tenant.actorId, sendId],
+        )
+        if (attempt === 0) await operation
+        else await expect(operation).rejects.toThrow(/notifications_shop_recipient_dedupe_uq/)
+      }
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('keeps every Row 31 table free of raw destination, message, URL, and token columns', async () => {
+    const fixture = await createTestDb()
+    try {
+      const forbidden = await fixture.client.query<{ table_name: string; column_name: string }>(`
+        select table_name, column_name
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name in (
+            'messaging_consent_events', 'messaging_consent_state', 'sms_suppressions',
+            'messaging_deletion_requests', 'messaging_retention_holds', 'quote_sends',
+            'sms_log', 'notifications'
+          )
+          and column_name in (
+            'message_body', 'raw_body', 'destination', 'phone', 'secure_url', 'token'
+          )
+      `)
+      expect(forbidden.rows).toEqual([])
     } finally {
       await fixture.close()
     }

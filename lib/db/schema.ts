@@ -707,6 +707,130 @@ export const cannedJobs = pgTable(
   ],
 )
 
+export const quoteSends = pgTable(
+  'quote_sends',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    quoteVersionId: uuid('quote_version_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    destinationFingerprint: text('destination_fingerprint').notNull(),
+    fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
+    channel: text('channel', { enum: ['sms'] }).notNull(),
+    tokenHash: text('token_hash'),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    requestingActorProfileId: uuid('requesting_actor_profile_id').notNull(),
+    requestKey: uuid('request_key').notNull(),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    state: text('state', {
+      enum: [
+        'queued', 'claimed', 'submitting', 'submitted', 'cancelled',
+        'delivered', 'failed', 'responded', 'expired',
+      ],
+    }).notNull(),
+    submittingAt: timestamp('submitting_at', { withTimezone: true }),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
+    retainUntil: timestamp('retain_until', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'quote_sends_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'quote_sends_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_sends_shop_ticket_version_fk',
+      columns: [table.shopId, table.ticketId, table.quoteVersionId],
+      foreignColumns: [quoteVersions.shopId, quoteVersions.ticketId, quoteVersions.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_sends_shop_customer_fk',
+      columns: [table.shopId, table.customerId],
+      foreignColumns: [customers.shopId, customers.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_sends_shop_actor_fk',
+      columns: [table.shopId, table.requestingActorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('quote_sends_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('quote_sends_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
+    uniqueIndex('quote_sends_shop_actor_request_uq').on(
+      table.shopId,
+      table.requestingActorProfileId,
+      table.requestKey,
+    ),
+    index('quote_sends_destination_idx').on(
+      table.shopId,
+      table.destinationFingerprint,
+      table.fingerprintKeyVersion,
+    ),
+    index('quote_sends_purge_idx').on(table.state, table.retainUntil, table.id),
+    check(
+      'quote_sends_destination_fingerprint_valid',
+      sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'quote_sends_fingerprint_key_version_valid',
+      sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check('quote_sends_channel_valid', sql`${table.channel} = 'sms'`),
+    check(
+      'quote_sends_token_hash_valid',
+      sql`${table.tokenHash} is null or ${table.tokenHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'quote_sends_request_fingerprint_valid',
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'quote_sends_state_valid',
+      sql`${table.state} in (
+        'queued', 'claimed', 'submitting', 'submitted', 'cancelled',
+        'delivered', 'failed', 'responded', 'expired'
+      )`,
+    ),
+    check(
+      'quote_sends_token_action_consistent',
+      sql`(${table.tokenHash} is null and ${table.tokenExpiresAt} is null)
+        or (${table.tokenHash} is not null and ${table.tokenExpiresAt} is not null
+          and ${table.state} in ('queued', 'claimed', 'submitting', 'submitted', 'delivered'))`,
+    ),
+    check(
+      'quote_sends_submission_timestamps_consistent',
+      sql`(${table.state} in ('queued', 'claimed', 'cancelled')
+          and ${table.submittingAt} is null and ${table.submittedAt} is null)
+        or (${table.state} = 'submitting'
+          and ${table.submittingAt} >= ${table.createdAt} and ${table.submittedAt} is null)
+        or (${table.state} in ('submitted', 'delivered', 'failed', 'responded', 'expired')
+          and ${table.submittingAt} >= ${table.createdAt} and ${table.submittedAt} is not null
+          and ${table.submittedAt} >= ${table.submittingAt})`,
+    ),
+    check(
+      'quote_sends_terminal_timestamps_consistent',
+      sql`(${table.state} in ('cancelled', 'failed', 'responded', 'expired')
+          and ${table.terminalAt} is not null and ${table.retainUntil} is not null)
+        or (${table.state} not in ('cancelled', 'failed', 'responded', 'expired')
+          and ${table.terminalAt} is null and ${table.retainUntil} is null)`,
+    ),
+    check(
+      'quote_sends_retention_timestamp_valid',
+      sql`${table.retainUntil} is null
+        or (${table.terminalAt} >= ${table.createdAt}
+          and ${table.retainUntil} >= ${table.terminalAt})`,
+    ),
+  ],
+)
+
 export const quoteEvents = pgTable(
   'quote_events',
   {
@@ -748,6 +872,11 @@ export const quoteEvents = pgTable(
       columns: [table.shopId, table.actorProfileId],
       foreignColumns: [profiles.shopId, profiles.id],
     }).onDelete('restrict'),
+    foreignKey({
+      name: 'quote_events_shop_ticket_send_fk',
+      columns: [table.shopId, table.ticketId, table.quoteSendId],
+      foreignColumns: [quoteSends.shopId, quoteSends.ticketId, quoteSends.id],
+    }).onDelete('restrict'),
     uniqueIndex('quote_events_shop_request_key_uq').on(table.shopId, table.requestKey),
     uniqueIndex('quote_events_shop_provider_event_uq')
       .on(table.shopId, table.providerEventId)
@@ -785,6 +914,136 @@ export const quoteEvents = pgTable(
       sql`${table.kind} <> 'approved'
         or ${table.approvedVia} not in ('phone', 'in_person')
         or ${table.actorProfileId} is not null`,
+    ),
+  ],
+)
+
+export const smsLog = pgTable(
+  'sms_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    quoteSendId: uuid('quote_send_id').notNull(),
+    providerMessageId: text('provider_message_id'),
+    providerEventId: text('provider_event_id'),
+    templateKey: text('template_key').notNull(),
+    templateVersion: text('template_version').notNull(),
+    state: text('state', {
+      enum: [
+        'accepted', 'queued', 'sent', 'delivered', 'undelivered',
+        'failed', 'opt_out', 'help', 'start',
+      ],
+    }).notNull(),
+    errorCode: text('error_code'),
+    providerOccurredAt: timestamp('provider_occurred_at', { withTimezone: true }),
+    serverReceivedAt: timestamp('server_received_at', { withTimezone: true }).defaultNow().notNull(),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'sms_log_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'sms_log_shop_send_fk',
+      columns: [table.shopId, table.quoteSendId],
+      foreignColumns: [quoteSends.shopId, quoteSends.id],
+    }).onDelete('cascade'),
+    uniqueIndex('sms_log_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('sms_log_shop_provider_event_uq')
+      .on(table.shopId, table.providerEventId)
+      .where(sql`${table.providerEventId} is not null`),
+    index('sms_log_send_idx').on(table.shopId, table.quoteSendId),
+    index('sms_log_purge_idx').on(table.state, table.retainUntil, table.id),
+    check(
+      'sms_log_provider_message_id_valid',
+      sql`${table.providerMessageId} is null
+        or char_length(${table.providerMessageId}) between 1 and 256`,
+    ),
+    check(
+      'sms_log_provider_event_id_valid',
+      sql`${table.providerEventId} is null
+        or char_length(${table.providerEventId}) between 1 and 256`,
+    ),
+    check(
+      'sms_log_template_key_valid',
+      sql`${table.templateKey} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'sms_log_template_version_valid',
+      sql`${table.templateVersion} ~ '^[a-z0-9][a-z0-9_.-]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'sms_log_state_valid',
+      sql`${table.state} in (
+        'accepted', 'queued', 'sent', 'delivered', 'undelivered',
+        'failed', 'opt_out', 'help', 'start'
+      )`,
+    ),
+    check(
+      'sms_log_error_code_valid',
+      sql`${table.errorCode} is null or char_length(${table.errorCode}) between 1 and 128`,
+    ),
+    check(
+      'sms_log_retention_timestamp_valid',
+      sql`${table.retainUntil} >= ${table.serverReceivedAt}
+        and (${table.providerOccurredAt} is null or ${table.retainUntil} >= ${table.providerOccurredAt})`,
+    ),
+  ],
+)
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    recipientProfileId: uuid('recipient_profile_id').notNull(),
+    eventType: text('event_type').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'notifications_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'notifications_shop_recipient_fk',
+      columns: [table.shopId, table.recipientProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('cascade'),
+    uniqueIndex('notifications_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('notifications_shop_recipient_dedupe_uq').on(
+      table.shopId,
+      table.recipientProfileId,
+      table.dedupeKey,
+    ),
+    index('notifications_purge_idx').on(table.retainUntil, table.id),
+    check(
+      'notifications_event_type_valid',
+      sql`${table.eventType} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'notifications_entity_type_valid',
+      sql`${table.entityType} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'notifications_dedupe_key_valid',
+      sql`char_length(${table.dedupeKey}) between 1 and 128`,
+    ),
+    check(
+      'notifications_read_at_valid',
+      sql`${table.readAt} is null or ${table.readAt} >= ${table.createdAt}`,
+    ),
+    check(
+      'notifications_retention_timestamp_valid',
+      sql`${table.retainUntil} >= ${table.createdAt}`,
     ),
   ],
 )

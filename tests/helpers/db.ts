@@ -318,7 +318,10 @@ async function messagingRetentionMarkers(
       ('messaging_consent_state'),
       ('sms_suppressions'),
       ('messaging_deletion_requests'),
-      ('messaging_retention_holds')
+      ('messaging_retention_holds'),
+      ('quote_sends'),
+      ('sms_log'),
+      ('notifications')
     ), expected_columns(table_name, column_name) as (values
       ('messaging_consent_events', 'id'), ('messaging_consent_events', 'shop_id'),
       ('messaging_consent_events', 'subject_key'), ('messaging_consent_events', 'customer_id'),
@@ -356,7 +359,28 @@ async function messagingRetentionMarkers(
       ('messaging_retention_holds', 'subject_key'), ('messaging_retention_holds', 'reason_code'),
       ('messaging_retention_holds', 'authorizing_actor_profile_id'), ('messaging_retention_holds', 'starts_at'),
       ('messaging_retention_holds', 'review_at'), ('messaging_retention_holds', 'expires_at'),
-      ('messaging_retention_holds', 'released_at'), ('messaging_retention_holds', 'retain_until')
+      ('messaging_retention_holds', 'released_at'), ('messaging_retention_holds', 'retain_until'),
+      ('quote_sends', 'id'), ('quote_sends', 'shop_id'),
+      ('quote_sends', 'ticket_id'), ('quote_sends', 'quote_version_id'),
+      ('quote_sends', 'customer_id'), ('quote_sends', 'destination_fingerprint'),
+      ('quote_sends', 'fingerprint_key_version'), ('quote_sends', 'channel'),
+      ('quote_sends', 'token_hash'), ('quote_sends', 'token_expires_at'),
+      ('quote_sends', 'requesting_actor_profile_id'), ('quote_sends', 'request_key'),
+      ('quote_sends', 'request_fingerprint'), ('quote_sends', 'state'),
+      ('quote_sends', 'submitting_at'), ('quote_sends', 'submitted_at'),
+      ('quote_sends', 'terminal_at'), ('quote_sends', 'retain_until'),
+      ('quote_sends', 'created_at'), ('quote_sends', 'updated_at'),
+      ('sms_log', 'id'), ('sms_log', 'shop_id'),
+      ('sms_log', 'quote_send_id'), ('sms_log', 'provider_message_id'),
+      ('sms_log', 'provider_event_id'), ('sms_log', 'template_key'),
+      ('sms_log', 'template_version'), ('sms_log', 'state'),
+      ('sms_log', 'error_code'), ('sms_log', 'provider_occurred_at'),
+      ('sms_log', 'server_received_at'), ('sms_log', 'retain_until'),
+      ('notifications', 'id'), ('notifications', 'shop_id'),
+      ('notifications', 'recipient_profile_id'), ('notifications', 'event_type'),
+      ('notifications', 'entity_type'), ('notifications', 'entity_id'),
+      ('notifications', 'dedupe_key'), ('notifications', 'created_at'),
+      ('notifications', 'read_at'), ('notifications', 'retain_until')
     ), expected_constraints(constraint_name) as (values
       ('messaging_consent_events_pkey'), ('messaging_consent_events_shop_fk'),
       ('messaging_consent_events_shop_customer_fk'), ('messaging_consent_events_shop_actor_fk'),
@@ -387,14 +411,38 @@ async function messagingRetentionMarkers(
       ('messaging_retention_holds_shop_actor_fk'), ('messaging_retention_holds_resource_type_valid'),
       ('messaging_retention_holds_reason_code_valid'), ('messaging_retention_holds_target_consistent'),
       ('messaging_retention_holds_review_valid'), ('messaging_retention_holds_release_valid'),
-      ('messaging_retention_holds_max_duration')
+      ('messaging_retention_holds_max_duration'),
+      ('quote_sends_pkey'), ('quote_sends_shop_fk'),
+      ('quote_sends_shop_ticket_fk'), ('quote_sends_shop_ticket_version_fk'),
+      ('quote_sends_shop_customer_fk'), ('quote_sends_shop_actor_fk'),
+      ('quote_sends_destination_fingerprint_valid'), ('quote_sends_fingerprint_key_version_valid'),
+      ('quote_sends_channel_valid'), ('quote_sends_token_hash_valid'),
+      ('quote_sends_request_fingerprint_valid'), ('quote_sends_state_valid'),
+      ('quote_sends_token_action_consistent'), ('quote_sends_submission_timestamps_consistent'),
+      ('quote_sends_terminal_timestamps_consistent'), ('quote_sends_retention_timestamp_valid'),
+      ('quote_events_shop_ticket_send_fk'),
+      ('sms_log_pkey'), ('sms_log_shop_fk'), ('sms_log_shop_send_fk'),
+      ('sms_log_provider_message_id_valid'), ('sms_log_provider_event_id_valid'),
+      ('sms_log_template_key_valid'), ('sms_log_template_version_valid'),
+      ('sms_log_state_valid'), ('sms_log_error_code_valid'),
+      ('sms_log_retention_timestamp_valid'),
+      ('notifications_pkey'), ('notifications_shop_fk'), ('notifications_shop_recipient_fk'),
+      ('notifications_event_type_valid'), ('notifications_entity_type_valid'),
+      ('notifications_dedupe_key_valid'), ('notifications_read_at_valid'),
+      ('notifications_retention_timestamp_valid')
     ), expected_indexes(index_name) as (values
       ('messaging_consent_events_shop_id_uq'), ('messaging_consent_events_shop_request_uq'),
       ('messaging_consent_events_subject_idx'), ('messaging_consent_state_shop_id_uq'),
       ('messaging_consent_state_subject_program_uq'), ('sms_suppressions_shop_id_uq'),
       ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
       ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
-      ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx')
+      ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
+      ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
+      ('quote_sends_shop_actor_request_uq'), ('quote_sends_destination_idx'),
+      ('quote_sends_purge_idx'), ('sms_log_shop_id_uq'),
+      ('sms_log_shop_provider_event_uq'), ('sms_log_send_idx'), ('sms_log_purge_idx'),
+      ('notifications_shop_id_uq'), ('notifications_shop_recipient_dedupe_uq'),
+      ('notifications_purge_idx')
     ), expected_functions(signature, return_type, security_definer, service_execute) as (values
       ('reject_messaging_consent_event_mutation()', 'trigger', false, false),
       ('require_messaging_compaction_completion()', 'trigger', false, false),
@@ -480,17 +528,17 @@ async function messagingRetentionMarkers(
 }
 
 function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
-  return markers.table_count === 5
-    && markers.column_count === 72
-    && markers.constraint_count === 55
-    && markers.index_count === 12
-    && markers.rls_count === 5
-    && markers.policy_count === 5
+  return markers.table_count === 8
+    && markers.column_count === 114
+    && markers.constraint_count === 90
+    && markers.index_count === 24
+    && markers.rls_count === 8
+    && markers.policy_count === 8
     && markers.function_marker_count === 6
     && markers.trigger_binding_count === 4
     && markers.direct_client_grant_count === 0
     && markers.effective_client_privilege_count === 0
-    && markers.service_crud_count === 20
+    && markers.service_crud_count === 32
 }
 
 function hasAnyMessagingRetentionMarker(markers: MessagingRetentionMarkers): boolean {
