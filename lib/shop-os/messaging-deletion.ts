@@ -35,6 +35,17 @@ const reasons = new Set(['customer_request', 'shop_request', 'account_deletion']
 const cancellable = new Set(['queued', 'claimed'])
 const inFlight = new Set(['submitting', 'submitted'])
 
+// Internal recovery safety ceilings. These are not retention or purge batch sizes.
+const MAX_HISTORICAL_PAIRS = 64
+const MAX_PENDING_REQUESTS = 32
+const MAX_SENDS = 128
+const MAX_CONSENT_EVENTS = 256
+const MAX_CONSENT_PROJECTIONS = 128
+const MAX_SMS_LOGS = 512
+const MAX_NOTIFICATIONS = 256
+const MAX_HOLDS = 256
+const MAX_TOTAL_RESOURCES = 1024
+
 function retentionAuthority(role: string): boolean {
   return canManageMessagingRetention(role, role === 'founder')
 }
@@ -189,37 +200,41 @@ async function lockCustomerMessagingPairs(input: {
   shopId: string
   customerId: string
   current: ReadonlyArray<{ fingerprint: string; keyVersion: string }>
-}): Promise<ReadonlyArray<MessagingPair>> {
+}): Promise<ReadonlyArray<MessagingPair> | null> {
   const sends = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select destination_fingerprint as "destinationFingerprint",
+    select distinct destination_fingerprint as "destinationFingerprint",
       fingerprint_key_version as "fingerprintKeyVersion"
     from quote_sends
     where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by id for update
+    order by destination_fingerprint, fingerprint_key_version
+    limit ${MAX_HISTORICAL_PAIRS + 1}
   `))
   const projections = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select destination_fingerprint as "destinationFingerprint",
+    select distinct destination_fingerprint as "destinationFingerprint",
       fingerprint_key_version as "fingerprintKeyVersion"
     from messaging_consent_state
     where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by id for update
+    order by destination_fingerprint, fingerprint_key_version
+    limit ${MAX_HISTORICAL_PAIRS + 1}
   `))
   const events = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select destination_fingerprint as "destinationFingerprint",
+    select distinct destination_fingerprint as "destinationFingerprint",
       fingerprint_key_version as "fingerprintKeyVersion"
     from messaging_consent_events
     where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by id for update
+    order by destination_fingerprint, fingerprint_key_version
+    limit ${MAX_HISTORICAL_PAIRS + 1}
   `))
   const requests = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select destination_fingerprint as "destinationFingerprint",
+    select distinct destination_fingerprint as "destinationFingerprint",
       fingerprint_key_version as "fingerprintKeyVersion"
     from messaging_deletion_requests
     where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
       and state = 'pending'
-    order by id for update
+    order by destination_fingerprint, fingerprint_key_version
+    limit ${MAX_HISTORICAL_PAIRS + 1}
   `))
-  return exactMessagingPairs([
+  const pairs = exactMessagingPairs([
     ...input.current.map(({ fingerprint: destinationFingerprint, keyVersion }) => ({
       destinationFingerprint,
       fingerprintKeyVersion: keyVersion,
@@ -229,6 +244,7 @@ async function lockCustomerMessagingPairs(input: {
     ...events,
     ...requests,
   ])
+  return pairs.length <= MAX_HISTORICAL_PAIRS ? pairs : null
 }
 
 function semanticCustomerBinding(input: {
@@ -379,6 +395,7 @@ export async function requestMessagingDeletion(rawInput: {
         customerId: input.customerId!,
         current: input.fingerprints!,
       })
+      if (!historicalPairs) return { ok: false, error: 'busy' }
 
       const subject = unwrapRows<{ subjectKey: string }>(await tx.execute(sql`
         select subject_key as "subjectKey" from messaging_consent_state
@@ -438,7 +455,8 @@ export async function requestMessagingDeletion(rawInput: {
             (destination_fingerprint = ${item.destinationFingerprint}
               and fingerprint_key_version = ${item.fingerprintKeyVersion})
           `), sql` or `)})
-        order by destination_fingerprint, fingerprint_key_version for update
+        order by destination_fingerprint, fingerprint_key_version
+        limit ${MAX_HISTORICAL_PAIRS + 1} for update
       `))
       const transitionAt = transition instanceof Date
         ? new Date(transition.getTime())
@@ -456,7 +474,7 @@ export async function requestMessagingDeletion(rawInput: {
         customerId: input.customerId!,
         current: input.fingerprints!,
       })
-      if (!sameMessagingPairs(historicalPairs, verifiedPairs)) {
+      if (!verifiedPairs || !sameMessagingPairs(historicalPairs, verifiedPairs)) {
         throw new Error('historical_messaging_pairs_changed')
       }
       const current = input.fingerprints![0]!
@@ -488,6 +506,9 @@ export async function requestMessagingDeletion(rawInput: {
 type CleanupRequest = RequestRow & { shopId: string; subjectKey: string; requestKey: string }
 type SendRow = { id: string; state: string; customerId: string | null }
 type HoldRow = { resourceType: string | null; resourceId: string | null; subjectKey: string | null }
+type ConsentProjectionRow = MessagingPair & { id: string; subjectKey: string }
+type ConsentEventRow = MessagingPair & { id: string; subjectKey: string }
+type SmsRow = { id: string; quoteSendId: string }
 
 export async function completeMessagingDeletion(rawInput: {
   db: AppDb
@@ -532,13 +553,14 @@ export async function completeMessagingDeletion(rawInput: {
       }
       if (!request.customerId) return { ok: false, error: 'request_conflict' }
 
-      await tx.execute(sql`
+      const pendingRequests = unwrapRows<{ id: string }>(await tx.execute(sql`
         select id from messaging_deletion_requests
         where shop_id = ${request.shopId}::uuid and state = 'pending'
           and (subject_key = ${request.subjectKey}::uuid
             or customer_id = ${request.customerId}::uuid)
-        order by id for update
-      `)
+        order by id limit ${MAX_PENDING_REQUESTS + 1} for update
+      `))
+      if (pendingRequests.length > MAX_PENDING_REQUESTS) return { ok: false, error: 'busy' }
       request = unwrapRows<CleanupRequest>(await tx.execute(sql`
         select id, shop_id as "shopId", subject_key as "subjectKey", request_key as "requestKey",
           request_fingerprint as "requestFingerprint", customer_id as "customerId",
@@ -560,69 +582,83 @@ export async function completeMessagingDeletion(rawInput: {
       const sends = unwrapRows<SendRow>(await tx.execute(sql`
         select id, state, customer_id as "customerId" from quote_sends
         where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
-        order by id for update
+        order by id limit ${MAX_SENDS + 1} for update
       `))
-      const consentProjections = unwrapRows<{ id: string }>(await tx.execute(sql`
-        select id from messaging_consent_state
-        where shop_id = ${request.shopId}::uuid and subject_key = ${request.subjectKey}::uuid
-        order by id for update
+      const consentProjections = unwrapRows<ConsentProjectionRow>(await tx.execute(sql`
+        select id, subject_key as "subjectKey",
+          destination_fingerprint as "destinationFingerprint",
+          fingerprint_key_version as "fingerprintKeyVersion"
+        from messaging_consent_state
+        where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
+        order by subject_key, id limit ${MAX_CONSENT_PROJECTIONS + 1} for update
       `))
-      const consentEvents = unwrapRows<{
-        id: string
-        destinationFingerprint: string
-        fingerprintKeyVersion: string
-      }>(await tx.execute(sql`
-        select id, destination_fingerprint as "destinationFingerprint",
-          fingerprint_key_version as "fingerprintKeyVersion" from messaging_consent_events
-        where shop_id = ${request.shopId}::uuid and subject_key = ${request.subjectKey}::uuid
-        order by id for update
+      const consentEvents = unwrapRows<ConsentEventRow>(await tx.execute(sql`
+        select id, subject_key as "subjectKey",
+          destination_fingerprint as "destinationFingerprint",
+          fingerprint_key_version as "fingerprintKeyVersion"
+        from messaging_consent_events
+        where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
+        order by subject_key, id limit ${MAX_CONSENT_EVENTS + 1} for update
       `))
       const sendIds = sends.map(({ id }) => id)
-      const smsRows = unwrapRows<{ id: string }>(await tx.execute(sql`
-        select id from sms_log where shop_id = ${request.shopId}::uuid
-          and (${sendIds.length > 0} and quote_send_id in ${sql.raw(
-            sendIds.length ? `(${sendIds.map((id) => `'${id}'::uuid`).join(',')})` : `(null::uuid)`,
-          )}) order by id for update
+      const smsRows = unwrapRows<SmsRow>(await tx.execute(sql`
+        select id, quote_send_id as "quoteSendId" from sms_log
+        where shop_id = ${request.shopId}::uuid
+          and quote_send_id = any(${sql.param(sendIds)}::uuid[])
+        order by id limit ${MAX_SMS_LOGS + 1} for update
       `))
       const notificationRows = unwrapRows<{ id: string }>(await tx.execute(sql`
         select id from notifications where shop_id = ${request.shopId}::uuid
           and ((entity_type = 'customer' and entity_id = ${request.customerId}::uuid)
-            or (entity_type = 'quote_send' and ${sendIds.length > 0} and entity_id in ${sql.raw(
-              sendIds.length ? `(${sendIds.map((id) => `'${id}'::uuid`).join(',')})` : `(null::uuid)`,
-            )})) order by id for update
+            or (entity_type = 'quote_send'
+              and entity_id = any(${sql.param(sendIds)}::uuid[])))
+        order by id limit ${MAX_NOTIFICATIONS + 1} for update
       `))
-      const allHolds = unwrapRows<HoldRow>(await tx.execute(sql`
+      const subjectKeys = [...new Set([
+        request.subjectKey,
+        ...consentProjections.map(({ subjectKey }) => subjectKey),
+        ...consentEvents.map(({ subjectKey }) => subjectKey),
+      ])].sort()
+      const smsIds = smsRows.map(({ id }) => id)
+      const notificationIds = notificationRows.map(({ id }) => id)
+      const consentEventIds = consentEvents.map(({ id }) => id)
+      const holds = unwrapRows<HoldRow>(await tx.execute(sql`
         select resource_type as "resourceType", resource_id as "resourceId", subject_key as "subjectKey"
         from messaging_retention_holds
         where shop_id = ${request.shopId}::uuid and released_at is null
           and starts_at <= clock_timestamp() and expires_at > clock_timestamp()
-        order by id for update
+          and (subject_key = any(${sql.param(subjectKeys)}::uuid[])
+            or (resource_type = 'quote_send'
+              and resource_id = any(${sql.param(sendIds)}::uuid[]))
+            or (resource_type = 'sms_log'
+              and resource_id = any(${sql.param(smsIds)}::uuid[]))
+            or (resource_type = 'notification'
+              and resource_id = any(${sql.param(notificationIds)}::uuid[]))
+            or (resource_type = 'messaging_consent_event'
+              and resource_id = any(${sql.param(consentEventIds)}::uuid[])))
+        order by id limit ${MAX_HOLDS + 1} for update
       `))
-      const smsIds = new Set(smsRows.map(({ id }) => id))
-      const notificationIds = new Set(notificationRows.map(({ id }) => id))
-      const sendIdSet = new Set(sendIds)
-      const consentEventIds = new Set(consentEvents.map(({ id }) => id))
-      const holds = allHolds.filter((hold) => hold.subjectKey === request.subjectKey
-        || (hold.resourceType === 'quote_send' && hold.resourceId !== null && sendIdSet.has(hold.resourceId))
-        || (hold.resourceType === 'sms_log' && hold.resourceId !== null && smsIds.has(hold.resourceId))
-        || (hold.resourceType === 'notification' && hold.resourceId !== null
-          && notificationIds.has(hold.resourceId))
-        || (hold.resourceType === 'messaging_consent_event' && hold.resourceId !== null
-          && consentEventIds.has(hold.resourceId)))
-      const subjectHeld = holds.some((hold) => hold.subjectKey === request.subjectKey)
-      const held = (type: string, id: string) => subjectHeld || holds.some((hold) =>
-        hold.resourceType === type && hold.resourceId === id)
 
-      const heldSms = unwrapRows<{ quoteSendId: string; count: number }>(await tx.execute(sql`
-        select quote_send_id as "quoteSendId", count(*)::int as count from sms_log l
-        where l.shop_id = ${request.shopId}::uuid
-          and exists (select 1 from messaging_retention_holds h
-            where h.shop_id = l.shop_id and h.resource_type = 'sms_log' and h.resource_id = l.id
-              and h.released_at is null and h.starts_at <= clock_timestamp()
-              and h.expires_at > clock_timestamp())
-        group by quote_send_id
-      `))
-      const heldSmsParents = new Set(heldSms.map(({ quoteSendId }) => quoteSendId))
+      const overLimit = sends.length > MAX_SENDS
+        || consentEvents.length > MAX_CONSENT_EVENTS
+        || consentProjections.length > MAX_CONSENT_PROJECTIONS
+        || smsRows.length > MAX_SMS_LOGS
+        || notificationRows.length > MAX_NOTIFICATIONS
+        || holds.length > MAX_HOLDS
+        || sends.length + consentEvents.length + consentProjections.length + smsRows.length
+          + notificationRows.length + holds.length > MAX_TOTAL_RESOURCES
+      if (overLimit) return { ok: false, error: 'busy' }
+
+      const heldSubjectKeys = new Set(subjectKeys.filter((subjectKey) =>
+        holds.some((hold) => hold.subjectKey === subjectKey)
+          || consentEvents.some((event) => event.subjectKey === subjectKey
+            && holds.some((hold) => hold.resourceType === 'messaging_consent_event'
+              && hold.resourceId === event.id))))
+      const customerSubjectHeld = heldSubjectKeys.size > 0
+      const held = (type: string, id: string) => customerSubjectHeld || holds.some((hold) =>
+        hold.resourceType === type && hold.resourceId === id)
+      const heldSmsParents = new Set(smsRows.filter(({ id }) => held('sms_log', id))
+        .map(({ quoteSendId }) => quoteSendId))
 
       const priorCounts = Object.freeze({
         consentEvents: consentEvents.length,
@@ -632,21 +668,58 @@ export async function completeMessagingDeletion(rawInput: {
         smsLogs: smsRows.length,
       })
 
-      const detachedSuppressionSources = unwrapRows<{ id: string }>(await tx.execute(sql`
-        update sms_suppressions set source_event_id = null, updated_at = clock_timestamp()
-        where shop_id = ${request.shopId}::uuid and source_event_id in ${sql.raw(
-          consentEvents.length
-            ? `(${consentEvents.map(({ id }) => `'${id}'::uuid`).join(',')})`
-            : `(null::uuid)`,
-        )} returning id
-      `)).length
-
+      let consentDeleted = 0
+      let detachedSuppressionSources = 0
+      const consentSubjectKeys = [...new Set([
+        ...consentProjections.map(({ subjectKey }) => subjectKey),
+        ...consentEvents.map(({ subjectKey }) => subjectKey),
+      ])].sort()
+      for (const subjectKey of consentSubjectKeys) {
+        if (heldSubjectKeys.has(subjectKey)) continue
+        const subjectEvents = consentEvents.filter((event) => event.subjectKey === subjectKey)
+        const subjectProjections = consentProjections.filter((projection) =>
+          projection.subjectKey === subjectKey)
+        const source = subjectEvents[0] ?? subjectProjections[0]
+        if (!source) throw new Error('consent_subject_source_unavailable')
+        const eventIds = subjectEvents.map(({ id }) => id)
+        detachedSuppressionSources += unwrapRows<{ id: string }>(await tx.execute(sql`
+          update sms_suppressions set source_event_id = null, updated_at = clock_timestamp()
+          where shop_id = ${request.shopId}::uuid
+            and source_event_id = any(${sql.param(eventIds)}::uuid[])
+          returning id
+        `)).length
+        await tx.execute(sql`
+          insert into messaging_consent_events (
+            shop_id, subject_key, customer_id, destination_fingerprint,
+            fingerprint_key_version, program_version, event_type, committed_at, occurred_at,
+            capture_method, customer_controlled, evidence_kind, actor_profile_id,
+            request_key, request_fingerprint, retain_until
+          ) values (
+            ${request.shopId}::uuid, ${subjectKey}::uuid, ${request.customerId}::uuid,
+            ${source.destinationFingerprint}, ${source.fingerprintKeyVersion}, 'internal_deletion_v1',
+            'deleted', clock_timestamp(), clock_timestamp(), 'staff_request', false,
+            'staff_request', ${input.actor.profileId}::uuid, gen_random_uuid(),
+            ${request.requestFingerprint}, clock_timestamp() + interval '5 years'
+          )
+        `)
+        await tx.execute(sql`
+          delete from messaging_consent_state
+          where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
+            and subject_key = ${subjectKey}::uuid
+        `)
+        const compacted = unwrapRows<{ count: number }>(await tx.execute(sql`
+          select compact_messaging_consent_events(
+            ${request.shopId}::uuid, ${subjectKey}::uuid, ${request.id}::uuid
+          ) as count
+        `))[0]?.count ?? 0
+        consentDeleted += Math.max(0, compacted - 1)
+      }
 
       const smsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (delete from sms_log l where l.shop_id = ${request.shopId}::uuid
-          and ${!subjectHeld} and (${sendIds.length > 0} and l.quote_send_id in ${sql.raw(
-            sendIds.length ? `(${sendIds.map((id) => `'${id}'::uuid`).join(',')})` : `(null::uuid)`,
-          )}) and not exists (select 1 from messaging_retention_holds h
+          and ${!customerSubjectHeld}
+          and l.quote_send_id = any(${sql.param(sendIds)}::uuid[])
+          and not exists (select 1 from messaging_retention_holds h
             where h.shop_id = l.shop_id and h.resource_type = 'sms_log' and h.resource_id = l.id
               and h.released_at is null and h.starts_at <= clock_timestamp()
               and h.expires_at > clock_timestamp()) returning 1)
@@ -654,10 +727,11 @@ export async function completeMessagingDeletion(rawInput: {
       `))[0]?.count ?? 0
       const notificationsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (delete from notifications n where n.shop_id = ${request.shopId}::uuid
-          and ${!subjectHeld} and ((n.entity_type = 'customer' and n.entity_id = ${request.customerId}::uuid)
-            or (n.entity_type = 'quote_send' and ${sendIds.length > 0} and n.entity_id in ${sql.raw(
-              sendIds.length ? `(${sendIds.map((id) => `'${id}'::uuid`).join(',')})` : `(null::uuid)`,
-            )})) and not exists (select 1 from messaging_retention_holds h
+          and ${!customerSubjectHeld}
+          and ((n.entity_type = 'customer' and n.entity_id = ${request.customerId}::uuid)
+            or (n.entity_type = 'quote_send'
+              and n.entity_id = any(${sql.param(sendIds)}::uuid[])))
+          and not exists (select 1 from messaging_retention_holds h
               where h.shop_id = n.shop_id and h.resource_type = 'notification' and h.resource_id = n.id
                 and h.released_at is null and h.starts_at <= clock_timestamp()
                 and h.expires_at > clock_timestamp()) returning 1)
@@ -687,32 +761,6 @@ export async function completeMessagingDeletion(rawInput: {
         sendsRetained += 1
       }
 
-      let consentDeleted = 0
-      if (!subjectHeld && !holds.some((hold) => hold.resourceType === 'messaging_consent_event')) {
-        await tx.execute(sql`
-          insert into messaging_consent_events (
-            shop_id, subject_key, customer_id, destination_fingerprint,
-            fingerprint_key_version, program_version, event_type, committed_at, occurred_at,
-            capture_method, customer_controlled, evidence_kind, actor_profile_id,
-            request_key, request_fingerprint, retain_until
-          ) values (
-            ${request.shopId}::uuid, ${request.subjectKey}::uuid, ${request.customerId}::uuid,
-            ${request.destinationFingerprint}, ${request.fingerprintKeyVersion}, 'internal_deletion_v1',
-            'deleted', clock_timestamp(), clock_timestamp(), 'staff_request', false,
-            'staff_request', ${input.actor.profileId}::uuid, ${request.id}::uuid,
-            ${request.requestFingerprint}, clock_timestamp() + interval '5 years'
-          )
-        `)
-        await tx.execute(sql`delete from messaging_consent_state
-          where shop_id = ${request.shopId}::uuid and subject_key = ${request.subjectKey}::uuid`)
-        const compacted = unwrapRows<{ count: number }>(await tx.execute(sql`
-          select compact_messaging_consent_events(
-            ${request.shopId}::uuid, ${request.subjectKey}::uuid, ${request.id}::uuid
-          ) as count
-        `))[0]?.count ?? 0
-        consentDeleted = Math.max(0, compacted - 1)
-      }
-
       const completedAt = unwrapRows<{ at: Date | string }>(await tx.execute(sql`
         with barriers(at) as (
           select requested_at from messaging_deletion_requests where shop_id = ${request.shopId}::uuid
@@ -731,19 +779,15 @@ export async function completeMessagingDeletion(rawInput: {
         quoteSendsDeleted: sendsDeleted,
         quoteSendsRetained: sendsRetained,
       })
-      const heldConsentEvents = subjectHeld
-        || holds.some((hold) => hold.resourceType === 'messaging_consent_event')
-        ? consentEvents.length
-        : 0
-      const heldConsentProjections = subjectHeld
-        || holds.some((hold) => hold.resourceType === 'messaging_consent_event')
-        ? consentProjections.length
-        : 0
+      const heldConsentEvents = consentEvents.filter(({ subjectKey }) =>
+        heldSubjectKeys.has(subjectKey)).length
+      const heldConsentProjections = consentProjections.filter(({ subjectKey }) =>
+        heldSubjectKeys.has(subjectKey)).length
       const heldQuoteSends = sendsRetained
-      const heldSmsLogs = subjectHeld
+      const heldSmsLogs = customerSubjectHeld
         ? smsRows.length
         : smsRows.filter(({ id }) => held('sms_log', id)).length
-      const heldNotifications = subjectHeld
+      const heldNotifications = customerSubjectHeld
         ? notificationRows.length
         : notificationRows.filter(({ id }) => held('notification', id)).length
       const retained = Object.freeze({
