@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createQuoteVersion, type QuoteActor } from '@/lib/shop-os/quotes'
+import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
-  customers, jobAttachments, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets, vehicles,
+  customers, jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets, vehicles,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -157,6 +157,75 @@ describe('Shop OS immutable quote version creation', () => {
     expect(jobs.find((job) => job.id === excludedJobId)?.approvalState).toBe('pending_quote')
     expect(jobs.find((job) => job.id === canceledJobId)?.approvalState).toBe('pending_quote')
   })
+
+  it.each(['in_progress', 'done'] as const)(
+    'preserves %s simple-work approval and excludes its totals from a later version',
+    async (workStatus) => {
+      const first = await create()
+      if (!first.ok) throw new Error('missing first version')
+      await db.update(ticketJobs).set({
+        workStatus,
+        approvalState: 'approved',
+        approvedQuoteVersionId: first.version.id,
+      }).where(eq(ticketJobs.id, jobId))
+      await db.insert(quoteEvents).values({
+        id: uuid(60), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+        kind: 'approved', actorProfileId: uuid(1), approvedVia: 'in_person', requestKey: uuid(61),
+      })
+      await db.insert(jobLines).values({
+        id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee',
+        description: 'Alignment check', priceCents: 5_000, taxable: false,
+      })
+
+      const second = await create()
+      expect(second).toMatchObject({ ok: true, changed: true, version: { versionNumber: 2 } })
+      if (!second.ok) throw new Error('missing second version')
+      const [source] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      expect(source).toMatchObject({
+        workStatus,
+        approvalState: 'approved',
+        approvedQuoteVersionId: first.version.id,
+      })
+      const [version] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, second.version.id))
+      const jobs = (version.snapshot as { jobs: Array<{ id: string }>; totals: { subtotalCents: number } }).jobs
+      expect(jobs.map((job) => job.id)).toEqual([excludedJobId])
+      expect((version.snapshot as { totals: { subtotalCents: number } }).totals.subtotalCents).toBe(5_000)
+      if (workStatus === 'in_progress') {
+        const builder = await getQuoteBuilder(db, { actor, ticketId })
+        expect(builder).toMatchObject({
+          ok: true,
+          builder: {
+            jobs: expect.arrayContaining([expect.objectContaining({
+              id: jobId,
+              approval: { state: 'approved', quoteVersionId: first.version.id },
+              decisionEligible: false,
+            })]),
+          },
+        })
+        const [pinned] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, first.version.id))
+        const snapshot = pinned.snapshot as { jobs: Array<Record<string, unknown>> }
+        await db.execute(sql`alter table quote_versions disable trigger all`)
+        await db.update(quoteVersions).set({
+          snapshot: { ...snapshot, jobs: snapshot.jobs.map((job) => job.id === jobId ? { ...job, kind: 'maintenance' } : job) },
+        }).where(eq(quoteVersions.id, first.version.id))
+        await db.execute(sql`alter table quote_versions enable trigger all`)
+        await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+          ok: false, error: 'conflict', retryable: false,
+        })
+        await db.execute(sql`alter table quote_versions disable trigger all`)
+        await db.update(quoteVersions).set({ snapshot: pinned.snapshot }).where(eq(quoteVersions.id, first.version.id))
+        await db.execute(sql`alter table quote_versions enable trigger all`)
+        await db.insert(quoteEvents).values({
+          id: uuid(62), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+          kind: 'declined', actorProfileId: uuid(1), requestKey: uuid(63),
+          createdAt: new Date('2099-01-01T00:00:00.000Z'),
+        })
+        await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+          ok: false, error: 'conflict', retryable: false,
+        })
+      }
+    },
+  )
 
   it('requires explicit human review before an AI story can enter a quote snapshot', async () => {
     const aiMeta = {

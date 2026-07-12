@@ -4,6 +4,9 @@ import {
   uploadArtifact,
   signedUrl,
   downloadArtifact,
+  uploadJobAttachment,
+  removeJobAttachment,
+  downloadJobAttachment,
 } from '@/lib/storage/client'
 
 // All tests inject mocks via DI. The lazy-Proxy real client is never reached,
@@ -140,5 +143,27 @@ describe('downloadArtifact', () => {
     await expect(
       downloadArtifact('k', { download }),
     ).rejects.toThrow(/download failed.*no data/)
+  })
+})
+
+describe('private job attachment storage', () => {
+  it('uses an idempotent content-type-preserving upload', async () => {
+    const upload = vi.fn().mockResolvedValue({ data: { path: 'proof' }, error: null })
+    const bytes = new Uint8Array([1, 2, 3])
+    await uploadJobAttachment({ storageKey: 'shop/jobs/job/proof/id/hash.jpg', bytes, mimeType: 'image/jpeg', upload })
+    expect(upload).toHaveBeenCalledWith('shop/jobs/job/proof/id/hash.jpg', bytes, {
+      contentType: 'image/jpeg', upsert: true,
+    })
+  })
+
+  it('removes only the requested proof object', async () => {
+    const remove = vi.fn().mockResolvedValue({ data: [], error: null })
+    await removeJobAttachment('shop/jobs/job/proof/id/hash.jpg', { remove })
+    expect(remove).toHaveBeenCalledWith(['shop/jobs/job/proof/id/hash.jpg'])
+  })
+
+  it('downloads private proof without creating a signed URL', async () => {
+    const download = vi.fn().mockResolvedValue({ data: new Blob([new Uint8Array([7, 8])]), error: null })
+    await expect(downloadJobAttachment('private-proof', { download })).resolves.toEqual(new Uint8Array([7, 8]))
   })
 })
