@@ -302,8 +302,10 @@ type MessagingRetentionMarkers = {
   index_count: number
   rls_count: number
   policy_count: number
-  trigger_count: number
+  function_marker_count: number
+  trigger_binding_count: number
   direct_client_grant_count: number
+  effective_client_privilege_count: number
   service_crud_count: number
 }
 
@@ -391,9 +393,26 @@ async function messagingRetentionMarkers(
       ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
       ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx')
-    ), expected_triggers(trigger_name) as (values
-      ('messaging_consent_events_append_only'),
-      ('messaging_deletion_requests_guard')
+    ), expected_functions(signature, return_type, security_definer, service_execute) as (values
+      ('reject_messaging_consent_event_mutation()', 'trigger', false, false),
+      ('require_messaging_compaction_completion()', 'trigger', false, false),
+      ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true),
+      ('guard_messaging_deletion_request_mutation()', 'trigger', false, false),
+      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true)
+    ), expected_triggers(
+      table_name, trigger_name, function_signature, trigger_type, is_deferrable
+    ) as (values
+      ('messaging_consent_events', 'messaging_consent_events_append_only',
+        'reject_messaging_consent_event_mutation()', 27, false),
+      ('messaging_consent_events', 'messaging_consent_events_compaction_completion',
+        'require_messaging_compaction_completion()', 9, true),
+      ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
+        'guard_messaging_deletion_request_mutation()', 27, false)
+    ), client_roles(role_name) as (values
+      ('anon'), ('authenticated')
+    ), table_privileges(privilege_name) as (values
+      ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+      ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
     )
     select
       (select count(*)::int from expected_tables e
@@ -417,12 +436,32 @@ async function messagingRetentionMarkers(
        where p.policyname = e.table_name || '_server_only_deny_direct'
          and p.roles::text = '{anon,authenticated}'
          and p.cmd = 'ALL' and p.qual = 'false' and p.with_check = 'false') as policy_count,
+      (select count(*)::int from expected_functions e
+       join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+       where p.prorettype = e.return_type::regtype
+         and p.prosecdef = e.security_definer
+         and p.proconfig = array['search_path=""']
+         and has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
+         and not has_function_privilege('anon', p.oid, 'execute')
+         and not has_function_privilege('authenticated', p.oid, 'execute')) as function_marker_count,
       (select count(*)::int from expected_triggers e
        join pg_trigger t on t.tgname = e.trigger_name
-       where not t.tgisinternal) as trigger_count,
+         and t.tgrelid = to_regclass('public.' || e.table_name)
+         and t.tgfoid = to_regprocedure('public.' || e.function_signature)
+       where not t.tgisinternal
+         and t.tgenabled = 'O'
+         and t.tgtype = e.trigger_type
+         and t.tgdeferrable = e.is_deferrable
+         and t.tginitdeferred = e.is_deferrable) as trigger_binding_count,
       (select count(*)::int from expected_tables e
        join information_schema.role_table_grants g on g.table_name = e.table_name
        where g.table_schema = 'public' and g.grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join client_roles r
+       cross join table_privileges p
+       where has_table_privilege(r.role_name, c.oid, p.privilege_name)) as effective_client_privilege_count,
       (select count(*)::int from expected_tables e
        join information_schema.role_table_grants g on g.table_name = e.table_name
        where g.table_schema = 'public' and g.grantee = 'service_role'
@@ -440,8 +479,10 @@ function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boole
     && markers.index_count === 12
     && markers.rls_count === 5
     && markers.policy_count === 5
-    && markers.trigger_count === 2
+    && markers.function_marker_count === 5
+    && markers.trigger_binding_count === 3
     && markers.direct_client_grant_count === 0
+    && markers.effective_client_privilege_count === 0
     && markers.service_crud_count === 20
 }
 

@@ -180,11 +180,11 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  if current_setting('vyntechs.messaging_consent_compaction', true) = 'on'
+  if current_setting('vyntechs.messaging_consent_compaction_request', true) is not null
     and current_user = pg_catalog.pg_get_userbyid((
       select p.proowner
       from pg_catalog.pg_proc p
-      where p.oid = 'public.compact_messaging_consent_events(uuid,uuid)'::pg_catalog.regprocedure
+      where p.oid = 'public.compact_messaging_consent_events(uuid,uuid,uuid)'::pg_catalog.regprocedure
     ))
     and tg_op = 'DELETE'
   then
@@ -199,7 +199,48 @@ before update or delete on messaging_consent_events
 for each row execute function reject_messaging_consent_event_mutation();
 --> statement-breakpoint
 
-create function compact_messaging_consent_events(p_shop_id uuid, p_subject_key uuid)
+create function require_messaging_compaction_completion()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  compaction_request_id uuid;
+begin
+  begin
+    compaction_request_id := current_setting(
+      'vyntechs.messaging_consent_compaction_request',
+      true
+    )::uuid;
+  exception when others then
+    raise exception 'compaction requires completed tombstone in the same transaction';
+  end;
+
+  if not exists (
+    select 1
+    from public.messaging_deletion_requests r
+    where r.id = compaction_request_id
+      and r.shop_id = old.shop_id
+      and r.subject_key = old.subject_key
+      and r.state = 'completed'
+  ) then
+    raise exception 'compaction requires completed tombstone in the same transaction';
+  end if;
+  return old;
+end;
+$$;
+--> statement-breakpoint
+create constraint trigger messaging_consent_events_compaction_completion
+after delete on messaging_consent_events
+deferrable initially deferred
+for each row execute function require_messaging_compaction_completion();
+--> statement-breakpoint
+
+create function compact_messaging_consent_events(
+  p_shop_id uuid,
+  p_subject_key uuid,
+  p_request_id uuid
+)
 returns integer
 language plpgsql
 security definer
@@ -208,7 +249,46 @@ as $$
 declare
   deleted_count integer;
 begin
-  perform set_config('vyntechs.messaging_consent_compaction', 'on', true);
+  perform 1
+  from public.messaging_deletion_requests
+  where id = p_request_id
+    and shop_id = p_shop_id
+    and subject_key = p_subject_key
+    and state = 'pending'
+  for update;
+  if not found then
+    raise exception 'matching pending messaging deletion request required';
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_retention_holds h
+    where h.shop_id = p_shop_id
+      and h.released_at is null
+      and h.starts_at <= now()
+      and h.expires_at > now()
+      and (
+        h.subject_key = p_subject_key
+        or (
+          h.resource_type = 'messaging_consent_event'
+          and exists (
+            select 1
+            from public.messaging_consent_events e
+            where e.shop_id = p_shop_id
+              and e.subject_key = p_subject_key
+              and e.id = h.resource_id
+          )
+        )
+      )
+  ) then
+    raise exception 'active messaging retention hold blocks compaction';
+  end if;
+
+  perform set_config(
+    'vyntechs.messaging_consent_compaction_request',
+    p_request_id::text,
+    true
+  );
   delete from public.messaging_consent_events
     where shop_id = p_shop_id and subject_key = p_subject_key;
   get diagnostics deleted_count = row_count;
@@ -272,7 +352,43 @@ set search_path = ''
 as $$
 declare
   deleted_count integer;
+  request_subject_key uuid;
 begin
+  select subject_key
+  into request_subject_key
+  from public.messaging_deletion_requests
+  where shop_id = p_shop_id and id = p_request_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  if not exists (
+    select 1
+    from public.messaging_deletion_requests
+    where shop_id = p_shop_id
+      and id = p_request_id
+      and state = 'completed'
+      and retain_until <= now()
+  ) then
+    return false;
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_retention_holds h
+    where h.shop_id = p_shop_id
+      and h.released_at is null
+      and h.starts_at <= now()
+      and h.expires_at > now()
+      and (
+        h.subject_key = request_subject_key
+        or (h.resource_type = 'messaging_deletion_request' and h.resource_id = p_request_id)
+      )
+  ) then
+    raise exception 'active messaging retention hold blocks purge';
+  end if;
+
   perform set_config('vyntechs.messaging_retention_purge', 'on', true);
   delete from public.messaging_deletion_requests
     where shop_id = p_shop_id
@@ -316,8 +432,9 @@ create policy messaging_retention_holds_server_only_deny_direct on messaging_ret
 --> statement-breakpoint
 
 revoke all on function reject_messaging_consent_event_mutation() from public, anon, authenticated, service_role;
+revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
-revoke all on function compact_messaging_consent_events(uuid, uuid) from public, anon, authenticated;
+revoke all on function compact_messaging_consent_events(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
-grant execute on function compact_messaging_consent_events(uuid, uuid) to service_role;
+grant execute on function compact_messaging_consent_events(uuid, uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to service_role;

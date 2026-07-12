@@ -46,6 +46,7 @@ async function insertConsentEvent(
     disclosureHash: string | null
     evidenceKind: string
     requestFingerprint: string
+    subjectKey: string
   }> = {},
 ) {
   const id = crypto.randomUUID()
@@ -59,6 +60,7 @@ async function insertConsentEvent(
     disclosureHash: otherHex,
     evidenceKind: 'customer_checkbox',
     requestFingerprint: hex,
+    subjectKey: crypto.randomUUID(),
     ...overrides,
   }
   await client.query(
@@ -74,7 +76,7 @@ async function insertConsentEvent(
     [
       id,
       tenant.shopId,
-      crypto.randomUUID(),
+      values.subjectKey,
       tenant.customerId,
       values.destinationFingerprint,
       values.fingerprintKeyVersion,
@@ -90,6 +92,64 @@ async function insertConsentEvent(
     ],
   )
   return id
+}
+
+async function insertDeletionRequest(
+  client: PGlite,
+  tenant: Awaited<ReturnType<typeof seedTenant>>,
+  input: {
+    subjectKey: string
+    state?: 'pending' | 'completed'
+    retainUntil?: 'now' | 'future' | 'past'
+  },
+) {
+  const requestId = crypto.randomUUID()
+  const state = input.state ?? 'pending'
+  const retainUntil = input.retainUntil === 'future'
+    ? "now() + interval '5 years'"
+    : input.retainUntil === 'past'
+      ? "now() - interval '1 second'"
+      : 'now()'
+  await client.query(
+    `insert into messaging_deletion_requests (
+      id, request_key, request_fingerprint, shop_id, subject_key, customer_id,
+      destination_fingerprint, fingerprint_key_version, state, reason_code,
+      requesting_actor_profile_id, completed_at, prior_record_counts,
+      proof_summary, retain_until
+    ) values (
+      $1, $2, $3, $4, $5, $6, $7,
+      'key_v1', '${state}', 'customer_request', $8,
+      ${state === 'completed' ? 'now()' : 'null'},
+      ${state === 'completed' ? "'{}'::jsonb" : 'null'},
+      ${state === 'completed' ? "'{}'::jsonb" : 'null'},
+      ${state === 'completed' ? retainUntil : 'null'}
+    )`,
+    [requestId, crypto.randomUUID(), hex, tenant.shopId, input.subjectKey,
+      state === 'pending' ? tenant.customerId : null, hex, tenant.actorId],
+  )
+  return requestId
+}
+
+async function insertHold(
+  client: PGlite,
+  tenant: Awaited<ReturnType<typeof seedTenant>>,
+  target: { subjectKey: string } | { resourceType: string; resourceId: string },
+) {
+  await client.query(
+    `insert into messaging_retention_holds (
+      shop_id, resource_type, resource_id, subject_key, reason_code,
+      authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
+    ) values ($1, $2, $3, $4, 'legal_claim', $5,
+      now() - interval '1 minute', now() + interval '1 day',
+      now() + interval '30 days', now() + interval '5 years')`,
+    [
+      tenant.shopId,
+      'resourceType' in target ? target.resourceType : null,
+      'resourceId' in target ? target.resourceId : null,
+      'subjectKey' in target ? target.subjectKey : null,
+      tenant.actorId,
+    ],
+  )
 }
 
 describe('Shop OS messaging retention source schema', () => {
@@ -365,6 +425,249 @@ describe('Shop OS messaging retention source schema', () => {
         'update messaging_deletion_requests set proof_summary = $1 where id = $2',
         [{ changed: true }, requestId],
       )).rejects.toThrow(/completed messaging deletion tombstones are immutable/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('requires a matching pending request and keeps compaction atomic with tombstone completion', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const subjectKey = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, { subjectKey })
+
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, crypto.randomUUID()],
+      )).rejects.toThrow(/matching pending messaging deletion request required/)
+
+      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, requestId],
+      )).rejects.toThrow(/compaction requires completed tombstone in the same transaction/)
+
+      const afterAutocommit = await fixture.client.query<{ event_count: number; state: string }>(`
+        select
+          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
+          (select state from messaging_deletion_requests where id = $2) as state
+      `, [subjectKey, requestId])
+      expect(afterAutocommit.rows[0]).toEqual({ event_count: 1, state: 'pending' })
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, requestId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null, completed_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now() + interval '5 years'
+        where id = $1`,
+        [requestId],
+      )
+      await fixture.client.exec('rollback')
+
+      const afterRollback = await fixture.client.query<{ event_count: number; state: string }>(`
+        select
+          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
+          (select state from messaging_deletion_requests where id = $2) as state
+      `, [subjectKey, requestId])
+      expect(afterRollback.rows[0]).toEqual({ event_count: 1, state: 'pending' })
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, requestId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null, completed_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now() + interval '5 years'
+        where id = $1`,
+        [requestId],
+      )
+      await fixture.client.exec('commit')
+      const afterCommit = await fixture.client.query<{ event_count: number; state: string }>(`
+        select
+          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
+          (select state from messaging_deletion_requests where id = $2) as state
+      `, [subjectKey, requestId])
+      expect(afterCommit.rows[0]).toEqual({ event_count: 0, state: 'completed' })
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('blocks compaction for active subject and consent-event holds', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const subjectKey = crypto.randomUUID()
+      const eventId = await insertConsentEvent(fixture.client, tenant, { subjectKey })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
+
+      await insertHold(fixture.client, tenant, { subjectKey })
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, requestId],
+      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
+      await fixture.client.exec('delete from messaging_retention_holds')
+
+      await insertHold(fixture.client, tenant, {
+        resourceType: 'messaging_consent_event',
+        resourceId: eventId,
+      })
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, subjectKey, requestId],
+      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('purges completed tombstones only at or after the exact retention boundary', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const futureId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(), state: 'completed', retainUntil: 'future',
+      })
+      const before = await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_deletion_request($1, $2) as purged',
+        [tenant.shopId, futureId],
+      )
+      expect(before.rows[0]?.purged).toBe(false)
+
+      await fixture.client.exec('begin')
+      const boundaryId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(), state: 'completed', retainUntil: 'now',
+      })
+      const atBoundary = await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_deletion_request($1, $2) as purged',
+        [tenant.shopId, boundaryId],
+      )
+      expect(atBoundary.rows[0]?.purged).toBe(true)
+      await fixture.client.exec('commit')
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('blocks tombstone purge for active request and subject holds', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const subjectKey = crypto.randomUUID()
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey, state: 'completed', retainUntil: 'past',
+      })
+      await insertHold(fixture.client, tenant, {
+        resourceType: 'messaging_deletion_request',
+        resourceId: requestId,
+      })
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rejects.toThrow(/active messaging retention hold blocks purge/)
+      await fixture.client.exec('delete from messaging_retention_holds')
+      await insertHold(fixture.client, tenant, { subjectKey })
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rejects.toThrow(/active messaging retention hold blocks purge/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('refuses PUBLIC and inherited effective client table access', async () => {
+    const publicFixture = await createTestDb()
+    try {
+      await publicFixture.client.exec('grant select on messaging_consent_events to public')
+      await expect(ensureMessagingRetentionMigration(publicFixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await publicFixture.close()
+    }
+
+    const inheritedFixture = await createTestDb()
+    try {
+      await inheritedFixture.client.exec(`
+        create role messaging_retention_reader nologin;
+        grant select on messaging_consent_events to messaging_retention_reader;
+        grant messaging_retention_reader to authenticated;
+      `)
+      await expect(ensureMessagingRetentionMigration(inheritedFixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await inheritedFixture.close()
+    }
+  })
+
+  it('refuses unsafe privileged function definitions and execution ACLs', async () => {
+    const unsafeDefinition = await createTestDb()
+    try {
+      await unsafeDefinition.client.exec(
+        'alter function compact_messaging_consent_events(uuid, uuid, uuid) security invoker',
+      )
+      await expect(ensureMessagingRetentionMigration(unsafeDefinition.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+      await unsafeDefinition.client.exec(`
+        alter function compact_messaging_consent_events(uuid, uuid, uuid) security definer;
+        alter function compact_messaging_consent_events(uuid, uuid, uuid) set search_path = public;
+      `)
+      await expect(ensureMessagingRetentionMigration(unsafeDefinition.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await unsafeDefinition.close()
+    }
+
+    const unsafeAcl = await createTestDb()
+    try {
+      await unsafeAcl.client.exec(
+        'grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to public',
+      )
+      await expect(ensureMessagingRetentionMigration(unsafeAcl.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await unsafeAcl.close()
+    }
+
+    const missingFunction = await createTestDb()
+    try {
+      await missingFunction.client.exec(
+        'drop function compact_messaging_consent_events(uuid, uuid, uuid) cascade',
+      )
+      await expect(ensureMessagingRetentionMigration(missingFunction.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await missingFunction.close()
+    }
+  })
+
+  it('refuses a trigger rebound to the wrong guard function', async () => {
+    const fixture = await createTestDb()
+    try {
+      await fixture.client.exec(`
+        drop trigger messaging_consent_events_append_only on messaging_consent_events;
+        create trigger messaging_consent_events_append_only
+          before update or delete on messaging_consent_events
+          for each row execute function guard_messaging_deletion_request_mutation();
+      `)
+      await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
     } finally {
       await fixture.close()
     }
