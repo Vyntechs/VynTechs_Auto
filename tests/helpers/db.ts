@@ -10,6 +10,7 @@ export type TestDb = PgliteDatabase<typeof schema>
 
 export async function createTestDb(): Promise<{
   db: TestDb
+  client: PGlite
   close: () => Promise<void>
 }> {
   // pgvector is required by Phase K's corpus_entries migration. PGlite ships
@@ -49,10 +50,115 @@ export async function createTestDb(): Promise<{
   } else if (adaptiveColumns.rows.length !== 2) {
     throw new Error('partial adaptive diagnostic schema in ephemeral database')
   }
+  await ensureVendorAccountsMigration(client)
   return {
     db,
+    client,
     close: async () => {
       await client.close()
     },
   }
+}
+
+type VendorAccountsMarkers = {
+  table_exists: boolean
+  column_count: number
+  constraint_count: number
+  index_count: number
+  rls_enabled: boolean
+  policy_count: number
+  direct_grant_count: number
+  service_grant_count: number
+  job_line_fk_exists: boolean
+}
+
+async function vendorAccountsMarkers(client: PGlite): Promise<VendorAccountsMarkers> {
+  const result = await client.query<VendorAccountsMarkers>(`
+    select
+      to_regclass('public.vendor_accounts') is not null as table_exists,
+      (select count(*)::int from information_schema.columns
+       where table_schema = 'public' and table_name = 'vendor_accounts'
+         and column_name in (
+           'id', 'shop_id', 'vendor', 'display_name', 'mode', 'non_secret_config',
+           'secret_ref', 'enabled', 'created_at', 'updated_at'
+         )) as column_count,
+      (select count(*)::int from pg_constraint
+       where conrelid = to_regclass('public.vendor_accounts') and conname in (
+         'vendor_accounts_pkey', 'vendor_accounts_shop_fk',
+         'vendor_accounts_vendor_slug_valid', 'vendor_accounts_display_name_valid',
+         'vendor_accounts_mode_valid', 'vendor_accounts_non_secret_config_object',
+         'vendor_accounts_non_secret_config_size', 'vendor_accounts_secret_ref_valid',
+         'vendor_accounts_mode_secret_ref_valid'
+       )) as constraint_count,
+      (select count(*)::int from pg_indexes
+       where schemaname = 'public' and indexname in (
+         'vendor_accounts_shop_id_id_uq', 'vendor_accounts_shop_enabled_vendor_idx'
+       )) as index_count,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.vendor_accounts')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'vendor_accounts'
+         and policyname = 'vendor_accounts_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'vendor_accounts'
+         and grantee in ('anon', 'authenticated')) as direct_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'vendor_accounts'
+         and grantee = 'service_role') as service_grant_count,
+      exists(select 1 from pg_constraint
+       where conname = 'job_lines_shop_vendor_account_fk'
+         and conrelid = 'public.job_lines'::regclass
+         and confrelid = to_regclass('public.vendor_accounts')
+         and pg_get_constraintdef(oid) like
+           'FOREIGN KEY (shop_id, vendor_account_id) REFERENCES vendor_accounts(shop_id, id) ON DELETE RESTRICT%'
+      ) as job_line_fk_exists
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('vendor accounts schema inspection failed')
+  return markers
+}
+
+export async function ensureVendorAccountsMigration(client: PGlite): Promise<void> {
+  const before = await vendorAccountsMarkers(client)
+  const anyMarker = before.table_exists
+    || before.column_count > 0
+    || before.constraint_count > 0
+    || before.index_count > 0
+    || before.rls_enabled
+    || before.policy_count > 0
+    || before.direct_grant_count > 0
+    || before.service_grant_count > 0
+    || before.job_line_fk_exists
+  const isComplete = before.table_exists
+    && before.column_count === 10
+    && before.constraint_count === 9
+    && before.index_count === 2
+    && before.rls_enabled
+    && before.policy_count === 1
+    && before.direct_grant_count === 0
+    && before.service_grant_count === 4
+    && before.job_line_fk_exists
+
+  if (isComplete) return
+  if (anyMarker) throw new Error('partial vendor accounts schema in ephemeral database')
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0030_shop_os_vendor_accounts.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await vendorAccountsMarkers(client)
+  const applied = after.table_exists
+    && after.column_count === 10
+    && after.constraint_count === 9
+    && after.index_count === 2
+    && after.rls_enabled
+    && after.policy_count === 1
+    && after.direct_grant_count === 0
+    && after.service_grant_count === 4
+    && after.job_line_fk_exists
+  if (!applied) throw new Error('partial vendor accounts schema in ephemeral database')
 }
