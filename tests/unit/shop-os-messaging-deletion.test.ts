@@ -108,15 +108,17 @@ describe('suppression-first messaging deletion', () => {
     id: string,
     state: 'queued' | 'claimed' | 'submitting' | 'submitted' | 'delivered',
     keyVersion: 'key_v1' | 'key_v2' = 'key_v2',
+    sendDestination = destination,
+    sendCustomerId = customerId,
   ) => {
     const createdAt = new Date('2026-07-12T10:00:00.000Z')
     const submittingAt = ['submitting', 'submitted', 'delivered'].includes(state)
       ? new Date('2026-07-12T10:01:00.000Z') : null
     const submittedAt = ['submitted', 'delivered'].includes(state)
       ? new Date('2026-07-12T10:02:00.000Z') : null
-    const current = fingerprintDestination(destination, keyVersion, keyRing.keys[keyVersion]!)
+    const current = fingerprintDestination(sendDestination, keyVersion, keyRing.keys[keyVersion]!)
     await db.insert(quoteSends).values({
-      id, shopId, ticketId, quoteVersionId: versionId, customerId,
+      id, shopId, ticketId, quoteVersionId: versionId, customerId: sendCustomerId,
       destinationFingerprint: current, fingerprintKeyVersion: keyVersion, channel: 'sms',
       tokenHash: 'd'.repeat(64), tokenExpiresAt: new Date('2026-07-13T10:00:00.000Z'),
       requestingActorProfileId: owner.profileId, requestKey: uuid(500 + Number(id.slice(-3))),
@@ -179,6 +181,135 @@ describe('suppression-first messaging deletion', () => {
     expect(after.suppressedAt).toEqual(before.suppressedAt)
     expect(after.liftedAt).toBeNull()
     expect(after.retainUntil.getTime()).toBeGreaterThan(before.retainUntil.getTime())
+  })
+
+  it('normalizes every historical destination pair before detaching customer-wide held sends', async () => {
+    const historicalDestination = '+12025550991'
+    const unrelatedDestination = '+12025550992'
+    const consentDestination = '+12025550990'
+    const historicalV1 = fingerprintDestination(
+      historicalDestination, 'key_v1', keyRing.keys.key_v1!,
+    )
+    const historicalV2 = fingerprintDestination(
+      historicalDestination, 'key_v2', keyRing.keys.key_v2!,
+    )
+    const unrelatedV1 = fingerprintDestination(
+      unrelatedDestination, 'key_v1', keyRing.keys.key_v1!,
+    )
+    const consentV1 = fingerprintDestination(consentDestination, 'key_v1', keyRing.keys.key_v1!)
+    const consentV2 = fingerprintDestination(consentDestination, 'key_v2', keyRing.keys.key_v2!)
+    await insertSend(uuid(80), 'submitted', 'key_v1', historicalDestination)
+    await insertSend(uuid(81), 'submitted', 'key_v2', historicalDestination)
+    await insertSend(uuid(82), 'submitted', 'key_v1', unrelatedDestination, duplicateCustomerId)
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(80) })
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(81) })
+    const committedAt = new Date('2026-07-12T09:00:00Z')
+    await db.insert(messagingConsentEvents).values({
+      id: uuid(90), shopId, subjectKey: customerId, customerId,
+      destinationFingerprint: consentV1, fingerprintKeyVersion: 'key_v1',
+      programVersion: 'repair_updates_v1', eventType: 'revoked', committedAt,
+      occurredAt: committedAt, captureMethod: 'staff_request', customerControlled: false,
+      evidenceKind: 'staff_request', actorProfileId: owner.profileId, requestKey: uuid(190),
+      requestFingerprint: '9'.repeat(64), retainUntil: new Date('2031-07-12T09:00:00Z'),
+    })
+    await db.insert(messagingConsentEvents).values({
+      id: uuid(91), shopId, subjectKey: customerId, customerId,
+      destinationFingerprint: consentV2, fingerprintKeyVersion: 'key_v2',
+      programVersion: 'marketing_updates_v1', eventType: 'revoked', committedAt,
+      occurredAt: committedAt, captureMethod: 'staff_request', customerControlled: false,
+      evidenceKind: 'staff_request', actorProfileId: owner.profileId, requestKey: uuid(191),
+      requestFingerprint: '1'.repeat(64), retainUntil: new Date('2031-07-12T09:00:00Z'),
+    })
+    await db.insert(messagingConsentState).values({
+      shopId, subjectKey: customerId, customerId, destinationFingerprint: consentV2,
+      fingerprintKeyVersion: 'key_v2', programVersion: 'marketing_updates_v1', status: 'revoked',
+      sourceEventId: uuid(91), revokedAt: committedAt,
+      retainUntil: new Date('2031-07-12T09:00:00Z'), updatedAt: committedAt,
+    })
+    await db.insert(smsSuppressions).values({
+      shopId: otherShopId, destinationFingerprint: unrelatedV1, fingerprintKeyVersion: 'key_v1',
+      reason: 'number_reassigned', suppressedAt: committedAt,
+      retainUntil: new Date('2035-07-12T09:00:00Z'), updatedAt: committedAt,
+    })
+    const [unrelatedShopBefore] = await db.select().from(smsSuppressions)
+      .where(eq(smsSuppressions.shopId, otherShopId))
+
+    const pending = await request()
+    expect(pending).toMatchObject({ ok: true, state: 'pending' })
+    if (!pending.ok) return
+    const suppressions = await db.select().from(smsSuppressions)
+      .where(eq(smsSuppressions.shopId, shopId))
+    expect(suppressions.map((row) => [
+      row.destinationFingerprint, row.fingerprintKeyVersion,
+    ])).toEqual(expect.arrayContaining([
+      [historicalV1, 'key_v1'],
+      [historicalV2, 'key_v2'],
+      [consentV1, 'key_v1'],
+      [consentV2, 'key_v2'],
+    ]))
+    expect(suppressions.some(({ destinationFingerprint }) =>
+      destinationFingerprint === unrelatedV1)).toBe(false)
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, counts: { quoteSendsRetained: 2 } })
+    expect(await db.select().from(quoteSends)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: uuid(80), customerId: null, tokenHash: null }),
+      expect.objectContaining({ id: uuid(81), customerId: null, tokenHash: null }),
+      expect.objectContaining({ id: uuid(82), customerId: duplicateCustomerId }),
+    ]))
+    expect((await db.select().from(smsSuppressions)
+      .where(eq(smsSuppressions.shopId, otherShopId)))[0]).toEqual(unrelatedShopBefore)
+  })
+
+  it('extends the complete historical pair set through the latest distinct pending request deadline', async () => {
+    const firstDestination = '+12025550993'
+    const secondDestination = '+12025550994'
+    await db.update(customers).set({ phone: firstDestination }).where(eq(customers.id, customerId))
+    await insertSend(uuid(83), 'submitted', 'key_v1', firstDestination)
+    await insertSend(uuid(84), 'submitted', 'key_v2', firstDestination)
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(83) })
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(84) })
+    const first = await request({ destination: firstDestination, requestKey: uuid(183) })
+    expect(first).toMatchObject({ ok: true, state: 'pending' })
+
+    await db.update(customers).set({ phone: secondDestination }).where(eq(customers.id, customerId))
+    await insertSend(uuid(85), 'submitted', 'key_v1', secondDestination)
+    await insertSend(uuid(86), 'submitted', 'key_v2', secondDestination)
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(85) })
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(86) })
+    const second = await request({ destination: secondDestination, requestKey: uuid(184) })
+    expect(second).toMatchObject({ ok: true, state: 'pending' })
+    if (!first.ok || !second.ok) return
+
+    const requests = await db.select().from(messagingDeletionRequests)
+    const latestRequestedAt = Math.max(...requests.map(({ requestedAt }) => requestedAt.getTime()))
+    const suppressions = await db.select().from(smsSuppressions)
+    expect(suppressions).toHaveLength(4)
+    expect(suppressions.every(({ retainUntil }) => {
+      const minimum = new Date(latestRequestedAt)
+      minimum.setUTCFullYear(minimum.getUTCFullYear() + 5)
+      return retainUntil.getTime() >= minimum.getTime()
+    })).toBe(true)
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: first.requestId, now }))
+      .toMatchObject({ ok: true, counts: { quoteSendsRetained: 4 } })
+  })
+
+  it('fails phase one without acceptance when a historical pair is malformed', async () => {
+    await db.execute(sql`
+      alter table quote_sends drop constraint quote_sends_destination_fingerprint_valid
+    `)
+    const createdAt = new Date('2026-07-12T10:00:00.000Z')
+    await db.insert(quoteSends).values({
+      id: uuid(87), shopId, ticketId, quoteVersionId: versionId, customerId,
+      destinationFingerprint: 'malformed', fingerprintKeyVersion: 'key_v1', channel: 'sms',
+      tokenHash: 'd'.repeat(64), tokenExpiresAt: new Date('2026-07-13T10:00:00.000Z'),
+      requestingActorProfileId: owner.profileId, requestKey: uuid(587),
+      requestFingerprint: 'e'.repeat(64), state: 'queued', createdAt, updatedAt: createdAt,
+    })
+
+    expect(await request()).toEqual({ ok: false, error: 'retryable' })
+    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(0)
+    expect(await db.select().from(smsSuppressions)).toHaveLength(0)
   })
 
   it('uses actor-bound semantic idempotency and rejects changed or spoofed retries', async () => {
@@ -555,7 +686,15 @@ describe('suppression-first messaging deletion', () => {
       evidenceKind: 'staff_request', actorProfileId: owner.profileId, requestKey: uuid(66),
       requestFingerprint: '5'.repeat(64), retainUntil: new Date('2031-07-12T11:00:00Z'),
     })
+    await db.insert(messagingConsentState).values({
+      shopId, subjectKey: customerId, customerId,
+      destinationFingerprint: fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!),
+      fingerprintKeyVersion: 'key_v2', programVersion: 'repair_updates_v1', status: 'revoked',
+      sourceEventId: uuid(65), revokedAt: createdAt,
+      retainUntil: new Date('2031-07-12T11:00:00Z'), updatedAt: createdAt,
+    })
     await activeHold({ subjectKey: customerId })
+    await activeHold({ subjectKey: customerId, reasonCode: 'duplicate_subject_authority' })
     await activeHold({ resourceType: 'quote_send', resourceId: uuid(999) })
     const expiredStart = new Date(Date.now() - 3 * 86_400_000)
     await activeHold({
@@ -572,11 +711,52 @@ describe('suppression-first messaging deletion', () => {
     const [tombstone] = await db.select().from(messagingDeletionRequests)
     expect(tombstone.proofSummary).toMatchObject({
       retained: {
-        heldConsentEvents: 1, heldQuoteSends: 1, heldSmsLogs: 1,
-        heldNotifications: 1, total: 4,
+        heldConsentEvents: 1, heldConsentProjections: 1, heldQuoteSends: 1,
+        heldSmsLogs: 1, heldNotifications: 1, total: 5,
       },
     })
+    expect(tombstone.priorRecordCounts).toMatchObject({ consentEvents: 1, consentProjections: 1 })
     expect((await db.select().from(quoteSends))[0]).toMatchObject({ customerId: null, tokenHash: null })
+  })
+
+  it('counts the distinct consent projection retained by duplicate event holds', async () => {
+    const subjectKey = uuid(88)
+    const eventId = uuid(89)
+    const committedAt = new Date('2026-07-12T11:00:00Z')
+    const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
+    await db.insert(messagingConsentEvents).values({
+      id: eventId, shopId, subjectKey, customerId, destinationFingerprint: current,
+      fingerprintKeyVersion: 'key_v2', programVersion: 'repair_updates_v1', eventType: 'consented',
+      committedAt, occurredAt: committedAt, captureMethod: 'signed_form', customerControlled: true,
+      evidenceKind: 'signed_form_reference', evidenceRef: 'projection-hold',
+      actorProfileId: owner.profileId, requestKey: uuid(188), requestFingerprint: '8'.repeat(64),
+      retainUntil: new Date('2031-07-12T11:00:00Z'),
+    })
+    await db.insert(messagingConsentState).values({
+      shopId, subjectKey, customerId, destinationFingerprint: current,
+      fingerprintKeyVersion: 'key_v2', programVersion: 'repair_updates_v1', status: 'consented',
+      sourceEventId: eventId, consentedAt: committedAt,
+      retainUntil: new Date('2031-07-12T11:00:00Z'), updatedAt: committedAt,
+    })
+    const pending = await request({ requestKey: uuid(189) })
+    if (!pending.ok) throw new Error('request failed')
+    await activeHold({ resourceType: 'messaging_consent_event', resourceId: eventId })
+    await activeHold({
+      resourceType: 'messaging_consent_event', resourceId: eventId,
+      reasonCode: 'duplicate_event_authority',
+    })
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true })
+    const [tombstone] = await db.select().from(messagingDeletionRequests)
+    expect(tombstone.priorRecordCounts).toMatchObject({ consentEvents: 1, consentProjections: 1 })
+    expect(tombstone.proofSummary).toMatchObject({
+      retained: {
+        heldConsentEvents: 1,
+        heldConsentProjections: 1,
+        total: 2,
+      },
+    })
   })
 
   it('rolls phase two back on an injected final-write failure while phase one remains committed', async () => {

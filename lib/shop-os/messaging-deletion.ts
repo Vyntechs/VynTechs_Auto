@@ -30,6 +30,7 @@ type Snapshot = {
 
 const uuid = z.uuid()
 const fingerprint = z.string().regex(/^[0-9a-f]{64}$/)
+const fingerprintKeyVersion = z.string().regex(/^[a-z][a-z0-9_]{0,62}[a-z0-9]$/)
 const reasons = new Set(['customer_request', 'shop_request', 'account_deletion'])
 const cancellable = new Set(['queued', 'claimed'])
 const inFlight = new Set(['submitting', 'submitted'])
@@ -155,6 +156,79 @@ type RequestRow = {
   requestingActorProfileId: string
   counts: Record<string, number> | null
   proof: Record<string, unknown> | null
+}
+
+type MessagingPair = { destinationFingerprint: string; fingerprintKeyVersion: string }
+
+function exactMessagingPairs(rows: ReadonlyArray<MessagingPair>): ReadonlyArray<MessagingPair> {
+  const pairs = new Map<string, MessagingPair>()
+  for (const row of rows) {
+    if (!fingerprint.safeParse(row.destinationFingerprint).success
+      || !fingerprintKeyVersion.safeParse(row.fingerprintKeyVersion).success) {
+      throw new Error('invalid_historical_messaging_pair')
+    }
+    const key = `${row.destinationFingerprint}:${row.fingerprintKeyVersion}`
+    pairs.set(key, Object.freeze({ ...row }))
+  }
+  return Object.freeze([...pairs.values()].sort((left, right) =>
+    left.destinationFingerprint.localeCompare(right.destinationFingerprint)
+      || left.fingerprintKeyVersion.localeCompare(right.fingerprintKeyVersion)))
+}
+
+function sameMessagingPairs(
+  left: ReadonlyArray<MessagingPair>,
+  right: ReadonlyArray<MessagingPair>,
+): boolean {
+  return left.length === right.length && left.every((pair, index) =>
+    pair.destinationFingerprint === right[index]?.destinationFingerprint
+      && pair.fingerprintKeyVersion === right[index]?.fingerprintKeyVersion)
+}
+
+async function lockCustomerMessagingPairs(input: {
+  tx: AppDb
+  shopId: string
+  customerId: string
+  current: ReadonlyArray<{ fingerprint: string; keyVersion: string }>
+}): Promise<ReadonlyArray<MessagingPair>> {
+  const sends = unwrapRows<MessagingPair>(await input.tx.execute(sql`
+    select destination_fingerprint as "destinationFingerprint",
+      fingerprint_key_version as "fingerprintKeyVersion"
+    from quote_sends
+    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+    order by id for update
+  `))
+  const projections = unwrapRows<MessagingPair>(await input.tx.execute(sql`
+    select destination_fingerprint as "destinationFingerprint",
+      fingerprint_key_version as "fingerprintKeyVersion"
+    from messaging_consent_state
+    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+    order by id for update
+  `))
+  const events = unwrapRows<MessagingPair>(await input.tx.execute(sql`
+    select destination_fingerprint as "destinationFingerprint",
+      fingerprint_key_version as "fingerprintKeyVersion"
+    from messaging_consent_events
+    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+    order by id for update
+  `))
+  const requests = unwrapRows<MessagingPair>(await input.tx.execute(sql`
+    select destination_fingerprint as "destinationFingerprint",
+      fingerprint_key_version as "fingerprintKeyVersion"
+    from messaging_deletion_requests
+    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+      and state = 'pending'
+    order by id for update
+  `))
+  return exactMessagingPairs([
+    ...input.current.map(({ fingerprint: destinationFingerprint, keyVersion }) => ({
+      destinationFingerprint,
+      fingerprintKeyVersion: keyVersion,
+    })),
+    ...sends,
+    ...projections,
+    ...events,
+    ...requests,
+  ])
 }
 
 function semanticCustomerBinding(input: {
@@ -299,6 +373,13 @@ export async function requestMessagingDeletion(rawInput: {
       `))[0]
       if (existing) return retry(existing, input)
 
+      const historicalPairs = await lockCustomerMessagingPairs({
+        tx: tx as AppDb,
+        shopId: input.actor.shopId,
+        customerId: input.customerId!,
+        current: input.fingerprints!,
+      })
+
       const subject = unwrapRows<{ subjectKey: string }>(await tx.execute(sql`
         select subject_key as "subjectKey" from messaging_consent_state
         where shop_id = ${input.actor.shopId}::uuid and customer_id = ${input.customerId}::uuid
@@ -322,13 +403,14 @@ export async function requestMessagingDeletion(rawInput: {
       `))[0]?.at
       if (!transition) throw new Error('transition_time_unavailable')
 
-      for (const item of input.fingerprints!) {
+      for (const item of historicalPairs) {
         await tx.execute(sql`
           insert into sms_suppressions (
             shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
             reason, suppressed_at, lifted_at, retain_until, updated_at
           ) values (
-            ${input.actor.shopId}::uuid, ${item.fingerprint}, ${item.keyVersion}, null,
+            ${input.actor.shopId}::uuid, ${item.destinationFingerprint},
+            ${item.fingerprintKeyVersion}, null,
             'verified_deletion', ${transition}::timestamptz, null,
             ${transition}::timestamptz + interval '5 years', ${transition}::timestamptz
           )
@@ -352,22 +434,31 @@ export async function requestMessagingDeletion(rawInput: {
           fingerprint_key_version as "fingerprintKeyVersion", reason,
           lifted_at as "liftedAt", retain_until as "retainUntil", updated_at as "updatedAt"
         from sms_suppressions where shop_id = ${input.actor.shopId}::uuid
-          and (${sql.join(input.fingerprints!.map((item) => sql`
-            (destination_fingerprint = ${item.fingerprint}
-              and fingerprint_key_version = ${item.keyVersion})
+          and (${sql.join(historicalPairs.map((item) => sql`
+            (destination_fingerprint = ${item.destinationFingerprint}
+              and fingerprint_key_version = ${item.fingerprintKeyVersion})
           `), sql` or `)})
-        order by fingerprint_key_version for update
+        order by destination_fingerprint, fingerprint_key_version for update
       `))
       const transitionAt = transition instanceof Date
         ? new Date(transition.getTime())
         : new Date(transition)
       const barrierAt = addUtcCalendarYearsClamped(transitionAt, 5)
-      if (normalized.length !== input.fingerprints!.length || normalized.some((row) =>
+      if (normalized.length !== historicalPairs.length || normalized.some((row) =>
         !['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(row.reason)
         || row.liftedAt !== null
         || timestampMilliseconds(row.retainUntil) < barrierAt.getTime()
         || timestampMilliseconds(row.updatedAt) !== transitionAt.getTime()
       )) throw new Error('suppression_normalization_failed')
+      const verifiedPairs = await lockCustomerMessagingPairs({
+        tx: tx as AppDb,
+        shopId: input.actor.shopId,
+        customerId: input.customerId!,
+        current: input.fingerprints!,
+      })
+      if (!sameMessagingPairs(historicalPairs, verifiedPairs)) {
+        throw new Error('historical_messaging_pairs_changed')
+      }
       const current = input.fingerprints![0]!
       const inserted = unwrapRows<{ id: string }>(await tx.execute(sql`
         insert into messaging_deletion_requests (
@@ -644,6 +735,10 @@ export async function completeMessagingDeletion(rawInput: {
         || holds.some((hold) => hold.resourceType === 'messaging_consent_event')
         ? consentEvents.length
         : 0
+      const heldConsentProjections = subjectHeld
+        || holds.some((hold) => hold.resourceType === 'messaging_consent_event')
+        ? consentProjections.length
+        : 0
       const heldQuoteSends = sendsRetained
       const heldSmsLogs = subjectHeld
         ? smsRows.length
@@ -653,10 +748,12 @@ export async function completeMessagingDeletion(rawInput: {
         : notificationRows.filter(({ id }) => held('notification', id)).length
       const retained = Object.freeze({
         heldConsentEvents,
+        heldConsentProjections,
         heldQuoteSends,
         heldSmsLogs,
         heldNotifications,
-        total: heldConsentEvents + heldQuoteSends + heldSmsLogs + heldNotifications,
+        total: heldConsentEvents + heldConsentProjections + heldQuoteSends
+          + heldSmsLogs + heldNotifications,
       })
       const proof = Object.freeze({
         version: 2,
