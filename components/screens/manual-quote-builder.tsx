@@ -700,7 +700,7 @@ export function ManualQuoteBuilder({
                               </div>
                             </div>
                             <LineFacts line={line} />
-                            <div className={styles.lineControls}>
+                            {line.mutable ? <div className={styles.lineControls}>
                               <button
                                 type="button"
                                 className={styles.lineAction}
@@ -727,7 +727,7 @@ export function ManualQuoteBuilder({
                               >
                                 Remove {line.description}
                               </button>
-                            </div>
+                            </div> : <p className={styles.lineKind}>Sourced · read-only</p>}
                           </li>
                         ))}
                       </ul>

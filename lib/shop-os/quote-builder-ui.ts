@@ -40,6 +40,8 @@ const builderLineSchema = z.strictObject({
   fitment: nullableText(500),
   laborHours: z.string().max(32).regex(/^\d+(?:\.\d{1,2})?$/).nullable(),
   laborRateCents: safeMoneySchema.nullable(),
+  source: z.enum(['manual', 'vendor_offer']),
+  mutable: z.boolean(),
 }).superRefine((line, context) => {
   try {
     const quantity = parseScaledDecimal(line.quantity, 3)
@@ -70,6 +72,12 @@ const builderLineSchema = z.strictObject({
     || line.fitment !== null || line.laborHours !== null || line.laborRateCents !== null
     || line.quantity !== '1'
   )) context.addIssue({ code: 'custom', message: 'fee fields are invalid' })
+  if ((line.source === 'manual') !== line.mutable) {
+    context.addIssue({ code: 'custom', message: 'line source and mutability are inconsistent' })
+  }
+  if (line.source === 'vendor_offer' && (line.kind !== 'part' || line.coreChargeCents !== null)) {
+    context.addIssue({ code: 'custom', message: 'sourced line projection is invalid' })
+  }
 })
 
 const quoteBuilderSchema = z.strictObject({

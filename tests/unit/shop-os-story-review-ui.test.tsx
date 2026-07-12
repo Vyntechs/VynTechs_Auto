@@ -94,7 +94,7 @@ describe('Shop OS diagnostic story UI', () => {
 
   it('blocks preparation for pending or unavailable diagnostic truth without inventing an action', () => {
     const pending = builder('ordinary_locked_tree', { content: story, source: 'ai', reviewStatus: 'pending', revision: 1 })
-    pending.jobs[0].lines = [{ id: '00000000-0000-4000-8000-000000000701', kind: 'fee', description: 'Diagnosis', sort: 0, quantity: '1', priceCents: 10000, taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null }]
+    pending.jobs[0].lines = [{ id: '00000000-0000-4000-8000-000000000701', kind: 'fee', description: 'Diagnosis', sort: 0, quantity: '1', priceCents: 10000, taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null, source: 'manual', mutable: true }]
     const { rerender } = render(<ManualQuoteBuilder ticket={ticket} builder={pending} />)
     expect(screen.getByText('Review every diagnostic story.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
@@ -106,7 +106,7 @@ describe('Shop OS diagnostic story UI', () => {
 
   it('does not block a priced repair for an unpriced diagnostic story', () => {
     const mixed = builder('unavailable')
-    mixed.jobs.unshift({ id: '00000000-0000-4000-8000-000000000202', title: 'Replace battery', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: false, approval: { state: 'pending_quote', quoteVersionId: null }, lines: [{ id: '00000000-0000-4000-8000-000000000702', kind: 'fee', description: 'Battery replacement', sort: 0, quantity: '1', priceCents: 20000, taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null }] })
+    mixed.jobs.unshift({ id: '00000000-0000-4000-8000-000000000202', title: 'Replace battery', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: false, approval: { state: 'pending_quote', quoteVersionId: null }, lines: [{ id: '00000000-0000-4000-8000-000000000702', kind: 'fee', description: 'Battery replacement', sort: 0, quantity: '1', priceCents: 20000, taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null, source: 'manual', mutable: true }] })
     render(<ManualQuoteBuilder ticket={ticket} builder={mixed} />)
     expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
     expect(screen.queryByText('Review every diagnostic story.')).toBeNull()

@@ -30,7 +30,7 @@ describe('quote preparation readiness', () => {
         id: '00000000-0000-4000-8000-000000000301', kind: 'labor', description: 'Explicit labor',
         sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
         partNumber: null, brand: null, coreChargeCents: null, fitment: null,
-        laborHours: '1', laborRateCents: null,
+        laborHours: '1', laborRateCents: null, source: 'manual', mutable: true,
       }],
     }],
     capabilities: { canRecordCustomerApproval: false },
@@ -203,6 +203,7 @@ describe('quote builder refresh projection validation', () => {
         id: '00000000-0000-4000-8000-000000000301', kind: 'fee', description: 'Fee', sort: 0, quantity: '1',
         priceCents: 500, taxable: true, partNumber: null, brand: null,
         coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+        source: 'manual', mutable: true,
       }],
     }],
     capabilities: { canRecordCustomerApproval: false },
@@ -216,6 +217,31 @@ describe('quote builder refresh projection validation', () => {
       jobs: [{ ...valid.jobs[0], kind: 'diagnostic', storyMode: 'unavailable' }],
     }
     expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
+  })
+
+  it('accepts only immutable customer-safe sourced parts', () => {
+    const sourced = {
+      ...valid.jobs[0].lines[0],
+      kind: 'part',
+      description: 'Sourced pads',
+      priceCents: 12_000,
+      source: 'vendor_offer',
+      mutable: false,
+    }
+    const projection = { ...valid, jobs: [{ ...valid.jobs[0], lines: [sourced] }] }
+    expect(parseQuoteBuilderProjection(projection)).toEqual(projection)
+
+    for (const line of [
+      { ...sourced, mutable: true },
+      { ...sourced, source: 'manual', mutable: false },
+      { ...sourced, kind: 'labor', laborHours: '1' },
+      { ...sourced, kind: 'fee' },
+      { ...sourced, coreChargeCents: 500 },
+    ]) {
+      expect(parseQuoteBuilderProjection({
+        ...valid, jobs: [{ ...valid.jobs[0], lines: [line] }],
+      })).toBeNull()
+    }
   })
 
   it('accepts exact row-17 quantity/hour caps and rejects cap plus one', () => {
