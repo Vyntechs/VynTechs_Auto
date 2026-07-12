@@ -22,3 +22,8 @@ Reason: Diagnostic instructions must be independently revalidatable before reduc
 Trigger: Production code queries columns from an unapplied source migration.
 Rule: Block production promotion until required migrations are applied or backward-compatible code is proven.
 Reason: Successful authentication can still fail immediately when middleware reads missing schema.
+
+### landing-scope-is-shop-os
+Trigger: Marketing, positioning, or landing work anchored on the live page or the 2026-05 doctrine.
+Rule: Position the product as the Shop OS (counter to closeout) with the honest diagnostic engine as its signature, never diagnostics alone.
+Reason: Live page and doctrine predate Shop OS; Brandon corrected a diagnostics-only prototype mid-build 2026-07-11.

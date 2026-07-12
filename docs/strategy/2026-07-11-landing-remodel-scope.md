@@ -5,11 +5,13 @@
 
 ## 1. What this page is
 
-The front door of a trust-first diagnostic tool, aimed at one reader: **the Owner-Tech** — owns the shop, still wrenches, signs the checks, and has been burned by every tool that guessed. Secondary reader over his shoulder: **the Gate** (master tech), who will try to catch it lying. The page's *one job*: **turn a skeptical owner into someone who brings us one stubborn vehicle.** Not "sign up" — *test us*. The subscription is the consequence of that test going well.
+**Positioning correction (Brandon, 2026-07-11): the page sells the Shop OS, not the diagnostic tool alone.** The product is the whole ticket — counter check-in → assignment → diagnosis → evidence-backed customer story → quote approval → closeout — and the refuse-to-guess engine is its *signature and moat*, the thing that makes this shop OS unlike every filing-cabinet shop system. The page must claim only what has shipped (rows 1–22: intake, tickets/jobs/assignment, quote builder, customer story with human review, phone/in-person approval, closeout). No SMS/public-approval claims until rows 25–37 ship.
+
+One reader: **the Owner-Tech** — owns the shop, still wrenches, signs the checks; he's bought shop software that filed tickets and helped nobody, and AI tools that guessed. Secondary reader over his shoulder: **the Gate** (master tech), who will try to catch it lying. The page's *one job*: **turn a skeptical owner into someone who runs one day's tickets through it.** Not "sign up" — *test us*. The subscription is the consequence of that test going well.
 
 ## 2. The promise (counter voice)
 
-"It knows how your vehicle's system works, shows you where it looked, and refuses to guess when it can't back the call." Every section of the page is a different form of proving that one sentence.
+"One system runs the whole job — and it shows its work: to your tech in the bay, and to your customer at the counter." Shop software that files tickets is a cabinet; this is an OS with an honest engine in it, and a quote your customer can actually believe. Every section of the page proves a piece of that sentence.
 
 ## 3. Psychology architecture (all devices inspectable — see §8)
 
@@ -40,14 +42,14 @@ Within the first viewport + one scroll, an Owner-Tech should think:
 
 ## 6. Page structure (prototype hypothesis — Figma will test it)
 
-1. **Hero** — recognition line + promise + one honest proof element; CTA pair: primary "Bring it one stubborn vehicle" (subscribe), secondary = the §3.5 inspection path.
-2. **The refusal** (signature section) — the below-the-line moment, shown.
-3. **Where it looked** — the real-case evidence artifact, inspectable.
-4. **The math** — comeback arithmetic vs $100, flat.
-5. **How it works** — three steps, counter voice, no diagram-soup.
+1. **Hero** — recognition (shop software files tickets; AI tools guess) + promise ("the shop OS that shows its work") + the customer-story tag as the proof element; CTA pair: primary "Run your counter on it", secondary "See a ticket, end to end".
+2. **The refusal** (signature section) — the below-the-line moment, shown; framed as *the engine under your quotes*.
+3. **The quote they can believe** — the customer story + its evidence ledger (what we found / how we know / what it costs), inspectable.
+4. **The math** — owner arithmetic: the comeback you eat, the quote they doubt, vs $100 flat.
+5. **How the day runs** — check in → hand it to the right tech → diagnose without guessing → quote it with the story; counter voice, no diagram-soup.
 6. **The price** — one card, the why, the exit terms.
-7. **Straight answers** — keep the honest FAQ (it's a trust asset today), tightened to the plain-language standard.
-8. **Close** — "Stop guessing. Bring it one vehicle." Founder-signed.
+7. **Straight answers** — keep the honest FAQ (it's a trust asset today), tightened to the plain-language standard; add "do I have to move my whole shop onto it?"
+8. **Close** — "Stop guessing. Run one day's tickets through it." Founder-signed.
 
 Kept from today: founder Why story (compressed, moved near the close as the signature), the honest FAQ, the no-logos/no-inflated-benchmarks stance, the three enforcement-backed stats (only where machinery demonstrably enforces them). Killed: "Live · Bay 03" fake-live labeling, phantom "Vyntechs Bay" plan name, CTA label drift, undefined "confidence line" jargon (the concept stays — it gets *shown*, then named).
 

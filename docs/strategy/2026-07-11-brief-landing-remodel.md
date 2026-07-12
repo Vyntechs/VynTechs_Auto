@@ -15,7 +15,7 @@ Total makeover, 100% remodel. Figma must be used; visual-first approval. Psychol
 
 1. **Scope:** `2026-07-11-landing-remodel-scope.md` — the page's one job, audience, promise, psychology architecture, required first impressions, design feeling, anti-derivative standard, non-goals, launch bar. Built on the customer-interaction doctrine's personas and trust principles + the plain-language standard's counter voice.
 2. **Current-state annex:** `2026-07-11-annex-landing-current-state.md` — what exists today (copy, structure, screenshots), prior GTM exploration worth honoring or retiring.
-3. **Figma prototype** — desktop + mobile of the full page, real copy (no lorem), placeholder proof clearly marked PLACEHOLDER. Link in the PR.
+3. **Figma prototype** — desktop + mobile of the full page, real copy (no lorem), placeholder proof clearly marked PLACEHOLDER. **Delivered v1: https://www.figma.com/design/wsfRi93M41ts5ONQvkGrJZ** — "Landing / Desktop 1440" + "Landing / Mobile 390", positioned per Brandon's mid-session correction as the Shop OS (counter → closeout) with the refuse-to-guess engine as its signature, claims held to shipped rows 1–22.
 4. After approval: implementation plan as its own reviewed slice (not this lane).
 
 ## Hard gates (in order)
