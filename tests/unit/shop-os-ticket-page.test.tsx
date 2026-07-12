@@ -46,8 +46,8 @@ vi.mock('@/lib/tickets', async (importOriginal) => {
 })
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote }: { ticket: TicketDetail; canBuildQuote: boolean }) => (
-    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, currentProfileId }: { ticket: TicketDetail; canBuildQuote: boolean; currentProfileId: string }) => (
+    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; actor {currentProfileId}</div>
   ),
 }))
 
@@ -151,7 +151,7 @@ describe('TicketPage', () => {
   it('renders the ticket detail screen on success', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText('Ticket screen 101; quote true')).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote true; actor ${profile.id}`)).toBeInTheDocument()
   })
 
   it('keeps the ticket readable but omits quote entry for an unsupported role', async () => {
@@ -162,7 +162,7 @@ describe('TicketPage', () => {
 
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText('Ticket screen 101; quote false')).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote false; actor ${profile.id}`)).toBeInTheDocument()
   })
 
   it.each<TicketDomainError>([

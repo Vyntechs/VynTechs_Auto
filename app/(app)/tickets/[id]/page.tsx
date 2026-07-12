@@ -33,6 +33,7 @@ export default async function TicketPage({
     <TicketDetailScreen
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
+      currentProfileId={ctx.profile.id}
     />
   )
 }

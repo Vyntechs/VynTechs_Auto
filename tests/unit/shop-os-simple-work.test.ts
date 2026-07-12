@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import {
   customers,
@@ -8,6 +8,7 @@ import {
   profiles,
   quoteEvents,
   quoteVersions,
+  sessions,
   shops,
   ticketJobs,
   tickets,
@@ -199,9 +200,62 @@ describe('Shop OS approved simple work', () => {
         kind: 'repair',
         workStatus: 'open',
         authorization: 'approved',
+        hasCompletionProof: false,
         attachments: [],
       },
     })
     expect(JSON.stringify(result)).not.toMatch(/shopId|storageKey|quoteVersion|actorProfile|customerId|vehicleId/)
+  })
+
+  it('projects completion-proof eligibility from authoritative Row-23 provenance only', async () => {
+    const proofId = uuid(80)
+    await db.insert(jobAttachments).values({
+      id: proofId, shopId, jobId,
+      storageKey: `${shopId}/jobs/${jobId}/proof/${proofId}/${'a'.repeat(64)}.jpg`,
+      kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, uploadedByProfileId: advisorId,
+    })
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
+      ok: true, workspace: { hasCompletionProof: false },
+    })
+    await db.update(jobAttachments).set({ uploadedByProfileId: techId, storageKey: 'forged/photo.jpg' })
+      .where(eq(jobAttachments.id, proofId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
+      ok: true, workspace: { hasCompletionProof: false },
+    })
+    await db.delete(jobAttachments).where(eq(jobAttachments.id, proofId))
+    await db.update(ticketJobs).set({ workStatus: 'in_progress' }).where(eq(ticketJobs.id, jobId))
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
+    await createJobAttachment(db, {
+      actor, ticketId, jobId, requestKey: uuid(81), kind: 'photo',
+      file: { bytes: jpeg, mimeType: 'image/jpeg', size: jpeg.byteLength },
+    }, { upload: async () => undefined, remove: async () => undefined })
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
+      ok: true, workspace: { hasCompletionProof: true },
+    })
+  })
+
+  it('uses real ticket/session truth while preserving completed closed history', async () => {
+    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, jobId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
+      ok: true, workspace: { workStatus: 'done' },
+    })
+    await db.update(ticketJobs).set({ workStatus: 'open' }).where(eq(ticketJobs.id, jobId))
+    await db.update(tickets).set({ status: 'canceled' }).where(eq(tickets.id, ticketId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+
+    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
+    const [session] = await db.insert(sessions).values({
+      id: uuid(90), shopId, techId,
+      intake: { vehicleYear: 2020, vehicleMake: 'Jeep', vehicleModel: 'Wrangler', customerComplaint: 'Test' },
+      treeState: { nodes: [], currentNodeId: 'root', message: 'Test' },
+    }).returning()
+    await db.execute(sql`alter table ticket_jobs drop constraint ticket_jobs_session_only_for_diagnostic`)
+    await db.update(ticketJobs).set({ sessionId: session.id }).where(eq(ticketJobs.id, jobId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
   })
 })

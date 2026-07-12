@@ -426,17 +426,25 @@ function JobRow({
             setButton={setDiagnosticButton}
           />
         ) : (
-          <button
-            type="button"
-            className={`${styles.control} ${styles.approval}`}
-            style={{ minHeight: 44 }}
-            disabled
-          >
-            Quote and approval required
-          </button>
+          <SimpleWorkAction job={job} />
         )}
       </div>
     </article>
+  )
+}
+
+function SimpleWorkAction({ job }: { job: TodayTicketJob }) {
+  const identityComplete = job.customerName !== null && job.vehicle !== null
+  const workAvailable = identityComplete && job.workStatus !== 'blocked' && job.sessionId === null
+  return (
+    <Link
+      href={workAvailable
+        ? `/tickets/${job.ticketId}/jobs/${job.id}/work`
+        : `/tickets/${job.ticketId}`}
+      className={`${styles.control} ${workAvailable ? styles.openDiagnosis : styles.secondary}`}
+    >
+      {workAvailable ? 'Open work' : job.workStatus === 'blocked' ? 'Review blocked work' : 'Review work order'}
+    </Link>
   )
 }
 
