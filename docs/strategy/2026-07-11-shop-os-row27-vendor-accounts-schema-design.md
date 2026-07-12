@@ -8,7 +8,7 @@ Add the source-only tenant boundary for parts-vendor accounts without storing a 
 
 - Production has no `vendor_accounts` table and the two current `job_lines` contain zero non-null `vendor_account_id` values.
 - `job_lines.vendor_account_id` already exists without a foreign key so quote work could ship before vendor identity.
-- Current Shop OS tables are server-only: RLS enabled, direct `anon`/`authenticated` CRUD revoked, `service_role` CRUD granted, and explicit deny policies retained as defense in depth.
+- Current Shop OS tables are server-only: RLS enabled, all table privileges revoked from `anon`/`authenticated`, `service_role` CRUD granted, and explicit deny policies retained as defense in depth.
 - Production has Supabase Vault `0.3.1`, but current Supabase documentation still labels Vault public alpha. Row 27 therefore stores an opaque reference only and does not depend on the extension.
 - Drizzle metadata ends at `0028` even though source/live migration `0029_adaptive_diagnostic_state` exists. Historical snapshots are malformed to the current generator, so Row 27 must not regenerate or absorb unrelated adaptive SQL.
 

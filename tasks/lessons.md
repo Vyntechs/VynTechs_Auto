@@ -27,3 +27,8 @@ Reason: Successful authentication can still fail immediately when middleware rea
 Trigger: A driver checkpoint named the branch head inside a commit that changed that head.
 Rule: Record stable source commits or state descriptions, never the current branch-head hash in that branch.
 Reason: Self-referential hashes become false immediately and create avoidable correction commits.
+
+### revoke-complete-server-only-acl
+Trigger: CRUD-only revokes left server-only tables exposed to TRUNCATE, REFERENCES, and TRIGGER privileges.
+Rule: Revoke all client table privileges and verify direct, PUBLIC, inherited, and intended service access.
+Reason: RLS does not protect every table privilege, and partial ACL checks can falsely certify isolation.
