@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and Phase 4 rows 27–28 are complete; Row 30 reconciliation/design is the next safe internal lane.** Approved production migrations through `0032_shop_os_server_only_acl` are live and verified. External access, spend, messaging retention/legal policy, production database changes, and later feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and Phase 4 rows 27–28 are complete; Row 30's written design is owner-approved and its execution plan is ready in draft PR #154.** Approved production migrations through `0032_shop_os_server_only_acl` are live and verified. External access, spend, messaging retention/legal policy, production database changes, and later feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -690,7 +690,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3, 5–25, and 27–28 are complete. Row 30 reconciliation/design is the next safe internal lane. Row 26, Row 31 retention/legal policy, later production feature enablement, and external account/spend work remain owner gates.
+3. Rows 1–3, 5–25, and 27–28 are complete. Row 30's written design is owner-approved and its execution plan is ready in draft PR #154; runtime implementation has not started. Row 26, Row 31 retention/legal policy, later production feature enablement, and external account/spend work remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -757,7 +757,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 27 | 4 | Schema/security: vendor accounts and safe secret references | S | 5,16 | complete | PR #147; production migration `shop_os_vendor_accounts` live and verified with ACL correction PR #152/migration `shop_os_server_only_acl`; [design](./2026-07-11-shop-os-row27-vendor-accounts-schema-design.md) + [execution packet](./2026-07-11-shop-os-row27-vendor-accounts-schema-plan.md) |
 | 28 | 4 | Adapter interface + complete manual sourcing mode | LP | 27 | complete | PR #153; 260 files/2,606 tests; TypeScript/build; three independent final approvals; manual-only and provider-free |
 | 29 | 4 | Approved PartsTech/O'Reilly transport + failure tests | LP | 4,28 | blocked | External access required |
-| 30 | 4 | Locked-diagnosis seed + manual/live offer/line-fill UI | A | 21,28 | pending | Live transport controls wait on 29 |
+| 30 | 4 | Locked-diagnosis seed + manual/live offer/line-fill UI | A | 21,28 | in_progress | Draft PR #154; owner-approved [written design](./2026-07-12-shop-os-row30-frictionless-sourcing-design.md) + [execution plan](../superpowers/plans/2026-07-12-shop-os-row30-frictionless-sourcing.md); runtime not started; manual capture does not wait on Row 29, while live transport controls do |
 | 31 | 5 | Schema: consent, sends, SMS log, notification dedupe | S | 16,25 | owner_gate | Owner/legal retention and deletion policy required before implementation |
 | 32 | 5 | Public approval token/response handlers + retry/security tests | LM | 17,21,31 | pending | — |
 | 33 | 5 | Public-route middleware exemption + rate-limit policy | P | 32 | pending | Shared middleware owned here |

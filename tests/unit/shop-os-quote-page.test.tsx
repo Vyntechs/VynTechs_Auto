@@ -1,18 +1,20 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TicketDetail } from '@/lib/tickets'
+import type { SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 
-const { notFoundError, redirectError, notFoundMock, redirectMock, manualBuilderMock } = vi.hoisted(() => ({
+const { notFoundError, redirectError, notFoundMock, redirectMock, manualBuilderMock, founderMock } = vi.hoisted(() => ({
   notFoundError: new Error('NEXT_NOT_FOUND'),
   redirectError: new Error('NEXT_REDIRECT'),
   notFoundMock: vi.fn(() => { throw new Error('NEXT_NOT_FOUND') }),
   redirectMock: vi.fn(() => { throw new Error('NEXT_REDIRECT') }),
   manualBuilderMock: vi.fn(),
+  founderMock: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({ notFound: notFoundMock, redirect: redirectMock }))
-vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
+vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn(), isFounder: founderMock }))
 vi.mock('@/lib/auth-access', () => ({ checkAccess: vi.fn() }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
@@ -28,11 +30,27 @@ vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/shop-os/canned-jobs')>()),
   listCannedJobs: vi.fn(),
 }))
+vi.mock('@/lib/shop-os/parts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/shop-os/parts')>()),
+  listVendorAccounts: vi.fn(),
+}))
 vi.mock('@/components/screens/manual-quote-builder', () => ({
-  ManualQuoteBuilder: ({ ticket, builder, cannedJobs, cannedCatalogAvailable }: {
-    ticket: TicketDetail; builder: QuoteBuilder; cannedJobs: unknown[]; cannedCatalogAvailable: boolean
+  ManualQuoteBuilder: ({
+    ticket, builder, cannedJobs, cannedCatalogAvailable,
+    vendorAccounts, vendorCatalogAvailable, canCreateVendorAccount,
+  }: {
+    ticket: TicketDetail
+    builder: QuoteBuilder
+    cannedJobs: unknown[]
+    cannedCatalogAvailable: boolean
+    vendorAccounts: SafeManualVendorAccount[]
+    vendorCatalogAvailable: boolean
+    canCreateVendorAccount: boolean
   }) => (
-    manualBuilderMock({ ticket, builder, cannedJobs, cannedCatalogAvailable })
+    manualBuilderMock({
+      ticket, builder, cannedJobs, cannedCatalogAvailable,
+      vendorAccounts, vendorCatalogAvailable, canCreateVendorAccount,
+    })
       ?? <div>Quote screen {ticket.ticketNumber}; {builder.ticket.id}</div>
   ),
 }))
@@ -42,6 +60,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { getQuoteBuilder } from '@/lib/shop-os/quotes'
 import { listCannedJobs } from '@/lib/shop-os/canned-jobs'
+import { listVendorAccounts } from '@/lib/shop-os/parts'
 import { getTicketDetail } from '@/lib/tickets'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -50,6 +69,7 @@ const checkAccessMock = vi.mocked(checkAccess)
 const getTicketMock = vi.mocked(getTicketDetail)
 const getBuilderMock = vi.mocked(getQuoteBuilder)
 const listCannedMock = vi.mocked(listCannedJobs)
+const listVendorAccountsMock = vi.mocked(listVendorAccounts)
 
 const ticketId = '00000000-0000-0000-0000-000000000101'
 const profile = {
@@ -63,6 +83,13 @@ const profile = {
   deactivatedAt: null, createdAt: new Date('2026-07-10T12:00:00Z'),
 }
 const context = { profile, user: { id: profile.userId, email: 'avery@shop.test' } }
+const safeAccount = {
+  id: '00000000-0000-4000-8000-000000000501',
+  displayName: 'Main Street Parts',
+  mode: 'manual',
+  enabled: true,
+  updatedAt: '2026-07-11T12:00:00.000Z',
+} satisfies SafeManualVendorAccount
 const ticket = {
   id: ticketId, ticketNumber: 101, source: 'counter', status: 'open',
   concern: 'Brake vibration', whenStarted: null, howOften: null,
@@ -89,6 +116,8 @@ describe('QuotePage', () => {
     getTicketMock.mockResolvedValue({ ok: true, ticket })
     getBuilderMock.mockResolvedValue({ ok: true, builder })
     listCannedMock.mockResolvedValue({ ok: true, cannedJobs: [], taxRateBps: 825 })
+    listVendorAccountsMock.mockResolvedValue({ ok: true, vendorAccounts: [safeAccount] })
+    founderMock.mockReturnValue(false)
   })
 
   it('redirects unauthenticated visitors before access or domain reads', async () => {
@@ -135,11 +164,56 @@ describe('QuotePage', () => {
       actor: { profileId: profile.id }, ticketId,
     })
     expect(listCannedMock).toHaveBeenCalledWith({}, { actor: { profileId: profile.id } })
+    expect(listVendorAccountsMock).toHaveBeenCalledWith({}, {
+      actor: { profileId: profile.id }, scope: 'enabled',
+    })
     expect(screen.getByText(`Quote screen 101; ${ticketId}`)).toBeInTheDocument()
     expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
       cannedJobs: [], cannedCatalogAvailable: true,
+      vendorAccounts: [safeAccount], vendorCatalogAvailable: true,
+      canCreateVendorAccount: false,
     })
   })
+
+  it.each([
+    ['owner', { ...profile, role: 'owner' as const }, false],
+    ['founder override', profile, true],
+  ])('allows %s to create vendor accounts without broadening the enabled read', async (_, actorProfile, founder) => {
+    requireUserMock.mockResolvedValue({
+      profile: actorProfile,
+      user: { id: actorProfile.userId, email: 'founder@shop.test' },
+    })
+    founderMock.mockReturnValue(founder)
+    render(await QuotePage(props()))
+    expect(listVendorAccountsMock).toHaveBeenCalledWith({}, {
+      actor: founder
+        ? { profileId: profile.id, founderOverride: true }
+        : { profileId: profile.id },
+      scope: 'enabled',
+    })
+    expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+      vendorAccounts: [safeAccount], vendorCatalogAvailable: true,
+      canCreateVendorAccount: true,
+    })
+  })
+
+  it.each(['conflict', 'rejection'] as const)(
+    'keeps ordinary manual quoting available after vendor account %s',
+    async (failure) => {
+      if (failure === 'conflict') {
+        listVendorAccountsMock.mockResolvedValueOnce({
+          ok: false, error: 'conflict', retryable: false,
+        })
+      } else {
+        listVendorAccountsMock.mockRejectedValueOnce(new Error('vendor catalog unavailable'))
+      }
+      render(await QuotePage(props()))
+      expect(screen.getByText(`Quote screen 101; ${ticketId}`)).toBeInTheDocument()
+      expect(manualBuilderMock.mock.calls[0][0]).toMatchObject({
+        vendorAccounts: [], vendorCatalogAvailable: false,
+      })
+    },
+  )
 
   it('keeps manual quoting available when the canned catalog is corrupt or tax-stale', async () => {
     listCannedMock.mockResolvedValueOnce({ ok: false, error: 'conflict', retryable: false })
@@ -192,6 +266,38 @@ describe('QuotePage', () => {
       vehicle: { year: 2019, make: 'Ford', model: 'F-150' },
     })
     expect(JSON.stringify(clientTicket)).not.toMatch(/PRIVATE_PHONE|PRIVATE_EMAIL|PRIVATE_ENGINE|PRIVATE_VIN|PRIVATE_PLATE|customer-1|vehicle-1/)
+  })
+
+  it('projects only safe sourcing and quote fields across the client boundary', async () => {
+    getTicketMock.mockResolvedValue({
+      ok: true,
+      ticket: {
+        ...ticket,
+        customer: {
+          id: 'customer-1', name: 'Marisol Vega', phone: 'PRIVATE_PHONE', email: 'PRIVATE_EMAIL',
+        },
+        vehicle: {
+          id: 'vehicle-1', year: 2019, make: 'Ford', model: 'F-150', engine: 'PRIVATE_ENGINE',
+          vin: 'PRIVATE_VIN', mileage: 88420, plate: 'PRIVATE_PLATE',
+        },
+      },
+    })
+    listVendorAccountsMock.mockResolvedValue({
+      ok: true,
+      vendorAccounts: [{
+        ...safeAccount,
+        secretRef: 'PRIVATE_SECRET_REF',
+        nonSecretConfig: { accountNumber: 'PRIVATE_ACCOUNT_NUMBER' },
+        unitCostCents: 1234,
+        vendorSnapshot: { warehouse: 'PRIVATE_VENDOR_SNAPSHOT' },
+      } as unknown as typeof safeAccount],
+    })
+    render(await QuotePage(props()))
+    const serialized = JSON.stringify(manualBuilderMock.mock.calls[0][0])
+    expect(serialized).toContain('Main Street Parts')
+    expect(serialized).not.toMatch(
+      /secretRef|nonSecretConfig|unitCostCents|vendorSnapshot|PRIVATE_SECRET_REF|PRIVATE_ACCOUNT_NUMBER|PRIVATE_VENDOR_SNAPSHOT|PRIVATE_PHONE|PRIVATE_EMAIL|PRIVATE_ENGINE|PRIVATE_VIN|PRIVATE_PLATE/,
+    )
   })
 
   it('renders a retry surface for initial quote lock contention', async () => {

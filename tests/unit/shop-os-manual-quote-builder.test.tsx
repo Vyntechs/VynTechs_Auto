@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
+import type { SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
 import { parseQuoteBuilderProjection } from '@/lib/shop-os/quote-builder-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import type { TicketDetail } from '@/lib/tickets'
@@ -32,6 +34,17 @@ const CANNED_ID = '00000000-0000-4000-8000-000000000501'
 const CANNED_JOB_ID = '00000000-0000-4000-8000-000000000502'
 const CANNED_PART_LINE_ID = '00000000-0000-4000-8000-000000000503'
 const CANNED_LABOR_LINE_ID = '00000000-0000-4000-8000-000000000504'
+const SOURCED_LINE_ID = '00000000-0000-4000-8000-000000000601'
+const ACCOUNT_ID = '00000000-0000-4000-8000-000000000701'
+const SECOND_JOB_ID = '00000000-0000-4000-8000-000000000202'
+
+const vendorAccount: SafeManualVendorAccount = {
+  id: ACCOUNT_ID,
+  displayName: 'Metro Parts',
+  mode: 'manual',
+  enabled: true,
+  updatedAt: '2026-07-12T05:00:00.000Z',
+}
 
 const cannedJob = {
   id: CANNED_ID,
@@ -138,6 +151,47 @@ function builderWithAppliedCannedJob(overrides: Partial<Builder> = {}): Builder 
     ],
     ...overrides,
   })
+}
+
+function reviewedDiagnosis(recommendation: string): Builder['jobs'][number] {
+  return {
+    id: '00000000-0000-4000-8000-000000000203',
+    title: 'Brake diagnosis',
+    kind: 'diagnostic',
+    workStatus: 'open',
+    story: {
+      content: {
+        whatYouToldUs: 'The brakes vibrate.',
+        whatWeFound: 'The front pads are worn.',
+        howWeKnow: [],
+        whatItMeansIfWaived: 'Stopping distance may increase.',
+        whatWeRecommend: recommendation,
+      },
+      source: 'ai', reviewStatus: 'reviewed', revision: 1,
+    },
+    storyMode: 'ordinary_locked_tree',
+    decisionEligible: false,
+    approval: { state: 'pending_quote', quoteVersionId: null },
+    lines: [],
+  }
+}
+
+function capturedOfferResponse(lineId = SOURCED_LINE_ID) {
+  return {
+    changed: true,
+    line: {
+      id: lineId, jobId: JOB_ID, kind: 'part', description: 'Sourced pad set',
+      quantity: '1', priceCents: 14_000, taxable: true,
+      partNumber: null, brand: null, fitment: null,
+      source: 'vendor_offer', mutable: false,
+    },
+    sourcing: {
+      vendorAccountId: ACCOUNT_ID, displayName: 'Metro Parts', externalOfferId: null,
+      unitCostCents: 8_000, coreChargeCents: 0, availability: 'unknown',
+      fulfillment: { method: 'unknown', locationLabel: null },
+      fetchedAt: '2026-07-12T05:01:00.000Z',
+    },
+  }
 }
 
 describe('ManualQuoteBuilder', () => {
@@ -270,6 +324,11 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/\.header a:focus-visible[\s\S]*outline:/)
     expect(css).toMatch(/\.totalList\s*>\s*div\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/)
     expect(css).toMatch(/\.workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(320px,\s*360px\)/)
+    expect(css).toMatch(/@media\s*\(min-width:\s*801px\)\s*and\s*\(max-width:\s*1290px\)[\s\S]*\.screenWithSourcing\s+\.workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
+    expect(css).toMatch(/@media\s*\(min-width:\s*801px\)\s*and\s*\(max-width:\s*1290px\)[\s\S]*\.screenWithSourcing\s+\.tape\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/\.jobHeader\s*>\s*div\s*\{[^}]*min-width:\s*0/)
+    expect(css).toMatch(/\.jobHeader h3\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/)
+    expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/)
     expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor:focus-within\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
@@ -444,6 +503,483 @@ describe('ManualQuoteBuilder canned application', () => {
   })
 })
 
+describe('ManualQuoteBuilder sourcing integration', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => SOURCED_LINE_ID) })
+    router.push.mockReset()
+    router.replace.mockReset()
+  })
+
+  it('offers one sourcing surface only for open or blocked repair and maintenance jobs', () => {
+    const jobs: Builder['jobs'] = [
+      { ...builder().jobs[0], id: JOB_ID, title: 'Open repair', kind: 'repair', workStatus: 'open', lines: [] },
+      { ...builder().jobs[0], id: SECOND_JOB_ID, title: 'Blocked maintenance', kind: 'maintenance', workStatus: 'blocked', lines: [] },
+      { ...builder().jobs[0], id: '00000000-0000-4000-8000-000000000204', title: 'Active repair', kind: 'repair', workStatus: 'in_progress', lines: [] },
+      { ...reviewedDiagnosis('Replace the pad set.'), id: '00000000-0000-4000-8000-000000000205' },
+    ]
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder({ jobs, activeVersion: null })} />)
+
+    expect(screen.getAllByRole('button', { name: 'Source part' })).toHaveLength(2)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Source part' })[0])
+    expect(screen.getByRole('dialog', { name: 'Source part for Open repair' })).toBeInTheDocument()
+    expect(screen.getAllByRole('dialog', { name: /Source part for/ })).toHaveLength(1)
+    expect(screen.getByTestId('quote-background')).toHaveAttribute('inert')
+    const otherSource = screen.getAllByRole('button', { name: 'Source part' })[1]
+    expect(otherSource).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Dirty sourced draft' } })
+    fireEvent.click(otherSource)
+    expect(screen.getByRole('dialog', { name: 'Source part for Open repair' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Part description')).toHaveValue('Dirty sourced draft')
+  })
+
+  it('passes safe quote context, supplier permission, and only one unambiguous diagnosis seed', () => {
+    const state = builder({
+      jobs: [builder().jobs[0], reviewedDiagnosis('Use ceramic front pads.')],
+      activeVersion: null,
+    })
+    const { unmount } = render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={state}
+      vendorAccounts={[vendorAccount]}
+      vendorCatalogAvailable
+      canCreateVendorAccount={false}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+
+    expect(screen.getByText('2019 Ford F-150 · Repair order 000042')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Metro Parts' })).toBeChecked()
+    expect(screen.getByText('Use ceramic front pads.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close part sourcing' }))
+
+    unmount()
+    const secondDiagnosis = {
+      ...reviewedDiagnosis('A second recommendation.'),
+      id: '00000000-0000-4000-8000-000000000206',
+    }
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={{ ...state, jobs: [...state.jobs, secondDiagnosis] }}
+      vendorAccounts={[]}
+      vendorCatalogAvailable
+      canCreateVendorAccount
+    />)
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    expect(screen.getByRole('button', { name: 'Add supplier' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Starting point from locked diagnosis')).toBeNull()
+  })
+
+  it('refreshes strict server truth after capture, updates totals, closes, and focuses the sourced line', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+    })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    let resolveCapture!: (result: Response) => void
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCapture = resolve }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder
+      ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]}
+      vendorCatalogAvailable canCreateVendorAccount={false}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80.00' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add 1 Sourced pad set · Customer price $140.00' }))
+
+    expect(await screen.findByRole('button', { name: 'Adding sourced part…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add part' })).toBeDisabled()
+    resolveCapture(response(201, capturedOfferResponse()))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Source part for/ })).toBeNull())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/tickets/${TICKET_ID}/quote`, expect.objectContaining({ method: 'GET' }))
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
+    expect(document.activeElement).toHaveTextContent('Sourced pad set')
+  })
+
+  it.each([
+    ['description', { description: 'Different pad set' }],
+    ['quantity', { quantity: '2' }],
+    ['priceCents', { priceCents: 14_001 }],
+    ['taxable', { taxable: false }],
+    ['partNumber', { partNumber: 'PAD-OTHER' }],
+    ['brand', { brand: 'Other brand' }],
+    ['fitment', { fitment: 'Rear axle' }],
+  ] satisfies Array<[string, Partial<BuilderLine>]>)('rejects a same-id sourced refresh with mismatched %s', async (_field, mismatch) => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const mismatched = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+      ...mismatch,
+    })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [mismatched] }], activeVersion: null })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByText('Part saved. Refresh the quote to see current totals.')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+  })
+
+  it('keeps saved state after a hostile refresh and retries GET without reposting capture', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+    })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: { hostile: true } }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).queryByText('$140.00')).toBeNull()
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Source part for/ })).getByRole('button', { name: 'Refresh quote' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Source part for/ })).toBeNull())
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
+  it('recovers retryable capture conflict through the parent GET-only quote refresh', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockResolvedValueOnce(response(200, { builder: initial }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByText('This quote changed elsewhere. Refresh and retry.')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Source part for/ })).getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET'])
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Part description')).toHaveValue('Sourced pad set')
+    expect(screen.getByRole('button', { name: /Add 1 Sourced pad set/ })).toBeEnabled()
+  })
+
+  it('rejects capture refresh truth while a stale active quote version exists', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const sourced = line({ id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000, source: 'vendor_offer', mutable: false, coreChargeCents: null })
+    const staleVersion = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: activeVersion() })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: staleVersion }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).queryByText('$140.00')).toBeNull()
+  })
+
+  it('rejects same-ticket stale capture truth until the selected job contains the immutable sourced part', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const mutableManual = builder({ jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ id: SOURCED_LINE_ID, description: 'Stale manual part' })],
+    }], activeVersion: null })
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+    })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+      .mockResolvedValueOnce(response(200, { builder: mutableManual }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).queryByText('$140.00')).toBeNull()
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Source part for/ })).getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+    expect(screen.queryByText('Stale manual part')).toBeNull()
+    fireEvent.click(within(screen.getByRole('dialog', { name: /Source part for/ })).getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Source part for/ })).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET', 'GET', 'GET'])
+    expect(document.activeElement).toHaveTextContent('Sourced pad set')
+  })
+
+  it('removes sourced rows only through the dedicated contract and returns focus to Source part', async () => {
+    const sourced = line({ id: SOURCED_LINE_ID, description: 'Sourced pad set', source: 'vendor_offer', mutable: false, coreChargeCents: null })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    expect(screen.getByText('Sourced · read-only')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Sourced pad set' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove Sourced pad set' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    const removalDialog = screen.getByRole('alertdialog', { name: 'Remove sourced part?' })
+    const removalTarget = within(removalDialog).getByText('Sourced pad set')
+    expect(removalDialog).toHaveAttribute('aria-describedby', removalTarget.id)
+    expect(screen.getByRole('button', { name: 'Keep sourced part' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    await screen.findByText('No quote lines yet.')
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/parts/manual-offers/${SOURCED_LINE_ID}`)
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/tickets/${TICKET_ID}/quote`)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
+  it('fails sourced removal closed, restores focus, preserves the row, and leaks no sourcing fields', async () => {
+    const sourced = line({ id: SOURCED_LINE_ID, description: 'Sourced pad set', source: 'vendor_offer', mutable: false, coreChargeCents: null })
+    const state = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    Object.assign(state.jobs[0].lines[0], { unitCostCents: 8_000, vendorAccountId: ACCOUNT_ID, vendorSnapshot: 'SECRET_SNAPSHOT' })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(200, { changed: true, secret: 'NO' }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={state} />)
+    const remove = screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' })
+    fireEvent.click(remove)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    await waitFor(() => expect(document.activeElement).toBe(remove))
+    expect(document.body.textContent).not.toMatch(/SECRET_SNAPSHOT|Metro Parts|unit cost|vendor account|NO/)
+  })
+
+  it.each([
+    ['same-ticket stale truth', response(200, { builder: builder({
+      jobs: [{ ...builder().jobs[0], lines: [line({
+        id: SOURCED_LINE_ID, description: 'Sourced pad set', source: 'vendor_offer',
+        mutable: false, coreChargeCents: null,
+      })] }],
+      activeVersion: null,
+    }) })],
+    ['malformed truth', response(200, { builder: { hostile: true } })],
+    ['failed GET', response(503, { error: 'unavailable' })],
+  ])('rejects %s after sourced deletion and disables the exact remove invoker', async (_label, refreshResponse) => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(refreshResponse)
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+    const remove = screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' })
+
+    fireEvent.click(remove)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
+    expect(remove).toBeDisabled()
+    const refreshQuote = screen.getByRole('button', { name: 'Refresh quote' })
+    await waitFor(() => expect(document.activeElement).toBe(refreshQuote))
+  })
+
+  it('preserves sourced-removal recovery after a transport failure and retries GET only', async () => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const absent = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(response(200, { builder: absent }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText('Connection interrupted. Retry with the same details.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
+  it('disables only the pending sourced remove action and recovers with GET only', async () => {
+    const user = userEvent.setup()
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const otherSourced = line({
+      id: PINNED_LINE_ID, description: 'Sourced rotor set', priceCents: 20_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced, otherSourced] }], activeVersion: null })
+    const absent = builder({ jobs: [{ ...builder().jobs[0], lines: [otherSourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(503, { error: 'unavailable' }))
+      .mockResolvedValueOnce(response(200, { builder: absent }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    const remove = screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' })
+    await user.click(remove)
+    await user.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(remove).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove sourced part: Sourced rotor set' })).toBeEnabled()
+    remove.focus()
+    expect(document.activeElement).not.toBe(remove)
+    await user.click(remove)
+    await user.keyboard('{Enter} ')
+    expect(screen.queryByRole('alertdialog', { name: 'Remove sourced part?' })).toBeNull()
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET'])
+
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.getByRole('button', { name: 'Remove sourced part: Sourced rotor set' })).toBeEnabled()
+  })
+
+  it('keeps sourced-removal recovery strict when the visible refresh still receives stale truth', async () => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.getByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
+  })
+
+  it('recovers a sourced removal with GET only and focuses Source part after absent truth', async () => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const absent = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+      .mockResolvedValueOnce(response(200, { builder: absent }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.queryByText('Review the visible fields, then refresh and retry.')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
+  it.each(['initial removal refresh', 'pending removal recovery'])('rejects absent sourced truth with a stale active version during %s', async (phase) => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const staleLine = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const absentWithVersion = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: activeVersion() })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: phase === 'initial removal refresh' ? absentWithVersion : staleLine }))
+      .mockResolvedValueOnce(response(200, { builder: absentWithVersion }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    if (phase === 'pending removal recovery') {
+      fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    }
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
+  })
+
+  it('restores Source part focus after clean close and dirty discard', async () => {
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+    const source = screen.getByRole('button', { name: 'Source part' })
+
+    fireEvent.click(source)
+    fireEvent.click(screen.getByRole('button', { name: 'Close part sourcing' }))
+    await waitFor(() => expect(document.activeElement).toBe(source))
+
+    fireEvent.click(source)
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Dirty draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close part sourcing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+    await waitFor(() => expect(document.activeElement).toBe(source))
+  })
+
+  it('reserves desktop panel width without changing the mobile workspace contract', () => {
+    const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'), 'utf8')
+    expect(css).toMatch(/\.screenWithSourcing\s*\{[^}]*width:\s*min\(calc\(100% - min\(440px, 42vw\)\), 1240px\)[^}]*margin-left:\s*0/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.screenWithSourcing\s*\{[^}]*width:\s*min\(100%, 1240px\)[^}]*margin:\s*0 auto/)
+  })
+})
+
 describe('ManualQuoteBuilder line mutations', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -603,7 +1139,9 @@ describe('ManualQuoteBuilder line mutations', () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Edited pads' }))
-    expect(screen.getByText('Remove this quote line?')).toBeInTheDocument()
+    const removalDialog = screen.getByRole('alertdialog', { name: 'Remove this quote line?' })
+    const removalTarget = within(removalDialog).getByText('Edited pads')
+    expect(removalDialog).toHaveAttribute('aria-describedby', removalTarget.id)
     fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
     await screen.findByText('No quote lines yet.')
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'DELETE' })
