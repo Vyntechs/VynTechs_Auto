@@ -466,6 +466,28 @@ describe('Shop OS quote foundation source schema', () => {
 })
 
 describe('Shop OS quote foundation migration', () => {
+  it('pins both quote trigger functions to an empty search path', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    const functions = await client.query<{
+      proname: string
+      proconfig: string[] | null
+    }>(`
+      select p.proname, p.proconfig
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.proname in ('guard_quote_versions_immutable', 'reject_quote_events_mutation')
+      order by p.proname
+    `)
+
+    expect(functions.rows).toEqual([
+      { proname: 'guard_quote_versions_immutable', proconfig: ['search_path=""'] },
+      { proname: 'reject_quote_events_mutation', proconfig: ['search_path=""'] },
+    ])
+  })
+
   it('creates the additive foundation through the complete source chain with unconfigured shop rates', async () => {
     const client = await createPre0028Db()
     closeCallbacks.push(() => client.close())

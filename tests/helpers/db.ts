@@ -51,6 +51,7 @@ export async function createTestDb(): Promise<{
     throw new Error('partial adaptive diagnostic schema in ephemeral database')
   }
   await ensureVendorAccountsMigration(client)
+  await ensureQuoteTriggerSearchPathMigration(client)
   return {
     db,
     client,
@@ -161,4 +162,38 @@ export async function ensureVendorAccountsMigration(client: PGlite): Promise<voi
     && after.service_grant_count === 4
     && after.job_line_fk_exists
   if (!applied) throw new Error('partial vendor accounts schema in ephemeral database')
+}
+
+async function quoteTriggerSearchPaths(client: PGlite) {
+  const result = await client.query<{
+    proname: string
+    proconfig: string[] | null
+  }>(`
+    select p.proname, p.proconfig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('guard_quote_versions_immutable', 'reject_quote_events_mutation')
+    order by p.proname
+  `)
+  return result.rows
+}
+
+export async function ensureQuoteTriggerSearchPathMigration(client: PGlite): Promise<void> {
+  const before = await quoteTriggerSearchPaths(client)
+  if (before.length !== 2) {
+    throw new Error('quote trigger functions missing in ephemeral database')
+  }
+  if (before.every(({ proconfig }) => proconfig?.includes('search_path=""'))) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0031_shop_os_quote_trigger_search_path.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await quoteTriggerSearchPaths(client)
+  if (after.length !== 2 || after.some(({ proconfig }) => !proconfig?.includes('search_path=""'))) {
+    throw new Error(`quote trigger search path hardening failed in ephemeral database: ${JSON.stringify(after)}`)
+  }
 }
