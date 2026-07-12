@@ -238,7 +238,9 @@ export function ManualPartSourcing({
       const body = await readJson(response)
       if (delegateAccessFailure(response.status, body)) return
       const parsed = parseCreatedVendorAccountResponse(response.status, body)
-      if (!parsed) {
+      if (!parsed
+        || parsed.vendorAccount.id !== accountClientKey.toLowerCase()
+        || parsed.vendorAccount.displayName !== displayName) {
         setStatus('The saved response could not be verified. Refresh before continuing.')
         return
       }
@@ -289,8 +291,24 @@ export function ManualPartSourcing({
         setStatus('Supplier reports this part unavailable. No quote line was added.')
         return
       }
-      if (parsed.line.jobId !== job.id.toLowerCase()
-        || parsed.sourcing.vendorAccountId !== payload.vendorAccountId) {
+      const selectedAccount = localAccounts.find((account) => account.id === payload.vendorAccountId)
+      if (!selectedAccount
+        || parsed.line.jobId !== job.id.toLowerCase()
+        || parsed.line.description !== payload.description
+        || parsed.line.quantity !== payload.quantity
+        || parsed.line.priceCents !== payload.priceCents
+        || parsed.line.taxable !== payload.taxable
+        || parsed.line.partNumber !== payload.partNumber
+        || parsed.line.brand !== payload.brand
+        || parsed.line.fitment !== payload.fitment
+        || parsed.sourcing.vendorAccountId !== payload.vendorAccountId
+        || parsed.sourcing.displayName !== selectedAccount.displayName
+        || parsed.sourcing.externalOfferId !== payload.externalOfferId
+        || parsed.sourcing.unitCostCents !== payload.unitCostCents
+        || parsed.sourcing.coreChargeCents !== payload.coreChargeCents
+        || parsed.sourcing.availability !== payload.availability
+        || parsed.sourcing.fulfillment.method !== payload.fulfillment.method
+        || parsed.sourcing.fulfillment.locationLabel !== payload.fulfillment.locationLabel) {
         setStatus('The saved response could not be verified. Refresh before continuing.')
         return
       }
@@ -350,7 +368,6 @@ export function ManualPartSourcing({
       role="dialog"
       aria-modal="true"
       aria-labelledby="manual-part-sourcing-title"
-      data-client-key={clientKey}
     >
       <div className={styles.content} data-testid="manual-part-dialog-content" inert={confirmingClose ? true : undefined}>
         <header className={styles.header}>

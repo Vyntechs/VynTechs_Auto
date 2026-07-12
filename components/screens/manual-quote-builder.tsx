@@ -273,11 +273,11 @@ export function ManualQuoteBuilder({
       if (expectedSourcedLine) {
         const expectedJob = refreshed.jobs.find((job) => job.id === expectedSourcedLine.jobId)
         const expectedLine = expectedJob?.lines.find((line) => line.id === expectedSourcedLine.lineId)
-        const expectationMet = expectedSourcedLine.state === 'present'
+        const expectationMet = refreshed.activeVersion === null && (expectedSourcedLine.state === 'present'
           ? expectedLine?.kind === 'part'
             && expectedLine.source === 'vendor_offer'
             && expectedLine.mutable === false
-          : Boolean(expectedJob) && expectedLine === undefined
+          : Boolean(expectedJob) && expectedLine === undefined)
         if (!expectationMet) {
           setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
           return false

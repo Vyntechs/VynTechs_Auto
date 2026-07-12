@@ -617,6 +617,26 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 
+  it('rejects capture refresh truth while a stale active quote version exists', async () => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const sourced = line({ id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000, source: 'vendor_offer', mutable: false, coreChargeCents: null })
+    const staleVersion = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: activeVersion() })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: staleVersion }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).queryByText('$140.00')).toBeNull()
+  })
+
   it('rejects same-ticket stale capture truth until the selected job contains the immutable sourced part', async () => {
     const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
     const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
@@ -775,6 +795,32 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
     expect(screen.queryByText('Review the visible fields, then refresh and retry.')).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
+  it.each(['initial removal refresh', 'pending removal recovery'])('rejects absent sourced truth with a stale active version during %s', async (phase) => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const staleLine = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const absentWithVersion = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: activeVersion() })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: phase === 'initial removal refresh' ? absentWithVersion : staleLine }))
+      .mockResolvedValueOnce(response(200, { builder: absentWithVersion }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    if (phase === 'pending removal recovery') {
+      fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    }
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
   })
 
   it('restores Source part focus after clean close and dirty discard', async () => {
