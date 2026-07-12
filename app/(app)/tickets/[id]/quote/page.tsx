@@ -1,11 +1,17 @@
 import { notFound, redirect } from 'next/navigation'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import styles from '@/components/screens/manual-quote-builder.module.css'
-import { requireUserAndProfile } from '@/lib/auth'
+import { isFounder, requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
-import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { canBuildQuotes, canManageIntegrations } from '@/lib/shop-os/capabilities'
 import { cannedJobActorFromProfile, listCannedJobs } from '@/lib/shop-os/canned-jobs'
+import {
+  listVendorAccounts,
+  publicVendorAccount,
+  vendorAccountActorFromProfile,
+} from '@/lib/shop-os/parts'
+import type { SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
 import { getQuoteBuilder, quoteActorFromProfile } from '@/lib/shop-os/quotes'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
@@ -65,6 +71,26 @@ export default async function QuotePage({
   const cannedCatalogAvailable = cannedResult?.ok === true
     && cannedResult.taxRateBps === builderResult.builder.configuration.taxRateBps
 
+  let vendorResult: Awaited<ReturnType<typeof listVendorAccounts>> | null = null
+  try {
+    vendorResult = await listVendorAccounts(db, {
+      actor: vendorAccountActorFromProfile(ctx.profile, isFounder(ctx.user.email)),
+      scope: 'enabled',
+    })
+  } catch {
+    // Sourcing is optional. Ordinary manual quote entry remains available.
+  }
+  const vendorCatalogAvailable = vendorResult?.ok === true
+  const vendorAccounts: SafeManualVendorAccount[] = vendorResult?.ok
+    ? vendorResult.vendorAccounts
+      .map(publicVendorAccount)
+      .filter((account): account is SafeManualVendorAccount => account.enabled === true)
+    : []
+  const canCreateVendorAccount = canManageIntegrations(
+    ctx.profile.role,
+    isFounder(ctx.user.email),
+  )
+
   const quoteTicket = {
     id: ticketResult.ticket.id,
     ticketNumber: ticketResult.ticket.ticketNumber,
@@ -87,6 +113,9 @@ export default async function QuotePage({
       builder={builderResult.builder}
       cannedJobs={cannedCatalogAvailable && cannedResult?.ok ? cannedResult.cannedJobs : []}
       cannedCatalogAvailable={cannedCatalogAvailable}
+      vendorAccounts={vendorAccounts}
+      vendorCatalogAvailable={vendorCatalogAvailable}
+      canCreateVendorAccount={canCreateVendorAccount}
     />
   )
 }
