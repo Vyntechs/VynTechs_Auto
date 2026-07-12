@@ -305,6 +305,7 @@ type MessagingRetentionMarkers = {
   policy_count: number
   function_marker_count: number
   trigger_binding_count: number
+  nullable_quote_send_customer_count: number
   direct_client_grant_count: number
   effective_client_privilege_count: number
   service_crud_count: number
@@ -421,7 +422,6 @@ async function messagingRetentionMarkers(
       ('quote_sends_request_fingerprint_valid'), ('quote_sends_state_valid'),
       ('quote_sends_token_action_consistent'), ('quote_sends_submission_timestamps_consistent'),
       ('quote_sends_terminal_timestamps_consistent'), ('quote_sends_retention_timestamp_valid'),
-      ('quote_events_shop_ticket_send_fk'),
       ('sms_log_pkey'), ('sms_log_shop_fk'), ('sms_log_shop_send_fk'),
       ('sms_log_provider_message_id_valid'), ('sms_log_provider_event_id_valid'),
       ('sms_log_template_key_valid'), ('sms_log_template_version_valid'),
@@ -445,18 +445,25 @@ async function messagingRetentionMarkers(
       ('sms_log_shop_provider_event_uq'), ('sms_log_send_idx'), ('sms_log_purge_idx'),
       ('notifications_shop_id_uq'), ('notifications_shop_recipient_dedupe_uq'),
       ('notifications_purge_idx')
-    ), expected_functions(signature, return_type, security_definer, service_execute) as (values
-      ('guard_quote_send_lifecycle()', 'trigger', false, false),
-      ('reject_messaging_consent_event_mutation()', 'trigger', false, false),
-      ('require_messaging_compaction_completion()', 'trigger', false, false),
-      ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true),
-      ('guard_messaging_deletion_request_mutation()', 'trigger', false, false),
-      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true),
-      ('serialize_messaging_retention_hold_target()', 'trigger', false, false)
+    ), expected_functions(
+      signature, return_type, security_definer, service_execute, body_marker
+    ) as (values
+      ('validate_quote_event_send_reference()', 'trigger', true, false,
+        'quote event send reference must match an exact live quote send'),
+      ('guard_quote_send_lifecycle()', 'trigger', false, false,
+        'matching pending messaging deletion request'),
+      ('reject_messaging_consent_event_mutation()', 'trigger', false, false, null),
+      ('require_messaging_compaction_completion()', 'trigger', false, false, null),
+      ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true, null),
+      ('guard_messaging_deletion_request_mutation()', 'trigger', false, false, null),
+      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true, null),
+      ('serialize_messaging_retention_hold_target()', 'trigger', false, false, null)
     ), expected_triggers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,
       trigger_columns
     ) as (values
+      ('quote_events', 'quote_events_send_reference_validator',
+        'validate_quote_event_send_reference()', 7, false, null),
       ('quote_sends', 'quote_sends_lifecycle_guard',
         'guard_quote_send_lifecycle()', 19, false, null),
       ('messaging_consent_events', 'messaging_consent_events_append_only',
@@ -500,6 +507,7 @@ async function messagingRetentionMarkers(
        where p.prorettype = e.return_type::regtype
          and p.prosecdef = e.security_definer
          and p.proconfig = array['search_path=""']
+         and (e.body_marker is null or position(e.body_marker in pg_get_functiondef(p.oid)) > 0)
          and has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
          and not has_function_privilege('anon', p.oid, 'execute')
          and not has_function_privilege('authenticated', p.oid, 'execute')) as function_marker_count,
@@ -513,6 +521,12 @@ async function messagingRetentionMarkers(
          and t.tgdeferrable = e.is_deferrable
          and t.tginitdeferred = e.is_deferrable
          and (e.trigger_columns is null or t.tgattr::text = e.trigger_columns)) as trigger_binding_count,
+      (select count(*)::int
+       from information_schema.columns c
+       where c.table_schema = 'public'
+         and c.table_name = 'quote_sends'
+         and c.column_name = 'customer_id'
+         and c.is_nullable = 'YES') as nullable_quote_send_customer_count,
       (select count(*)::int from expected_tables e
        join information_schema.role_table_grants g on g.table_name = e.table_name
        where g.table_schema = 'public' and g.grantee in ('anon', 'authenticated')) as direct_client_grant_count,
@@ -535,12 +549,13 @@ async function messagingRetentionMarkers(
 function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
   return markers.table_count === 8
     && markers.column_count === 114
-    && markers.constraint_count === 90
+    && markers.constraint_count === 89
     && markers.index_count === 25
     && markers.rls_count === 8
     && markers.policy_count === 8
-    && markers.function_marker_count === 7
-    && markers.trigger_binding_count === 5
+    && markers.function_marker_count === 8
+    && markers.trigger_binding_count === 6
+    && markers.nullable_quote_send_customer_count === 1
     && markers.direct_client_grant_count === 0
     && markers.effective_client_privilege_count === 0
     && markers.service_crud_count === 32
@@ -603,6 +618,7 @@ async function messagingRetentionAclMarkers(
     with
       expected_tables(table_name) as (values ${expectedTables}),
       expected_functions(signature, service_execute) as (values
+        ('validate_quote_event_send_reference()', false),
         ('guard_quote_send_lifecycle()', false),
         ('reject_messaging_consent_event_mutation()', false),
         ('require_messaging_compaction_completion()', false),
@@ -696,9 +712,9 @@ function hasCompleteMessagingRetentionAcl(
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
-    && markers.function_count === 7
+    && markers.function_count === 8
     && markers.required_service_function_count === 2
-    && markers.exact_function_acl_count === 7
+    && markers.exact_function_acl_count === 8
 }
 
 export async function ensureMessagingRetentionAclMigration(
@@ -710,7 +726,7 @@ export async function ensureMessagingRetentionAclMigration(
     || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
-    || before.function_count !== 7
+    || before.function_count !== 8
     || before.required_service_function_count !== 2
   ) {
     throw new Error('partial messaging retention ACL in ephemeral database')

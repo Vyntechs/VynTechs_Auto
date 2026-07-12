@@ -718,9 +718,12 @@ Cover:
 - retry completes exactly one tombstone;
 - queued/claimed sends become cancelled;
 - submitting/submitted sends remain honestly in flight;
-- token hashes/expiries are nulled before ordinary metadata deletion;
+- token hashes/expiries are nulled for submitting, submitted, and delivered sends before ordinary metadata deletion;
 - consent events and projection are compacted/deleted;
-- SMS log, quote sends, and notifications are removed unless held;
+- unheld notifications and SMS logs are deleted;
+- a quote send is deleted only when it has no held child SMS log;
+- retained quote sends detach customer identity and strip token material;
+- quote events never change, and their quote-send ID remains an immutable historical identifier that may no longer resolve;
 - completed request has null customer ID, bounded counts/proof, and five-year retain-until;
 - same request retry is stable and changed fingerprint conflicts;
 - customer/vehicle/ticket/quote/repair history is unchanged;
@@ -750,7 +753,7 @@ const cancellable = new Set(['queued', 'claimed'])
 const inFlight = new Set(['submitting', 'submitted'])
 ```
 
-Delete unheld ordinary records, append the internal deleted event, create the bounded proof/count summary from already loaded metadata, delete consent events through the authorized compaction function, set customer ID null, state completed, completed-at, and retain-until. Do not touch unrelated Shop OS records.
+Delete unheld notifications and SMS logs. Delete a quote send only when it has no held child SMS log; otherwise detach its customer identity and strip token material. Quote events never change, and their quote-send ID remains an immutable historical identifier that may no longer resolve. Revoke tokens for submitting, submitted, and delivered sends without fabricating state or lifecycle anchors. Append the internal deleted event, create the bounded proof/count summary from already loaded metadata, delete consent events through the authorized compaction function, set customer ID null, state completed, completed-at, and retain-until. Do not touch unrelated Shop OS records.
 
 If held records remain, detach their readable customer link where lawful, record only held counts in the tombstone, and leave suppression active. Do not copy their content into the tombstone.
 

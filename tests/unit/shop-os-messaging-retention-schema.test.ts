@@ -278,11 +278,11 @@ describe('Shop OS messaging retention source schema', () => {
     })
   })
 
-  it('declares the three dormant operation tables and quote-event send reference', () => {
+  it('declares detachable sends and a historical quote-event send identifier', () => {
     expect([quoteSends, smsLog, notifications].map((table) => getTableConfig(table).name))
       .toEqual(['quote_sends', 'sms_log', 'notifications'])
     expect(getTableConfig(quoteEvents).foreignKeys.map((key) => key.getName()))
-      .toContain('quote_events_shop_ticket_send_fk')
+      .not.toContain('quote_events_shop_ticket_send_fk')
     expect(getTableColumns(quoteSends)).toMatchObject({
       shopId: expect.anything(),
       ticketId: expect.anything(),
@@ -302,6 +302,7 @@ describe('Shop OS messaging retention source schema', () => {
       terminalAt: expect.anything(),
       retainUntil: expect.anything(),
     })
+    expect(getTableColumns(quoteSends).customerId.notNull).toBe(false)
     expect(getTableColumns(smsLog)).toMatchObject({
       shopId: expect.anything(),
       quoteSendId: expect.anything(),
@@ -349,7 +350,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('enforces same-shop operation references and quote-event send integrity', async () => {
+  it('validates exact live quote-send identity when a quote event is inserted', async () => {
     const fixture = await createTestDb()
     try {
       const first = await seedOperationalTenant(fixture.client)
@@ -387,7 +388,7 @@ describe('Shop OS messaging retention source schema', () => {
           shop_id, ticket_id, quote_version_id, quote_send_id, kind, request_key
         ) values ($1, $2, $3, $4, 'sent', $5)`,
         [second.shopId, second.ticketId, second.quoteVersionId, sendId, crypto.randomUUID()],
-      )).rejects.toThrow(/quote_events_shop_ticket_send_fk/)
+      )).rejects.toThrow(/quote event send reference must match an exact live quote send/)
 
       const secondVersionId = crypto.randomUUID()
       await fixture.client.query(
@@ -401,7 +402,236 @@ describe('Shop OS messaging retention source schema', () => {
           shop_id, ticket_id, quote_version_id, quote_send_id, kind, request_key
         ) values ($1, $2, $3, $4, 'sent', $5)`,
         [first.shopId, first.ticketId, secondVersionId, sendId, crypto.randomUUID()],
-      )).rejects.toThrow(/quote_events_shop_ticket_send_fk/)
+      )).rejects.toThrow(/quote event send reference must match an exact live quote send/)
+
+      await fixture.client.exec('set role service_role')
+      try {
+        await expect(fixture.client.query(
+          `insert into quote_events (
+            shop_id, ticket_id, quote_version_id, quote_send_id, kind, request_key
+          ) values ($1, $2, $3, $4, 'sent', $5)`,
+          [first.shopId, first.ticketId, first.quoteVersionId, sendId, crypto.randomUUID()],
+        )).resolves.toBeDefined()
+      } finally {
+        await fixture.client.exec('reset role')
+      }
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('deletes a referenced quote send without changing its historical quote event', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const sendId = await insertQuoteSend(fixture.client, tenant)
+      const eventId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into quote_events (
+          id, shop_id, ticket_id, quote_version_id, quote_send_id, kind, request_key
+        ) values ($1, $2, $3, $4, $5, 'sent', $6)`,
+        [eventId, tenant.shopId, tenant.ticketId, tenant.quoteVersionId, sendId,
+          crypto.randomUUID()],
+      )
+      const before = await fixture.client.query<{ snapshot: string }>(
+        'select to_jsonb(quote_events)::text as snapshot from quote_events where id = $1',
+        [eventId],
+      )
+
+      await fixture.client.query('delete from quote_sends where id = $1', [sendId])
+
+      const after = await fixture.client.query<{ snapshot: string }>(
+        'select to_jsonb(quote_events)::text as snapshot from quote_events where id = $1',
+        [eventId],
+      )
+      expect(after.rows[0]?.snapshot).toBe(before.rows[0]?.snapshot)
+      expect(JSON.parse(after.rows[0]!.snapshot).quote_send_id).toBe(sendId)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('requires a matching pending deletion request before identity or token detachment', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitting',
+        submittingAt: 'now()',
+      })
+      await expect(fixture.client.query(
+        'update quote_sends set customer_id = null where id = $1',
+        [sendId],
+      )).rejects.toThrow(/matching pending messaging deletion request/)
+      await expect(fixture.client.query(
+        'update quote_sends set token_hash = null, token_expires_at = null where id = $1',
+        [sendId],
+      )).rejects.toThrow(/matching pending messaging deletion request/)
+
+      const otherCustomerId = crypto.randomUUID()
+      await fixture.client.query(
+        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
+        [otherCustomerId, tenant.shopId, 'Other Schema Customer', '+15550000001'],
+      )
+      await insertDeletionRequest(fixture.client, {
+        ...tenant,
+        customerId: otherCustomerId,
+      }, { subjectKey: crypto.randomUUID() })
+      await expect(fixture.client.query(
+        `update quote_sends
+        set customer_id = null, token_hash = null, token_expires_at = null
+        where id = $1`,
+        [sendId],
+      )).rejects.toThrow(/matching pending messaging deletion request/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it.each(['submitting', 'submitted', 'delivered'] as const)(
+    'allows authorized atomic identity and token detachment for %s sends',
+    async (state) => {
+      const fixture = await createTestDb()
+      try {
+        const tenant = await seedOperationalTenant(fixture.client)
+        await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+        const sendId = await insertQuoteSend(fixture.client, tenant, {
+          state,
+          submittingAt: 'now()',
+          submittedAt: state === 'submitting' ? null : 'now()',
+        })
+
+        await fixture.client.query(
+          `update quote_sends
+          set customer_id = null, token_hash = null, token_expires_at = null
+          where id = $1`,
+          [sendId],
+        )
+        expect((await fixture.client.query<{
+          customer_id: string | null
+          token_hash: string | null
+          token_expires_at: Date | null
+          state: string
+        }>(
+          `select customer_id, token_hash, token_expires_at, state
+          from quote_sends where id = $1`,
+          [sendId],
+        )).rows[0]).toEqual({
+          customer_id: null,
+          token_hash: null,
+          token_expires_at: null,
+          state,
+        })
+      } finally {
+        await fixture.close()
+      }
+    },
+  )
+
+  it('allows authorized detachment and token revocation independently', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      const detachedId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitting',
+        submittingAt: 'now()',
+      })
+      const revokedId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+
+      await fixture.client.query(
+        'update quote_sends set customer_id = null where id = $1',
+        [detachedId],
+      )
+      await fixture.client.query(
+        'update quote_sends set token_hash = null, token_expires_at = null where id = $1',
+        [revokedId],
+      )
+
+      expect((await fixture.client.query<{
+        customer_id: string | null
+        token_hash: string | null
+      }>(
+        'select customer_id, token_hash from quote_sends where id = $1',
+        [detachedId],
+      )).rows[0]).toEqual({ customer_id: null, token_hash: hex })
+      expect((await fixture.client.query<{
+        customer_id: string | null
+        token_hash: string | null
+      }>(
+        'select customer_id, token_hash from quote_sends where id = $1',
+        [revokedId],
+      )).rows[0]).toEqual({ customer_id: tenant.customerId, token_hash: null })
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('never restores or reassigns detached customer identity or revoked tokens', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const other = await seedTenant(fixture.client)
+      await fixture.client.query(
+        'update customers set shop_id = $1 where id = $2',
+        [tenant.shopId, other.customerId],
+      )
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+      await fixture.client.query(
+        `update quote_sends
+        set customer_id = null, token_hash = null, token_expires_at = null
+        where id = $1`,
+        [sendId],
+      )
+
+      await expect(fixture.client.query(
+        'update quote_sends set customer_id = $1 where id = $2',
+        [tenant.customerId, sendId],
+      )).rejects.toThrow(/detached quote send customer cannot be restored or reassigned/)
+      await expect(fixture.client.query(
+        'update quote_sends set customer_id = $1 where id = $2',
+        [other.customerId, sendId],
+      )).rejects.toThrow(/detached quote send customer cannot be restored or reassigned/)
+      await expect(fixture.client.query(
+        `update quote_sends set token_hash = $1,
+          token_expires_at = now() + interval '1 day' where id = $2`,
+        [otherHex, sendId],
+      )).rejects.toThrow(/revoked quote send token cannot be restored or reassigned/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('permits only authorized customer detachment on a terminal held send', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'responded',
+        tokenHash: null,
+        tokenExpiresAt: null,
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+        terminalAt: 'now()',
+        retainUntil: "now() + interval '1 year'",
+      })
+      await insertHold(fixture.client, tenant, { resourceType: 'quote_send', resourceId: sendId })
+
+      await fixture.client.query('update quote_sends set customer_id = null where id = $1', [sendId])
+      await expect(fixture.client.query(
+        "update quote_sends set updated_at = now() + interval '1 second' where id = $1",
+        [sendId],
+      )).rejects.toThrow(/terminal quote sends are immutable/)
     } finally {
       await fixture.close()
     }
@@ -695,11 +925,11 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('refuses missing lifecycle-trigger bindings and direct guard execution', async () => {
+  it('refuses missing or rebound quote-event validator triggers', async () => {
     const missingTrigger = await createTestDb()
     try {
       await missingTrigger.client.exec(
-        'drop trigger quote_sends_lifecycle_guard on quote_sends',
+        'drop trigger quote_events_send_reference_validator on quote_events',
       )
       await expect(ensureMessagingRetentionMigration(missingTrigger.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
@@ -708,16 +938,73 @@ describe('Shop OS messaging retention source schema', () => {
       await missingTrigger.close()
     }
 
+    const reboundTrigger = await createTestDb()
+    try {
+      await reboundTrigger.client.exec(`
+        drop trigger quote_events_send_reference_validator on quote_events;
+        create trigger quote_events_send_reference_validator
+        before insert on quote_events
+        for each row execute function guard_quote_send_lifecycle();
+      `)
+      await expect(ensureMessagingRetentionMigration(reboundTrigger.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await reboundTrigger.close()
+    }
+  })
+
+  it('refuses unsafe validator execution, search path, customer nullability, or lifecycle body', async () => {
     const unsafeExecute = await createTestDb()
     try {
       await unsafeExecute.client.exec(
-        'grant execute on function guard_quote_send_lifecycle() to anon',
+        'grant execute on function validate_quote_event_send_reference() to public',
       )
       await expect(ensureMessagingRetentionMigration(unsafeExecute.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
       )
     } finally {
       await unsafeExecute.close()
+    }
+
+    const unsafeSearchPath = await createTestDb()
+    try {
+      await unsafeSearchPath.client.exec(
+        'alter function validate_quote_event_send_reference() set search_path = public',
+      )
+      await expect(ensureMessagingRetentionMigration(unsafeSearchPath.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await unsafeSearchPath.close()
+    }
+
+    const nonNullCustomer = await createTestDb()
+    try {
+      await nonNullCustomer.client.exec(
+        'alter table quote_sends alter column customer_id set not null',
+      )
+      await expect(ensureMessagingRetentionMigration(nonNullCustomer.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await nonNullCustomer.close()
+    }
+
+    const weakenedLifecycle = await createTestDb()
+    try {
+      await weakenedLifecycle.client.exec(`
+        create or replace function guard_quote_send_lifecycle()
+        returns trigger
+        language plpgsql
+        set search_path = ''
+        as $$ begin return new; end $$;
+      `)
+      await expect(ensureMessagingRetentionMigration(weakenedLifecycle.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await weakenedLifecycle.close()
     }
   })
 

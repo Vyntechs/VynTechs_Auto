@@ -714,7 +714,7 @@ export const quoteSends = pgTable(
     shopId: uuid('shop_id').notNull(),
     ticketId: uuid('ticket_id').notNull(),
     quoteVersionId: uuid('quote_version_id').notNull(),
-    customerId: uuid('customer_id').notNull(),
+    customerId: uuid('customer_id'),
     destinationFingerprint: text('destination_fingerprint').notNull(),
     fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
     channel: text('channel', { enum: ['sms'] }).notNull(),
@@ -886,16 +886,6 @@ export const quoteEvents = pgTable(
       name: 'quote_events_shop_actor_fk',
       columns: [table.shopId, table.actorProfileId],
       foreignColumns: [profiles.shopId, profiles.id],
-    }).onDelete('restrict'),
-    foreignKey({
-      name: 'quote_events_shop_ticket_send_fk',
-      columns: [table.shopId, table.ticketId, table.quoteVersionId, table.quoteSendId],
-      foreignColumns: [
-        quoteSends.shopId,
-        quoteSends.ticketId,
-        quoteSends.quoteVersionId,
-        quoteSends.id,
-      ],
     }).onDelete('restrict'),
     uniqueIndex('quote_events_shop_request_key_uq').on(table.shopId, table.requestKey),
     uniqueIndex('quote_events_shop_provider_event_uq')

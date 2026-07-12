@@ -26,6 +26,8 @@ to service_role;
 
 revoke all on function public.guard_quote_send_lifecycle()
   from public, anon, authenticated, service_role;
+revoke all on function public.validate_quote_event_send_reference()
+  from public, anon, authenticated, service_role;
 revoke all on function public.reject_messaging_consent_event_mutation()
   from public, anon, authenticated, service_role;
 revoke all on function public.require_messaging_compaction_completion()

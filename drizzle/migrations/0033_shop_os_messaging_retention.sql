@@ -184,7 +184,7 @@ create table quote_sends (
   shop_id uuid not null,
   ticket_id uuid not null,
   quote_version_id uuid not null,
-  customer_id uuid not null,
+  customer_id uuid,
   destination_fingerprint text not null,
   fingerprint_key_version text not null,
   channel text not null,
@@ -254,11 +254,6 @@ create index quote_sends_destination_idx on quote_sends (shop_id, destination_fi
 --> statement-breakpoint
 create index quote_sends_purge_idx on quote_sends (state, retain_until, id);
 --> statement-breakpoint
-alter table quote_events add constraint quote_events_shop_ticket_send_fk
-  foreign key (shop_id, ticket_id, quote_version_id, quote_send_id)
-  references quote_sends(shop_id, ticket_id, quote_version_id, id) on delete restrict;
---> statement-breakpoint
-
 create table sms_log (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null,
@@ -325,17 +320,129 @@ comment on column notifications.entity_id is
   'Routing reference only; never an authorization or tenant-ownership boundary.';
 --> statement-breakpoint
 
+comment on column quote_events.quote_send_id is
+  'Immutable historical quote-send identifier. It is validated against an exact live send on insert and may intentionally stop resolving after retention or verified deletion.';
+--> statement-breakpoint
+
+create function validate_quote_event_send_reference()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.quote_send_id is null then
+    return new;
+  end if;
+
+  perform 1
+  from public.quote_sends
+  where shop_id = new.shop_id
+    and ticket_id = new.ticket_id
+    and quote_version_id = new.quote_version_id
+    and id = new.quote_send_id
+  for key share;
+
+  if not found then
+    raise exception 'quote event send reference must match an exact live quote send';
+  end if;
+
+  return new;
+end;
+$$;
+--> statement-breakpoint
+create trigger quote_events_send_reference_validator
+before insert on quote_events
+for each row execute function validate_quote_event_send_reference();
+--> statement-breakpoint
+
 create function guard_quote_send_lifecycle()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  customer_detached boolean := old.customer_id is not null and new.customer_id is null;
+  token_revoked boolean := old.token_hash is not null
+    and old.token_expires_at is not null
+    and new.token_hash is null
+    and new.token_expires_at is null;
+  deletion_authorized boolean := false;
 begin
+  if old.customer_id is null and new.customer_id is not null
+    or (old.customer_id is not null and new.customer_id is not null
+      and new.customer_id is distinct from old.customer_id) then
+    raise exception 'detached quote send customer cannot be restored or reassigned';
+  end if;
+
+  if old.state in ('cancelled', 'failed', 'responded', 'expired')
+    and not customer_detached then
+    raise exception 'terminal quote sends are immutable';
+  end if;
+
+  if old.token_hash is null and new.token_hash is not null
+    or old.token_expires_at is null and new.token_expires_at is not null
+    or (old.token_hash is not null and new.token_hash is not null
+      and new.token_hash is distinct from old.token_hash)
+    or (old.token_expires_at is not null and new.token_expires_at is not null
+      and new.token_expires_at is distinct from old.token_expires_at) then
+    raise exception 'revoked quote send token cannot be restored or reassigned';
+  end if;
+
+  if customer_detached or (new.state = old.state and token_revoked) then
+    select exists (
+      select 1
+      from public.messaging_deletion_requests deletion_request
+      where deletion_request.shop_id = old.shop_id
+        and deletion_request.customer_id = old.customer_id
+        and deletion_request.destination_fingerprint = old.destination_fingerprint
+        and deletion_request.fingerprint_key_version = old.fingerprint_key_version
+        and deletion_request.state = 'pending'
+    ) into deletion_authorized;
+
+    if not deletion_authorized then
+      raise exception 'quote send detachment requires a matching pending messaging deletion request';
+    end if;
+  end if;
+
   if old.state in ('cancelled', 'failed', 'responded', 'expired') then
+    if customer_detached
+      and (new.id, new.shop_id, new.ticket_id, new.quote_version_id,
+           new.destination_fingerprint, new.fingerprint_key_version, new.channel,
+           new.token_hash, new.token_expires_at, new.requesting_actor_profile_id,
+           new.request_key, new.request_fingerprint, new.state, new.submitting_at,
+           new.submitted_at, new.terminal_at, new.retain_until, new.created_at)
+        is not distinct from
+          (old.id, old.shop_id, old.ticket_id, old.quote_version_id,
+           old.destination_fingerprint, old.fingerprint_key_version, old.channel,
+           old.token_hash, old.token_expires_at, old.requesting_actor_profile_id,
+           old.request_key, old.request_fingerprint, old.state, old.submitting_at,
+           old.submitted_at, old.terminal_at, old.retain_until, old.created_at) then
+      return new;
+    end if;
     raise exception 'terminal quote sends are immutable';
   end if;
 
   if new.state = old.state then
+    if token_revoked and old.state not in ('submitting', 'submitted', 'delivered') then
+      raise exception 'active quote send token material is immutable';
+    end if;
+
+    if (customer_detached or token_revoked)
+      and (new.id, new.shop_id, new.ticket_id, new.quote_version_id,
+           new.destination_fingerprint, new.fingerprint_key_version, new.channel,
+           new.requesting_actor_profile_id, new.request_key, new.request_fingerprint,
+           new.state, new.submitting_at, new.submitted_at, new.terminal_at,
+           new.retain_until, new.created_at)
+        is not distinct from
+          (old.id, old.shop_id, old.ticket_id, old.quote_version_id,
+           old.destination_fingerprint, old.fingerprint_key_version, old.channel,
+           old.requesting_actor_profile_id, old.request_key, old.request_fingerprint,
+           old.state, old.submitting_at, old.submitted_at, old.terminal_at,
+           old.retain_until, old.created_at) then
+      return new;
+    end if;
+
     if (new.id, new.shop_id, new.ticket_id, new.quote_version_id, new.customer_id,
         new.destination_fingerprint, new.fingerprint_key_version, new.channel,
         new.token_hash, new.token_expires_at, new.requesting_actor_profile_id,
@@ -352,15 +459,19 @@ begin
     return new;
   end if;
 
-  if (new.id, new.shop_id, new.ticket_id, new.quote_version_id, new.customer_id,
+  if (new.id, new.shop_id, new.ticket_id, new.quote_version_id,
       new.destination_fingerprint, new.fingerprint_key_version, new.channel,
       new.requesting_actor_profile_id, new.request_key, new.request_fingerprint,
       new.created_at)
     is distinct from
-     (old.id, old.shop_id, old.ticket_id, old.quote_version_id, old.customer_id,
+     (old.id, old.shop_id, old.ticket_id, old.quote_version_id,
       old.destination_fingerprint, old.fingerprint_key_version, old.channel,
       old.requesting_actor_profile_id, old.request_key, old.request_fingerprint,
       old.created_at) then
+    raise exception 'quote send identity is immutable';
+  end if;
+
+  if new.customer_id is distinct from old.customer_id and not customer_detached then
     raise exception 'quote send identity is immutable';
   end if;
 
@@ -746,6 +857,7 @@ create policy notifications_server_only_deny_direct on notifications
 --> statement-breakpoint
 
 revoke all on function reject_messaging_consent_event_mutation() from public, anon, authenticated, service_role;
+revoke all on function validate_quote_event_send_reference() from public, anon, authenticated, service_role;
 revoke all on function guard_quote_send_lifecycle() from public, anon, authenticated, service_role;
 revoke all on function serialize_messaging_retention_hold_target() from public, anon, authenticated, service_role;
 revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
