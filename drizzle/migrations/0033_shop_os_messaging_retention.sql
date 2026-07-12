@@ -639,22 +639,33 @@ set search_path = ''
 as $$
 declare
   compaction_request_id uuid;
+  compaction_shop_id uuid;
+  authorized_subjects uuid[];
 begin
   begin
     compaction_request_id := current_setting(
       'vyntechs.messaging_consent_compaction_request',
       true
     )::uuid;
+    compaction_shop_id := current_setting(
+      'vyntechs.messaging_consent_compaction_shop',
+      true
+    )::uuid;
+    authorized_subjects := current_setting(
+      'vyntechs.messaging_consent_compaction_subjects',
+      true
+    )::uuid[];
   exception when others then
     raise exception 'compaction requires completed tombstone in the same transaction';
   end;
 
-  if not exists (
+  if compaction_shop_id is distinct from old.shop_id
+    or not (old.subject_key = any(authorized_subjects))
+    or not exists (
     select 1
     from public.messaging_deletion_requests r
     where r.id = compaction_request_id
       and r.shop_id = old.shop_id
-      and r.subject_key = old.subject_key
       and r.state = 'completed'
   ) then
     raise exception 'compaction requires completed tombstone in the same transaction';
@@ -681,16 +692,94 @@ set search_path = ''
 as $$
 declare
   deleted_count integer;
+  request_customer_id uuid;
+  existing_request_text text;
+  existing_shop_text text;
+  existing_subjects_text text;
+  authorized_subjects uuid[];
 begin
-  perform 1
-  from public.messaging_deletion_requests
-  where id = p_request_id
-    and shop_id = p_shop_id
-    and subject_key = p_subject_key
-    and state = 'pending'
+  existing_request_text := nullif(current_setting(
+    'vyntechs.messaging_consent_compaction_request', true
+  ), '');
+  existing_shop_text := nullif(current_setting(
+    'vyntechs.messaging_consent_compaction_shop', true
+  ), '');
+  existing_subjects_text := nullif(current_setting(
+    'vyntechs.messaging_consent_compaction_subjects', true
+  ), '');
+
+  if existing_request_text is not null
+    or existing_shop_text is not null
+    or existing_subjects_text is not null
+  then
+    begin
+      if existing_request_text is null
+        or existing_shop_text is null
+        or existing_subjects_text is null
+        or existing_request_text::uuid is distinct from p_request_id
+        or existing_shop_text::uuid is distinct from p_shop_id
+      then
+        raise exception 'compaction transaction cannot mix deletion requests or shops';
+      end if;
+      authorized_subjects := existing_subjects_text::uuid[];
+    exception when invalid_text_representation then
+      raise exception 'invalid messaging consent compaction authorization context';
+    end;
+  else
+    authorized_subjects := array[]::uuid[];
+  end if;
+
+  select r.customer_id
+  into request_customer_id
+  from public.messaging_deletion_requests r
+  where r.id = p_request_id
+    and r.shop_id = p_shop_id
+    and r.state = 'pending'
+    and r.customer_id is not null
   for update;
   if not found then
     raise exception 'matching pending messaging deletion request required';
+  end if;
+
+  perform 1
+  from public.messaging_consent_state s
+  where s.shop_id = p_shop_id
+    and s.subject_key = p_subject_key
+  order by s.id
+  for update;
+  perform 1
+  from public.messaging_consent_events e
+  where e.shop_id = p_shop_id
+    and e.subject_key = p_subject_key
+  order by e.id
+  for update;
+
+  if not exists (
+    select 1
+    from public.messaging_consent_state s
+    where s.shop_id = p_shop_id
+      and s.subject_key = p_subject_key
+      and s.customer_id = request_customer_id
+    union all
+    select 1
+    from public.messaging_consent_events e
+    where e.shop_id = p_shop_id
+      and e.subject_key = p_subject_key
+      and e.customer_id = request_customer_id
+  ) or exists (
+    select 1
+    from public.messaging_consent_state s
+    where s.shop_id = p_shop_id
+      and s.subject_key = p_subject_key
+      and s.customer_id is distinct from request_customer_id
+    union all
+    select 1
+    from public.messaging_consent_events e
+    where e.shop_id = p_shop_id
+      and e.subject_key = p_subject_key
+      and e.customer_id is distinct from request_customer_id
+  ) then
+    raise exception 'consent subject must belong to deletion request customer';
   end if;
 
   if exists (
@@ -720,6 +809,19 @@ begin
   perform set_config(
     'vyntechs.messaging_consent_compaction_request',
     p_request_id::text,
+    true
+  );
+  perform set_config(
+    'vyntechs.messaging_consent_compaction_shop',
+    p_shop_id::text,
+    true
+  );
+  select array_agg(distinct subject_key order by subject_key)
+  into authorized_subjects
+  from unnest(authorized_subjects || p_subject_key) as subjects(subject_key);
+  perform set_config(
+    'vyntechs.messaging_consent_compaction_subjects',
+    authorized_subjects::text,
     true
   );
   delete from public.messaging_consent_events

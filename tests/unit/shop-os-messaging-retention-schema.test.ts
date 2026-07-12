@@ -135,6 +135,7 @@ async function insertConsentEvent(
     evidenceKind: string
     requestFingerprint: string
     subjectKey: string
+    customerId: string
   }> = {},
 ) {
   const id = crypto.randomUUID()
@@ -149,6 +150,7 @@ async function insertConsentEvent(
     evidenceKind: 'customer_checkbox',
     requestFingerprint: hex,
     subjectKey: crypto.randomUUID(),
+    customerId: tenant.customerId,
     ...overrides,
   }
   await client.query(
@@ -165,7 +167,7 @@ async function insertConsentEvent(
       id,
       tenant.shopId,
       values.subjectKey,
-      tenant.customerId,
+      values.customerId,
       values.destinationFingerprint,
       values.fingerprintKeyVersion,
       values.programVersion,
@@ -1620,6 +1622,187 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
+  it('authorizes multiple consent subjects for one pending customer deletion request', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const firstSubject = crypto.randomUUID()
+      const secondSubject = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: firstSubject,
+      })
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, firstSubject, requestId],
+      )
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, secondSubject, requestId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null, completed_at = now(),
+          latest_relevant_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now() + interval '5 years'
+        where id = $1`,
+        [requestId],
+      )
+      await fixture.client.exec('commit')
+
+      const remaining = await fixture.client.query<{ count: number }>(
+        `select count(*)::int as count from messaging_consent_events
+        where subject_key in ($1, $2)`,
+        [firstSubject, secondSubject],
+      )
+      expect(remaining.rows[0]?.count).toBe(0)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('rejects a consent subject belonging to a different customer', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const otherCustomerId = crypto.randomUUID()
+      await fixture.client.query(
+        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
+        [otherCustomerId, tenant.shopId, 'Other Customer', '+15550000001'],
+      )
+      const requestSubject = crypto.randomUUID()
+      const otherSubject = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: requestSubject })
+      await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: otherSubject,
+        customerId: otherCustomerId,
+      })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: requestSubject,
+      })
+
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, otherSubject, requestId],
+      )).rejects.toThrow(/consent subject must belong to deletion request customer/)
+      const remaining = await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
+        [otherSubject],
+      )
+      expect(remaining.rows[0]?.count).toBe(1)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('compacts unheld customer subjects while retaining an independently held subject', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const heldSubject = crypto.randomUUID()
+      const unheldSubject = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: heldSubject })
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: unheldSubject })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: heldSubject,
+      })
+      await insertHold(fixture.client, tenant, { subjectKey: heldSubject })
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, unheldSubject, requestId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null, completed_at = now(),
+          latest_relevant_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now() + interval '5 years'
+        where id = $1`,
+        [requestId],
+      )
+      await fixture.client.exec('commit')
+
+      const remaining = await fixture.client.query<{ subject_key: string }>(
+        `select subject_key from messaging_consent_events
+        where subject_key in ($1, $2) order by subject_key`,
+        [heldSubject, unheldSubject],
+      )
+      expect(remaining.rows).toEqual([{ subject_key: heldSubject }])
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('fails closed for mixed compaction requests and spoofed authorization settings', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const firstSubject = crypto.randomUUID()
+      const secondSubject = crypto.randomUUID()
+      const malformedSubject = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
+      const malformedEvent = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: malformedSubject,
+      })
+      const firstRequest = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: firstSubject,
+      })
+      const secondRequest = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: secondSubject,
+      })
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, firstSubject, firstRequest],
+      )
+      await expect(fixture.client.query(
+        'select compact_messaging_consent_events($1, $2, $3)',
+        [tenant.shopId, secondSubject, secondRequest],
+      )).rejects.toThrow(/compaction transaction cannot mix deletion requests or shops/)
+      await fixture.client.exec('rollback')
+
+      await fixture.client.exec('set role service_role')
+      try {
+        await fixture.client.query(
+          "select set_config('vyntechs.messaging_consent_compaction_request', $1, false)",
+          [firstRequest],
+        )
+        await fixture.client.query(
+          "select set_config('vyntechs.messaging_consent_compaction_shop', $1, false)",
+          [tenant.shopId],
+        )
+        await fixture.client.query(
+          "select set_config('vyntechs.messaging_consent_compaction_subjects', $1, false)",
+          [`{${malformedSubject}}`],
+        )
+        await expect(fixture.client.query(
+          'delete from messaging_consent_events where id = $1',
+          [malformedEvent],
+        )).rejects.toThrow(/messaging consent events are append-only/)
+      } finally {
+        await fixture.client.exec('reset role')
+      }
+
+      await fixture.client.query(
+        "select set_config('vyntechs.messaging_consent_compaction_request', 'not-a-uuid', false)",
+      )
+      await expect(fixture.client.query(
+        'delete from messaging_consent_events where id = $1',
+        [malformedEvent],
+      )).rejects.toThrow(/compaction requires completed tombstone in the same transaction/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('blocks compaction for active subject and consent-event holds', async () => {
     const fixture = await createTestDb()
     try {
@@ -1771,6 +1954,44 @@ describe('Shop OS messaging retention source schema', () => {
       )
     } finally {
       await missingFunction.close()
+    }
+  })
+
+  it('refuses weakened customer-wide compaction authorization and deferred proof', async () => {
+    const fixture = await createTestDb()
+    try {
+      const compactProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'compact_messaging_consent_events(uuid,uuid,uuid)'::regprocedure
+        ) as function_definition
+      `)
+      const completionProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'require_messaging_compaction_completion()'::regprocedure
+        ) as function_definition
+      `)
+      const compact = compactProof.rows[0]!.function_definition
+      const completion = completionProof.rows[0]!.function_definition
+      const weakenings = [
+        compact.replace(/\s+and e\.customer_id = request_customer_id/i, ''),
+        compact.replace(/array_agg\(distinct subject_key order by subject_key\)/i, 'array_agg(subject_key)'),
+        completion.replace(/old\.subject_key = any\(authorized_subjects\)/i, 'true'),
+        completion.replace(/r\.shop_id = old\.shop_id/i, 'true'),
+      ]
+
+      for (const weakened of weakenings) {
+        expect(weakened).not.toBe(compact)
+        expect(weakened).not.toBe(completion)
+        await fixture.client.exec(weakened)
+        await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+          'partial messaging retention schema in ephemeral database',
+        )
+        await fixture.client.exec(weakened.includes('compact_messaging_consent_events')
+          ? compact
+          : completion)
+      }
+    } finally {
+      await fixture.close()
     }
   })
 
