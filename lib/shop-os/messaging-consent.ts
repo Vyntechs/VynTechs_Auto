@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
+import { createHash } from 'node:crypto'
+import { isIP } from 'node:net'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -8,6 +10,7 @@ import {
   messagingConsentState,
   messagingDeletionRequests,
   profiles,
+  shops,
   smsSuppressions,
 } from '@/lib/db/schema'
 import { canManageCustomerMessaging } from '@/lib/shop-os/capabilities'
@@ -26,11 +29,43 @@ const captureMethods = new Set(['customer_web', 'signed_form', 'provider_webhook
 const evidenceKinds = new Set(['customer_checkbox', 'signed_form_reference', 'provider_event', 'staff_request'])
 const MAX_DISCLOSURE_BYTES = 4_096
 const MAX_EVIDENCE_REF_LENGTH = 256
+const MAX_DISCLOSURE_STRING_LENGTH = 2_048
+const DISCLOSURE_KEYS = [
+  'consentNotConditionOfPurchase',
+  'disclosureVersion',
+  'helpKeyword',
+  'messageAndDataRates',
+  'messageFrequency',
+  'messagePurpose',
+  'privacyPolicyUrl',
+  'programVersion',
+  'renderedDisclosure',
+  'senderIdentity',
+  'smsTermsUrl',
+  'stopKeyword',
+  'technologyProvider',
+] as const
 
 export type MessagingActor = {
   profileId: string
   shopId: string
   role: string
+}
+
+export type MessagingDisclosureSnapshot = {
+  disclosureVersion: string
+  programVersion: string
+  senderIdentity: string
+  messagePurpose: 'estimates_authorizations_repair_status_pickup'
+  messageFrequency: 'varies_by_repair_order'
+  messageAndDataRates: 'may_apply'
+  stopKeyword: 'STOP'
+  helpKeyword: 'HELP'
+  consentNotConditionOfPurchase: true
+  smsTermsUrl: string
+  privacyPolicyUrl: string
+  technologyProvider: 'Vyntechs'
+  renderedDisclosure: string
 }
 
 export type MessagingEligibility =
@@ -59,23 +94,109 @@ type RecordResult =
 
 type SupportedFingerprint = { keyVersion: string; fingerprint: string }
 type ValidatedRecordInput =
-  | { ok: true; destination: string; fingerprints: ReadonlyArray<SupportedFingerprint> }
+  | {
+      ok: true
+      destination: string
+      fingerprints: ReadonlyArray<SupportedFingerprint>
+      disclosureSnapshot?: MessagingDisclosureSnapshot
+      disclosureHash?: string
+    }
   | { ok: false; error: string }
 
 function validDate(value: unknown): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime())
 }
 
-function disclosureIsBounded(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  if (Object.keys(value).length === 0) return false
-  try {
-    const serialized = JSON.stringify(value)
-    return serialized !== undefined
-      && Buffer.byteLength(serialized, 'utf8') <= MAX_DISCLOSURE_BYTES
-  } catch {
-    return false
+function boundedDisclosureString(value: unknown, maximum = MAX_DISCLOSURE_STRING_LENGTH): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= maximum
+    && value.trim() === value
+    && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+function publicHttpsUrl(value: unknown): value is string {
+  if (!boundedDisclosureString(value)) return false
+  const parsed = new URL(value)
+  return parsed.protocol === 'https:'
+    && parsed.username === ''
+    && parsed.password === ''
+    && parsed.hash === ''
+    && parsed.hostname.includes('.')
+    && isIP(parsed.hostname) === 0
+    && !parsed.hostname.endsWith('.local')
+    && !parsed.hostname.endsWith('.internal')
+    && !parsed.hostname.endsWith('.localhost')
+    && parsed.href === value
+}
+
+function exactSignedDisclosure(snapshot: MessagingDisclosureSnapshot): string {
+  return `By signing below, I agree to receive recurring transactional text messages from ${snapshot.senderIdentity} about estimates, authorizations, repair status, and pickup for vehicles I bring to this shop. Message frequency varies by repair order. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help. Consent is not a condition of purchase. SMS Terms: ${snapshot.smsTermsUrl}. Privacy Policy: ${snapshot.privacyPolicyUrl}. Vyntechs provides the messaging technology.`
+}
+
+function canonicalDisclosure(snapshot: MessagingDisclosureSnapshot): string {
+  const ordered = Object.fromEntries(DISCLOSURE_KEYS.map((key) => [key, snapshot[key]]))
+  return JSON.stringify(ordered)
+}
+
+function validatedDisclosureProof(
+  value: unknown,
+  disclosureHash: unknown,
+  programVersion: string,
+  requireFrozen: boolean,
+): { snapshot: MessagingDisclosureSnapshot; hash: string } | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  if (requireFrozen && !Object.isFrozen(value)) return null
+  if (Object.getPrototypeOf(value) !== Object.prototype) return null
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  const keys = Reflect.ownKeys(descriptors)
+  if (keys.some((key) => typeof key !== 'string')) return null
+  const sortedKeys = (keys as string[]).sort()
+  if (
+    sortedKeys.length !== DISCLOSURE_KEYS.length
+    || sortedKeys.some((key, index) => key !== DISCLOSURE_KEYS[index])
+  ) return null
+  const data = {} as Record<string, unknown>
+  for (const key of DISCLOSURE_KEYS) {
+    const descriptor = descriptors[key]
+    if (!descriptor?.enumerable || !('value' in descriptor)) return null
+    if (requireFrozen && (descriptor.configurable || descriptor.writable)) return null
+    data[key] = descriptor.value
   }
+  const snapshot = Object.freeze({
+    disclosureVersion: data.disclosureVersion,
+    programVersion: data.programVersion,
+    senderIdentity: data.senderIdentity,
+    messagePurpose: data.messagePurpose,
+    messageFrequency: data.messageFrequency,
+    messageAndDataRates: data.messageAndDataRates,
+    stopKeyword: data.stopKeyword,
+    helpKeyword: data.helpKeyword,
+    consentNotConditionOfPurchase: data.consentNotConditionOfPurchase,
+    smsTermsUrl: data.smsTermsUrl,
+    privacyPolicyUrl: data.privacyPolicyUrl,
+    technologyProvider: data.technologyProvider,
+    renderedDisclosure: data.renderedDisclosure,
+  }) as MessagingDisclosureSnapshot
+  if (
+    !boundedVersionSchema.safeParse(snapshot.disclosureVersion).success
+    || snapshot.programVersion !== programVersion
+    || !boundedDisclosureString(snapshot.senderIdentity, 160)
+    || snapshot.messagePurpose !== 'estimates_authorizations_repair_status_pickup'
+    || snapshot.messageFrequency !== 'varies_by_repair_order'
+    || snapshot.messageAndDataRates !== 'may_apply'
+    || snapshot.stopKeyword !== 'STOP'
+    || snapshot.helpKeyword !== 'HELP'
+    || snapshot.consentNotConditionOfPurchase !== true
+    || !publicHttpsUrl(snapshot.smsTermsUrl)
+    || !publicHttpsUrl(snapshot.privacyPolicyUrl)
+    || snapshot.technologyProvider !== 'Vyntechs'
+    || snapshot.renderedDisclosure !== exactSignedDisclosure(snapshot)
+  ) return null
+  const canonical = canonicalDisclosure(snapshot)
+  if (Buffer.byteLength(canonical, 'utf8') > MAX_DISCLOSURE_BYTES) return null
+  const hash = createHash('sha256').update(canonical).digest('hex')
+  return disclosureHash === hash ? { snapshot, hash } : null
 }
 
 function validEvidenceRef(value: unknown): value is string {
@@ -119,6 +240,8 @@ function validateRecordInput(input: {
   now: Date
   keyRing: FingerprintKeyRing
 }): ValidatedRecordInput {
+  const disclosureSnapshot = input.disclosureSnapshot
+  const disclosureHash = input.disclosureHash
   if (
     !uuidSchema.safeParse(input.actor.profileId).success
     || !uuidSchema.safeParse(input.actor.shopId).success
@@ -134,9 +257,6 @@ function validateRecordInput(input: {
     || !validDate(input.now)
     || input.occurredAt.getTime() > input.now.getTime()
     || (input.evidenceRef !== undefined && !validEvidenceRef(input.evidenceRef))
-    || (input.disclosureSnapshot !== undefined && !disclosureIsBounded(input.disclosureSnapshot))
-    || (input.disclosureHash !== undefined
-      && !fingerprintSchema.safeParse(input.disclosureHash).success)
   ) return { ok: false, error: 'invalid_input' }
 
   if (!canManageCustomerMessaging(input.actor.role)) {
@@ -147,14 +267,25 @@ function validateRecordInput(input: {
   }
 
   const createsConsent = input.eventType === 'consented' || input.eventType === 'reconsented'
+  const hasDisclosure = disclosureSnapshot !== undefined || disclosureHash !== undefined
+  const disclosure = hasDisclosure
+    ? validatedDisclosureProof(
+        disclosureSnapshot,
+        disclosureHash,
+        input.programVersion,
+        true,
+      )
+    : null
   if (createsConsent && (
     input.captureMethod !== 'signed_form'
     || input.evidenceKind !== 'signed_form_reference'
     || input.customerControlled !== true
     || !validEvidenceRef(input.evidenceRef)
-    || !disclosureIsBounded(input.disclosureSnapshot)
-    || !fingerprintSchema.safeParse(input.disclosureHash).success
+    || !disclosure
   )) return { ok: false, error: 'invalid_input' }
+  if (!createsConsent && hasDisclosure && !disclosure) {
+    return { ok: false, error: 'invalid_input' }
+  }
 
   if (input.eventType === 'revoked') {
     const staffRequest = input.captureMethod === 'staff_request'
@@ -176,22 +307,16 @@ function validateRecordInput(input: {
   try {
     const destination = normalizeE164(input.destination)
     const fingerprints = fingerprintsForKeyRing(destination, input.keyRing)
-    return { ok: true, destination, fingerprints }
+    return {
+      ok: true,
+      destination,
+      fingerprints,
+      disclosureSnapshot: disclosure?.snapshot,
+      disclosureHash: disclosure?.hash,
+    }
   } catch {
     return { ok: false, error: 'invalid_input' }
   }
-}
-
-async function loadPersistedRequest(
-  db: AppDb,
-  input: { shopId: string; profileId: string; requestKey: string },
-): Promise<typeof messagingConsentEvents.$inferSelect | null> {
-  const [event] = await db.select().from(messagingConsentEvents).where(and(
-    eq(messagingConsentEvents.shopId, input.shopId),
-    eq(messagingConsentEvents.actorProfileId, input.profileId),
-    eq(messagingConsentEvents.requestKey, input.requestKey),
-  )).limit(1)
-  return event ?? null
 }
 
 function retryResult(
@@ -201,6 +326,83 @@ function retryResult(
   return event.requestFingerprint === requestFingerprint
     ? { ok: true, eventId: event.id, status: statusForEvent(event.eventType) }
     : { ok: false, error: 'request_conflict' }
+}
+
+function ownDataProperty(value: unknown, key: string): unknown {
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
+    return undefined
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(value, key)
+  return descriptor && 'value' in descriptor ? descriptor.value : undefined
+}
+
+function isExactRequestUniqueViolation(error: unknown): boolean {
+  let current: unknown = error
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    const code = ownDataProperty(current, 'code')
+    const constraint = ownDataProperty(current, 'constraint')
+      ?? ownDataProperty(current, 'constraint_name')
+    const message = ownDataProperty(current, 'message')
+    if (
+      code === '23505'
+      && (constraint === 'messaging_consent_events_shop_request_uq'
+        || (typeof message === 'string'
+          && message.includes('messaging_consent_events_shop_request_uq')))
+    ) return true
+    current = ownDataProperty(current, 'cause')
+  }
+  return false
+}
+
+async function recoverExactRequestRace(
+  db: AppDb,
+  input: {
+    actor: MessagingActor
+    customerId: string
+    requestKey: string
+    requestFingerprint: string
+  },
+  validated: Extract<ValidatedRecordInput, { ok: true }>,
+): Promise<RecordResult> {
+  return db.transaction(async (tx) => {
+    const [event] = await tx.select().from(messagingConsentEvents).where(and(
+      eq(messagingConsentEvents.shopId, input.actor.shopId),
+      eq(messagingConsentEvents.actorProfileId, input.actor.profileId),
+      eq(messagingConsentEvents.requestKey, input.requestKey),
+    )).limit(1).for('update')
+    if (!event) return { ok: false, error: 'compliance_unavailable' as const }
+
+    const [context] = await tx.select({
+      customerPhone: customers.phone,
+      actorShopId: profiles.shopId,
+      actorRole: profiles.role,
+      membershipStatus: profiles.membershipStatus,
+      deactivatedAt: profiles.deactivatedAt,
+      shopName: shops.name,
+    }).from(customers).innerJoin(profiles, and(
+      eq(profiles.id, input.actor.profileId),
+      eq(profiles.shopId, input.actor.shopId),
+    )).innerJoin(shops, eq(shops.id, input.actor.shopId)).where(and(
+      eq(customers.id, input.customerId),
+      eq(customers.shopId, input.actor.shopId),
+    )).limit(1).for('update')
+    if (!context) return { ok: false, error: 'not_found' as const }
+    if (
+      context.actorShopId !== input.actor.shopId
+      || context.actorRole !== input.actor.role
+      || context.membershipStatus !== 'active'
+      || context.deactivatedAt !== null
+      || !canManageCustomerMessaging(context.actorRole)
+    ) return { ok: false, error: 'forbidden' as const }
+    if (context.customerPhone !== validated.destination) {
+      return { ok: false, error: 'customer_mismatch' as const }
+    }
+    if (
+      validated.disclosureSnapshot
+      && validated.disclosureSnapshot.senderIdentity !== context.shopName
+    ) return { ok: false, error: 'invalid_input' as const }
+    return retryResult(event, input.requestFingerprint)
+  })
 }
 
 export async function recordMessagingConsentEvent(input: {
@@ -222,7 +424,12 @@ export async function recordMessagingConsentEvent(input: {
   now: Date
   keyRing: FingerprintKeyRing
 }): Promise<RecordResult> {
-  const validated = validateRecordInput(input)
+  let validated: ValidatedRecordInput
+  try {
+    validated = validateRecordInput(input)
+  } catch {
+    return { ok: false, error: 'invalid_input' }
+  }
   if (!validated.ok) return validated
   const current = validated.fingerprints[0]
   if (!current) return { ok: false, error: 'invalid_input' }
@@ -244,10 +451,11 @@ export async function recordMessagingConsentEvent(input: {
         actorRole: profiles.role,
         membershipStatus: profiles.membershipStatus,
         deactivatedAt: profiles.deactivatedAt,
+        shopName: shops.name,
       }).from(customers).innerJoin(profiles, and(
         eq(profiles.id, input.actor.profileId),
         eq(profiles.shopId, input.actor.shopId),
-      )).where(and(
+      )).innerJoin(shops, eq(shops.id, input.actor.shopId)).where(and(
         eq(customers.id, input.customerId),
         eq(customers.shopId, input.actor.shopId),
       )).limit(1).for('update')
@@ -263,6 +471,10 @@ export async function recordMessagingConsentEvent(input: {
       if (context.customerPhone !== validated.destination) {
         return { ok: false, error: 'customer_mismatch' as const }
       }
+      if (
+        validated.disclosureSnapshot
+        && validated.disclosureSnapshot.senderIdentity !== context.shopName
+      ) return { ok: false, error: 'invalid_input' as const }
       if (existingRequest) return retryResult(existingRequest, input.requestFingerprint)
 
       const matchingSuppression = fingerprintPredicate(
@@ -275,21 +487,69 @@ export async function recordMessagingConsentEvent(input: {
         matchingSuppression,
       )).orderBy(asc(smsSuppressions.fingerprintKeyVersion)).for('update')
 
-      const [projection] = await tx.select().from(messagingConsentState).where(and(
+      const matchingProjection = fingerprintPredicate(
+        sortedFingerprints,
+        messagingConsentState.destinationFingerprint,
+        messagingConsentState.fingerprintKeyVersion,
+      )
+      const projections = await tx.select().from(messagingConsentState).where(and(
         eq(messagingConsentState.shopId, input.actor.shopId),
         eq(messagingConsentState.customerId, input.customerId),
-        eq(messagingConsentState.destinationFingerprint, current.fingerprint),
-        eq(messagingConsentState.fingerprintKeyVersion, current.keyVersion),
         eq(messagingConsentState.programVersion, input.programVersion),
-      )).limit(1).for('update')
+        matchingProjection,
+      )).orderBy(
+        asc(messagingConsentState.fingerprintKeyVersion),
+        asc(messagingConsentState.id),
+      ).for('update')
+      if (projections.length > 1) {
+        return { ok: false, error: 'stale_projection' as const }
+      }
+      const projection = projections[0]
+
+      const eventPair = fingerprintPredicate(
+        sortedFingerprints,
+        messagingConsentEvents.destinationFingerprint,
+        messagingConsentEvents.fingerprintKeyVersion,
+      )
+      const revocations = await tx.select().from(messagingConsentEvents).where(and(
+        eq(messagingConsentEvents.shopId, input.actor.shopId),
+        eq(messagingConsentEvents.eventType, 'revoked'),
+        eventPair,
+      )).orderBy(
+        asc(messagingConsentEvents.committedAt),
+        asc(messagingConsentEvents.id),
+      )
+      const latestRevocation = revocations.at(-1)
+
+      const deletionPair = fingerprintPredicate(
+        sortedFingerprints,
+        messagingDeletionRequests.destinationFingerprint,
+        messagingDeletionRequests.fingerprintKeyVersion,
+      )
+      const [deletionBarrier] = await tx.select({ id: messagingDeletionRequests.id })
+        .from(messagingDeletionRequests).where(and(
+          eq(messagingDeletionRequests.shopId, input.actor.shopId),
+          deletionPair,
+        )).limit(1)
 
       const unliftedSuppressions = suppressions.filter(({ liftedAt }) => liftedAt === null)
-      if (input.eventType === 'consented' && unliftedSuppressions.length > 0) {
+      if (
+        input.eventType === 'consented'
+        && (unliftedSuppressions.length > 0 || latestRevocation !== undefined)
+      ) {
         return { ok: false, error: 'invalid_transition' as const }
       }
       if (input.eventType === 'reconsented' && (
-        unliftedSuppressions.length === 0
-        || unliftedSuppressions.some(({ suppressedAt }) => suppressedAt.getTime() >= input.now.getTime())
+        (suppressions.length > 0 && unliftedSuppressions.length === 0)
+        || suppressions.some(({ reason }) => reason !== 'customer_revocation')
+        || deletionBarrier !== undefined
+        || !latestRevocation
+        || latestRevocation.committedAt.getTime() >= input.now.getTime()
+        || unliftedSuppressions.some((suppression) =>
+          suppression.reason !== 'customer_revocation'
+          || suppression.sourceEventId !== latestRevocation.id
+          || suppression.suppressedAt.getTime() !== latestRevocation.committedAt.getTime()
+        )
       )) return { ok: false, error: 'invalid_transition' as const }
 
       const retainUntil = consentProofRetainUntil(input.now)
@@ -307,8 +567,8 @@ export async function recordMessagingConsentEvent(input: {
         occurredAt: input.occurredAt,
         captureMethod: input.captureMethod,
         customerControlled: input.customerControlled,
-        disclosureSnapshot: input.disclosureSnapshot,
-        disclosureHash: input.disclosureHash,
+        disclosureSnapshot: validated.disclosureSnapshot,
+        disclosureHash: validated.disclosureHash,
         evidenceKind: input.evidenceKind,
         evidenceRef: input.evidenceRef,
         actorProfileId: input.actor.profileId,
@@ -319,7 +579,7 @@ export async function recordMessagingConsentEvent(input: {
 
       const status = statusForEvent(input.eventType)
       if (input.eventType !== 'asked') {
-        await tx.insert(messagingConsentState).values({
+        const projectedValues = {
           shopId: input.actor.shopId,
           subjectKey: projection?.subjectKey ?? input.customerId,
           customerId: input.customerId,
@@ -332,24 +592,15 @@ export async function recordMessagingConsentEvent(input: {
           revokedAt: status === 'revoked' ? input.now : null,
           retainUntil,
           updatedAt: input.now,
-        }).onConflictDoUpdate({
-          target: [
-            messagingConsentState.shopId,
-            messagingConsentState.subjectKey,
-            messagingConsentState.destinationFingerprint,
-            messagingConsentState.fingerprintKeyVersion,
-            messagingConsentState.programVersion,
-          ],
-          set: {
-            customerId: input.customerId,
-            status,
-            sourceEventId: eventId,
-            consentedAt: status === 'consented' ? input.now : null,
-            revokedAt: status === 'revoked' ? input.now : null,
-            retainUntil,
-            updatedAt: input.now,
-          },
-        })
+        } as const
+        if (projection) {
+          await tx.update(messagingConsentState).set(projectedValues).where(and(
+            eq(messagingConsentState.shopId, input.actor.shopId),
+            eq(messagingConsentState.id, projection.id),
+          ))
+        } else {
+          await tx.insert(messagingConsentState).values(projectedValues)
+        }
       }
 
       if (input.eventType === 'revoked') {
@@ -388,21 +639,27 @@ export async function recordMessagingConsentEvent(input: {
           eq(smsSuppressions.shopId, input.actor.shopId),
           matchingSuppression,
           isNull(smsSuppressions.liftedAt),
+          eq(smsSuppressions.reason, 'customer_revocation'),
+          eq(smsSuppressions.sourceEventId, latestRevocation!.id),
         ))
       }
 
       return { ok: true, eventId, status }
     })
-  } catch {
+  } catch (error) {
+    let exactRequestRace = false
     try {
-      const existing = await loadPersistedRequest(input.db, {
-        shopId: input.actor.shopId,
-        profileId: input.actor.profileId,
-        requestKey: input.requestKey,
-      })
-      if (existing) return retryResult(existing, input.requestFingerprint)
+      exactRequestRace = isExactRequestUniqueViolation(error)
     } catch {
-      // The bounded compliance error below is the only safe failure result.
+      return { ok: false, error: 'compliance_unavailable' }
+    }
+    if (!exactRequestRace) {
+      return { ok: false, error: 'compliance_unavailable' }
+    }
+    try {
+      return await recoverExactRequestRace(input.db, input, validated)
+    } catch {
+      // The bounded compliance error below is the only safe recovery failure.
     }
     return { ok: false, error: 'compliance_unavailable' }
   }
@@ -415,6 +672,7 @@ function sameInstant(left: Date | null, right: Date | null): boolean {
 function sourceMatchesProjection(
   projection: typeof messagingConsentState.$inferSelect,
   source: typeof messagingConsentEvents.$inferSelect,
+  shopName: string,
 ): boolean {
   const expectedStatus = statusForEvent(source.eventType)
   const projectableEvent = source.eventType === 'declined'
@@ -426,14 +684,21 @@ function sourceMatchesProjection(
     : projection.status === 'revoked'
       ? sameInstant(projection.revokedAt, source.committedAt)
       : projection.consentedAt === null && projection.revokedAt === null
+  const disclosure = projection.status === 'consented'
+    ? validatedDisclosureProof(
+        source.disclosureSnapshot,
+        source.disclosureHash,
+        source.programVersion,
+        false,
+      )
+    : null
   const validConsentProof = projection.status !== 'consented' || (
     (source.eventType === 'consented' || source.eventType === 'reconsented')
     && source.captureMethod === 'signed_form'
     && source.customerControlled === true
     && source.evidenceKind === 'signed_form_reference'
     && validEvidenceRef(source.evidenceRef)
-    && disclosureIsBounded(source.disclosureSnapshot)
-    && fingerprintSchema.safeParse(source.disclosureHash).success
+    && disclosure?.snapshot.senderIdentity === shopName
   )
   const validRevocationProof = projection.status !== 'revoked' || (
     source.eventType === 'revoked'
@@ -508,12 +773,59 @@ export async function getMessagingEligibility(input: {
     const suppressions = await input.db.select().from(smsSuppressions).where(and(
       eq(smsSuppressions.shopId, input.shopId),
       suppressionPair,
-      isNull(smsSuppressions.liftedAt),
     )).orderBy(asc(smsSuppressions.fingerprintKeyVersion))
-    if (suppressions.some(({ retainUntil }) => retainUntil.getTime() > currentTime.getTime())) {
+    const blockingSuppressions = suppressions.filter((suppression) =>
+      suppression.liftedAt === null || suppression.reason !== 'customer_revocation',
+    )
+    if (blockingSuppressions.some(
+      ({ retainUntil }) => retainUntil.getTime() > currentTime.getTime(),
+    )) {
       return { allowed: false, reason: 'suppressed' }
     }
-    if (suppressions.length > 0) return { allowed: false, reason: 'missing_consent' }
+    if (blockingSuppressions.length > 0) {
+      return { allowed: false, reason: 'missing_consent' }
+    }
+
+    const [shop] = await input.db.select({ name: shops.name }).from(shops).where(
+      eq(shops.id, input.shopId),
+    ).limit(1)
+    if (!shop) return { allowed: false, reason: 'compliance_unavailable' }
+
+    const eventPair = fingerprintPredicate(
+      fingerprints,
+      messagingConsentEvents.destinationFingerprint,
+      messagingConsentEvents.fingerprintKeyVersion,
+    )
+    const revocations = await input.db.select({
+      id: messagingConsentEvents.id,
+      committedAt: messagingConsentEvents.committedAt,
+    }).from(messagingConsentEvents).where(and(
+      eq(messagingConsentEvents.shopId, input.shopId),
+      eq(messagingConsentEvents.eventType, 'revoked'),
+      eventPair,
+    )).orderBy(
+      asc(messagingConsentEvents.committedAt),
+      asc(messagingConsentEvents.id),
+    )
+    const completedDeletions = await input.db.select({
+      id: messagingDeletionRequests.id,
+      barrierAt: messagingDeletionRequests.latestRelevantAt,
+    }).from(messagingDeletionRequests).where(and(
+      eq(messagingDeletionRequests.shopId, input.shopId),
+      eq(messagingDeletionRequests.state, 'completed'),
+      deletionPair,
+    )).orderBy(
+      asc(messagingDeletionRequests.latestRelevantAt),
+      asc(messagingDeletionRequests.id),
+    )
+    if (completedDeletions.some(({ barrierAt }) => barrierAt === null)) {
+      return { allowed: false, reason: 'compliance_unavailable' }
+    }
+    const barrierTimes = [
+      ...revocations.map(({ committedAt }) => committedAt.getTime()),
+      ...completedDeletions.map(({ barrierAt }) => barrierAt!.getTime()),
+    ]
+    const latestBarrierAt = barrierTimes.length > 0 ? Math.max(...barrierTimes) : null
 
     const candidates = await input.db.select().from(messagingConsentState).where(and(
       eq(messagingConsentState.shopId, input.shopId),
@@ -526,6 +838,9 @@ export async function getMessagingEligibility(input: {
       ({ programVersion }) => programVersion === input.programVersion,
     )
     if (programCandidates.length === 0) return { allowed: false, reason: 'program_mismatch' }
+    if (programCandidates.length !== 1) {
+      return { allowed: false, reason: 'stale_projection' }
+    }
 
     const sourceIds = [...new Set(programCandidates.map(({ sourceEventId }) => sourceEventId))]
     const sources = await input.db.select().from(messagingConsentEvents).where(and(
@@ -535,15 +850,18 @@ export async function getMessagingEligibility(input: {
     const sourceById = new Map(sources.map((source) => [source.id, source]))
     if (programCandidates.some((projection) => {
       const source = sourceById.get(projection.sourceEventId)
-      return !source || !sourceMatchesProjection(projection, source)
+      return !source || !sourceMatchesProjection(projection, source, shop.name)
     })) return { allowed: false, reason: 'stale_projection' }
 
-    const latest = [...programCandidates].sort((left, right) => {
-      const leftSource = sourceById.get(left.sourceEventId)!
-      const rightSource = sourceById.get(right.sourceEventId)!
-      return rightSource.committedAt.getTime() - leftSource.committedAt.getTime()
-    })[0]
-    if (!latest || latest.status !== 'consented') {
+    const latest = programCandidates[0]
+    const latestSource = sourceById.get(latest.sourceEventId)!
+    if (
+      latest.status !== 'consented'
+      || (latestBarrierAt !== null && (
+        latestSource.committedAt.getTime() <= latestBarrierAt
+        || latestSource.eventType !== 'reconsented'
+      ))
+    ) {
       return { allowed: false, reason: 'missing_consent' }
     }
     return {

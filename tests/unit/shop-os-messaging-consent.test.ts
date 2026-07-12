@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getMessagingEligibility,
@@ -16,12 +17,12 @@ import {
 } from '@/lib/db/schema'
 import { fingerprintDestination, type FingerprintKeyRing } from '@/lib/shop-os/messaging-retention-policy'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
+import type { AppDb } from '@/lib/db/queries'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 const destination = '+12025550123'
 const programVersion = 'repair_updates_v1'
-const disclosureHash = 'a'.repeat(64)
 const keyRing: FingerprintKeyRing = Object.freeze({
   currentVersion: 'key_v2',
   keys: Object.freeze({
@@ -29,18 +30,41 @@ const keyRing: FingerprintKeyRing = Object.freeze({
     key_v1: 'legacy-shop-key-material-that-is-at-least-32-bytes',
   }),
 })
-const disclosureSnapshot = Object.freeze({
+const signedDisclosure = (
+  senderIdentity: string,
+  smsTermsUrl: string,
+  privacyPolicyUrl: string,
+) => `By signing below, I agree to receive recurring transactional text messages from ${senderIdentity} about estimates, authorizations, repair status, and pickup for vehicles I bring to this shop. Message frequency varies by repair order. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help. Consent is not a condition of purchase. SMS Terms: ${smsTermsUrl}. Privacy Policy: ${privacyPolicyUrl}. Vyntechs provides the messaging technology.`
+
+const canonicalDisclosure = (snapshot: Record<string, unknown>) => JSON.stringify(
+  Object.fromEntries(Object.keys(snapshot).sort().map((key) => [key, snapshot[key]])),
+)
+
+const hashDisclosure = (snapshot: Record<string, unknown>) => createHash('sha256')
+  .update(canonicalDisclosure(snapshot))
+  .digest('hex')
+
+const disclosureFor = (senderIdentity: string) => Object.freeze({
+  disclosureVersion: 'signed_repair_updates_v1',
   programVersion,
-  senderIdentity: 'North Shop',
-  messagePurpose: 'transactional_repair_updates',
-  variableFrequency: true,
-  messageDataRates: true,
-  stopInstructions: true,
-  helpInstructions: true,
-  noPurchaseCondition: true,
+  senderIdentity,
+  messagePurpose: 'estimates_authorizations_repair_status_pickup',
+  messageFrequency: 'varies_by_repair_order',
+  messageAndDataRates: 'may_apply',
+  stopKeyword: 'STOP',
+  helpKeyword: 'HELP',
+  consentNotConditionOfPurchase: true,
   smsTermsUrl: 'https://example.test/sms-terms',
-  privacyUrl: 'https://example.test/privacy',
+  privacyPolicyUrl: 'https://example.test/privacy',
+  technologyProvider: 'Vyntechs',
+  renderedDisclosure: signedDisclosure(
+    senderIdentity,
+    'https://example.test/sms-terms',
+    'https://example.test/privacy',
+  ),
 })
+const disclosureSnapshot = disclosureFor('North Shop')
+const disclosureHash = hashDisclosure(disclosureSnapshot)
 const now = new Date('2026-07-12T18:00:00.000Z')
 
 describe('Shop OS messaging consent truth', () => {
@@ -173,8 +197,75 @@ describe('Shop OS messaging consent truth', () => {
       disclosureSnapshot: { value: 'x'.repeat(4097) },
     })).toEqual({ ok: false, error: 'invalid_input' })
     expect(await signedConsent(owner, customerId, {
+      disclosureSnapshot: Object.freeze({ x: true }),
+      disclosureHash: 'a'.repeat(64),
+    })).toEqual({ ok: false, error: 'invalid_input' })
+    expect(await signedConsent(owner, customerId, {
+      disclosureHash: 'a'.repeat(64),
+    })).toEqual({ ok: false, error: 'invalid_input' })
+    const privateLinkDisclosure = Object.freeze({
+      ...disclosureSnapshot,
+      smsTermsUrl: 'https://127.0.0.1/sms-terms',
+      renderedDisclosure: signedDisclosure(
+        'North Shop',
+        'https://127.0.0.1/sms-terms',
+        disclosureSnapshot.privacyPolicyUrl,
+      ),
+    })
+    expect(await signedConsent(owner, customerId, {
+      disclosureSnapshot: privateLinkDisclosure,
+      disclosureHash: hashDisclosure(privateLinkDisclosure),
+    })).toEqual({ ok: false, error: 'invalid_input' })
+    expect(await signedConsent(owner, customerId, {
       occurredAt: new Date(Number.NaN),
     })).toEqual({ ok: false, error: 'invalid_input' })
+  })
+
+  it('rejects extra, inherited, accessor, proxy, and mutable disclosure input without invoking it', async () => {
+    const extra = Object.freeze({ ...disclosureSnapshot, extra: 'ambiguous' })
+    const inherited = Object.freeze(Object.assign(
+      Object.create({ inherited: 'ambiguous' }) as Record<string, unknown>,
+      disclosureSnapshot,
+    ))
+    let getterCalls = 0
+    const accessor = { ...disclosureSnapshot } as Record<string, unknown>
+    Object.defineProperty(accessor, 'senderIdentity', {
+      enumerable: true,
+      get() {
+        getterCalls += 1
+        throw new Error(`${destination}:private-disclosure`)
+      },
+    })
+    Object.freeze(accessor)
+    const proxy = new Proxy({ ...disclosureSnapshot }, {
+      ownKeys() {
+        throw new Error(`${destination}:private-proxy`)
+      },
+    })
+    const mutable = { ...disclosureSnapshot }
+
+    for (const snapshot of [extra, inherited, accessor, proxy, mutable]) {
+      expect(await signedConsent(owner, customerId, {
+        disclosureSnapshot: snapshot,
+        disclosureHash: 'a'.repeat(64),
+      })).toEqual({ ok: false, error: 'invalid_input' })
+    }
+    expect(getterCalls).toBe(0)
+  })
+
+  it('persists the one validated immutable disclosure copy and revalidates its hash for eligibility', async () => {
+    const result = await signedConsent(owner)
+    expect(result).toMatchObject({ ok: true })
+    const [stored] = await db.select().from(messagingConsentEvents)
+    expect(stored.disclosureSnapshot).toEqual(disclosureSnapshot)
+    expect(stored.disclosureHash).toBe(disclosureHash)
+    expect(await eligibility()).toMatchObject({ allowed: true })
+
+    await client.exec('drop trigger messaging_consent_events_append_only on messaging_consent_events')
+    await db.update(messagingConsentEvents).set({
+      disclosureHash: 'a'.repeat(64),
+    }).where(eq(messagingConsentEvents.id, stored.id))
+    expect(await eligibility()).toEqual({ allowed: false, reason: 'stale_projection' })
   })
 
   it('keeps declined destinations ineligible and binds consent to customer and program', async () => {
@@ -216,7 +307,11 @@ describe('Shop OS messaging consent truth', () => {
     expect(await signedConsent(owner, customerId)).toMatchObject({ ok: true })
     expect(await signedConsent(advisor, duplicateCustomerId)).toMatchObject({ ok: true })
     const otherOwner: MessagingActor = { profileId: uuid(24), shopId: otherShopId, role: 'owner' }
-    expect(await signedConsent(otherOwner, otherShopCustomerId)).toMatchObject({ ok: true })
+    const otherDisclosure = disclosureFor('South Shop')
+    expect(await signedConsent(otherOwner, otherShopCustomerId, {
+      disclosureSnapshot: otherDisclosure,
+      disclosureHash: hashDisclosure(otherDisclosure),
+    })).toMatchObject({ ok: true })
 
     expect(await revoke(owner)).toMatchObject({ ok: true })
     expect(await eligibility()).toEqual({ allowed: false, reason: 'suppressed' })
@@ -260,8 +355,56 @@ describe('Shop OS messaging consent truth', () => {
     expect(await db.select().from(messagingConsentEvents)).toHaveLength(1)
   })
 
-  it('requires a later full-disclosure re-consent before lifting suppression', async () => {
+  it('recovers only the exact request unique race and rechecks current authority', async () => {
+    const stableKey = requestKey()
+    const first = await signedConsent(owner, customerId, { requestKey: stableKey })
+    expect(first).toMatchObject({ ok: true })
+    let transactions = 0
+    const uniqueRaceDb = {
+      transaction: async (callback: Parameters<AppDb['transaction']>[0]) => {
+        transactions += 1
+        if (transactions === 1) {
+          throw Object.assign(new Error('safe unique race'), {
+            code: '23505',
+            constraint: 'messaging_consent_events_shop_request_uq',
+          })
+        }
+        return db.transaction(callback as never)
+      },
+    } as unknown as AppDb
+
+    expect(await signedConsent(owner, customerId, {
+      db: uniqueRaceDb,
+      requestKey: stableKey,
+    })).toEqual(first)
+    expect(transactions).toBe(2)
+
+    await db.update(profiles).set({ deactivatedAt: now }).where(eq(profiles.id, owner.profileId))
+    transactions = 0
+    expect(await signedConsent(owner, customerId, {
+      db: uniqueRaceDb,
+      requestKey: stableKey,
+    })).toEqual({ ok: false, error: 'forbidden' })
+  })
+
+  it('does not reinterpret a generic database failure as a successful retry', async () => {
+    const stableKey = requestKey()
+    expect(await signedConsent(owner, customerId, { requestKey: stableKey })).toMatchObject({ ok: true })
+    const failingDb = {
+      transaction: async () => {
+        throw new Error(`${destination}:private-database-failure`)
+      },
+      select: db.select.bind(db),
+    } as unknown as AppDb
+    expect(await signedConsent(owner, customerId, {
+      db: failingDb,
+      requestKey: stableKey,
+    })).toEqual({ ok: false, error: 'compliance_unavailable' })
+  })
+
+  it('allows only A fresh re-consent after A/B shared-number revocation, even if suppression rows disappear', async () => {
     await signedConsent(owner)
+    await signedConsent(advisor, duplicateCustomerId)
     await revoke(owner)
     expect(await signedConsent(owner, customerId, {
       now: new Date(now.getTime() + 1),
@@ -279,6 +422,99 @@ describe('Shop OS messaging consent truth', () => {
     expect(
       (await db.select().from(smsSuppressions)).every(({ liftedAt }) => liftedAt !== null),
     ).toBe(true)
+    expect(await eligibility(duplicateCustomerId)).toEqual({
+      allowed: false,
+      reason: 'missing_consent',
+    })
+
+    await db.delete(smsSuppressions).where(eq(smsSuppressions.shopId, shopId))
+    expect(await eligibility()).toMatchObject({ allowed: true })
+    expect(await eligibility(duplicateCustomerId)).toEqual({
+      allowed: false,
+      reason: 'missing_consent',
+    })
+  })
+
+  it('requires an explicit re-consent event after suppression rows have expired or been purged', async () => {
+    await signedConsent(owner)
+    await signedConsent(advisor, duplicateCustomerId)
+    await revoke(owner)
+    await db.delete(smsSuppressions).where(eq(smsSuppressions.shopId, shopId))
+
+    expect(await signedConsent(owner, customerId, {
+      now: new Date(now.getTime() + 1),
+    })).toEqual({ ok: false, error: 'invalid_transition' })
+    expect(await signedConsent(owner, customerId, {
+      eventType: 'reconsented',
+      now: new Date(now.getTime() + 1),
+    })).toMatchObject({ ok: true, status: 'consented' })
+    expect(await eligibility()).toMatchObject({ allowed: true })
+    expect(await eligibility(duplicateCustomerId)).toEqual({
+      allowed: false,
+      reason: 'missing_consent',
+    })
+  })
+
+  it.each(['verified_deletion', 'permanent_failure', 'number_reassigned'] as const)(
+    'never lifts a %s suppression through re-consent',
+    async (reason) => {
+      await signedConsent(owner)
+      const fingerprint = fingerprintDestination(
+        destination,
+        keyRing.currentVersion,
+        keyRing.keys[keyRing.currentVersion]!,
+      )
+      await db.insert(smsSuppressions).values({
+        shopId,
+        destinationFingerprint: fingerprint,
+        fingerprintKeyVersion: keyRing.currentVersion,
+        reason,
+        suppressedAt: now,
+        retainUntil: new Date('2031-07-12T18:00:00.000Z'),
+      })
+      expect(await signedConsent(owner, customerId, {
+        eventType: 'reconsented',
+        now: new Date(now.getTime() + 1),
+      })).toEqual({ ok: false, error: 'invalid_transition' })
+      expect((await db.select().from(smsSuppressions))[0]?.liftedAt).toBeNull()
+    },
+  )
+
+  it('preserves one valid legacy projection during key rotation and migrates it on the next event', async () => {
+    const legacyOnlyRing: FingerprintKeyRing = {
+      currentVersion: 'key_v1',
+      keys: { key_v1: keyRing.keys.key_v1! },
+    }
+    expect(await signedConsent(owner, customerId, { keyRing: legacyOnlyRing })).toMatchObject({ ok: true })
+    expect(await eligibility()).toMatchObject({ allowed: true, keyVersion: 'key_v1' })
+
+    expect(await revoke(owner, customerId, {
+      keyRing,
+      now: new Date(now.getTime() + 1),
+    })).toMatchObject({ ok: true })
+    const projections = await db.select().from(messagingConsentState)
+    expect(projections).toHaveLength(1)
+    expect(projections[0]?.fingerprintKeyVersion).toBe('key_v2')
+  })
+
+  it('fails closed on multiple or equal-time projection truths instead of choosing key order', async () => {
+    const legacyOnlyRing: FingerprintKeyRing = {
+      currentVersion: 'key_v1',
+      keys: { key_v1: keyRing.keys.key_v1! },
+    }
+    await signedConsent(owner, customerId, { keyRing: legacyOnlyRing })
+    const [legacyProjection] = await db.select().from(messagingConsentState)
+    await db.insert(messagingConsentState).values({
+      ...legacyProjection,
+      id: uuid(95),
+      destinationFingerprint: fingerprintDestination(
+        destination,
+        keyRing.currentVersion,
+        keyRing.keys[keyRing.currentVersion]!,
+      ),
+      fingerprintKeyVersion: keyRing.currentVersion,
+    })
+    expect(await eligibility()).toEqual({ allowed: false, reason: 'stale_projection' })
   })
 
   it('rolls back the event when projection mutation fails', async () => {
@@ -323,6 +559,35 @@ describe('Shop OS messaging consent truth', () => {
       requestingActorProfileId: owner.profileId,
     })
     expect(await eligibility()).toEqual({ allowed: false, reason: 'deletion_pending' })
+  })
+
+  it('keeps a completed deletion barrier authoritative after suppression rows are absent', async () => {
+    await signedConsent(owner)
+    const fingerprint = fingerprintDestination(
+      destination,
+      keyRing.currentVersion,
+      keyRing.keys[keyRing.currentVersion]!,
+    )
+    await db.insert(messagingDeletionRequests).values({
+      id: uuid(92),
+      requestKey: uuid(93),
+      requestFingerprint: 'f'.repeat(64),
+      shopId,
+      subjectKey: customerId,
+      customerId: null,
+      destinationFingerprint: fingerprint,
+      fingerprintKeyVersion: keyRing.currentVersion,
+      state: 'completed',
+      reasonCode: 'customer_request',
+      requestingActorProfileId: owner.profileId,
+      requestedAt: now,
+      completedAt: now,
+      latestRelevantAt: now,
+      priorRecordCounts: {},
+      proofSummary: {},
+      retainUntil: new Date('2031-07-12T18:00:00.000Z'),
+    })
+    expect(await eligibility()).toEqual({ allowed: false, reason: 'missing_consent' })
   })
 
   it('does not restore duplicate-customer consent when suppression expires', async () => {
