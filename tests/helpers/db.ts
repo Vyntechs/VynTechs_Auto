@@ -53,6 +53,7 @@ export async function createTestDb(): Promise<{
   await ensureVendorAccountsMigration(client)
   await ensureQuoteTriggerSearchPathMigration(client)
   await ensureShopOsServerOnlyAclMigration(client)
+  await ensureMessagingRetentionMigration(client)
   return {
     db,
     client,
@@ -291,5 +292,176 @@ export async function ensureShopOsServerOnlyAclMigration(client: PGlite): Promis
   const after = await shopOsServerOnlyAclMarkers(client)
   if (!hasCompleteShopOsServerOnlyAcl(after)) {
     throw new Error('Shop OS server-only ACL hardening failed in ephemeral database')
+  }
+}
+
+type MessagingRetentionMarkers = {
+  table_count: number
+  column_count: number
+  constraint_count: number
+  index_count: number
+  rls_count: number
+  policy_count: number
+  trigger_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function messagingRetentionMarkers(
+  client: PGlite,
+): Promise<MessagingRetentionMarkers> {
+  const result = await client.query<MessagingRetentionMarkers>(`
+    with expected_tables(table_name) as (values
+      ('messaging_consent_events'),
+      ('messaging_consent_state'),
+      ('sms_suppressions'),
+      ('messaging_deletion_requests'),
+      ('messaging_retention_holds')
+    ), expected_columns(table_name, column_name) as (values
+      ('messaging_consent_events', 'id'), ('messaging_consent_events', 'shop_id'),
+      ('messaging_consent_events', 'subject_key'), ('messaging_consent_events', 'customer_id'),
+      ('messaging_consent_events', 'destination_fingerprint'), ('messaging_consent_events', 'fingerprint_key_version'),
+      ('messaging_consent_events', 'program_version'), ('messaging_consent_events', 'event_type'),
+      ('messaging_consent_events', 'committed_at'), ('messaging_consent_events', 'occurred_at'),
+      ('messaging_consent_events', 'capture_method'), ('messaging_consent_events', 'customer_controlled'),
+      ('messaging_consent_events', 'disclosure_snapshot'), ('messaging_consent_events', 'disclosure_hash'),
+      ('messaging_consent_events', 'evidence_kind'), ('messaging_consent_events', 'evidence_ref'),
+      ('messaging_consent_events', 'actor_profile_id'), ('messaging_consent_events', 'request_key'),
+      ('messaging_consent_events', 'request_fingerprint'), ('messaging_consent_events', 'retain_until'),
+      ('messaging_consent_state', 'id'), ('messaging_consent_state', 'shop_id'),
+      ('messaging_consent_state', 'subject_key'), ('messaging_consent_state', 'customer_id'),
+      ('messaging_consent_state', 'destination_fingerprint'), ('messaging_consent_state', 'fingerprint_key_version'),
+      ('messaging_consent_state', 'program_version'), ('messaging_consent_state', 'status'),
+      ('messaging_consent_state', 'source_event_id'), ('messaging_consent_state', 'consented_at'),
+      ('messaging_consent_state', 'revoked_at'), ('messaging_consent_state', 'retain_until'),
+      ('messaging_consent_state', 'updated_at'),
+      ('sms_suppressions', 'id'), ('sms_suppressions', 'shop_id'),
+      ('sms_suppressions', 'destination_fingerprint'), ('sms_suppressions', 'fingerprint_key_version'),
+      ('sms_suppressions', 'source_event_id'), ('sms_suppressions', 'reason'),
+      ('sms_suppressions', 'suppressed_at'), ('sms_suppressions', 'lifted_at'),
+      ('sms_suppressions', 'retain_until'), ('sms_suppressions', 'updated_at'),
+      ('messaging_deletion_requests', 'id'), ('messaging_deletion_requests', 'request_key'),
+      ('messaging_deletion_requests', 'request_fingerprint'), ('messaging_deletion_requests', 'shop_id'),
+      ('messaging_deletion_requests', 'subject_key'), ('messaging_deletion_requests', 'customer_id'),
+      ('messaging_deletion_requests', 'destination_fingerprint'), ('messaging_deletion_requests', 'fingerprint_key_version'),
+      ('messaging_deletion_requests', 'state'), ('messaging_deletion_requests', 'reason_code'),
+      ('messaging_deletion_requests', 'requesting_actor_profile_id'), ('messaging_deletion_requests', 'requested_at'),
+      ('messaging_deletion_requests', 'completed_at'), ('messaging_deletion_requests', 'prior_record_counts'),
+      ('messaging_deletion_requests', 'proof_summary'), ('messaging_deletion_requests', 'retain_until'),
+      ('messaging_retention_holds', 'id'), ('messaging_retention_holds', 'shop_id'),
+      ('messaging_retention_holds', 'resource_type'), ('messaging_retention_holds', 'resource_id'),
+      ('messaging_retention_holds', 'subject_key'), ('messaging_retention_holds', 'reason_code'),
+      ('messaging_retention_holds', 'authorizing_actor_profile_id'), ('messaging_retention_holds', 'starts_at'),
+      ('messaging_retention_holds', 'review_at'), ('messaging_retention_holds', 'expires_at'),
+      ('messaging_retention_holds', 'released_at'), ('messaging_retention_holds', 'retain_until')
+    ), expected_constraints(constraint_name) as (values
+      ('messaging_consent_events_pkey'), ('messaging_consent_events_shop_fk'),
+      ('messaging_consent_events_shop_customer_fk'), ('messaging_consent_events_shop_actor_fk'),
+      ('messaging_consent_events_destination_fingerprint_valid'), ('messaging_consent_events_fingerprint_key_version_valid'),
+      ('messaging_consent_events_program_version_valid'), ('messaging_consent_events_event_type_valid'),
+      ('messaging_consent_events_capture_method_valid'), ('messaging_consent_events_disclosure_snapshot_object'),
+      ('messaging_consent_events_disclosure_snapshot_size'), ('messaging_consent_events_disclosure_hash_valid'),
+      ('messaging_consent_events_evidence_kind_valid'), ('messaging_consent_events_evidence_ref_valid'),
+      ('messaging_consent_events_request_fingerprint_valid'),
+      ('messaging_consent_state_pkey'), ('messaging_consent_state_shop_fk'),
+      ('messaging_consent_state_shop_customer_fk'), ('messaging_consent_state_shop_source_event_fk'),
+      ('messaging_consent_state_destination_fingerprint_valid'), ('messaging_consent_state_fingerprint_key_version_valid'),
+      ('messaging_consent_state_program_version_valid'), ('messaging_consent_state_status_valid'),
+      ('messaging_consent_state_timestamps_consistent'),
+      ('sms_suppressions_pkey'), ('sms_suppressions_shop_fk'),
+      ('sms_suppressions_shop_source_event_fk'), ('sms_suppressions_destination_fingerprint_valid'),
+      ('sms_suppressions_fingerprint_key_version_valid'), ('sms_suppressions_reason_valid'),
+      ('sms_suppressions_lifted_at_valid'),
+      ('messaging_deletion_requests_pkey'), ('messaging_deletion_requests_shop_fk'),
+      ('messaging_deletion_requests_shop_customer_fk'), ('messaging_deletion_requests_shop_actor_fk'),
+      ('messaging_deletion_requests_request_fingerprint_valid'), ('messaging_deletion_requests_destination_fingerprint_valid'),
+      ('messaging_deletion_requests_fingerprint_key_version_valid'), ('messaging_deletion_requests_state_valid'),
+      ('messaging_deletion_requests_reason_code_valid'), ('messaging_deletion_requests_prior_counts_object'),
+      ('messaging_deletion_requests_prior_counts_size'), ('messaging_deletion_requests_proof_summary_object'),
+      ('messaging_deletion_requests_proof_summary_size'), ('messaging_deletion_requests_state_consistent'),
+      ('messaging_retention_holds_pkey'), ('messaging_retention_holds_shop_fk'),
+      ('messaging_retention_holds_shop_actor_fk'), ('messaging_retention_holds_resource_type_valid'),
+      ('messaging_retention_holds_reason_code_valid'), ('messaging_retention_holds_target_consistent'),
+      ('messaging_retention_holds_review_valid'), ('messaging_retention_holds_release_valid'),
+      ('messaging_retention_holds_max_duration')
+    ), expected_indexes(index_name) as (values
+      ('messaging_consent_events_shop_id_uq'), ('messaging_consent_events_shop_request_uq'),
+      ('messaging_consent_events_subject_idx'), ('messaging_consent_state_shop_id_uq'),
+      ('messaging_consent_state_subject_program_uq'), ('sms_suppressions_shop_id_uq'),
+      ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
+      ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
+      ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx')
+    ), expected_triggers(trigger_name) as (values
+      ('messaging_consent_events_append_only'),
+      ('messaging_deletion_requests_guard')
+    )
+    select
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relkind in ('r', 'p')) as table_count,
+      (select count(*)::int from expected_columns e
+       join information_schema.columns c using (table_name, column_name)
+       where c.table_schema = 'public') as column_count,
+      (select count(*)::int from expected_constraints e
+       join pg_constraint c on c.conname = e.constraint_name
+       where c.connamespace = 'public'::regnamespace) as constraint_count,
+      (select count(*)::int from expected_indexes e
+       join pg_indexes i on i.indexname = e.index_name and i.schemaname = 'public') as index_count,
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relrowsecurity) as rls_count,
+      (select count(*)::int from expected_tables e
+       join pg_policies p on p.tablename = e.table_name and p.schemaname = 'public'
+       where p.policyname = e.table_name || '_server_only_deny_direct'
+         and p.roles::text = '{anon,authenticated}'
+         and p.cmd = 'ALL' and p.qual = 'false' and p.with_check = 'false') as policy_count,
+      (select count(*)::int from expected_triggers e
+       join pg_trigger t on t.tgname = e.trigger_name
+       where not t.tgisinternal) as trigger_count,
+      (select count(*)::int from expected_tables e
+       join information_schema.role_table_grants g on g.table_name = e.table_name
+       where g.table_schema = 'public' and g.grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from expected_tables e
+       join information_schema.role_table_grants g on g.table_name = e.table_name
+       where g.table_schema = 'public' and g.grantee = 'service_role'
+         and g.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('messaging retention schema inspection failed')
+  return markers
+}
+
+function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
+  return markers.table_count === 5
+    && markers.column_count === 71
+    && markers.constraint_count === 54
+    && markers.index_count === 12
+    && markers.rls_count === 5
+    && markers.policy_count === 5
+    && markers.trigger_count === 2
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 20
+}
+
+function hasAnyMessagingRetentionMarker(markers: MessagingRetentionMarkers): boolean {
+  return Object.values(markers).some((value) => value > 0)
+}
+
+export async function ensureMessagingRetentionMigration(client: PGlite): Promise<void> {
+  const before = await messagingRetentionMarkers(client)
+  if (isCompleteMessagingRetention(before)) return
+  if (hasAnyMessagingRetentionMarker(before)) {
+    throw new Error('partial messaging retention schema in ephemeral database')
+  }
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0033_shop_os_messaging_retention.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  const after = await messagingRetentionMarkers(client)
+  if (!isCompleteMessagingRetention(after)) {
+    throw new Error('messaging retention schema hardening failed in ephemeral database')
   }
 }

@@ -789,6 +789,387 @@ export const quoteEvents = pgTable(
   ],
 )
 
+export const messagingConsentEvents = pgTable(
+  'messaging_consent_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    subjectKey: uuid('subject_key').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    destinationFingerprint: text('destination_fingerprint').notNull(),
+    fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
+    programVersion: text('program_version').notNull(),
+    eventType: text('event_type', {
+      enum: ['asked', 'declined', 'consented', 'revoked', 'reconsented', 'deleted'],
+    }).notNull(),
+    committedAt: timestamp('committed_at', { withTimezone: true }).defaultNow().notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    captureMethod: text('capture_method', {
+      enum: ['customer_web', 'signed_form', 'provider_webhook', 'staff_request'],
+    }).notNull(),
+    customerControlled: boolean('customer_controlled').notNull(),
+    disclosureSnapshot: jsonb('disclosure_snapshot').$type<Record<string, unknown>>(),
+    disclosureHash: text('disclosure_hash'),
+    evidenceKind: text('evidence_kind', {
+      enum: ['customer_checkbox', 'signed_form_reference', 'provider_event', 'staff_request'],
+    }).notNull(),
+    evidenceRef: text('evidence_ref'),
+    actorProfileId: uuid('actor_profile_id'),
+    requestKey: uuid('request_key').notNull(),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'messaging_consent_events_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_consent_events_shop_customer_fk',
+      columns: [table.shopId, table.customerId],
+      foreignColumns: [customers.shopId, customers.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'messaging_consent_events_shop_actor_fk',
+      columns: [table.shopId, table.actorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('messaging_consent_events_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('messaging_consent_events_shop_request_uq').on(
+      table.shopId,
+      table.actorProfileId,
+      table.requestKey,
+    ),
+    index('messaging_consent_events_subject_idx').on(
+      table.shopId,
+      table.subjectKey,
+      table.committedAt,
+    ),
+    check(
+      'messaging_consent_events_destination_fingerprint_valid',
+      sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'messaging_consent_events_fingerprint_key_version_valid',
+      sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_consent_events_program_version_valid',
+      sql`${table.programVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_consent_events_event_type_valid',
+      sql`${table.eventType} in ('asked', 'declined', 'consented', 'revoked', 'reconsented', 'deleted')`,
+    ),
+    check(
+      'messaging_consent_events_capture_method_valid',
+      sql`${table.captureMethod} in ('customer_web', 'signed_form', 'provider_webhook', 'staff_request')`,
+    ),
+    check(
+      'messaging_consent_events_disclosure_snapshot_object',
+      sql`${table.disclosureSnapshot} is null or jsonb_typeof(${table.disclosureSnapshot}) = 'object'`,
+    ),
+    check(
+      'messaging_consent_events_disclosure_snapshot_size',
+      sql`${table.disclosureSnapshot} is null or octet_length(${table.disclosureSnapshot}::text) <= 4096`,
+    ),
+    check(
+      'messaging_consent_events_disclosure_hash_valid',
+      sql`${table.disclosureHash} is null or ${table.disclosureHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'messaging_consent_events_evidence_kind_valid',
+      sql`${table.evidenceKind} in ('customer_checkbox', 'signed_form_reference', 'provider_event', 'staff_request')`,
+    ),
+    check(
+      'messaging_consent_events_evidence_ref_valid',
+      sql`${table.evidenceRef} is null or char_length(${table.evidenceRef}) between 1 and 256`,
+    ),
+    check(
+      'messaging_consent_events_request_fingerprint_valid',
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+)
+
+export const messagingConsentState = pgTable(
+  'messaging_consent_state',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    subjectKey: uuid('subject_key').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    destinationFingerprint: text('destination_fingerprint').notNull(),
+    fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
+    programVersion: text('program_version').notNull(),
+    status: text('status', { enum: ['declined', 'consented', 'revoked'] }).notNull(),
+    sourceEventId: uuid('source_event_id').notNull(),
+    consentedAt: timestamp('consented_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'messaging_consent_state_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_consent_state_shop_customer_fk',
+      columns: [table.shopId, table.customerId],
+      foreignColumns: [customers.shopId, customers.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_consent_state_shop_source_event_fk',
+      columns: [table.shopId, table.sourceEventId],
+      foreignColumns: [messagingConsentEvents.shopId, messagingConsentEvents.id],
+    }).onDelete('restrict'),
+    uniqueIndex('messaging_consent_state_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('messaging_consent_state_subject_program_uq').on(
+      table.shopId,
+      table.subjectKey,
+      table.destinationFingerprint,
+      table.fingerprintKeyVersion,
+      table.programVersion,
+    ),
+    check(
+      'messaging_consent_state_destination_fingerprint_valid',
+      sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'messaging_consent_state_fingerprint_key_version_valid',
+      sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_consent_state_program_version_valid',
+      sql`${table.programVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_consent_state_status_valid',
+      sql`${table.status} in ('declined', 'consented', 'revoked')`,
+    ),
+    check(
+      'messaging_consent_state_timestamps_consistent',
+      sql`(${table.status} = 'declined' and ${table.consentedAt} is null and ${table.revokedAt} is null)
+        or (${table.status} = 'consented' and ${table.consentedAt} is not null and ${table.revokedAt} is null)
+        or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`,
+    ),
+  ],
+)
+
+export const smsSuppressions = pgTable(
+  'sms_suppressions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    destinationFingerprint: text('destination_fingerprint').notNull(),
+    fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
+    sourceEventId: uuid('source_event_id'),
+    reason: text('reason', {
+      enum: ['customer_revocation', 'verified_deletion', 'permanent_failure', 'number_reassigned'],
+    }).notNull(),
+    suppressedAt: timestamp('suppressed_at', { withTimezone: true }).defaultNow().notNull(),
+    liftedAt: timestamp('lifted_at', { withTimezone: true }),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'sms_suppressions_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'sms_suppressions_shop_source_event_fk',
+      columns: [table.shopId, table.sourceEventId],
+      foreignColumns: [messagingConsentEvents.shopId, messagingConsentEvents.id],
+    }).onDelete('restrict'),
+    uniqueIndex('sms_suppressions_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('sms_suppressions_shop_destination_uq').on(
+      table.shopId,
+      table.destinationFingerprint,
+      table.fingerprintKeyVersion,
+    ),
+    check(
+      'sms_suppressions_destination_fingerprint_valid',
+      sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'sms_suppressions_fingerprint_key_version_valid',
+      sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'sms_suppressions_reason_valid',
+      sql`${table.reason} in ('customer_revocation', 'verified_deletion', 'permanent_failure', 'number_reassigned')`,
+    ),
+    check(
+      'sms_suppressions_lifted_at_valid',
+      sql`${table.liftedAt} is null or ${table.liftedAt} >= ${table.suppressedAt}`,
+    ),
+  ],
+)
+
+export const messagingDeletionRequests = pgTable(
+  'messaging_deletion_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestKey: uuid('request_key').notNull(),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    shopId: uuid('shop_id').notNull(),
+    subjectKey: uuid('subject_key').notNull(),
+    customerId: uuid('customer_id'),
+    destinationFingerprint: text('destination_fingerprint').notNull(),
+    fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
+    state: text('state', { enum: ['pending', 'completed'] }).notNull(),
+    reasonCode: text('reason_code').notNull(),
+    requestingActorProfileId: uuid('requesting_actor_profile_id').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    priorRecordCounts: jsonb('prior_record_counts').$type<Record<string, number>>(),
+    proofSummary: jsonb('proof_summary').$type<Record<string, unknown>>(),
+    retainUntil: timestamp('retain_until', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'messaging_deletion_requests_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_deletion_requests_shop_customer_fk',
+      columns: [table.shopId, table.customerId],
+      foreignColumns: [customers.shopId, customers.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'messaging_deletion_requests_shop_actor_fk',
+      columns: [table.shopId, table.requestingActorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('messaging_deletion_requests_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('messaging_deletion_requests_shop_actor_request_uq').on(
+      table.shopId,
+      table.requestingActorProfileId,
+      table.requestKey,
+    ),
+    index('messaging_deletion_requests_pending_idx')
+      .on(table.shopId, table.requestedAt)
+      .where(sql`${table.state} = 'pending'`),
+    check(
+      'messaging_deletion_requests_request_fingerprint_valid',
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'messaging_deletion_requests_destination_fingerprint_valid',
+      sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'messaging_deletion_requests_fingerprint_key_version_valid',
+      sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_deletion_requests_state_valid',
+      sql`${table.state} in ('pending', 'completed')`,
+    ),
+    check(
+      'messaging_deletion_requests_reason_code_valid',
+      sql`${table.reasonCode} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_deletion_requests_prior_counts_object',
+      sql`${table.priorRecordCounts} is null or jsonb_typeof(${table.priorRecordCounts}) = 'object'`,
+    ),
+    check(
+      'messaging_deletion_requests_prior_counts_size',
+      sql`${table.priorRecordCounts} is null or octet_length(${table.priorRecordCounts}::text) <= 4096`,
+    ),
+    check(
+      'messaging_deletion_requests_proof_summary_object',
+      sql`${table.proofSummary} is null or jsonb_typeof(${table.proofSummary}) = 'object'`,
+    ),
+    check(
+      'messaging_deletion_requests_proof_summary_size',
+      sql`${table.proofSummary} is null or octet_length(${table.proofSummary}::text) <= 4096`,
+    ),
+    check(
+      'messaging_deletion_requests_state_consistent',
+      sql`(${table.state} = 'pending'
+          and ${table.customerId} is not null
+          and ${table.completedAt} is null
+          and ${table.priorRecordCounts} is null
+          and ${table.proofSummary} is null
+          and ${table.retainUntil} is null)
+        or (${table.state} = 'completed'
+          and ${table.customerId} is null
+          and ${table.completedAt} is not null
+          and ${table.priorRecordCounts} is not null
+          and ${table.proofSummary} is not null
+          and ${table.retainUntil} is not null)`,
+    ),
+  ],
+)
+
+export const messagingRetentionHolds = pgTable(
+  'messaging_retention_holds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    resourceType: text('resource_type'),
+    resourceId: uuid('resource_id'),
+    subjectKey: uuid('subject_key'),
+    reasonCode: text('reason_code').notNull(),
+    authorizingActorProfileId: uuid('authorizing_actor_profile_id').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true }).defaultNow().notNull(),
+    reviewAt: timestamp('review_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    retainUntil: timestamp('retain_until', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'messaging_retention_holds_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_retention_holds_shop_actor_fk',
+      columns: [table.shopId, table.authorizingActorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('messaging_retention_holds_shop_id_uq').on(table.shopId, table.id),
+    index('messaging_retention_holds_active_subject_idx')
+      .on(table.shopId, table.subjectKey, table.expiresAt)
+      .where(sql`${table.subjectKey} is not null and ${table.releasedAt} is null`),
+    check(
+      'messaging_retention_holds_resource_type_valid',
+      sql`${table.resourceType} is null or ${table.resourceType} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_retention_holds_reason_code_valid',
+      sql`${table.reasonCode} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+    ),
+    check(
+      'messaging_retention_holds_target_consistent',
+      sql`(${table.subjectKey} is not null and ${table.resourceType} is null and ${table.resourceId} is null)
+        or (${table.subjectKey} is null and ${table.resourceType} is not null and ${table.resourceId} is not null)`,
+    ),
+    check(
+      'messaging_retention_holds_review_valid',
+      sql`${table.reviewAt} >= ${table.startsAt} and ${table.reviewAt} <= ${table.expiresAt}`,
+    ),
+    check(
+      'messaging_retention_holds_release_valid',
+      sql`${table.releasedAt} is null or ${table.releasedAt} >= ${table.startsAt}`,
+    ),
+    check(
+      'messaging_retention_holds_max_duration',
+      sql`${table.expiresAt} > ${table.startsAt}
+        and ${table.expiresAt} <= ${table.startsAt} + interval '365 days'`,
+    ),
+  ],
+)
+
 export const sessionEvents = pgTable(
   'session_events',
   {
