@@ -188,6 +188,8 @@ create unique index messaging_retention_holds_shop_id_uq on messaging_retention_
 --> statement-breakpoint
 create index messaging_retention_holds_active_subject_idx on messaging_retention_holds (shop_id, subject_key, expires_at) where subject_key is not null and released_at is null;
 --> statement-breakpoint
+create index messaging_retention_holds_active_resource_idx on messaging_retention_holds (shop_id, resource_type, resource_id, starts_at, expires_at) where resource_id is not null and released_at is null;
+--> statement-breakpoint
 create index messaging_retention_holds_purge_idx on messaging_retention_holds (retain_until, id);
 --> statement-breakpoint
 
@@ -566,7 +568,33 @@ as $$
 declare
   request_ids uuid[];
   locked_request_id uuid;
+  purge_shop_id uuid;
+  purge_hold_ids uuid[];
 begin
+  if tg_op = 'DELETE' then
+    if current_user = pg_catalog.pg_get_userbyid((
+      select p.proowner
+      from pg_catalog.pg_proc p
+      where p.oid = 'public.purge_expired_messaging_retention_hold(uuid,uuid)'::pg_catalog.regprocedure
+    )) then
+      begin
+        purge_shop_id := nullif(current_setting(
+          'vyntechs.messaging_retention_hold_purge_shop', true
+        ), '')::uuid;
+        purge_hold_ids := nullif(current_setting(
+          'vyntechs.messaging_retention_hold_purge_ids', true
+        ), '')::uuid[];
+      exception when others then
+        purge_shop_id := null;
+        purge_hold_ids := null;
+      end;
+      if purge_shop_id = old.shop_id and old.id = any(purge_hold_ids) then
+        return old;
+      end if;
+    end if;
+    raise exception 'messaging retention holds may only be purged after retention';
+  end if;
+
   if tg_op = 'UPDATE' then
     if new.shop_id is distinct from old.shop_id
       or new.resource_type is distinct from old.resource_type
@@ -642,7 +670,7 @@ end;
 $$;
 --> statement-breakpoint
 create trigger messaging_retention_holds_serialize_target
-before insert or update
+before insert or update or delete
 on messaging_retention_holds
 for each row execute function serialize_messaging_retention_hold_target();
 --> statement-breakpoint
@@ -1043,6 +1071,85 @@ end;
 $$;
 --> statement-breakpoint
 
+create function purge_expired_messaging_retention_hold(p_shop_id uuid, p_hold_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  deleted_count integer;
+  existing_shop_text text;
+  existing_ids_text text;
+  authorized_hold_ids uuid[];
+begin
+  existing_shop_text := nullif(current_setting(
+    'vyntechs.messaging_retention_hold_purge_shop', true
+  ), '');
+  existing_ids_text := nullif(current_setting(
+    'vyntechs.messaging_retention_hold_purge_ids', true
+  ), '');
+  if existing_shop_text is not null or existing_ids_text is not null then
+    begin
+      if existing_shop_text is null
+        or existing_ids_text is null
+        or existing_shop_text::uuid is distinct from p_shop_id then
+        raise exception 'retention hold purge transaction cannot mix shops';
+      end if;
+      authorized_hold_ids := existing_ids_text::uuid[];
+    exception when invalid_text_representation then
+      raise exception 'invalid retention hold purge authorization context';
+    end;
+  else
+    authorized_hold_ids := array[]::uuid[];
+  end if;
+
+  perform 1
+  from public.shops locked_shop
+  where locked_shop.id = p_shop_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  perform 1
+  from public.messaging_retention_holds h
+  where h.shop_id = p_shop_id and h.id = p_hold_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  if not exists (
+    select 1
+    from public.messaging_retention_holds h
+    where h.shop_id = p_shop_id
+      and h.id = p_hold_id
+      and h.retain_until <= clock_timestamp()
+  ) then
+    return false;
+  end if;
+
+  select array_agg(distinct hold_id order by hold_id)
+  into authorized_hold_ids
+  from unnest(authorized_hold_ids || p_hold_id) as holds(hold_id);
+  perform set_config(
+    'vyntechs.messaging_retention_hold_purge_shop', p_shop_id::text, true
+  );
+  perform set_config(
+    'vyntechs.messaging_retention_hold_purge_ids', authorized_hold_ids::text, true
+  );
+
+  delete from public.messaging_retention_holds h
+  where h.shop_id = p_shop_id
+    and h.id = p_hold_id
+    and h.retain_until <= clock_timestamp();
+  get diagnostics deleted_count = row_count;
+  return deleted_count = 1;
+end;
+$$;
+--> statement-breakpoint
+
 create function guard_messaging_deletion_request_mutation()
 returns trigger
 language plpgsql
@@ -1195,6 +1302,8 @@ revoke all on function guard_messaging_deletion_request_mutation() from public, 
 revoke all on function compact_messaging_consent_events(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_consent_event(uuid, uuid) from public, anon, authenticated;
+revoke all on function purge_expired_messaging_retention_hold(uuid, uuid) from public, anon, authenticated;
 grant execute on function compact_messaging_consent_events(uuid, uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_consent_event(uuid, uuid) to service_role;
+grant execute on function purge_expired_messaging_retention_hold(uuid, uuid) to service_role;

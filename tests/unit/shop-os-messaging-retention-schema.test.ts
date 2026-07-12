@@ -262,13 +262,14 @@ async function insertHold(
   tenant: Awaited<ReturnType<typeof seedTenant>>,
   target: { subjectKey: string } | { resourceType: string; resourceId: string },
 ) {
-  await client.query(
+  const result = await client.query<{ id: string }>(
     `insert into messaging_retention_holds (
       shop_id, resource_type, resource_id, subject_key, reason_code,
       authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
     ) values ($1, $2, $3, $4, 'legal_claim', $5,
       now() - interval '1 minute', now() + interval '1 day',
-      now() + interval '30 days', now() + interval '30 days' + interval '5 years')`,
+      now() + interval '30 days', now() + interval '30 days' + interval '5 years')
+    returning id`,
     [
       tenant.shopId,
       'resourceType' in target ? target.resourceType : null,
@@ -277,6 +278,7 @@ async function insertHold(
       tenant.actorId,
     ],
   )
+  return result.rows[0]!.id
 }
 
 describe('Shop OS messaging retention source schema', () => {
@@ -1344,6 +1346,22 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
+  it('refuses an active-resource hold index weakened behind the expected name', async () => {
+    const fixture = await createTestDb()
+    try {
+      await fixture.client.exec(`
+        drop index messaging_retention_holds_active_resource_idx;
+        create index messaging_retention_holds_active_resource_idx
+          on messaging_retention_holds (shop_id, resource_type, resource_id);
+      `)
+      await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('rejects cross-shop customer, actor, and source-event references', async () => {
     const fixture = await createTestDb()
     try {
@@ -1505,20 +1523,6 @@ describe('Shop OS messaging retention source schema', () => {
     try {
       const tenant = await seedTenant(fixture.client)
       const resourceId = crypto.randomUUID()
-      for (const resourceType of [
-        'messaging_consent_event', 'sms_suppression', 'quote_send', 'sms_log',
-        'notification', 'messaging_deletion_request',
-      ]) {
-        await fixture.client.query(
-          `insert into messaging_retention_holds (
-            shop_id, resource_type, resource_id, reason_code,
-            authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
-          ) values ($1, $2, $3, 'legal_claim', $4,
-            '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
-            '2024-03-31 12:00:00+00', '2029-03-31 12:00:00+00')`,
-          [tenant.shopId, resourceType, crypto.randomUUID(), tenant.actorId],
-        )
-      }
       await expect(fixture.client.query(
         `insert into messaging_retention_holds (
           shop_id, resource_type, resource_id, reason_code,
@@ -1546,6 +1550,64 @@ describe('Shop OS messaging retention source schema', () => {
           '2024-03-31 12:00:00+00', '2029-03-31 11:59:59+00')`,
         [tenant.shopId, crypto.randomUUID(), tenant.actorId],
       )).rejects.toThrow(/messaging_retention_holds_retention_window_exact/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('guards hold deletion and purges only one exact expired hold through owner context', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const other = await seedTenant(fixture.client)
+      const earlyId = await insertHold(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await expect(fixture.client.query(
+        'delete from messaging_retention_holds where id = $1', [earlyId],
+      )).rejects.toThrow(/messaging retention holds may only be purged after retention/)
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_retention_hold($1, $2) as purged',
+        [tenant.shopId, earlyId],
+      )).rows[0]?.purged).toBe(false)
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_retention_hold($1, $2) as purged',
+        [other.shopId, earlyId],
+      )).rows[0]?.purged).toBe(false)
+
+      const expired = await fixture.client.query<{ id: string }>(
+        `insert into messaging_retention_holds (
+          shop_id, subject_key, reason_code, authorizing_actor_profile_id,
+          starts_at, review_at, expires_at, retain_until
+        ) values ($1, $2, 'legal_claim', $3,
+          '2019-01-01 00:00:00+00', '2019-06-01 00:00:00+00',
+          '2020-01-01 00:00:00+00', '2025-01-01 00:00:00+00') returning id`,
+        [tenant.shopId, crypto.randomUUID(), tenant.actorId],
+      )
+      const expiredId = expired.rows[0]!.id
+      await fixture.client.exec('begin')
+      await fixture.client.exec('set local role service_role')
+      await fixture.client.query(
+        "select set_config('vyntechs.messaging_retention_hold_purge_shop', $1, true)",
+        [tenant.shopId],
+      )
+      await fixture.client.query(
+        "select set_config('vyntechs.messaging_retention_hold_purge_ids', $1, true)",
+        [`{${expiredId}}`],
+      )
+      await expect(fixture.client.query(
+        'delete from messaging_retention_holds where id = $1', [expiredId],
+      )).rejects.toThrow(/messaging retention holds may only be purged after retention/)
+      await fixture.client.exec('rollback')
+
+      await fixture.client.exec('begin')
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_retention_hold($1, $2) as purged',
+        [tenant.shopId, expiredId],
+      )).rows[0]?.purged).toBe(true)
+      await fixture.client.exec('commit')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_retention_holds where id = $1',
+        [expiredId],
+      )).rows[0]?.count).toBe(0)
     } finally {
       await fixture.close()
     }
@@ -2039,7 +2101,10 @@ describe('Shop OS messaging retention source schema', () => {
         'select compact_messaging_consent_events($1, $2, $3)',
         [tenant.shopId, subjectKey, requestId],
       )).rejects.toThrow(/active messaging retention hold blocks compaction/)
-      await fixture.client.exec('delete from messaging_retention_holds')
+      await fixture.client.exec(`
+        update messaging_retention_holds set released_at = clock_timestamp()
+        where released_at is null
+      `)
 
       await insertHold(fixture.client, tenant, {
         resourceType: 'messaging_consent_event',
@@ -2098,7 +2163,10 @@ describe('Shop OS messaging retention source schema', () => {
         'select purge_expired_messaging_deletion_request($1, $2)',
         [tenant.shopId, requestId],
       )).rejects.toThrow(/active messaging retention hold blocks purge/)
-      await fixture.client.exec('delete from messaging_retention_holds')
+      await fixture.client.exec(`
+        update messaging_retention_holds set released_at = clock_timestamp()
+        where released_at is null
+      `)
       await insertHold(fixture.client, tenant, { subjectKey })
       await expect(fixture.client.query(
         'select purge_expired_messaging_deletion_request($1, $2)',
@@ -2190,6 +2258,44 @@ describe('Shop OS messaging retention source schema', () => {
       )
     } finally {
       await missingFunction.close()
+    }
+  })
+
+  it('rejects a marker-spoofing no-op hold purge and an untrusted purge owner', async () => {
+    const noOp = await createTestDb()
+    try {
+      await noOp.client.exec(`
+        create or replace function purge_expired_messaging_retention_hold(
+          p_shop_id uuid, p_hold_id uuid
+        )
+        returns boolean language plpgsql security definer set search_path = '' as $$
+        begin
+          perform clock_timestamp();
+          perform current_setting('vyntechs.messaging_retention_hold_purge_shop', true);
+          perform current_setting('vyntechs.messaging_retention_hold_purge_ids', true);
+          perform 1 from public.shops locked_shop where locked_shop.id = p_shop_id for update;
+          return false;
+        end;
+        $$;
+      `)
+      await expect(ensureMessagingRetentionMigration(noOp.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await noOp.close()
+    }
+
+    const untrustedOwner = await createTestDb()
+    try {
+      await untrustedOwner.client.exec(
+        `alter function purge_expired_messaging_retention_hold(uuid, uuid)
+        owner to service_role`,
+      )
+      await expect(ensureMessagingRetentionMigration(untrustedOwner.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await untrustedOwner.close()
     }
   })
 
@@ -2376,7 +2482,7 @@ describe('Shop OS messaging retention source schema', () => {
         where tgname = 'messaging_retention_holds_serialize_target'
       `)
       expect(triggerProof.rows[0]?.trigger_definition).toContain(
-        'BEFORE INSERT OR UPDATE ON public.messaging_retention_holds',
+        'BEFORE INSERT OR DELETE OR UPDATE ON public.messaging_retention_holds',
       )
 
       const tenant = await seedTenant(fixture.client)

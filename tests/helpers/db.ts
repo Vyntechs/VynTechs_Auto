@@ -2,6 +2,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { vector } from '@electric-sql/pglite/vector'
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import * as schema from '@/lib/db/schema'
@@ -301,14 +302,88 @@ type MessagingRetentionMarkers = {
   column_count: number
   constraint_count: number
   index_count: number
+  active_resource_index_count: number
   rls_count: number
   policy_count: number
   function_marker_count: number
+  function_digest_count: number
+  function_authority_count: number
   trigger_binding_count: number
   nullable_quote_send_customer_count: number
   direct_client_grant_count: number
   effective_client_privilege_count: number
   service_crud_count: number
+}
+
+const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
+  'validate_quote_event_send_reference()': 'be3c718f2e44f7a71c4c0f3366de84a1ed3d949048df400a99501dbc5690191b',
+  'guard_quote_send_lifecycle()': '8ee2fe1faaee2f23515ba74f8f6a4145f2a7c3ed22d31653c2c1cc86ff3fc4ae',
+  'serialize_messaging_retention_hold_target()': 'c324faa9988827a2e66824118c1b5ea4481ffd5321eb9582a556eca374e0e82e',
+  'reject_messaging_consent_event_mutation()': 'ae5135ed441581082da98ee7759016a91ec2352e8c7f575b9a6b15100281c7dd',
+  'require_messaging_compaction_completion()': 'b195ef83c2f0e6139194a459978364ff68c4e17970c3a6b9fc63dba0d9325b3d',
+  'compact_messaging_consent_events(uuid,uuid,uuid)': 'e57b84d24e5878655994412309bd924c7101e7ca84c5de9bc90c5d459cb80ba2',
+  'purge_expired_messaging_consent_event(uuid,uuid)': 'a88035857f054ce4e0c3deed216d3a81073736ba50471798dbfb5bab793688e4',
+  'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
+  'guard_messaging_deletion_request_mutation()': 'ad60c8ef2fba7815527c4b1d9579c3c4743b363707c728e088b5b6f18ed209ab',
+  'purge_expired_messaging_deletion_request(uuid,uuid)': '13fad7040edbd0cc5ed10dba7eaacacddf42a95f9d2eb5e858a3989c07c6837f',
+} as const
+
+async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
+  digestCount: number
+  authorityCount: number
+}> {
+  const result = await client.query<{
+    signature: keyof typeof MESSAGING_RETENTION_FUNCTION_DIGESTS
+    prosrc: string
+    owner_trusted: boolean
+    client_inherits_owner: boolean
+    unexpected_direct_acl_count: number
+    unexpected_effective_executor_count: number
+  }>(`
+    with expected_functions(signature, service_execute) as (values
+      ('validate_quote_event_send_reference()', false),
+      ('guard_quote_send_lifecycle()', false),
+      ('reject_messaging_consent_event_mutation()', false),
+      ('require_messaging_compaction_completion()', false),
+      ('compact_messaging_consent_events(uuid,uuid,uuid)', true),
+      ('guard_messaging_deletion_request_mutation()', false),
+      ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
+      ('purge_expired_messaging_consent_event(uuid,uuid)', true),
+      ('purge_expired_messaging_retention_hold(uuid,uuid)', true),
+      ('serialize_messaging_retention_hold_target()', false)
+    )
+    select e.signature, p.prosrc,
+      owner_role.rolname not in ('service_role', 'anon', 'authenticated') as owner_trusted,
+      pg_has_role('service_role', owner_role.oid, 'usage')
+        or pg_has_role('anon', owner_role.oid, 'usage')
+        or pg_has_role('authenticated', owner_role.oid, 'usage') as client_inherits_owner,
+      (select count(*)::int
+       from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       where acl.privilege_type = 'EXECUTE'
+         and acl.grantee <> p.proowner
+         and not (e.service_execute and acl.grantee = 'service_role'::regrole))
+        as unexpected_direct_acl_count,
+      (select count(*)::int
+       from pg_roles executor
+       where not executor.rolsuper
+         and executor.oid <> p.proowner
+         and not (e.service_execute and executor.rolname = 'service_role')
+         and has_function_privilege(executor.oid, p.oid, 'execute'))
+        as unexpected_effective_executor_count
+    from expected_functions e
+    join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+    join pg_roles owner_role on owner_role.oid = p.proowner
+  `)
+  const digestCount = result.rows.filter(({ signature, prosrc }) => {
+    const normalized = prosrc.trim().replace(/\s+/g, ' ')
+    return createHash('sha256').update(normalized).digest('hex')
+      === MESSAGING_RETENTION_FUNCTION_DIGESTS[signature]
+  }).length
+  const authorityCount = result.rows.filter((row) => row.owner_trusted
+    && !row.client_inherits_owner
+    && row.unexpected_direct_acl_count === 0
+    && row.unexpected_effective_executor_count === 0).length
+  return { digestCount, authorityCount }
 }
 
 async function messagingRetentionMarkers(
@@ -439,7 +514,7 @@ async function messagingRetentionMarkers(
       ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
       ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
-      ('messaging_retention_holds_purge_idx'),
+      ('messaging_retention_holds_purge_idx'), ('messaging_retention_holds_active_resource_idx'),
       ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
       ('quote_sends_shop_ticket_version_id_uq'),
       ('quote_sends_shop_actor_request_uq'), ('quote_sends_destination_idx'),
@@ -478,6 +553,11 @@ async function messagingRetentionMarkers(
         'consent projection still references event',
         'suppression still references event',
         'from public.shops locked_shop where locked_shop.id = p_shop_id for update'),
+      ('purge_expired_messaging_retention_hold(uuid,uuid)', 'boolean', true, true,
+        'clock_timestamp()',
+        'vyntechs.messaging_retention_hold_purge_shop',
+        'from public.shops locked_shop where locked_shop.id = p_shop_id for update',
+        'vyntechs.messaging_retention_hold_purge_ids'),
       ('serialize_messaging_retention_hold_target()', 'trigger', false, false,
         'messaging retention hold target is immutable',
         'messaging retention hold lifecycle is immutable',
@@ -498,7 +578,7 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
         'guard_messaging_deletion_request_mutation()', 27, false, null),
       ('messaging_retention_holds', 'messaging_retention_holds_serialize_target',
-        'serialize_messaging_retention_hold_target()', 23, false, null)
+        'serialize_messaging_retention_hold_target()', 31, false, null)
     ), client_roles(role_name) as (values
       ('anon'), ('authenticated')
     ), table_privileges(privilege_name) as (values
@@ -518,6 +598,14 @@ async function messagingRetentionMarkers(
        where c.connamespace = 'public'::regnamespace) as constraint_count,
       (select count(*)::int from expected_indexes e
        join pg_indexes i on i.indexname = e.index_name and i.schemaname = 'public') as index_count,
+      (select count(*)::int
+       from pg_indexes i
+       where i.schemaname = 'public'
+         and i.indexname = 'messaging_retention_holds_active_resource_idx'
+         and position(
+           'on public.messaging_retention_holds using btree (shop_id, resource_type, resource_id, starts_at, expires_at) where ((resource_id is not null) and (released_at is null))'
+           in lower(regexp_replace(i.indexdef, '\\s+', ' ', 'g'))
+         ) > 0) as active_resource_index_count,
       (select count(*)::int from expected_tables e
        join pg_class c on c.relname = e.table_name
        join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
@@ -582,6 +670,9 @@ async function messagingRetentionMarkers(
   `)
   const markers = result.rows[0]
   if (!markers) throw new Error('messaging retention schema inspection failed')
+  const functionInspection = await messagingRetentionFunctionInspection(client)
+  markers.function_digest_count = functionInspection.digestCount
+  markers.function_authority_count = functionInspection.authorityCount
   return markers
 }
 
@@ -589,10 +680,13 @@ function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boole
   return markers.table_count === 8
     && markers.column_count === 114
     && markers.constraint_count === 90
-    && markers.index_count === 26
+    && markers.index_count === 27
+    && markers.active_resource_index_count === 1
     && markers.rls_count === 8
     && markers.policy_count === 8
-    && markers.function_marker_count === 9
+    && markers.function_marker_count === 10
+    && markers.function_digest_count === 10
+    && markers.function_authority_count === 10
     && markers.trigger_binding_count === 6
     && markers.nullable_quote_send_customer_count === 1
     && markers.direct_client_grant_count === 0
@@ -645,6 +739,7 @@ type MessagingRetentionAclMarkers = {
   function_count: number
   required_service_function_count: number
   exact_function_acl_count: number
+  function_authority_count: number
 }
 
 async function messagingRetentionAclMarkers(
@@ -665,6 +760,7 @@ async function messagingRetentionAclMarkers(
         ('guard_messaging_deletion_request_mutation()', false),
         ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
         ('purge_expired_messaging_consent_event(uuid,uuid)', true),
+        ('purge_expired_messaging_retention_hold(uuid,uuid)', true),
         ('serialize_messaging_retention_hold_target()', false)
       ),
       client_roles(role_name) as (values ('anon'), ('authenticated')),
@@ -737,6 +833,9 @@ async function messagingRetentionAclMarkers(
   `)
   const markers = result.rows[0]
   if (!markers) throw new Error('messaging retention ACL inspection failed')
+  markers.function_authority_count = (
+    await messagingRetentionFunctionInspection(client)
+  ).authorityCount
   return markers
 }
 
@@ -752,9 +851,10 @@ function hasCompleteMessagingRetentionAcl(
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
-    && markers.function_count === 9
-    && markers.required_service_function_count === 3
-    && markers.exact_function_acl_count === 9
+    && markers.function_count === 10
+    && markers.required_service_function_count === 4
+    && markers.exact_function_acl_count === 10
+    && markers.function_authority_count === 10
 }
 
 export async function ensureMessagingRetentionAclMigration(
@@ -766,8 +866,8 @@ export async function ensureMessagingRetentionAclMigration(
     || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
-    || before.function_count !== 9
-    || before.required_service_function_count !== 3
+    || before.function_count !== 10
+    || before.required_service_function_count !== 4
   ) {
     throw new Error('partial messaging retention ACL in ephemeral database')
   }

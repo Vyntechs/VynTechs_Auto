@@ -32,6 +32,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
   { signature: 'purge_expired_messaging_consent_event(uuid,uuid)', serviceExecute: true },
+  { signature: 'purge_expired_messaging_retention_hold(uuid,uuid)', serviceExecute: true },
   { signature: 'serialize_messaging_retention_hold_target()', serviceExecute: false },
 ] as const
 
@@ -152,6 +153,42 @@ describe('Shop OS messaging retention ACL hardening', () => {
           client_direct_execute_count: 0,
         })),
     )
+  }, 15_000)
+
+  it('requires trusted non-client owners and an exact effective executor set', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+    const owners = await client.query<{
+      signature: string
+      owner_trusted: boolean
+      client_inherits_owner: boolean
+      unexpected_executor_count: number
+    }>(`
+      with expected_functions(signature, service_execute) as (values
+        ${FUNCTION_EXECUTION.map(({ signature, serviceExecute }) =>
+          `('${signature}', ${serviceExecute})`).join(', ')}
+      )
+      select e.signature,
+        owner_role.rolname not in ('service_role', 'anon', 'authenticated') as owner_trusted,
+        pg_has_role('service_role', owner_role.oid, 'usage')
+          or pg_has_role('anon', owner_role.oid, 'usage')
+          or pg_has_role('authenticated', owner_role.oid, 'usage') as client_inherits_owner,
+        (select count(*)::int
+         from pg_roles executor
+         where not executor.rolsuper
+           and executor.oid <> p.proowner
+           and not (e.service_execute and executor.rolname = 'service_role')
+           and has_function_privilege(executor.oid, p.oid, 'execute'))
+          as unexpected_executor_count
+      from expected_functions e
+      join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+      join pg_roles owner_role on owner_role.oid = p.proowner
+      order by e.signature
+    `)
+    expect(owners.rows).toHaveLength(FUNCTION_EXECUTION.length)
+    expect(owners.rows.every((row) => row.owner_trusted)).toBe(true)
+    expect(owners.rows.every((row) => !row.client_inherits_owner)).toBe(true)
+    expect(owners.rows.every((row) => row.unexpected_executor_count === 0)).toBe(true)
   }, 15_000)
 
   it('repairs direct and PUBLIC table/function leakage idempotently', async () => {
@@ -301,6 +338,53 @@ describe('Shop OS messaging retention ACL hardening', () => {
       create policy notifications_unexpected on public.notifications for select to service_role using (true);
     `)
     await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+  }, 15_000)
+
+  it('fails closed on untrusted function owners and unrelated direct executors', async () => {
+    const ownerFixture = await createTestDb()
+    closeCallbacks.push(ownerFixture.close)
+    await ownerFixture.client.exec(
+      `alter function public.purge_expired_messaging_consent_event(uuid, uuid)
+      owner to service_role`,
+    )
+    await expect(ensureMessagingRetentionAclMigration(ownerFixture.client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+
+    const executorFixture = await createTestDb()
+    closeCallbacks.push(executorFixture.close)
+    await executorFixture.client.exec(`
+      create role messaging_unrelated_executor nologin;
+      grant execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
+        to messaging_unrelated_executor;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(executorFixture.client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+
+    const inheritanceFixture = await createTestDb()
+    closeCallbacks.push(inheritanceFixture.close)
+    await inheritanceFixture.client.exec(`
+      create role messaging_trusted_owner nologin;
+      alter function public.purge_expired_messaging_retention_hold(uuid, uuid)
+        owner to messaging_trusted_owner;
+      grant messaging_trusted_owner to authenticated;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(inheritanceFixture.client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+
+    const inheritedExecutor = await createTestDb()
+    closeCallbacks.push(inheritedExecutor.close)
+    await inheritedExecutor.client.exec(`
+      create role messaging_inherited_executor nologin;
+      grant execute on function public.serialize_messaging_retention_hold_target()
+        to messaging_inherited_executor;
+      grant messaging_inherited_executor to service_role;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(inheritedExecutor.client)).rejects.toThrow(
       'messaging retention ACL hardening failed in ephemeral database',
     )
   }, 15_000)

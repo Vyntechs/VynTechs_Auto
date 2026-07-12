@@ -1430,6 +1430,9 @@ export const messagingRetentionHolds = pgTable(
     index('messaging_retention_holds_active_subject_idx')
       .on(table.shopId, table.subjectKey, table.expiresAt)
       .where(sql`${table.subjectKey} is not null and ${table.releasedAt} is null`),
+    index('messaging_retention_holds_active_resource_idx')
+      .on(table.shopId, table.resourceType, table.resourceId, table.startsAt, table.expiresAt)
+      .where(sql`${table.resourceId} is not null and ${table.releasedAt} is null`),
     index('messaging_retention_holds_purge_idx').on(table.retainUntil, table.id),
     check(
       'messaging_retention_holds_resource_type_valid',

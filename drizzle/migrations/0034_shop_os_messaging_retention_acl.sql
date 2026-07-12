@@ -40,6 +40,8 @@ revoke all on function public.purge_expired_messaging_deletion_request(uuid, uui
   from public, anon, authenticated, service_role;
 revoke all on function public.purge_expired_messaging_consent_event(uuid, uuid)
   from public, anon, authenticated, service_role;
+revoke all on function public.purge_expired_messaging_retention_hold(uuid, uuid)
+  from public, anon, authenticated, service_role;
 revoke all on function public.serialize_messaging_retention_hold_target()
   from public, anon, authenticated, service_role;
 --> statement-breakpoint
@@ -49,4 +51,6 @@ grant execute on function public.compact_messaging_consent_events(uuid, uuid, uu
 grant execute on function public.purge_expired_messaging_deletion_request(uuid, uuid)
   to service_role;
 grant execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
+  to service_role;
+grant execute on function public.purge_expired_messaging_retention_hold(uuid, uuid)
   to service_role;

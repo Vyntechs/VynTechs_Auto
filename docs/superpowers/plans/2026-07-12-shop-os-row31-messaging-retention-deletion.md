@@ -857,6 +857,8 @@ Validate exact bounded enums and times, authorize, insert immutable hold, and re
 
 Resource-targeted holds use exactly the canonical `resourceType` vocabulary above with one `resourceId`. Subject-targeted holds use `subjectKey` with both resource fields null. An unreleased hold has `retainUntil = expiresAt + 5 calendar years`; the one allowed release recalculates it to `releasedAt + 5 calendar years`. Every hold operation locks the shop row first, before target/request locks.
 
+Hold creation owns polymorphic target validation at runtime; the database stores only the canonical target shape and does not use speculative polymorphic foreign keys. In the same transaction, creation must lock the shop first and then lock and verify the exact same-shop canonical target. Missing or cross-shop resources fail. A subject target must already exist for that same shop in at least one consent event, consent projection, or messaging deletion request. The public count field is exactly `consentProjections` everywhere.
+
 - [ ] **Step 4: Implement bounded purge**
 
 Process record families in dependency order:
