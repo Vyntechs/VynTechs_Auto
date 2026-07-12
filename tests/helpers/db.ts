@@ -463,8 +463,8 @@ async function messagingRetentionMarkers(
       ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
         null, null, null),
       ('serialize_messaging_retention_hold_target()', 'trigger', false, false,
-        'array_agg(distinct target_shop_id order by target_shop_id)',
-        'from public.shops locked_shop where locked_shop.id = locked_shop_id for update',
+        'begin if tg_op = ''UPDATE'' then if new.shop_id is distinct from old.shop_id or new.resource_type is distinct from old.resource_type or new.resource_id is distinct from old.resource_id or new.subject_key is distinct from old.subject_key then',
+        'raise exception ''messaging retention hold target is immutable''; end if; return new; end if; perform 1 from public.shops locked_shop where locked_shop.id = new.shop_id for update',
         'array_agg(distinct r.id order by r.id)')
     ), expected_triggers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,

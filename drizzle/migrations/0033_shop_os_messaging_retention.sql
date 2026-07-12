@@ -531,70 +531,43 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  shop_ids uuid[];
-  locked_shop_id uuid;
   request_ids uuid[];
   locked_request_id uuid;
 begin
   if tg_op = 'UPDATE' then
-    select array_agg(distinct target_shop_id order by target_shop_id)
-    into shop_ids
-    from (values (old.shop_id), (new.shop_id)) as target_shops(target_shop_id);
-  else
-    shop_ids := array[new.shop_id];
+    if new.shop_id is distinct from old.shop_id
+      or new.resource_type is distinct from old.resource_type
+      or new.resource_id is distinct from old.resource_id
+      or new.subject_key is distinct from old.subject_key then
+      raise exception 'messaging retention hold target is immutable';
+    end if;
+    return new;
   end if;
 
-  foreach locked_shop_id in array coalesce(shop_ids, array[]::uuid[])
-  loop
-    perform 1
-    from public.shops locked_shop
-    where locked_shop.id = locked_shop_id
-    for update;
-  end loop;
+  perform 1
+  from public.shops locked_shop
+  where locked_shop.id = new.shop_id
+  for update;
 
-  if tg_op = 'UPDATE' then
-    with targets(shop_id, subject_key, resource_type, resource_id) as (
-      values
-        (new.shop_id, new.subject_key, new.resource_type, new.resource_id),
-        (old.shop_id, old.subject_key, old.resource_type, old.resource_id)
-    )
-    select array_agg(distinct r.id order by r.id)
-    into request_ids
-    from public.messaging_deletion_requests r
-    join targets t on t.shop_id = r.shop_id
-      and (
-        (t.subject_key is not null and t.subject_key = r.subject_key)
-        or (t.resource_type = 'messaging_deletion_request' and t.resource_id = r.id)
-        or (
-          t.resource_type = 'messaging_consent_event'
-          and r.subject_key = (
-            select e.subject_key
-            from public.messaging_consent_events e
-            where e.shop_id = t.shop_id and e.id = t.resource_id
-          )
+  with targets(shop_id, subject_key, resource_type, resource_id) as (
+    values (new.shop_id, new.subject_key, new.resource_type, new.resource_id)
+  )
+  select array_agg(distinct r.id order by r.id)
+  into request_ids
+  from public.messaging_deletion_requests r
+  join targets t on t.shop_id = r.shop_id
+    and (
+      (t.subject_key is not null and t.subject_key = r.subject_key)
+      or (t.resource_type = 'messaging_deletion_request' and t.resource_id = r.id)
+      or (
+        t.resource_type = 'messaging_consent_event'
+        and r.subject_key = (
+          select e.subject_key
+          from public.messaging_consent_events e
+          where e.shop_id = t.shop_id and e.id = t.resource_id
         )
-      );
-  else
-    with targets(shop_id, subject_key, resource_type, resource_id) as (
-      values (new.shop_id, new.subject_key, new.resource_type, new.resource_id)
-    )
-    select array_agg(distinct r.id order by r.id)
-    into request_ids
-    from public.messaging_deletion_requests r
-    join targets t on t.shop_id = r.shop_id
-      and (
-        (t.subject_key is not null and t.subject_key = r.subject_key)
-        or (t.resource_type = 'messaging_deletion_request' and t.resource_id = r.id)
-        or (
-          t.resource_type = 'messaging_consent_event'
-          and r.subject_key = (
-            select e.subject_key
-            from public.messaging_consent_events e
-            where e.shop_id = t.shop_id and e.id = t.resource_id
-          )
-        )
-      );
-  end if;
+      )
+    );
 
   foreach locked_request_id in array coalesce(request_ids, array[]::uuid[])
   loop

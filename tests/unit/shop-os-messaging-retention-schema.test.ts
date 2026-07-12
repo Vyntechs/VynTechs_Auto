@@ -1675,7 +1675,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('installs stable hold-target serialization before hold insertion or retargeting', async () => {
+  it('serializes hold inserts and rejects target mutation before any update lock', async () => {
     const fixture = await createTestDb()
     try {
       const functionProof = await fixture.client.query<{
@@ -1687,17 +1687,24 @@ describe('Shop OS messaging retention source schema', () => {
       `)
       const functionDefinition = functionProof.rows[0]?.function_definition.toLowerCase()
       const normalizedFunction = functionDefinition?.replace(/\s+/g, ' ')
-      expect(functionDefinition).toContain(
-        'array_agg(distinct target_shop_id order by target_shop_id)',
+      const updateGuard = normalizedFunction!.indexOf("if tg_op = 'update' then")
+      const unchangedReturn = normalizedFunction!.indexOf('return new; end if;', updateGuard)
+      const shopLock = normalizedFunction!.indexOf('from public.shops locked_shop')
+      expect(normalizedFunction).toContain(
+        "raise exception 'messaging retention hold target is immutable'",
       )
       expect(normalizedFunction).toContain(
-        'from public.shops locked_shop where locked_shop.id = locked_shop_id for update',
+        'from public.shops locked_shop where locked_shop.id = new.shop_id for update',
       )
       expect(functionDefinition).toContain(
         'array_agg(distinct r.id order by r.id)',
       )
-      expect(functionDefinition!.indexOf('from public.shops locked_shop'))
-        .toBeLessThan(functionDefinition!.indexOf('array_agg(distinct r.id order by r.id)'))
+      expect(updateGuard).toBeGreaterThan(-1)
+      expect(unchangedReturn).toBeGreaterThan(updateGuard)
+      expect(unchangedReturn).toBeLessThan(shopLock)
+      expect(shopLock).toBeLessThan(
+        normalizedFunction!.indexOf('array_agg(distinct r.id order by r.id)'),
+      )
       expect(functionDefinition).toContain(
         "messaging_deletion_request",
       )
@@ -1715,7 +1722,6 @@ describe('Shop OS messaging retention source schema', () => {
       )
 
       const tenant = await seedTenant(fixture.client)
-      const otherTenant = await seedTenant(fixture.client)
       const firstSubject = crypto.randomUUID()
       const secondSubject = crypto.randomUUID()
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
@@ -1729,14 +1735,27 @@ describe('Shop OS messaging retention source schema', () => {
         returning id`,
         [tenant.shopId, firstSubject, tenant.actorId],
       )
-      await fixture.client.query(
+      await expect(fixture.client.query(
         `update messaging_retention_holds
-        set shop_id = $1, subject_key = $2, authorizing_actor_profile_id = $3
-        where id = $4`,
-        [otherTenant.shopId, secondSubject, otherTenant.actorId, hold.rows[0]?.id],
-      )
+        set subject_key = $1
+        where id = $2`,
+        [secondSubject, hold.rows[0]?.id],
+      )).rejects.toThrow(/messaging retention hold target is immutable/)
+      await expect(fixture.client.query(
+        `update messaging_retention_holds
+        set shop_id = shop_id, resource_type = resource_type,
+          resource_id = resource_id, subject_key = subject_key
+        where id = $1`,
+        [hold.rows[0]?.id],
+      )).resolves.toBeDefined()
+      await expect(fixture.client.query(
+        `update messaging_retention_holds
+        set released_at = now()
+        where id = $1`,
+        [hold.rows[0]?.id],
+      )).resolves.toBeDefined()
       for (const resourceType of ['quote_send', 'sms_log', 'notification']) {
-        await insertHold(fixture.client, otherTenant, {
+        await insertHold(fixture.client, tenant, {
           resourceType,
           resourceId: crypto.randomUUID(),
         })
@@ -1780,7 +1799,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('refuses a hold serializer weakened to omit only the shop-row lock', async () => {
+  it('refuses a hold serializer weakened to omit only the insert shop-row lock', async () => {
     const fixture = await createTestDb()
     try {
       const functionProof = await fixture.client.query<{ function_definition: string }>(`
@@ -1790,7 +1809,7 @@ describe('Shop OS messaging retention source schema', () => {
       `)
       const original = functionProof.rows[0]!.function_definition
       const weakened = original.replace(
-        /(from public\.shops locked_shop\s+where locked_shop\.id = locked_shop_id)\s+for update/i,
+        /(from public\.shops locked_shop\s+where locked_shop\.id = new\.shop_id)\s+for update/i,
         '$1',
       )
       expect(weakened).not.toBe(original)
@@ -1801,6 +1820,51 @@ describe('Shop OS messaging retention source schema', () => {
       )
     } finally {
       await fixture.close()
+    }
+  })
+
+  it('refuses hold serializers that allow retargeting or lock inside UPDATE', async () => {
+    const retargetable = await createTestDb()
+    try {
+      const functionProof = await retargetable.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'serialize_messaging_retention_hold_target()'::regprocedure
+        ) as function_definition
+      `)
+      const original = functionProof.rows[0]!.function_definition
+      const weakened = original.replace(
+        /raise exception 'messaging retention hold target is immutable';/i,
+        'return new;',
+      )
+      expect(weakened).not.toBe(original)
+      await retargetable.client.exec(weakened)
+      await expect(ensureMessagingRetentionMigration(retargetable.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await retargetable.close()
+    }
+
+    const updateLocker = await createTestDb()
+    try {
+      const functionProof = await updateLocker.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'serialize_messaging_retention_hold_target()'::regprocedure
+        ) as function_definition
+      `)
+      const original = functionProof.rows[0]!.function_definition
+      const weakened = original.replace(
+        /if tg_op = 'UPDATE' then/i,
+        `if tg_op = 'UPDATE' then
+          perform 1 from public.shops where id = new.shop_id for update;`,
+      )
+      expect(weakened).not.toBe(original)
+      await updateLocker.client.exec(weakened)
+      await expect(ensureMessagingRetentionMigration(updateLocker.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await updateLocker.close()
     }
   })
 
@@ -1816,6 +1880,9 @@ describe('Shop OS messaging retention source schema', () => {
     )
     expect(taskSix).toContain(
       'Hold the shop lock through the final hold scan, every cleanup delete or update, and transaction commit.',
+    )
+    expect(taskSix).toContain(
+      'Hold targets are immutable: cleanup never mutates or reparents a hold target, and renewal creates a new hold row with a new authorization.',
     )
   })
 })
