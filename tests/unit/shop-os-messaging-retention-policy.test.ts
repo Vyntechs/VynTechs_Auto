@@ -171,6 +171,80 @@ describe('Shop OS messaging retention policy', () => {
       expect(message).not.toContain(FICTIONAL_DESTINATION)
       expect(message).not.toContain('too-short')
     })
+
+    it.each(['v1', 'v0'] as const)(
+      'rejects an enumerable %s accessor without invoking or leaking it',
+      (accessorVersion) => {
+        const sensitiveThrownText = `${FICTIONAL_DESTINATION}:${CURRENT_SECRET}`
+        let getterCalls = 0
+        const keys = {
+          v1: CURRENT_SECRET,
+          v0: LEGACY_SECRET,
+        } as Record<string, string>
+        Object.defineProperty(keys, accessorVersion, {
+          enumerable: true,
+          get() {
+            getterCalls += 1
+            throw new Error(sensitiveThrownText)
+          },
+        })
+
+        const message = errorMessage(() =>
+          fingerprintsForKeyRing(FICTIONAL_DESTINATION, {
+            currentVersion: 'v1',
+            keys,
+          }),
+        )
+
+        expect(getterCalls).toBe(0)
+        expect(message).toBe('invalid_fingerprint_key')
+        expect(message.length).toBeLessThanOrEqual(32)
+        expect(message).not.toContain(FICTIONAL_DESTINATION)
+        expect(message).not.toContain(CURRENT_SECRET)
+        expect(message).not.toContain(sensitiveThrownText)
+      },
+    )
+
+    it('rejects non-string own key data with a fixed sanitized error', () => {
+      const message = errorMessage(() =>
+        fingerprintsForKeyRing(FICTIONAL_DESTINATION, {
+          currentVersion: 'v1',
+          keys: { v1: 42 } as unknown as Record<string, string>,
+        }),
+      )
+      expect(message).toBe('invalid_fingerprint_key')
+      expect(message).not.toContain(FICTIONAL_DESTINATION)
+    })
+
+    it.each(['currentVersion', 'keys'] as const)(
+      'rejects an enumerable key-ring %s accessor without invoking it',
+      (propertyName) => {
+        let getterCalls = 0
+        const keyRing = {
+          currentVersion: 'v1',
+          keys: { v1: CURRENT_SECRET },
+        }
+        Object.defineProperty(keyRing, propertyName, {
+          enumerable: true,
+          get() {
+            getterCalls += 1
+            throw new Error(`${FICTIONAL_DESTINATION}:${CURRENT_SECRET}`)
+          },
+        })
+
+        const message = errorMessage(() =>
+          fingerprintsForKeyRing(
+            FICTIONAL_DESTINATION,
+            keyRing as unknown as {
+              currentVersion: string
+              keys: Readonly<Record<string, string>>
+            },
+          ),
+        )
+        expect(getterCalls).toBe(0)
+        expect(message).toBe('invalid_fingerprint_key_ring')
+      },
+    )
   })
 
   describe('immutable retention clocks', () => {
@@ -242,6 +316,36 @@ describe('Shop OS messaging retention policy', () => {
         '2021-02-28T12:00:00.000Z',
       )
       expect(input.toISOString()).toBe('2020-02-29T12:00:00.000Z')
+    })
+
+    it.each([new Date(8.64e15), new Date(-8.64e15)])(
+      'returns a fresh equal boundary date for zero calendar offsets: %s',
+      (input) => {
+        const originalTime = input.getTime()
+        const yearsResult = addUtcCalendarYearsClamped(input, 0)
+        const monthsResult = addUtcCalendarMonthsClamped(input, 0)
+
+        expect(yearsResult).not.toBe(input)
+        expect(monthsResult).not.toBe(input)
+        expect(yearsResult.getTime()).toBe(originalTime)
+        expect(monthsResult.getTime()).toBe(originalTime)
+        expect(input.getTime()).toBe(originalTime)
+      },
+    )
+
+    it('still rejects impossible nonzero offsets at the valid date boundaries', () => {
+      expect(() => addUtcCalendarYearsClamped(new Date(8.64e15), 1)).toThrow(
+        'invalid_calendar_offset',
+      )
+      expect(() => addUtcCalendarMonthsClamped(new Date(8.64e15), 1)).toThrow(
+        'invalid_calendar_offset',
+      )
+      expect(() => addUtcCalendarYearsClamped(new Date(-8.64e15), -1)).toThrow(
+        'invalid_calendar_offset',
+      )
+      expect(() => addUtcCalendarMonthsClamped(new Date(-8.64e15), -1)).toThrow(
+        'invalid_calendar_offset',
+      )
     })
   })
 

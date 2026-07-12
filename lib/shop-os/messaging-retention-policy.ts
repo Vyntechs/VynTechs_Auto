@@ -95,22 +95,48 @@ export function fingerprintsForKeyRing(
   keyRing: FingerprintKeyRing,
 ): ReadonlyArray<{ keyVersion: string; fingerprint: string }> {
   const destination = normalizeE164(input)
-  const currentVersion = requireKeyVersion(keyRing?.currentVersion)
-  const keys = keyRing?.keys
+  if (keyRing === null || typeof keyRing !== 'object' || Array.isArray(keyRing)) {
+    throw new Error('invalid_fingerprint_key_ring')
+  }
+  const currentVersionDescriptor = Object.getOwnPropertyDescriptor(
+    keyRing,
+    'currentVersion',
+  )
+  const keysDescriptor = Object.getOwnPropertyDescriptor(keyRing, 'keys')
+  if (
+    !currentVersionDescriptor?.enumerable ||
+    !('value' in currentVersionDescriptor) ||
+    typeof currentVersionDescriptor.value !== 'string' ||
+    !keysDescriptor?.enumerable ||
+    !('value' in keysDescriptor)
+  ) {
+    throw new Error('invalid_fingerprint_key_ring')
+  }
+
+  const currentVersion = requireKeyVersion(currentVersionDescriptor.value)
+  const keys: unknown = keysDescriptor.value
   if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) {
     throw new Error('invalid_fingerprint_key_ring')
   }
-  if (!Object.hasOwn(keys, currentVersion)) {
+  const keyDescriptors = Object.getOwnPropertyDescriptors(keys)
+  const keyVersions = Object.keys(keyDescriptors).filter(
+    (keyVersion) => keyDescriptors[keyVersion]?.enumerable,
+  )
+  if (!keyVersions.includes(currentVersion)) {
     throw new Error('missing_current_fingerprint_key')
   }
 
-  const legacyVersions = Object.keys(keys)
+  const legacyVersions = keyVersions
     .filter((keyVersion) => keyVersion !== currentVersion)
     .sort()
   const versions = [currentVersion, ...legacyVersions]
   const fingerprints = versions.map((keyVersion) => {
     requireKeyVersion(keyVersion)
-    const fingerprint = fingerprintDestination(destination, keyVersion, keys[keyVersion]!)
+    const descriptor = keyDescriptors[keyVersion]
+    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') {
+      throw new Error('invalid_fingerprint_key')
+    }
+    const fingerprint = fingerprintDestination(destination, keyVersion, descriptor.value)
     return Object.freeze({ keyVersion, fingerprint })
   })
 
@@ -119,14 +145,18 @@ export function fingerprintsForKeyRing(
 
 export function addUtcCalendarYearsClamped(at: Date, years: number): Date {
   const source = requireRetentionDate(at)
-  const targetYear = source.getUTCFullYear() + requireCalendarOffset(years)
+  const offset = requireCalendarOffset(years)
+  if (offset === 0) return source
+  const targetYear = source.getUTCFullYear() + offset
   return calendarDateClamped(source, targetYear, source.getUTCMonth())
 }
 
 export function addUtcCalendarMonthsClamped(at: Date, months: number): Date {
   const source = requireRetentionDate(at)
+  const offset = requireCalendarOffset(months)
+  if (offset === 0) return source
   const targetIndex =
-    source.getUTCFullYear() * 12 + source.getUTCMonth() + requireCalendarOffset(months)
+    source.getUTCFullYear() * 12 + source.getUTCMonth() + offset
   if (!Number.isSafeInteger(targetIndex)) throw new Error('invalid_calendar_offset')
   const targetMonth = ((targetIndex % 12) + 12) % 12
   const targetYear = (targetIndex - targetMonth) / 12
