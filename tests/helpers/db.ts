@@ -232,7 +232,7 @@ async function shopOsServerOnlyAclMarkers(
       table_privileges(privilege_name) as (
         values
           ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
       )
     select
       (select count(*)::int
@@ -471,7 +471,7 @@ async function messagingRetentionMarkers(
       ('anon'), ('authenticated')
     ), table_privileges(privilege_name) as (values
       ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-      ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+      ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
     )
     select
       (select count(*)::int from expected_tables e
@@ -587,6 +587,7 @@ type MessagingRetentionAclMarkers = {
   effective_client_privilege_count: number
   service_crud_count: number
   service_grant_count: number
+  service_effective_acl_count: number
   function_count: number
   required_service_function_count: number
   exact_function_acl_count: number
@@ -613,7 +614,12 @@ async function messagingRetentionAclMarkers(
       client_roles(role_name) as (values ('anon'), ('authenticated')),
       table_privileges(privilege_name) as (values
         ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-        ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+        ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+      ),
+      service_privileges(privilege_name, expected) as (values
+        ('SELECT', true), ('INSERT', true), ('UPDATE', true), ('DELETE', true),
+        ('TRUNCATE', false), ('REFERENCES', false), ('TRIGGER', false),
+        ('MAINTAIN', false)
       )
     select
       (select count(*)::int from expected_tables e
@@ -653,6 +659,12 @@ async function messagingRetentionAclMarkers(
        join information_schema.role_table_grants g on g.table_name = e.table_name
        where g.table_schema = 'public' and g.grantee = 'service_role')
         as service_grant_count,
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join service_privileges p
+       where has_table_privilege('service_role', c.oid, p.privilege_name) = p.expected)
+        as service_effective_acl_count,
       (select count(*)::int from expected_functions e
        join pg_proc p on p.oid = to_regprocedure('public.' || e.signature))
         as function_count,
@@ -683,6 +695,7 @@ function hasCompleteMessagingRetentionAcl(
     && markers.effective_client_privilege_count === 0
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
+    && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
     && markers.function_count === 7
     && markers.required_service_function_count === 2
     && markers.exact_function_acl_count === 7

@@ -53,6 +53,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
       direct_client_grant_count: number
       effective_client_privilege_count: number
       service_grants: string[]
+      service_effective_acl_count: number
     }>(`
       with
         expected_tables(table_name) as (values
@@ -61,7 +62,12 @@ describe('Shop OS messaging retention ACL hardening', () => {
         client_roles(role_name) as (values ('anon'), ('authenticated')),
         table_privileges(privilege_name) as (values
           ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+        ),
+        service_privileges(privilege_name, expected) as (values
+          ('SELECT', true), ('INSERT', true), ('UPDATE', true), ('DELETE', true),
+          ('TRUNCATE', false), ('REFERENCES', false), ('TRIGGER', false),
+          ('MAINTAIN', false)
         )
       select
         e.table_name,
@@ -81,7 +87,10 @@ describe('Shop OS messaging retention ACL hardening', () => {
         coalesce((select array_agg(g.privilege_type order by g.privilege_type)
          from information_schema.role_table_grants g
          where g.table_schema = 'public' and g.table_name = e.table_name
-           and g.grantee = 'service_role'), array[]::text[]) as service_grants
+           and g.grantee = 'service_role'), array[]::text[]) as service_grants,
+        (select count(*)::int from service_privileges p
+         where has_table_privilege('service_role', c.oid, p.privilege_name) = p.expected)
+          as service_effective_acl_count
       from expected_tables e
       join pg_class c on c.relname = e.table_name
       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
@@ -98,6 +107,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
         direct_client_grant_count: 0,
         effective_client_privilege_count: 0,
         service_grants: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+        service_effective_acl_count: 8,
       })),
     )
 
@@ -147,7 +157,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
     closeCallbacks.push(close)
 
     await client.exec(`
-      grant truncate, references, trigger on public.notifications to anon, authenticated, service_role;
+      grant truncate, references, trigger, maintain on public.notifications to anon, authenticated, service_role;
       grant select on public.notifications to public;
       grant execute on function public.guard_quote_send_lifecycle() to public, anon, authenticated, service_role;
     `)
@@ -161,12 +171,12 @@ describe('Shop OS messaging retention ACL hardening', () => {
           ('anon'), ('authenticated')
         ) roles(role_name) cross join (values
           ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
         ) privileges(privilege_name)
         where has_table_privilege(role_name, 'public.notifications', privilege_name)) as client_count,
         (select count(*)::int from (values
           ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
-          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
         ) privileges(privilege_name)
         where has_table_privilege('service_role', 'public.notifications', privilege_name)) as service_count
     `)
@@ -179,6 +189,46 @@ describe('Shop OS messaging retention ACL hardening', () => {
         has_function_privilege('service_role', 'public.guard_quote_send_lifecycle()', 'execute')
           as service_execute
     `)).rows[0]).toEqual({ client_execute: false, service_execute: false })
+  }, 15_000)
+
+  it('repairs direct and PUBLIC MAINTAIN but refuses inherited client or service MAINTAIN', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    await client.exec('grant maintain on public.notifications to public;')
+    await expect(ensureMessagingRetentionAclMigration(client)).resolves.toBeUndefined()
+    expect((await client.query<{ leaked: boolean }>(`
+      select has_table_privilege('anon', 'public.notifications', 'maintain')
+        or has_table_privilege('authenticated', 'public.notifications', 'maintain') as leaked
+    `)).rows[0]?.leaked).toBe(false)
+
+    await client.exec('grant maintain on public.notifications to anon, authenticated;')
+    await expect(ensureMessagingRetentionAclMigration(client)).resolves.toBeUndefined()
+    expect((await client.query<{ leaked: boolean }>(`
+      select has_table_privilege('anon', 'public.notifications', 'maintain')
+        or has_table_privilege('authenticated', 'public.notifications', 'maintain') as leaked
+    `)).rows[0]?.leaked).toBe(false)
+
+    await client.exec(`
+      create role messaging_acl_client_maintain nologin;
+      grant maintain on public.notifications to messaging_acl_client_maintain;
+      grant messaging_acl_client_maintain to authenticated;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
+
+    await client.exec(`
+      revoke messaging_acl_client_maintain from authenticated;
+      revoke maintain on public.notifications from messaging_acl_client_maintain;
+      drop role messaging_acl_client_maintain;
+      create role messaging_acl_service_maintain nologin;
+      grant maintain on public.notifications to messaging_acl_service_maintain;
+      grant messaging_acl_service_maintain to service_role;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
+      'messaging retention ACL hardening failed in ephemeral database',
+    )
   }, 15_000)
 
   it('fails closed on absent tables, missing service CRUD, and missing allowed function execution', async () => {

@@ -52,19 +52,27 @@ describe('Shop OS server-only table ACL hardening', () => {
     closeCallbacks.push(close)
 
     await client.exec(`
-      grant truncate, references, trigger
+      grant truncate, references, trigger, maintain
       on ${SERVER_ONLY_TABLES.map((table) => `public.${table}`).join(', ')}
       to anon, authenticated;
     `)
 
     const before = await client.query<{ count: number }>(`
+      with
+        expected_tables(table_name) as (values
+          ${SERVER_ONLY_TABLES.map((table) => `('${table}')`).join(', ')}
+        ),
+        client_roles(role_name) as (values ('anon'), ('authenticated')),
+        granted_privileges(privilege_name) as (values
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+        )
       select count(*)::int
-      from information_schema.role_table_grants
-      where table_schema = 'public'
-        and table_name = any(array[${SERVER_ONLY_TABLES.map((table) => `'${table}'`).join(', ')}])
-        and grantee in ('anon', 'authenticated')
+      from expected_tables e
+      cross join client_roles r
+      cross join granted_privileges p
+      where has_table_privilege(r.role_name, 'public.' || e.table_name, p.privilege_name)
     `)
-    expect(before.rows[0]?.count).toBe(SERVER_ONLY_TABLES.length * 2 * 3)
+    expect(before.rows[0]?.count).toBe(SERVER_ONLY_TABLES.length * 2 * 4)
 
     await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
     await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
