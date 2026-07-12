@@ -113,6 +113,7 @@ create table messaging_deletion_requests (
   requesting_actor_profile_id uuid not null,
   requested_at timestamptz not null default now(),
   completed_at timestamptz,
+  latest_relevant_at timestamptz,
   prior_record_counts jsonb,
   proof_summary jsonb,
   retain_until timestamptz,
@@ -129,8 +130,12 @@ create table messaging_deletion_requests (
   constraint messaging_deletion_requests_proof_summary_object check (proof_summary is null or jsonb_typeof(proof_summary) = 'object'),
   constraint messaging_deletion_requests_proof_summary_size check (proof_summary is null or octet_length(proof_summary::text) <= 4096),
   constraint messaging_deletion_requests_state_consistent check (
-    (state = 'pending' and customer_id is not null and completed_at is null and prior_record_counts is null and proof_summary is null and retain_until is null)
-    or (state = 'completed' and customer_id is null and completed_at is not null and prior_record_counts is not null and proof_summary is not null and retain_until is not null)
+    (state = 'pending' and customer_id is not null and completed_at is null and latest_relevant_at is null and prior_record_counts is null and proof_summary is null and retain_until is null)
+    or (state = 'completed' and customer_id is null and completed_at is not null and latest_relevant_at is not null and prior_record_counts is not null and proof_summary is not null and retain_until is not null)
+  ),
+  constraint messaging_deletion_requests_retention_window_exact check (
+    state = 'pending'
+    or (latest_relevant_at >= completed_at and retain_until = latest_relevant_at + interval '5 years')
   )
 );
 --> statement-breakpoint
@@ -172,6 +177,76 @@ create table messaging_retention_holds (
 create unique index messaging_retention_holds_shop_id_uq on messaging_retention_holds (shop_id, id);
 --> statement-breakpoint
 create index messaging_retention_holds_active_subject_idx on messaging_retention_holds (shop_id, subject_key, expires_at) where subject_key is not null and released_at is null;
+--> statement-breakpoint
+
+create function serialize_messaging_retention_hold_target()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  request_ids uuid[];
+  locked_request_id uuid;
+begin
+  if tg_op = 'UPDATE' then
+    with targets(shop_id, subject_key, resource_type, resource_id) as (
+      values
+        (new.shop_id, new.subject_key, new.resource_type, new.resource_id),
+        (old.shop_id, old.subject_key, old.resource_type, old.resource_id)
+    )
+    select array_agg(distinct r.id order by r.id)
+    into request_ids
+    from public.messaging_deletion_requests r
+    join targets t on t.shop_id = r.shop_id
+      and (
+        (t.subject_key is not null and t.subject_key = r.subject_key)
+        or (t.resource_type = 'messaging_deletion_request' and t.resource_id = r.id)
+        or (
+          t.resource_type = 'messaging_consent_event'
+          and r.subject_key = (
+            select e.subject_key
+            from public.messaging_consent_events e
+            where e.shop_id = t.shop_id and e.id = t.resource_id
+          )
+        )
+      );
+  else
+    with targets(shop_id, subject_key, resource_type, resource_id) as (
+      values (new.shop_id, new.subject_key, new.resource_type, new.resource_id)
+    )
+    select array_agg(distinct r.id order by r.id)
+    into request_ids
+    from public.messaging_deletion_requests r
+    join targets t on t.shop_id = r.shop_id
+      and (
+        (t.subject_key is not null and t.subject_key = r.subject_key)
+        or (t.resource_type = 'messaging_deletion_request' and t.resource_id = r.id)
+        or (
+          t.resource_type = 'messaging_consent_event'
+          and r.subject_key = (
+            select e.subject_key
+            from public.messaging_consent_events e
+            where e.shop_id = t.shop_id and e.id = t.resource_id
+          )
+        )
+      );
+  end if;
+
+  foreach locked_request_id in array coalesce(request_ids, array[]::uuid[])
+  loop
+    perform 1
+    from public.messaging_deletion_requests r
+    where r.id = locked_request_id
+    for update;
+  end loop;
+  return new;
+end;
+$$;
+--> statement-breakpoint
+create trigger messaging_retention_holds_serialize_target
+before insert or update of shop_id, resource_type, resource_id, subject_key
+on messaging_retention_holds
+for each row execute function serialize_messaging_retention_hold_target();
 --> statement-breakpoint
 
 create function reject_messaging_consent_event_mutation()
@@ -432,6 +507,7 @@ create policy messaging_retention_holds_server_only_deny_direct on messaging_ret
 --> statement-breakpoint
 
 revoke all on function reject_messaging_consent_event_mutation() from public, anon, authenticated, service_role;
+revoke all on function serialize_messaging_retention_hold_target() from public, anon, authenticated, service_role;
 revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
 revoke all on function compact_messaging_consent_events(uuid, uuid, uuid) from public, anon, authenticated;

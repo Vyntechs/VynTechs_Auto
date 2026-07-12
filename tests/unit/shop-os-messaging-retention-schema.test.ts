@@ -105,21 +105,23 @@ async function insertDeletionRequest(
 ) {
   const requestId = crypto.randomUUID()
   const state = input.state ?? 'pending'
-  const retainUntil = input.retainUntil === 'future'
-    ? "now() + interval '5 years'"
+  const latestRelevantAt = input.retainUntil === 'future'
+    ? 'now()'
     : input.retainUntil === 'past'
-      ? "now() - interval '1 second'"
-      : 'now()'
+      ? "now() - interval '5 years' - interval '1 second'"
+      : "now() - interval '5 years'"
+  const retainUntil = `${latestRelevantAt} + interval '5 years'`
   await client.query(
     `insert into messaging_deletion_requests (
       id, request_key, request_fingerprint, shop_id, subject_key, customer_id,
       destination_fingerprint, fingerprint_key_version, state, reason_code,
-      requesting_actor_profile_id, completed_at, prior_record_counts,
+      requesting_actor_profile_id, completed_at, latest_relevant_at, prior_record_counts,
       proof_summary, retain_until
     ) values (
       $1, $2, $3, $4, $5, $6, $7,
       'key_v1', '${state}', 'customer_request', $8,
-      ${state === 'completed' ? 'now()' : 'null'},
+      ${state === 'completed' ? latestRelevantAt : 'null'},
+      ${state === 'completed' ? latestRelevantAt : 'null'},
       ${state === 'completed' ? "'{}'::jsonb" : 'null'},
       ${state === 'completed' ? "'{}'::jsonb" : 'null'},
       ${state === 'completed' ? retainUntil : 'null'}
@@ -188,6 +190,9 @@ describe('Shop OS messaging retention source schema', () => {
       requestKey: expect.anything(),
       requestFingerprint: expect.anything(),
       retainUntil: expect.anything(),
+    })
+    expect(getTableColumns(messagingDeletionRequests)).toMatchObject({
+      latestRelevantAt: expect.anything(),
     })
   })
 
@@ -322,10 +327,10 @@ describe('Shop OS messaging retention source schema', () => {
         `insert into messaging_deletion_requests (
           request_key, request_fingerprint, shop_id, subject_key, customer_id,
           destination_fingerprint, fingerprint_key_version, state, reason_code,
-          requesting_actor_profile_id, completed_at, prior_record_counts,
+          requesting_actor_profile_id, completed_at, latest_relevant_at, prior_record_counts,
           proof_summary, retain_until
         ) values ($1, $2, $3, $4, null, $5, 'key_v1', 'completed',
-          'customer_request', $6, now(), '{}'::jsonb, $7, now() + interval '5 years')`,
+          'customer_request', $6, now(), now(), '{}'::jsonb, $7, now() + interval '5 years')`,
         [crypto.randomUUID(), hex, tenant.shopId, crypto.randomUUID(), hex,
           tenant.actorId, { value: 'x'.repeat(4097) }],
       )).rejects.toThrow(/messaging_deletion_requests_proof_summary_size/)
@@ -344,9 +349,9 @@ describe('Shop OS messaging retention source schema', () => {
         `insert into messaging_deletion_requests (
           request_key, request_fingerprint, shop_id, subject_key, customer_id,
           destination_fingerprint, fingerprint_key_version, state, reason_code,
-          requesting_actor_profile_id, completed_at, proof_summary, retain_until
+          requesting_actor_profile_id, completed_at, latest_relevant_at, proof_summary, retain_until
         ) values ($1, $2, $3, $4, $5, $6, 'key_v1', 'completed', 'customer_request', $7,
-          now(), '{}'::jsonb, now() + interval '5 years')`,
+          now(), now(), '{}'::jsonb, now() + interval '5 years')`,
         base,
       )).rejects.toThrow(/messaging_deletion_requests_state_consistent/)
 
@@ -416,6 +421,7 @@ describe('Shop OS messaging retention source schema', () => {
       await fixture.client.query(
         `update messaging_deletion_requests set
           state = 'completed', customer_id = null, completed_at = now(),
+          latest_relevant_at = now(),
           prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
           retain_until = now() + interval '5 years'
         where id = $1`,
@@ -463,6 +469,7 @@ describe('Shop OS messaging retention source schema', () => {
       await fixture.client.query(
         `update messaging_deletion_requests set
           state = 'completed', customer_id = null, completed_at = now(),
+          latest_relevant_at = now(),
           prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
           retain_until = now() + interval '5 years'
         where id = $1`,
@@ -485,6 +492,7 @@ describe('Shop OS messaging retention source schema', () => {
       await fixture.client.query(
         `update messaging_deletion_requests set
           state = 'completed', customer_id = null, completed_at = now(),
+          latest_relevant_at = now(),
           prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
           retain_until = now() + interval '5 years'
         where id = $1`,
@@ -670,6 +678,174 @@ describe('Shop OS messaging retention source schema', () => {
       )
     } finally {
       await fixture.close()
+    }
+  })
+
+  it('requires the exact five-calendar-year completed tombstone window', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const exactId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(),
+      })
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null,
+          completed_at = '2024-02-29 12:00:00+00',
+          latest_relevant_at = '2024-02-29 12:00:00+00',
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = '2029-02-28 12:00:00+00'
+        where id = $1`,
+        [exactId],
+      )
+      const exact = await fixture.client.query<{
+        latest_relevant_at: Date
+        retain_until: Date
+      }>(`
+        select latest_relevant_at, retain_until
+        from messaging_deletion_requests where id = $1
+      `, [exactId])
+      expect(exact.rows[0]).toMatchObject({
+        latest_relevant_at: new Date('2024-02-29T12:00:00.000Z'),
+        retain_until: new Date('2029-02-28T12:00:00.000Z'),
+      })
+      const immediatePurge = await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_deletion_request($1, $2) as purged',
+        [tenant.shopId, exactId],
+      )
+      expect(immediatePurge.rows[0]?.purged).toBe(false)
+
+      for (const retainUntil of [
+        '2029-02-28 11:59:59+00',
+        '2029-02-28 12:00:01+00',
+      ]) {
+        const invalidId = await insertDeletionRequest(fixture.client, tenant, {
+          subjectKey: crypto.randomUUID(),
+        })
+        await expect(fixture.client.query(
+          `update messaging_deletion_requests set
+            state = 'completed', customer_id = null,
+            completed_at = '2024-02-29 12:00:00+00',
+            latest_relevant_at = '2024-02-29 12:00:00+00',
+            prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+            retain_until = $1
+          where id = $2`,
+          [retainUntil, invalidId],
+        )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
+      }
+
+      const immediateRetentionId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(),
+      })
+      await expect(fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null,
+          completed_at = now(), latest_relevant_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now()
+        where id = $1`,
+        [immediateRetentionId],
+      )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
+
+      const beforeCompletionId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(),
+      })
+      await expect(fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null,
+          completed_at = '2024-03-01 12:00:00+00',
+          latest_relevant_at = '2024-02-29 12:00:00+00',
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = '2029-02-28 12:00:00+00'
+        where id = $1`,
+        [beforeCompletionId],
+      )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('installs stable hold-target serialization before hold insertion or retargeting', async () => {
+    const fixture = await createTestDb()
+    try {
+      const functionProof = await fixture.client.query<{
+        function_definition: string
+      }>(`
+        select pg_get_functiondef(
+          'serialize_messaging_retention_hold_target()'::regprocedure
+        ) as function_definition
+      `)
+      const functionDefinition = functionProof.rows[0]?.function_definition.toLowerCase()
+      expect(functionDefinition).toContain(
+        'array_agg(distinct r.id order by r.id)',
+      )
+      expect(functionDefinition).toContain('for update')
+      expect(functionDefinition).toContain(
+        "messaging_deletion_request",
+      )
+      expect(functionDefinition).toContain(
+        "messaging_consent_event",
+      )
+
+      const triggerProof = await fixture.client.query<{ trigger_definition: string }>(`
+        select pg_get_triggerdef(oid) as trigger_definition
+        from pg_trigger
+        where tgname = 'messaging_retention_holds_serialize_target'
+      `)
+      expect(triggerProof.rows[0]?.trigger_definition).toContain(
+        'BEFORE INSERT OR UPDATE OF shop_id, resource_type, resource_id, subject_key',
+      )
+
+      const tenant = await seedTenant(fixture.client)
+      const firstSubject = crypto.randomUUID()
+      const secondSubject = crypto.randomUUID()
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
+      const hold = await fixture.client.query<{ id: string }>(
+        `insert into messaging_retention_holds (
+          shop_id, subject_key, reason_code, authorizing_actor_profile_id,
+          starts_at, review_at, expires_at, retain_until
+        ) values ($1, $2, 'legal_claim', $3, now(), now() + interval '1 day',
+          now() + interval '30 days', now() + interval '5 years')
+        returning id`,
+        [tenant.shopId, firstSubject, tenant.actorId],
+      )
+      await fixture.client.query(
+        `update messaging_retention_holds
+        set subject_key = $1
+        where id = $2`,
+        [secondSubject, hold.rows[0]?.id],
+      )
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('refuses unsafe or missing hold-serialization markers', async () => {
+    const unsafeFunction = await createTestDb()
+    try {
+      await unsafeFunction.client.exec(
+        `alter function serialize_messaging_retention_hold_target()
+        set search_path = public`,
+      )
+      await expect(ensureMessagingRetentionMigration(unsafeFunction.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await unsafeFunction.close()
+    }
+
+    const missingTrigger = await createTestDb()
+    try {
+      await missingTrigger.client.exec(
+        `drop trigger messaging_retention_holds_serialize_target
+        on messaging_retention_holds`,
+      )
+      await expect(ensureMessagingRetentionMigration(missingTrigger.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await missingTrigger.close()
     }
   })
 })

@@ -1027,6 +1027,7 @@ export const messagingDeletionRequests = pgTable(
     requestingActorProfileId: uuid('requesting_actor_profile_id').notNull(),
     requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    latestRelevantAt: timestamp('latest_relevant_at', { withTimezone: true }),
     priorRecordCounts: jsonb('prior_record_counts').$type<Record<string, number>>(),
     proofSummary: jsonb('proof_summary').$type<Record<string, unknown>>(),
     retainUntil: timestamp('retain_until', { withTimezone: true }),
@@ -1097,15 +1098,23 @@ export const messagingDeletionRequests = pgTable(
       sql`(${table.state} = 'pending'
           and ${table.customerId} is not null
           and ${table.completedAt} is null
+          and ${table.latestRelevantAt} is null
           and ${table.priorRecordCounts} is null
           and ${table.proofSummary} is null
           and ${table.retainUntil} is null)
         or (${table.state} = 'completed'
           and ${table.customerId} is null
           and ${table.completedAt} is not null
+          and ${table.latestRelevantAt} is not null
           and ${table.priorRecordCounts} is not null
           and ${table.proofSummary} is not null
           and ${table.retainUntil} is not null)`,
+    ),
+    check(
+      'messaging_deletion_requests_retention_window_exact',
+      sql`${table.state} = 'pending'
+        or (${table.latestRelevantAt} >= ${table.completedAt}
+          and ${table.retainUntil} = ${table.latestRelevantAt} + interval '5 years')`,
     ),
   ],
 )

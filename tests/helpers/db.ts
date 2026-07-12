@@ -348,7 +348,8 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests', 'destination_fingerprint'), ('messaging_deletion_requests', 'fingerprint_key_version'),
       ('messaging_deletion_requests', 'state'), ('messaging_deletion_requests', 'reason_code'),
       ('messaging_deletion_requests', 'requesting_actor_profile_id'), ('messaging_deletion_requests', 'requested_at'),
-      ('messaging_deletion_requests', 'completed_at'), ('messaging_deletion_requests', 'prior_record_counts'),
+      ('messaging_deletion_requests', 'completed_at'), ('messaging_deletion_requests', 'latest_relevant_at'),
+      ('messaging_deletion_requests', 'prior_record_counts'),
       ('messaging_deletion_requests', 'proof_summary'), ('messaging_deletion_requests', 'retain_until'),
       ('messaging_retention_holds', 'id'), ('messaging_retention_holds', 'shop_id'),
       ('messaging_retention_holds', 'resource_type'), ('messaging_retention_holds', 'resource_id'),
@@ -381,6 +382,7 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests_reason_code_valid'), ('messaging_deletion_requests_prior_counts_object'),
       ('messaging_deletion_requests_prior_counts_size'), ('messaging_deletion_requests_proof_summary_object'),
       ('messaging_deletion_requests_proof_summary_size'), ('messaging_deletion_requests_state_consistent'),
+      ('messaging_deletion_requests_retention_window_exact'),
       ('messaging_retention_holds_pkey'), ('messaging_retention_holds_shop_fk'),
       ('messaging_retention_holds_shop_actor_fk'), ('messaging_retention_holds_resource_type_valid'),
       ('messaging_retention_holds_reason_code_valid'), ('messaging_retention_holds_target_consistent'),
@@ -398,16 +400,20 @@ async function messagingRetentionMarkers(
       ('require_messaging_compaction_completion()', 'trigger', false, false),
       ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true),
       ('guard_messaging_deletion_request_mutation()', 'trigger', false, false),
-      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true)
+      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true),
+      ('serialize_messaging_retention_hold_target()', 'trigger', false, false)
     ), expected_triggers(
-      table_name, trigger_name, function_signature, trigger_type, is_deferrable
+      table_name, trigger_name, function_signature, trigger_type, is_deferrable,
+      trigger_columns
     ) as (values
       ('messaging_consent_events', 'messaging_consent_events_append_only',
-        'reject_messaging_consent_event_mutation()', 27, false),
+        'reject_messaging_consent_event_mutation()', 27, false, null),
       ('messaging_consent_events', 'messaging_consent_events_compaction_completion',
-        'require_messaging_compaction_completion()', 9, true),
+        'require_messaging_compaction_completion()', 9, true, null),
       ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
-        'guard_messaging_deletion_request_mutation()', 27, false)
+        'guard_messaging_deletion_request_mutation()', 27, false, null),
+      ('messaging_retention_holds', 'messaging_retention_holds_serialize_target',
+        'serialize_messaging_retention_hold_target()', 23, false, '2 3 4 5')
     ), client_roles(role_name) as (values
       ('anon'), ('authenticated')
     ), table_privileges(privilege_name) as (values
@@ -452,7 +458,8 @@ async function messagingRetentionMarkers(
          and t.tgenabled = 'O'
          and t.tgtype = e.trigger_type
          and t.tgdeferrable = e.is_deferrable
-         and t.tginitdeferred = e.is_deferrable) as trigger_binding_count,
+         and t.tginitdeferred = e.is_deferrable
+         and (e.trigger_columns is null or t.tgattr::text = e.trigger_columns)) as trigger_binding_count,
       (select count(*)::int from expected_tables e
        join information_schema.role_table_grants g on g.table_name = e.table_name
        where g.table_schema = 'public' and g.grantee in ('anon', 'authenticated')) as direct_client_grant_count,
@@ -474,13 +481,13 @@ async function messagingRetentionMarkers(
 
 function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
   return markers.table_count === 5
-    && markers.column_count === 71
-    && markers.constraint_count === 54
+    && markers.column_count === 72
+    && markers.constraint_count === 55
     && markers.index_count === 12
     && markers.rls_count === 5
     && markers.policy_count === 5
-    && markers.function_marker_count === 5
-    && markers.trigger_binding_count === 3
+    && markers.function_marker_count === 6
+    && markers.trigger_binding_count === 4
     && markers.direct_client_grant_count === 0
     && markers.effective_client_privilege_count === 0
     && markers.service_crud_count === 20
