@@ -746,7 +746,7 @@ Return pending only after commit. Any database error returns `retryable`; never 
 
 - [ ] **Step 4: Implement cleanup transaction**
 
-Lock pending request, customer, sends in stable ID order, consent projection/events, SMS log, notifications, and active holds. Apply the exact state rule:
+Lock every matching pending request in stable ascending ID order before locking the customer and sends. Preserve the request → customer → send mutation order: the quote-send lifecycle guard deterministically reacquires those already-held request rows `FOR SHARE`, which conflicts with pending → completed updates and prevents completion from committing around authorized detachment or token revocation. Then lock consent projection/events, SMS log, notifications, and active holds in their documented stable order. Apply the exact state rule:
 
 ```ts
 const cancellable = new Set(['queued', 'claimed'])

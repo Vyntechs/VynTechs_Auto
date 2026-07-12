@@ -24,6 +24,7 @@ const MESSAGING_TABLES = [
 ] as const
 
 const FUNCTION_EXECUTION = [
+  { signature: 'validate_quote_event_send_reference()', serviceExecute: false },
   { signature: 'guard_quote_send_lifecycle()', serviceExecute: false },
   { signature: 'reject_messaging_consent_event_mutation()', serviceExecute: false },
   { signature: 'require_messaging_compaction_completion()', serviceExecute: false },

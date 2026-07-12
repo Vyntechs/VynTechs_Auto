@@ -571,6 +571,40 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
+  it('locks every matching pending deletion request in stable order before send mutation', async () => {
+    const fixture = await createTestDb()
+    try {
+      const functionProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'guard_quote_send_lifecycle()'::regprocedure
+        ) as function_definition
+      `)
+      const functionDefinition = functionProof.rows[0]!.function_definition.toLowerCase()
+      expect(functionDefinition).not.toContain('select exists')
+      expect(functionDefinition).toContain('order by deletion_request.id')
+      expect(functionDefinition).toContain('for share')
+      expect(functionDefinition.indexOf('order by deletion_request.id'))
+        .toBeLessThan(functionDefinition.indexOf('for share'))
+
+      const tenant = await seedOperationalTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+      await expect(fixture.client.query(
+        `update quote_sends
+        set customer_id = null, token_hash = null, token_expires_at = null
+        where id = $1`,
+        [sendId],
+      )).resolves.toBeDefined()
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('never restores or reassigns detached customer identity or revoked tokens', async () => {
     const fixture = await createTestDb()
     try {
@@ -1005,6 +1039,26 @@ describe('Shop OS messaging retention source schema', () => {
       )
     } finally {
       await weakenedLifecycle.close()
+    }
+  })
+
+  it('refuses a lifecycle guard weakened to authorize without a request-row lock', async () => {
+    const fixture = await createTestDb()
+    try {
+      const functionProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'guard_quote_send_lifecycle()'::regprocedure
+        ) as function_definition
+      `)
+      const original = functionProof.rows[0]!.function_definition
+      const weakened = original.replace(/\n\s*for share/i, '')
+      expect(weakened).not.toBe(original)
+      await fixture.client.exec(weakened)
+      await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await fixture.close()
     }
   })
 

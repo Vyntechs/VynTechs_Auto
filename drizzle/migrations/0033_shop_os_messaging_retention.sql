@@ -368,6 +368,7 @@ declare
     and new.token_hash is null
     and new.token_expires_at is null;
   deletion_authorized boolean := false;
+  locked_request_id uuid;
 begin
   if old.customer_id is null and new.customer_id is not null
     or (old.customer_id is not null and new.customer_id is not null
@@ -390,15 +391,19 @@ begin
   end if;
 
   if customer_detached or (new.state = old.state and token_revoked) then
-    select exists (
-      select 1
+    for locked_request_id in
+      select deletion_request.id
       from public.messaging_deletion_requests deletion_request
       where deletion_request.shop_id = old.shop_id
         and deletion_request.customer_id = old.customer_id
         and deletion_request.destination_fingerprint = old.destination_fingerprint
         and deletion_request.fingerprint_key_version = old.fingerprint_key_version
         and deletion_request.state = 'pending'
-    ) into deletion_authorized;
+      order by deletion_request.id
+      for share
+    loop
+      deletion_authorized := true;
+    end loop;
 
     if not deletion_authorized then
       raise exception 'quote send detachment requires a matching pending messaging deletion request';

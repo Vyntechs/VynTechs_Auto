@@ -446,18 +446,24 @@ async function messagingRetentionMarkers(
       ('notifications_shop_id_uq'), ('notifications_shop_recipient_dedupe_uq'),
       ('notifications_purge_idx')
     ), expected_functions(
-      signature, return_type, security_definer, service_execute, body_marker
+      signature, return_type, security_definer, service_execute,
+      body_marker, secondary_body_marker, tertiary_body_marker
     ) as (values
       ('validate_quote_event_send_reference()', 'trigger', true, false,
-        'quote event send reference must match an exact live quote send'),
+        'quote event send reference must match an exact live quote send', null, null),
       ('guard_quote_send_lifecycle()', 'trigger', false, false,
-        'matching pending messaging deletion request'),
-      ('reject_messaging_consent_event_mutation()', 'trigger', false, false, null),
-      ('require_messaging_compaction_completion()', 'trigger', false, false, null),
-      ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true, null),
-      ('guard_messaging_deletion_request_mutation()', 'trigger', false, false, null),
-      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true, null),
-      ('serialize_messaging_retention_hold_target()', 'trigger', false, false, null)
+        'matching pending messaging deletion request',
+        'order by deletion_request.id', 'for share'),
+      ('reject_messaging_consent_event_mutation()', 'trigger', false, false, null, null, null),
+      ('require_messaging_compaction_completion()', 'trigger', false, false, null, null, null),
+      ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true,
+        null, null, null),
+      ('guard_messaging_deletion_request_mutation()', 'trigger', false, false,
+        null, null, null),
+      ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
+        null, null, null),
+      ('serialize_messaging_retention_hold_target()', 'trigger', false, false,
+        null, null, null)
     ), expected_triggers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,
       trigger_columns
@@ -508,6 +514,10 @@ async function messagingRetentionMarkers(
          and p.prosecdef = e.security_definer
          and p.proconfig = array['search_path=""']
          and (e.body_marker is null or position(e.body_marker in pg_get_functiondef(p.oid)) > 0)
+         and (e.secondary_body_marker is null
+           or position(e.secondary_body_marker in pg_get_functiondef(p.oid)) > 0)
+         and (e.tertiary_body_marker is null
+           or position(e.tertiary_body_marker in pg_get_functiondef(p.oid)) > 0)
          and has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
          and not has_function_privilege('anon', p.oid, 'execute')
          and not has_function_privilege('authenticated', p.oid, 'execute')) as function_marker_count,
