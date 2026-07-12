@@ -26,8 +26,6 @@ const reasonCodes = new Set([
   'security_investigation',
 ])
 const DAY = 86_400_000
-const MAX_SCANS_PER_FAMILY = 1_100
-const ZERO_UUID = '00000000-0000-0000-0000-000000000000'
 
 type ResourceType =
   | 'messaging_consent_event'
@@ -71,8 +69,7 @@ type ReleaseSnapshot = {
 }
 
 type PurgeSnapshot = { db: AppDb; now: Date; batchSize: number }
-type Cursor = { retainUntil: Date | string; id: string }
-type Hint = Cursor & { shopId: string }
+type Hint = { retainUntil: Date | string; id: string; shopId: string }
 type Family =
   | 'notifications'
   | 'smsLog'
@@ -343,86 +340,236 @@ export async function releaseMessagingRetentionHold(rawInput: {
   }
 }
 
-function cursorValues(cursor: Cursor | null, now: Date): [boolean, Date | string, string] {
-  return [cursor === null, cursor?.retainUntil ?? now, cursor?.id ?? ZERO_UUID]
-}
-
-async function nextHint(
+async function candidateHints(
   db: AppDb,
   family: Family,
   now: Date,
-  cursor: Cursor | null,
-): Promise<Hint | null> {
-  const [first, retainUntil, id] = cursorValues(cursor, now)
-  let rows: Hint[]
+  limit: number,
+): Promise<Hint[]> {
   switch (family) {
-    case 'notifications':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from notifications
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'smsLog':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from sms_log
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'quoteSends':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from quote_sends
-        where state in ('cancelled', 'failed', 'responded', 'expired')
-          and retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'consentProjections':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from messaging_consent_state
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'suppressions':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from sms_suppressions
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'consentEvents':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from messaging_consent_events
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'deletionRequests':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from messaging_deletion_requests
-        where state = 'completed' and retain_until <= ${now}::timestamptz
-          and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
-    case 'retentionHolds':
-      rows = unwrapRows(await db.execute(sql`select shop_id as "shopId", id,
-        retain_until as "retainUntil" from messaging_retention_holds
-        where retain_until <= ${now}::timestamptz and retain_until <= clock_timestamp()
-          and (${first} or (retain_until, id) > (${retainUntil}::timestamptz, ${id}::uuid))
-        order by retain_until, id limit 1`)); break
+    case 'notifications': return unwrapRows(await db.execute(sql`
+      select n.shop_id as "shopId", n.id, n.retain_until as "retainUntil"
+      from notifications n
+      where n.retain_until <= ${now}::timestamptz and n.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = n.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'notification' and h.resource_id = n.id)
+              or (n.entity_type = 'customer' and h.subject_key = n.entity_id)
+              or (n.entity_type = 'quote_send' and exists (select 1 from quote_sends q
+                where q.shop_id = n.shop_id and q.id = n.entity_id
+                  and q.subject_key = h.subject_key))))
+      order by n.retain_until, n.id limit ${limit}
+    `))
+    case 'smsLog': return unwrapRows(await db.execute(sql`
+      select l.shop_id as "shopId", l.id, l.retain_until as "retainUntil"
+      from sms_log l
+      where l.retain_until <= ${now}::timestamptz and l.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = l.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'sms_log' and h.resource_id = l.id)
+              or exists (select 1 from quote_sends q
+                where q.shop_id = l.shop_id and q.id = l.quote_send_id
+                  and q.subject_key = h.subject_key)))
+      order by l.retain_until, l.id limit ${limit}
+    `))
+    case 'quoteSends': return unwrapRows(await db.execute(sql`
+      select q.shop_id as "shopId", q.id, q.retain_until as "retainUntil"
+      from quote_sends q
+      where q.state in ('cancelled', 'failed', 'responded', 'expired')
+        and q.retain_until <= ${now}::timestamptz and q.retain_until <= clock_timestamp()
+        and not exists (select 1 from sms_log l
+          where l.shop_id = q.shop_id and l.quote_send_id = q.id)
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = q.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'quote_send' and h.resource_id = q.id)
+              or h.subject_key = q.subject_key))
+      order by q.retain_until, q.id limit ${limit}
+    `))
+    case 'consentProjections': return unwrapRows(await db.execute(sql`
+      select s.shop_id as "shopId", s.id, s.retain_until as "retainUntil"
+      from messaging_consent_state s
+      where s.retain_until <= ${now}::timestamptz and s.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_consent_events e
+          where e.shop_id = s.shop_id and e.id = s.source_event_id
+            and e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp())
+        and not exists (select 1 from sms_suppressions x
+          where x.shop_id = s.shop_id
+            and x.destination_fingerprint = s.destination_fingerprint
+            and x.fingerprint_key_version = s.fingerprint_key_version
+            and (x.retain_until > ${now}::timestamptz or x.retain_until > clock_timestamp()))
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = s.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = s.subject_key
+              or (h.resource_type = 'messaging_consent_event'
+                and h.resource_id = s.source_event_id)))
+      order by s.retain_until, s.id limit ${limit}
+    `))
+    case 'suppressions': return unwrapRows(await db.execute(sql`
+      select x.shop_id as "shopId", x.id, x.retain_until as "retainUntil"
+      from sms_suppressions x
+      where x.retain_until <= ${now}::timestamptz and x.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_consent_state s
+          where s.shop_id = x.shop_id and s.status = 'consented'
+            and s.destination_fingerprint = x.destination_fingerprint
+            and s.fingerprint_key_version = x.fingerprint_key_version)
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = x.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'sms_suppression' and h.resource_id = x.id)
+              or (h.subject_key is not null and exists (
+                select 1 from messaging_consent_events e where e.shop_id = x.shop_id
+                  and e.subject_key = h.subject_key
+                  and e.destination_fingerprint = x.destination_fingerprint
+                  and e.fingerprint_key_version = x.fingerprint_key_version))
+              or (h.subject_key is not null and exists (
+                select 1 from messaging_consent_state s where s.shop_id = x.shop_id
+                  and s.subject_key = h.subject_key
+                  and s.destination_fingerprint = x.destination_fingerprint
+                  and s.fingerprint_key_version = x.fingerprint_key_version))
+              or (h.subject_key is not null and exists (
+                select 1 from messaging_deletion_requests r where r.shop_id = x.shop_id
+                  and r.subject_key = h.subject_key
+                  and r.destination_fingerprint = x.destination_fingerprint
+                  and r.fingerprint_key_version = x.fingerprint_key_version))))
+      order by x.retain_until, x.id limit ${limit}
+    `))
+    case 'consentEvents': return unwrapRows(await db.execute(sql`
+      select e.shop_id as "shopId", e.id, e.retain_until as "retainUntil"
+      from messaging_consent_events e
+      where e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_consent_state s
+          where s.shop_id = e.shop_id and s.source_event_id = e.id)
+        and not exists (select 1 from sms_suppressions x
+          where x.shop_id = e.shop_id and x.source_event_id = e.id)
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = e.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = e.subject_key
+              or (h.resource_type = 'messaging_consent_event' and h.resource_id = e.id)))
+      order by e.retain_until, e.id limit ${limit}
+    `))
+    case 'deletionRequests': return unwrapRows(await db.execute(sql`
+      select r.shop_id as "shopId", r.id, r.retain_until as "retainUntil"
+      from messaging_deletion_requests r
+      where r.state = 'completed' and r.retain_until <= ${now}::timestamptz
+        and r.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_retention_holds h
+          where h.shop_id = r.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = r.subject_key
+              or (h.resource_type = 'messaging_deletion_request' and h.resource_id = r.id)))
+      order by r.retain_until, r.id limit ${limit}
+    `))
+    case 'retentionHolds': return unwrapRows(await db.execute(sql`
+      select h.shop_id as "shopId", h.id, h.retain_until as "retainUntil"
+      from messaging_retention_holds h
+      where h.retain_until <= ${now}::timestamptz and h.retain_until <= clock_timestamp()
+      order by h.retain_until, h.id limit ${limit}
+    `))
   }
-  return rows[0] ?? null
 }
 
-async function lockedRowOutcome(
+async function boundedHeldCount(
   db: AppDb,
+  family: Family,
+  now: Date,
+  limit: number,
+): Promise<number> {
+  let rows: Array<{ count: number }>
+  switch (family) {
+    case 'notifications': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select n.id from notifications n
+      where n.retain_until <= ${now}::timestamptz and n.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = n.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'notification' and h.resource_id = n.id)
+              or (n.entity_type = 'customer' and h.subject_key = n.entity_id)
+              or (n.entity_type = 'quote_send' and exists (select 1 from quote_sends q
+                where q.shop_id = n.shop_id and q.id = n.entity_id
+                  and q.subject_key = h.subject_key))))
+      order by n.retain_until, n.id limit ${limit}) held`)); break
+    case 'smsLog': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select l.id from sms_log l
+      where l.retain_until <= ${now}::timestamptz and l.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = l.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'sms_log' and h.resource_id = l.id)
+              or exists (select 1 from quote_sends q where q.shop_id = l.shop_id
+                and q.id = l.quote_send_id and q.subject_key = h.subject_key)))
+      order by l.retain_until, l.id limit ${limit}) held`)); break
+    case 'quoteSends': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select q.id from quote_sends q
+      where q.state in ('cancelled', 'failed', 'responded', 'expired')
+        and q.retain_until <= ${now}::timestamptz and q.retain_until <= clock_timestamp()
+        and not exists (select 1 from sms_log l where l.shop_id = q.shop_id
+          and l.quote_send_id = q.id)
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = q.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'quote_send' and h.resource_id = q.id)
+              or h.subject_key = q.subject_key))
+      order by q.retain_until, q.id limit ${limit}) held`)); break
+    case 'consentProjections': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select s.id from messaging_consent_state s
+      where s.retain_until <= ${now}::timestamptz and s.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = s.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = s.subject_key
+              or (h.resource_type = 'messaging_consent_event' and h.resource_id = s.source_event_id)))
+      order by s.retain_until, s.id limit ${limit}) held`)); break
+    case 'suppressions': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select x.id from sms_suppressions x
+      where x.retain_until <= ${now}::timestamptz and x.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = x.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and ((h.resource_type = 'sms_suppression' and h.resource_id = x.id)
+              or (h.subject_key is not null and exists (select 1 from messaging_consent_events e
+                where e.shop_id = x.shop_id and e.subject_key = h.subject_key
+                  and e.destination_fingerprint = x.destination_fingerprint
+                  and e.fingerprint_key_version = x.fingerprint_key_version))))
+      order by x.retain_until, x.id limit ${limit}) held`)); break
+    case 'consentEvents': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select e.id from messaging_consent_events e
+      where e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = e.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = e.subject_key
+              or (h.resource_type = 'messaging_consent_event' and h.resource_id = e.id)))
+      order by e.retain_until, e.id limit ${limit}) held`)); break
+    case 'deletionRequests': rows = unwrapRows(await db.execute(sql`
+      select count(*)::int as count from (select r.id from messaging_deletion_requests r
+      where r.state = 'completed' and r.retain_until <= ${now}::timestamptz
+        and r.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_retention_holds h
+          where h.shop_id = r.shop_id and h.released_at is null
+            and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+            and (h.subject_key = r.subject_key
+              or (h.resource_type = 'messaging_deletion_request' and h.resource_id = r.id)))
+      order by r.retain_until, r.id limit ${limit}) held`)); break
+    case 'retentionHolds': return 0
+  }
+  return rows[0]?.count ?? 0
+}
+
+async function deleteLockedCandidate(
+  tx: AppDb,
   family: Family,
   hint: Hint,
   now: Date,
 ): Promise<RowOutcome> {
-  return db.transaction(async (transaction) => {
-    const tx = transaction as AppDb
-    if (!await lockShop(tx, hint.shopId)) return 'skipped'
-    let row: { held: boolean } | undefined
-    switch (family) {
-      case 'notifications':
-        row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
+  let row: { held: boolean } | undefined
+  switch (family) {
+    case 'notifications':
+      row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = n.shop_id and h.released_at is null
               and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -431,51 +578,51 @@ async function lockedRowOutcome(
                   (n.entity_type = 'customer' and h.subject_key = n.entity_id)
                   or (n.entity_type = 'quote_send' and exists (select 1 from quote_sends q
                     where q.shop_id = n.shop_id and q.id = n.entity_id
-                      and q.customer_id = h.subject_key)))))) as held
+                      and q.subject_key = h.subject_key)))))) as held
           from notifications n where n.shop_id = ${hint.shopId}::uuid and n.id = ${hint.id}::uuid
             and n.retain_until <= ${now}::timestamptz and n.retain_until <= clock_timestamp()
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows(await tx.execute(sql`delete from notifications where
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows(await tx.execute(sql`delete from notifications where
           shop_id = ${hint.shopId}::uuid and id = ${hint.id}::uuid returning id`)).length === 1
           ? 'deleted' : 'skipped'
-      case 'smsLog':
-        row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
+    case 'smsLog':
+      row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = l.shop_id and h.released_at is null
               and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
               and ((h.resource_type = 'sms_log' and h.resource_id = l.id)
                 or (h.subject_key is not null and exists (select 1 from quote_sends q
                   where q.shop_id = l.shop_id and q.id = l.quote_send_id
-                    and q.customer_id = h.subject_key)))) as held
+                    and q.subject_key = h.subject_key)))) as held
           from sms_log l where l.shop_id = ${hint.shopId}::uuid and l.id = ${hint.id}::uuid
             and l.retain_until <= ${now}::timestamptz and l.retain_until <= clock_timestamp()
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows(await tx.execute(sql`delete from sms_log where
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows(await tx.execute(sql`delete from sms_log where
           shop_id = ${hint.shopId}::uuid and id = ${hint.id}::uuid returning id`)).length === 1
           ? 'deleted' : 'skipped'
-      case 'quoteSends':
+    case 'quoteSends':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = q.shop_id and h.released_at is null
               and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
               and ((h.resource_type = 'quote_send' and h.resource_id = q.id)
-                or h.subject_key = q.customer_id)) as held
+                or h.subject_key = q.subject_key)) as held
           from quote_sends q where q.shop_id = ${hint.shopId}::uuid and q.id = ${hint.id}::uuid
             and q.state in ('cancelled', 'failed', 'responded', 'expired')
             and q.retain_until <= ${now}::timestamptz and q.retain_until <= clock_timestamp()
             and not exists (select 1 from sms_log l
               where l.shop_id = q.shop_id and l.quote_send_id = q.id)
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows(await tx.execute(sql`delete from quote_sends where
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows(await tx.execute(sql`delete from quote_sends where
           shop_id = ${hint.shopId}::uuid and id = ${hint.id}::uuid returning id`)).length === 1
           ? 'deleted' : 'skipped'
-      case 'consentProjections':
+    case 'consentProjections':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = s.shop_id and h.released_at is null
@@ -495,12 +642,12 @@ async function lockedRowOutcome(
                 and x.fingerprint_key_version = s.fingerprint_key_version
                 and (x.retain_until > ${now}::timestamptz or x.retain_until > clock_timestamp()))
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows(await tx.execute(sql`delete from messaging_consent_state where
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows(await tx.execute(sql`delete from messaging_consent_state where
           shop_id = ${hint.shopId}::uuid and id = ${hint.id}::uuid returning id`)).length === 1
           ? 'deleted' : 'skipped'
-      case 'suppressions':
+    case 'suppressions':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = x.shop_id and h.released_at is null
@@ -529,12 +676,12 @@ async function lockedRowOutcome(
                 and s.destination_fingerprint = x.destination_fingerprint
                 and s.fingerprint_key_version = x.fingerprint_key_version)
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows(await tx.execute(sql`delete from sms_suppressions where
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows(await tx.execute(sql`delete from sms_suppressions where
           shop_id = ${hint.shopId}::uuid and id = ${hint.id}::uuid returning id`)).length === 1
           ? 'deleted' : 'skipped'
-      case 'consentEvents':
+    case 'consentEvents':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = e.shop_id and h.released_at is null
@@ -549,14 +696,14 @@ async function lockedRowOutcome(
             and not exists (select 1 from sms_suppressions x
               where x.shop_id = e.shop_id and x.source_event_id = e.id)
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
           select purge_expired_messaging_consent_event(
             ${hint.shopId}::uuid, ${hint.id}::uuid
           ) as purged
         `))[0]?.purged ? 'deleted' : 'skipped'
-      case 'deletionRequests':
+    case 'deletionRequests':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select exists (select 1 from messaging_retention_holds h
             where h.shop_id = r.shop_id and h.released_at is null
@@ -568,27 +715,59 @@ async function lockedRowOutcome(
             and r.state = 'completed' and r.retain_until <= ${now}::timestamptz
             and r.retain_until <= clock_timestamp()
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        if (row.held) return 'held'
-        return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
+      if (!row) return 'skipped'
+      if (row.held) return 'held'
+      return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
           select purge_expired_messaging_deletion_request(
             ${hint.shopId}::uuid, ${hint.id}::uuid
           ) as purged
         `))[0]?.purged ? 'deleted' : 'skipped'
-      case 'retentionHolds':
+    case 'retentionHolds':
         row = unwrapRows<{ held: boolean }>(await tx.execute(sql`
           select false as held from messaging_retention_holds h
           where h.shop_id = ${hint.shopId}::uuid and h.id = ${hint.id}::uuid
             and h.retain_until <= ${now}::timestamptz and h.retain_until <= clock_timestamp()
           for update skip locked`))[0]
-        if (!row) return 'skipped'
-        return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
+      if (!row) return 'skipped'
+      return unwrapRows<{ purged: boolean }>(await tx.execute(sql`
           select purge_expired_messaging_retention_hold(
             ${hint.shopId}::uuid, ${hint.id}::uuid
           ) as purged
         `))[0]?.purged ? 'deleted' : 'skipped'
+  }
+}
+
+async function runAtomicFamily(
+  db: AppDb,
+  family: Family,
+  hints: ReadonlyArray<Hint>,
+  now: Date,
+): Promise<{ deleted: number; newlyHeld: number }> {
+  if (hints.length === 0) return { deleted: 0, newlyHeld: 0 }
+  const shopIds = [...new Set(hints.map(({ shopId }) => shopId))].sort()
+  return db.transaction(async (transaction) => {
+    const tx = transaction as AppDb
+    const lockedShops = new Set<string>()
+    for (const shopId of shopIds) {
+      if (await lockShop(tx, shopId)) lockedShops.add(shopId)
     }
+    let deleted = 0
+    let newlyHeld = 0
+    for (const hint of hints) {
+      if (!lockedShops.has(hint.shopId)) continue
+      const outcome = await deleteLockedCandidate(tx, family, hint, now)
+      if (outcome === 'deleted') deleted += 1
+      if (outcome === 'held') newlyHeld += 1
+    }
+    return { deleted, newlyHeld }
   })
+}
+
+function firstShopPrefix(hints: ReadonlyArray<Hint>): ReadonlyArray<Hint> {
+  const firstShopId = hints[0]?.shopId
+  if (!firstShopId) return []
+  const firstDifferentShop = hints.findIndex(({ shopId }) => shopId !== firstShopId)
+  return firstDifferentShop === -1 ? hints : hints.slice(0, firstDifferentShop)
 }
 
 function emptyCounts(): PurgeCounts {
@@ -633,20 +812,17 @@ export async function purgeExpiredMessagingRecords(rawInput: {
     if (family === 'suppressions' && failed.has('consentProjections')) continue
     if (family === 'consentEvents'
       && (failed.has('consentProjections') || failed.has('suppressions'))) continue
-    let cursor: Cursor | null = null
-    let scans = 0
     try {
-      while (remaining > 0 && scans < MAX_SCANS_PER_FAMILY) {
-        const hint = await nextHint(input.db, family, input.now, cursor)
-        if (!hint) break
-        cursor = Object.freeze({ retainUntil: hint.retainUntil, id: hint.id })
-        scans += 1
-        const outcome = await lockedRowOutcome(input.db, family, hint, input.now)
-        if (outcome === 'held') counts.skippedHeld += 1
-        if (outcome !== 'deleted') continue
-        counts[family] += 1
-        remaining -= 1
-      }
+      counts.skippedHeld += await boundedHeldCount(
+        input.db, family, input.now, remaining,
+      )
+      const hints = firstShopPrefix(
+        await candidateHints(input.db, family, input.now, remaining),
+      )
+      const result = await runAtomicFamily(input.db, family, hints, input.now)
+      counts[family] += result.deleted
+      counts.skippedHeld += result.newlyHeld
+      remaining -= result.deleted
     } catch {
       failed.add(family)
       counts.failed += 1
