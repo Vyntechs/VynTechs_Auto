@@ -67,6 +67,8 @@ const sourcedLineSchema = z.strictObject({
   }
 })
 
+export type SafeSourcedQuoteLine = z.infer<typeof sourcedLineSchema>
+
 const sourcingSchema = z.strictObject({
   vendorAccountId: canonicalUuidSchema,
   displayName: canonicalText(200),

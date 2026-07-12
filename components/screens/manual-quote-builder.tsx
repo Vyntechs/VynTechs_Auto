@@ -25,6 +25,7 @@ import {
   parseManualOfferRemovalResponse,
   selectLockedDiagnosisSeed,
   type SafeManualVendorAccount,
+  type SafeSourcedQuoteLine,
 } from '@/lib/shop-os/parts-sourcing-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
@@ -226,11 +227,9 @@ export function ManualQuoteBuilder({
       kind: 'repair' | 'maintenance'
       lineCount: number
     },
-    expectedSourcedLine?: {
-      jobId: string
-      lineId: string
-      state: 'present' | 'absent'
-    },
+    expectedSourcedLine?:
+      | { line: SafeSourcedQuoteLine; state: 'present' }
+      | { jobId: string; lineId: string; state: 'absent' },
   ): Promise<boolean> {
     const ownsOperation = !nested
     if (ownsOperation && !beginOperation('refresh')) return false
@@ -271,12 +270,27 @@ export function ManualQuoteBuilder({
         }
       }
       if (expectedSourcedLine) {
-        const expectedJob = refreshed.jobs.find((job) => job.id === expectedSourcedLine.jobId)
-        const expectedLine = expectedJob?.lines.find((line) => line.id === expectedSourcedLine.lineId)
+        const jobId = expectedSourcedLine.state === 'present'
+          ? expectedSourcedLine.line.jobId
+          : expectedSourcedLine.jobId
+        const lineId = expectedSourcedLine.state === 'present'
+          ? expectedSourcedLine.line.id
+          : expectedSourcedLine.lineId
+        const expectedJob = refreshed.jobs.find((job) => job.id === jobId)
+        const expectedLine = expectedJob?.lines.find((line) => line.id === lineId)
         const expectationMet = refreshed.activeVersion === null && (expectedSourcedLine.state === 'present'
-          ? expectedLine?.kind === 'part'
-            && expectedLine.source === 'vendor_offer'
-            && expectedLine.mutable === false
+          ? expectedLine?.id === expectedSourcedLine.line.id
+            && expectedJob?.id === expectedSourcedLine.line.jobId
+            && expectedLine.kind === expectedSourcedLine.line.kind
+            && expectedLine.source === expectedSourcedLine.line.source
+            && expectedLine.mutable === expectedSourcedLine.line.mutable
+            && expectedLine.description === expectedSourcedLine.line.description
+            && expectedLine.quantity === expectedSourcedLine.line.quantity
+            && expectedLine.priceCents === expectedSourcedLine.line.priceCents
+            && expectedLine.taxable === expectedSourcedLine.line.taxable
+            && expectedLine.partNumber === expectedSourcedLine.line.partNumber
+            && expectedLine.brand === expectedSourcedLine.line.brand
+            && expectedLine.fitment === expectedSourcedLine.line.fitment
           : Boolean(expectedJob) && expectedLine === undefined)
         if (!expectationMet) {
           setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
@@ -1054,14 +1068,14 @@ export function ManualQuoteBuilder({
               ? currentAccounts
               : [...currentAccounts, account]
           ))}
-          onSaved={async (lineId) => {
+          onSaved={async (line) => {
             const refreshed = await refreshQuote(
-              `line:${lineId}`,
+              `line:${line.id}`,
               false,
               true,
               undefined,
               undefined,
-              { jobId: sourcingJob.id, lineId, state: 'present' },
+              { line, state: 'present' },
             )
             if (refreshed) sourcingSavedCloseRef.current = true
             return refreshed

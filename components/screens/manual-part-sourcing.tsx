@@ -12,6 +12,7 @@ import {
   parseManualOfferResponse,
   type ManualPartDraft,
   type SafeManualVendorAccount,
+  type SafeSourcedQuoteLine,
 } from '@/lib/shop-os/parts-sourcing-ui'
 
 export type ManualPartSourcingProps = {
@@ -27,7 +28,7 @@ export type ManualPartSourcingProps = {
   busy: boolean
   onBusyChange: (busy: boolean) => void
   onAccountCreated: (account: SafeManualVendorAccount) => void
-  onSaved: (lineId: string) => Promise<boolean>
+  onSaved: (line: SafeSourcedQuoteLine) => Promise<boolean>
   onAccessFailure: (status: 401 | 403 | 404, body: unknown) => void
   onClose: () => void
 }
@@ -81,7 +82,7 @@ export function ManualPartSourcing({
   const [accountName, setAccountName] = useState('')
   const [accountClientKey, setAccountClientKey] = useState<string | null>(null)
   const [mutationBusy, setMutationBusy] = useState(false)
-  const [savedLineId, setSavedLineId] = useState<string | null>(null)
+  const [savedLine, setSavedLine] = useState<SafeSourcedQuoteLine | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const [status, setStatus] = useState('')
@@ -116,7 +117,7 @@ export function ManualPartSourcing({
     setAccountFormOpen(false)
     setAccountName('')
     setAccountClientKey(null)
-    setSavedLineId(null)
+    setSavedLine(null)
     setDetailsOpen(false)
     setConfirmingClose(false)
     setStatus('')
@@ -207,7 +208,7 @@ export function ManualPartSourcing({
       requestAnimationFrame(() => fieldRefs.current[error.key]?.focus())
       return
     }
-    if (savedLineId || isBusy) return
+    if (savedLine || isBusy) return
     await captureOffer()
   }
 
@@ -293,6 +294,7 @@ export function ManualPartSourcing({
       }
       const selectedAccount = localAccounts.find((account) => account.id === payload.vendorAccountId)
       if (!selectedAccount
+        || parsed.line.id !== payload.clientKey
         || parsed.line.jobId !== job.id.toLowerCase()
         || parsed.line.description !== payload.description
         || parsed.line.quantity !== payload.quantity
@@ -312,10 +314,10 @@ export function ManualPartSourcing({
         setStatus('The saved response could not be verified. Refresh before continuing.')
         return
       }
-      setSavedLineId(parsed.line.id)
+      setSavedLine(parsed.line)
       let refreshed
       try {
-        refreshed = await onSaved(parsed.line.id)
+        refreshed = await onSaved(parsed.line)
       } catch {
         setStatus('Part saved. Refresh the quote to see current totals.')
         return
@@ -336,11 +338,11 @@ export function ManualPartSourcing({
   }
 
   async function refreshSavedLine() {
-    if (!savedLineId || isBusy) return
+    if (!savedLine || isBusy) return
     setMutationBusy(true)
     onBusyChange(true)
     try {
-      if (await onSaved(savedLineId)) closeAfterSuccessfulRefresh()
+      if (await onSaved(savedLine)) closeAfterSuccessfulRefresh()
       else setStatus('Part saved. Refresh the quote to see current totals.')
     } catch {
       setStatus('Part saved. Refresh the quote to see current totals.')
@@ -518,7 +520,7 @@ export function ManualPartSourcing({
 
         <footer className={styles.footer}>
           <p role="status" aria-live="polite">{status || (requiredError ? `Needed: ${requiredError.label}` : '')}</p>
-          {savedLineId ? (
+          {savedLine ? (
             <button type="button" className={styles.commit} disabled={isBusy} onClick={refreshSavedLine}>Refresh quote</button>
           ) : (
             <button type="submit" className={styles.commit} disabled={isBusy || !catalogAvailable || localAccounts.length === 0}>

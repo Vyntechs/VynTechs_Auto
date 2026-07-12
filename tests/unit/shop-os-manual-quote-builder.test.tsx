@@ -500,6 +500,7 @@ describe('ManualQuoteBuilder canned application', () => {
 describe('ManualQuoteBuilder sourcing integration', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => SOURCED_LINE_ID) })
     router.push.mockReset()
     router.replace.mockReset()
   })
@@ -567,6 +568,7 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     const sourced = line({
       id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
       source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
     })
     const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
     let resolveCapture!: (result: Response) => void
@@ -593,9 +595,45 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     expect(document.activeElement).toHaveTextContent('Sourced pad set')
   })
 
+  it.each([
+    ['description', { description: 'Different pad set' }],
+    ['quantity', { quantity: '2' }],
+    ['priceCents', { priceCents: 14_001 }],
+    ['taxable', { taxable: false }],
+    ['partNumber', { partNumber: 'PAD-OTHER' }],
+    ['brand', { brand: 'Other brand' }],
+    ['fitment', { fitment: 'Rear axle' }],
+  ] satisfies Array<[string, Partial<BuilderLine>]>)('rejects a same-id sourced refresh with mismatched %s', async (_field, mismatch) => {
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const mismatched = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+      ...mismatch,
+    })
+    const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [mismatched] }], activeVersion: null })
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, capturedOfferResponse()))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source part' }))
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Sourced pad set' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Customer line price'), { target: { value: '140' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 1 Sourced pad set/ }))
+
+    expect(await screen.findByText('Part saved. Refresh the quote to see current totals.')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: /Source part for/ })).toBeInTheDocument()
+  })
+
   it('keeps saved state after a hostile refresh and retries GET without reposting capture', async () => {
     const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
-    const sourced = line({ id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000, source: 'vendor_offer', mutable: false, coreChargeCents: null })
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
+    })
     const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(201, capturedOfferResponse()))
@@ -647,6 +685,7 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     const sourced = line({
       id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
       source: 'vendor_offer', mutable: false, coreChargeCents: null,
+      partNumber: null, brand: null, fitment: null,
     })
     const refreshed = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
     const fetchMock = vi.spyOn(globalThis, 'fetch')

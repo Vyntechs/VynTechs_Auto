@@ -422,7 +422,7 @@ describe('ManualPartSourcing', () => {
     const onSaved = vi.fn(async () => true)
     const onClose = vi.fn()
     const onBusyChange = vi.fn()
-    const lineId = '00000000-0000-4000-8000-000000000401'
+    const lineId = '00000000-0000-4000-8000-000000000901'
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
       status: 201,
       headers: { 'content-type': 'application/json' },
@@ -457,7 +457,7 @@ describe('ManualPartSourcing', () => {
       },
     )
     expect(onBusyChange.mock.calls).toEqual([[true], [false]])
-    expect(onSaved).toHaveBeenCalledWith(lineId)
+    expect(onSaved).toHaveBeenCalledWith(manualOfferResponse({ lineId }).line)
   })
 
   it('retains retry identity after an ambiguous failure and rotates it after normalized quantity or price edits', async () => {
@@ -508,7 +508,7 @@ describe('ManualPartSourcing', () => {
 
   it('hands off a saved-but-unrefreshed line to a dedicated refresh action without duplicate capture', async () => {
     const user = userEvent.setup()
-    const lineId = '00000000-0000-4000-8000-000000000401'
+    const lineId = '00000000-0000-4000-8000-000000000901'
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
       status: 201,
       headers: { 'content-type': 'application/json' },
@@ -525,12 +525,12 @@ describe('ManualPartSourcing', () => {
     await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(onSaved).toHaveBeenNthCalledWith(2, lineId)
+    expect(onSaved).toHaveBeenNthCalledWith(2, manualOfferResponse({ lineId }).line)
   })
 
   it('keeps strict capture truth when the first refresh rejects and never reposts the saved offer', async () => {
     const user = userEvent.setup()
-    const lineId = '00000000-0000-4000-8000-000000000401'
+    const lineId = '00000000-0000-4000-8000-000000000901'
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
       status: 201,
       headers: { 'content-type': 'application/json' },
@@ -549,7 +549,7 @@ describe('ManualPartSourcing', () => {
     await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(onSaved).toHaveBeenNthCalledWith(2, lineId)
+    expect(onSaved).toHaveBeenNthCalledWith(2, manualOfferResponse({ lineId }).line)
   })
 
   it('resets offer lifecycle before close so a controlled reopen is fresh without losing supplier choices', async () => {
@@ -558,12 +558,16 @@ describe('ManualPartSourcing', () => {
     vi.mocked(crypto.randomUUID).mockImplementation(() => (
       `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`
     ))
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({
-      vendorAccountId: ACCOUNT_TWO.id,
-    })), {
-      status: 201,
-      headers: { 'content-type': 'application/json' },
-    })))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, init) => {
+      const request = JSON.parse(init.body as string) as { clientKey: string }
+      return new Response(JSON.stringify(manualOfferResponse({
+        lineId: request.clientKey,
+        vendorAccountId: ACCOUNT_TWO.id,
+      })), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      })
+    }))
     const onClose = vi.fn()
     const controlledProps = props({ accounts: [ACCOUNT_ONE, ACCOUNT_TWO], onClose })
     const { rerender } = render(<ManualPartSourcing {...controlledProps} />)
@@ -608,6 +612,7 @@ describe('ManualPartSourcing', () => {
   it.each([
     ['extra response key', () => ({ ...manualOfferResponse({}), secret: 'do-not-render' })],
     ['hostile line id', () => manualOfferResponse({ lineId: '<script>bad</script>' })],
+    ['different valid line id', () => manualOfferResponse({ lineId: '00000000-0000-4000-8000-000000000402' })],
     ['malformed money', () => manualOfferResponse({ priceCents: -1 })],
     ['wrong changed pairing', () => ({ ...manualOfferResponse({}), changed: false })],
     ['supplier id mismatch', () => manualOfferResponse({ vendorAccountId: ACCOUNT_TWO.id })],
@@ -637,7 +642,7 @@ describe('ManualPartSourcing', () => {
     await fillRequiredOffer(user)
     await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('The saved response could not be verified. Refresh before continuing.')
+    expect(await screen.findByText('The saved response could not be verified. Refresh before continuing.')).toBeInTheDocument()
     expect(onSaved).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
     expect(document.body).not.toHaveTextContent('do-not-render')
@@ -714,7 +719,7 @@ function manualOfferResponse(overrides: {
   return {
     changed: true,
     line: {
-      id: overrides.lineId ?? '00000000-0000-4000-8000-000000000401',
+      id: overrides.lineId ?? '00000000-0000-4000-8000-000000000901',
       jobId: overrides.jobId ?? '00000000-0000-4000-8000-000000000301',
       kind: 'part',
       description: overrides.description ?? 'Brake pads',
