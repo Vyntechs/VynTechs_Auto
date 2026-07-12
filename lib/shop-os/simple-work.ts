@@ -287,21 +287,22 @@ export async function getSimpleWorkWorkspace(
         eq(profiles.membershipStatus, 'active'),
         isNull(profiles.deactivatedAt),
       )).limit(1)
+    const [ticket] = await transactionDb.select({ id: tickets.id, status: tickets.status })
+      .from(tickets).where(and(
+        eq(tickets.shopId, parsedActor.data.shopId),
+        eq(tickets.id, parsedTicket.data),
+      )).limit(1)
     const [job] = await transactionDb.select().from(ticketJobs).where(and(
       eq(ticketJobs.shopId, parsedActor.data.shopId),
       eq(ticketJobs.ticketId, parsedTicket.data),
       eq(ticketJobs.id, parsedJob.data),
     )).limit(1)
-    if (!actor || !isShopRole(actor.role) || !job || job.assignedTechId !== actor.id
+    if (!actor || !isShopRole(actor.role) || !ticket || !job || job.assignedTechId !== actor.id
       || (job.kind !== 'repair' && job.kind !== 'maintenance')
-      || job.workStatus === 'blocked' || job.workStatus === 'canceled') return failure('not_found')
-    const attachments = await transactionDb.select({
-      id: jobAttachments.id,
-      kind: jobAttachments.kind,
-      mimeType: jobAttachments.mimeType,
-      byteSize: jobAttachments.byteSize,
-      createdAt: jobAttachments.createdAt,
-    }).from(jobAttachments).where(and(
+      || job.sessionId !== null
+      || job.workStatus === 'blocked' || job.workStatus === 'canceled'
+      || (ticket.status !== 'open' && job.workStatus !== 'done')) return failure('not_found')
+    const attachments = await transactionDb.select().from(jobAttachments).where(and(
       eq(jobAttachments.shopId, parsedActor.data.shopId),
       eq(jobAttachments.jobId, job.id),
     )).orderBy(asc(jobAttachments.createdAt), asc(jobAttachments.id))
@@ -320,7 +321,7 @@ export async function getSimpleWorkWorkspace(
       inArray(quoteEvents.kind, ['approved', 'declined']),
     )).orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
     const context: LockedContext = {
-      ticket: { id: parsedTicket.data, status: 'open' }, job, versions, decisions, attachments: [],
+      ticket, job, versions, decisions, attachments,
     }
     const authorization = hasPinnedApproval(context, job.workStatus === 'open')
       ? 'approved'
@@ -335,8 +336,16 @@ export async function getSimpleWorkWorkspace(
         workNotes: job.workNotes,
         updatedAt: job.updatedAt.toISOString(),
         authorization,
+        hasCompletionProof: attachments.some((attachment) => isRow23WorkPhoto(attachment, {
+          shopId: parsedActor.data.shopId,
+          jobId: job.id,
+          actorId: parsedActor.data.profileId,
+        })),
         attachments: attachments.map((attachment) => ({
-          ...attachment,
+          id: attachment.id,
+          kind: attachment.kind,
+          mimeType: attachment.mimeType,
+          byteSize: attachment.byteSize,
           createdAt: attachment.createdAt.toISOString(),
         })),
       },
