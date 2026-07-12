@@ -31,6 +31,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'compact_messaging_consent_events(uuid,uuid,uuid)', serviceExecute: true },
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
+  { signature: 'purge_expired_messaging_consent_event(uuid,uuid)', serviceExecute: true },
   { signature: 'serialize_messaging_retention_hold_target()', serviceExecute: false },
 ] as const
 
@@ -252,6 +253,16 @@ describe('Shop OS messaging retention ACL hardening', () => {
 
     await client.exec(`
       grant execute on function public.compact_messaging_consent_events(uuid, uuid, uuid)
+        to service_role;
+      revoke execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
+        from service_role;
+    `)
+    await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
+      'partial messaging retention ACL in ephemeral database',
+    )
+
+    await client.exec(`
+      grant execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
         to service_role;
       drop table public.notifications;
     `)

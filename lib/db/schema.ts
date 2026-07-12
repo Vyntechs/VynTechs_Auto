@@ -1393,10 +1393,21 @@ export const messagingRetentionHolds = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     shopId: uuid('shop_id').notNull(),
-    resourceType: text('resource_type'),
+    resourceType: text('resource_type', {
+      enum: [
+        'messaging_consent_event',
+        'sms_suppression',
+        'quote_send',
+        'sms_log',
+        'notification',
+        'messaging_deletion_request',
+      ],
+    }),
     resourceId: uuid('resource_id'),
     subjectKey: uuid('subject_key'),
-    reasonCode: text('reason_code').notNull(),
+    reasonCode: text('reason_code', {
+      enum: ['legal_claim', 'subpoena', 'fraud_review', 'security_investigation'],
+    }).notNull(),
     authorizingActorProfileId: uuid('authorizing_actor_profile_id').notNull(),
     startsAt: timestamp('starts_at', { withTimezone: true }).defaultNow().notNull(),
     reviewAt: timestamp('review_at', { withTimezone: true }).notNull(),
@@ -1419,13 +1430,19 @@ export const messagingRetentionHolds = pgTable(
     index('messaging_retention_holds_active_subject_idx')
       .on(table.shopId, table.subjectKey, table.expiresAt)
       .where(sql`${table.subjectKey} is not null and ${table.releasedAt} is null`),
+    index('messaging_retention_holds_purge_idx').on(table.retainUntil, table.id),
     check(
       'messaging_retention_holds_resource_type_valid',
-      sql`${table.resourceType} is null or ${table.resourceType} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+      sql`${table.resourceType} is null or ${table.resourceType} in (
+        'messaging_consent_event', 'sms_suppression', 'quote_send', 'sms_log',
+        'notification', 'messaging_deletion_request'
+      )`,
     ),
     check(
       'messaging_retention_holds_reason_code_valid',
-      sql`${table.reasonCode} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
+      sql`${table.reasonCode} in (
+        'legal_claim', 'subpoena', 'fraud_review', 'security_investigation'
+      )`,
     ),
     check(
       'messaging_retention_holds_target_consistent',
@@ -1444,6 +1461,11 @@ export const messagingRetentionHolds = pgTable(
       'messaging_retention_holds_max_duration',
       sql`${table.expiresAt} > ${table.startsAt}
         and ${table.expiresAt} <= ${table.startsAt} + interval '365 days'`,
+    ),
+    check(
+      'messaging_retention_holds_retention_window_exact',
+      sql`${table.retainUntil} = coalesce(${table.releasedAt}, ${table.expiresAt})
+        + interval '5 years'`,
     ),
   ],
 )

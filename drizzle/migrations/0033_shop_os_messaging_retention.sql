@@ -161,8 +161,15 @@ create table messaging_retention_holds (
   retain_until timestamptz not null,
   constraint messaging_retention_holds_shop_fk foreign key (shop_id) references shops(id) on delete cascade,
   constraint messaging_retention_holds_shop_actor_fk foreign key (shop_id, authorizing_actor_profile_id) references profiles(shop_id, id) on delete restrict,
-  constraint messaging_retention_holds_resource_type_valid check (resource_type is null or resource_type ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
-  constraint messaging_retention_holds_reason_code_valid check (reason_code ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
+  constraint messaging_retention_holds_resource_type_valid check (
+    resource_type is null or resource_type in (
+      'messaging_consent_event', 'sms_suppression', 'quote_send', 'sms_log',
+      'notification', 'messaging_deletion_request'
+    )
+  ),
+  constraint messaging_retention_holds_reason_code_valid check (
+    reason_code in ('legal_claim', 'subpoena', 'fraud_review', 'security_investigation')
+  ),
   constraint messaging_retention_holds_target_consistent check (
     (subject_key is not null and resource_type is null and resource_id is null)
     or (subject_key is null and resource_type is not null and resource_id is not null)
@@ -171,12 +178,17 @@ create table messaging_retention_holds (
   constraint messaging_retention_holds_release_valid check (released_at is null or released_at >= starts_at),
   constraint messaging_retention_holds_max_duration check (
     expires_at > starts_at and expires_at <= starts_at + interval '365 days'
+  ),
+  constraint messaging_retention_holds_retention_window_exact check (
+    retain_until = coalesce(released_at, expires_at) + interval '5 years'
   )
 );
 --> statement-breakpoint
 create unique index messaging_retention_holds_shop_id_uq on messaging_retention_holds (shop_id, id);
 --> statement-breakpoint
 create index messaging_retention_holds_active_subject_idx on messaging_retention_holds (shop_id, subject_key, expires_at) where subject_key is not null and released_at is null;
+--> statement-breakpoint
+create index messaging_retention_holds_purge_idx on messaging_retention_holds (retain_until, id);
 --> statement-breakpoint
 
 create table quote_sends (
@@ -562,6 +574,34 @@ begin
       or new.subject_key is distinct from old.subject_key then
       raise exception 'messaging retention hold target is immutable';
     end if;
+
+    if new.id is distinct from old.id
+      or new.reason_code is distinct from old.reason_code
+      or new.authorizing_actor_profile_id is distinct from old.authorizing_actor_profile_id
+      or new.starts_at is distinct from old.starts_at
+      or new.review_at is distinct from old.review_at
+      or new.expires_at is distinct from old.expires_at then
+      raise exception 'messaging retention hold lifecycle is immutable';
+    end if;
+
+    if new.released_at is not distinct from old.released_at then
+      if new.retain_until is distinct from old.retain_until then
+        raise exception 'messaging retention hold lifecycle is immutable';
+      end if;
+      return new;
+    end if;
+
+    if old.released_at is not null then
+      raise exception 'messaging retention hold may only be released once';
+    end if;
+    if new.released_at is null then
+      raise exception 'messaging retention hold lifecycle is immutable';
+    end if;
+    if new.retain_until is distinct from old.retain_until
+      and new.retain_until is distinct from new.released_at + interval '5 years' then
+      raise exception 'messaging retention hold lifecycle is immutable';
+    end if;
+    new.retain_until := new.released_at + interval '5 years';
     return new;
   end if;
 
@@ -602,7 +642,7 @@ end;
 $$;
 --> statement-breakpoint
 create trigger messaging_retention_holds_serialize_target
-before insert or update of shop_id, resource_type, resource_id, subject_key
+before insert or update
 on messaging_retention_holds
 for each row execute function serialize_messaging_retention_hold_target();
 --> statement-breakpoint
@@ -612,6 +652,9 @@ returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  purge_shop_id uuid;
+  purge_event_ids uuid[];
 begin
   if current_setting('vyntechs.messaging_consent_compaction_request', true) is not null
     and current_user = pg_catalog.pg_get_userbyid((
@@ -622,6 +665,29 @@ begin
     and tg_op = 'DELETE'
   then
     return old;
+  end if;
+
+  if tg_op = 'DELETE'
+    and current_user = pg_catalog.pg_get_userbyid((
+      select p.proowner
+      from pg_catalog.pg_proc p
+      where p.oid = 'public.purge_expired_messaging_consent_event(uuid,uuid)'::pg_catalog.regprocedure
+    ))
+  then
+    begin
+      purge_shop_id := nullif(current_setting(
+        'vyntechs.messaging_consent_purge_shop', true
+      ), '')::uuid;
+      purge_event_ids := nullif(current_setting(
+        'vyntechs.messaging_consent_purge_events', true
+      ), '')::uuid[];
+    exception when others then
+      purge_shop_id := null;
+      purge_event_ids := null;
+    end;
+    if purge_shop_id = old.shop_id and old.id = any(purge_event_ids) then
+      return old;
+    end if;
   end if;
   raise exception 'messaging consent events are append-only';
 end;
@@ -641,7 +707,30 @@ declare
   compaction_request_id uuid;
   compaction_shop_id uuid;
   authorized_subjects uuid[];
+  purge_shop_id uuid;
+  purge_event_ids uuid[];
 begin
+  begin
+    purge_shop_id := nullif(current_setting(
+      'vyntechs.messaging_consent_purge_shop', true
+    ), '')::uuid;
+    purge_event_ids := nullif(current_setting(
+      'vyntechs.messaging_consent_purge_events', true
+    ), '')::uuid[];
+  exception when others then
+    raise exception 'consent event purge requires exact authorization context';
+  end;
+
+  if purge_shop_id is not null or purge_event_ids is not null then
+    if purge_shop_id is null
+      or purge_event_ids is null
+      or purge_shop_id is distinct from old.shop_id
+      or not (old.id = any(purge_event_ids)) then
+      raise exception 'consent event purge requires exact authorization context';
+    end if;
+    return old;
+  end if;
+
   begin
     compaction_request_id := current_setting(
       'vyntechs.messaging_consent_compaction_request',
@@ -698,6 +787,12 @@ declare
   existing_subjects_text text;
   authorized_subjects uuid[];
 begin
+  if nullif(current_setting('vyntechs.messaging_consent_purge_shop', true), '') is not null
+    or nullif(current_setting('vyntechs.messaging_consent_purge_events', true), '') is not null
+  then
+    raise exception 'compaction transaction cannot mix consent event purge context';
+  end if;
+
   existing_request_text := nullif(current_setting(
     'vyntechs.messaging_consent_compaction_request', true
   ), '');
@@ -828,6 +923,122 @@ begin
     where shop_id = p_shop_id and subject_key = p_subject_key;
   get diagnostics deleted_count = row_count;
   return deleted_count;
+end;
+$$;
+--> statement-breakpoint
+
+create function purge_expired_messaging_consent_event(p_shop_id uuid, p_event_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  deleted_count integer;
+  event_subject_key uuid;
+  existing_shop_text text;
+  existing_events_text text;
+  authorized_event_ids uuid[];
+begin
+  if nullif(current_setting('vyntechs.messaging_consent_compaction_request', true), '') is not null
+    or nullif(current_setting('vyntechs.messaging_consent_compaction_shop', true), '') is not null
+    or nullif(current_setting('vyntechs.messaging_consent_compaction_subjects', true), '') is not null
+  then
+    raise exception 'consent event purge transaction cannot mix compaction context';
+  end if;
+
+  existing_shop_text := nullif(current_setting(
+    'vyntechs.messaging_consent_purge_shop', true
+  ), '');
+  existing_events_text := nullif(current_setting(
+    'vyntechs.messaging_consent_purge_events', true
+  ), '');
+  if existing_shop_text is not null or existing_events_text is not null then
+    begin
+      if existing_shop_text is null
+        or existing_events_text is null
+        or existing_shop_text::uuid is distinct from p_shop_id then
+        raise exception 'consent event purge transaction cannot mix shops';
+      end if;
+      authorized_event_ids := existing_events_text::uuid[];
+    exception when invalid_text_representation then
+      raise exception 'invalid consent event purge authorization context';
+    end;
+  else
+    authorized_event_ids := array[]::uuid[];
+  end if;
+
+  perform 1
+  from public.shops locked_shop
+  where locked_shop.id = p_shop_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  select e.subject_key
+  into event_subject_key
+  from public.messaging_consent_events e
+  where e.shop_id = p_shop_id and e.id = p_event_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  if not exists (
+    select 1
+    from public.messaging_consent_events e
+    where e.shop_id = p_shop_id
+      and e.id = p_event_id
+      and e.retain_until <= clock_timestamp()
+  ) then
+    return false;
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_retention_holds h
+    where h.shop_id = p_shop_id
+      and h.released_at is null
+      and h.starts_at <= clock_timestamp()
+      and h.expires_at > clock_timestamp()
+      and (
+        h.subject_key = event_subject_key
+        or (h.resource_type = 'messaging_consent_event' and h.resource_id = p_event_id)
+      )
+  ) then
+    raise exception 'active messaging retention hold blocks consent event purge';
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_consent_state s
+    where s.shop_id = p_shop_id and s.source_event_id = p_event_id
+  ) then
+    raise exception 'consent projection still references event';
+  end if;
+  if exists (
+    select 1
+    from public.sms_suppressions s
+    where s.shop_id = p_shop_id and s.source_event_id = p_event_id
+  ) then
+    raise exception 'suppression still references event';
+  end if;
+
+  select array_agg(distinct event_id order by event_id)
+  into authorized_event_ids
+  from unnest(authorized_event_ids || p_event_id) as events(event_id);
+  perform set_config('vyntechs.messaging_consent_purge_shop', p_shop_id::text, true);
+  perform set_config(
+    'vyntechs.messaging_consent_purge_events', authorized_event_ids::text, true
+  );
+
+  delete from public.messaging_consent_events e
+  where e.shop_id = p_shop_id
+    and e.id = p_event_id
+    and e.retain_until <= clock_timestamp();
+  get diagnostics deleted_count = row_count;
+  return deleted_count = 1;
 end;
 $$;
 --> statement-breakpoint
@@ -983,5 +1194,7 @@ revoke all on function require_messaging_compaction_completion() from public, an
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
 revoke all on function compact_messaging_consent_events(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
+revoke all on function purge_expired_messaging_consent_event(uuid, uuid) from public, anon, authenticated;
 grant execute on function compact_messaging_consent_events(uuid, uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to service_role;
+grant execute on function purge_expired_messaging_consent_event(uuid, uuid) to service_role;

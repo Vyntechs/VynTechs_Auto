@@ -136,6 +136,7 @@ async function insertConsentEvent(
     requestFingerprint: string
     subjectKey: string
     customerId: string
+    retainUntil: string
   }> = {},
 ) {
   const id = crypto.randomUUID()
@@ -151,6 +152,7 @@ async function insertConsentEvent(
     requestFingerprint: hex,
     subjectKey: crypto.randomUUID(),
     customerId: tenant.customerId,
+    retainUntil: "now() + interval '5 years'",
     ...overrides,
   }
   await client.query(
@@ -161,7 +163,7 @@ async function insertConsentEvent(
       evidence_kind, actor_profile_id, request_key, request_fingerprint, retain_until
     ) values (
       $1, $2, $3, $4, $5, $6, $7, $8, now(), $9, true, $10, $11,
-      $12, $13, $14, $15, now() + interval '5 years'
+      $12, $13, $14, $15, ${values.retainUntil}
     )`,
     [
       id,
@@ -266,7 +268,7 @@ async function insertHold(
       authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
     ) values ($1, $2, $3, $4, 'legal_claim', $5,
       now() - interval '1 minute', now() + interval '1 day',
-      now() + interval '30 days', now() + interval '5 years')`,
+      now() + interval '30 days', now() + interval '30 days' + interval '5 years')`,
     [
       tenant.shopId,
       'resourceType' in target ? target.resourceType : null,
@@ -1498,6 +1500,109 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
+  it('enforces the canonical hold vocabulary and exact five-calendar-year audit anchor', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const resourceId = crypto.randomUUID()
+      for (const resourceType of [
+        'messaging_consent_event', 'sms_suppression', 'quote_send', 'sms_log',
+        'notification', 'messaging_deletion_request',
+      ]) {
+        await fixture.client.query(
+          `insert into messaging_retention_holds (
+            shop_id, resource_type, resource_id, reason_code,
+            authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
+          ) values ($1, $2, $3, 'legal_claim', $4,
+            '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
+            '2024-03-31 12:00:00+00', '2029-03-31 12:00:00+00')`,
+          [tenant.shopId, resourceType, crypto.randomUUID(), tenant.actorId],
+        )
+      }
+      await expect(fixture.client.query(
+        `insert into messaging_retention_holds (
+          shop_id, resource_type, resource_id, reason_code,
+          authorizing_actor_profile_id, starts_at, review_at, expires_at, retain_until
+        ) values ($1, 'consent_event', $2, 'legal_claim', $3,
+          '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
+          '2024-03-31 12:00:00+00', '2029-03-31 12:00:00+00')`,
+        [tenant.shopId, resourceId, tenant.actorId],
+      )).rejects.toThrow(/messaging_retention_holds_resource_type_valid/)
+      await expect(fixture.client.query(
+        `insert into messaging_retention_holds (
+          shop_id, subject_key, reason_code, authorizing_actor_profile_id,
+          starts_at, review_at, expires_at, retain_until
+        ) values ($1, $2, 'free_text', $3,
+          '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
+          '2024-03-31 12:00:00+00', '2029-03-31 12:00:00+00')`,
+        [tenant.shopId, crypto.randomUUID(), tenant.actorId],
+      )).rejects.toThrow(/messaging_retention_holds_reason_code_valid/)
+      await expect(fixture.client.query(
+        `insert into messaging_retention_holds (
+          shop_id, subject_key, reason_code, authorizing_actor_profile_id,
+          starts_at, review_at, expires_at, retain_until
+        ) values ($1, $2, 'subpoena', $3,
+          '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
+          '2024-03-31 12:00:00+00', '2029-03-31 11:59:59+00')`,
+        [tenant.shopId, crypto.randomUUID(), tenant.actorId],
+      )).rejects.toThrow(/messaging_retention_holds_retention_window_exact/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('allows only one exact hold release and keeps lifecycle identity immutable', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const hold = await fixture.client.query<{ id: string }>(
+        `insert into messaging_retention_holds (
+          shop_id, subject_key, reason_code, authorizing_actor_profile_id,
+          starts_at, review_at, expires_at, retain_until
+        ) values ($1, $2, 'security_investigation', $3,
+          '2024-02-29 12:00:00+00', '2024-03-01 12:00:00+00',
+          '2024-03-31 12:00:00+00', '2029-03-31 12:00:00+00') returning id`,
+        [tenant.shopId, crypto.randomUUID(), tenant.actorId],
+      )
+      const holdId = hold.rows[0]!.id
+      for (const mutation of [
+        "reason_code = 'legal_claim'",
+        "review_at = review_at + interval '1 day'",
+        "expires_at = expires_at + interval '1 day'",
+        "starts_at = starts_at + interval '1 second'",
+        `authorizing_actor_profile_id = '${crypto.randomUUID()}'`,
+        "retain_until = retain_until + interval '1 day'",
+      ]) {
+        await expect(fixture.client.query(
+          `update messaging_retention_holds set ${mutation} where id = $1`, [holdId],
+        )).rejects.toThrow(/messaging retention hold lifecycle is immutable/)
+      }
+      await expect(fixture.client.query(
+        `update messaging_retention_holds
+        set released_at = '2024-04-01 12:00:00+00',
+          retain_until = '2030-04-01 12:00:00+00'
+        where id = $1`, [holdId],
+      )).rejects.toThrow(/messaging retention hold lifecycle is immutable/)
+      await fixture.client.query(
+        `update messaging_retention_holds
+        set released_at = '2024-04-01 12:00:00+00' where id = $1`, [holdId],
+      )
+      const released = await fixture.client.query<{ released_at: Date; retain_until: Date }>(
+        'select released_at, retain_until from messaging_retention_holds where id = $1', [holdId],
+      )
+      expect(released.rows[0]).toEqual({
+        released_at: new Date('2024-04-01T12:00:00.000Z'),
+        retain_until: new Date('2029-04-01T12:00:00.000Z'),
+      })
+      await expect(fixture.client.query(
+        `update messaging_retention_holds
+        set released_at = '2024-04-02 12:00:00+00' where id = $1`, [holdId],
+      )).rejects.toThrow(/messaging retention hold may only be released once/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('rejects direct consent-event updates and deletes', async () => {
     const fixture = await createTestDb()
     try {
@@ -1511,6 +1616,124 @@ describe('Shop OS messaging retention source schema', () => {
         'delete from messaging_consent_events where id = $1',
         [eventId],
       )).rejects.toThrow(/messaging consent events are append-only/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('purges only an exact expired unreferenced consent event through owner context', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const subjectKey = crypto.randomUUID()
+      const earlyId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey, retainUntil: "clock_timestamp() + interval '1 day'",
+      })
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_consent_event($1, $2) as purged',
+        [tenant.shopId, earlyId],
+      )).rows[0]?.purged).toBe(false)
+
+      const heldId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey, retainUntil: "clock_timestamp() - interval '1 second'",
+      })
+      await insertHold(fixture.client, tenant, { subjectKey })
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [tenant.shopId, heldId],
+      )).rejects.toThrow(/active messaging retention hold blocks consent event purge/)
+      await fixture.client.query(
+        `update messaging_retention_holds set released_at = clock_timestamp()
+        where subject_key = $1`, [subjectKey],
+      )
+
+      await insertHold(fixture.client, tenant, {
+        resourceType: 'messaging_consent_event', resourceId: heldId,
+      })
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [tenant.shopId, heldId],
+      )).rejects.toThrow(/active messaging retention hold blocks consent event purge/)
+      await fixture.client.query(
+        `update messaging_retention_holds set released_at = clock_timestamp()
+        where resource_type = 'messaging_consent_event' and resource_id = $1`, [heldId],
+      )
+
+      await fixture.client.query(
+        `insert into messaging_consent_state (
+          shop_id, subject_key, customer_id, destination_fingerprint,
+          fingerprint_key_version, program_version, status, source_event_id,
+          consented_at, retain_until
+        ) values ($1, $2, $3, $4, 'key_v1', 'repair_updates_v1',
+          'consented', $5, now(), now() + interval '5 years')`,
+        [tenant.shopId, subjectKey, tenant.customerId, hex, heldId],
+      )
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [tenant.shopId, heldId],
+      )).rejects.toThrow(/consent projection still references event/)
+      await fixture.client.exec('delete from messaging_consent_state')
+
+      await fixture.client.query(
+        `insert into sms_suppressions (
+          shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
+          reason, retain_until
+        ) values ($1, $2, 'key_v1', $3, 'customer_revocation', now() + interval '5 years')`,
+        [tenant.shopId, otherHex, heldId],
+      )
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [tenant.shopId, heldId],
+      )).rejects.toThrow(/suppression still references event/)
+      await fixture.client.exec('delete from sms_suppressions')
+
+      await fixture.client.exec('begin')
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_consent_event($1, $2) as purged',
+        [tenant.shopId, heldId],
+      )).rows[0]?.purged).toBe(true)
+      await fixture.client.exec('commit')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_consent_events where id = $1', [heldId],
+      )).rows[0]?.count).toBe(0)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('rejects cross-shop, forged purge context, and mixed event purge shops', async () => {
+    const fixture = await createTestDb()
+    try {
+      const first = await seedTenant(fixture.client)
+      const second = await seedTenant(fixture.client)
+      const firstId = await insertConsentEvent(fixture.client, first, {
+        retainUntil: "clock_timestamp() - interval '1 second'",
+      })
+      const secondId = await insertConsentEvent(fixture.client, second, {
+        retainUntil: "clock_timestamp() - interval '1 second'",
+      })
+      expect((await fixture.client.query<{ purged: boolean }>(
+        'select purge_expired_messaging_consent_event($1, $2) as purged',
+        [second.shopId, firstId],
+      )).rows[0]?.purged).toBe(false)
+
+      await fixture.client.exec('begin')
+      await fixture.client.exec('set local role service_role')
+      await fixture.client.query(
+        "select set_config('vyntechs.messaging_consent_purge_shop', $1, true)", [first.shopId],
+      )
+      await fixture.client.query(
+        "select set_config('vyntechs.messaging_consent_purge_events', $1, true)", [`{${firstId}}`],
+      )
+      await expect(fixture.client.query(
+        'delete from messaging_consent_events where id = $1', [firstId],
+      )).rejects.toThrow(/messaging consent events are append-only/)
+      await fixture.client.exec('rollback')
+
+      await fixture.client.exec('begin')
+      await fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [first.shopId, firstId],
+      )
+      await expect(fixture.client.query(
+        'select purge_expired_messaging_consent_event($1, $2)', [second.shopId, secondId],
+      )).rejects.toThrow(/consent event purge transaction cannot mix shops/)
+      await fixture.client.exec('rollback')
     } finally {
       await fixture.close()
     }
@@ -1944,6 +2167,19 @@ describe('Shop OS messaging retention source schema', () => {
       await unsafeAcl.close()
     }
 
+    const unsafeEventPurge = await createTestDb()
+    try {
+      await unsafeEventPurge.client.exec(
+        `alter function purge_expired_messaging_consent_event(uuid, uuid)
+        set search_path = public`,
+      )
+      await expect(ensureMessagingRetentionMigration(unsafeEventPurge.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await unsafeEventPurge.close()
+    }
+
     const missingFunction = await createTestDb()
     try {
       await missingFunction.client.exec(
@@ -1977,6 +2213,7 @@ describe('Shop OS messaging retention source schema', () => {
         compact.replace(/array_agg\(distinct subject_key order by subject_key\)/i, 'array_agg(subject_key)'),
         completion.replace(/old\.subject_key = any\(authorized_subjects\)/i, 'true'),
         completion.replace(/r\.shop_id = old\.shop_id/i, 'true'),
+        completion.replace(/old\.id = any\(purge_event_ids\)/i, 'true'),
       ]
 
       for (const weakened of weakenings) {
@@ -2139,7 +2376,7 @@ describe('Shop OS messaging retention source schema', () => {
         where tgname = 'messaging_retention_holds_serialize_target'
       `)
       expect(triggerProof.rows[0]?.trigger_definition).toContain(
-        'BEFORE INSERT OR UPDATE OF shop_id, resource_type, resource_id, subject_key',
+        'BEFORE INSERT OR UPDATE ON public.messaging_retention_holds',
       )
 
       const tenant = await seedTenant(fixture.client)
@@ -2152,7 +2389,7 @@ describe('Shop OS messaging retention source schema', () => {
           shop_id, subject_key, reason_code, authorizing_actor_profile_id,
           starts_at, review_at, expires_at, retain_until
         ) values ($1, $2, 'legal_claim', $3, now(), now() + interval '1 day',
-          now() + interval '30 days', now() + interval '5 years')
+          now() + interval '30 days', now() + interval '30 days' + interval '5 years')
         returning id`,
         [tenant.shopId, firstSubject, tenant.actorId],
       )

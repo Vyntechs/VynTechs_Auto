@@ -787,19 +787,21 @@ git commit -m "Add suppression-first messaging deletion"
 
 ```ts
 export type PurgeCounts = {
+  consentProjections: number
   consentEvents: number
   suppressions: number
   quoteSends: number
   smsLog: number
   notifications: number
   deletionRequests: number
+  retentionHolds: number
   skippedHeld: number
   failed: number
 }
 export async function createMessagingRetentionHold(input: {
   db: AppDb
   actor: MessagingActor
-  resourceType: 'consent_event' | 'suppression' | 'quote_send' | 'sms_log' | 'notification' | 'deletion_request' | 'subject'
+  resourceType?: 'messaging_consent_event' | 'sms_suppression' | 'quote_send' | 'sms_log' | 'notification' | 'messaging_deletion_request'
   resourceId?: string
   subjectKey?: string
   reasonCode: 'legal_claim' | 'subpoena' | 'fraud_review' | 'security_investigation'
@@ -853,6 +855,8 @@ Expected: FAIL because the purge module does not exist.
 
 Validate exact bounded enums and times, authorize, insert immutable hold, and release only by setting released-at once. Reject free text and silent extension. A renewal creates a new row referencing the same target after a fresh authorization check.
 
+Resource-targeted holds use exactly the canonical `resourceType` vocabulary above with one `resourceId`. Subject-targeted holds use `subjectKey` with both resource fields null. An unreleased hold has `retainUntil = expiresAt + 5 calendar years`; the one allowed release recalculates it to `releasedAt + 5 calendar years`. Every hold operation locks the shop row first, before target/request locks.
+
 - [ ] **Step 4: Implement bounded purge**
 
 Process record families in dependency order:
@@ -860,9 +864,9 @@ Process record families in dependency order:
 1. notifications;
 2. SMS log;
 3. terminal quote sends;
-4. stale consent projection;
-5. expired consent events;
-6. lifted/expired suppressions;
+4. stale consent projections;
+5. eligible lifted/expired suppressions;
+6. expired consent events after projection and suppression source references are gone;
 7. completed deletion tombstones; and
 8. expired hold audit rows after their five-year proof window.
 

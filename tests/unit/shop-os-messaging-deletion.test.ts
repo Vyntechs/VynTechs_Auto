@@ -136,13 +136,21 @@ describe('suppression-first messaging deletion', () => {
     })
   }
 
+  const addCalendarYears = (value: Date, years: number) => {
+    const result = new Date(value)
+    result.setUTCFullYear(result.getUTCFullYear() + years)
+    return result
+  }
+
   const activeHold = (overrides: Partial<typeof messagingRetentionHolds.$inferInsert>) => {
     const startsAt = new Date(Date.now() - 60_000)
     const expiresAt = new Date(Date.now() + 86_400_000)
+    const retentionAnchor = overrides.releasedAt ?? overrides.expiresAt ?? expiresAt
     return db.insert(messagingRetentionHolds).values({
-      shopId, reasonCode: 'legal_request', authorizingActorProfileId: owner.profileId,
+      shopId, reasonCode: 'legal_claim', authorizingActorProfileId: owner.profileId,
       startsAt, reviewAt: new Date(Date.now() + 3_600_000), expiresAt,
-      retainUntil: new Date(expiresAt.getTime() + 365 * 86_400_000), ...overrides,
+      ...overrides,
+      retainUntil: overrides.retainUntil ?? addCalendarYears(retentionAnchor, 5),
     })
   }
 
@@ -209,9 +217,9 @@ describe('suppression-first messaging deletion', () => {
     const expiresAt = new Date(Date.now() + 86_400_000)
     await db.insert(messagingRetentionHolds).values(Array.from({ length: count }, (_, index) => ({
       id: uuid(50_000 + index), shopId, subjectKey: customerId,
-      reasonCode: `legal_${index}`, authorizingActorProfileId: owner.profileId,
+      reasonCode: 'legal_claim' as const, authorizingActorProfileId: owner.profileId,
       startsAt, reviewAt: new Date(Date.now() + 3_600_000), expiresAt,
-      retainUntil: new Date(expiresAt.getTime() + 365 * 86_400_000),
+      retainUntil: addCalendarYears(expiresAt, 5),
     })))
   }
 
@@ -656,7 +664,7 @@ describe('suppression-first messaging deletion', () => {
       retainUntil: new Date('2031-07-12T11:00:00Z'), updatedAt: createdAt,
     })))
     await activeHold({ subjectKey: heldSubject })
-    await activeHold({ subjectKey: heldSubject, reasonCode: 'duplicate_subject_authority' })
+    await activeHold({ subjectKey: heldSubject, reasonCode: 'subpoena' })
     const pending = await request({ requestKey: uuid(299) })
     if (!pending.ok) throw new Error('request failed')
 
@@ -768,7 +776,7 @@ describe('suppression-first messaging deletion', () => {
     await insertSend(currentSend, 'submitted', 'key_v2')
     await insertSend(legacySend, 'submitted', 'key_v1')
     await activeHold({ resourceType: 'quote_send', resourceId: currentSend })
-    await activeHold({ resourceType: 'quote_send', resourceId: currentSend, reasonCode: 'second_authority' })
+    await activeHold({ resourceType: 'quote_send', resourceId: currentSend, reasonCode: 'subpoena' })
     await activeHold({ resourceType: 'quote_send', resourceId: legacySend })
     const pending = await request()
     if (!pending.ok) throw new Error('request failed')
@@ -836,7 +844,7 @@ describe('suppression-first messaging deletion', () => {
       retainUntil: new Date('2031-07-12T11:00:00Z'), updatedAt: createdAt,
     })
     await activeHold({ subjectKey: customerId })
-    await activeHold({ subjectKey: customerId, reasonCode: 'duplicate_subject_authority' })
+    await activeHold({ subjectKey: customerId, reasonCode: 'subpoena' })
     await activeHold({ resourceType: 'quote_send', resourceId: uuid(999) })
     const expiredStart = new Date(Date.now() - 3 * 86_400_000)
     await activeHold({
@@ -885,7 +893,7 @@ describe('suppression-first messaging deletion', () => {
     await activeHold({ resourceType: 'messaging_consent_event', resourceId: eventId })
     await activeHold({
       resourceType: 'messaging_consent_event', resourceId: eventId,
-      reasonCode: 'duplicate_event_authority',
+      reasonCode: 'subpoena',
     })
 
     expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))

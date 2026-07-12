@@ -414,6 +414,7 @@ async function messagingRetentionMarkers(
       ('messaging_retention_holds_reason_code_valid'), ('messaging_retention_holds_target_consistent'),
       ('messaging_retention_holds_review_valid'), ('messaging_retention_holds_release_valid'),
       ('messaging_retention_holds_max_duration'),
+      ('messaging_retention_holds_retention_window_exact'),
       ('quote_sends_pkey'), ('quote_sends_shop_fk'),
       ('quote_sends_shop_ticket_fk'), ('quote_sends_shop_ticket_version_fk'),
       ('quote_sends_shop_customer_fk'), ('quote_sends_shop_actor_fk'),
@@ -438,6 +439,7 @@ async function messagingRetentionMarkers(
       ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
       ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
+      ('messaging_retention_holds_purge_idx'),
       ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
       ('quote_sends_shop_ticket_version_id_uq'),
       ('quote_sends_shop_actor_request_uq'), ('quote_sends_destination_idx'),
@@ -447,30 +449,39 @@ async function messagingRetentionMarkers(
       ('notifications_purge_idx')
     ), expected_functions(
       signature, return_type, security_definer, service_execute,
-      body_marker, secondary_body_marker, tertiary_body_marker
+      body_marker, secondary_body_marker, tertiary_body_marker, quaternary_body_marker
     ) as (values
       ('validate_quote_event_send_reference()', 'trigger', true, false,
-        'quote event send reference must match an exact live quote send', null, null),
+        'quote event send reference must match an exact live quote send', null, null, null),
       ('guard_quote_send_lifecycle()', 'trigger', false, false,
         'matching pending messaging deletion request',
         'order by deletion_request.id for share',
-        'and suppression.destination_fingerprint = old.destination_fingerprint and suppression.fingerprint_key_version = old.fingerprint_key_version and suppression.reason in (''verified_deletion'', ''permanent_failure'', ''number_reassigned'') and suppression.lifted_at is null and suppression.retain_until >= approved_deletion_barrier order by suppression.id for share'),
-      ('reject_messaging_consent_event_mutation()', 'trigger', false, false, null, null, null),
+        'and suppression.destination_fingerprint = old.destination_fingerprint and suppression.fingerprint_key_version = old.fingerprint_key_version and suppression.reason in (''verified_deletion'', ''permanent_failure'', ''number_reassigned'') and suppression.lifted_at is null and suppression.retain_until >= approved_deletion_barrier order by suppression.id for share', null),
+      ('reject_messaging_consent_event_mutation()', 'trigger', false, false,
+        'purge_expired_messaging_consent_event(uuid,uuid)',
+        'purge_shop_id = old.shop_id and old.id = any(purge_event_ids)', null, null),
       ('require_messaging_compaction_completion()', 'trigger', false, false,
         'vyntechs.messaging_consent_compaction_shop',
         'old.subject_key = any(authorized_subjects)',
-        'r.shop_id = old.shop_id and r.state = ''completed'''),
+        'r.shop_id = old.shop_id and r.state = ''completed''',
+        'old.id = any(purge_event_ids)'),
       ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true,
         'and r.customer_id is not null',
         'and e.customer_id = request_customer_id',
-        'array_agg(distinct subject_key order by subject_key)'),
+        'array_agg(distinct subject_key order by subject_key)', null),
       ('guard_messaging_deletion_request_mutation()', 'trigger', false, false,
-        null, null, null),
+        null, null, null, null),
       ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
-        null, null, null),
+        null, null, null, null),
+      ('purge_expired_messaging_consent_event(uuid,uuid)', 'boolean', true, true,
+        'clock_timestamp()',
+        'consent projection still references event',
+        'suppression still references event',
+        'from public.shops locked_shop where locked_shop.id = p_shop_id for update'),
       ('serialize_messaging_retention_hold_target()', 'trigger', false, false,
-        'begin if tg_op = ''UPDATE'' then if new.shop_id is distinct from old.shop_id or new.resource_type is distinct from old.resource_type or new.resource_id is distinct from old.resource_id or new.subject_key is distinct from old.subject_key then',
-        'raise exception ''messaging retention hold target is immutable''; end if; return new; end if; perform 1 from public.shops locked_shop where locked_shop.id = new.shop_id for update',
+        'messaging retention hold target is immutable',
+        'messaging retention hold lifecycle is immutable',
+        'from public.shops locked_shop where locked_shop.id = new.shop_id for update',
         'array_agg(distinct r.id order by r.id)')
     ), expected_triggers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,
@@ -487,7 +498,7 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
         'guard_messaging_deletion_request_mutation()', 27, false, null),
       ('messaging_retention_holds', 'messaging_retention_holds_serialize_target',
-        'serialize_messaging_retention_hold_target()', 23, false, '2 3 4 5')
+        'serialize_messaging_retention_hold_target()', 23, false, null)
     ), client_roles(role_name) as (values
       ('anon'), ('authenticated')
     ), table_privileges(privilege_name) as (values
@@ -529,6 +540,13 @@ async function messagingRetentionMarkers(
          and (e.tertiary_body_marker is null
            or position(e.tertiary_body_marker in
              regexp_replace(pg_get_functiondef(p.oid), '\\s+', ' ', 'g')) > 0)
+         and (e.quaternary_body_marker is null
+           or position(e.quaternary_body_marker in
+             regexp_replace(pg_get_functiondef(p.oid), '\\s+', ' ', 'g')) > 0)
+         and (e.signature <> 'serialize_messaging_retention_hold_target()'
+           or (length(lower(pg_get_functiondef(p.oid)))
+             - length(replace(lower(pg_get_functiondef(p.oid)), 'from public.shops', '')))
+             / length('from public.shops') = 1)
          and has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
          and not has_function_privilege('anon', p.oid, 'execute')
          and not has_function_privilege('authenticated', p.oid, 'execute')) as function_marker_count,
@@ -570,11 +588,11 @@ async function messagingRetentionMarkers(
 function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
   return markers.table_count === 8
     && markers.column_count === 114
-    && markers.constraint_count === 89
-    && markers.index_count === 25
+    && markers.constraint_count === 90
+    && markers.index_count === 26
     && markers.rls_count === 8
     && markers.policy_count === 8
-    && markers.function_marker_count === 8
+    && markers.function_marker_count === 9
     && markers.trigger_binding_count === 6
     && markers.nullable_quote_send_customer_count === 1
     && markers.direct_client_grant_count === 0
@@ -646,6 +664,7 @@ async function messagingRetentionAclMarkers(
         ('compact_messaging_consent_events(uuid,uuid,uuid)', true),
         ('guard_messaging_deletion_request_mutation()', false),
         ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
+        ('purge_expired_messaging_consent_event(uuid,uuid)', true),
         ('serialize_messaging_retention_hold_target()', false)
       ),
       client_roles(role_name) as (values ('anon'), ('authenticated')),
@@ -733,9 +752,9 @@ function hasCompleteMessagingRetentionAcl(
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
-    && markers.function_count === 8
-    && markers.required_service_function_count === 2
-    && markers.exact_function_acl_count === 8
+    && markers.function_count === 9
+    && markers.required_service_function_count === 3
+    && markers.exact_function_acl_count === 9
 }
 
 export async function ensureMessagingRetentionAclMigration(
@@ -747,8 +766,8 @@ export async function ensureMessagingRetentionAclMigration(
     || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
-    || before.function_count !== 8
-    || before.required_service_function_count !== 2
+    || before.function_count !== 9
+    || before.required_service_function_count !== 3
   ) {
     throw new Error('partial messaging retention ACL in ephemeral database')
   }
