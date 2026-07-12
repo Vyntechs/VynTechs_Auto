@@ -463,7 +463,9 @@ async function messagingRetentionMarkers(
       ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
         null, null, null),
       ('serialize_messaging_retention_hold_target()', 'trigger', false, false,
-        null, null, null)
+        'array_agg(distinct target_shop_id order by target_shop_id)',
+        'from public.shops locked_shop where locked_shop.id = locked_shop_id for update',
+        'array_agg(distinct r.id order by r.id)')
     ), expected_triggers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,
       trigger_columns
@@ -513,11 +515,14 @@ async function messagingRetentionMarkers(
        where p.prorettype = e.return_type::regtype
          and p.prosecdef = e.security_definer
          and p.proconfig = array['search_path=""']
-         and (e.body_marker is null or position(e.body_marker in pg_get_functiondef(p.oid)) > 0)
+         and (e.body_marker is null or position(e.body_marker in
+           regexp_replace(pg_get_functiondef(p.oid), '\\s+', ' ', 'g')) > 0)
          and (e.secondary_body_marker is null
-           or position(e.secondary_body_marker in pg_get_functiondef(p.oid)) > 0)
+           or position(e.secondary_body_marker in
+             regexp_replace(pg_get_functiondef(p.oid), '\\s+', ' ', 'g')) > 0)
          and (e.tertiary_body_marker is null
-           or position(e.tertiary_body_marker in pg_get_functiondef(p.oid)) > 0)
+           or position(e.tertiary_body_marker in
+             regexp_replace(pg_get_functiondef(p.oid), '\\s+', ' ', 'g')) > 0)
          and has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
          and not has_function_privilege('anon', p.oid, 'execute')
          and not has_function_privilege('authenticated', p.oid, 'execute')) as function_marker_count,

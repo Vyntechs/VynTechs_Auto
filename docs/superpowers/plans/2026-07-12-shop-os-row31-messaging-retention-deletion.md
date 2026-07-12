@@ -746,7 +746,7 @@ Return pending only after commit. Any database error returns `retryable`; never 
 
 - [ ] **Step 4: Implement cleanup transaction**
 
-Lock every matching pending request in stable ascending ID order before locking the customer and sends. Preserve the request → customer → send mutation order: the quote-send lifecycle guard deterministically reacquires those already-held request rows `FOR SHARE`, which conflicts with pending → completed updates and prevents completion from committing around authorized detachment or token revocation. Then lock consent projection/events, SMS log, notifications, and active holds in their documented stable order. Apply the exact state rule:
+Use one global lock order: shop → matching pending deletion requests → customer → quote sends → consent projection/events → child SMS logs → notifications → active holds. Lock the existing shop row `FOR UPDATE` as the cleanup transaction's first operation, then lock every matching pending request in stable ascending ID order. Preserve shop → request → customer → send order: the quote-send lifecycle guard deterministically reacquires those already-held request rows `FOR SHARE`, which conflicts with pending → completed updates and prevents completion from committing around authorized detachment or token revocation. This is the same shop-first order used by consent transitions and by hold insertion or retargeting, so it does not introduce an inverted Task 5 lock path. Hold the shop lock through the final hold scan, every cleanup delete or update, and transaction commit. Apply the exact state rule:
 
 ```ts
 const cancellable = new Set(['queued', 'claimed'])

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { getTableColumns } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { describe, expect, it } from 'vitest'
@@ -1684,10 +1686,18 @@ describe('Shop OS messaging retention source schema', () => {
         ) as function_definition
       `)
       const functionDefinition = functionProof.rows[0]?.function_definition.toLowerCase()
+      const normalizedFunction = functionDefinition?.replace(/\s+/g, ' ')
+      expect(functionDefinition).toContain(
+        'array_agg(distinct target_shop_id order by target_shop_id)',
+      )
+      expect(normalizedFunction).toContain(
+        'from public.shops locked_shop where locked_shop.id = locked_shop_id for update',
+      )
       expect(functionDefinition).toContain(
         'array_agg(distinct r.id order by r.id)',
       )
-      expect(functionDefinition).toContain('for update')
+      expect(functionDefinition!.indexOf('from public.shops locked_shop'))
+        .toBeLessThan(functionDefinition!.indexOf('array_agg(distinct r.id order by r.id)'))
       expect(functionDefinition).toContain(
         "messaging_deletion_request",
       )
@@ -1705,6 +1715,7 @@ describe('Shop OS messaging retention source schema', () => {
       )
 
       const tenant = await seedTenant(fixture.client)
+      const otherTenant = await seedTenant(fixture.client)
       const firstSubject = crypto.randomUUID()
       const secondSubject = crypto.randomUUID()
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
@@ -1720,9 +1731,21 @@ describe('Shop OS messaging retention source schema', () => {
       )
       await fixture.client.query(
         `update messaging_retention_holds
-        set subject_key = $1
-        where id = $2`,
-        [secondSubject, hold.rows[0]?.id],
+        set shop_id = $1, subject_key = $2, authorizing_actor_profile_id = $3
+        where id = $4`,
+        [otherTenant.shopId, secondSubject, otherTenant.actorId, hold.rows[0]?.id],
+      )
+      for (const resourceType of ['quote_send', 'sms_log', 'notification']) {
+        await insertHold(fixture.client, otherTenant, {
+          resourceType,
+          resourceId: crypto.randomUUID(),
+        })
+      }
+      await expect(insertHold(fixture.client, {
+        ...tenant,
+        shopId: crypto.randomUUID(),
+      }, { subjectKey: crypto.randomUUID() })).rejects.toThrow(
+        /messaging_retention_holds_shop_fk/,
       )
     } finally {
       await fixture.close()
@@ -1755,5 +1778,44 @@ describe('Shop OS messaging retention source schema', () => {
     } finally {
       await missingTrigger.close()
     }
+  })
+
+  it('refuses a hold serializer weakened to omit only the shop-row lock', async () => {
+    const fixture = await createTestDb()
+    try {
+      const functionProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'serialize_messaging_retention_hold_target()'::regprocedure
+        ) as function_definition
+      `)
+      const original = functionProof.rows[0]!.function_definition
+      const weakened = original.replace(
+        /(from public\.shops locked_shop\s+where locked_shop\.id = locked_shop_id)\s+for update/i,
+        '$1',
+      )
+      expect(weakened).not.toBe(original)
+      expect(weakened.toLowerCase()).toContain('array_agg(distinct r.id order by r.id)')
+      await fixture.client.exec(weakened)
+      await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+        'partial messaging retention schema in ephemeral database',
+      )
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('documents the exact shop-first Task 6 cleanup lock order', async () => {
+    const plan = await readFile(path.join(
+      process.cwd(),
+      'docs/superpowers/plans/2026-07-12-shop-os-row31-messaging-retention-deletion.md',
+    ), 'utf8')
+    const taskSix = plan.slice(plan.indexOf('### Task 6:'), plan.indexOf('### Task 7:'))
+
+    expect(taskSix).toContain(
+      'shop → matching pending deletion requests → customer → quote sends → consent projection/events → child SMS logs → notifications → active holds',
+    )
+    expect(taskSix).toContain(
+      'Hold the shop lock through the final hold scan, every cleanup delete or update, and transaction commit.',
+    )
   })
 })

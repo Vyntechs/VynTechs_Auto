@@ -531,9 +531,27 @@ language plpgsql
 set search_path = ''
 as $$
 declare
+  shop_ids uuid[];
+  locked_shop_id uuid;
   request_ids uuid[];
   locked_request_id uuid;
 begin
+  if tg_op = 'UPDATE' then
+    select array_agg(distinct target_shop_id order by target_shop_id)
+    into shop_ids
+    from (values (old.shop_id), (new.shop_id)) as target_shops(target_shop_id);
+  else
+    shop_ids := array[new.shop_id];
+  end if;
+
+  foreach locked_shop_id in array coalesce(shop_ids, array[]::uuid[])
+  loop
+    perform 1
+    from public.shops locked_shop
+    where locked_shop.id = locked_shop_id
+    for update;
+  end loop;
+
   if tg_op = 'UPDATE' then
     with targets(shop_id, subject_key, resource_type, resource_id) as (
       values
