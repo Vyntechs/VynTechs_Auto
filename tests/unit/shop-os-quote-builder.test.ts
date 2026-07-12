@@ -4,7 +4,8 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
-  customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets, vehicles,
+  customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets,
+  vehicles, vendorAccounts,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -49,6 +50,14 @@ describe('Shop OS quote builder read model', () => {
       { id: uuid(31), shopId, ticketId, title: 'Canceled', kind: 'maintenance', requiredSkillTier: 1,
         workStatus: 'canceled' },
     ])
+    await db.insert(vendorAccounts).values({
+      id: uuid(90),
+      shopId,
+      vendor: 'test_vendor',
+      displayName: 'Test vendor',
+      mode: 'api',
+      secretRef: 'env:TEST_VENDOR_ACCOUNT_90',
+    })
     await db.insert(jobLines).values([
       { id: uuid(40), shopId, jobId: uuid(30), kind: 'part', description: 'Pads', quantity: 2,
         priceCents: 12_500, taxable: true, partNumber: 'PAD', brand: 'ACME', unitCostCents: 7_000,

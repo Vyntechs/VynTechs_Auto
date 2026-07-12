@@ -515,6 +515,70 @@ export const jobAttachments = pgTable(
   ],
 )
 
+export const vendorAccounts = pgTable(
+  'vendor_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    vendor: text('vendor').notNull(),
+    displayName: text('display_name').notNull(),
+    mode: text('mode', { enum: ['manual', 'api', 'punchout'] }).notNull(),
+    nonSecretConfig: jsonb('non_secret_config')
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    secretRef: text('secret_ref'),
+    enabled: boolean('enabled').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'vendor_accounts_shop_fk',
+      columns: [table.shopId],
+      foreignColumns: [shops.id],
+    }).onDelete('cascade'),
+    uniqueIndex('vendor_accounts_shop_id_id_uq').on(table.shopId, table.id),
+    index('vendor_accounts_shop_enabled_vendor_idx').on(
+      table.shopId,
+      table.enabled,
+      table.vendor,
+    ),
+    check(
+      'vendor_accounts_vendor_slug_valid',
+      sql`char_length(${table.vendor}) between 2 and 64
+        and ${table.vendor} ~ '^[a-z][a-z0-9_]*[a-z0-9]$'`,
+    ),
+    check(
+      'vendor_accounts_display_name_valid',
+      sql`${table.displayName} = btrim(${table.displayName})
+        and char_length(${table.displayName}) between 1 and 120`,
+    ),
+    check(
+      'vendor_accounts_mode_valid',
+      sql`${table.mode} in ('manual', 'api', 'punchout')`,
+    ),
+    check(
+      'vendor_accounts_non_secret_config_object',
+      sql`jsonb_typeof(${table.nonSecretConfig}) = 'object'`,
+    ),
+    check(
+      'vendor_accounts_non_secret_config_size',
+      sql`octet_length(${table.nonSecretConfig}::text) <= 4096`,
+    ),
+    check(
+      'vendor_accounts_secret_ref_valid',
+      sql`${table.secretRef} is null
+        or ${table.secretRef} ~ '^(env:[A-Z][A-Z0-9_]{2,127}|vault:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$'`,
+    ),
+    check(
+      'vendor_accounts_mode_secret_ref_valid',
+      sql`(${table.mode} = 'manual' and ${table.secretRef} is null)
+        or (${table.mode} in ('api', 'punchout') and ${table.secretRef} is not null)`,
+    ),
+  ],
+)
+
 export const jobLines = pgTable(
   'job_lines',
   {
@@ -565,6 +629,11 @@ export const jobLines = pgTable(
       name: 'job_lines_shop_received_by_fk',
       columns: [table.shopId, table.receivedByProfileId],
       foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_lines_shop_vendor_account_fk',
+      columns: [table.shopId, table.vendorAccountId],
+      foreignColumns: [vendorAccounts.shopId, vendorAccounts.id],
     }).onDelete('restrict'),
     index('job_lines_job_sort_idx').on(table.shopId, table.jobId, table.sort),
     index('job_lines_ordered_by_idx')
