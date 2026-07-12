@@ -79,12 +79,12 @@ export function ManualQuoteBuilder({
   const [pendingSourcedRemoval, setPendingSourcedRemoval] = useState<{
     jobId: string
     lineId: string
-    invoker: HTMLElement
   } | null>(null)
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
   const editorFirstInputRef = useRef<HTMLInputElement>(null)
+  const recoveryRefreshRef = useRef<HTMLButtonElement>(null)
   const cannedSelectRef = useRef<HTMLSelectElement>(null)
   const cannedUnavailableRef = useRef<HTMLDivElement>(null)
   const reloadPendingRef = useRef(false)
@@ -132,6 +132,11 @@ export function ManualQuoteBuilder({
       setFocusTarget(null)
     }
   }, [current, focusTarget])
+  useEffect(() => {
+    if (error?.refresh && pendingSourcedRemoval) {
+      queueMicrotask(() => recoveryRefreshRef.current?.focus())
+    }
+  }, [error, pendingSourcedRemoval])
 
   const lines = current.jobs.flatMap((job) => job.lines)
   const sourcingJob = sourcingJobId
@@ -406,7 +411,6 @@ export function ManualQuoteBuilder({
   async function confirmSourcedRemove(): Promise<void> {
     if (modal?.kind !== 'remove-sourced' || !beginOperation('remove')) return
     const removeTarget = modal.target
-    const invoker = modal.invoker
     setError(null)
     try {
       const response = await fetch(
@@ -427,7 +431,6 @@ export function ManualQuoteBuilder({
       const recovery = {
         jobId: removeTarget.jobId,
         lineId: removeTarget.line.id,
-        invoker,
       }
       setPendingSourcedRemoval(recovery)
       setModal(null)
@@ -453,7 +456,6 @@ export function ManualQuoteBuilder({
       { jobId: recovery.jobId, lineId: recovery.lineId, state: 'absent' },
     )
     if (refreshed) setPendingSourcedRemoval(null)
-    else setTimeout(() => recovery.invoker.focus(), 0)
   }
 
   async function prepareQuote(): Promise<void> {
@@ -1045,6 +1047,7 @@ export function ManualQuoteBuilder({
               type="button"
               className={styles.lineAction}
               disabled={busy}
+              ref={pendingSourcedRemoval ? recoveryRefreshRef : undefined}
               onClick={() => error.reloadPage
                 ? reloadCannedPage()
                 : pendingSourcedRemoval

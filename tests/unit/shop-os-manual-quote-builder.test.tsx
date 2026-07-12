@@ -817,8 +817,8 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
     expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
     expect(remove).toBeDisabled()
-    await waitFor(() => expect(document.activeElement).not.toBe(remove))
-    expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
+    const refreshQuote = screen.getByRole('button', { name: 'Refresh quote' })
+    await waitFor(() => expect(document.activeElement).toBe(refreshQuote))
   })
 
   it('preserves sourced-removal recovery after a transport failure and retries GET only', async () => {
