@@ -630,3 +630,134 @@ export async function getJobAttachmentProof(
     return failure('conflict', true)
   }
 }
+
+type SafeEscalatedJob = {
+  id: string
+  title: string
+  kind: 'diagnostic'
+  requiredSkillTier: number
+  assignedTechId: null
+  workStatus: 'open'
+  approvalState: 'pending_quote'
+  sessionId: null
+}
+
+export type WorkEscalationResult =
+  | { ok: true; changed: boolean; job: SafeEscalatedJob }
+  | SimpleWorkFailure
+
+const escalationBodySchema = z.strictObject({
+  requestKey: uuidSchema,
+  concern: z.string().trim().min(5).max(500),
+  requiredSkillTier: z.number().int().min(1).max(3),
+})
+
+function safeEscalatedJob(job: typeof ticketJobs.$inferSelect): SafeEscalatedJob | null {
+  if (job.kind !== 'diagnostic' || job.assignedTechId !== null || job.workStatus !== 'open'
+    || job.approvalState !== 'pending_quote' || job.sessionId !== null) return null
+  return {
+    id: job.id,
+    title: job.title,
+    kind: job.kind,
+    requiredSkillTier: job.requiredSkillTier,
+    assignedTechId: null,
+    workStatus: job.workStatus,
+    approvalState: job.approvalState,
+    sessionId: null,
+  }
+}
+
+function exactEscalation(
+  job: typeof ticketJobs.$inferSelect,
+  expected: { id: string; shopId: string; ticketId: string; title: string; requiredSkillTier: number },
+): SafeEscalatedJob | null {
+  if (job.id !== expected.id || job.shopId !== expected.shopId || job.ticketId !== expected.ticketId
+    || job.title !== expected.title || job.requiredSkillTier !== expected.requiredSkillTier
+    || job.claimedAt !== null || job.customerStory !== null || job.storyMeta !== null || job.workNotes !== null
+    || job.approvedQuoteVersionId !== null || job.diagnosticStartState !== 'idle'
+    || job.diagnosticStartAttemptKey !== null || job.diagnosticStartLeaseUntil !== null
+    || job.diagnosticStartErrorCode !== null) return null
+  return safeEscalatedJob(job)
+}
+
+export async function createWorkEscalation(
+  db: AppDb,
+  input: {
+    actor: SimpleWorkActor
+    ticketId: unknown
+    sourceJobId: unknown
+    body: unknown
+  },
+): Promise<WorkEscalationResult> {
+  const parsedActor = z.strictObject({ profileId: uuidSchema, shopId: uuidSchema }).safeParse(input.actor)
+  const parsedTicket = uuidSchema.safeParse(input.ticketId)
+  const parsedSource = uuidSchema.safeParse(input.sourceJobId)
+  const parsedBody = escalationBodySchema.safeParse(input.body)
+  if (!parsedActor.success || !parsedTicket.success || !parsedSource.success || !parsedBody.success) {
+    return failure('invalid_input')
+  }
+  const title = `Diagnose: ${parsedBody.data.concern}`
+  const jobId = derivedUuid('shop-os-work-escalation-v1', [
+    parsedActor.data.shopId,
+    parsedTicket.data,
+    parsedSource.data,
+    parsedActor.data.profileId,
+    parsedBody.data.requestKey,
+  ])
+  const expected = {
+    id: jobId,
+    shopId: parsedActor.data.shopId,
+    ticketId: parsedTicket.data,
+    title,
+    requiredSkillTier: parsedBody.data.requiredSkillTier,
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const context = await lockContext(transactionDb, {
+        actor: parsedActor.data,
+        ticketId: parsedTicket.data,
+        jobId: parsedSource.data,
+      })
+      if (!context) return failure('not_found')
+      const [existing] = await transactionDb.select().from(ticketJobs)
+        .where(eq(ticketJobs.id, jobId)).limit(1)
+      if (existing) {
+        const projected = exactEscalation(existing, expected)
+        return projected
+          ? { ok: true, changed: false, job: projected }
+          : failure('conflict')
+      }
+      if (context.ticket.status !== 'open' || context.job.workStatus !== 'in_progress') {
+        return failure('not_ready')
+      }
+      if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+      const [created] = await transactionDb.insert(ticketJobs).values({
+        id: jobId,
+        shopId: parsedActor.data.shopId,
+        ticketId: parsedTicket.data,
+        title,
+        kind: 'diagnostic',
+        requiredSkillTier: parsedBody.data.requiredSkillTier,
+        assignedTechId: null,
+        sessionId: null,
+        workStatus: 'open',
+        approvalState: 'pending_quote',
+        customerStory: null,
+        storyMeta: null,
+        workNotes: null,
+        approvedQuoteVersionId: null,
+      }).returning()
+      const projected = safeEscalatedJob(created)
+      if (!projected) throw new TypeError('created escalation shape is invalid')
+      return { ok: true, changed: true, job: projected }
+    })
+  } catch (error) {
+    if (isLockUnavailable(error)
+      || (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505')) {
+      return failure('conflict', true)
+    }
+    throw error
+  }
+}
