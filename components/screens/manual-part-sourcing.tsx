@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
+import { parseScaledDecimal } from '@/lib/shop-os/quote-math'
 import styles from './manual-part-sourcing.module.css'
 import {
   manualPartCommitLabel,
@@ -47,8 +49,8 @@ function createManualPartDraft(vendorAccountId: string): ManualPartDraft {
 
 type DraftKey = keyof ManualPartDraft
 
-const moneyPattern = /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/
-const quantityPattern = /^(?:0|[1-9]\d*)(?:\.\d{1,3})?$/
+const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
+const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 export function ManualPartSourcing({
   open,
@@ -70,10 +72,14 @@ export function ManualPartSourcing({
   const [status, setStatus] = useState('')
   const initialSignature = useRef(normalizedManualPartSignature(createManualPartDraft(initialAccountId)))
   const fieldRefs = useRef<Partial<Record<DraftKey, HTMLElement | null>>>({})
+  const panelRef = useRef<HTMLElement | null>(null)
+  const confirmRef = useRef<HTMLElement | null>(null)
+  const keepEditingRef = useRef<HTMLButtonElement | null>(null)
 
   const dirty = normalizedManualPartSignature(draft) !== initialSignature.current
 
   function updateDraft<K extends DraftKey>(key: K, value: ManualPartDraft[K]) {
+    setStatus('')
     setDraft((previous) => {
       const next = { ...previous, [key]: value }
       if (normalizedManualPartSignature(previous) !== normalizedManualPartSignature(next)) {
@@ -94,13 +100,41 @@ export function ManualPartSourcing({
   useEffect(() => {
     if (!open) return
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || confirmingClose) return
-      event.preventDefault()
-      requestClose()
+      if (event.key === 'Escape' && !confirmingClose) {
+        event.preventDefault()
+        requestClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const container = confirmingClose ? confirmRef.current : panelRef.current
+      if (!container) return
+      const focusable = Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   })
+
+  useEffect(() => {
+    if (!open) return
+    const error = firstInvalidField(draft, catalogAvailable)
+    fieldRefs.current[error?.key ?? 'description']?.focus()
+    // Initial focus is set only when the panel opens; validation handles later changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  useEffect(() => {
+    if (confirmingClose) keepEditingRef.current?.focus()
+  }, [confirmingClose])
 
   if (!open) return null
 
@@ -123,21 +157,23 @@ export function ManualPartSourcing({
 
   return (
     <section
+      ref={panelRef}
       className={styles.panel}
       role="dialog"
       aria-modal="true"
       aria-labelledby="manual-part-sourcing-title"
       data-client-key={clientKey}
     >
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{vehicleLabel ? `${vehicleLabel} · ${ticketLabel}` : ticketLabel}</p>
-          <h2 id="manual-part-sourcing-title">Source part for {job.title}</h2>
-        </div>
-        <button type="button" className={styles.close} onClick={requestClose} aria-label="Close part sourcing">×</button>
-      </header>
+      <div className={styles.content} data-testid="manual-part-dialog-content" inert={confirmingClose ? true : undefined}>
+        <header className={styles.header}>
+          <div>
+            <p className={styles.eyebrow}>{vehicleLabel ? `${vehicleLabel} · ${ticketLabel}` : ticketLabel}</p>
+            <h2 id="manual-part-sourcing-title">Source part for {job.title}</h2>
+          </div>
+          <button type="button" className={styles.close} onClick={requestClose} aria-label="Close part sourcing">×</button>
+        </header>
 
-      <form className={styles.form} onSubmit={submit} noValidate>
+        <form className={styles.form} onSubmit={submit} noValidate>
         <div className={styles.body}>
           {!catalogAvailable ? (
             <p className={styles.notice}>Sourcing is temporarily unavailable. Manual quote entry still works.</p>
@@ -269,15 +305,16 @@ export function ManualPartSourcing({
             {busy ? 'Adding sourced part…' : commitLabel}
           </button>
         </footer>
-      </form>
+        </form>
+      </div>
 
       {confirmingClose ? (
         <div className={styles.confirmBackdrop}>
-          <section className={styles.confirm} role="alertdialog" aria-modal="true" aria-labelledby="discard-draft-title">
+          <section ref={confirmRef} className={styles.confirm} role="alertdialog" aria-modal="true" aria-labelledby="discard-draft-title">
             <h3 id="discard-draft-title">Discard sourced part draft?</h3>
             <p>The details entered here are kept only while this quote is open.</p>
             <div>
-              <button type="button" onClick={() => setConfirmingClose(false)}>Keep editing</button>
+              <button ref={keepEditingRef} type="button" onClick={() => setConfirmingClose(false)}>Keep editing</button>
               <button type="button" className={styles.danger} onClick={onClose}>Discard draft</button>
             </div>
           </section>
@@ -346,14 +383,32 @@ function firstInvalidField(draft: ManualPartDraft, catalogAvailable: boolean): F
   if (!catalogAvailable) return null
   if (!draft.vendorAccountId) return { key: 'vendorAccountId', label: 'Supplier' }
   if (!draft.description.trim() || draft.description.trim().length > 500) return { key: 'description', label: 'Part description' }
-  if (!quantityPattern.test(draft.quantity.trim()) || Number(draft.quantity) <= 0) return { key: 'quantity', label: 'Quantity' }
-  if (!moneyPattern.test(draft.unitCost.trim())) return { key: 'unitCost', label: 'Supplier unit cost' }
-  if (!moneyPattern.test(draft.customerPrice.trim())) return { key: 'customerPrice', label: 'Customer line price' }
+  if (!validQuantity(draft.quantity)) return { key: 'quantity', label: 'Quantity' }
+  if (!validMoney(draft.unitCost)) return { key: 'unitCost', label: 'Supplier unit cost' }
+  if (!validMoney(draft.customerPrice)) return { key: 'customerPrice', label: 'Customer line price' }
   if (draft.partNumber.trim().length > 200) return { key: 'partNumber', label: 'Part number', details: true }
   if (draft.brand.trim().length > 200) return { key: 'brand', label: 'Brand', details: true }
   if (draft.fitment.trim().length > 500) return { key: 'fitment', label: 'Fitment', details: true }
   if (draft.externalOfferId.trim().length > 500) return { key: 'externalOfferId', label: 'Human reference', details: true }
-  if (!moneyPattern.test(draft.coreCharge.trim())) return { key: 'coreCharge', label: 'Supplier core charge', details: true }
+  if (!validMoney(draft.coreCharge)) return { key: 'coreCharge', label: 'Supplier core charge', details: true }
   if (draft.locationLabel.trim().length > 500) return { key: 'locationLabel', label: 'Location label', details: true }
   return null
+}
+
+function validQuantity(value: string): boolean {
+  try {
+    const quantity = parseScaledDecimal(value.trim(), 3)
+    return quantity > 0n && quantity <= MAX_PART_QUANTITY_SCALED
+  } catch {
+    return false
+  }
+}
+
+function validMoney(value: string): boolean {
+  try {
+    parseMoneyToCents(value.trim())
+    return true
+  } catch {
+    return false
+  }
 }

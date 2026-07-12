@@ -57,6 +57,21 @@ describe('ManualPartSourcing', () => {
     expect(screen.queryByText(/step|progress/i)).toBeNull()
   })
 
+  it('focuses the first missing required field and traps forward and reverse focus in the panel', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props({ accounts: [ACCOUNT_ONE, ACCOUNT_TWO] })} />)
+
+    expect(screen.getByRole('radio', { name: 'Northside Parts' })).toHaveFocus()
+    const dialog = screen.getByRole('dialog')
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])'))
+    focusable.at(-1)!.focus()
+    await user.tab()
+    expect(focusable[0]).toHaveFocus()
+    focusable[0].focus()
+    await user.tab({ shift: true })
+    expect(focusable.at(-1)).toHaveFocus()
+  })
+
   it('visibly preselects exactly one supplier but requires a choice when two exist', () => {
     const { unmount } = render(<ManualPartSourcing {...props()} />)
     expect(screen.getByRole('radio', { name: 'Northside Parts' })).toBeChecked()
@@ -161,6 +176,70 @@ describe('ManualPartSourcing', () => {
     expect(dirtyClose).toHaveBeenCalledOnce()
   })
 
+  it('opens the dirty confirmation from the close button, focuses Keep editing, traps focus, and makes the form inert', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props()} />)
+    await user.type(screen.getByLabelText('Part description'), 'Pads')
+    await user.click(screen.getByRole('button', { name: 'Close part sourcing' }))
+
+    const confirmation = screen.getByRole('alertdialog', { name: 'Discard sourced part draft?' })
+    const keepEditing = within(confirmation).getByRole('button', { name: 'Keep editing' })
+    const discard = within(confirmation).getByRole('button', { name: 'Discard draft' })
+    expect(keepEditing).toHaveFocus()
+    expect(screen.getByTestId('manual-part-dialog-content')).toHaveAttribute('inert')
+    discard.focus()
+    await user.tab()
+    expect(keepEditing).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(discard).toHaveFocus()
+  })
+
+  it('clears stale submitted status after a correction so the next required issue is announced', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props()} />)
+    await user.click(screen.getByRole('button', { name: /^Add / }))
+    expect(screen.getByRole('status')).toHaveTextContent('Part description')
+
+    await user.type(screen.getByLabelText('Part description'), 'Pads')
+    expect(screen.getByRole('status')).toHaveTextContent('Supplier unit cost')
+    expect(screen.getByRole('status')).not.toHaveTextContent('Part description')
+  })
+
+  it('rejects quantities and money beyond the Task 1 safe bounds', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props()} />)
+    await user.type(screen.getByLabelText('Part description'), 'Pads')
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '1000000000' } })
+    await user.type(screen.getByLabelText('Supplier unit cost'), '1')
+    await user.type(screen.getByLabelText('Customer line price'), '1')
+    await user.click(screen.getByRole('button', { name: /^Add / }))
+    expect(screen.getByRole('status')).toHaveTextContent('Quantity')
+    expect(screen.getByLabelText('Quantity')).toHaveFocus()
+
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '999999999.999' } })
+    fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '90071992547409.92' } })
+    await user.click(screen.getByRole('button', { name: /^Add / }))
+    expect(screen.getByRole('status')).toHaveTextContent('Supplier unit cost')
+    expect(screen.getByLabelText('Supplier unit cost')).toHaveFocus()
+  })
+
+  it('rotates the retry key only when normalized draft intent changes', () => {
+    vi.mocked(crypto.randomUUID)
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000901')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000902')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000903')
+    render(<ManualPartSourcing {...props()} />)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000901')
+
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Pads' } })
+    expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000902')
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Pads ' } })
+    expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000902')
+    fireEvent.change(screen.getByLabelText('Part description'), { target: { value: 'Pads set' } })
+    expect(dialog).toHaveAttribute('data-client-key', '00000000-0000-4000-8000-000000000903')
+  })
+
   it('contains no fake persistence, provider, order, price, fitment, or visible step claims', () => {
     render(<ManualPartSourcing {...props()} />)
     expect(document.body).not.toHaveTextContent(/Autosaved|\bOrder\b|\bBuy\b|Live price|Verified fitment|\d+\s+of\s+\d+|\d+\s+steps?/i)
@@ -171,7 +250,8 @@ describe('ManualPartSourcing', () => {
     expect(css).toMatch(/@media\s*\(min-width:\s*801px\)/)
     expect(css).toMatch(/width:\s*min\(440px,\s*42vw\)/)
     expect(css).toMatch(/height:\s*100vh/)
-    expect(css).toMatch(/overflow-y:\s*auto/)
+    expect(css).toMatch(/\.panel\s*{[^}]*overflow:\s*hidden/s)
+    expect(css).toMatch(/\.body\s*{[^}]*overflow-y:\s*auto/s)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)/)
     expect(css).toMatch(/inset:\s*0/)
     expect(css).toMatch(/min-height:\s*100dvh/)
