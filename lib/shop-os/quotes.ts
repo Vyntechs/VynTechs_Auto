@@ -484,18 +484,30 @@ export async function getQuoteBuilder(
         const clockRows = ('rows' in clockResult ? clockResult.rows : clockResult) as Array<{ now: string | Date }>
         databaseNow = new Date(clockRows[0].now)
       }
-      const activeVersions = await transactionDb.select({
+      const versions = await transactionDb.select({
         id: quoteVersions.id,
         versionNumber: quoteVersions.versionNumber,
         snapshot: quoteVersions.snapshot,
+        supersededAt: quoteVersions.supersededAt,
       }).from(quoteVersions).where(and(
         eq(quoteVersions.shopId, actor.shopId as string),
         eq(quoteVersions.ticketId, ticket.id),
-        isNull(quoteVersions.supersededAt),
       )).orderBy(quoteVersions.id)
+      const activeVersions = versions.filter((version) => version.supersededAt === null)
       if (activeVersions.length > 1) {
         return { ok: false as const, error: 'conflict' as const, retryable: false }
       }
+      const approvalEvents = await transactionDb.select({
+        id: quoteEvents.id,
+        kind: quoteEvents.kind,
+        jobId: quoteEvents.jobId,
+        quoteVersionId: quoteEvents.quoteVersionId,
+        createdAt: quoteEvents.createdAt,
+      }).from(quoteEvents).where(and(
+        eq(quoteEvents.shopId, actor.shopId as string),
+        eq(quoteEvents.ticketId, ticket.id),
+        inArray(quoteEvents.kind, ['approved', 'declined']),
+      )).orderBy(quoteEvents.createdAt, quoteEvents.id)
 
       try {
         const sessionById = new Map(linkedSessions.map((session) => [session.id, session]))
@@ -585,6 +597,7 @@ export async function getQuoteBuilder(
                 job,
                 activeVersionProjection,
                 activeSnapshotJobIds,
+                pinnedBuilderApprovalIsValid(job, ticket.id, versions, approvalEvents),
               ),
               lines: lines
                 .filter((line) => line.jobId === job.id && isMutableManualLine(line))
@@ -918,6 +931,7 @@ function safeBuilderApproval(
   job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus'>,
   activeVersion: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'],
   activeSnapshotJobIds: ReadonlySet<string>,
+  pinnedApprovalValid: boolean,
 ): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['approval']> {
   if (state !== 'pending_quote' && state !== 'quote_ready' && state !== 'sent'
     && state !== 'approved' && state !== 'declined') {
@@ -931,13 +945,36 @@ function safeBuilderApproval(
   if ((state === 'approved') !== (safeVersionId !== null)) {
     throw new TypeError('quote approval projection is inconsistent')
   }
-  if (state === 'approved' && (
-    !isPinnedSimpleWork(job)
-    && (!activeVersion
+  if (state === 'approved') {
+    if (isPinnedSimpleWork(job)) {
+      if (!pinnedApprovalValid) throw new TypeError('pinned quote approval projection is stale')
+    } else if (!activeVersion
       || safeVersionId !== activeVersion.id
-      || !activeSnapshotJobIds.has(job.id))
-  )) throw new TypeError('approved quote projection is stale')
+      || !activeSnapshotJobIds.has(job.id)) {
+      throw new TypeError('approved quote projection is stale')
+    }
+  }
   return { state, quoteVersionId: safeVersionId }
+}
+
+function pinnedBuilderApprovalIsValid(
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus' | 'approvedQuoteVersionId'>,
+  ticketId: string,
+  versions: ReadonlyArray<Pick<typeof quoteVersions.$inferSelect, 'id' | 'snapshot'>>,
+  events: ReadonlyArray<Pick<typeof quoteEvents.$inferSelect, 'id' | 'kind' | 'jobId' | 'quoteVersionId' | 'createdAt'>>,
+): boolean {
+  if (!isPinnedSimpleWork(job) || !job.approvedQuoteVersionId) return false
+  const version = versions.find((candidate) => candidate.id === job.approvedQuoteVersionId)
+  if (!version || !quoteSnapshotContainsExactJob(version.snapshot, {
+    ticketId,
+    jobId: job.id,
+    kind: job.kind,
+  })) return false
+  const latest = events.filter((event) => event.jobId === job.id).sort((left, right) => {
+    const time = left.createdAt.getTime() - right.createdAt.getTime()
+    return time === 0 ? left.id.localeCompare(right.id) : time
+  }).at(-1)
+  return latest?.kind === 'approved' && latest.quoteVersionId === version.id
 }
 
 function requireVersionableStory(

@@ -14,6 +14,7 @@ import {
   vehicles,
 } from '@/lib/db/schema'
 import {
+  createJobAttachment,
   getSimpleWorkWorkspace,
   mutateSimpleWork,
   type SimpleWorkActor,
@@ -166,6 +167,17 @@ describe('Shop OS approved simple work', () => {
       storageKey: `${shopId}/jobs/${jobId}/proof/${uuid(80)}/digest.jpg`,
       kind: 'photo', mimeType: 'image/jpeg', byteSize: 3, uploadedByProfileId: techId,
     })
+    await expect(mutateSimpleWork(db, {
+      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+    })).resolves.toEqual({ ok: false, error: 'not_ready' })
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
+    await expect(createJobAttachment(db, {
+      actor, ticketId, jobId, requestKey: uuid(81), kind: 'photo',
+      file: { bytes: jpeg, mimeType: 'image/jpeg', size: jpeg.byteLength },
+    }, {
+      upload: async () => undefined,
+      remove: async () => undefined,
+    })).resolves.toMatchObject({ ok: true, changed: true })
     const completed = await mutateSimpleWork(db, {
       actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
     })

@@ -243,11 +243,11 @@ export async function mutateSimpleWork(
       if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
         return failure('conflict', true)
       }
-      const proofPrefix = `${parsedActor.data.shopId}/jobs/${job.id}/proof/`
-      const hasWorkPhoto = context.attachments.some((attachment) =>
-        attachment.kind === 'photo'
-        && attachment.uploadedByProfileId === parsedActor.data.profileId
-        && attachment.storageKey.startsWith(proofPrefix))
+      const hasWorkPhoto = context.attachments.some((attachment) => isRow23WorkPhoto(attachment, {
+        shopId: parsedActor.data.shopId,
+        jobId: job.id,
+        actorId: parsedActor.data.profileId,
+      }))
       if (!job.workNotes?.trim() || !hasWorkPhoto) return failure('not_ready')
       const [updated] = await (tx as AppDb)
         .update(ticketJobs)
@@ -383,6 +383,24 @@ function canonicalMime(value: string): string {
   return value.split(';')[0].trim().toLowerCase()
 }
 
+function isRow23WorkPhoto(
+  attachment: typeof jobAttachments.$inferSelect,
+  input: { shopId: string; jobId: string; actorId: string },
+): boolean {
+  if (attachment.kind !== 'photo' || attachment.uploadedByProfileId !== input.actorId
+    || attachment.byteSize < 1 || attachment.byteSize > MAX_JOB_ATTACHMENT_BYTES) return false
+  const mimeType = canonicalMime(attachment.mimeType)
+  if (attachment.mimeType !== mimeType || !mimeByKind.photo.has(mimeType)) return false
+  const extension = extensionByMime[mimeType]
+  const prefix = `${input.shopId}/jobs/${input.jobId}/proof/${attachment.id}/`
+  const suffix = attachment.storageKey.startsWith(prefix)
+    ? attachment.storageKey.slice(prefix.length)
+    : ''
+  return suffix.length === 64 + 1 + extension.length
+    && suffix.endsWith(`.${extension}`)
+    && /^[0-9a-f]{64}\.[a-z]+$/.test(suffix)
+}
+
 function bytesStartWith(bytes: Uint8Array, signature: number[]): boolean {
   return signature.every((value, index) => bytes[index] === value)
 }
@@ -451,6 +469,23 @@ function exactAttachmentRetry(
     && row.mimeType === expected.mimeType
     && row.byteSize === expected.byteSize
     && row.storageKey === expected.storageKey
+}
+
+async function removeUnreferencedAttachment(
+  db: AppDb,
+  expected: { id: string; shopId: string; storageKey: string },
+  remove: (storageKey: string) => Promise<void>,
+): Promise<void> {
+  try {
+    const [persisted] = await db.select({ id: jobAttachments.id }).from(jobAttachments).where(and(
+      eq(jobAttachments.shopId, expected.shopId),
+      eq(jobAttachments.id, expected.id),
+      eq(jobAttachments.storageKey, expected.storageKey),
+    )).limit(1)
+    if (!persisted) await remove(expected.storageKey)
+  } catch {
+    console.warn('job attachment cleanup skipped because orphan status was not provable')
+  }
 }
 
 async function attachmentAuthorization(
@@ -567,21 +602,17 @@ export async function createJobAttachment(
   } catch (error) {
     const retryable = isLockUnavailable(error)
       || (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505')
-    try {
-      await dependencies.remove(storageKey)
-    } catch {
-      console.warn('job attachment cleanup failed after finalize error')
-    }
-    if (!retryable) throw error
-    return failure('conflict', true)
+    if (retryable) return failure('conflict', true)
+    await removeUnreferencedAttachment(db, {
+      id: attachmentId, shopId: parsedActor.data.shopId, storageKey,
+    }, dependencies.remove)
+    throw error
   }
 
   if (!result.ok) {
-    try {
-      await dependencies.remove(storageKey)
-    } catch {
-      console.warn('job attachment cleanup failed after finalize rejection')
-    }
+    await removeUnreferencedAttachment(db, {
+      id: attachmentId, shopId: parsedActor.data.shopId, storageKey,
+    }, dependencies.remove)
   }
   return result
 }

@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
-  customers, jobAttachments, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets, vehicles,
+  customers, jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets, vehicles,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -168,6 +168,10 @@ describe('Shop OS immutable quote version creation', () => {
         approvalState: 'approved',
         approvedQuoteVersionId: first.version.id,
       }).where(eq(ticketJobs.id, jobId))
+      await db.insert(quoteEvents).values({
+        id: uuid(60), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+        kind: 'approved', actorProfileId: uuid(1), approvedVia: 'in_person', requestKey: uuid(61),
+      })
       await db.insert(jobLines).values({
         id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee',
         description: 'Alignment check', priceCents: 5_000, taxable: false,
@@ -197,6 +201,27 @@ describe('Shop OS immutable quote version creation', () => {
               decisionEligible: false,
             })]),
           },
+        })
+        const [pinned] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, first.version.id))
+        const snapshot = pinned.snapshot as { jobs: Array<Record<string, unknown>> }
+        await db.execute(sql`alter table quote_versions disable trigger all`)
+        await db.update(quoteVersions).set({
+          snapshot: { ...snapshot, jobs: snapshot.jobs.map((job) => job.id === jobId ? { ...job, kind: 'maintenance' } : job) },
+        }).where(eq(quoteVersions.id, first.version.id))
+        await db.execute(sql`alter table quote_versions enable trigger all`)
+        await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+          ok: false, error: 'conflict', retryable: false,
+        })
+        await db.execute(sql`alter table quote_versions disable trigger all`)
+        await db.update(quoteVersions).set({ snapshot: pinned.snapshot }).where(eq(quoteVersions.id, first.version.id))
+        await db.execute(sql`alter table quote_versions enable trigger all`)
+        await db.insert(quoteEvents).values({
+          id: uuid(62), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+          kind: 'declined', actorProfileId: uuid(1), requestKey: uuid(63),
+          createdAt: new Date('2099-01-01T00:00:00.000Z'),
+        })
+        await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+          ok: false, error: 'conflict', retryable: false,
         })
       }
     },

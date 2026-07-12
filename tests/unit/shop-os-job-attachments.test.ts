@@ -147,6 +147,37 @@ describe('Shop OS simple-work proof attachments', () => {
     expect(warning).toHaveBeenCalledOnce()
   })
 
+  it('does not delete a shared object already committed by a concurrent exact retry', async () => {
+    const upload = vi.fn(async (_input: { storageKey: string }) => undefined)
+    const remove = vi.fn(async () => undefined)
+    const winner = async () => {
+      const [{ storageKey }] = upload.mock.calls[0]
+      const attachmentId = storageKey.split('/')[4]
+      await db.insert(jobAttachments).values({
+        id: attachmentId, shopId, jobId, storageKey, kind: 'photo', mimeType: 'image/jpeg',
+        byteSize: jpeg.byteLength, uploadedByProfileId: techId,
+      })
+      await db.update(ticketJobs).set({ assignedTechId: advisorId }).where(eq(ticketJobs.id, jobId))
+    }
+    await expect(createJobAttachment(db, input(), { upload, remove, beforeFinalize: winner }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(jobAttachments)).toHaveLength(1)
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('never cleans the shared object when an in-flight retry owns the finalization lock', async () => {
+    const upload = vi.fn(async () => undefined)
+    const remove = vi.fn(async () => undefined)
+    const lockUnavailable = Object.assign(new Error('winner finalizing'), { code: '55P03' })
+    await expect(createJobAttachment(db, input(), {
+      upload,
+      remove,
+      beforeFinalize: async () => { throw lockUnavailable },
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect(upload).toHaveBeenCalledOnce()
+    expect(remove).not.toHaveBeenCalled()
+  })
+
   it('proxies only bounded persisted proof after active same-shop authorization', async () => {
     const upload = vi.fn(async () => undefined)
     const remove = vi.fn(async () => undefined)
