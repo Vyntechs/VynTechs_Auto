@@ -206,14 +206,14 @@ export function ManualQuoteBuilder({
     try { return await response.json() } catch { return {} }
   }
 
-  function applyFailure(status: number, body: unknown): void {
+  function applyFailure(status: number, body: unknown, forceRefresh = false): void {
     const action = classifyQuoteFailure(status, body, quotePath)
     if (action.kind === 'navigate') {
       if (status === 404) router.replace(action.href)
       else router.push(action.href)
       return
     }
-    setError({ message: action.message, refresh: action.refresh })
+    setError({ message: action.message, refresh: forceRefresh || action.refresh })
   }
 
   async function refreshQuote(
@@ -239,7 +239,7 @@ export function ManualQuoteBuilder({
       })
       const body = await readJson(response)
       if (!response.ok) {
-        applyFailure(response.status, body)
+        applyFailure(response.status, body, expectedSourcedLine?.state === 'absent')
         return false
       }
       const refreshed = body && typeof body === 'object' && 'builder' in body
@@ -305,7 +305,10 @@ export function ManualQuoteBuilder({
       if (nextFocus) setFocusTarget(nextFocus)
       return true
     } catch {
-      setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
+      setError({
+        message: 'Connection interrupted. Retry with the same details.',
+        refresh: expectedSourcedLine?.state === 'absent',
+      })
       return false
     } finally {
       if (ownsOperation) endOperation()
@@ -1080,6 +1083,7 @@ export function ManualQuoteBuilder({
             if (refreshed) sourcingSavedCloseRef.current = true
             return refreshed
           }}
+          onRefreshQuote={() => refreshQuote(undefined, false, true)}
           onAccessFailure={applyFailure}
           onClose={() => {
             setSourcingJobId(null)

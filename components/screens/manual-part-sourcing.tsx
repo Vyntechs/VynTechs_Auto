@@ -29,6 +29,7 @@ export type ManualPartSourcingProps = {
   onBusyChange: (busy: boolean) => void
   onAccountCreated: (account: SafeManualVendorAccount) => void
   onSaved: (line: SafeSourcedQuoteLine) => Promise<boolean>
+  onRefreshQuote: () => Promise<boolean>
   onAccessFailure: (status: 401 | 403 | 404, body: unknown) => void
   onClose: () => void
 }
@@ -71,6 +72,7 @@ export function ManualPartSourcing({
   onBusyChange,
   onAccountCreated,
   onSaved,
+  onRefreshQuote,
   onAccessFailure,
   onClose,
 }: ManualPartSourcingProps) {
@@ -83,6 +85,7 @@ export function ManualPartSourcing({
   const [accountClientKey, setAccountClientKey] = useState<string | null>(null)
   const [mutationBusy, setMutationBusy] = useState(false)
   const [savedLine, setSavedLine] = useState<SafeSourcedQuoteLine | null>(null)
+  const [captureRefreshRequired, setCaptureRefreshRequired] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [confirmingClose, setConfirmingClose] = useState(false)
   const [status, setStatus] = useState('')
@@ -93,6 +96,7 @@ export function ManualPartSourcing({
   const keepEditingRef = useRef<HTMLButtonElement | null>(null)
   const closeReturnFocusRef = useRef<HTMLElement | null>(null)
   const supplierCreatedRef = useRef(false)
+  const mutationInFlightRef = useRef(false)
 
   const dirty = normalizedManualPartSignature(draft) !== initialSignature.current
   const isBusy = busy || mutationBusy
@@ -120,6 +124,7 @@ export function ManualPartSourcing({
     setAccountName('')
     setAccountClientKey(null)
     setSavedLine(null)
+    setCaptureRefreshRequired(false)
     setDetailsOpen(false)
     setConfirmingClose(false)
     setStatus('')
@@ -133,6 +138,7 @@ export function ManualPartSourcing({
   }
 
   function requestClose() {
+    if (isBusy || mutationInFlightRef.current) return
     if (dirty) {
       closeReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setConfirmingClose(true)
@@ -159,6 +165,10 @@ export function ManualPartSourcing({
   useEffect(() => {
     if (!open) return
     function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && (isBusy || mutationInFlightRef.current)) {
+        event.preventDefault()
+        return
+      }
       if (event.key === 'Escape' && confirmingClose) {
         event.preventDefault()
         keepEditing()
@@ -239,6 +249,7 @@ export function ManualPartSourcing({
       return
     }
     setMutationBusy(true)
+    mutationInFlightRef.current = true
     onBusyChange(true)
     try {
       const response = await fetch('/api/shop/vendor-accounts', {
@@ -270,6 +281,7 @@ export function ManualPartSourcing({
     } catch {
       setStatus('Connection interrupted. Retry with the same details.')
     } finally {
+      mutationInFlightRef.current = false
       setMutationBusy(false)
       onBusyChange(false)
     }
@@ -284,6 +296,7 @@ export function ManualPartSourcing({
       return
     }
     setMutationBusy(true)
+    mutationInFlightRef.current = true
     onBusyChange(true)
     try {
       const response = await fetch(`/api/tickets/${ticketId}/quote/jobs/${job.id}/parts/manual-offers`, {
@@ -292,6 +305,22 @@ export function ManualPartSourcing({
         body: JSON.stringify(payload),
       })
       const body = await readJson(response)
+      if (response.status === 404) {
+        setLocalAccounts((current) => current.filter((account) => account.id !== payload.vendorAccountId))
+        updateDraft('vendorAccountId', '')
+        setStatus('That supplier is no longer available. Choose another.')
+        return
+      }
+      if (response.status === 409) {
+        const conflict = body && typeof body === 'object' ? body as Record<string, unknown> : null
+        if (conflict?.error === 'conflict' && conflict.retryable === true) {
+          setCaptureRefreshRequired(true)
+          setStatus('This quote changed elsewhere. Refresh and retry.')
+        } else {
+          setStatus('The saved response could not be verified. Refresh before continuing.')
+        }
+        return
+      }
       if (delegateAccessFailure(response.status, body)) return
       const parsed = parseManualOfferResponse(response.status, body)
       if (!parsed) {
@@ -342,6 +371,7 @@ export function ManualPartSourcing({
         ? 'Supplier saved. The part was not added yet.'
         : 'Connection interrupted. Retry with the same details.')
     } finally {
+      mutationInFlightRef.current = false
       setMutationBusy(false)
       onBusyChange(false)
     }
@@ -350,6 +380,7 @@ export function ManualPartSourcing({
   async function refreshSavedLine() {
     if (!savedLine || isBusy) return
     setMutationBusy(true)
+    mutationInFlightRef.current = true
     onBusyChange(true)
     try {
       if (await onSaved(savedLine)) closeAfterSuccessfulRefresh()
@@ -357,6 +388,28 @@ export function ManualPartSourcing({
     } catch {
       setStatus('Part saved. Refresh the quote to see current totals.')
     } finally {
+      mutationInFlightRef.current = false
+      setMutationBusy(false)
+      onBusyChange(false)
+    }
+  }
+
+  async function refreshCaptureConflict() {
+    if (!captureRefreshRequired || isBusy) return
+    setMutationBusy(true)
+    mutationInFlightRef.current = true
+    onBusyChange(true)
+    try {
+      if (await onRefreshQuote()) {
+        setCaptureRefreshRequired(false)
+        setStatus('')
+      } else {
+        setStatus('This quote changed elsewhere. Refresh and retry.')
+      }
+    } catch {
+      setStatus('This quote changed elsewhere. Refresh and retry.')
+    } finally {
+      mutationInFlightRef.current = false
       setMutationBusy(false)
       onBusyChange(false)
     }
@@ -387,7 +440,7 @@ export function ManualPartSourcing({
             <p className={styles.eyebrow}>{vehicleLabel ? `${vehicleLabel} · ${ticketLabel}` : ticketLabel}</p>
             <h2 id="manual-part-sourcing-title">Source part for {job.title}</h2>
           </div>
-          <button type="button" className={styles.close} onClick={requestClose} aria-label="Close part sourcing">×</button>
+          <button type="button" className={styles.close} disabled={isBusy} onClick={requestClose} aria-label="Close part sourcing">×</button>
         </header>
 
         <form className={styles.form} onSubmit={submit} noValidate>
@@ -531,11 +584,13 @@ export function ManualPartSourcing({
         <footer className={styles.footer}>
           <p role="status" aria-live="polite">
             {isBusy
-              ? (accountFormOpen ? 'Saving supplier…' : savedLine ? 'Refreshing quote…' : 'Adding sourced part…')
+              ? (accountFormOpen ? 'Saving supplier…' : savedLine || captureRefreshRequired ? 'Refreshing quote…' : 'Adding sourced part…')
               : status || (requiredError ? `Needed: ${requiredError.label}` : '')}
           </p>
           {savedLine ? (
             <button type="button" className={styles.commit} disabled={isBusy} onClick={refreshSavedLine}>Refresh quote</button>
+          ) : captureRefreshRequired ? (
+            <button type="button" className={styles.commit} disabled={isBusy} onClick={refreshCaptureConflict}>Refresh quote</button>
           ) : (
             <button type="submit" className={styles.commit} disabled={isBusy || !catalogAvailable || localAccounts.length === 0 || requiredError !== null}>
               {isBusy ? 'Adding sourced part…' : commitLabel}
@@ -552,7 +607,9 @@ export function ManualPartSourcing({
             <p id="discard-draft-consequence">The details entered here are kept only while this quote is open.</p>
             <div>
               <button ref={keepEditingRef} type="button" onClick={keepEditing}>Keep editing</button>
-              <button type="button" className={styles.danger} onClick={onClose}>Discard draft</button>
+              <button type="button" className={styles.danger} disabled={isBusy} onClick={() => {
+                if (!isBusy && !mutationInFlightRef.current) onClose()
+              }}>Discard draft</button>
             </div>
           </section>
         </div>

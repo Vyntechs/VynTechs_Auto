@@ -35,6 +35,7 @@ function props(overrides: Partial<ManualPartSourcingProps> = {}): ManualPartSour
     onBusyChange: vi.fn(),
     onAccountCreated: vi.fn(),
     onSaved: vi.fn(async () => true),
+    onRefreshQuote: vi.fn(async () => true),
     onAccessFailure: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
@@ -238,6 +239,68 @@ describe('ManualPartSourcing', () => {
     await user.click(keepEditing)
     expect(screen.getByRole('button', { name: 'Close part sourcing' })).toHaveFocus()
   })
+
+  it.each(['account POST', 'capture POST', 'saved-line refresh'] as const)(
+    'blocks close, Escape, and discard while %s is in flight',
+    async (operation) => {
+      const user = userEvent.setup()
+      let resolveRequest!: (response: Response) => void
+      let resolveRefresh!: (refreshed: boolean) => void
+      const fetchMock = vi.fn()
+      const onSaved = vi.fn()
+      const onRefreshQuote = vi.fn()
+      const onClose = vi.fn()
+
+      if (operation === 'account POST') {
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve }))
+      } else if (operation === 'capture POST') {
+        fetchMock.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve }))
+      } else {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(manualOfferResponse({})), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        }))
+        onSaved
+          .mockResolvedValueOnce(false)
+          .mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveRefresh = resolve }))
+      }
+      vi.stubGlobal('fetch', fetchMock)
+      render(<ManualPartSourcing {...props({
+        accounts: operation === 'account POST' ? [] : [ACCOUNT_ONE],
+        canCreateVendorAccount: operation === 'account POST',
+        onSaved,
+        onRefreshQuote,
+        onClose,
+      })} />)
+
+      if (operation === 'account POST') {
+        await user.type(screen.getByLabelText('Part description'), 'Brake pads')
+        await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+        await user.type(screen.getByLabelText('Supplier name'), 'Metro Supply')
+        await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+      } else {
+        await fillRequiredOffer(user)
+        await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+        if (operation === 'saved-line refresh') {
+          await screen.findByText('Part saved. Refresh the quote to see current totals.')
+          await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+        }
+      }
+
+      const close = screen.getByRole('button', { name: 'Close part sourcing' })
+      expect(close).toBeDisabled()
+      fireEvent.click(close)
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.getByRole('dialog', { name: 'Source part for Replace front brakes' })).toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog', { name: 'Discard sourced part draft?' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Discard draft' })).toBeNull()
+      expect(onClose).not.toHaveBeenCalled()
+
+      if (operation === 'saved-line refresh') resolveRefresh(false)
+      else resolveRequest(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }))
+      await waitFor(() => expect(close).toBeEnabled())
+    },
+  )
 
   it('restores the field that owned focus before Escape after Keep editing', async () => {
     const user = userEvent.setup()
@@ -605,6 +668,93 @@ describe('ManualPartSourcing', () => {
     expect(onSaved).toHaveBeenNthCalledWith(2, manualOfferResponse({ lineId }).line)
   })
 
+  it('recovers retryable quote conflict through GET-only refresh and preserves draft identity', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'conflict', retryable: true }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockRejectedValueOnce(new TypeError('capture remains pending'))
+    vi.stubGlobal('fetch', fetchMock)
+    const onRefreshQuote = vi.fn(async () => true)
+    const onSaved = vi.fn(async () => true)
+    render(<ManualPartSourcing {...props({ onRefreshQuote, onSaved })} />)
+    await fillRequiredOffer(user)
+
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+    expect(await screen.findByRole('status')).toHaveTextContent('This quote changed elsewhere. Refresh and retry.')
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    expect(onRefreshQuote).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Part description')).toHaveValue('Brake pads')
+
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const retriedBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(retriedBody.clientKey).toBe(firstBody.clientKey)
+  })
+
+  it('fails a nonretryable capture conflict closed without claiming the part was saved', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: 'conflict', retryable: false,
+    }), { status: 409, headers: { 'content-type': 'application/json' } })))
+    const onSaved = vi.fn(async () => true)
+    render(<ManualPartSourcing {...props({ onSaved })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('The saved response could not be verified. Refresh before continuing.')
+    expect(screen.queryByText(/Part saved/)).toBeNull()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('handles a removed selected supplier locally, preserving offer fields and rotating capture identity', async () => {
+    const user = userEvent.setup()
+    let uuidSequence = 900
+    vi.mocked(crypto.randomUUID).mockImplementation(() => (
+      `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`
+    ))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'not_found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockRejectedValueOnce(new TypeError('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    const onAccessFailure = vi.fn()
+    render(<ManualPartSourcing {...props({
+      accounts: [ACCOUNT_ONE, ACCOUNT_TWO],
+      onAccessFailure,
+    })} />)
+    await user.click(screen.getByRole('radio', { name: 'Northside Parts' }))
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: 'Part details' }))
+    await user.type(screen.getByLabelText('Part number'), 'PAD-42')
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('That supplier is no longer available. Choose another.')
+    expect(onAccessFailure).not.toHaveBeenCalled()
+    expect(screen.queryByRole('radio', { name: 'Northside Parts' })).toBeNull()
+    expect(screen.getByRole('radio', { name: 'Metro Supply' })).not.toBeChecked()
+    expect(screen.getByLabelText('Part description')).toHaveValue('Brake pads')
+    expect(screen.getByLabelText('Quantity')).toHaveValue('2')
+    expect(screen.getByLabelText('Supplier unit cost')).toHaveValue('80')
+    expect(screen.getByLabelText('Customer line price')).toHaveValue('240')
+    expect(screen.getByLabelText('Part number')).toHaveValue('PAD-42')
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+
+    await user.click(screen.getByRole('radio', { name: 'Metro Supply' }))
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(secondBody.clientKey).not.toBe(firstBody.clientKey)
+  })
+
   it('resets offer lifecycle before close so a controlled reopen is fresh without losing supplier choices', async () => {
     const user = userEvent.setup()
     let uuidSequence = 900
@@ -701,7 +851,7 @@ describe('ManualPartSourcing', () => {
     expect(document.body).not.toHaveTextContent('do-not-render')
   })
 
-  it.each([401, 403, 404] as const)('delegates %s access failures without rendering raw server fields', async (status) => {
+  it.each([401, 403] as const)('delegates %s access failures without rendering raw server fields', async (status) => {
     const user = userEvent.setup()
     const body = { error: 'secret-internal-error', feedback: 'hostile raw feedback' }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
@@ -714,6 +864,24 @@ describe('ManualPartSourcing', () => {
     await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
 
     await waitFor(() => expect(onAccessFailure).toHaveBeenCalledWith(status, body))
+    expect(document.body).not.toHaveTextContent('secret-internal-error')
+    expect(document.body).not.toHaveTextContent('hostile raw feedback')
+  })
+
+  it('still delegates account-create 404 without rendering raw server fields', async () => {
+    const user = userEvent.setup()
+    const body = { error: 'secret-internal-error', feedback: 'hostile raw feedback' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })))
+    const onAccessFailure = vi.fn()
+    render(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: true, onAccessFailure })} />)
+    await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+    await user.type(screen.getByLabelText('Supplier name'), 'Metro Supply')
+    await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+
+    await waitFor(() => expect(onAccessFailure).toHaveBeenCalledWith(404, body))
     expect(document.body).not.toHaveTextContent('secret-internal-error')
     expect(document.body).not.toHaveTextContent('hostile raw feedback')
   })
