@@ -15,6 +15,7 @@ import {
   shops,
   ticketJobs,
   tickets,
+  vendorAccounts,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -85,6 +86,24 @@ describe('Shop OS quote draft mutations', () => {
       title: 'Other work', kind: 'repair', requiredSkillTier: 1,
     })
     otherJobId = uuid(32)
+    await db.insert(vendorAccounts).values([
+      {
+        id: uuid(500),
+        shopId,
+        vendor: 'test_vendor_500',
+        displayName: 'Test vendor 500',
+        mode: 'api',
+        secretRef: 'env:TEST_VENDOR_ACCOUNT_500',
+      },
+      {
+        id: uuid(501),
+        shopId,
+        vendor: 'test_vendor_501',
+        displayName: 'Test vendor 501',
+        mode: 'api',
+        secretRef: 'env:TEST_VENDOR_ACCOUNT_501',
+      },
+    ])
   })
 
   afterEach(async () => close())
