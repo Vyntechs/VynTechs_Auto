@@ -6,7 +6,7 @@ Captured in an isolated intake lane (fresh clone of `origin/main`; no shared che
 |---|---|---|---|---|
 | 1 | Never tax labor wrongly (quote/invoice tax rule) | `2026-07-11-brief-labor-tax-rule.md` | `2026-07-11-annex-labor-tax-research.md` | Brandon picks the tax model |
 | 2 | Every word reduces friction (terminology + customer story) | `2026-07-11-brief-plain-language-terminology.md` | `2026-07-11-annex-terminology-audit.md` + proposed standard `2026-07-11-plain-language-and-trust-copy-standard.md` | Brandon approves the standard |
-| 3 | Landing page 100% remodel (Figma-first) | `2026-07-11-brief-landing-remodel.md` | `2026-07-11-annex-landing-current-state.md` + scope `2026-07-11-landing-remodel-scope.md` + brand personality `2026-07-11-vyntechs-personality.md` | Brandon approves scope + personality, then the Figma prototype (v2 live in the file; v1 superseded after his red-line) |
+| 3 | Landing page 100% remodel (Figma-first) | `2026-07-11-brief-landing-remodel.md` | `2026-07-11-annex-landing-current-state.md` + scope `2026-07-11-landing-remodel-scope.md` + personality `2026-07-11-vyntechs-personality.md` + design language `2026-07-11-vyntechs-design-language.md` | Brandon approves scope + personality + design language, then the Figma prototype (v3 live in the file; v1/v2 superseded after his red-lines) |
 
 **One thing the control lane should read before shipping more quote math:** the tax brief. Verified on `main`: every quote line — labor included — defaults `taxable: true` and the math ignores line kind. Research says ~18–20 states do tax repair labor and ~30 don't, so the default is wrong for most shops and right for some; the fix is per-kind, per-shop configuration, not a constant. Details + state matrix in the annex.
 

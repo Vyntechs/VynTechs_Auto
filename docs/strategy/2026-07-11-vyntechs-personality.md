@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-11 · **Status:** PROPOSED — written alongside landing prototype v2, which embodies it.
 **Origin:** Brandon's red-line of prototype v1: "bland… doesn't show the value… must comfort and close… no personality. Now is the time to create the feel of Vyntechs."
+**Rev note (same day):** the character and voice below still govern every word. The *visual carrier* evolved after Brandon's second red-line ("average vs other AI products, no wow") — see `2026-07-11-vyntechs-design-language.md` (THE SERVICE MANUAL): the master tech's paperwork turns out to be the factory service manual, and the cream-paper/serif/oxide skin is retired as token-level AI-default.
 
 ## The character
 

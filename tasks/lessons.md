@@ -32,3 +32,8 @@ Reason: Live page and doctrine predate Shop OS; Brandon corrected a diagnostics-
 Trigger: Any Brandon-facing prototype, mockup, or customer-facing surface.
 Rule: Structure plus honest copy is not done; carry the named Vyntechs personality, show value visually, answer objections, and close.
 Reason: Brandon rejected a structurally-correct landing v1 as bland and personality-free (2026-07-11); personality doc now governs.
+
+### anti-familiarity-applies-to-tokens
+Trigger: Choosing palette or display type for any Vyntechs surface or prototype.
+Rule: Reject cream background + high-contrast serif display + terracotta accent; that token combo is the 2025–26 AI-generated default regardless of layout originality.
+Reason: Brandon red-lined v2 as "average vs other AI products" (2026-07-11); the concept was original, the materials were the cliché.
