@@ -75,6 +75,11 @@ export function ManualQuoteBuilder({
   const [decision, setDecision] = useState<DecisionState | null>(null)
   const [accounts, setAccounts] = useState(vendorAccounts)
   const [sourcingJobId, setSourcingJobId] = useState<string | null>(null)
+  const [pendingSourcedRemoval, setPendingSourcedRemoval] = useState<{
+    jobId: string
+    lineId: string
+    invoker: HTMLElement
+  } | null>(null)
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
@@ -402,22 +407,36 @@ export function ManualQuoteBuilder({
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return
       }
+      const recovery = {
+        jobId: removeTarget.jobId,
+        lineId: removeTarget.line.id,
+        invoker,
+      }
+      setPendingSourcedRemoval(recovery)
       setModal(null)
-      const refreshed = await refreshQuote(
-        `source:${removeTarget.jobId}`,
-        false,
-        true,
-        undefined,
-        undefined,
-        { jobId: removeTarget.jobId, lineId: removeTarget.line.id, state: 'absent' },
-      )
-      if (!refreshed) setTimeout(() => invoker.focus(), 0)
+      await recoverSourcedRemoval(recovery, true)
     } catch {
       closeModal()
       setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
     } finally {
       endOperation()
     }
+  }
+
+  async function recoverSourcedRemoval(
+    recovery: NonNullable<typeof pendingSourcedRemoval>,
+    nested = false,
+  ): Promise<void> {
+    const refreshed = await refreshQuote(
+      `source:${recovery.jobId}`,
+      false,
+      nested,
+      undefined,
+      undefined,
+      { jobId: recovery.jobId, lineId: recovery.lineId, state: 'absent' },
+    )
+    if (refreshed) setPendingSourcedRemoval(null)
+    else setTimeout(() => recovery.invoker.focus(), 0)
   }
 
   async function prepareQuote(): Promise<void> {
@@ -1004,7 +1023,11 @@ export function ManualQuoteBuilder({
               type="button"
               className={styles.lineAction}
               disabled={busy}
-              onClick={() => error.reloadPage ? reloadCannedPage() : refreshQuote()}
+              onClick={() => error.reloadPage
+                ? reloadCannedPage()
+                : pendingSourcedRemoval
+                  ? recoverSourcedRemoval(pendingSourcedRemoval)
+                  : refreshQuote()}
             >
               {error.reloadPage ? 'Refresh canned jobs' : 'Refresh quote'}
             </button>

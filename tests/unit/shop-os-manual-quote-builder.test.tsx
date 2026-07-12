@@ -729,6 +729,54 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     await waitFor(() => expect(document.activeElement).toBe(remove))
   })
 
+  it('keeps sourced-removal recovery strict when the visible refresh still receives stale truth', async () => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.getByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
+    expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
+  })
+
+  it('recovers a sourced removal with GET only and focuses Source part after absent truth', async () => {
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const stale = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const absent = builder({ jobs: [{ ...builder().jobs[0], lines: [] }], activeVersion: null })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: stale }))
+      .mockResolvedValueOnce(response(200, { builder: absent }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.queryByText('Review the visible fields, then refresh and retry.')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
   it('restores Source part focus after clean close and dirty discard', async () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} vendorAccounts={[vendorAccount]} vendorCatalogAvailable />)
     const source = screen.getByRole('button', { name: 'Source part' })
