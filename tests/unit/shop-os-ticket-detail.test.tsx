@@ -333,4 +333,25 @@ describe('TicketDetailScreen', () => {
       expect(within(jobs[index]).getByText(approvalLabel)).toBeInTheDocument()
     })
   })
+
+  it('links only the assigned actor with complete identity to eligible simple work and history', () => {
+    render(<TicketDetailScreen currentProfileId="tech-1" ticket={ticket({
+      jobs: [
+        job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', assignedTechId: 'tech-1', workStatus: 'open' }),
+        job({ id: 'maintenance-done', title: 'Rotate tires', kind: 'maintenance', assignedTechId: 'tech-1', workStatus: 'done' }),
+        job({ id: 'other-work', title: 'Other tech work', kind: 'repair', assignedTechId: 'tech-2', workStatus: 'in_progress' }),
+      ],
+    })} />)
+    expect(screen.getByRole('link', { name: 'Open work' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/repair-open/work')
+    expect(screen.getByRole('link', { name: 'View work history' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/maintenance-done/work')
+    expect(screen.getByText('Other tech work').closest('li')).not.toHaveTextContent('Continue work')
+  })
+
+  it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {
+    render(<TicketDetailScreen currentProfileId="tech-1" ticket={ticket({
+      vehicle: null,
+      jobs: [job({ title: 'Install lift kit', kind: 'repair', assignedTechId: 'tech-1' })],
+    })} />)
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+  })
 })

@@ -146,16 +146,22 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByRole('button', { name: 'Start diagnosis' })).toBeNull()
   })
 
-  it.each([repair, maintenance])(
-    'keeps assigned $kind work disabled behind exact quote approval copy',
-    (job) => {
-      render(<TodayJobsBoard myJobs={[job]} openJobs={[]} />)
+  it('opens identity-complete simple work without claiming authorization truth', () => {
+    render(<TodayJobsBoard myJobs={[maintenance]} openJobs={[]} />)
+    expect(screen.getByRole('link', { name: 'Open work' })).toHaveAttribute(
+      'href', '/tickets/ticket-44/jobs/job-maintenance/work',
+    )
+    expect(screen.queryByText(/approved|approval required/i)).toBeNull()
+  })
 
-      const control = screen.getByRole('button', { name: 'Quote and approval required' })
-      expect(control).toBeDisabled()
-      expect(control).toHaveStyle({ minHeight: '44px' })
-    },
-  )
+  it('routes blocked or identity-incomplete simple work to honest ticket context', () => {
+    render(<TodayJobsBoard myJobs={[
+      repair,
+      { ...maintenance, id: 'missing-identity', ticketId: 'ticket-45', customerName: null, vehicle: null },
+    ]} openJobs={[]} />)
+    expect(screen.getByRole('link', { name: 'Review blocked work' })).toHaveAttribute('href', '/tickets/ticket-43')
+    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute('href', '/tickets/ticket-45')
+  })
 
   it.each(['idle', 'failed'] as const)(
     'posts one fresh attempt for a %s diagnostic and navigates only to the returned session',

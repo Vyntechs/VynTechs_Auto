@@ -47,9 +47,11 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
 export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
+  currentProfileId = null,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
+  currentProfileId?: string | null
 }): React.JSX.Element {
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
@@ -230,6 +232,7 @@ export function TicketDetailScreen({
                         Open diagnosis
                       </Link>
                     )}
+                    {simpleWorkLink(ticket, job, currentProfileId)}
                   </div>
                 </div>
               </li>
@@ -238,6 +241,26 @@ export function TicketDetailScreen({
         </section>
       </div>
     </main>
+  )
+}
+
+function simpleWorkLink(
+  ticket: TicketDetail,
+  job: TicketDetail['jobs'][number],
+  currentProfileId: string | null,
+) {
+  if (!ticket.customer || !ticket.vehicle || !currentProfileId
+    || job.assignedTechId !== currentProfileId
+    || (job.kind !== 'repair' && job.kind !== 'maintenance')
+    || job.sessionId !== null
+    || !['open', 'in_progress', 'done'].includes(job.workStatus)) return null
+  const label = job.workStatus === 'done'
+    ? 'View work history'
+    : job.workStatus === 'in_progress' ? 'Continue work' : 'Open work'
+  return (
+    <Link href={`/tickets/${ticket.id}/jobs/${job.id}/work`} className={styles.diagnosisLink}>
+      {label}
+    </Link>
   )
 }
 
