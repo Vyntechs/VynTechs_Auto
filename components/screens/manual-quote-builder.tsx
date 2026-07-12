@@ -83,6 +83,7 @@ export function ManualQuoteBuilder({
   const cannedUnavailableRef = useRef<HTMLDivElement>(null)
   const reloadPendingRef = useRef(false)
   const resetCannedSelectionOnReloadRef = useRef(false)
+  const sourcingSavedCloseRef = useRef(false)
   const reloadBaselineRef = useRef<{
     builder: QuoteBuilder
     catalogSignature: string
@@ -220,6 +221,11 @@ export function ManualQuoteBuilder({
       kind: 'repair' | 'maintenance'
       lineCount: number
     },
+    expectedSourcedLine?: {
+      jobId: string
+      lineId: string
+      state: 'present' | 'absent'
+    },
   ): Promise<boolean> {
     const ownsOperation = !nested
     if (ownsOperation && !beginOperation('refresh')) return false
@@ -255,6 +261,19 @@ export function ManualQuoteBuilder({
           || appliedJob.lines.length !== expectedAppliedJob.lineCount
           || refreshed.activeVersion !== null
         ) {
+          setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+          return false
+        }
+      }
+      if (expectedSourcedLine) {
+        const expectedJob = refreshed.jobs.find((job) => job.id === expectedSourcedLine.jobId)
+        const expectedLine = expectedJob?.lines.find((line) => line.id === expectedSourcedLine.lineId)
+        const expectationMet = expectedSourcedLine.state === 'present'
+          ? expectedLine?.kind === 'part'
+            && expectedLine.source === 'vendor_offer'
+            && expectedLine.mutable === false
+          : Boolean(expectedJob) && expectedLine === undefined
+        if (!expectationMet) {
           setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
           return false
         }
@@ -365,6 +384,7 @@ export function ManualQuoteBuilder({
   async function confirmSourcedRemove(): Promise<void> {
     if (modal?.kind !== 'remove-sourced' || !beginOperation('remove')) return
     const removeTarget = modal.target
+    const invoker = modal.invoker
     setError(null)
     try {
       const response = await fetch(
@@ -383,7 +403,15 @@ export function ManualQuoteBuilder({
         return
       }
       setModal(null)
-      await refreshQuote(`source:${removeTarget.jobId}`, false, true)
+      const refreshed = await refreshQuote(
+        `source:${removeTarget.jobId}`,
+        false,
+        true,
+        undefined,
+        undefined,
+        { jobId: removeTarget.jobId, lineId: removeTarget.line.id, state: 'absent' },
+      )
+      if (!refreshed) setTimeout(() => invoker.focus(), 0)
     } catch {
       closeModal()
       setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
@@ -840,6 +868,7 @@ export function ManualQuoteBuilder({
                           onClick={() => {
                             if (inFlightRef.current || modal || editor || sourcingJobId) return
                             setError(null)
+                            sourcingSavedCloseRef.current = false
                             setSourcingJobId(job.id)
                           }}
                         >
@@ -1002,9 +1031,24 @@ export function ManualQuoteBuilder({
               ? currentAccounts
               : [...currentAccounts, account]
           ))}
-          onSaved={(lineId) => refreshQuote(`line:${lineId}`, false, true)}
+          onSaved={async (lineId) => {
+            const refreshed = await refreshQuote(
+              `line:${lineId}`,
+              false,
+              true,
+              undefined,
+              undefined,
+              { jobId: sourcingJob.id, lineId, state: 'present' },
+            )
+            if (refreshed) sourcingSavedCloseRef.current = true
+            return refreshed
+          }}
           onAccessFailure={applyFailure}
-          onClose={() => setSourcingJobId(null)}
+          onClose={() => {
+            setSourcingJobId(null)
+            if (sourcingSavedCloseRef.current) sourcingSavedCloseRef.current = false
+            else setFocusTarget(`source:${sourcingJob.id}`)
+          }}
         />
       )}
 
