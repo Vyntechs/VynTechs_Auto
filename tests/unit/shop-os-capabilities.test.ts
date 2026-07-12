@@ -6,6 +6,8 @@ import {
   canBuildQuotes,
   canCloseTickets,
   canCreateTickets,
+  canManageCustomerMessaging,
+  canManageMessagingRetention,
   canManageTeam,
   canPlacePartsOrders,
   canSendQuotes,
@@ -61,5 +63,21 @@ describe('Shop OS role capabilities', () => {
     expect(canManageTeam('advisor')).toBe(false)
     expect(canManageTeam('curator')).toBe(false)
     expect(canManageTeam('curator', true)).toBe(true)
+  })
+
+  it('limits customer messaging management to advisors and owners', () => {
+    expect(['tech', 'parts', 'advisor', 'owner'].map(canManageCustomerMessaging)).toEqual([
+      false,
+      false,
+      true,
+      true,
+    ])
+  })
+
+  it('keeps messaging retention owner-only while founder override stays explicit', () => {
+    expect(canManageMessagingRetention('owner')).toBe(true)
+    expect(canManageMessagingRetention('advisor')).toBe(false)
+    expect(canManageMessagingRetention('curator')).toBe(false)
+    expect(canManageMessagingRetention('curator', true)).toBe(true)
   })
 })
