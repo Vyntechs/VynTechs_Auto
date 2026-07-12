@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
+import { unwrapRows } from '@/lib/db/unwrap-rows'
 import {
   customers,
   messagingConsentEvents,
@@ -454,6 +455,52 @@ function retryResult(
     : { ok: false, error: 'request_conflict' }
 }
 
+async function databaseTransitionTime(db: AppDb, shopId: string): Promise<Date> {
+  const result = await db.execute<{
+    transitionAt: Date | string
+    latestBarrier: Date | string | null
+  }>(sql`
+    with barriers(at) as (
+      select committed_at from messaging_consent_events where shop_id = ${shopId}::uuid
+      union all select suppressed_at from sms_suppressions where shop_id = ${shopId}::uuid
+      union all select lifted_at from sms_suppressions where shop_id = ${shopId}::uuid
+      union all select updated_at from sms_suppressions where shop_id = ${shopId}::uuid
+      union all select consented_at from messaging_consent_state where shop_id = ${shopId}::uuid
+      union all select revoked_at from messaging_consent_state where shop_id = ${shopId}::uuid
+      union all select updated_at from messaging_consent_state where shop_id = ${shopId}::uuid
+      union all select requested_at from messaging_deletion_requests where shop_id = ${shopId}::uuid
+      union all select completed_at from messaging_deletion_requests where shop_id = ${shopId}::uuid
+      union all select latest_relevant_at from messaging_deletion_requests where shop_id = ${shopId}::uuid
+    ), latest as (
+      select max(at) as at from barriers
+    )
+    select
+      greatest(clock_timestamp(), latest.at + interval '1 millisecond') as "transitionAt",
+      latest.at as "latestBarrier"
+    from latest
+  `)
+  const [row] = unwrapRows<{
+    transitionAt: Date | string
+    latestBarrier: Date | string | null
+  }>(result)
+  const transitionAt = row?.transitionAt instanceof Date
+    ? new Date(row.transitionAt.getTime())
+    : new Date(row?.transitionAt ?? Number.NaN)
+  if (!Number.isFinite(transitionAt.getTime())) throw new Error('invalid_database_transition_time')
+  const latestBarrier = row?.latestBarrier === null || row?.latestBarrier === undefined
+    ? null
+    : row.latestBarrier instanceof Date
+      ? row.latestBarrier
+      : new Date(row.latestBarrier)
+  if (latestBarrier && (
+    !Number.isFinite(latestBarrier.getTime())
+    || transitionAt.getTime() <= latestBarrier.getTime()
+  )) {
+    throw new Error('non_monotonic_database_transition_time')
+  }
+  return transitionAt
+}
+
 function ownDataProperty(value: unknown, key: string): unknown {
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
     return undefined
@@ -557,6 +604,11 @@ export async function recordMessagingConsentEvent(rawInput: {
 
   try {
     return await input.db.transaction(async (tx) => {
+      const [lockedShop] = await tx.select({ id: shops.id }).from(shops).where(
+        eq(shops.id, input.actor.shopId),
+      ).limit(1).for('update')
+      if (!lockedShop) return { ok: false, error: 'not_found' as const }
+
       const [existingRequest] = await tx.select().from(messagingConsentEvents).where(and(
         eq(messagingConsentEvents.shopId, input.actor.shopId),
         eq(messagingConsentEvents.actorProfileId, input.actor.profileId),
@@ -645,11 +697,22 @@ export async function recordMessagingConsentEvent(rawInput: {
         messagingDeletionRequests.destinationFingerprint,
         messagingDeletionRequests.fingerprintKeyVersion,
       )
-      const [deletionBarrier] = await tx.select({ id: messagingDeletionRequests.id })
+      const deletionBarriers = await tx.select({
+        id: messagingDeletionRequests.id,
+        requestedAt: messagingDeletionRequests.requestedAt,
+        completedAt: messagingDeletionRequests.completedAt,
+        latestRelevantAt: messagingDeletionRequests.latestRelevantAt,
+      })
         .from(messagingDeletionRequests).where(and(
           eq(messagingDeletionRequests.shopId, input.actor.shopId),
           deletionPair,
-        )).limit(1)
+        )).orderBy(
+          asc(messagingDeletionRequests.fingerprintKeyVersion),
+          asc(messagingDeletionRequests.id),
+        ).for('update')
+      const deletionBarrier = deletionBarriers[0]
+
+      const transitionAt = await databaseTransitionTime(tx as AppDb, input.actor.shopId)
 
       const unliftedSuppressions = suppressions.filter(({ liftedAt }) => liftedAt === null)
       if (
@@ -663,7 +726,7 @@ export async function recordMessagingConsentEvent(rawInput: {
         || suppressions.some(({ reason }) => reason !== 'customer_revocation')
         || deletionBarrier !== undefined
         || !latestRevocation
-        || latestRevocation.committedAt.getTime() >= input.now.getTime()
+        || latestRevocation.committedAt.getTime() >= transitionAt.getTime()
         || unliftedSuppressions.some((suppression) =>
           suppression.reason !== 'customer_revocation'
           || suppression.sourceEventId !== latestRevocation.id
@@ -671,7 +734,7 @@ export async function recordMessagingConsentEvent(rawInput: {
         )
       )) return { ok: false, error: 'invalid_transition' as const }
 
-      const retainUntil = consentProofRetainUntil(input.now)
+      const retainUntil = consentProofRetainUntil(transitionAt)
       const eventId = crypto.randomUUID()
       await tx.insert(messagingConsentEvents).values({
         id: eventId,
@@ -682,7 +745,7 @@ export async function recordMessagingConsentEvent(rawInput: {
         fingerprintKeyVersion: current.keyVersion,
         programVersion: input.programVersion,
         eventType: input.eventType,
-        committedAt: input.now,
+        committedAt: transitionAt,
         occurredAt: input.occurredAt,
         captureMethod: input.captureMethod,
         customerControlled: input.customerControlled,
@@ -707,10 +770,10 @@ export async function recordMessagingConsentEvent(rawInput: {
           programVersion: input.programVersion,
           status,
           sourceEventId: eventId,
-          consentedAt: status === 'consented' ? input.now : null,
-          revokedAt: status === 'revoked' ? input.now : null,
+          consentedAt: status === 'consented' ? transitionAt : null,
+          revokedAt: status === 'revoked' ? transitionAt : null,
           retainUntil,
-          updatedAt: input.now,
+          updatedAt: transitionAt,
         } as const
         if (projection) {
           await tx.update(messagingConsentState).set(projectedValues).where(and(
@@ -730,10 +793,10 @@ export async function recordMessagingConsentEvent(rawInput: {
             fingerprintKeyVersion: supported.keyVersion,
             sourceEventId: eventId,
             reason: 'customer_revocation',
-            suppressedAt: input.now,
+            suppressedAt: transitionAt,
             liftedAt: null,
             retainUntil,
-            updatedAt: input.now,
+            updatedAt: transitionAt,
           }).onConflictDoUpdate({
             target: [
               smsSuppressions.shopId,
@@ -744,17 +807,17 @@ export async function recordMessagingConsentEvent(rawInput: {
             set: {
               sourceEventId: eventId,
               reason: 'customer_revocation',
-              suppressedAt: input.now,
+              suppressedAt: transitionAt,
               liftedAt: null,
               retainUntil,
-              updatedAt: input.now,
+              updatedAt: transitionAt,
             },
           })
         }
       } else if (input.eventType === 'reconsented') {
         await tx.update(smsSuppressions).set({
-          liftedAt: input.now,
-          updatedAt: input.now,
+          liftedAt: transitionAt,
+          updatedAt: transitionAt,
         }).where(and(
           eq(smsSuppressions.shopId, input.actor.shopId),
           matchingSuppression,
@@ -844,12 +907,48 @@ function sourceMatchesProjection(
     && statusTimestampMatches
     && sameInstant(source.retainUntil, projection.retainUntil)
     && sameInstant(source.retainUntil, consentProofRetainUntil(source.committedAt))
-    && source.occurredAt.getTime() <= source.committedAt.getTime()
     && validConsentProof
     && validRevocationProof
 }
 
-export async function getMessagingEligibility(input: {
+type ValidatedEligibilityInput = Readonly<{
+  db: AppDb
+  shopId: string
+  customerId: string
+  destination: string
+  programVersion: string
+  fingerprints: ReadonlyArray<SupportedFingerprint>
+}>
+
+function validateEligibilityInput(input: unknown): ValidatedEligibilityInput | null {
+  const data = domainDataProperties(input, [
+    'db',
+    'shopId',
+    'customerId',
+    'destination',
+    'programVersion',
+    'keyRing',
+  ])
+  if (
+    !data
+    || !uuidSchema.safeParse(data.shopId).success
+    || !uuidSchema.safeParse(data.customerId).success
+    || !boundedVersionSchema.safeParse(data.programVersion).success
+  ) return null
+  const destination = normalizeE164(data.destination)
+  const fingerprints = fingerprintsForKeyRing(destination, data.keyRing as FingerprintKeyRing)
+  if (fingerprints.length === 0) return null
+  return Object.freeze({
+    db: data.db as AppDb,
+    shopId: data.shopId as string,
+    customerId: data.customerId as string,
+    destination,
+    programVersion: data.programVersion as string,
+    fingerprints,
+  })
+}
+
+export async function getMessagingEligibility(rawInput: {
   db: AppDb
   shopId: string
   customerId: string
@@ -858,13 +957,9 @@ export async function getMessagingEligibility(input: {
   keyRing: FingerprintKeyRing
 }): Promise<MessagingEligibility> {
   try {
-    if (
-      !uuidSchema.safeParse(input.shopId).success
-      || !uuidSchema.safeParse(input.customerId).success
-      || !boundedVersionSchema.safeParse(input.programVersion).success
-    ) return { allowed: false, reason: 'compliance_unavailable' }
-    const destination = normalizeE164(input.destination)
-    const fingerprints = fingerprintsForKeyRing(destination, input.keyRing)
+    const input = validateEligibilityInput(rawInput)
+    if (!input) return { allowed: false, reason: 'compliance_unavailable' }
+    const fingerprints = input.fingerprints
     const currentTime = new Date()
     const consentPair = fingerprintPredicate(
       fingerprints,

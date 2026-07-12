@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -168,8 +168,10 @@ describe('Shop OS messaging consent truth', () => {
     ...overrides,
   })
 
-  const eligibility = (targetCustomerId = customerId, targetShopId = shopId) =>
-    getMessagingEligibility({
+  const eligibilityInput = (
+    targetCustomerId = customerId,
+    targetShopId = shopId,
+  ): Parameters<typeof getMessagingEligibility>[0] => ({
       db,
       shopId: targetShopId,
       customerId: targetCustomerId,
@@ -177,6 +179,9 @@ describe('Shop OS messaging consent truth', () => {
       programVersion,
       keyRing,
     })
+
+  const eligibility = (targetCustomerId = customerId, targetShopId = shopId) =>
+    getMessagingEligibility(eligibilityInput(targetCustomerId, targetShopId))
 
   it('allows advisor/owner signed evidence and revocation but denies tech/parts mutation', async () => {
     expect(await signedConsent(advisor)).toMatchObject({ ok: true, status: 'consented' })
@@ -383,7 +388,11 @@ describe('Shop OS messaging consent truth', () => {
   it('returns the original actor-bound event on exact retry and conflicts on changed fingerprint', async () => {
     const stableKey = requestKey()
     const first = await signedConsent(owner, customerId, { requestKey: stableKey })
-    const retry = await signedConsent(owner, customerId, { requestKey: stableKey })
+    const [persistedBeforeRetry] = await db.select().from(messagingConsentEvents)
+    const retry = await signedConsent(owner, customerId, {
+      requestKey: stableKey,
+      now: new Date('2036-07-12T18:00:00.000Z'),
+    })
     const conflict = await signedConsent(owner, customerId, {
       requestKey: stableKey,
       requestFingerprint: 'e'.repeat(64),
@@ -397,6 +406,8 @@ describe('Shop OS messaging consent truth', () => {
       eq(messagingConsentEvents.actorProfileId, owner.profileId),
       eq(messagingConsentEvents.requestKey, stableKey),
     ))).toHaveLength(1)
+    const [persistedAfterRetry] = await db.select().from(messagingConsentEvents)
+    expect(persistedAfterRetry?.committedAt).toEqual(persistedBeforeRetry?.committedAt)
   })
 
   it('serializes concurrent identical actor-bound retries to one event', async () => {
@@ -798,5 +809,163 @@ describe('Shop OS messaging consent truth', () => {
     expect(JSON.stringify(result)).not.toContain(destination)
     expect(spies.every((spy) => spy.mock.calls.length === 0)).toBe(true)
     spies.forEach((spy) => spy.mockRestore())
+  })
+
+  it.each([
+    'db',
+    'shopId',
+    'customerId',
+    'destination',
+    'programVersion',
+    'keyRing',
+  ] as const)('rejects accessor-backed eligibility field %s without reading it', async (field) => {
+    const input = eligibilityInput() as Record<string, unknown>
+    const original = input[field]
+    let getterCalls = 0
+    Object.defineProperty(input, field, {
+      enumerable: true,
+      get() {
+        getterCalls += 1
+        return original
+      },
+    })
+
+    expect(await getMessagingEligibility(
+      input as Parameters<typeof getMessagingEligibility>[0],
+    )).toEqual({ allowed: false, reason: 'compliance_unavailable' })
+    expect(getterCalls).toBe(0)
+  })
+
+  it('bounds a trapping eligibility proxy without querying compliance state', async () => {
+    let trapCalls = 0
+    const input = new Proxy(eligibilityInput(), {
+      ownKeys() {
+        trapCalls += 1
+        throw new Error(`${destination}:private-eligibility-proxy`)
+      },
+    })
+
+    expect(await getMessagingEligibility(input)).toEqual({
+      allowed: false,
+      reason: 'compliance_unavailable',
+    })
+    expect(trapCalls).toBe(1)
+  })
+
+  it('keeps tenant-A eligibility meaning after input mutates toward tenant B', async () => {
+    const otherOwner: MessagingActor = { profileId: uuid(24), shopId: otherShopId, role: 'owner' }
+    const otherDisclosure = disclosureFor('South Shop')
+    expect(await signedConsent(otherOwner, otherShopCustomerId, {
+      disclosureSnapshot: otherDisclosure,
+      disclosureHash: hashDisclosure(otherDisclosure),
+    })).toMatchObject({ ok: true })
+    const mutableKeyRing: FingerprintKeyRing = {
+      currentVersion: keyRing.currentVersion,
+      keys: { ...keyRing.keys },
+    }
+    const input = { ...eligibilityInput(customerId, shopId), keyRing: mutableKeyRing }
+
+    const pending = getMessagingEligibility(input)
+    input.db = { select: () => { throw new Error('mutated-db') } } as unknown as AppDb
+    input.shopId = otherShopId
+    input.customerId = otherShopCustomerId
+    input.destination = '+12025550124'
+    input.programVersion = 'marketing_v1'
+    input.keyRing = { currentVersion: 'bad', keys: {} }
+    mutableKeyRing.currentVersion = 'mutated'
+    ;(mutableKeyRing.keys as Record<string, string>).key_v2 = 'short'
+
+    expect(await pending).toEqual({ allowed: false, reason: 'missing_consent' })
+  })
+
+  it('orders shared-destination transitions by the database, not inverted caller time', async () => {
+    const first = await signedConsent(owner, customerId, {
+      occurredAt: new Date('2030-01-01T00:00:00.000Z'),
+      now: new Date('2030-01-01T00:00:00.000Z'),
+    })
+    expect(first).toMatchObject({ ok: true })
+    const second = await revoke(advisor, duplicateCustomerId, {
+      occurredAt: new Date('2020-01-01T00:00:00.000Z'),
+      now: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    expect(second).toMatchObject({ ok: true })
+    const third = await signedConsent(owner, customerId, {
+      eventType: 'reconsented',
+      occurredAt: new Date('2025-01-01T00:00:00.000Z'),
+      now: new Date('2025-01-01T00:00:00.000Z'),
+    })
+    expect(third).toMatchObject({ ok: true })
+
+    const events = await db.select().from(messagingConsentEvents).orderBy(
+      messagingConsentEvents.committedAt,
+      messagingConsentEvents.id,
+    )
+    expect(events.map(({ id }) => id)).toEqual([
+      first.ok ? first.eventId : '',
+      second.ok ? second.eventId : '',
+      third.ok ? third.eventId : '',
+    ])
+    expect(events[1]!.committedAt.getTime()).toBeGreaterThan(events[0]!.committedAt.getTime())
+    expect(events[2]!.committedAt.getTime()).toBeGreaterThan(events[1]!.committedAt.getTime())
+
+    await db.delete(smsSuppressions).where(eq(smsSuppressions.shopId, shopId))
+    expect(await eligibility()).toMatchObject({
+      allowed: true,
+      consentEventId: third.ok ? third.eventId : '',
+    })
+  })
+
+  it('clamps equal database clock values strictly above the persisted barrier', async () => {
+    await client.exec(`
+      create function public.clock_timestamp() returns timestamptz
+      language sql immutable
+      as $$ select '2026-07-12T18:00:00.000Z'::timestamptz $$;
+      set search_path = public, pg_catalog;
+    `)
+    const consent = await signedConsent(owner)
+    const revocation = await revoke(owner)
+    expect(consent.ok && revocation.ok).toBe(true)
+    if (!consent.ok || !revocation.ok) throw new Error('test setup failed')
+
+    const events = await db.select().from(messagingConsentEvents).where(
+      inArray(messagingConsentEvents.id, [consent.eventId, revocation.eventId]),
+    ).orderBy(messagingConsentEvents.committedAt)
+    expect(events).toHaveLength(2)
+    expect(events[0]!.committedAt.toISOString()).toBe('2026-07-12T18:00:00.000Z')
+    expect(events[1]!.committedAt.getTime() - events[0]!.committedAt.getTime()).toBe(1)
+  })
+
+  it('serializes concurrent shared-number re-consent before a later revocation', async () => {
+    await signedConsent(owner, customerId)
+    await revoke(advisor, duplicateCustomerId)
+    await signedConsent(owner, customerId, {
+      eventType: 'reconsented',
+      now: new Date(now.getTime() + 1),
+    })
+    await db.delete(smsSuppressions).where(eq(smsSuppressions.shopId, shopId))
+
+    const reconsentPromise = signedConsent(owner, customerId, {
+      eventType: 'reconsented',
+      now: new Date(now.getTime() + 2),
+    })
+    await Promise.resolve()
+    const revocationPromise = revoke(advisor, duplicateCustomerId, {
+      now: new Date(now.getTime() - 10_000),
+      occurredAt: new Date(now.getTime() - 20_000),
+    })
+    const [reconsent, revocation] = await Promise.all([reconsentPromise, revocationPromise])
+    expect(reconsent.ok && revocation.ok).toBe(true)
+    if (!reconsent.ok || !revocation.ok) throw new Error('test setup failed')
+
+    const events = await db.select({
+      id: messagingConsentEvents.id,
+      committedAt: messagingConsentEvents.committedAt,
+    }).from(messagingConsentEvents).where(inArray(
+      messagingConsentEvents.id,
+      [reconsent.eventId, revocation.eventId],
+    )).orderBy(messagingConsentEvents.committedAt)
+    expect(events.map(({ id }) => id)).toEqual([reconsent.eventId, revocation.eventId])
+    expect(events[1]!.committedAt.getTime()).toBeGreaterThan(events[0]!.committedAt.getTime())
+    expect(await eligibility()).toEqual({ allowed: false, reason: 'suppressed' })
   })
 })
