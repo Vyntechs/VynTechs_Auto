@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and source-only Row 27 are complete; Row 28 design is approved in PR #148, while runtime implementation waits on owner-approved live Row 27 DDL.** The approved production migrations through quote foundation were applied and verified on 2026-07-11. External access, spend, production database changes, and later feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and Phase 4 rows 27–28 are complete; Row 30 reconciliation/design is the next safe internal lane.** Approved production migrations through `0032_shop_os_server_only_acl` are live and verified. External access, spend, messaging retention/legal policy, production database changes, and later feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -626,6 +626,8 @@ Quote build is universal. Send/approval recording/close remain capability-gated.
 
 **Implementation correction — manual sourcing contract approved 2026-07-11.** [Row-28 design](./2026-07-11-shop-os-row28-manual-sourcing-design.md) and [execution packet](./2026-07-11-shop-os-row28-manual-sourcing-plan.md) reconcile the already-complete manual quote entry floor with the missing supplier identity, normalized human-verified offer snapshot, retry/removal semantics, complete quote projection, and read-only compatibility rendering. The approved contract is manual-only, provider-free, fixed-USD, tenant-bound, privacy-minimized, and uses the canonical all-job/all-line quote lock order. It explicitly excludes diagnostics until Row 30, preserves historical offers across account rename/disable, and adds no order methods or credential resolver. PR #148 is docs-only and independently approved with no remaining findings. Runtime implementation is not authorized until the owner approves the exact Row 27 production migration and live table/FK/RLS/grant/advisor/application proofs pass.
 
+**Implementation correction — complete manual sourcing runtime proved 2026-07-12.** Production migrations `0030`, `0031`, and ACL correction `0032` were separately owner-approved, applied through Supabase migration tooling, and verified with unchanged data, 0 direct/effective client table privileges, 32 intended service CRUD grants, 8 RLS policies, clean Shop OS advisor scope, successful deployment, and healthy application response. PR #153 adds zero-network manual adapter contracts, tenant/capability-safe supplier account management, canonical retry-safe human offer capture/removal, one shared fail-closed 4-KiB snapshot validator, complete customer-safe quote totals/versions, and honest read-only compatibility rendering. It adds no provider transport, credential resolver, order method, schema, spend, diagnostic-engine change, or Row-30 sourcing controls. The complete 260-file/2,606-test suite, TypeScript, production build, diff checks, and independent parts/security, quote/privacy, and UI/accessibility reviews pass with no remaining findings.
+
 ### Phase 5 — Secure text-to-approve and response inbox (M)
 
 **Ships:** customer consent fields; `quote_sends`, `sms_log`, and `notifications`; hosted public approval route; hashed expiring/revocable version-bound token; per-job approval/decline/question; Twilio send/webhooks; STOP/HELP; redacted logging; minimal in-app advisor/tech response notifications; updated privacy/terms/subprocessor disclosures.
@@ -688,7 +690,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3, 5–24, and source-only Row 27 are complete. Row 28 design is approved; its runtime work waits on live Row 27 DDL. Rows 25–26, later production feature enablement, and external account/spend work remain owner gates.
+3. Rows 1–3, 5–25, and 27–28 are complete. Row 30 reconciliation/design is the next safe internal lane. Row 26, Row 31 retention/legal policy, later production feature enablement, and external account/spend work remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -753,7 +755,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 25 | 3 | A2P consent, policy, and disclosure design | P | 1 | owner_gate | PR #149 independently approved; owner approves or red-lines exact customer/legal language |
 | 26 | 3 | A2P registration and sender procurement | X | 25 | owner_gate | Business representation + spend |
 | 27 | 4 | Schema/security: vendor accounts and safe secret references | S | 5,16 | complete | PR #147; 4 affected files/53 tests + 254 files/2,549 full tests; [design](./2026-07-11-shop-os-row27-vendor-accounts-schema-design.md) + [execution packet](./2026-07-11-shop-os-row27-vendor-accounts-schema-plan.md); source/local proof only, production DDL unapplied |
-| 28 | 4 | Adapter interface + complete manual sourcing mode | LP | 27 | pending | PR #148 design approved; runtime blocked on owner-approved live Row 27 DDL + invariants/advisors/health |
+| 28 | 4 | Adapter interface + complete manual sourcing mode | LP | 27 | complete | PR #153; 260 files/2,606 tests; TypeScript/build; three independent final approvals; manual-only and provider-free |
 | 29 | 4 | Approved PartsTech/O'Reilly transport + failure tests | LP | 4,28 | blocked | External access required |
 | 30 | 4 | Locked-diagnosis seed + manual/live offer/line-fill UI | A | 21,28 | pending | Live transport controls wait on 29 |
 | 31 | 5 | Schema: consent, sends, SMS log, notification dedupe | S | 16,25 | pending | — |
