@@ -531,7 +531,7 @@ export function ManualPartSourcing({
         <footer className={styles.footer}>
           <p role="status" aria-live="polite">
             {isBusy
-              ? (accountFormOpen ? 'Saving supplier…' : 'Adding sourced part…')
+              ? (accountFormOpen ? 'Saving supplier…' : savedLine ? 'Refreshing quote…' : 'Adding sourced part…')
               : status || (requiredError ? `Needed: ${requiredError.label}` : '')}
           </p>
           {savedLine ? (

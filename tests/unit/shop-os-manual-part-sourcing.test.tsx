@@ -552,6 +552,35 @@ describe('ManualPartSourcing', () => {
     expect(onSaved).toHaveBeenNthCalledWith(2, manualOfferResponse({ lineId }).line)
   })
 
+  it('announces a pending saved-line refresh and calls only the quote refresh callback', async () => {
+    const user = userEvent.setup()
+    const lineId = '00000000-0000-4000-8000-000000000901'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    let resolveRefresh!: (refreshed: boolean) => void
+    const onSaved = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveRefresh = resolve }))
+    const onClose = vi.fn()
+    render(<ManualPartSourcing {...props({ onSaved, onClose })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+
+    expect(screen.getByRole('status')).toHaveTextContent(/^Refreshing quote…$/)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ method: 'POST' }))
+    expect(onSaved).toHaveBeenNthCalledWith(2, manualOfferResponse({ lineId }).line)
+
+    resolveRefresh(true)
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+  })
+
   it('keeps strict capture truth when the first refresh rejects and never reposts the saved offer', async () => {
     const user = userEvent.setup()
     const lineId = '00000000-0000-4000-8000-000000000901'
