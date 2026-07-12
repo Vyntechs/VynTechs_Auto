@@ -453,6 +453,53 @@ describe('Shop OS messaging consent truth', () => {
     })).toEqual({ ok: false, error: 'forbidden' })
   })
 
+  it('locks the shop before the request event during unique-race recovery', async () => {
+    const stableKey = requestKey()
+    const first = await signedConsent(owner, customerId, { requestKey: stableKey })
+    expect(first).toMatchObject({ ok: true })
+    const selectedTables: unknown[] = []
+    let transactions = 0
+    const orderedRecoveryDb = {
+      transaction: async (callback: Parameters<AppDb['transaction']>[0]) => {
+        transactions += 1
+        if (transactions === 1) {
+          throw Object.assign(new Error('unique race'), {
+            code: '23505',
+            constraint: 'messaging_consent_events_shop_request_uq',
+          })
+        }
+        return db.transaction(async (tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== 'select') return Reflect.get(target, property, receiver)
+            return (...args: unknown[]) => {
+              const builder = (target.select.bind(target) as
+                (...values: unknown[]) => unknown)(...args)
+              return new Proxy(builder as object, {
+                get(selectTarget, selectProperty, selectReceiver) {
+                  if (selectProperty !== 'from') {
+                    return Reflect.get(selectTarget, selectProperty, selectReceiver)
+                  }
+                  return (table: unknown) => {
+                    selectedTables.push(table)
+                    return (Reflect.get(selectTarget, 'from', selectReceiver) as Function)
+                      .call(selectTarget, table)
+                  }
+                },
+              })
+            }
+          },
+        }) as never) as never)
+      },
+    } as unknown as AppDb
+
+    expect(await signedConsent(owner, customerId, {
+      db: orderedRecoveryDb,
+      requestKey: stableKey,
+    })).toEqual(first)
+    expect(selectedTables[0]).toBe(shops)
+    expect(selectedTables[1]).toBe(messagingConsentEvents)
+  })
+
   it('does not recover a free-form unique-constraint message', async () => {
     const stableKey = requestKey()
     expect(await signedConsent(owner, customerId, { requestKey: stableKey })).toMatchObject({ ok: true })

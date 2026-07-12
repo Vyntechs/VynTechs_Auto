@@ -530,6 +530,11 @@ async function recoverExactRequestRace(
   input: Extract<ValidatedRecordInput, { ok: true }>,
 ): Promise<RecordResult> {
   return db.transaction(async (tx) => {
+    const [lockedShop] = await tx.select({ id: shops.id }).from(shops).where(
+      eq(shops.id, input.actor.shopId),
+    ).limit(1).for('update')
+    if (!lockedShop) return { ok: false, error: 'not_found' as const }
+
     const [event] = await tx.select().from(messagingConsentEvents).where(and(
       eq(messagingConsentEvents.shopId, input.actor.shopId),
       eq(messagingConsentEvents.actorProfileId, input.actor.profileId),
