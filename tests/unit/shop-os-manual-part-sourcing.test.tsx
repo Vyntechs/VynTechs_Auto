@@ -137,6 +137,27 @@ describe('ManualPartSourcing', () => {
     ]
     for (const control of controls) expect(control).toHaveAccessibleName()
     expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('button', { name: /^Add / })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Needed: Part description')
+  })
+
+  it('keeps commit disabled for any invalid field and announces saving politely', async () => {
+    const user = userEvent.setup()
+    let resolveCapture!: (response: Response) => void
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(() => new Promise((resolve) => { resolveCapture = resolve }))
+    render(<ManualPartSourcing {...props()} />)
+
+    await fillRequiredOffer(user)
+    const commit = screen.getByRole('button', { name: /Add 2 Brake pads/ })
+    expect(commit).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '0' } })
+    expect(commit).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Needed: Quantity')
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '2' } })
+    await user.click(commit)
+    expect(screen.getByRole('status')).toHaveTextContent('Adding sourced part…')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+    resolveCapture(new Response(JSON.stringify({}), { status: 500 }))
   })
 
   it('preserves optional values across collapse and opens details for invalid optional input', async () => {
@@ -158,7 +179,7 @@ describe('ManualPartSourcing', () => {
     await user.type(screen.getByLabelText('Customer line price'), '120')
     await user.click(screen.getByRole('button', { name: /Add 1 Pad set/ }))
     expect(disclosure).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByLabelText('Part number')).toHaveFocus()
+    expect(screen.getByRole('button', { name: /Add 1 Pad set/ })).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Part number')
   })
 
@@ -187,7 +208,6 @@ describe('ManualPartSourcing', () => {
     const dirtyClose = vi.fn()
     render(<ManualPartSourcing {...props({ onClose: dirtyClose })} />)
     await user.type(screen.getByLabelText('Part description'), 'Pads')
-    fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.keyDown(document, { key: 'Escape' })
     const confirmation = screen.getByRole('alertdialog', { name: 'Discard sourced part draft?' })
     expect(screen.getAllByRole('alertdialog')).toHaveLength(1)
@@ -227,8 +247,12 @@ describe('ManualPartSourcing', () => {
     expect(description).toHaveFocus()
 
     fireEvent.keyDown(document, { key: 'Escape' })
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep editing' }))
-    expect(description).toHaveFocus()
+    const confirmation = screen.getByRole('alertdialog')
+    const consequence = within(confirmation).getByText('The details entered here are kept only while this quote is open.')
+    expect(confirmation).toHaveAttribute('aria-describedby', consequence.id)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(description).toHaveFocus())
   })
 
   it('clears stale submitted status after a correction so the next required issue is announced', async () => {
@@ -251,13 +275,13 @@ describe('ManualPartSourcing', () => {
     await user.type(screen.getByLabelText('Customer line price'), '1')
     await user.click(screen.getByRole('button', { name: /^Add / }))
     expect(screen.getByRole('status')).toHaveTextContent('Quantity')
-    expect(screen.getByLabelText('Quantity')).toHaveFocus()
+    expect(screen.getByRole('button', { name: /^Add / })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '999999999.999' } })
     fireEvent.change(screen.getByLabelText('Supplier unit cost'), { target: { value: '90071992547409.92' } })
     await user.click(screen.getByRole('button', { name: /^Add / }))
     expect(screen.getByRole('status')).toHaveTextContent('Supplier unit cost')
-    expect(screen.getByLabelText('Supplier unit cost')).toHaveFocus()
+    expect(screen.getByRole('button', { name: /^Add / })).toBeDisabled()
   })
 
   it('ignores a stale location label while fulfillment is unknown', async () => {
@@ -680,8 +704,12 @@ describe('ManualPartSourcing', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)/)
     expect(css).toMatch(/inset:\s*0/)
     expect(css).toMatch(/min-height:\s*100dvh/)
-    expect(css).toMatch(/env\(safe-area-inset-bottom\)/)
+    expect(css.match(/env\(safe-area-inset-bottom\)/g)).toHaveLength(1)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.header\s*\{[^}]*env\(safe-area-inset-top\)/)
+    expect(css).not.toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.panel\s*\{[^}]*padding-bottom:/)
     expect(css).toMatch(/position:\s*sticky/)
+    expect(css).toMatch(/\.header\s*>\s*div\s*\{[^}]*min-width:\s*0/)
+    expect(css).toMatch(/\.header h2,[\s\S]*\.eyebrow\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/)
     expect(css).toMatch(/min-height:\s*44px/)
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce/)
   })

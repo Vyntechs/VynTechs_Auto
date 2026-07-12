@@ -1596,6 +1596,7 @@ function ConfirmationModal({
 
   const discard = modal.kind === 'discard'
   const sourced = modal.kind === 'remove-sourced'
+  const descriptionId = discard ? undefined : `${titleId}-target`
   return (
     <div
       ref={dialogRef}
@@ -1604,6 +1605,7 @@ function ConfirmationModal({
       tabIndex={-1}
       aria-modal="true"
       aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       onKeyDown={onKeyDown}
     >
       <strong id={titleId}>
@@ -1611,7 +1613,7 @@ function ConfirmationModal({
           ? 'Discard unsaved line changes?'
           : sourced ? 'Remove sourced part?' : 'Remove this quote line?'}
       </strong>
-      {!discard && <p>{modal.target.line.description}</p>}
+      {!discard && <p id={descriptionId}>{modal.target.line.description}</p>}
       <div>
         <button ref={cancelRef} type="button" className={styles.lineAction} disabled={busy} onClick={onCancel}>
           {discard ? 'Keep editing' : sourced ? 'Keep sourced part' : 'Keep line'}

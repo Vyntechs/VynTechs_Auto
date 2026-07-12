@@ -96,6 +96,8 @@ export function ManualPartSourcing({
 
   const dirty = normalizedManualPartSignature(draft) !== initialSignature.current
   const isBusy = busy || mutationBusy
+  const requiredError = firstInvalidField(draft, catalogAvailable)
+  const invalidDetailsKey = requiredError?.details ? requiredError.key : null
 
   function updateDraft<K extends DraftKey>(key: K, value: ManualPartDraft[K]) {
     setStatus('')
@@ -157,6 +159,11 @@ export function ManualPartSourcing({
   useEffect(() => {
     if (!open) return
     function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && confirmingClose) {
+        event.preventDefault()
+        keepEditing()
+        return
+      }
       if (event.key === 'Escape' && !confirmingClose) {
         event.preventDefault()
         requestClose()
@@ -194,9 +201,12 @@ export function ManualPartSourcing({
     if (confirmingClose) keepEditingRef.current?.focus()
   }, [confirmingClose])
 
+  useEffect(() => {
+    if (open && invalidDetailsKey) setDetailsOpen(true)
+  }, [invalidDetailsKey, open])
+
   if (!open) return null
 
-  const requiredError = firstInvalidField(draft, catalogAvailable)
   const commitLabel = manualPartCommitLabel(draft)
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -484,7 +494,7 @@ export function ManualPartSourcing({
             className={styles.disclosure}
             aria-expanded={detailsOpen}
             aria-controls="manual-part-details"
-            onClick={() => setDetailsOpen((current) => !current)}
+            onClick={() => setDetailsOpen((current) => requiredError?.details ? true : !current)}
           >
             Part details <span aria-hidden="true">{detailsOpen ? '−' : '+'}</span>
           </button>
@@ -519,11 +529,15 @@ export function ManualPartSourcing({
         </div>
 
         <footer className={styles.footer}>
-          <p role="status" aria-live="polite">{status || (requiredError ? `Needed: ${requiredError.label}` : '')}</p>
+          <p role="status" aria-live="polite">
+            {isBusy
+              ? (accountFormOpen ? 'Saving supplier…' : 'Adding sourced part…')
+              : status || (requiredError ? `Needed: ${requiredError.label}` : '')}
+          </p>
           {savedLine ? (
             <button type="button" className={styles.commit} disabled={isBusy} onClick={refreshSavedLine}>Refresh quote</button>
           ) : (
-            <button type="submit" className={styles.commit} disabled={isBusy || !catalogAvailable || localAccounts.length === 0}>
+            <button type="submit" className={styles.commit} disabled={isBusy || !catalogAvailable || localAccounts.length === 0 || requiredError !== null}>
               {isBusy ? 'Adding sourced part…' : commitLabel}
             </button>
           )}
@@ -533,9 +547,9 @@ export function ManualPartSourcing({
 
       {confirmingClose ? (
         <div className={styles.confirmBackdrop}>
-          <section ref={confirmRef} className={styles.confirm} role="alertdialog" aria-modal="true" aria-labelledby="discard-draft-title">
+          <section ref={confirmRef} className={styles.confirm} role="alertdialog" aria-modal="true" aria-labelledby="discard-draft-title" aria-describedby="discard-draft-consequence">
             <h3 id="discard-draft-title">Discard sourced part draft?</h3>
-            <p>The details entered here are kept only while this quote is open.</p>
+            <p id="discard-draft-consequence">The details entered here are kept only while this quote is open.</p>
             <div>
               <button ref={keepEditingRef} type="button" onClick={keepEditing}>Keep editing</button>
               <button type="button" className={styles.danger} onClick={onClose}>Discard draft</button>

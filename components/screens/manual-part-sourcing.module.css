@@ -27,12 +27,23 @@
   background: var(--vt-bone-100);
 }
 
+.header > div {
+  min-width: 0;
+}
+
 .header h2 {
   margin: 6px 0 0;
   font-family: var(--vt-font-serif);
   font-size: clamp(24px, 3vw, 32px);
   font-weight: 400;
   line-height: 1.05;
+}
+
+.header h2,
+.eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eyebrow {
@@ -361,7 +372,6 @@
     position: fixed;
     inset: 0;
     min-height: 100dvh;
-    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .costGrid,
@@ -373,6 +383,10 @@
   .body {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .header {
+    padding-top: calc(22px + env(safe-area-inset-top));
   }
 
   .footer {
