@@ -163,6 +163,12 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute('href', '/tickets/ticket-45')
   })
 
+  it('does not create a dead work link for corrupt session-linked simple work', () => {
+    render(<TodayJobsBoard myJobs={[{ ...maintenance, sessionId: 'unexpected-session' }]} openJobs={[]} />)
+    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute('href', '/tickets/ticket-44')
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+  })
+
   it.each(['idle', 'failed'] as const)(
     'posts one fresh attempt for a %s diagnostic and navigates only to the returned session',
     async (diagnosticStartState) => {

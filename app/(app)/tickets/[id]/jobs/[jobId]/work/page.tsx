@@ -37,6 +37,7 @@ export default async function SimpleWorkPage({
   if (!initialWorkspace) notFound()
   const { ticket } = ticketResult
   if (!ticket.customer || !ticket.vehicle) notFound()
+  if (ticket.status !== 'open' && initialWorkspace.workStatus !== 'done') notFound()
 
   return (
     <SimpleWorkWorkspace

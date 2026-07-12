@@ -109,6 +109,8 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
   async function chooseProof(file: File) {
     const kind = classifySimpleWorkFile(file)
     if (!kind) {
+      fileAttempt.current = null
+      setSelectedProof(null)
       setNotice({ kind: 'error', text: 'Choose a supported, non-empty file no larger than 4 MiB.' })
       return
     }

@@ -435,7 +435,7 @@ function JobRow({
 
 function SimpleWorkAction({ job }: { job: TodayTicketJob }) {
   const identityComplete = job.customerName !== null && job.vehicle !== null
-  const workAvailable = identityComplete && job.workStatus !== 'blocked'
+  const workAvailable = identityComplete && job.workStatus !== 'blocked' && job.sessionId === null
   return (
     <Link
       href={workAvailable

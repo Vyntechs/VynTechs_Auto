@@ -354,4 +354,16 @@ describe('TicketDetailScreen', () => {
     })} />)
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
+
+  it('exposes no active-work link on a closed ticket while preserving done history', () => {
+    render(<TicketDetailScreen currentProfileId="tech-1" ticket={ticket({
+      status: 'closed',
+      jobs: [
+        job({ id: 'stale-open', title: 'Stale open work', kind: 'repair', assignedTechId: 'tech-1', workStatus: 'open' }),
+        job({ id: 'closed-history', title: 'Completed work', kind: 'repair', assignedTechId: 'tech-1', workStatus: 'done' }),
+      ],
+    })} />)
+    expect(screen.getByText('Stale open work').closest('li')).not.toHaveTextContent('Open work')
+    expect(screen.getByRole('link', { name: 'View work history' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/closed-history/work')
+  })
 })

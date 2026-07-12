@@ -253,6 +253,7 @@ function simpleWorkLink(
     || job.assignedTechId !== currentProfileId
     || (job.kind !== 'repair' && job.kind !== 'maintenance')
     || job.sessionId !== null
+    || (ticket.status !== 'open' && job.workStatus !== 'done')
     || !['open', 'in_progress', 'done'].includes(job.workStatus)) return null
   const label = job.workStatus === 'done'
     ? 'View work history'

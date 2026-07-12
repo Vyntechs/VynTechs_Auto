@@ -81,4 +81,10 @@ describe('simple work page', () => {
     render(await SimpleWorkPage(props))
     expect(workspaceScreenMock.mock.calls[0][0].initialWorkspace).toMatchObject({ workStatus: 'done' })
   })
+
+  it('fails closed when ticket composition observes closure after an active workspace read', async () => {
+    vi.mocked(getTicketDetail).mockResolvedValue({ ok: true, ticket: { ...ticket, status: 'closed' } } as never)
+    await expect(SimpleWorkPage(props)).rejects.toThrow('not-found')
+    expect(workspaceScreenMock).not.toHaveBeenCalled()
+  })
 })

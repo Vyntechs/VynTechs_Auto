@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SimpleWorkWorkspace } from '@/components/screens/simple-work-workspace'
 import type { SimpleWorkWorkspaceView } from '@/lib/shop-os/simple-work-ui'
@@ -89,6 +91,18 @@ describe('simple work workspace', () => {
     expect(JSON.stringify(await Promise.all([...retryForm.entries()].map(async ([key, value]) => [key, typeof value === 'string' ? value : value.name])))).not.toContain('storageKey')
   })
 
+  it('clears an old retry when the technician selects an invalid replacement file', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
+    const camera = container.querySelector('input[data-proof-camera]') as HTMLInputElement
+    fireEvent.change(camera, { target: { files: [new File(['photo'], 'old.jpg', { type: 'image/jpeg' })] } })
+    expect(await screen.findByRole('button', { name: 'Retry proof upload' })).toBeInTheDocument()
+    const addFile = container.querySelector('input:not([data-proof-camera])') as HTMLInputElement
+    fireEvent.change(addFile, { target: { files: [new File(['bad'], 'new.heic', { type: 'image/heic' })] } })
+    expect(screen.queryByRole('button', { name: 'Retry proof upload' })).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a supported')
+  })
+
   it('keeps found concern optional and reports only unassigned/unstarted truth', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true, status: 201,
@@ -122,5 +136,13 @@ describe('simple work workspace', () => {
     expect(proof).toHaveAttribute('href', `/api/tickets/${TICKET}/jobs/${JOB}/attachments/${REQUEST}`)
     expect(proof.getAttribute('href')).not.toMatch(/storage|token|supabase/i)
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('protects long technician-controlled strings from narrow-screen overflow', () => {
+    const css = readFileSync(join(process.cwd(), 'components/screens/simple-work-workspace.module.css'), 'utf8')
+    expect(css).toMatch(/\.hero h1[^}]*overflow-wrap: anywhere/)
+    expect(css).toMatch(/\.savedNote[^}]*overflow-wrap: anywhere/)
+    expect(css).toMatch(/\.retryRow span[^}]*overflow-wrap: anywhere/)
+    expect(css).toMatch(/\.proofList li[^}]*min-width: 0[^}]*overflow-wrap: anywhere/)
   })
 })
