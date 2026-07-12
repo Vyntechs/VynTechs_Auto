@@ -1,7 +1,7 @@
 # Shop OS — Spec & Phased Implementation Plan
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
-**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 rows 16–22 are complete; row 23 is next.** The approved production migrations through quote foundation were applied and verified on 2026-07-11. External access, spend, and later feature enablement remain separate owner gates.
+**Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15 plus Phase 3 rows 16–23 are complete; row 24 is next.** The approved production migrations through quote foundation were applied and verified on 2026-07-11. External access, spend, and later feature enablement remain separate owner gates.
 **Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
@@ -682,7 +682,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3 and 5–22 are complete. Row 23 is next; later production feature enablement and external account/spend rows remain owner gates.
+3. Rows 1–3 and 5–23 are complete. Row 24 is next; later production feature enablement and external account/spend rows remain owner gates.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -742,7 +742,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 20 | 3 | Evidence-bound story generator + guards | LQ | 15,16 | complete | PR #132; merge `e9bc780`; 5 focused files/129 tests + 227 files/2,251 full tests; [execution packet](./2026-07-11-shop-os-phase-3-customer-story-plan.md); ordinary locked trees only |
 | 21 | 3 | Story review/manual topology + phone/in-person approval UI | A | 17,20 | complete | PR #134; 231 files/2,312 full tests; [design](./2026-07-11-shop-os-row21-story-review-and-approval-design.md) + [execution packet](./2026-07-11-shop-os-row21-story-review-and-approval-plan.md); no migration/provider/engine changes |
 | 22 | 3 | Ticket-aware repair + declined/no-repair closeout guards across handler/API/UI | I | 15,17 | complete | PR #141; 10 focused files/113 tests + 244 files/2,478 full tests; [design](./2026-07-11-shop-os-row22-repair-closeout-design.md) + [execution packet](./2026-07-11-shop-os-row22-repair-closeout-plan.md); authorization seam; legacy sessions unchanged |
-| 23 | 3 | Simple-work/attachment/escalation handlers | LT | 13,16,17,22 | pending | Approved quote version required |
+| 23 | 3 | Simple-work/attachment/escalation handlers | LT | 13,16,17,22 | complete | PR #143; 12 focused files/134 tests + 250 files/2,517 full tests; [design](./2026-07-11-shop-os-row23-simple-work-handlers-design.md) + [execution packet](./2026-07-11-shop-os-row23-simple-work-handlers-plan.md); independently reviewed; no schema/provider/UI/engine changes |
 | 24 | 3 | Simple-work/attachment/escalation UI | T | 14,23 | pending | Approved quote version required |
 | 25 | 3 | A2P consent, policy, and disclosure design | P | 1 | pending | Owner approves customer/legal language |
 | 26 | 3 | A2P registration and sender procurement | X | 25 | owner_gate | Business representation + spend |
