@@ -851,9 +851,14 @@ export function ManualQuoteBuilder({
                                   <button
                                     type="button"
                                     className={styles.lineAction}
-                                    disabled={busy}
+                                    disabled={busy || (
+                                      pendingSourcedRemoval?.jobId === job.id
+                                      && pendingSourcedRemoval.lineId === line.id
+                                    )}
                                     onClick={(event) => {
-                                      if (!inFlightRef.current && !modal && !sourcingJobId) {
+                                      const removalPending = pendingSourcedRemoval?.jobId === job.id
+                                        && pendingSourcedRemoval.lineId === line.id
+                                      if (!removalPending && !inFlightRef.current && !modal && !sourcingJobId) {
                                         setModal({
                                           kind: 'remove-sourced', target: { jobId: job.id, line },
                                           invoker: event.currentTarget,

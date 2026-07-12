@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -797,7 +798,7 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     }) })],
     ['malformed truth', response(200, { builder: { hostile: true } })],
     ['failed GET', response(503, { error: 'unavailable' })],
-  ])('rejects %s after sourced deletion and restores the exact remove invoker', async (_label, refreshResponse) => {
+  ])('rejects %s after sourced deletion and disables the exact remove invoker', async (_label, refreshResponse) => {
     const sourced = line({
       id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
       source: 'vendor_offer', mutable: false, coreChargeCents: null,
@@ -815,7 +816,8 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
     expect(screen.getByText('Sourced pad set')).toBeInTheDocument()
     expect(within(screen.getByRole('complementary', { name: 'Quote totals' })).getAllByText('$140.00')).toHaveLength(2)
-    await waitFor(() => expect(document.activeElement).toBe(remove))
+    expect(remove).toBeDisabled()
+    await waitFor(() => expect(document.activeElement).not.toBe(remove))
     expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
   })
 
@@ -841,6 +843,45 @@ describe('ManualQuoteBuilder sourcing integration', () => {
     await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Source part' }))
+  })
+
+  it('disables only the pending sourced remove action and recovers with GET only', async () => {
+    const user = userEvent.setup()
+    const sourced = line({
+      id: SOURCED_LINE_ID, description: 'Sourced pad set', priceCents: 14_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const otherSourced = line({
+      id: PINNED_LINE_ID, description: 'Sourced rotor set', priceCents: 20_000,
+      source: 'vendor_offer', mutable: false, coreChargeCents: null,
+    })
+    const initial = builder({ jobs: [{ ...builder().jobs[0], lines: [sourced, otherSourced] }], activeVersion: null })
+    const absent = builder({ jobs: [{ ...builder().jobs[0], lines: [otherSourced] }], activeVersion: null })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(503, { error: 'unavailable' }))
+      .mockResolvedValueOnce(response(200, { builder: absent }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={initial} />)
+
+    const remove = screen.getByRole('button', { name: 'Remove sourced part: Sourced pad set' })
+    await user.click(remove)
+    await user.click(screen.getByRole('button', { name: 'Confirm removal' }))
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(remove).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove sourced part: Sourced rotor set' })).toBeEnabled()
+    remove.focus()
+    expect(document.activeElement).not.toBe(remove)
+    await user.click(remove)
+    await user.keyboard('{Enter} ')
+    expect(screen.queryByRole('alertdialog', { name: 'Remove sourced part?' })).toBeNull()
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET'])
+
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.queryByText('Sourced pad set')).toBeNull())
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['DELETE', 'GET', 'GET'])
+    expect(screen.getByRole('button', { name: 'Remove sourced part: Sourced rotor set' })).toBeEnabled()
   })
 
   it('keeps sourced-removal recovery strict when the visible refresh still receives stale truth', async () => {
