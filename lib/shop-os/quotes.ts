@@ -313,6 +313,23 @@ export function quoteSnapshotContainsJob(
     && parsed.data.jobs.some((job) => job.id === input.jobId)
 }
 
+export function quoteSnapshotContainsExactJob(
+  snapshot: unknown,
+  input: { ticketId: string; jobId: string; kind: 'diagnostic' | 'repair' | 'maintenance' },
+): boolean {
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  return parsed.success
+    && parsed.data.ticket.id === input.ticketId
+    && parsed.data.jobs.some((job) => job.id === input.jobId && job.kind === input.kind)
+}
+
+function isPinnedSimpleWork(
+  job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus'>,
+): boolean {
+  return (job.kind === 'repair' || job.kind === 'maintenance')
+    && (job.workStatus === 'in_progress' || job.workStatus === 'done')
+}
+
 function notFound(): Failure {
   return { ok: false, error: 'not_found' }
 }
@@ -565,7 +582,7 @@ export async function getQuoteBuilder(
               approval: safeBuilderApproval(
                 job.approvalState,
                 job.approvedQuoteVersionId,
-                job.id,
+                job,
                 activeVersionProjection,
                 activeSnapshotJobIds,
               ),
@@ -639,13 +656,14 @@ async function lockDraftContext(
   if (!ticket || ticket.status !== 'open') return null
 
   const jobRows = await db
-    .select({ id: ticketJobs.id, workStatus: ticketJobs.workStatus })
+    .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
     .from(ticketJobs)
     .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
     .orderBy(ticketJobs.id)
     .for('update', { noWait: true })
   const targetJob = jobRows.find((job) => job.id === input.jobId)
-  if (!targetJob || targetJob.workStatus === 'done' || targetJob.workStatus === 'canceled') return null
+  if (!targetJob || targetJob.workStatus === 'done' || targetJob.workStatus === 'canceled'
+    || isPinnedSimpleWork(targetJob)) return null
 
   const lineRows = await db
     .select()
@@ -725,13 +743,23 @@ export async function invalidateActiveQuoteVersion(
     .returning()
   if (!superseded) return conflict(true)
   if (includedJobIds.length > 0) {
-    await db
+    const resetJobIds = (await db
+      .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
+      .from(ticketJobs)
+      .where(and(
+        eq(ticketJobs.shopId, input.shopId),
+        eq(ticketJobs.ticketId, input.ticketId),
+        inArray(ticketJobs.id, includedJobIds),
+      )))
+      .filter((job) => !isPinnedSimpleWork(job))
+      .map((job) => job.id)
+    if (resetJobIds.length > 0) await db
       .update(ticketJobs)
       .set({ approvalState: 'pending_quote', approvedQuoteVersionId: null, updatedAt: new Date() })
       .where(and(
         eq(ticketJobs.shopId, input.shopId),
         eq(ticketJobs.ticketId, input.ticketId),
-        inArray(ticketJobs.id, includedJobIds),
+        inArray(ticketJobs.id, resetJobIds),
       ))
   }
   return null
@@ -887,7 +915,7 @@ function safeBuilderStory(
 function safeBuilderApproval(
   state: unknown,
   quoteVersionId: unknown,
-  jobId: string,
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus'>,
   activeVersion: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'],
   activeSnapshotJobIds: ReadonlySet<string>,
 ): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['approval']> {
@@ -904,9 +932,10 @@ function safeBuilderApproval(
     throw new TypeError('quote approval projection is inconsistent')
   }
   if (state === 'approved' && (
-    !activeVersion
-    || safeVersionId !== activeVersion.id
-    || !activeSnapshotJobIds.has(jobId)
+    !isPinnedSimpleWork(job)
+    && (!activeVersion
+      || safeVersionId !== activeVersion.id
+      || !activeSnapshotJobIds.has(job.id))
   )) throw new TypeError('approved quote projection is stale')
   return { state, quoteVersionId: safeVersionId }
 }
@@ -979,7 +1008,9 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
     attachmentsByJob.set(attachment.jobId, rows)
   }
   const jobs = sortBySnapshotOrder(context.jobs)
-    .filter((job) => job.workStatus !== 'canceled' && (linesByJob.get(job.id)?.length ?? 0) > 0)
+    .filter((job) => job.workStatus !== 'canceled'
+      && !isPinnedSimpleWork(job)
+      && (linesByJob.get(job.id)?.length ?? 0) > 0)
     .map((job) => {
       if (!job.title) throw new TypeError('job title is empty')
       requireVersionableStory(job.kind, job.customerStory, job.storyMeta)
@@ -1225,7 +1256,10 @@ export async function createQuoteVersion(
           .returning()
         if (!superseded) throw new AbortVersionCreation(conflict(true))
         const oldJobIds = activeSnapshot!.jobs.map((job) => job.id)
-        if (oldJobIds.length > 0) {
+        const resetOldJobIds = context.jobs
+          .filter((job) => oldJobIds.includes(job.id) && !isPinnedSimpleWork(job))
+          .map((job) => job.id)
+        if (resetOldJobIds.length > 0) {
           await transactionDb.update(ticketJobs).set({
             approvalState: 'pending_quote',
             approvedQuoteVersionId: null,
@@ -1233,7 +1267,7 @@ export async function createQuoteVersion(
           }).where(and(
             eq(ticketJobs.shopId, context.shop.id),
             eq(ticketJobs.ticketId, context.ticket.id),
-            inArray(ticketJobs.id, oldJobIds),
+            inArray(ticketJobs.id, resetOldJobIds),
           ))
         }
       }
@@ -1249,14 +1283,17 @@ export async function createQuoteVersion(
         createdByProfileId: context.actorId,
       }).returning()
       const includedJobIds = snapshot.jobs.map((job) => job.id)
-      await transactionDb.update(ticketJobs).set({
+      const readyJobIds = context.jobs
+        .filter((job) => includedJobIds.includes(job.id) && !isPinnedSimpleWork(job))
+        .map((job) => job.id)
+      if (readyJobIds.length > 0) await transactionDb.update(ticketJobs).set({
         approvalState: 'quote_ready',
         approvedQuoteVersionId: null,
         updatedAt: new Date(),
       }).where(and(
         eq(ticketJobs.shopId, context.shop.id),
         eq(ticketJobs.ticketId, context.ticket.id),
-        inArray(ticketJobs.id, includedJobIds),
+        inArray(ticketJobs.id, readyJobIds),
       ))
       return {
         ok: true,
