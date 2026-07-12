@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createTestDb,
+  ensureMessagingRetentionAclMigration,
   ensureShopOsServerOnlyAclMigration,
 } from '@/tests/helpers/db'
 
@@ -21,7 +22,17 @@ const SERVER_ONLY_TABLES = [
   'quote_versions',
   'quote_events',
   'vendor_accounts',
+  'messaging_consent_events',
+  'messaging_consent_state',
+  'sms_suppressions',
+  'quote_sends',
+  'sms_log',
+  'notifications',
+  'messaging_deletion_requests',
+  'messaging_retention_holds',
 ] as const
+
+const LEGACY_SERVER_ONLY_TABLES = SERVER_ONLY_TABLES.slice(0, 8)
 
 describe('Shop OS server-only table ACL hardening', () => {
   it('revokes every direct anon and authenticated table privilege without changing service CRUD', async () => {
@@ -30,7 +41,12 @@ describe('Shop OS server-only table ACL hardening', () => {
       'drizzle/migrations/0032_shop_os_server_only_acl.sql',
     )
     expect(existsSync(migrationPath), 'source migration 0032 must exist').toBe(true)
-    if (!existsSync(migrationPath)) return
+    const messagingMigrationPath = path.join(
+      process.cwd(),
+      'drizzle/migrations/0034_shop_os_messaging_retention_acl.sql',
+    )
+    expect(existsSync(messagingMigrationPath), 'source migration 0034 must exist').toBe(true)
+    if (!existsSync(migrationPath) || !existsSync(messagingMigrationPath)) return
 
     const { client, close } = await createTestDb()
     closeCallbacks.push(close)
@@ -52,6 +68,8 @@ describe('Shop OS server-only table ACL hardening', () => {
 
     await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
     await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
+    await expect(ensureMessagingRetentionAclMigration(client)).resolves.toBeUndefined()
+    await expect(ensureMessagingRetentionAclMigration(client)).resolves.toBeUndefined()
 
     const after = await client.query<{ count: number }>(`
       select count(*)::int
@@ -100,4 +118,17 @@ describe('Shop OS server-only table ACL hardening', () => {
       'Shop OS server-only ACL hardening failed in ephemeral database',
     )
   }, 15_000)
+
+  it('keeps the legacy 0032 guard scoped to its original eight tables', () => {
+    expect(LEGACY_SERVER_ONLY_TABLES).toEqual([
+      'tickets',
+      'ticket_jobs',
+      'job_attachments',
+      'job_lines',
+      'canned_jobs',
+      'quote_versions',
+      'quote_events',
+      'vendor_accounts',
+    ])
+  })
 })

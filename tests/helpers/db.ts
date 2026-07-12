@@ -54,6 +54,7 @@ export async function createTestDb(): Promise<{
   await ensureQuoteTriggerSearchPathMigration(client)
   await ensureShopOsServerOnlyAclMigration(client)
   await ensureMessagingRetentionMigration(client)
+  await ensureMessagingRetentionAclMigration(client)
   return {
     db,
     client,
@@ -563,5 +564,154 @@ export async function ensureMessagingRetentionMigration(client: PGlite): Promise
   const after = await messagingRetentionMarkers(client)
   if (!isCompleteMessagingRetention(after)) {
     throw new Error('messaging retention schema hardening failed in ephemeral database')
+  }
+}
+
+const MESSAGING_RETENTION_ACL_TABLES = [
+  'messaging_consent_events',
+  'messaging_consent_state',
+  'sms_suppressions',
+  'quote_sends',
+  'sms_log',
+  'notifications',
+  'messaging_deletion_requests',
+  'messaging_retention_holds',
+] as const
+
+type MessagingRetentionAclMarkers = {
+  table_count: number
+  rls_count: number
+  policy_count: number
+  matching_policy_count: number
+  direct_client_grant_count: number
+  effective_client_privilege_count: number
+  service_crud_count: number
+  service_grant_count: number
+  function_count: number
+  required_service_function_count: number
+  exact_function_acl_count: number
+}
+
+async function messagingRetentionAclMarkers(
+  client: PGlite,
+): Promise<MessagingRetentionAclMarkers> {
+  const expectedTables = MESSAGING_RETENTION_ACL_TABLES
+    .map((table) => `('${table}')`)
+    .join(', ')
+  const result = await client.query<MessagingRetentionAclMarkers>(`
+    with
+      expected_tables(table_name) as (values ${expectedTables}),
+      expected_functions(signature, service_execute) as (values
+        ('guard_quote_send_lifecycle()', false),
+        ('reject_messaging_consent_event_mutation()', false),
+        ('require_messaging_compaction_completion()', false),
+        ('compact_messaging_consent_events(uuid,uuid,uuid)', true),
+        ('guard_messaging_deletion_request_mutation()', false),
+        ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
+        ('serialize_messaging_retention_hold_target()', false)
+      ),
+      client_roles(role_name) as (values ('anon'), ('authenticated')),
+      table_privileges(privilege_name) as (values
+        ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+        ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+      )
+    select
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relkind in ('r', 'p')) as table_count,
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relrowsecurity) as rls_count,
+      (select count(*)::int from expected_tables e
+       join pg_policies p on p.tablename = e.table_name and p.schemaname = 'public')
+        as policy_count,
+      (select count(*)::int from expected_tables e
+       join pg_policies p on p.tablename = e.table_name and p.schemaname = 'public'
+       where p.policyname = e.table_name || '_server_only_deny_direct'
+         and p.roles::text = '{anon,authenticated}'
+         and p.cmd = 'ALL' and p.qual = 'false' and p.with_check = 'false')
+        as matching_policy_count,
+      (select count(*)::int from expected_tables e
+       join information_schema.role_table_grants g on g.table_name = e.table_name
+       where g.table_schema = 'public' and g.grantee in ('anon', 'authenticated'))
+        as direct_client_grant_count,
+      (select count(*)::int from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join client_roles r
+       cross join table_privileges p
+       where has_table_privilege(r.role_name, c.oid, p.privilege_name))
+        as effective_client_privilege_count,
+      (select count(*)::int from expected_tables e
+       join information_schema.role_table_grants g on g.table_name = e.table_name
+       where g.table_schema = 'public' and g.grantee = 'service_role'
+         and g.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE'))
+        as service_crud_count,
+      (select count(*)::int from expected_tables e
+       join information_schema.role_table_grants g on g.table_name = e.table_name
+       where g.table_schema = 'public' and g.grantee = 'service_role')
+        as service_grant_count,
+      (select count(*)::int from expected_functions e
+       join pg_proc p on p.oid = to_regprocedure('public.' || e.signature))
+        as function_count,
+      (select count(*)::int from expected_functions e
+       join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+       where e.service_execute and has_function_privilege('service_role', p.oid, 'execute'))
+        as required_service_function_count,
+      (select count(*)::int from expected_functions e
+       join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+       where has_function_privilege('service_role', p.oid, 'execute') = e.service_execute
+         and not has_function_privilege('anon', p.oid, 'execute')
+         and not has_function_privilege('authenticated', p.oid, 'execute'))
+        as exact_function_acl_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('messaging retention ACL inspection failed')
+  return markers
+}
+
+function hasCompleteMessagingRetentionAcl(
+  markers: MessagingRetentionAclMarkers,
+): boolean {
+  return markers.table_count === MESSAGING_RETENTION_ACL_TABLES.length
+    && markers.rls_count === MESSAGING_RETENTION_ACL_TABLES.length
+    && markers.policy_count === MESSAGING_RETENTION_ACL_TABLES.length
+    && markers.matching_policy_count === MESSAGING_RETENTION_ACL_TABLES.length
+    && markers.direct_client_grant_count === 0
+    && markers.effective_client_privilege_count === 0
+    && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
+    && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
+    && markers.function_count === 7
+    && markers.required_service_function_count === 2
+    && markers.exact_function_acl_count === 7
+}
+
+export async function ensureMessagingRetentionAclMigration(
+  client: PGlite,
+): Promise<void> {
+  const before = await messagingRetentionAclMarkers(client)
+  if (
+    before.table_count !== MESSAGING_RETENTION_ACL_TABLES.length
+    || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
+    || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
+    || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
+    || before.function_count !== 7
+    || before.required_service_function_count !== 2
+  ) {
+    throw new Error('partial messaging retention ACL in ephemeral database')
+  }
+  if (hasCompleteMessagingRetentionAcl(before)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0034_shop_os_messaging_retention_acl.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await messagingRetentionAclMarkers(client)
+  if (!hasCompleteMessagingRetentionAcl(after)) {
+    throw new Error('messaging retention ACL hardening failed in ephemeral database')
   }
 }
