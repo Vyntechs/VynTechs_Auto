@@ -338,6 +338,50 @@ describe('ManualPartSourcing', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
+  it('accepts an exact account-creation replay and selects the returned supplier without capturing an offer', async () => {
+    const user = userEvent.setup()
+    const replayed = { ...ACCOUNT_TWO, displayName: 'Metro Supply' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      changed: false,
+      vendorAccount: replayed,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onAccountCreated = vi.fn()
+    render(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: true, onAccountCreated })} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+    fireEvent.change(screen.getByLabelText('Supplier name'), { target: { value: 'Metro Supply' } })
+    await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+
+    await waitFor(() => expect(onAccountCreated).toHaveBeenCalledWith(replayed))
+    expect(screen.getByRole('radio', { name: 'Metro Supply' })).toBeChecked()
+    expect(screen.getByRole('status')).toHaveTextContent('Supplier saved. Continue with the part details.')
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('rotates capture identity when a newly created supplier becomes the normalized offer intent', async () => {
+    const user = userEvent.setup()
+    let uuidSequence = 900
+    vi.mocked(crypto.randomUUID).mockImplementation(() => (
+      `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`
+    ))
+    const created = { ...ACCOUNT_TWO, displayName: 'Metro Supply' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      changed: true,
+      vendorAccount: created,
+    }), { status: 201, headers: { 'content-type': 'application/json' } })))
+    render(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: true })} />)
+    const dialog = screen.getByRole('dialog')
+    const initialCaptureKey = dialog.getAttribute('data-client-key')
+
+    await user.click(screen.getByRole('button', { name: 'Add supplier' }))
+    fireEvent.change(screen.getByLabelText('Supplier name'), { target: { value: 'Metro Supply' } })
+    await user.click(screen.getByRole('button', { name: 'Save supplier' }))
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Metro Supply' })).toBeChecked())
+    expect(dialog.getAttribute('data-client-key')).not.toBe(initialCaptureKey)
+  })
+
   it('captures the exact normalized offer, refreshes by saved line id, and closes only after refresh succeeds', async () => {
     const user = userEvent.setup()
     const onSaved = vi.fn(async () => true)
@@ -447,6 +491,62 @@ describe('ManualPartSourcing', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(onSaved).toHaveBeenNthCalledWith(2, lineId)
+  })
+
+  it('keeps strict capture truth when the first refresh rejects and never reposts the saved offer', async () => {
+    const user = userEvent.setup()
+    const lineId = '00000000-0000-4000-8000-000000000401'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onSaved = vi.fn()
+      .mockRejectedValueOnce(new TypeError('refresh interrupted'))
+      .mockResolvedValueOnce(true)
+    const onClose = vi.fn()
+    render(<ManualPartSourcing {...props({ onSaved, onClose })} />)
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Part saved. Refresh the quote to see current totals.')
+    expect(screen.queryByRole('button', { name: /Add 2 Brake pads/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(onSaved).toHaveBeenNthCalledWith(2, lineId)
+  })
+
+  it('resets offer lifecycle before close so a controlled reopen is fresh without losing supplier choices', async () => {
+    const user = userEvent.setup()
+    let uuidSequence = 900
+    vi.mocked(crypto.randomUUID).mockImplementation(() => (
+      `00000000-0000-4000-8000-${String(++uuidSequence).padStart(12, '0')}`
+    ))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({
+      vendorAccountId: ACCOUNT_TWO.id,
+    })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    })))
+    const onClose = vi.fn()
+    const controlledProps = props({ accounts: [ACCOUNT_ONE, ACCOUNT_TWO], onClose })
+    const { rerender } = render(<ManualPartSourcing {...controlledProps} />)
+    const firstCaptureKey = screen.getByRole('dialog').getAttribute('data-client-key')
+    await user.click(screen.getByRole('radio', { name: 'Metro Supply' }))
+    await fillRequiredOffer(user)
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+
+    rerender(<ManualPartSourcing {...controlledProps} open={false} />)
+    rerender(<ManualPartSourcing {...controlledProps} open />)
+
+    expect(screen.getByLabelText('Part description')).toHaveValue('')
+    expect(screen.getByLabelText('Quantity')).toHaveValue('1')
+    expect(screen.getByRole('radio', { name: 'Northside Parts' })).not.toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Metro Supply' })).not.toBeChecked()
+    expect(screen.getByRole('dialog').getAttribute('data-client-key')).not.toBe(firstCaptureKey)
+    expect(screen.queryByRole('button', { name: 'Refresh quote' })).toBeNull()
   })
 
   it('reports supplier partial success when later capture fails and preserves every offer field', async () => {

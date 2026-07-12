@@ -107,6 +107,28 @@ export function ManualPartSourcing({
     })
   }
 
+  function resetOfferLifecycle() {
+    const resetAccountId = localAccounts.length === 1 ? localAccounts[0].id : ''
+    const resetDraft = createManualPartDraft(resetAccountId)
+    initialSignature.current = normalizedManualPartSignature(resetDraft)
+    setDraft(resetDraft)
+    setClientKey(crypto.randomUUID())
+    setAccountFormOpen(false)
+    setAccountName('')
+    setAccountClientKey(null)
+    setSavedLineId(null)
+    setDetailsOpen(false)
+    setConfirmingClose(false)
+    setStatus('')
+    closeReturnFocusRef.current = null
+    supplierCreatedRef.current = false
+  }
+
+  function closeAfterSuccessfulRefresh() {
+    resetOfferLifecycle()
+    onClose()
+  }
+
   function requestClose() {
     if (dirty) {
       closeReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -224,7 +246,7 @@ export function ManualPartSourcing({
       setLocalAccounts((current) => current.some((account) => account.id === parsed.vendorAccount.id)
         ? current
         : [...current, parsed.vendorAccount])
-      setDraft((current) => ({ ...current, vendorAccountId: parsed.vendorAccount.id }))
+      updateDraft('vendorAccountId', parsed.vendorAccount.id)
       setAccountFormOpen(false)
       onAccountCreated(parsed.vendorAccount)
       setStatus('Supplier saved. Continue with the part details.')
@@ -273,9 +295,15 @@ export function ManualPartSourcing({
         return
       }
       setSavedLineId(parsed.line.id)
-      const refreshed = await onSaved(parsed.line.id)
+      let refreshed
+      try {
+        refreshed = await onSaved(parsed.line.id)
+      } catch {
+        setStatus('Part saved. Refresh the quote to see current totals.')
+        return
+      }
       if (refreshed) {
-        onClose()
+        closeAfterSuccessfulRefresh()
         return
       }
       setStatus('Part saved. Refresh the quote to see current totals.')
@@ -294,8 +322,10 @@ export function ManualPartSourcing({
     setMutationBusy(true)
     onBusyChange(true)
     try {
-      if (await onSaved(savedLineId)) onClose()
+      if (await onSaved(savedLineId)) closeAfterSuccessfulRefresh()
       else setStatus('Part saved. Refresh the quote to see current totals.')
+    } catch {
+      setStatus('Part saved. Refresh the quote to see current totals.')
     } finally {
       setMutationBusy(false)
       onBusyChange(false)
