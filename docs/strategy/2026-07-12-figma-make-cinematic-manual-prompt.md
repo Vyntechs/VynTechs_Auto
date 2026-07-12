@@ -195,3 +195,62 @@ Make's output is the **approval artifact for motion**, not automatically the shi
 ## 7. Ethics carried into motion (binding, unchanged)
 
 Absence never performs. The signature never animates. EXAMPLE and PLACEHOLDER tags live on-screen inside their scenes, not in fine print. All numbers canonical from this prompt — the generator is told to invent nothing. Reduced-motion = complete static manual.
+
+## 8. PROMPT B — the blank-canvas control (Brandon, 2026-07-12)
+
+Same product, same goal, **zero design direction** — Make owns concept, palette, type, layout, motion, metaphor. Only two fences stay: the goal (they define success) and the truth rules (they are the brand, not art direction). Run in a **separate Make file with no attachments** — attaching v3 frames would contaminate the experiment.
+
+```
+Design and build a launch-grade marketing website for a real product. You own
+every creative decision — concept, art direction, palette, typography, layout,
+motion, imagery, metaphor, copy tone. We are deliberately giving you no design
+direction. Surprise us. Take a real risk. The only failure is resembling what
+everyone else makes: if the result could be mistaken for a typical AI or SaaS
+landing page, it has failed, no matter how polished.
+
+THE PRODUCT (facts — the only claims you may make)
+Vyntechs Shop OS: software for independent auto-repair shops (1–20 bays). It runs
+the entire job: counter check-in → tech assignment → diagnosis → an evidence-backed
+story the customer can read → quote approval → closeout. Its signature: the
+refuse-to-guess engine. Every diagnosis carries a calibrated confidence number;
+below the line, the send-quote action does not exist — not disabled, gone. A quote
+becomes sendable only when it carries its proof: the words, the evidence, the
+measurement, and the name of the tech who called it.
+True material you may show (nothing else):
+· An example case, labeled EXAMPLE: ticket №1042, F-150 3.5L EcoBoost, boost
+  measured 11.2 PSI against a 17.4 PSI spec, a smoke test confirming a clamp-seam
+  leak, called by M. Rivera at 14:41, confidence 87.0. The customer is told: "The
+  pipe that feeds your turbo is leaking at a clamp seam. We're replacing the
+  clamp — not your turbo."
+· A blocked case at confidence 43.4 — same engine, thinner evidence, no button.
+· An example day, labeled EXAMPLE: seven steps, 07:42 check-in to 16:15 closed,
+  paid, documented.
+· Pricing, labeled PLACEHOLDER — PRICING MODEL PENDING: $100 per technician per
+  month. No contract, cancel any month, your data leaves with you. No SOC 2
+  badge yet — we say so ourselves.
+· The founder's words: "I built this because I was tired of watching good techs
+  eat the blame for bad guesses."
+
+THE AUDIENCE
+Primary: the owner of an independent repair shop who still turns wrenches. He has
+bought shop software that filed tickets and helped nobody, and AI tools that
+guessed. He is skeptical of everything, especially marketing. Secondary, reading
+over his shoulder: software engineers and recruiters who will inspect this page
+like source code to judge the founder who shipped it.
+
+THE GOAL
+One job: turn that skeptical owner into someone who runs one day's tickets through
+the product. The page should make him feel it was built by someone who has eaten a
+comeback — and make the engineer close the tab wanting to know who built this.
+It must be a showpiece: the kind of site that gets screen-recorded and shared.
+Motion and interaction should make a visitor want to read, never require them to.
+
+TRUTH RULES (non-negotiable — they are the brand)
+Invent nothing: no testimonials, no customer logos, no star ratings, no
+statistics, no urgency, and no numbers beyond those listed above. The EXAMPLE and
+PLACEHOLDER labels stay visible on-screen wherever that material appears. If
+honesty and persuasion ever conflict, honesty wins — persuade with what is true,
+or not at all.
+```
+
+**A/B protocol:** Prompt A tests Make's *obedience* (can it execute our art direction); Prompt B tests its *taste* (what it invents unconstrained). Judge B by the same bar as everything else: thumbnail test, familiarity test, receipt test. Expected outcome: B lands in an AI-default look — that result is data, not waste; if B beats A anywhere, we steal that piece.
