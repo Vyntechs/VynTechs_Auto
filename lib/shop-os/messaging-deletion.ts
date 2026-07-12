@@ -504,7 +504,7 @@ export async function requestMessagingDeletion(rawInput: {
 }
 
 type CleanupRequest = RequestRow & { shopId: string; subjectKey: string; requestKey: string }
-type SendRow = { id: string; state: string; customerId: string | null }
+type SendRow = { id: string; state: string; customerId: string | null; subjectKey: string }
 type HoldRow = { resourceType: string | null; resourceId: string | null; subjectKey: string | null }
 type ConsentProjectionRow = MessagingPair & { id: string; subjectKey: string }
 type ConsentEventRow = MessagingPair & { id: string; subjectKey: string }
@@ -580,7 +580,7 @@ export async function completeMessagingDeletion(rawInput: {
       if (!customer) return { ok: false, error: 'not_found' }
 
       const sends = unwrapRows<SendRow>(await tx.execute(sql`
-        select id, state, customer_id as "customerId" from quote_sends
+        select id, state, customer_id as "customerId", subject_key as "subjectKey" from quote_sends
         where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
         order by id limit ${MAX_SENDS + 1} for update
       `))
@@ -607,8 +607,9 @@ export async function completeMessagingDeletion(rawInput: {
           and quote_send_id = any(${sql.param(sendIds)}::uuid[])
         order by id limit ${MAX_SMS_LOGS + 1} for update
       `))
-      const notificationRows = unwrapRows<{ id: string }>(await tx.execute(sql`
-        select id from notifications where shop_id = ${request.shopId}::uuid
+      const notificationRows = unwrapRows<{ id: string; entityType: string; entityId: string }>(await tx.execute(sql`
+        select id, entity_type as "entityType", entity_id as "entityId"
+        from notifications where shop_id = ${request.shopId}::uuid
           and ((entity_type = 'customer' and entity_id = ${request.customerId}::uuid)
             or (entity_type = 'quote_send'
               and entity_id = any(${sql.param(sendIds)}::uuid[])))
@@ -616,6 +617,7 @@ export async function completeMessagingDeletion(rawInput: {
       `))
       const subjectKeys = [...new Set([
         request.subjectKey,
+        ...sends.map(({ subjectKey }) => subjectKey),
         ...consentProjections.map(({ subjectKey }) => subjectKey),
         ...consentEvents.map(({ subjectKey }) => subjectKey),
       ])].sort()
@@ -654,10 +656,19 @@ export async function completeMessagingDeletion(rawInput: {
           || consentEvents.some((event) => event.subjectKey === subjectKey
             && holds.some((hold) => hold.resourceType === 'messaging_consent_event'
               && hold.resourceId === event.id))))
-      const customerSubjectHeld = heldSubjectKeys.size > 0
-      const held = (type: string, id: string) => customerSubjectHeld || holds.some((hold) =>
+      const resourceHeld = (type: string, id: string) => holds.some((hold) =>
         hold.resourceType === type && hold.resourceId === id)
-      const heldSmsParents = new Set(smsRows.filter(({ id }) => held('sms_log', id))
+      const sendsById = new Map(sends.map((send) => [send.id, send]))
+      const sendHeld = (send: SendRow) => heldSubjectKeys.has(send.subjectKey)
+        || resourceHeld('quote_send', send.id)
+      const smsHeld = (row: SmsRow) => resourceHeld('sms_log', row.id)
+        || heldSubjectKeys.has(sendsById.get(row.quoteSendId)?.subjectKey ?? '')
+      const notificationHeld = (row: { id: string; entityType: string; entityId: string }) =>
+        resourceHeld('notification', row.id)
+        || (row.entityType === 'customer' && heldSubjectKeys.has(request.subjectKey))
+        || (row.entityType === 'quote_send'
+          && heldSubjectKeys.has(sendsById.get(row.entityId)?.subjectKey ?? ''))
+      const heldSmsParents = new Set(smsRows.filter(smsHeld)
         .map(({ quoteSendId }) => quoteSendId))
 
       const priorCounts = Object.freeze({
@@ -715,22 +726,21 @@ export async function completeMessagingDeletion(rawInput: {
         consentDeleted += Math.max(0, compacted - 1)
       }
 
+      const deletableSmsIds = smsRows.filter((row) => !smsHeld(row)).map(({ id }) => id)
       const smsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (delete from sms_log l where l.shop_id = ${request.shopId}::uuid
-          and ${!customerSubjectHeld}
-          and l.quote_send_id = any(${sql.param(sendIds)}::uuid[])
+          and l.id = any(${sql.param(deletableSmsIds)}::uuid[])
           and not exists (select 1 from messaging_retention_holds h
             where h.shop_id = l.shop_id and h.resource_type = 'sms_log' and h.resource_id = l.id
               and h.released_at is null and h.starts_at <= clock_timestamp()
               and h.expires_at > clock_timestamp()) returning 1)
         select count(*)::int as count from deleted
       `))[0]?.count ?? 0
+      const deletableNotificationIds = notificationRows.filter((row) => !notificationHeld(row))
+        .map(({ id }) => id)
       const notificationsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (delete from notifications n where n.shop_id = ${request.shopId}::uuid
-          and ${!customerSubjectHeld}
-          and ((n.entity_type = 'customer' and n.entity_id = ${request.customerId}::uuid)
-            or (n.entity_type = 'quote_send'
-              and n.entity_id = any(${sql.param(sendIds)}::uuid[])))
+          and n.id = any(${sql.param(deletableNotificationIds)}::uuid[])
           and not exists (select 1 from messaging_retention_holds h
               where h.shop_id = n.shop_id and h.resource_type = 'notification' and h.resource_id = n.id
                 and h.released_at is null and h.starts_at <= clock_timestamp()
@@ -741,7 +751,7 @@ export async function completeMessagingDeletion(rawInput: {
       let sendsDeleted = 0
       let sendsRetained = 0
       for (const send of sends) {
-        if (!held('quote_send', send.id) && !heldSmsParents.has(send.id)) {
+        if (!sendHeld(send) && !heldSmsParents.has(send.id)) {
           await tx.execute(sql`delete from quote_sends where id = ${send.id}::uuid`)
           sendsDeleted += 1
           continue
@@ -784,12 +794,8 @@ export async function completeMessagingDeletion(rawInput: {
       const heldConsentProjections = consentProjections.filter(({ subjectKey }) =>
         heldSubjectKeys.has(subjectKey)).length
       const heldQuoteSends = sendsRetained
-      const heldSmsLogs = customerSubjectHeld
-        ? smsRows.length
-        : smsRows.filter(({ id }) => held('sms_log', id)).length
-      const heldNotifications = customerSubjectHeld
-        ? notificationRows.length
-        : notificationRows.filter(({ id }) => held('notification', id)).length
+      const heldSmsLogs = smsRows.filter(smsHeld).length
+      const heldNotifications = notificationRows.filter(notificationHeld).length
       const retained = Object.freeze({
         heldConsentEvents,
         heldConsentProjections,

@@ -715,6 +715,7 @@ export const quoteSends = pgTable(
     ticketId: uuid('ticket_id').notNull(),
     quoteVersionId: uuid('quote_version_id').notNull(),
     customerId: uuid('customer_id'),
+    subjectKey: uuid('subject_key').notNull(),
     destinationFingerprint: text('destination_fingerprint').notNull(),
     fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
     channel: text('channel', { enum: ['sms'] }).notNull(),
@@ -781,6 +782,12 @@ export const quoteSends = pgTable(
       table.fingerprintKeyVersion,
     ),
     index('quote_sends_purge_idx').on(table.state, table.retainUntil, table.id),
+    index('quote_sends_subject_retention_idx').on(
+      table.shopId,
+      table.subjectKey,
+      table.retainUntil,
+      table.id,
+    ),
     check(
       'quote_sends_destination_fingerprint_valid',
       sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,

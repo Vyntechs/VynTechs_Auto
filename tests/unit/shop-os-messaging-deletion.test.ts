@@ -120,6 +120,7 @@ describe('suppression-first messaging deletion', () => {
     keyVersion: 'key_v1' | 'key_v2' = 'key_v2',
     sendDestination = destination,
     sendCustomerId = customerId,
+    subjectKey = sendCustomerId,
   ) => {
     const createdAt = new Date('2026-07-12T10:00:00.000Z')
     const submittingAt = ['submitting', 'submitted', 'delivered'].includes(state)
@@ -128,7 +129,7 @@ describe('suppression-first messaging deletion', () => {
       ? new Date('2026-07-12T10:02:00.000Z') : null
     const current = fingerprintDestination(sendDestination, keyVersion, keyRing.keys[keyVersion]!)
     await db.insert(quoteSends).values({
-      id, shopId, ticketId, quoteVersionId: versionId, customerId: sendCustomerId,
+      id, shopId, ticketId, quoteVersionId: versionId, customerId: sendCustomerId, subjectKey,
       destinationFingerprint: current, fingerprintKeyVersion: keyVersion, channel: 'sms',
       tokenHash: 'd'.repeat(64), tokenExpiresAt: new Date('2026-07-13T10:00:00.000Z'),
       requestingActorProfileId: owner.profileId, requestKey: uuid(500 + Number(id.slice(-3))),
@@ -164,6 +165,7 @@ describe('suppression-first messaging deletion', () => {
     if (type === 'sends') {
       await db.insert(quoteSends).values(Array.from({ length: count }, (_, index) => ({
         id: uuid(10_000 + index), shopId, ticketId, quoteVersionId: versionId, customerId,
+        subjectKey: customerId,
         destinationFingerprint: current, fingerprintKeyVersion: 'key_v2' as const, channel: 'sms' as const,
         tokenHash: 'd'.repeat(64), tokenExpiresAt: new Date('2026-07-13T10:00:00.000Z'),
         requestingActorProfileId: owner.profileId, requestKey: uuid(11_000 + index),
@@ -387,7 +389,7 @@ describe('suppression-first messaging deletion', () => {
     `)
     const createdAt = new Date('2026-07-12T10:00:00.000Z')
     await db.insert(quoteSends).values({
-      id: uuid(87), shopId, ticketId, quoteVersionId: versionId, customerId,
+      id: uuid(87), shopId, ticketId, quoteVersionId: versionId, customerId, subjectKey: customerId,
       destinationFingerprint: 'malformed', fingerprintKeyVersion: 'key_v1', channel: 'sms',
       tokenHash: 'd'.repeat(64), tokenExpiresAt: new Date('2026-07-13T10:00:00.000Z'),
       requestingActorProfileId: owner.profileId, requestKey: uuid(587),
@@ -786,9 +788,41 @@ describe('suppression-first messaging deletion', () => {
     expect((await db.select().from(messagingDeletionRequests))[0]!.proofSummary)
       .toMatchObject({ retained: { heldQuoteSends: 2, total: 2 } })
     expect(await db.select().from(quoteSends)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: currentSend, customerId: null, tokenHash: null }),
-      expect.objectContaining({ id: legacySend, customerId: null, tokenHash: null }),
+      expect.objectContaining({ id: currentSend, customerId: null, subjectKey: customerId, tokenHash: null }),
+      expect.objectContaining({ id: legacySend, customerId: null, subjectKey: customerId, tokenHash: null }),
     ]))
+  })
+
+  it('maps same-customer sends to their own durable subjects after customer detachment', async () => {
+    const heldSubject = uuid(158)
+    const openSubject = uuid(159)
+    const heldSend = uuid(160)
+    const openSend = uuid(161)
+    await insertSend(heldSend, 'submitted', 'key_v2', destination, customerId, heldSubject)
+    await insertSend(openSend, 'submitted', 'key_v2', destination, customerId, openSubject)
+    await activeHold({ subjectKey: heldSubject })
+
+    const pending = await request({ requestKey: uuid(162) })
+    if (!pending.ok) throw new Error('request failed')
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({
+        ok: true,
+        counts: { quoteSendsDeleted: 1, quoteSendsRetained: 1 },
+      })
+
+    const sends = await db.select().from(quoteSends)
+    expect(sends).toEqual([
+      expect.objectContaining({ id: heldSend, customerId: null, subjectKey: heldSubject, tokenHash: null }),
+    ])
+    const eligibleAssociation = await db.execute<{ id: string }>(sql`
+      select q.id from quote_sends q
+      join messaging_retention_holds h
+        on h.shop_id = q.shop_id and h.subject_key = q.subject_key
+      where q.id = ${heldSend}::uuid and q.customer_id is null
+        and h.released_at is null
+        and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
+    `)
+    expect(eligibleAssociation.rows).toEqual([{ id: heldSend }])
   })
 
   it('retains and detaches a send with a held child SMS, but deletes released and expired resources', async () => {
@@ -1005,6 +1039,7 @@ describe('suppression-first messaging deletion', () => {
     const createdAt = new Date('2026-07-12T10:00:00Z')
     await db.insert(quoteSends).values(Array.from({ length: historicalCount }, (_, index) => ({
       id: uuid(60_000 + index), shopId, ticketId, quoteVersionId: versionId, customerId,
+      subjectKey: customerId,
       destinationFingerprint: (index + 1).toString(16).padStart(64, '0'),
       fingerprintKeyVersion: 'key_v2', channel: 'sms' as const,
       requestingActorProfileId: owner.profileId, requestKey: uuid(61_000 + index),

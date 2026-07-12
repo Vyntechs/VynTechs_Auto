@@ -199,6 +199,7 @@ create table quote_sends (
   ticket_id uuid not null,
   quote_version_id uuid not null,
   customer_id uuid,
+  subject_key uuid not null,
   destination_fingerprint text not null,
   fingerprint_key_version text not null,
   channel text not null,
@@ -267,6 +268,8 @@ create unique index quote_sends_shop_actor_request_uq on quote_sends (shop_id, r
 create index quote_sends_destination_idx on quote_sends (shop_id, destination_fingerprint, fingerprint_key_version);
 --> statement-breakpoint
 create index quote_sends_purge_idx on quote_sends (state, retain_until, id);
+--> statement-breakpoint
+create index quote_sends_subject_retention_idx on quote_sends (shop_id, subject_key, retain_until, id);
 --> statement-breakpoint
 create table sms_log (
   id uuid primary key default gen_random_uuid(),
@@ -387,6 +390,10 @@ declare
   approved_deletion_barrier timestamptz;
   locked_suppression_id uuid;
 begin
+  if new.subject_key is distinct from old.subject_key then
+    raise exception 'quote send subject identity is immutable';
+  end if;
+
   if old.customer_id is null and new.customer_id is not null
     or (old.customer_id is not null and new.customer_id is not null
       and new.customer_id is distinct from old.customer_id) then
@@ -1207,6 +1214,14 @@ declare
   deleted_count integer;
   request_subject_key uuid;
 begin
+  perform 1
+  from public.shops locked_shop
+  where locked_shop.id = p_shop_id
+  for update;
+  if not found then
+    return false;
+  end if;
+
   select subject_key
   into request_subject_key
   from public.messaging_deletion_requests
@@ -1222,7 +1237,7 @@ begin
     where shop_id = p_shop_id
       and id = p_request_id
       and state = 'completed'
-      and retain_until <= now()
+      and retain_until <= clock_timestamp()
   ) then
     return false;
   end if;
@@ -1232,8 +1247,8 @@ begin
     from public.messaging_retention_holds h
     where h.shop_id = p_shop_id
       and h.released_at is null
-      and h.starts_at <= now()
-      and h.expires_at > now()
+      and h.starts_at <= clock_timestamp()
+      and h.expires_at > clock_timestamp()
       and (
         h.subject_key = request_subject_key
         or (h.resource_type = 'messaging_deletion_request' and h.resource_id = p_request_id)
@@ -1247,7 +1262,7 @@ begin
     where shop_id = p_shop_id
       and id = p_request_id
       and state = 'completed'
-      and retain_until <= now();
+      and retain_until <= clock_timestamp();
   get diagnostics deleted_count = row_count;
   return deleted_count = 1;
 end;

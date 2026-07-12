@@ -66,6 +66,7 @@ async function insertQuoteSend(
     ticketId: string
     quoteVersionId: string
     customerId: string
+    subjectKey: string
     actorId: string
     tokenHash: string | null
     tokenExpiresAt: string | null
@@ -86,6 +87,7 @@ async function insertQuoteSend(
     ticketId: tenant.ticketId,
     quoteVersionId: tenant.quoteVersionId,
     customerId: tenant.customerId,
+    subjectKey: tenant.customerId,
     actorId: tenant.actorId,
     tokenHash: hex,
     tokenExpiresAt: "now() + interval '1 day'",
@@ -103,18 +105,18 @@ async function insertQuoteSend(
   }
   const result = await client.query<{ id: string }>(
     `insert into quote_sends (
-      shop_id, ticket_id, quote_version_id, customer_id,
+      shop_id, ticket_id, quote_version_id, customer_id, subject_key,
       destination_fingerprint, fingerprint_key_version, channel,
       token_hash, token_expires_at, requesting_actor_profile_id,
       request_key, request_fingerprint, state, submitting_at,
       submitted_at, terminal_at, retain_until, created_at
     ) values (
-      $1, $2, $3, $4, $5, $6, 'sms', $7,
-      ${values.tokenExpiresAt ?? 'null'}, $8, $9, $10, $11,
+      $1, $2, $3, $4, $5, $6, $7, 'sms', $8,
+      ${values.tokenExpiresAt ?? 'null'}, $9, $10, $11, $12,
       ${values.submittingAt ?? 'null'}, ${values.submittedAt ?? 'null'},
       ${values.terminalAt ?? 'null'}, ${values.retainUntil ?? 'null'}, ${values.createdAt}
     ) returning id`,
-    [values.shopId, values.ticketId, values.quoteVersionId, values.customerId,
+    [values.shopId, values.ticketId, values.quoteVersionId, values.customerId, values.subjectKey,
       values.destinationFingerprint, values.fingerprintKeyVersion, values.tokenHash,
       values.actorId, values.requestKey, values.requestFingerprint, values.state],
   )
@@ -333,6 +335,7 @@ describe('Shop OS messaging retention source schema', () => {
       ticketId: expect.anything(),
       quoteVersionId: expect.anything(),
       customerId: expect.anything(),
+      subjectKey: expect.anything(),
       destinationFingerprint: expect.anything(),
       fingerprintKeyVersion: expect.anything(),
       channel: expect.anything(),
@@ -348,6 +351,7 @@ describe('Shop OS messaging retention source schema', () => {
       retainUntil: expect.anything(),
     })
     expect(getTableColumns(quoteSends).customerId.notNull).toBe(false)
+    expect(getTableColumns(quoteSends).subjectKey.notNull).toBe(true)
     expect(getTableColumns(smsLog)).toMatchObject({
       shopId: expect.anything(),
       quoteSendId: expect.anything(),
@@ -801,6 +805,10 @@ describe('Shop OS messaging retention source schema', () => {
           token_expires_at = now() + interval '1 day' where id = $2`,
         [otherHex, sendId],
       )).rejects.toThrow(/revoked quote send token cannot be restored or reassigned/)
+      await expect(fixture.client.query(
+        'update quote_sends set subject_key = $1 where id = $2',
+        [crypto.randomUUID(), sendId],
+      )).rejects.toThrow(/quote send subject identity is immutable/)
     } finally {
       await fixture.close()
     }
@@ -2142,6 +2150,29 @@ describe('Shop OS messaging retention source schema', () => {
       )
       expect(atBoundary.rows[0]?.purged).toBe(true)
       await fixture.client.exec('commit')
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('locks the exact shop before the tombstone and revalidates expiry after both locks', async () => {
+    const fixture = await createTestDb()
+    try {
+      const source = (await fixture.client.query<{ definition: string }>(`
+        select pg_get_functiondef(
+          'purge_expired_messaging_deletion_request(uuid,uuid)'::regprocedure
+        ) as definition
+      `)).rows[0]!.definition.toLowerCase().replace(/\s+/g, ' ')
+      const shopLock = 'from public.shops locked_shop where locked_shop.id = p_shop_id for update'
+      const requestLock = 'from public.messaging_deletion_requests where shop_id = p_shop_id and id = p_request_id for update'
+      const expiryCheck = 'and retain_until <= clock_timestamp()'
+      const holdCheck = 'from public.messaging_retention_holds h'
+      expect(source).toContain(shopLock)
+      expect(source).toContain(requestLock)
+      expect(source).toContain(expiryCheck)
+      expect(source.indexOf(shopLock)).toBeLessThan(source.indexOf(requestLock))
+      expect(source.indexOf(requestLock)).toBeLessThan(source.indexOf(expiryCheck))
+      expect(source.indexOf(expiryCheck)).toBeLessThan(source.indexOf(holdCheck))
     } finally {
       await fixture.close()
     }

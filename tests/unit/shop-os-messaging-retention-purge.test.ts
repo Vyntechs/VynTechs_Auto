@@ -115,7 +115,7 @@ describe('messaging retention holds and bounded purge', () => {
     const createdAt = new Date('2019-01-01T00:00:00.000Z')
     const terminalAt = new Date('2020-01-01T00:00:00.000Z')
     await db.insert(quoteSends).values({
-      id: sendId, shopId, ticketId, quoteVersionId, customerId,
+      id: sendId, shopId, ticketId, quoteVersionId, customerId, subjectKey: customerId,
       destinationFingerprint: fingerprint, fingerprintKeyVersion: 'key_v1', channel: 'sms',
       requestingActorProfileId: owner.profileId, requestKey: uuid(140 + Number(sendId.slice(-2))),
       requestFingerprint: 'b'.repeat(64), state: 'cancelled', createdAt, terminalAt,
