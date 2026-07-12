@@ -75,6 +75,7 @@ export function ManualPartSourcing({
   const panelRef = useRef<HTMLElement | null>(null)
   const confirmRef = useRef<HTMLElement | null>(null)
   const keepEditingRef = useRef<HTMLButtonElement | null>(null)
+  const closeReturnFocusRef = useRef<HTMLElement | null>(null)
 
   const dirty = normalizedManualPartSignature(draft) !== initialSignature.current
 
@@ -91,6 +92,7 @@ export function ManualPartSourcing({
 
   function requestClose() {
     if (dirty) {
+      closeReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setConfirmingClose(true)
       return
     }
@@ -127,7 +129,8 @@ export function ManualPartSourcing({
   useEffect(() => {
     if (!open) return
     const error = firstInvalidField(draft, catalogAvailable)
-    fieldRefs.current[error?.key ?? 'description']?.focus()
+    const focusKey = !catalogAvailable || accounts.length === 0 ? 'vendorAccountId' : error?.key ?? 'description'
+    fieldRefs.current[focusKey]?.focus()
     // Initial focus is set only when the panel opens; validation handles later changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -155,6 +158,12 @@ export function ManualPartSourcing({
     updateDraft('description', diagnosisSeed.description)
   }
 
+  function keepEditing() {
+    const target = closeReturnFocusRef.current
+    setConfirmingClose(false)
+    queueMicrotask(() => target?.focus())
+  }
+
   return (
     <section
       ref={panelRef}
@@ -176,7 +185,7 @@ export function ManualPartSourcing({
         <form className={styles.form} onSubmit={submit} noValidate>
         <div className={styles.body}>
           {!catalogAvailable ? (
-            <p className={styles.notice}>Sourcing is temporarily unavailable. Manual quote entry still works.</p>
+            <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>Sourcing is temporarily unavailable. Manual quote entry still works.</p>
           ) : (
             <fieldset className={styles.fieldset}>
               <legend>Supplier</legend>
@@ -197,9 +206,9 @@ export function ManualPartSourcing({
                   ))}
                 </div>
               ) : canCreateVendorAccount ? (
-                <button type="button" className={styles.secondary}>Add supplier</button>
+                <button ref={(node) => { fieldRefs.current.vendorAccountId = node }} type="button" className={styles.secondary}>Add supplier</button>
               ) : (
-                <p className={styles.notice}>An owner needs to add a supplier before this part can be sourced.</p>
+                <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier before this part can be sourced.</p>
               )}
             </fieldset>
           )}
@@ -314,7 +323,7 @@ export function ManualPartSourcing({
             <h3 id="discard-draft-title">Discard sourced part draft?</h3>
             <p>The details entered here are kept only while this quote is open.</p>
             <div>
-              <button ref={keepEditingRef} type="button" onClick={() => setConfirmingClose(false)}>Keep editing</button>
+              <button ref={keepEditingRef} type="button" onClick={keepEditing}>Keep editing</button>
               <button type="button" className={styles.danger} onClick={onClose}>Discard draft</button>
             </div>
           </section>
@@ -391,7 +400,7 @@ function firstInvalidField(draft: ManualPartDraft, catalogAvailable: boolean): F
   if (draft.fitment.trim().length > 500) return { key: 'fitment', label: 'Fitment', details: true }
   if (draft.externalOfferId.trim().length > 500) return { key: 'externalOfferId', label: 'Human reference', details: true }
   if (!validMoney(draft.coreCharge)) return { key: 'coreCharge', label: 'Supplier core charge', details: true }
-  if (draft.locationLabel.trim().length > 500) return { key: 'locationLabel', label: 'Location label', details: true }
+  if (draft.fulfillmentMethod !== 'unknown' && draft.locationLabel.trim().length > 500) return { key: 'locationLabel', label: 'Location label', details: true }
   return null
 }
 

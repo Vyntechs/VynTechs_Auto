@@ -95,6 +95,27 @@ describe('ManualPartSourcing', () => {
     expect(screen.queryByRole('button', { name: 'Add supplier' })).toBeNull()
   })
 
+  it.each([
+    {
+      label: 'manager action',
+      overrides: { accounts: [], canCreateVendorAccount: true },
+      target: () => screen.getByRole('button', { name: 'Add supplier' }),
+    },
+    {
+      label: 'non-manager notice',
+      overrides: { accounts: [], canCreateVendorAccount: false },
+      target: () => screen.getByText('An owner needs to add a supplier before this part can be sourced.'),
+    },
+    {
+      label: 'catalog-unavailable notice',
+      overrides: { accounts: [], catalogAvailable: false, canCreateVendorAccount: true },
+      target: () => screen.getByText('Sourcing is temporarily unavailable. Manual quote entry still works.'),
+    },
+  ])('focuses the first honest zero-account $label when the panel opens', ({ overrides, target }) => {
+    render(<ManualPartSourcing {...props(overrides)} />)
+    expect(target()).toHaveFocus()
+  })
+
   it('starts with honest capture defaults and accessible decimal fields', () => {
     render(<ManualPartSourcing {...props()} />)
     expect(screen.getByLabelText('Quantity')).toHaveValue('1')
@@ -192,6 +213,21 @@ describe('ManualPartSourcing', () => {
     expect(keepEditing).toHaveFocus()
     await user.tab({ shift: true })
     expect(discard).toHaveFocus()
+
+    await user.click(keepEditing)
+    expect(screen.getByRole('button', { name: 'Close part sourcing' })).toHaveFocus()
+  })
+
+  it('restores the field that owned focus before Escape after Keep editing', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props()} />)
+    const description = screen.getByLabelText('Part description')
+    await user.type(description, 'Pads')
+    expect(description).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep editing' }))
+    expect(description).toHaveFocus()
   })
 
   it('clears stale submitted status after a correction so the next required issue is announced', async () => {
@@ -221,6 +257,22 @@ describe('ManualPartSourcing', () => {
     await user.click(screen.getByRole('button', { name: /^Add / }))
     expect(screen.getByRole('status')).toHaveTextContent('Supplier unit cost')
     expect(screen.getByLabelText('Supplier unit cost')).toHaveFocus()
+  })
+
+  it('ignores a stale location label while fulfillment is unknown', async () => {
+    const user = userEvent.setup()
+    render(<ManualPartSourcing {...props()} />)
+    await user.type(screen.getByLabelText('Part description'), 'Pads')
+    await user.type(screen.getByLabelText('Supplier unit cost'), '80')
+    await user.type(screen.getByLabelText('Customer line price'), '120')
+    await user.click(screen.getByRole('button', { name: 'Part details' }))
+    await user.click(screen.getByRole('radio', { name: 'Pickup' }))
+    fireEvent.change(screen.getByLabelText('Location label'), { target: { value: 'x'.repeat(501) } })
+    await user.click(screen.getByRole('radio', { name: 'Unknown fulfillment' }))
+
+    await user.click(screen.getByRole('button', { name: /Add 1 Pads/ }))
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    expect(screen.queryByLabelText('Location label')).toBeNull()
   })
 
   it('rotates the retry key only when normalized draft intent changes', () => {
