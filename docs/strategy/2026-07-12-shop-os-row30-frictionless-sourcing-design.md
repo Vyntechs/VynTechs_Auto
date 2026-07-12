@@ -1,6 +1,6 @@
 # Shop OS Row 30 — Frictionless Part Capture Design
 
-**Status:** Written design awaiting owner review. No implementation authority yet.
+**Status:** Owner-approved 2026-07-12. Implementation authority is defined by the companion execution plan.
 
 ## Outcome
 

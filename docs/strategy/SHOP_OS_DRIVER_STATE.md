@@ -1,10 +1,10 @@
 # Shop OS driver state
 
 - **Outcome:** Ship the approved Shop OS plan into `main`, one tested and independently reviewed PR at a time, without changing diagnostic-engine behavior.
-- **Current slice:** Owner-approved Row 30 frictionless sourcing direction is written as a durable design for owner review; implementation remains paused at the design gate.
+- **Current slice:** Row 30's written design is owner-approved and its test-first execution plan is ready; runtime implementation is the next safe slice.
 - **Last proof:** PR #153 is merged as `7352163` and its production deployment is Ready with healthy `200` JSON, correct unauthenticated JSON on the new vendor route, and no fresh Vercel error logs. Row 28 passed the complete 260-file/2,606-test suite, TypeScript, production build, diff checks, and three independent final reviews.
-- **Next safe move:** Obtain owner review of `2026-07-12-shop-os-row30-frictionless-sourcing-design.md`, then create the detailed implementation plan. Do not write Row 30 runtime code before both gates clear.
+- **Next safe move:** Execute `docs/superpowers/plans/2026-07-12-shop-os-row30-frictionless-sourcing.md` task-by-task, starting with strict UI contracts and focused RED/GREEN proof.
 - **Open gates:** Row 26 A2P registration/sender procurement requires business representation and spend. Row 31 requires an owner/legal retention and deletion policy before schema implementation. PartsTech/O'Reilly transport, credentials, live search, ordering, and spend remain external gates. Published-wizard story generation requires a separately approved provenance bridge. True two-connection PostgreSQL `NOWAIT` timing remains deferred to integration proof. Adaptive diagnostic production enablement remains an explicit owner gate.
-- **Worker lanes:** Rows 23–25 and 27–28 are merged, deployed, and verified. Row 30 has one design owner and no runtime writer. Row 31 has no writer and remains behind its retention/legal gate.
+- **Worker lanes:** Rows 23–25 and 27–28 are merged, deployed, and verified. Row 30 has one control owner and an implementation-ready plan; no runtime source has changed yet. Row 31 has no writer and remains behind its retention/legal gate.
 - **Stop only when:** A production database change, external account or credential, spend, irreversible action, or unresolved business decision is required.
 - **Usage balance:** Native tests/git handle routine proof; specialist workers implement/review bounded slices; the control lane reserves strongest effort for convergence, final verification, and merge. Automate repeated route-proof scaffolding after the third stable repeat.
