@@ -1,0 +1,103 @@
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  createTestDb,
+  ensureShopOsServerOnlyAclMigration,
+} from '@/tests/helpers/db'
+
+const closeCallbacks: Array<() => Promise<void>> = []
+
+afterEach(async () => {
+  await Promise.all(closeCallbacks.splice(0).map((close) => close()))
+})
+
+const SERVER_ONLY_TABLES = [
+  'tickets',
+  'ticket_jobs',
+  'job_attachments',
+  'job_lines',
+  'canned_jobs',
+  'quote_versions',
+  'quote_events',
+  'vendor_accounts',
+] as const
+
+describe('Shop OS server-only table ACL hardening', () => {
+  it('revokes every direct anon and authenticated table privilege without changing service CRUD', async () => {
+    const migrationPath = path.join(
+      process.cwd(),
+      'drizzle/migrations/0032_shop_os_server_only_acl.sql',
+    )
+    expect(existsSync(migrationPath), 'source migration 0032 must exist').toBe(true)
+    if (!existsSync(migrationPath)) return
+
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    await client.exec(`
+      grant truncate, references, trigger
+      on ${SERVER_ONLY_TABLES.map((table) => `public.${table}`).join(', ')}
+      to anon, authenticated;
+    `)
+
+    const before = await client.query<{ count: number }>(`
+      select count(*)::int
+      from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name = any(array[${SERVER_ONLY_TABLES.map((table) => `'${table}'`).join(', ')}])
+        and grantee in ('anon', 'authenticated')
+    `)
+    expect(before.rows[0]?.count).toBe(SERVER_ONLY_TABLES.length * 2 * 3)
+
+    await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
+    await expect(ensureShopOsServerOnlyAclMigration(client)).resolves.toBeUndefined()
+
+    const after = await client.query<{ count: number }>(`
+      select count(*)::int
+      from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name = any(array[${SERVER_ONLY_TABLES.map((table) => `'${table}'`).join(', ')}])
+        and grantee in ('anon', 'authenticated')
+    `)
+    expect(after.rows[0]?.count).toBe(0)
+
+    const service = await client.query<{ table_name: string; crud_count: number }>(`
+      select table_name, count(*)::int as crud_count
+      from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name = any(array[${SERVER_ONLY_TABLES.map((table) => `'${table}'`).join(', ')}])
+        and grantee = 'service_role'
+        and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+      group by table_name
+      order by table_name
+    `)
+    expect(service.rows).toEqual(
+      [...SERVER_ONLY_TABLES]
+        .sort()
+        .map((tableName) => ({ table_name: tableName, crud_count: 4 })),
+    )
+  }, 15_000)
+
+  it('fails closed when a server-only table loses required service CRUD', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    await client.exec('revoke select on public.vendor_accounts from service_role;')
+
+    await expect(ensureShopOsServerOnlyAclMigration(client)).rejects.toThrow(
+      'partial Shop OS server-only ACL in ephemeral database',
+    )
+  }, 15_000)
+
+  it('fails closed when PUBLIC grants effective client access', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    await client.exec('grant select on public.tickets to public;')
+
+    await expect(ensureShopOsServerOnlyAclMigration(client)).rejects.toThrow(
+      'Shop OS server-only ACL hardening failed in ephemeral database',
+    )
+  }, 15_000)
+})

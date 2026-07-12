@@ -52,6 +52,7 @@ export async function createTestDb(): Promise<{
   }
   await ensureVendorAccountsMigration(client)
   await ensureQuoteTriggerSearchPathMigration(client)
+  await ensureShopOsServerOnlyAclMigration(client)
   return {
     db,
     client,
@@ -195,5 +196,100 @@ export async function ensureQuoteTriggerSearchPathMigration(client: PGlite): Pro
   const after = await quoteTriggerSearchPaths(client)
   if (after.length !== 2 || after.some(({ proconfig }) => !proconfig?.includes('search_path=""'))) {
     throw new Error(`quote trigger search path hardening failed in ephemeral database: ${JSON.stringify(after)}`)
+  }
+}
+
+const SHOP_OS_SERVER_ONLY_TABLES = [
+  'tickets',
+  'ticket_jobs',
+  'job_attachments',
+  'job_lines',
+  'canned_jobs',
+  'quote_versions',
+  'quote_events',
+  'vendor_accounts',
+] as const
+
+type ShopOsServerOnlyAclMarkers = {
+  table_count: number
+  direct_client_grant_count: number
+  effective_client_privilege_count: number
+  service_crud_count: number
+}
+
+async function shopOsServerOnlyAclMarkers(
+  client: PGlite,
+): Promise<ShopOsServerOnlyAclMarkers> {
+  const expectedTables = SHOP_OS_SERVER_ONLY_TABLES
+    .map((table) => `('${table}')`)
+    .join(', ')
+  const result = await client.query<ShopOsServerOnlyAclMarkers>(`
+    with
+      expected_tables(table_name) as (values ${expectedTables}),
+      client_roles(role_name) as (values ('anon'), ('authenticated')),
+      table_privileges(privilege_name) as (
+        values
+          ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+          ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+      )
+    select
+      (select count(*)::int
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       join expected_tables e on e.table_name = c.relname
+       where n.nspname = 'public' and c.relkind in ('r', 'p')) as table_count,
+      (select count(*)::int
+       from information_schema.role_table_grants g
+       join expected_tables e on e.table_name = g.table_name
+       where g.table_schema = 'public'
+         and g.grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join client_roles r
+       cross join table_privileges p
+       where has_table_privilege(r.role_name, c.oid, p.privilege_name)
+      ) as effective_client_privilege_count,
+      (select count(*)::int
+       from information_schema.role_table_grants g
+       join expected_tables e on e.table_name = g.table_name
+       where g.table_schema = 'public'
+         and g.grantee = 'service_role'
+         and g.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('Shop OS server-only ACL inspection failed')
+  return markers
+}
+
+function hasCompleteShopOsServerOnlyAcl(
+  markers: ShopOsServerOnlyAclMarkers,
+): boolean {
+  return markers.table_count === SHOP_OS_SERVER_ONLY_TABLES.length
+    && markers.direct_client_grant_count === 0
+    && markers.effective_client_privilege_count === 0
+    && markers.service_crud_count === SHOP_OS_SERVER_ONLY_TABLES.length * 4
+}
+
+export async function ensureShopOsServerOnlyAclMigration(client: PGlite): Promise<void> {
+  const before = await shopOsServerOnlyAclMarkers(client)
+  if (
+    before.table_count !== SHOP_OS_SERVER_ONLY_TABLES.length
+    || before.service_crud_count !== SHOP_OS_SERVER_ONLY_TABLES.length * 4
+  ) {
+    throw new Error('partial Shop OS server-only ACL in ephemeral database')
+  }
+  if (hasCompleteShopOsServerOnlyAcl(before)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0032_shop_os_server_only_acl.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await shopOsServerOnlyAclMarkers(client)
+  if (!hasCompleteShopOsServerOnlyAcl(after)) {
+    throw new Error('Shop OS server-only ACL hardening failed in ephemeral database')
   }
 }

@@ -486,7 +486,7 @@ describe('Shop OS quote foundation migration', () => {
       { proname: 'guard_quote_versions_immutable', proconfig: ['search_path=""'] },
       { proname: 'reject_quote_events_mutation', proconfig: ['search_path=""'] },
     ])
-  })
+  }, 15_000)
 
   it('creates the additive foundation through the complete source chain with unconfigured shop rates', async () => {
     const client = await createPre0028Db()

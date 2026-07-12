@@ -393,7 +393,7 @@ Integrity and security rules:
 - Vendor snapshots include `externalOfferId`, currency, price, core charge, availability, fitment, fulfillment/location, and `fetchedAt`.
 - A parts order references the exact approved quote version; every order line must occur in that snapshot. Manual confirmation and provider submission both persist the refreshed offer, idempotency key, actor, result, and failure state before changing `job_lines.partStatus`.
 - Quote events and SMS delivery records are append-only. Approval storage does not require IP; the current privacy policy says the app does not log IP addresses.
-- New public-schema tables are server-only by default: RLS enabled, `anon`/`authenticated` DML revoked, and explicit deny-all direct-client policies installed so the service-role server path remains the only writer without leaving no-policy advisor findings. Add narrower direct-client policies only when an approved use exists; Supabase advisors must be clean for Shop OS objects.
+- New public-schema tables are server-only by default: RLS enabled, all table privileges revoked from `anon`/`authenticated`, no effective client access through `PUBLIC` or inherited roles, only intended operations granted to `service_role`, and explicit deny-all direct-client policies installed so the server path remains the only writer without leaving no-policy advisor findings. Add narrower direct-client policies only when an approved use exists; Supabase advisors must be clean for Shop OS objects.
 
 ---
 
