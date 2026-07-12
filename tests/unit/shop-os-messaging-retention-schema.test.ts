@@ -76,6 +76,8 @@ async function insertQuoteSend(
     retainUntil: string | null
     requestKey: string
     requestFingerprint: string
+    destinationFingerprint: string
+    fingerprintKeyVersion: string
     createdAt: string
   }> = {},
 ) {
@@ -94,6 +96,8 @@ async function insertQuoteSend(
     retainUntil: null,
     requestKey: crypto.randomUUID(),
     requestFingerprint: otherHex,
+    destinationFingerprint: hex,
+    fingerprintKeyVersion: 'key_v1',
     createdAt: 'now()',
     ...overrides,
   }
@@ -105,14 +109,14 @@ async function insertQuoteSend(
       request_key, request_fingerprint, state, submitting_at,
       submitted_at, terminal_at, retain_until, created_at
     ) values (
-      $1, $2, $3, $4, $5, 'key_v1', 'sms', $6,
-      ${values.tokenExpiresAt ?? 'null'}, $7, $8, $9, $10,
+      $1, $2, $3, $4, $5, $6, 'sms', $7,
+      ${values.tokenExpiresAt ?? 'null'}, $8, $9, $10, $11,
       ${values.submittingAt ?? 'null'}, ${values.submittedAt ?? 'null'},
       ${values.terminalAt ?? 'null'}, ${values.retainUntil ?? 'null'}, ${values.createdAt}
     ) returning id`,
     [values.shopId, values.ticketId, values.quoteVersionId, values.customerId,
-      hex, values.tokenHash, values.actorId, values.requestKey,
-      values.requestFingerprint, values.state],
+      values.destinationFingerprint, values.fingerprintKeyVersion, values.tokenHash,
+      values.actorId, values.requestKey, values.requestFingerprint, values.state],
   )
   return result.rows[0]!.id
 }
@@ -185,6 +189,8 @@ async function insertDeletionRequest(
     subjectKey: string
     state?: 'pending' | 'completed'
     retainUntil?: 'now' | 'future' | 'past'
+    destinationFingerprint?: string
+    fingerprintKeyVersion?: string
   },
 ) {
   const requestId = crypto.randomUUID()
@@ -203,7 +209,7 @@ async function insertDeletionRequest(
       proof_summary, retain_until
     ) values (
       $1, $2, $3, $4, $5, $6, $7,
-      'key_v1', '${state}', 'customer_request', $8,
+      $8, '${state}', 'customer_request', $9,
       ${state === 'completed' ? latestRelevantAt : 'null'},
       ${state === 'completed' ? latestRelevantAt : 'null'},
       ${state === 'completed' ? "'{}'::jsonb" : 'null'},
@@ -211,9 +217,40 @@ async function insertDeletionRequest(
       ${state === 'completed' ? retainUntil : 'null'}
     )`,
     [requestId, crypto.randomUUID(), hex, tenant.shopId, input.subjectKey,
-      state === 'pending' ? tenant.customerId : null, hex, tenant.actorId],
+      state === 'pending' ? tenant.customerId : null,
+      input.destinationFingerprint ?? hex, input.fingerprintKeyVersion ?? 'key_v1',
+      tenant.actorId],
   )
   return requestId
+}
+
+async function insertSuppression(
+  client: PGlite,
+  tenant: Awaited<ReturnType<typeof seedTenant>>,
+  overrides: Partial<{
+    destinationFingerprint: string
+    fingerprintKeyVersion: string
+    reason: string
+    liftedAt: string | null
+    retainUntil: string
+  }> = {},
+) {
+  const values = {
+    destinationFingerprint: hex,
+    fingerprintKeyVersion: 'key_v1',
+    reason: 'verified_deletion',
+    liftedAt: null,
+    retainUntil: "now() + interval '5 years' + interval '1 day'",
+    ...overrides,
+  }
+  await client.query(
+    `insert into sms_suppressions (
+      shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
+      reason, suppressed_at, lifted_at, retain_until
+    ) values ($1, $2, $3, null, $4, now() - interval '1 day',
+      ${values.liftedAt ?? 'null'}, ${values.retainUntil})`,
+    [tenant.shopId, values.destinationFingerprint, values.fingerprintKeyVersion, values.reason],
+  )
 }
 
 async function insertHold(
@@ -490,6 +527,113 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
+  it('authorizes a held legacy-key send from one current-key request and its exact deletion barrier', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(),
+        destinationFingerprint: otherHex,
+        fingerprintKeyVersion: 'key_v2',
+      })
+      await insertSuppression(fixture.client, tenant, {
+        destinationFingerprint: hex,
+        fingerprintKeyVersion: 'key_v1',
+      })
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+
+      await expect(fixture.client.query(
+        `update quote_sends
+        set customer_id = null, token_hash = null, token_expires_at = null
+        where id = $1`,
+        [sendId],
+      )).resolves.toBeDefined()
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it.each(['verified_deletion', 'permanent_failure', 'number_reassigned'])(
+    'accepts the exact current-key non-liftable %s barrier',
+    async (reason) => {
+      const fixture = await createTestDb()
+      try {
+        const tenant = await seedOperationalTenant(fixture.client)
+        await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+        await insertSuppression(fixture.client, tenant, { reason })
+        const sendId = await insertQuoteSend(fixture.client, tenant, {
+          state: 'submitted', submittingAt: 'now()', submittedAt: 'now()',
+        })
+        await expect(fixture.client.query(
+          'update quote_sends set customer_id = null where id = $1',
+          [sendId],
+        )).resolves.toBeDefined()
+      } finally {
+        await fixture.close()
+      }
+    },
+  )
+
+  it.each([
+    ['missing', {}],
+    ['customer revocation', { reason: 'customer_revocation' }],
+    ['lifted', { liftedAt: 'now()' }],
+    ['short retention', { retainUntil: "now() + interval '5 years' - interval '1 second'" }],
+    ['fingerprint mismatch', { destinationFingerprint: otherHex }],
+    ['key-version mismatch', { fingerprintKeyVersion: 'key_v2' }],
+  ] as const)('rejects a %s suppression as deletion authorization', async (variant, suppression) => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      if (variant !== 'missing') await insertSuppression(fixture.client, tenant, suppression)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted', submittingAt: 'now()', submittedAt: 'now()',
+      })
+
+      await expect(fixture.client.query(
+        'update quote_sends set customer_id = null where id = $1',
+        [sendId],
+      )).rejects.toThrow(/matching pending messaging deletion request/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('rejects completed, unrelated-customer, and unrelated-shop deletion authorization', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const other = await seedOperationalTenant(fixture.client)
+      const otherCustomerId = crypto.randomUUID()
+      await fixture.client.query(
+        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
+        [otherCustomerId, tenant.shopId, 'Unrelated Customer', '+15550000002'],
+      )
+      await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(), state: 'completed',
+      })
+      await insertDeletionRequest(fixture.client, {
+        ...tenant, customerId: otherCustomerId,
+      }, { subjectKey: crypto.randomUUID() })
+      await insertSuppression(fixture.client, other)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        state: 'submitted', submittingAt: 'now()', submittedAt: 'now()',
+      })
+
+      await expect(fixture.client.query(
+        'update quote_sends set customer_id = null where id = $1',
+        [sendId],
+      )).rejects.toThrow(/matching pending messaging deletion request/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it.each(['submitting', 'submitted', 'delivered'] as const)(
     'allows authorized atomic identity and token detachment for %s sends',
     async (state) => {
@@ -497,6 +641,7 @@ describe('Shop OS messaging retention source schema', () => {
       try {
         const tenant = await seedOperationalTenant(fixture.client)
         await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+        await insertSuppression(fixture.client, tenant)
         const sendId = await insertQuoteSend(fixture.client, tenant, {
           state,
           submittingAt: 'now()',
@@ -535,6 +680,7 @@ describe('Shop OS messaging retention source schema', () => {
     try {
       const tenant = await seedOperationalTenant(fixture.client)
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await insertSuppression(fixture.client, tenant)
       const detachedId = await insertQuoteSend(fixture.client, tenant, {
         state: 'submitting',
         submittingAt: 'now()',
@@ -587,10 +733,16 @@ describe('Shop OS messaging retention source schema', () => {
       expect(functionDefinition).toContain('for share')
       expect(functionDefinition.indexOf('order by deletion_request.id'))
         .toBeLessThan(functionDefinition.indexOf('for share'))
+      expect(functionDefinition).toContain('order by suppression.id')
 
       const tenant = await seedOperationalTenant(fixture.client)
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await insertSuppression(fixture.client, tenant)
+      await insertSuppression(fixture.client, tenant, {
+        destinationFingerprint: otherHex,
+        fingerprintKeyVersion: 'key_v2',
+      })
       const sendId = await insertQuoteSend(fixture.client, tenant, {
         state: 'submitted',
         submittingAt: 'now()',
@@ -617,6 +769,7 @@ describe('Shop OS messaging retention source schema', () => {
         [tenant.shopId, other.customerId],
       )
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await insertSuppression(fixture.client, tenant)
       const sendId = await insertQuoteSend(fixture.client, tenant, {
         state: 'submitted',
         submittingAt: 'now()',
@@ -652,6 +805,7 @@ describe('Shop OS messaging retention source schema', () => {
     try {
       const tenant = await seedOperationalTenant(fixture.client)
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await insertSuppression(fixture.client, tenant)
       const sendId = await insertQuoteSend(fixture.client, tenant, {
         state: 'responded',
         tokenHash: null,
@@ -1059,6 +1213,52 @@ describe('Shop OS messaging retention source schema', () => {
       await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
       )
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('refuses lifecycle guards with a weakened multi-key suppression contract', async () => {
+    const fixture = await createTestDb()
+    try {
+      const functionProof = await fixture.client.query<{ function_definition: string }>(`
+        select pg_get_functiondef(
+          'guard_quote_send_lifecycle()'::regprocedure
+        ) as function_definition
+      `)
+      const original = functionProof.rows[0]!.function_definition
+      const weakenings = [
+        (definition: string) => definition.replace(
+          /and suppression\.reason in \('verified_deletion', 'permanent_failure', 'number_reassigned'\)/i,
+          'and suppression.reason is not null',
+        ),
+        (definition: string) => definition.replace(
+          /\s+and suppression\.lifted_at is null/i,
+          '',
+        ),
+        (definition: string) => definition.replace(
+          /\s+and suppression\.retain_until >= approved_deletion_barrier/i,
+          '',
+        ),
+        (definition: string) => definition.replace(
+          /and suppression\.fingerprint_key_version = old\.fingerprint_key_version/i,
+          'and suppression.fingerprint_key_version = suppression.fingerprint_key_version',
+        ),
+        (definition: string) => {
+          const lock = definition.toLowerCase().lastIndexOf('for share')
+          return lock < 0 ? definition : `${definition.slice(0, lock)}${definition.slice(lock + 9)}`
+        },
+      ]
+
+      for (const weaken of weakenings) {
+        const weakened = weaken(original)
+        expect(weakened).not.toBe(original)
+        await fixture.client.exec(weakened)
+        await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
+          'partial messaging retention schema in ephemeral database',
+        )
+        await fixture.client.exec(original)
+      }
     } finally {
       await fixture.close()
     }
@@ -1883,6 +2083,12 @@ describe('Shop OS messaging retention source schema', () => {
     )
     expect(taskSix).toContain(
       'Hold targets are immutable: cleanup never mutates or reparents a hold target, and renewal creates a new hold row with a new authorization.',
+    )
+    expect(taskSix).toContain(
+      'normalize every relevant current and still-supported legacy suppression row to an active, non-liftable deletion barrier',
+    )
+    expect(taskSix).toContain(
+      "The guard then consumes phase one's suppression contract for the old send key",
     )
   })
 })

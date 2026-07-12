@@ -369,6 +369,9 @@ declare
     and new.token_expires_at is null;
   deletion_authorized boolean := false;
   locked_request_id uuid;
+  locked_request_requested_at timestamptz;
+  approved_deletion_barrier timestamptz;
+  locked_suppression_id uuid;
 begin
   if old.customer_id is null and new.customer_id is not null
     or (old.customer_id is not null and new.customer_id is not null
@@ -391,19 +394,37 @@ begin
   end if;
 
   if customer_detached or (new.state = old.state and token_revoked) then
-    for locked_request_id in
-      select deletion_request.id
+    for locked_request_id, locked_request_requested_at in
+      select deletion_request.id, deletion_request.requested_at
       from public.messaging_deletion_requests deletion_request
       where deletion_request.shop_id = old.shop_id
         and deletion_request.customer_id = old.customer_id
-        and deletion_request.destination_fingerprint = old.destination_fingerprint
-        and deletion_request.fingerprint_key_version = old.fingerprint_key_version
         and deletion_request.state = 'pending'
       order by deletion_request.id
       for share
     loop
-      deletion_authorized := true;
+      approved_deletion_barrier := greatest(
+        coalesce(approved_deletion_barrier, '-infinity'::timestamptz),
+        locked_request_requested_at + interval '5 years'
+      );
     end loop;
+
+    if approved_deletion_barrier is not null then
+      for locked_suppression_id in
+        select suppression.id
+        from public.sms_suppressions suppression
+        where suppression.shop_id = old.shop_id
+          and suppression.destination_fingerprint = old.destination_fingerprint
+          and suppression.fingerprint_key_version = old.fingerprint_key_version
+          and suppression.reason in ('verified_deletion', 'permanent_failure', 'number_reassigned')
+          and suppression.lifted_at is null
+          and suppression.retain_until >= approved_deletion_barrier
+        order by suppression.id
+        for share
+      loop
+        deletion_authorized := true;
+      end loop;
+    end if;
 
     if not deletion_authorized then
       raise exception 'quote send detachment requires a matching pending messaging deletion request';
