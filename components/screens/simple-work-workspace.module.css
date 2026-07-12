@@ -1,0 +1,41 @@
+.screen { min-height: 100%; overflow: auto; }
+.screen :global(.app-header__back) { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.screen :global(.app-header__right button) { min-width: 44px !important; min-height: 44px !important; width: 44px !important; height: 44px !important; }
+.content { width: min(100%, 900px); margin: 0 auto; padding: clamp(20px, 4vw, 48px); display: grid; gap: 28px; }
+.hero { padding-bottom: 24px; border-bottom: var(--vt-stroke-strong); }
+.eyebrow, .stateMark, .label, .moduleHeading span, .actionRow, .helper, .emptyProof, .proofList, .notice, .error { font-family: var(--vt-font-mono); }
+.eyebrow, .stateMark { margin: 0; color: var(--vt-fg-3); font-size: var(--vt-fs-12); font-weight: 600; letter-spacing: var(--vt-tr-eyebrow); text-transform: uppercase; }
+.hero h1, .state h2, .moduleHeading h2 { margin: 0; font-family: var(--vt-font-serif); font-weight: 400; }
+.hero h1 { margin-top: 10px; font-size: clamp(34px, 6vw, 58px); line-height: 1.02; letter-spacing: -0.035em; }
+.state { border-left: 3px solid var(--vt-accent); background: var(--vt-surface); padding: clamp(20px, 4vw, 32px); }
+.state h2 { margin-top: 8px; font-size: clamp(28px, 4vw, 40px); }
+.state > p:last-of-type { color: var(--vt-fg-2); line-height: 1.5; }
+.savedNote { white-space: pre-wrap; }
+.module { border-top: var(--vt-stroke-strong); padding-top: 22px; }
+.moduleHeading { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.moduleHeading span { color: var(--vt-accent); font-size: var(--vt-fs-12); }
+.moduleHeading h2 { font-size: clamp(24px, 4vw, 32px); }
+.label { display: block; margin: 14px 0 7px; color: var(--vt-fg-2); font-size: var(--vt-fs-12); font-weight: 600; }
+.module textarea, .concern textarea, .concern select { width: 100%; min-height: 48px; border: var(--vt-stroke-strong); border-radius: var(--vt-radius-2); background: var(--vt-bg); color: var(--vt-fg); padding: 12px; font: inherit; }
+.module textarea, .concern textarea { min-height: 112px; resize: vertical; }
+.actionRow, .retryRow, .proofActions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; }
+.actionRow { color: var(--vt-fg-3); font-size: var(--vt-fs-12); }
+.primary, .secondary, .primaryFile, .secondaryFile, .ticketLink { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--vt-radius-2); padding: 10px 18px; font-family: var(--vt-font-sans); font-size: 14px; font-weight: 650; cursor: pointer; text-decoration: none; }
+.primary, .primaryFile { border: 1px solid var(--vt-accent); background: var(--vt-accent); color: var(--vt-fg-on-signal); }
+.secondary, .secondaryFile, .ticketLink { border: 1px solid var(--vt-accent); background: var(--vt-bg); color: var(--vt-accent); }
+.primary:disabled, .secondary:disabled { border-color: var(--vt-rule); background: var(--vt-surface-2); color: var(--vt-fg-disabled); cursor: not-allowed; }
+.primaryFile input, .secondaryFile input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.primaryFile:focus-within, .secondaryFile:focus-within, .primary:focus-visible, .secondary:focus-visible, .ticketLink:focus-visible, .concern summary:focus-visible { outline: 2px solid var(--vt-focus-ring); outline-offset: 3px; }
+.helper, .emptyProof { margin: 0; color: var(--vt-fg-3); font-size: var(--vt-fs-12); line-height: 1.5; }
+.proofList { margin: 16px 0 0; padding: 0; list-style: none; font-size: var(--vt-fs-12); }
+.proofList li { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: var(--vt-stroke-hair); }
+.proofList a { min-height: 44px; display: inline-flex; align-items: center; color: var(--vt-accent); }
+.concern { border-top: var(--vt-stroke-hair); padding-top: 18px; }
+.concern summary { min-height: 44px; display: flex; align-items: center; color: var(--vt-accent); font-family: var(--vt-font-sans); font-weight: 650; cursor: pointer; }
+.concern form { display: grid; gap: 8px; padding-top: 10px; }
+.concern form .secondary { margin-top: 12px; justify-self: start; }
+.notice, .error { margin: 0; padding: 12px 14px; border-left: 3px solid var(--vt-accent); background: var(--vt-surface); font-size: var(--vt-fs-12); line-height: 1.45; }
+.error { border-left-color: var(--vt-risk-destructive); color: var(--vt-risk-destructive); }
+.ticketLink { justify-self: start; }
+@media (max-width: 420px) { .content { padding: 20px 14px 36px; } .primary, .secondary, .primaryFile, .secondaryFile { width: 100%; } .proofActions, .retryRow { align-items: stretch; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .screen * { scroll-behavior: auto !important; } }

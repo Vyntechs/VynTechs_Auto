@@ -323,7 +323,7 @@ export async function getSimpleWorkWorkspace(
     const context: LockedContext = {
       ticket, job, versions, decisions, attachments,
     }
-    const authorization = hasPinnedApproval(context, job.workStatus === 'open')
+    const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')
       ? 'approved'
       : job.approvalState === 'declined' ? 'declined' : 'awaiting_approval'
     return {
