@@ -438,12 +438,14 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
       ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
+      ('quote_sends_shop_ticket_version_id_uq'),
       ('quote_sends_shop_actor_request_uq'), ('quote_sends_destination_idx'),
       ('quote_sends_purge_idx'), ('sms_log_shop_id_uq'),
       ('sms_log_shop_provider_event_uq'), ('sms_log_send_idx'), ('sms_log_purge_idx'),
       ('notifications_shop_id_uq'), ('notifications_shop_recipient_dedupe_uq'),
       ('notifications_purge_idx')
     ), expected_functions(signature, return_type, security_definer, service_execute) as (values
+      ('guard_quote_send_lifecycle()', 'trigger', false, false),
       ('reject_messaging_consent_event_mutation()', 'trigger', false, false),
       ('require_messaging_compaction_completion()', 'trigger', false, false),
       ('compact_messaging_consent_events(uuid,uuid,uuid)', 'integer', true, true),
@@ -454,6 +456,8 @@ async function messagingRetentionMarkers(
       table_name, trigger_name, function_signature, trigger_type, is_deferrable,
       trigger_columns
     ) as (values
+      ('quote_sends', 'quote_sends_lifecycle_guard',
+        'guard_quote_send_lifecycle()', 19, false, null),
       ('messaging_consent_events', 'messaging_consent_events_append_only',
         'reject_messaging_consent_event_mutation()', 27, false, null),
       ('messaging_consent_events', 'messaging_consent_events_compaction_completion',
@@ -531,11 +535,11 @@ function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boole
   return markers.table_count === 8
     && markers.column_count === 114
     && markers.constraint_count === 90
-    && markers.index_count === 24
+    && markers.index_count === 25
     && markers.rls_count === 8
     && markers.policy_count === 8
-    && markers.function_marker_count === 6
-    && markers.trigger_binding_count === 4
+    && markers.function_marker_count === 7
+    && markers.trigger_binding_count === 5
     && markers.direct_client_grant_count === 0
     && markers.effective_client_privilege_count === 0
     && markers.service_crud_count === 32

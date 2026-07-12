@@ -216,26 +216,37 @@ create table quote_sends (
   constraint quote_sends_token_action_consistent check (
     (token_hash is null and token_expires_at is null)
     or (token_hash is not null and token_expires_at is not null
+      and token_expires_at > created_at
       and state in ('queued', 'claimed', 'submitting', 'submitted', 'delivered'))
   ),
   constraint quote_sends_submission_timestamps_consistent check (
     (state in ('queued', 'claimed', 'cancelled') and submitting_at is null and submitted_at is null)
     or (state = 'submitting' and submitting_at >= created_at and submitted_at is null)
-    or (state in ('submitted', 'delivered', 'failed', 'responded', 'expired')
+    or (state in ('submitted', 'delivered', 'responded')
       and submitting_at >= created_at and submitted_at is not null and submitted_at >= submitting_at)
+    or (state = 'failed' and submitting_at >= created_at
+      and (submitted_at is null or submitted_at >= submitting_at))
+    or (state = 'expired'
+      and ((submitting_at is null and submitted_at is null)
+        or (submitting_at >= created_at and submitted_at >= submitting_at)))
   ),
   constraint quote_sends_terminal_timestamps_consistent check (
     (state in ('cancelled', 'failed', 'responded', 'expired') and terminal_at is not null and retain_until is not null)
     or (state not in ('cancelled', 'failed', 'responded', 'expired') and terminal_at is null and retain_until is null)
   ),
   constraint quote_sends_retention_timestamp_valid check (
-    retain_until is null or (terminal_at >= created_at and retain_until >= terminal_at)
+    retain_until is null
+    or (terminal_at >= created_at
+      and (submitted_at is null or terminal_at >= submitted_at)
+      and retain_until = terminal_at + interval '1 year')
   )
 );
 --> statement-breakpoint
 create unique index quote_sends_shop_id_uq on quote_sends (shop_id, id);
 --> statement-breakpoint
 create unique index quote_sends_shop_ticket_id_uq on quote_sends (shop_id, ticket_id, id);
+--> statement-breakpoint
+create unique index quote_sends_shop_ticket_version_id_uq on quote_sends (shop_id, ticket_id, quote_version_id, id);
 --> statement-breakpoint
 create unique index quote_sends_shop_actor_request_uq on quote_sends (shop_id, requesting_actor_profile_id, request_key);
 --> statement-breakpoint
@@ -244,8 +255,8 @@ create index quote_sends_destination_idx on quote_sends (shop_id, destination_fi
 create index quote_sends_purge_idx on quote_sends (state, retain_until, id);
 --> statement-breakpoint
 alter table quote_events add constraint quote_events_shop_ticket_send_fk
-  foreign key (shop_id, ticket_id, quote_send_id)
-  references quote_sends(shop_id, ticket_id, id) on delete restrict;
+  foreign key (shop_id, ticket_id, quote_version_id, quote_send_id)
+  references quote_sends(shop_id, ticket_id, quote_version_id, id) on delete restrict;
 --> statement-breakpoint
 
 create table sms_log (
@@ -270,8 +281,7 @@ create table sms_log (
   constraint sms_log_state_valid check (state in ('accepted', 'queued', 'sent', 'delivered', 'undelivered', 'failed', 'opt_out', 'help', 'start')),
   constraint sms_log_error_code_valid check (error_code is null or char_length(error_code) between 1 and 128),
   constraint sms_log_retention_timestamp_valid check (
-    retain_until >= server_received_at
-    and (provider_occurred_at is null or retain_until >= provider_occurred_at)
+    retain_until = server_received_at + interval '1 year'
   )
 );
 --> statement-breakpoint
@@ -301,7 +311,7 @@ create table notifications (
   constraint notifications_entity_type_valid check (entity_type ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'),
   constraint notifications_dedupe_key_valid check (char_length(dedupe_key) between 1 and 128),
   constraint notifications_read_at_valid check (read_at is null or read_at >= created_at),
-  constraint notifications_retention_timestamp_valid check (retain_until >= created_at)
+  constraint notifications_retention_timestamp_valid check (retain_until = created_at + interval '90 days')
 );
 --> statement-breakpoint
 create unique index notifications_shop_id_uq on notifications (shop_id, id);
@@ -309,6 +319,94 @@ create unique index notifications_shop_id_uq on notifications (shop_id, id);
 create unique index notifications_shop_recipient_dedupe_uq on notifications (shop_id, recipient_profile_id, dedupe_key);
 --> statement-breakpoint
 create index notifications_purge_idx on notifications (retain_until, id);
+--> statement-breakpoint
+
+comment on column notifications.entity_id is
+  'Routing reference only; never an authorization or tenant-ownership boundary.';
+--> statement-breakpoint
+
+create function guard_quote_send_lifecycle()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.state in ('cancelled', 'failed', 'responded', 'expired') then
+    raise exception 'terminal quote sends are immutable';
+  end if;
+
+  if new.state = old.state then
+    if (new.id, new.shop_id, new.ticket_id, new.quote_version_id, new.customer_id,
+        new.destination_fingerprint, new.fingerprint_key_version, new.channel,
+        new.token_hash, new.token_expires_at, new.requesting_actor_profile_id,
+        new.request_key, new.request_fingerprint, new.state, new.submitting_at,
+        new.submitted_at, new.terminal_at, new.retain_until, new.created_at)
+      is distinct from
+       (old.id, old.shop_id, old.ticket_id, old.quote_version_id, old.customer_id,
+        old.destination_fingerprint, old.fingerprint_key_version, old.channel,
+        old.token_hash, old.token_expires_at, old.requesting_actor_profile_id,
+        old.request_key, old.request_fingerprint, old.state, old.submitting_at,
+        old.submitted_at, old.terminal_at, old.retain_until, old.created_at) then
+      raise exception 'same-state quote send updates may only change updated_at';
+    end if;
+    return new;
+  end if;
+
+  if (new.id, new.shop_id, new.ticket_id, new.quote_version_id, new.customer_id,
+      new.destination_fingerprint, new.fingerprint_key_version, new.channel,
+      new.requesting_actor_profile_id, new.request_key, new.request_fingerprint,
+      new.created_at)
+    is distinct from
+     (old.id, old.shop_id, old.ticket_id, old.quote_version_id, old.customer_id,
+      old.destination_fingerprint, old.fingerprint_key_version, old.channel,
+      old.requesting_actor_profile_id, old.request_key, old.request_fingerprint,
+      old.created_at) then
+    raise exception 'quote send identity is immutable';
+  end if;
+
+  if not (
+    (old.state = 'queued' and new.state in ('claimed', 'cancelled', 'expired'))
+    or (old.state = 'claimed' and new.state in ('submitting', 'cancelled', 'expired'))
+    or (old.state = 'submitting' and new.state in ('submitted', 'failed'))
+    or (old.state = 'submitted' and new.state in ('delivered', 'failed', 'responded', 'expired'))
+    or (old.state = 'delivered' and new.state in ('responded', 'expired'))
+  ) then
+    raise exception 'invalid quote send state transition';
+  end if;
+
+  if new.state in ('cancelled', 'failed', 'responded', 'expired') then
+    if new.token_hash is not null or new.token_expires_at is not null then
+      raise exception 'terminal quote sends cannot retain token material';
+    end if;
+  elsif new.token_hash is distinct from old.token_hash
+    or new.token_expires_at is distinct from old.token_expires_at then
+    raise exception 'active quote send token material is immutable';
+  end if;
+
+  if old.state in ('queued', 'claimed')
+    and new.state in ('cancelled', 'expired')
+    and (new.submitting_at is not null or new.submitted_at is not null) then
+    raise exception 'quote send transition cannot manufacture submission anchors';
+  end if;
+
+  if old.state = 'submitting' and new.state = 'failed' and new.submitted_at is not null then
+    raise exception 'quote send transition cannot manufacture submission anchors';
+  end if;
+
+  if (old.submitting_at is not null and new.submitting_at is distinct from old.submitting_at)
+    or (old.submitted_at is not null and new.submitted_at is distinct from old.submitted_at)
+    or (old.terminal_at is not null and new.terminal_at is distinct from old.terminal_at)
+    or (old.retain_until is not null and new.retain_until is distinct from old.retain_until) then
+    raise exception 'quote send lifecycle anchors are immutable';
+  end if;
+
+  return new;
+end;
+$$;
+--> statement-breakpoint
+create trigger quote_sends_lifecycle_guard
+before update on quote_sends
+for each row execute function guard_quote_send_lifecycle();
 --> statement-breakpoint
 
 create function serialize_messaging_retention_hold_target()
@@ -648,6 +746,7 @@ create policy notifications_server_only_deny_direct on notifications
 --> statement-breakpoint
 
 revoke all on function reject_messaging_consent_event_mutation() from public, anon, authenticated, service_role;
+revoke all on function guard_quote_send_lifecycle() from public, anon, authenticated, service_role;
 revoke all on function serialize_messaging_retention_hold_target() from public, anon, authenticated, service_role;
 revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;

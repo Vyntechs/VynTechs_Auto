@@ -764,6 +764,12 @@ export const quoteSends = pgTable(
     }).onDelete('restrict'),
     uniqueIndex('quote_sends_shop_id_uq').on(table.shopId, table.id),
     uniqueIndex('quote_sends_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
+    uniqueIndex('quote_sends_shop_ticket_version_id_uq').on(
+      table.shopId,
+      table.ticketId,
+      table.quoteVersionId,
+      table.id,
+    ),
     uniqueIndex('quote_sends_shop_actor_request_uq').on(
       table.shopId,
       table.requestingActorProfileId,
@@ -803,6 +809,7 @@ export const quoteSends = pgTable(
       'quote_sends_token_action_consistent',
       sql`(${table.tokenHash} is null and ${table.tokenExpiresAt} is null)
         or (${table.tokenHash} is not null and ${table.tokenExpiresAt} is not null
+          and ${table.tokenExpiresAt} > ${table.createdAt}
           and ${table.state} in ('queued', 'claimed', 'submitting', 'submitted', 'delivered'))`,
     ),
     check(
@@ -811,9 +818,16 @@ export const quoteSends = pgTable(
           and ${table.submittingAt} is null and ${table.submittedAt} is null)
         or (${table.state} = 'submitting'
           and ${table.submittingAt} >= ${table.createdAt} and ${table.submittedAt} is null)
-        or (${table.state} in ('submitted', 'delivered', 'failed', 'responded', 'expired')
+        or (${table.state} in ('submitted', 'delivered', 'responded')
           and ${table.submittingAt} >= ${table.createdAt} and ${table.submittedAt} is not null
-          and ${table.submittedAt} >= ${table.submittingAt})`,
+          and ${table.submittedAt} >= ${table.submittingAt})
+        or (${table.state} = 'failed'
+          and ${table.submittingAt} >= ${table.createdAt}
+          and (${table.submittedAt} is null or ${table.submittedAt} >= ${table.submittingAt}))
+        or (${table.state} = 'expired'
+          and ((${table.submittingAt} is null and ${table.submittedAt} is null)
+            or (${table.submittingAt} >= ${table.createdAt}
+              and ${table.submittedAt} >= ${table.submittingAt})))`,
     ),
     check(
       'quote_sends_terminal_timestamps_consistent',
@@ -826,7 +840,8 @@ export const quoteSends = pgTable(
       'quote_sends_retention_timestamp_valid',
       sql`${table.retainUntil} is null
         or (${table.terminalAt} >= ${table.createdAt}
-          and ${table.retainUntil} >= ${table.terminalAt})`,
+          and (${table.submittedAt} is null or ${table.terminalAt} >= ${table.submittedAt})
+          and ${table.retainUntil} = ${table.terminalAt} + interval '1 year')`,
     ),
   ],
 )
@@ -874,8 +889,13 @@ export const quoteEvents = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       name: 'quote_events_shop_ticket_send_fk',
-      columns: [table.shopId, table.ticketId, table.quoteSendId],
-      foreignColumns: [quoteSends.shopId, quoteSends.ticketId, quoteSends.id],
+      columns: [table.shopId, table.ticketId, table.quoteVersionId, table.quoteSendId],
+      foreignColumns: [
+        quoteSends.shopId,
+        quoteSends.ticketId,
+        quoteSends.quoteVersionId,
+        quoteSends.id,
+      ],
     }).onDelete('restrict'),
     uniqueIndex('quote_events_shop_request_key_uq').on(table.shopId, table.requestKey),
     uniqueIndex('quote_events_shop_provider_event_uq')
@@ -987,8 +1007,7 @@ export const smsLog = pgTable(
     ),
     check(
       'sms_log_retention_timestamp_valid',
-      sql`${table.retainUntil} >= ${table.serverReceivedAt}
-        and (${table.providerOccurredAt} is null or ${table.retainUntil} >= ${table.providerOccurredAt})`,
+      sql`${table.retainUntil} = ${table.serverReceivedAt} + interval '1 year'`,
     ),
   ],
 )
@@ -1001,6 +1020,7 @@ export const notifications = pgTable(
     recipientProfileId: uuid('recipient_profile_id').notNull(),
     eventType: text('event_type').notNull(),
     entityType: text('entity_type').notNull(),
+    // Routing reference only. Authorization must come from shop/recipient scope, never this polymorphic ID.
     entityId: uuid('entity_id').notNull(),
     dedupeKey: text('dedupe_key').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1043,7 +1063,7 @@ export const notifications = pgTable(
     ),
     check(
       'notifications_retention_timestamp_valid',
-      sql`${table.retainUntil} >= ${table.createdAt}`,
+      sql`${table.retainUntil} = ${table.createdAt} + interval '90 days'`,
     ),
   ],
 )
