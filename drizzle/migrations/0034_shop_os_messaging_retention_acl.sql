@@ -32,7 +32,7 @@ revoke all on function public.reject_messaging_consent_event_mutation()
   from public, anon, authenticated, service_role;
 revoke all on function public.require_messaging_compaction_completion()
   from public, anon, authenticated, service_role;
-revoke all on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
+revoke all on function public.compact_messaging_consent_work_items(uuid, uuid, uuid[])
   from public, anon, authenticated, service_role;
 revoke all on function public.guard_messaging_deletion_request_mutation()
   from public, anon, authenticated, service_role;
@@ -46,7 +46,7 @@ revoke all on function public.serialize_messaging_retention_hold_target()
   from public, anon, authenticated, service_role;
 --> statement-breakpoint
 
-grant execute on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
+grant execute on function public.compact_messaging_consent_work_items(uuid, uuid, uuid[])
   to service_role;
 grant execute on function public.purge_expired_messaging_deletion_request(uuid, uuid)
   to service_role;

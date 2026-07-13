@@ -2206,653 +2206,171 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('bounded consent compaction commits 257 events in two pending batches', async () => {
+  it('compacts exact deletion work items without mutating unrepresented consent events', async () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
-      const subjectKey = crypto.randomUUID()
-      const eventIds: string[] = []
-      for (let index = 0; index < 257; index += 1) {
-        eventIds.push(await insertConsentEvent(fixture.client, tenant, { subjectKey }))
-      }
-      const orderedEvents = (await fixture.client.query<{ id: string }>(`
-        select id from messaging_consent_events where subject_key = $1
-        order by committed_at, id
-      `, [subjectKey])).rows
-      await fixture.client.query(
-        `insert into messaging_consent_state (
-          shop_id, subject_key, customer_id, destination_fingerprint,
-          fingerprint_key_version, program_version, status, source_event_id,
-          consented_at, retain_until
-        ) values ($1, $2, $3, $4, 'key_v1', 'repair_updates_v1', 'consented', $5,
-          now(), now() + interval '5 years')`,
-        [tenant.shopId, subjectKey, tenant.customerId, hex, orderedEvents[256]!.id],
-      )
-      await insertSuppression(fixture.client, tenant, { sourceEventId: orderedEvents[0]!.id })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-
-      await fixture.client.exec('begin')
-      const first = await fixture.client.query<{
-        deleted_count: number
-        detached_suppression_sources: number
-        next_event_id: string
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      expect(first.rows[0]).toMatchObject({
-        deleted_count: 256,
-        detached_suppression_sources: 1,
-        exhausted: false,
-      })
-      await fixture.client.exec('commit')
-
-      expect((await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
-        [subjectKey],
-      )).rows[0]?.count).toBe(1)
-      expect((await fixture.client.query<{
-        state: string
-        source_event_id: string | null
-        reason: string
-        lifted_at: Date | null
-      }>(`
-        select r.state, s.source_event_id, s.reason, s.lifted_at
-        from messaging_deletion_requests r
-        cross join sms_suppressions s where r.id = $1
-      `, [requestId])).rows[0]).toEqual({
-        state: 'pending', source_event_id: null,
-        reason: 'verified_deletion', lifted_at: null,
-      })
-      const firstProgress = (await fixture.client.query<{
-        prior_record_counts: { consentEvents: number }
-        proof_summary: PendingDeletionProgress
-      }>(`
-        select prior_record_counts, proof_summary from messaging_deletion_requests where id = $1
-      `, [requestId])).rows[0]!
-      expect(firstProgress.prior_record_counts.consentEvents).toBe(256)
-      expect(firstProgress.proof_summary.resultCounts.consentEventsDeleted).toBe(256)
-      expect(firstProgress.proof_summary.detachedSuppressionSources).toBe(1)
-      expect(firstProgress.proof_summary.cursors.consentEvents?.id)
-        .toBe(first.rows[0]!.next_event_id)
-
-      await fixture.client.exec('begin')
-      const second = await fixture.client.query<{
-        deleted_count: number
-        detached_suppression_sources: number
-        next_event_id: string
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId, first.rows[0]!.next_event_id, 256],
-      )
-      expect(second.rows[0]).toMatchObject({
-        deleted_count: 1,
-        detached_suppression_sources: 0,
-        exhausted: true,
-      })
-      await fixture.client.exec('commit')
-
-      expect((await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
-        [subjectKey],
-      )).rows[0]?.count).toBe(0)
-      const finalProgress = (await fixture.client.query<{
-        prior_record_counts: { consentEvents: number }
-        proof_summary: PendingDeletionProgress
-      }>(`
-        select prior_record_counts, proof_summary from messaging_deletion_requests where id = $1
-      `, [requestId])).rows[0]!
-      expect(finalProgress.prior_record_counts.consentEvents).toBe(257)
-      expect(finalProgress.proof_summary.resultCounts.consentEventsDeleted).toBe(257)
-      expect(finalProgress.proof_summary.detachedSuppressionSources).toBe(1)
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('cursor-independent consent compaction wraps to a late event below the high-water cursor', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const subjectKey = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey,
-        committedAt: "'2026-07-12 10:00:01+00'",
-      })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-      const first = await fixture.client.query<{
-        deleted_count: number
-        next_event_id: string
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      expect(first.rows[0]).toMatchObject({ deleted_count: 1, exhausted: true })
-
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey,
-        committedAt: "'2026-07-12 10:00:00+00'",
-      })
-      const wrapped = await fixture.client.query<{
-        deleted_count: number
-        next_event_id: string
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId, first.rows[0]!.next_event_id, 256],
-      )
-      expect(wrapped.rows[0]).toEqual({
-        deleted_count: 1,
-        detached_suppression_sources: 0,
-        next_event_id: first.rows[0]!.next_event_id,
-        exhausted: true,
-      })
-      expect((await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
-        [subjectKey],
-      )).rows[0]?.count).toBe(0)
-      expect((await fixture.client.query<{
-        cursor_id: string
-        deleted: number
-      }>(`
-        select proof_summary->'cursors'->'consentEvents'->>'id' as cursor_id,
-          (proof_summary->'resultCounts'->>'consentEventsDeleted')::int as deleted
-        from messaging_deletion_requests where id = $1
-      `, [requestId])).rows[0]).toEqual({
-        cursor_id: first.rows[0]!.next_event_id,
-        deleted: 2,
-      })
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('cursor-independent consent compaction reconciles a second subject below global high-water', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const firstSubject = crypto.randomUUID()
-      const secondSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: firstSubject,
-        committedAt: "'2026-07-12 10:00:01+00'",
-      })
       const requestId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: firstSubject,
+        subjectKey: tenant.customerId,
       })
-      const first = await fixture.client.query<{ next_event_id: string }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, firstSubject, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: secondSubject,
-        committedAt: "'2026-07-12 10:00:00+00'",
-      })
-
-      const wrapped = await fixture.client.query<{
-        deleted_count: number
-        next_event_id: string
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, secondSubject, requestId, first.rows[0]!.next_event_id, 256],
-      )
-      expect(wrapped.rows[0]).toMatchObject({
-        deleted_count: 1,
-        next_event_id: first.rows[0]!.next_event_id,
-        exhausted: true,
-      })
-      expect((await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
-        [secondSubject],
-      )).rows[0]?.count).toBe(0)
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('exact event authorization rejects invalid limits, cursors, spoofing, and mixed contexts', async () => {
-    const fixture = await createTestDb()
-    try {
-      const first = await seedTenant(fixture.client)
-      const second = await seedTenant(fixture.client)
-      const firstSubject = crypto.randomUUID()
-      const secondSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, first, {
-        subjectKey: firstSubject,
-      })
-      await insertConsentEvent(fixture.client, first, { subjectKey: firstSubject })
-      await insertConsentEvent(fixture.client, second, { subjectKey: secondSubject })
-      const firstRequest = await insertDeletionRequest(fixture.client, first, {
-        subjectKey: firstSubject,
-      })
-      const secondRequest = await insertDeletionRequest(fixture.client, second, {
-        subjectKey: secondSubject,
-      })
-      const zeroCursor = '00000000-0000-0000-0000-000000000000'
-
-      for (const limit of [0, 257]) {
-        await expect(fixture.client.query(
-          'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-          [first.shopId, firstSubject, firstRequest, zeroCursor, limit],
-        )).rejects.toThrow(/compaction batch limit must be between 1 and 256/)
-      }
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [first.shopId, firstSubject, crypto.randomUUID(), zeroCursor, 1],
-      )).rejects.toThrow(/matching canonical pending messaging deletion request required/)
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [second.shopId, firstSubject, firstRequest, zeroCursor, 1],
-      )).rejects.toThrow(/matching canonical pending messaging deletion request required/)
-
-      await fixture.client.exec('begin')
-      const page = await fixture.client.query<{ next_event_id: string }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [first.shopId, firstSubject, firstRequest, zeroCursor, 1],
-      )
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [second.shopId, secondSubject, secondRequest, zeroCursor, 1],
-      )).rejects.toThrow(/compaction transaction cannot mix deletion requests or shops/)
-      await fixture.client.exec('rollback')
-
-      const committedPage = await fixture.client.query<{ next_event_id: string }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [first.shopId, firstSubject, firstRequest, zeroCursor, 1],
-      )
-      expect(committedPage.rows[0]?.next_event_id).toBe(page.rows[0]?.next_event_id)
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [first.shopId, firstSubject, firstRequest, zeroCursor, 1],
-      )).rejects.toThrow(/compaction cursor must match canonical progress/)
-      const remainingEvent = (await fixture.client.query<{ id: string }>(`
-        select id from messaging_consent_events where subject_key = $1
-      `, [firstSubject])).rows[0]!.id
-
-      await fixture.client.exec('begin')
-      await fixture.client.exec('set local role service_role')
       await fixture.client.query(
-        "select set_config('vyntechs.messaging_consent_compaction_request', $1, true)",
-        [firstRequest],
+        `with seeded as (
+          select i,
+            (md5('task-3-event-' || i::text))::uuid as event_id,
+            repeat(md5('task-3-destination-' || i::text), 2) as destination_fingerprint
+          from generate_series(1, 258) series(i)
+        )
+        insert into messaging_consent_events (
+          id, shop_id, subject_key, customer_id, destination_fingerprint,
+          fingerprint_key_version, program_version, event_type, committed_at, occurred_at,
+          capture_method, customer_controlled, evidence_kind, actor_profile_id,
+          request_key, request_fingerprint, retain_until
+        )
+        select event_id, $1, $2, $2, destination_fingerprint,
+          'key_v1', case when i = 258 then 'internal_deletion_v1' else 'repair_updates_v1' end,
+          case when i = 258 then 'deleted' else 'consented' end,
+          now() + i * interval '1 millisecond', now() + i * interval '1 millisecond',
+          'staff_request', false, 'staff_request', $3,
+          (md5('task-3-request-' || i::text))::uuid, $4,
+          now() + interval '5 years'
+        from seeded`,
+        [tenant.shopId, tenant.customerId, tenant.actorId, hex],
       )
       await fixture.client.query(
-        "select set_config('vyntechs.messaging_consent_compaction_shop', $1, true)",
-        [first.shopId],
-      )
-      await fixture.client.query(
-        "select set_config('vyntechs.messaging_consent_compaction_events', $1, true)",
-        [`{${remainingEvent}}`],
-      )
-      await expect(fixture.client.query(
-        'delete from messaging_consent_events where id = $1', [remainingEvent],
-      )).rejects.toThrow(/messaging consent events are append-only/)
-      await fixture.client.exec('rollback')
-
-      await fixture.client.exec('begin')
-      await fixture.client.query(
-        "select set_config('vyntechs.messaging_consent_purge_shop', $1, true)",
-        [first.shopId],
-      )
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [first.shopId, firstSubject, firstRequest,
-          committedPage.rows[0]!.next_event_id, 1],
-      )).rejects.toThrow(/cannot mix consent event purge context/)
-      await fixture.client.exec('rollback')
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('exact event authorization rejects mixed ownership and active holds', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const otherCustomerId = crypto.randomUUID()
-      await fixture.client.query(
-        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
-        [otherCustomerId, tenant.shopId, 'Other Customer', '+15550000001'],
-      )
-      const mixedSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: mixedSubject })
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: mixedSubject, customerId: otherCustomerId,
-      })
-      const mixedRequest = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: mixedSubject,
-      })
-      const zeroCursor = '00000000-0000-0000-0000-000000000000'
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, mixedSubject, mixedRequest, zeroCursor, 256],
-      )).rejects.toThrow(/consent subject must belong to deletion request customer/)
-
-      const heldSubject = crypto.randomUUID()
-      const heldEvent = await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: heldSubject,
-      })
-      await insertHold(fixture.client, tenant, { subjectKey: heldSubject })
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, heldSubject, mixedRequest, zeroCursor, 256],
-      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
-      await fixture.client.exec(
-        'update messaging_retention_holds set released_at = clock_timestamp()',
-      )
-      await insertHold(fixture.client, tenant, {
-        resourceType: 'messaging_consent_event', resourceId: heldEvent,
-      })
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, heldSubject, mixedRequest, zeroCursor, 256],
-      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('compaction rollback restores deletes, detachment, and progress after guard failure', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const subjectKey = crypto.randomUUID()
-      const eventId = await insertConsentEvent(fixture.client, tenant, { subjectKey })
-      await insertSuppression(fixture.client, tenant, { sourceEventId: eventId })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-      await fixture.client.exec(`
-        create function inject_compaction_progress_failure() returns trigger
-        language plpgsql as $$ begin raise exception 'injected progress failure'; end; $$;
-        create trigger a_inject_compaction_progress_failure
-        before update on messaging_deletion_requests
-        for each row execute function inject_compaction_progress_failure();
-      `)
-
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/injected progress failure/)
-      expect((await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where id = $1',
-        [eventId],
-      )).rows[0]?.count).toBe(1)
-      expect((await fixture.client.query<{ source_event_id: string | null }>(
-        'select source_event_id from sms_suppressions where shop_id = $1',
+        `with seeded as (
+          select i,
+            (md5('task-3-event-' || i::text))::uuid as event_id,
+            repeat(md5('task-3-destination-' || i::text), 2) as destination_fingerprint
+          from generate_series(1, 258) series(i)
+        )
+        insert into sms_suppressions (
+          shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
+          reason, suppressed_at, retain_until
+        )
+        select $1, destination_fingerprint, 'key_v1', event_id,
+          'customer_revocation', now(), now() + interval '5 years'
+        from seeded`,
         [tenant.shopId],
-      )).rows[0]?.source_event_id).toBe(eventId)
-      expect((await fixture.client.query<{
-        prior_record_counts: unknown; proof_summary: unknown
-      }>(`
-        select prior_record_counts, proof_summary from messaging_deletion_requests where id = $1
-      `, [requestId])).rows[0]).toEqual({
-        prior_record_counts: null, proof_summary: null,
-      })
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('requires a matching canonical request and commits bounded progress while pending', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const subjectKey = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey })
-
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, crypto.randomUUID(),
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/matching canonical pending messaging deletion request required/)
-
-      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-      const compacted = await fixture.client.query<{
-        deleted_count: number
-        exhausted: boolean
-      }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
       )
-      expect(compacted.rows[0]).toMatchObject({ deleted_count: 1, exhausted: true })
-
-      const afterAutocommit = await fixture.client.query<{
-        event_count: number
-        state: string
-        consent_events: number
-        consent_events_deleted: number
-      }>(`
-        select
-          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
-          state,
-          (prior_record_counts->>'consentEvents')::int as consent_events,
-          (proof_summary->'resultCounts'->>'consentEventsDeleted')::int
-            as consent_events_deleted
-        from messaging_deletion_requests where id = $2
-      `, [subjectKey, requestId])
-      expect(afterAutocommit.rows[0]).toEqual({
-        event_count: 0,
-        state: 'pending',
-        consent_events: 1,
-        consent_events_deleted: 1,
-      })
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('authorizes multiple consent subjects for one pending customer deletion request', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const firstSubject = crypto.randomUUID()
-      const secondSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: firstSubject,
-      })
-
-      await fixture.client.exec('begin')
-      const first = await fixture.client.query<{ next_event_id: string }>(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, firstSubject, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
       await fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, secondSubject, requestId,
-          first.rows[0]!.next_event_id, 256],
-      )
-      await fixture.client.exec('commit')
-
-      const remaining = await fixture.client.query<{ count: number }>(
-        `select count(*)::int as count from messaging_consent_events
-        where subject_key in ($1, $2)`,
-        [firstSubject, secondSubject],
-      )
-      expect(remaining.rows[0]?.count).toBe(0)
-      expect((await fixture.client.query<{
-        state: string
-        consent_events: number
-      }>(`
-        select state, (prior_record_counts->>'consentEvents')::int as consent_events
-        from messaging_deletion_requests where id = $1
-      `, [requestId])).rows[0]).toEqual({ state: 'pending', consent_events: 2 })
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('rejects a consent subject belonging to a different customer', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const otherCustomerId = crypto.randomUUID()
-      await fixture.client.query(
-        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
-        [otherCustomerId, tenant.shopId, 'Other Customer', '+15550000001'],
-      )
-      const requestSubject = crypto.randomUUID()
-      const otherSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: requestSubject })
-      await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: otherSubject,
-        customerId: otherCustomerId,
-      })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: requestSubject,
-      })
-
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, otherSubject, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/consent subject must belong to deletion request customer/)
-      const remaining = await fixture.client.query<{ count: number }>(
-        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
-        [otherSubject],
-      )
-      expect(remaining.rows[0]?.count).toBe(1)
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('compacts unheld customer subjects while retaining an independently held subject', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const heldSubject = crypto.randomUUID()
-      const unheldSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: heldSubject })
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: unheldSubject })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: heldSubject,
-      })
-      await insertHold(fixture.client, tenant, { subjectKey: heldSubject })
-
-      await fixture.client.exec('begin')
-      await fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, unheldSubject, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await fixture.client.exec('commit')
-
-      const remaining = await fixture.client.query<{ subject_key: string }>(
-        `select subject_key from messaging_consent_events
-        where subject_key in ($1, $2) order by subject_key`,
-        [heldSubject, unheldSubject],
-      )
-      expect(remaining.rows).toEqual([{ subject_key: heldSubject }])
-    } finally {
-      await fixture.close()
-    }
-  })
-
-  it('fails closed for mixed compaction requests and spoofed authorization settings', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const secondTenant = await seedTenant(fixture.client)
-      const firstSubject = crypto.randomUUID()
-      const secondSubject = crypto.randomUUID()
-      const malformedSubject = crypto.randomUUID()
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
-      await insertConsentEvent(fixture.client, secondTenant, { subjectKey: secondSubject })
-      const malformedEvent = await insertConsentEvent(fixture.client, tenant, {
-        subjectKey: malformedSubject,
-      })
-      const firstRequest = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: firstSubject,
-      })
-      const secondRequest = await insertDeletionRequest(fixture.client, secondTenant, {
-        subjectKey: secondSubject,
-      })
-
-      await fixture.client.exec('begin')
-      await fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, firstSubject, firstRequest,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [secondTenant.shopId, secondSubject, secondRequest,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/compaction transaction cannot mix deletion requests or shops/)
-      await fixture.client.exec('rollback')
-
-      await fixture.client.exec('set role service_role')
-      try {
-        await fixture.client.query(
-          "select set_config('vyntechs.messaging_consent_compaction_request', $1, false)",
-          [firstRequest],
+        `with seeded as (
+          select i,
+            (md5('task-3-event-' || i::text))::uuid as event_id,
+            (md5('task-3-work-' || i::text))::uuid as work_item_id
+          from generate_series(1, 258) series(i)
         )
-        await fixture.client.query(
-          "select set_config('vyntechs.messaging_consent_compaction_shop', $1, false)",
-          [tenant.shopId],
+        insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id, counts_toward_proof
         )
-        await fixture.client.query(
-          "select set_config('vyntechs.messaging_consent_compaction_events', $1, false)",
-          [`{${malformedEvent}}`],
-        )
-        await expect(fixture.client.query(
-          'delete from messaging_consent_events where id = $1',
-          [malformedEvent],
-        )).rejects.toThrow(/messaging consent events are append-only/)
-      } finally {
-        await fixture.client.exec('reset role')
+        select work_item_id, $1, $2, 'consent_event', event_id, i <> 258
+        from seeded`,
+        [tenant.shopId, requestId],
+      )
+      const seeded = (await fixture.client.query<{
+        i: number
+        event_id: string
+        work_item_id: string
+      }>(`select i,
+          (md5('task-3-event-' || i::text))::uuid as event_id,
+          (md5('task-3-work-' || i::text))::uuid as work_item_id
+        from generate_series(1, 258) series(i) order by i`)).rows
+      const selected = seeded.slice(0, 256)
+
+      expect((await fixture.client.query<{ advanced: number }>(
+        'select compact_messaging_consent_work_items($1, $2, $3::uuid[]) as advanced',
+        [tenant.shopId, requestId, selected.map(({ work_item_id }) => work_item_id)],
+      )).rows[0]?.advanced).toBe(256)
+
+      expect((await fixture.client.query<{ id: string }>(
+        'select id from messaging_consent_events where shop_id = $1 order by id',
+        [tenant.shopId],
+      )).rows.map(({ id }) => id).sort()).toEqual(
+        seeded.slice(256).map(({ event_id }) => event_id).sort(),
+      )
+      const suppressions = (await fixture.client.query<{
+        source_event_id: string | null
+      }>('select source_event_id from sms_suppressions where shop_id = $1', [tenant.shopId])).rows
+      expect(suppressions.filter(({ source_event_id }) => source_event_id === null)).toHaveLength(256)
+      expect(suppressions.map(({ source_event_id }) => source_event_id).filter(Boolean).sort())
+        .toEqual(seeded.slice(256).map(({ event_id }) => event_id).sort())
+
+      const workItems = (await fixture.client.query<{
+        id: string
+        outcome: string
+        counts_toward_proof: boolean
+        detached_suppression_sources: number
+      }>(`select id, outcome, counts_toward_proof, detached_suppression_sources
+          from messaging_deletion_work_items where request_id = $1`, [requestId])).rows
+      for (const item of selected) {
+        expect(workItems.find(({ id }) => id === item.work_item_id)).toMatchObject({
+          outcome: 'deleted',
+          counts_toward_proof: true,
+          detached_suppression_sources: 1,
+        })
       }
+      expect(workItems.find(({ id }) => id === seeded[257]!.work_item_id)).toMatchObject({
+        outcome: 'pending',
+        counts_toward_proof: false,
+        detached_suppression_sources: 0,
+      })
 
-      await fixture.client.query(
-        "select set_config('vyntechs.messaging_consent_compaction_request', 'not-a-uuid', false)",
-      )
       await expect(fixture.client.query(
-        'delete from messaging_consent_events where id = $1',
-        [malformedEvent],
-      )).rejects.toThrow(/compaction requires exact canonical request authorization/)
+        'select compact_messaging_consent_work_items($1, $2, $3::uuid[])',
+        [tenant.shopId, requestId, selected.map(({ work_item_id }) => work_item_id)],
+      )).rejects.toThrow(/pending consent-event work items|required/)
     } finally {
       await fixture.close()
     }
   })
 
-  it('blocks compaction for active subject and consent-event holds', async () => {
+  it('rolls back work outcomes when exact consent compaction fails after source mutation', async () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
-      const subjectKey = crypto.randomUUID()
-      const eventId = await insertConsentEvent(fixture.client, tenant, { subjectKey })
-      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-
-      await insertHold(fixture.client, tenant, { subjectKey })
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      const eventId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+        customerId: tenant.customerId,
+        eventType: 'revoked',
+        programVersion: 'repair_updates_v1',
+      })
+      await insertSuppression(fixture.client, tenant, { sourceEventId: eventId })
+      const workItemId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'consent_event', $4)`,
+        [workItemId, tenant.shopId, requestId, eventId],
+      )
       await fixture.client.exec(`
-        update messaging_retention_holds set released_at = clock_timestamp()
-        where released_at is null
+        create function fail_task_3_work_outcome() returns trigger language plpgsql as $$
+        begin
+          if old.outcome = 'pending' and new.outcome = 'deleted' then
+            raise exception 'injected work outcome failure';
+          end if;
+          return new;
+        end;
+        $$;
+        create trigger fail_task_3_work_outcome
+        before update on messaging_deletion_work_items
+        for each row execute function fail_task_3_work_outcome();
       `)
 
-      await insertHold(fixture.client, tenant, {
-        resourceType: 'messaging_consent_event',
-        resourceId: eventId,
-      })
       await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/active messaging retention hold blocks compaction/)
+        'select compact_messaging_consent_work_items($1, $2, $3::uuid[])',
+        [tenant.shopId, requestId, [workItemId]],
+      )).rejects.toThrow(/injected work outcome failure/)
+      expect((await fixture.client.query<{ id: string }>(
+        'select id from messaging_consent_events where id = $1', [eventId],
+      )).rows).toEqual([{ id: eventId }])
+      expect((await fixture.client.query<{ source_event_id: string | null }>(
+        'select source_event_id from sms_suppressions where shop_id = $1', [tenant.shopId],
+      )).rows[0]?.source_event_id).toBe(eventId)
+      expect((await fixture.client.query<{ outcome: string }>(
+        'select outcome from messaging_deletion_work_items where id = $1', [workItemId],
+      )).rows[0]?.outcome).toBe('pending')
     } finally {
       await fixture.close()
     }
@@ -2969,14 +2487,14 @@ describe('Shop OS messaging retention source schema', () => {
     const unsafeDefinition = await createTestDb()
     try {
       await unsafeDefinition.client.exec(
-        'alter function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) security invoker',
+        'alter function compact_messaging_consent_work_items(uuid, uuid, uuid[]) security invoker',
       )
       await expect(ensureMessagingRetentionMigration(unsafeDefinition.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
       )
       await unsafeDefinition.client.exec(`
-        alter function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) security definer;
-        alter function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) set search_path = public;
+        alter function compact_messaging_consent_work_items(uuid, uuid, uuid[]) security definer;
+        alter function compact_messaging_consent_work_items(uuid, uuid, uuid[]) set search_path = public;
       `)
       await expect(ensureMessagingRetentionMigration(unsafeDefinition.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
@@ -3013,7 +2531,7 @@ describe('Shop OS messaging retention source schema', () => {
     const missingFunction = await createTestDb()
     try {
       await missingFunction.client.exec(
-        'drop function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) cascade',
+        'drop function compact_messaging_consent_work_items(uuid, uuid, uuid[]) cascade',
       )
       await expect(ensureMessagingRetentionMigration(missingFunction.client)).rejects.toThrow(
         'partial messaging retention schema in ephemeral database',
@@ -3066,7 +2584,7 @@ describe('Shop OS messaging retention source schema', () => {
     try {
       const compactProof = await fixture.client.query<{ function_definition: string }>(`
         select pg_get_functiondef(
-          'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)'::regprocedure
+          'compact_messaging_consent_work_items(uuid,uuid,uuid[])'::regprocedure
         ) as function_definition
       `)
       const completionProof = await fixture.client.query<{ function_definition: string }>(`
@@ -3077,7 +2595,7 @@ describe('Shop OS messaging retention source schema', () => {
       const compact = compactProof.rows[0]!.function_definition
       const completion = completionProof.rows[0]!.function_definition
       const weakenings = [
-        compact.replace(/\s+and e\.customer_id = request_customer_id/i, ''),
+        compact.replace(/\s+and event\.customer_id = request_customer_id/i, ''),
         compact.replace(/array_agg\(distinct event_id order by event_id\)/i, 'array_agg(event_id)'),
         completion.replace(/old\.id = any\(compaction_event_ids\)/i, 'true'),
         completion.replace(/r\.shop_id = old\.shop_id/i, 'true'),
@@ -3091,7 +2609,7 @@ describe('Shop OS messaging retention source schema', () => {
         await expect(ensureMessagingRetentionMigration(fixture.client)).rejects.toThrow(
           'partial messaging retention schema in ephemeral database',
         )
-        await fixture.client.exec(weakened.includes('compact_messaging_consent_events')
+        await fixture.client.exec(weakened.includes('compact_messaging_consent_work_items')
           ? compact
           : completion)
       }

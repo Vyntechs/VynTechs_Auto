@@ -29,7 +29,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'guard_quote_send_lifecycle()', serviceExecute: false },
   { signature: 'reject_messaging_consent_event_mutation()', serviceExecute: false },
   { signature: 'require_messaging_compaction_completion()', serviceExecute: false },
-  { signature: 'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)', serviceExecute: true },
+  { signature: 'compact_messaging_consent_work_items(uuid,uuid,uuid[])', serviceExecute: true },
   { signature: 'guard_messaging_deletion_work_item_mutation()', serviceExecute: false },
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
@@ -99,6 +99,39 @@ describe('Shop OS messaging retention ACL hardening', () => {
       anon_execute: false,
       authenticated_execute: false,
       service_execute: false,
+    }])
+  })
+
+  it('exposes exact consent work items only through the service definer', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    expect((await client.query<{
+      old_signature_absent: boolean
+      returns_integer: boolean
+      security_definer: boolean
+      anon_execute: boolean
+      authenticated_execute: boolean
+      service_execute: boolean
+    }>(`
+      select
+        to_regprocedure(
+          'public.compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)'
+        ) is null as old_signature_absent,
+        p.prorettype = 'integer'::regtype as returns_integer,
+        p.prosecdef as security_definer,
+        has_function_privilege('anon', p.oid, 'execute') as anon_execute,
+        has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+        has_function_privilege('service_role', p.oid, 'execute') as service_execute
+      from pg_proc p
+      where p.oid = 'public.compact_messaging_consent_work_items(uuid,uuid,uuid[])'::regprocedure
+    `)).rows).toEqual([{
+      old_signature_absent: true,
+      returns_integer: true,
+      security_definer: true,
+      anon_execute: false,
+      authenticated_execute: false,
+      service_execute: true,
     }])
   })
 
@@ -349,7 +382,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
 
     await client.exec(`
       grant select on public.notifications to service_role;
-      revoke execute on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
+      revoke execute on function public.compact_messaging_consent_work_items(uuid, uuid, uuid[])
         from service_role;
     `)
     await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
@@ -357,7 +390,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
     )
 
     await client.exec(`
-      grant execute on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
+      grant execute on function public.compact_messaging_consent_work_items(uuid, uuid, uuid[])
         to service_role;
       revoke execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
         from service_role;

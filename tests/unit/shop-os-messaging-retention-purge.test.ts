@@ -12,6 +12,7 @@ import {
   messagingConsentEvents,
   messagingConsentState,
   messagingDeletionRequests,
+  messagingDeletionWorkItems,
   messagingRetentionHolds,
   notifications,
   profiles,
@@ -581,6 +582,96 @@ describe('messaging retention holds and bounded purge', () => {
     expect(await db.select().from(messagingConsentState)).toHaveLength(2)
     expect(await db.select().from(smsSuppressions)).toHaveLength(1)
     expect(await db.select().from(messagingConsentEvents)).toHaveLength(2)
+  })
+
+  it('keeps compaction authorization separate from purge authorization', async () => {
+    await db.delete(notifications)
+    const eventId = uuid(70)
+    const eventFingerprint = '7'.repeat(64)
+    await db.insert(messagingConsentEvents).values({
+      id: eventId,
+      shopId,
+      subjectKey,
+      customerId,
+      destinationFingerprint: eventFingerprint,
+      fingerprintKeyVersion: 'key_v1',
+      programVersion: 'authorization_separation_v1',
+      eventType: 'revoked',
+      committedAt: new Date('2015-01-01T00:00:00.000Z'),
+      occurredAt: new Date('2015-01-01T00:00:00.000Z'),
+      captureMethod: 'staff_request',
+      customerControlled: true,
+      evidenceKind: 'staff_request',
+      actorProfileId: owner.profileId,
+      requestKey: uuid(170),
+      requestFingerprint: '8'.repeat(64),
+      retainUntil: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    const deletion = await requestMessagingDeletion({
+      db,
+      actor: owner,
+      customerId,
+      destination: '+12025550123',
+      reasonCode: 'customer_request',
+      requestKey: uuid(171),
+      requestFingerprint: '9'.repeat(64),
+      now: new Date(),
+      keyRing,
+    })
+    if (!deletion.ok) throw new Error(`deletion request failed: ${deletion.error}`)
+    const [{ id: workItemId }] = await db.insert(messagingDeletionWorkItems).values({
+      shopId,
+      requestId: deletion.requestId,
+      resourceType: 'consent_event',
+      resourceId: eventId,
+    }).returning({ id: messagingDeletionWorkItems.id })
+
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`select set_config(
+          'vyntechs.messaging_consent_purge_shop', ${shopId}::text, true
+        )`)
+        await tx.execute(sql`select set_config(
+          'vyntechs.messaging_consent_purge_events', ${`{${eventId}}`}::text, true
+        )`)
+        await tx.execute(sql`select compact_messaging_consent_work_items(
+          ${shopId}::uuid, ${deletion.requestId}::uuid,
+          ${sql.param([workItemId!])}::uuid[]
+        )`)
+      })
+      throw new Error('purge context unexpectedly authorized compaction')
+    } catch (error) {
+      expect((error as { cause?: Error }).cause?.message)
+        .toContain('compaction transaction cannot mix consent event purge context')
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`select set_config(
+          'vyntechs.messaging_consent_compaction_request', ${deletion.requestId}::text, true
+        )`)
+        await tx.execute(sql`select set_config(
+          'vyntechs.messaging_consent_compaction_shop', ${shopId}::text, true
+        )`)
+        await tx.execute(sql`select set_config(
+          'vyntechs.messaging_consent_compaction_events', ${`{${eventId}}`}::text, true
+        )`)
+        await tx.execute(sql`select purge_expired_messaging_consent_event(
+          ${shopId}::uuid, ${eventId}::uuid
+        )`)
+      })
+      throw new Error('compaction context unexpectedly authorized purge')
+    } catch (error) {
+      expect((error as { cause?: Error }).cause?.message)
+        .toContain('consent event purge transaction cannot mix compaction context')
+    }
+
+    expect(await db.select({ id: messagingConsentEvents.id }).from(messagingConsentEvents))
+      .toEqual([{ id: eventId }])
+    expect((await db.select().from(messagingDeletionWorkItems))[0]).toMatchObject({
+      id: workItemId,
+      outcome: 'pending',
+    })
   })
 
   it('keeps durable subject-held send records after verified deletion nulls customer identity', async () => {

@@ -474,8 +474,9 @@ describe('suppression-first messaging deletion', () => {
     expect(firstJournal).toHaveLength(recoveryLimits.totalResources)
     expect(firstJournal.every((row) => row.requestId === pending.requestId
       && row.resourceType === 'consent_event'
-      && row.parentWorkItemId === null
-      && row.outcome === 'pending')).toBe(true)
+      && row.parentWorkItemId === null)).toBe(true)
+    expect(firstJournal.filter(({ outcome }) => outcome === 'retained')).toHaveLength(256)
+    expect(firstJournal.filter(({ outcome }) => outcome === 'pending')).toHaveLength(768)
 
     expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
       .toMatchObject({ ok: true, state: 'pending' })
@@ -577,12 +578,76 @@ describe('suppression-first messaging deletion', () => {
       resourceType: 'notification',
       resourceId: customerNotification,
       parentWorkItemId: null,
-      outcome: 'pending',
+      outcome: 'deleted',
     })
     expect(await db.select({ id: quoteSends.id }).from(quoteSends)
       .where(eq(quoteSends.id, otherCustomerSend))).toHaveLength(1)
     expect(await db.select({ id: notifications.id }).from(notifications)
       .where(eq(notifications.id, otherCustomerNotification))).toHaveLength(1)
+  })
+
+  it('commits source and work outcome atomically without replay counting', async () => {
+    await seedPhaseTwoResource('notifications', 1)
+    const pending = await request({ requestKey: uuid(73_600) })
+    if (!pending.ok) throw new Error('request failed')
+
+    const first = await completeMessagingDeletion({
+      db, actor: owner, requestId: pending.requestId, now,
+    })
+    expect(first).toMatchObject({
+      ok: true,
+      counts: { notificationsDeleted: 1 },
+    })
+    expect(await db.select().from(notifications)).toHaveLength(0)
+    expect(await journalRows(pending.requestId)).toEqual([expect.objectContaining({
+      resourceType: 'notification',
+      resourceId: uuid(40_000),
+      outcome: 'deleted',
+    })])
+
+    const retry = await completeMessagingDeletion({
+      db, actor: owner, requestId: pending.requestId, now: new Date(0),
+    })
+    expect(retry).toEqual(first)
+    expect(await journalRows(pending.requestId)).toEqual([expect.objectContaining({
+      resourceType: 'notification',
+      resourceId: uuid(40_000),
+      outcome: 'deleted',
+    })])
+  })
+
+  it('never deletes a parent before children are resolved and fully discovered', async () => {
+    const sendId = uuid(73_700)
+    await insertSend(sendId, 'queued')
+    const createdAt = new Date('2026-07-12T10:00:00.000Z')
+    const retainUntil = new Date('2026-10-10T10:00:00.000Z')
+    await db.insert(notifications).values(Array.from({ length: 1_024 }, (_, index) => ({
+      id: uuid(74_000 + index),
+      shopId,
+      recipientProfileId: owner.profileId,
+      eventType: 'quote_sent' as const,
+      entityType: 'quote_send' as const,
+      entityId: sendId,
+      dedupeKey: `parent-order-${index}`,
+      createdAt,
+      retainUntil,
+    })))
+    const pending = await request({ requestKey: uuid(75_100) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    expect(await db.select({ id: quoteSends.id }).from(quoteSends)
+      .where(eq(quoteSends.id, sendId))).toEqual([{ id: sendId }])
+    const rows = await journalRows(pending.requestId)
+    expect(rows.filter(({ resourceType }) => resourceType === 'notification')).toHaveLength(1_023)
+    expect(rows.filter(({ resourceType, outcome }) =>
+      resourceType === 'notification' && outcome === 'deleted')).toHaveLength(256)
+    expect(rows.find(({ resourceType }) => resourceType === 'quote_send')).toMatchObject({
+      resourceId: sendId,
+      outcome: 'pending',
+    })
+    expect(await db.select({ id: notifications.id }).from(notifications)).toHaveLength(768)
   })
 
   it('binds completed retries to the original customer without retaining a raw customer ID', async () => {
@@ -1227,9 +1292,9 @@ describe('suppression-first messaging deletion', () => {
     ['quote send mutation', 'sends', 1, 'delete from quote_sends', false],
     ['SMS mutation', 'smsLogs', 1, 'delete from sms_log', false],
     ['notification mutation', 'notifications', 1, 'delete from notifications', false],
-    ['consent mutation', 'consentEvents', 1, 'compact_messaging_consent_events', false],
+    ['consent mutation', 'consentEvents', 1, 'compact_messaging_consent_work_items', false],
     ['pending progress write', 'sends', 129, 'update messaging_deletion_requests', true],
-  ] as const)('rolls back %s and stored progress together', async (
+  ] as const)('commits source and work outcome atomically by rolling back %s', async (
     _label, family, count, marker, throwAfter,
   ) => {
     await seedPhaseTwoResource(family, count)
@@ -1240,6 +1305,7 @@ describe('suppression-first messaging deletion', () => {
       sms: await db.select().from(smsLog),
       notifications: await db.select().from(notifications),
       events: await db.select().from(messagingConsentEvents),
+      workItems: await db.select().from(messagingDeletionWorkItems),
       request: (await db.select().from(messagingDeletionRequests))[0],
     }
     const strings = (value: unknown, seen = new Set<unknown>()): string => {
@@ -1277,6 +1343,7 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select().from(smsLog)).toEqual(before.sms)
     expect(await db.select().from(notifications)).toEqual(before.notifications)
     expect(await db.select().from(messagingConsentEvents)).toEqual(before.events)
+    expect(await db.select().from(messagingDeletionWorkItems)).toEqual(before.workItems)
     expect((await db.select().from(messagingDeletionRequests))[0]).toEqual(before.request)
   })
 
@@ -1573,7 +1640,7 @@ describe('suppression-first messaging deletion', () => {
     expect(source).toContain("new Set(['queued', 'claimed'])")
     expect(source).toContain("new Set(['submitting', 'submitted'])")
     expect(source).toMatch(/for update/i)
-    expect(source).toContain('compact_messaging_consent_events')
+    expect(source).toContain('compact_messaging_consent_work_items')
     expect(source).toContain("resource_type = 'sms_log'")
     expect(source).toContain("resource_type = 'quote_send'")
     expect(source).toContain("resource_type = 'notification'")
@@ -1586,8 +1653,9 @@ describe('suppression-first messaging deletion', () => {
     const dedicatedHoldsLock = 'select id, starts_at as "startsAt", resource_type as "resourceType"'
     const positions = [
       'select id from shops', 'from messaging_deletion_requests',
-      'select id from customers', 'select id, state', 'from messaging_consent_state',
-      'from sms_log', 'from notifications', dedicatedHoldsLock,
+      'select id from customers', 'select source.id, source.state',
+      'join messaging_consent_state source', 'join sms_log source',
+      'join notifications source', dedicatedHoldsLock,
     ].map((marker) => phaseTwo.indexOf(marker))
     expect(positions.every((position) => position >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
