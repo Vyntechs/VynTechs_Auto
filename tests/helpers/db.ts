@@ -60,6 +60,7 @@ export async function createTestDb(): Promise<{
   await ensureShopOsServerOnlyAclMigration(client)
   await ensureMessagingRetentionMigration(client)
   await ensureMessagingRetentionAclMigration(client)
+  await ensureMessagingRetentionFkIndexMigration(client)
   return {
     db,
     client,
@@ -944,5 +945,58 @@ export async function ensureMessagingRetentionAclMigration(
   const after = await messagingRetentionAclMarkers(client)
   if (!hasCompleteMessagingRetentionAcl(after)) {
     throw new Error('messaging retention ACL hardening failed in ephemeral database')
+  }
+}
+
+const MESSAGING_RETENTION_FK_INDEXES = [
+  ['messaging_consent_events_shop_customer_idx', 'messaging_consent_events', '(shop_id, customer_id)'],
+  ['messaging_consent_state_shop_customer_idx', 'messaging_consent_state', '(shop_id, customer_id)'],
+  ['messaging_consent_state_shop_source_event_idx', 'messaging_consent_state', '(shop_id, source_event_id)'],
+  ['messaging_deletion_work_items_parent_work_item_idx', 'messaging_deletion_work_items', '(parent_work_item_id)'],
+  ['messaging_deletion_work_items_shop_request_idx', 'messaging_deletion_work_items', '(shop_id, request_id)'],
+  ['messaging_retention_holds_shop_actor_idx', 'messaging_retention_holds', '(shop_id, authorizing_actor_profile_id)'],
+  ['quote_sends_shop_customer_idx', 'quote_sends', '(shop_id, customer_id)'],
+  ['sms_suppressions_shop_source_event_idx', 'sms_suppressions', '(shop_id, source_event_id)'],
+] as const
+
+async function inspectMessagingRetentionFkIndexes(client: PGlite): Promise<{
+  present: number
+  exact: number
+}> {
+  const names = MESSAGING_RETENTION_FK_INDEXES
+    .map(([name]) => `'${name}'`)
+    .join(', ')
+  const result = await client.query<{ indexname: string; tablename: string; indexdef: string }>(`
+    select indexname, tablename, indexdef
+    from pg_indexes
+    where schemaname = 'public' and indexname in (${names})
+  `)
+  const exact = result.rows.filter((row) => {
+    const expected = MESSAGING_RETENTION_FK_INDEXES.find(([name]) => name === row.indexname)
+    if (!expected) return false
+    const [, table, columns] = expected
+    const definition = row.indexdef.toLowerCase().replace(/\s+/g, ' ')
+    return row.tablename === table
+      && definition.includes(`on public.${table} using btree ${columns}`)
+  }).length
+  return { present: result.rows.length, exact }
+}
+
+async function ensureMessagingRetentionFkIndexMigration(client: PGlite): Promise<void> {
+  const before = await inspectMessagingRetentionFkIndexes(client)
+  if (before.exact === MESSAGING_RETENTION_FK_INDEXES.length) return
+  if (before.present > 0) {
+    throw new Error('partial messaging retention foreign-key indexes in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0035_shop_os_messaging_retention_fk_indexes.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await inspectMessagingRetentionFkIndexes(client)
+  if (after.exact !== MESSAGING_RETENTION_FK_INDEXES.length) {
+    throw new Error('messaging retention foreign-key index hardening failed in ephemeral database')
   }
 }

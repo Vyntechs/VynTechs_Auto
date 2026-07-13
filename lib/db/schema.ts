@@ -776,6 +776,7 @@ export const quoteSends = pgTable(
       table.requestingActorProfileId,
       table.requestKey,
     ),
+    index('quote_sends_shop_customer_idx').on(table.shopId, table.customerId),
     index('quote_sends_destination_idx').on(
       table.shopId,
       table.destinationFingerprint,
@@ -1122,6 +1123,7 @@ export const messagingConsentEvents = pgTable(
       table.subjectKey,
       table.committedAt,
     ),
+    index('messaging_consent_events_shop_customer_idx').on(table.shopId, table.customerId),
     check(
       'messaging_consent_events_destination_fingerprint_valid',
       sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
@@ -1210,6 +1212,8 @@ export const messagingConsentState = pgTable(
       table.fingerprintKeyVersion,
       table.programVersion,
     ),
+    index('messaging_consent_state_shop_customer_idx').on(table.shopId, table.customerId),
+    index('messaging_consent_state_shop_source_event_idx').on(table.shopId, table.sourceEventId),
     check(
       'messaging_consent_state_destination_fingerprint_valid',
       sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
@@ -1268,6 +1272,7 @@ export const smsSuppressions = pgTable(
       table.destinationFingerprint,
       table.fingerprintKeyVersion,
     ),
+    index('sms_suppressions_shop_source_event_idx').on(table.shopId, table.sourceEventId),
     check(
       'sms_suppressions_destination_fingerprint_valid',
       sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
@@ -1439,6 +1444,10 @@ export const messagingDeletionWorkItems = pgTable(
       .on(table.requestId, table.outcome, table.resourceType, table.id),
     index('messaging_deletion_work_items_parent_idx')
       .on(table.requestId, table.parentWorkItemId, table.outcome),
+    index('messaging_deletion_work_items_parent_work_item_idx')
+      .on(table.parentWorkItemId),
+    index('messaging_deletion_work_items_shop_request_idx')
+      .on(table.shopId, table.requestId),
     check(
       'messaging_deletion_work_items_resource_type_valid',
       sql`${table.resourceType} in ('consent_event','consent_projection','quote_send','sms_log','notification')`,
@@ -1508,6 +1517,8 @@ export const messagingRetentionHolds = pgTable(
       foreignColumns: [profiles.shopId, profiles.id],
     }).onDelete('restrict'),
     uniqueIndex('messaging_retention_holds_shop_id_uq').on(table.shopId, table.id),
+    index('messaging_retention_holds_shop_actor_idx')
+      .on(table.shopId, table.authorizingActorProfileId),
     index('messaging_retention_holds_active_subject_idx')
       .on(table.shopId, table.subjectKey, table.expiresAt)
       .where(sql`${table.subjectKey} is not null and ${table.releasedAt} is null`),

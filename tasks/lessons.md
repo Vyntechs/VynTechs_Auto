@@ -32,3 +32,8 @@ Reason: Self-referential hashes become false immediately and create avoidable co
 Trigger: CRUD-only revokes left server-only tables exposed to TRUNCATE, REFERENCES, and TRIGGER privileges.
 Rule: Revoke all client table privileges and verify direct, PUBLIC, inherited, and intended service access.
 Reason: RLS does not protect every table privilege, and partial ACL checks can falsely certify isolation.
+
+### verify-advisors-before-production-migration-closure
+Trigger: Production verification found unindexed foreign keys after source had been called ready.
+Rule: Prove exact FK index coverage before merge, then run security and performance advisors after apply.
+Reason: Local schema correctness does not prove production advisor cleanliness.

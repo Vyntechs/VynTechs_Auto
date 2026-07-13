@@ -10,6 +10,7 @@ import {
   messagingConsentState,
   smsSuppressions,
   messagingDeletionRequests,
+  messagingDeletionWorkItems,
   messagingRetentionHolds,
   quoteEvents,
   quoteSends,
@@ -1102,6 +1103,66 @@ describe('finalizes deletion work journal atomically', () => {
 })
 
 describe('Shop OS messaging retention source schema', () => {
+  it('declares correctly ordered covering indexes for every Row 31 foreign key', () => {
+    const indexNames = [
+      messagingConsentEvents,
+      messagingConsentState,
+      smsSuppressions,
+      messagingDeletionWorkItems,
+      messagingRetentionHolds,
+      quoteSends,
+    ].flatMap((table) => getTableConfig(table).indexes.map((index) => index.config.name))
+
+    expect(indexNames).toEqual(expect.arrayContaining([
+      'messaging_consent_events_shop_customer_idx',
+      'messaging_consent_state_shop_customer_idx',
+      'messaging_consent_state_shop_source_event_idx',
+      'messaging_deletion_work_items_parent_work_item_idx',
+      'messaging_deletion_work_items_shop_request_idx',
+      'messaging_retention_holds_shop_actor_idx',
+      'quote_sends_shop_customer_idx',
+      'sms_suppressions_shop_source_event_idx',
+    ]))
+  })
+
+  it('applies the exact foreign-key covering indexes through the standard fixture', async () => {
+    const fixture = await createTestDb()
+    try {
+      const result = await fixture.client.query<{ indexname: string; indexdef: string }>(`
+        select indexname, indexdef
+        from pg_indexes
+        where schemaname = 'public'
+          and indexname in (
+            'messaging_consent_events_shop_customer_idx',
+            'messaging_consent_state_shop_customer_idx',
+            'messaging_consent_state_shop_source_event_idx',
+            'messaging_deletion_work_items_parent_work_item_idx',
+            'messaging_deletion_work_items_shop_request_idx',
+            'messaging_retention_holds_shop_actor_idx',
+            'quote_sends_shop_customer_idx',
+            'sms_suppressions_shop_source_event_idx'
+          )
+      `)
+      const definitions = Object.fromEntries(
+        result.rows.map((row) => [row.indexname, row.indexdef.replace(/\s+/g, ' ')]),
+      )
+
+      expect(definitions).toMatchObject({
+        messaging_consent_events_shop_customer_idx: expect.stringContaining('(shop_id, customer_id)'),
+        messaging_consent_state_shop_customer_idx: expect.stringContaining('(shop_id, customer_id)'),
+        messaging_consent_state_shop_source_event_idx: expect.stringContaining('(shop_id, source_event_id)'),
+        messaging_deletion_work_items_parent_work_item_idx: expect.stringContaining('(parent_work_item_id)'),
+        messaging_deletion_work_items_shop_request_idx: expect.stringContaining('(shop_id, request_id)'),
+        messaging_retention_holds_shop_actor_idx: expect.stringContaining('(shop_id, authorizing_actor_profile_id)'),
+        quote_sends_shop_customer_idx: expect.stringContaining('(shop_id, customer_id)'),
+        sms_suppressions_shop_source_event_idx: expect.stringContaining('(shop_id, source_event_id)'),
+      })
+      expect(Object.keys(definitions)).toHaveLength(8)
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('declares the five core compliance tables', () => {
     expect([
       messagingConsentEvents,
