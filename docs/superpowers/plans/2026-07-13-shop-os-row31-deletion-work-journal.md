@@ -240,9 +240,9 @@ where child.shop_id = $shop_id and existing.id is null
 
 Use the equivalent parent join for `notifications.entity_type = 'quote_send'`. Direct customer notifications require `entity_type = 'customer'` and the canonical request's still-locked customer ID.
 
-- [ ] **Step 5: Remove source cursors from pending progress**
+- [ ] **Step 5: Keep discovery cursor-free without breaking the temporary legacy processor**
 
-Stop reading or writing `proof_summary.cursors` in the Task 3 runtime. Keep Task 1/2 stored counts readable during the transition until Task 4 finalization replaces them. Do not weaken the pending-request mutation guard yet.
+Do not add a cursor to journal discovery. Leave the old source-processing cursor reads/writes intact only as temporary compatibility until Tasks 3 and 4 replace processing and finalization atomically; Task 5 removes the superseded code. Do not weaken the pending-request mutation guard in this task.
 
 - [ ] **Step 6: Run Task 2 GREEN tests**
 
