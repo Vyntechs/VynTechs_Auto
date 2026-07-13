@@ -851,110 +851,6 @@ export async function completeMessagingDeletion(rawInput: {
         customerId: request.customerId,
       }, MAX_TOTAL_RESOURCES)
 
-      const validRetainedWorkItemIds = unwrapRows<{ id: string }>(await tx.execute(sql`
-        with direct_valid as materialized (
-          select work.id
-          from messaging_deletion_work_items work
-          where work.request_id = ${request.id}::uuid
-            and work.outcome = 'retained'
-            and case work.retention_basis
-              when 'resource_hold' then exists (
-                select 1 from messaging_retention_holds hold
-                where hold.shop_id = work.shop_id
-                  and hold.resource_id = work.resource_id
-                  and hold.resource_type = case work.resource_type
-                    when 'consent_event' then 'messaging_consent_event'
-                    else work.resource_type
-                  end
-                  and hold.released_at is null
-                  and hold.starts_at <= clock_timestamp()
-                  and hold.expires_at > clock_timestamp()
-              )
-              when 'subject_hold' then exists (
-                select 1 from messaging_retention_holds hold
-                where hold.shop_id = work.shop_id
-                  and hold.subject_key = case
-                    when work.resource_type = 'consent_event' then (
-                      select source.subject_key from messaging_consent_events source
-                      where source.shop_id = work.shop_id and source.id = work.resource_id
-                    )
-                    when work.resource_type = 'consent_projection' then (
-                      select source.subject_key from messaging_consent_state source
-                      where source.shop_id = work.shop_id and source.id = work.resource_id
-                    )
-                    when work.resource_type = 'quote_send' then (
-                      select source.subject_key from quote_sends source
-                      where source.shop_id = work.shop_id and source.id = work.resource_id
-                    )
-                    when work.resource_type = 'sms_log' then (
-                      select parent_source.subject_key
-                      from sms_log source
-                      join quote_sends parent_source
-                        on parent_source.shop_id = source.shop_id
-                        and parent_source.id = source.quote_send_id
-                      where source.shop_id = work.shop_id and source.id = work.resource_id
-                    )
-                    when work.resource_type = 'notification' then coalesce((
-                      select parent_source.subject_key
-                      from notifications source
-                      join quote_sends parent_source
-                        on source.entity_type = 'quote_send'
-                        and parent_source.shop_id = source.shop_id
-                        and parent_source.id = source.entity_id
-                      where source.shop_id = work.shop_id and source.id = work.resource_id
-                    ), ${request.subjectKey}::uuid)
-                  end
-                  and hold.released_at is null
-                  and hold.starts_at <= clock_timestamp()
-                  and hold.expires_at > clock_timestamp()
-              )
-              else false
-            end
-            and not (
-              work.resource_type = 'quote_send'
-              and exists (
-                select 1 from messaging_deletion_work_items retained_child
-                where retained_child.request_id = work.request_id
-                  and retained_child.parent_work_item_id = work.id
-                  and retained_child.outcome = 'retained'
-              )
-            )
-        ), dependency_valid as (
-          select parent.id
-          from messaging_deletion_work_items parent
-          join messaging_deletion_work_items child
-            on child.request_id = parent.request_id
-            and child.parent_work_item_id = parent.id
-          join direct_valid direct_child on direct_child.id = child.id
-          where parent.request_id = ${request.id}::uuid
-            and parent.outcome = 'retained'
-            and parent.retention_basis = 'held_dependency'
-            and parent.resource_type in ('quote_send', 'consent_projection')
-          union
-          select dependent.id
-          from messaging_deletion_work_items dependent
-          join messaging_deletion_work_items parent
-            on parent.id = dependent.parent_work_item_id
-            and parent.request_id = dependent.request_id
-          join messaging_consent_state projection
-            on projection.shop_id = parent.shop_id and projection.id = parent.resource_id
-            and projection.source_event_id = dependent.resource_id
-          join messaging_deletion_work_items held_sibling
-            on held_sibling.request_id = dependent.request_id
-            and held_sibling.parent_work_item_id = parent.id
-            and held_sibling.id <> dependent.id
-          join direct_valid direct_sibling on direct_sibling.id = held_sibling.id
-          where dependent.request_id = ${request.id}::uuid
-            and dependent.resource_type = 'consent_event'
-            and dependent.outcome = 'retained'
-            and dependent.retention_basis = 'held_dependency'
-            and parent.outcome = 'retained'
-            and parent.retention_basis = 'held_dependency'
-        )
-        select id from direct_valid
-        union select id from dependency_valid
-      `)).map(({ id }) => id)
-
       const sendPage = unwrapRows<SendRow>(await tx.execute(sql`
         select source.id, source.state, source.customer_id as "customerId",
           source.subject_key as "subjectKey", work.id as "workItemId",
@@ -972,8 +868,59 @@ export async function completeMessagingDeletion(rawInput: {
         join quote_sends source on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'quote_send' and work.outcome in ('pending', 'retained')
-          and not (work.outcome = 'retained'
-            and work.id = any(${sql.param(validRetainedWorkItemIds)}::uuid[]))
+          and (work.outcome = 'pending' or not (
+            case work.retention_basis
+              when 'resource_hold' then
+                not exists (
+                  select 1 from messaging_deletion_work_items retained_child
+                  where retained_child.request_id = work.request_id
+                    and retained_child.parent_work_item_id = work.id
+                    and retained_child.outcome = 'retained'
+                ) and exists (
+                  select 1 from messaging_retention_holds hold
+                  where hold.shop_id = source.shop_id
+                    and hold.resource_type = 'quote_send' and hold.resource_id = source.id
+                    and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                    and hold.expires_at > clock_timestamp()
+                )
+              when 'subject_hold' then
+                not exists (
+                  select 1 from messaging_deletion_work_items retained_child
+                  where retained_child.request_id = work.request_id
+                    and retained_child.parent_work_item_id = work.id
+                    and retained_child.outcome = 'retained'
+                ) and exists (
+                  select 1 from messaging_retention_holds hold
+                  where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                    and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                    and hold.expires_at > clock_timestamp()
+                )
+              when 'held_dependency' then exists (
+                select 1
+                from messaging_deletion_work_items retained_child
+                where retained_child.request_id = work.request_id
+                  and retained_child.parent_work_item_id = work.id
+                  and retained_child.outcome = 'retained'
+                  and (
+                    (retained_child.retention_basis = 'resource_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = retained_child.shop_id
+                        and hold.resource_type = retained_child.resource_type
+                        and hold.resource_id = retained_child.resource_id
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                    or (retained_child.retention_basis = 'subject_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                  )
+              )
+              else false
+            end
+          ))
         order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
         limit ${MAX_SENDS + 1} for update of source, work
       `))
@@ -992,8 +939,59 @@ export async function completeMessagingDeletion(rawInput: {
           on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'consent_projection' and work.outcome in ('pending', 'retained')
-          and not (work.outcome = 'retained'
-            and work.id = any(${sql.param(validRetainedWorkItemIds)}::uuid[]))
+          and (work.outcome = 'pending' or not (
+            case work.retention_basis
+              when 'resource_hold' then
+                not exists (
+                  select 1 from messaging_deletion_work_items retained_child
+                  where retained_child.request_id = work.request_id
+                    and retained_child.parent_work_item_id = work.id
+                    and retained_child.outcome = 'retained'
+                ) and exists (
+                  select 1 from messaging_retention_holds hold
+                  where hold.shop_id = source.shop_id
+                    and hold.resource_type = 'consent_projection' and hold.resource_id = source.id
+                    and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                    and hold.expires_at > clock_timestamp()
+                )
+              when 'subject_hold' then
+                not exists (
+                  select 1 from messaging_deletion_work_items retained_child
+                  where retained_child.request_id = work.request_id
+                    and retained_child.parent_work_item_id = work.id
+                    and retained_child.outcome = 'retained'
+                ) and exists (
+                  select 1 from messaging_retention_holds hold
+                  where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                    and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                    and hold.expires_at > clock_timestamp()
+                )
+              when 'held_dependency' then exists (
+                select 1
+                from messaging_deletion_work_items retained_child
+                where retained_child.request_id = work.request_id
+                  and retained_child.parent_work_item_id = work.id
+                  and retained_child.outcome = 'retained'
+                  and (
+                    (retained_child.retention_basis = 'resource_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = retained_child.shop_id
+                        and hold.resource_type = 'messaging_consent_event'
+                        and hold.resource_id = retained_child.resource_id
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                    or (retained_child.retention_basis = 'subject_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                  )
+              )
+              else false
+            end
+          ))
         order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc,
           source.subject_key, source.id
         limit ${MAX_CONSENT_PROJECTIONS + 1}
@@ -1020,8 +1018,57 @@ export async function completeMessagingDeletion(rawInput: {
           on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'consent_event' and work.outcome in ('pending', 'retained')
-          and not (work.outcome = 'retained'
-            and work.id = any(${sql.param(validRetainedWorkItemIds)}::uuid[]))
+          and (work.outcome = 'pending' or not (
+            case work.retention_basis
+              when 'resource_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = source.shop_id
+                  and hold.resource_type = 'messaging_consent_event'
+                  and hold.resource_id = source.id
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              when 'subject_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              when 'held_dependency' then exists (
+                select 1
+                from messaging_deletion_work_items parent
+                join messaging_consent_state projection
+                  on projection.shop_id = parent.shop_id and projection.id = parent.resource_id
+                  and projection.source_event_id = source.id
+                join messaging_deletion_work_items held_sibling
+                  on held_sibling.request_id = work.request_id
+                  and held_sibling.parent_work_item_id = parent.id
+                  and held_sibling.id <> work.id
+                  and held_sibling.outcome = 'retained'
+                where parent.id = work.parent_work_item_id
+                  and parent.request_id = work.request_id
+                  and parent.outcome = 'retained'
+                  and parent.retention_basis = 'held_dependency'
+                  and (
+                    (held_sibling.retention_basis = 'resource_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = held_sibling.shop_id
+                        and hold.resource_type = 'messaging_consent_event'
+                        and hold.resource_id = held_sibling.resource_id
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                    or (held_sibling.retention_basis = 'subject_hold' and exists (
+                      select 1 from messaging_retention_holds hold
+                      where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+                        and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                        and hold.expires_at > clock_timestamp()
+                    ))
+                  )
+              )
+              else false
+            end
+          ))
         order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc,
           source.subject_key, source.id
         limit ${MAX_CONSENT_EVENTS + 1}
@@ -1037,7 +1084,6 @@ export async function completeMessagingDeletion(rawInput: {
       totalRemaining -= consentProjections.length
       const consentEvents = eventPage.slice(0, Math.min(MAX_CONSENT_EVENTS, totalRemaining))
       totalRemaining -= consentEvents.length
-      const sendIds = sends.map(({ id }) => id)
       const smsPage = unwrapRows<SmsRow>(await tx.execute(sql`
         select source.id, source.quote_send_id as "quoteSendId", work.id as "workItemId",
           work.outcome as "workOutcome",
@@ -1047,18 +1093,40 @@ export async function completeMessagingDeletion(rawInput: {
               and hold.starts_at <= clock_timestamp() and hold.expires_at > clock_timestamp())
             as "resourceHeld",
           exists (select 1 from messaging_retention_holds hold
-            join quote_sends parent_source on parent_source.shop_id = source.shop_id
-              and parent_source.id = source.quote_send_id
             where hold.shop_id = source.shop_id and hold.subject_key = parent_source.subject_key
               and hold.released_at is null and hold.starts_at <= clock_timestamp()
               and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join sms_log source on source.shop_id = work.shop_id and source.id = work.resource_id
+        join messaging_deletion_work_items parent
+          on parent.request_id = work.request_id and parent.id = work.parent_work_item_id
+            and parent.resource_type = 'quote_send'
+        join quote_sends parent_source on parent_source.shop_id = source.shop_id
+          and parent_source.id = source.quote_send_id and parent_source.id = parent.resource_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'sms_log' and work.outcome in ('pending', 'retained')
-          and not (work.outcome = 'retained'
-            and work.id = any(${sql.param(validRetainedWorkItemIds)}::uuid[]))
-          and source.quote_send_id = any(${sql.param(sendIds)}::uuid[])
+          and (work.outcome = 'pending' or not (
+            case work.retention_basis
+              when 'resource_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = source.shop_id and hold.resource_type = 'sms_log'
+                  and hold.resource_id = source.id
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              when 'subject_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                join quote_sends parent_source on parent_source.shop_id = source.shop_id
+                  and parent_source.id = source.quote_send_id
+                where hold.shop_id = source.shop_id
+                  and hold.subject_key = parent_source.subject_key
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              else false
+            end
+            and parent.outcome = 'retained' and parent.retention_basis = 'held_dependency'
+          ))
         order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
         limit ${MAX_SMS_LOGS + 1} for update of source, work
       `))
@@ -1084,13 +1152,40 @@ export async function completeMessagingDeletion(rawInput: {
               and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join notifications source on source.shop_id = work.shop_id and source.id = work.resource_id
+        left join messaging_deletion_work_items parent
+          on source.entity_type = 'quote_send'
+            and parent.request_id = work.request_id and parent.id = work.parent_work_item_id
+            and parent.resource_type = 'quote_send' and parent.resource_id = source.entity_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'notification' and work.outcome in ('pending', 'retained')
-          and not (work.outcome = 'retained'
-            and work.id = any(${sql.param(validRetainedWorkItemIds)}::uuid[]))
+          and (work.outcome = 'pending' or not (
+            case work.retention_basis
+              when 'resource_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = source.shop_id and hold.resource_type = 'notification'
+                  and hold.resource_id = source.id
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              when 'subject_hold' then exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = source.shop_id
+                  and hold.subject_key = case when source.entity_type = 'customer'
+                    then ${request.subjectKey}::uuid else (
+                      select parent_source.subject_key from quote_sends parent_source
+                      where parent_source.shop_id = source.shop_id
+                        and parent_source.id = source.entity_id
+                    ) end
+                  and hold.released_at is null and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+              )
+              else false
+            end
+            and (work.parent_work_item_id is null
+              or (parent.outcome = 'retained' and parent.retention_basis = 'held_dependency'))
+          ))
           and ((source.entity_type = 'customer' and source.entity_id = ${request.customerId}::uuid)
-            or (source.entity_type = 'quote_send'
-              and source.entity_id = any(${sql.param(sendIds)}::uuid[])))
+            or (source.entity_type = 'quote_send' and parent.id is not null))
         order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
         limit ${MAX_NOTIFICATIONS + 1} for update of source, work
       `))
@@ -1298,6 +1393,11 @@ export async function completeMessagingDeletion(rawInput: {
           await tx.execute(sql`
             update messaging_deletion_work_items work set outcome = 'retained',
               retention_basis = case when exists (
+                select 1 from messaging_deletion_work_items retained_child
+                where retained_child.request_id = work.request_id
+                  and retained_child.parent_work_item_id = work.id
+                  and retained_child.outcome = 'retained'
+              ) then 'held_dependency' when exists (
                 select 1
                 from messaging_consent_state projection
                 join messaging_retention_holds hold
@@ -1308,11 +1408,12 @@ export async function completeMessagingDeletion(rawInput: {
                   and hold.expires_at > clock_timestamp()
                 where projection.shop_id = work.shop_id
                   and projection.id = work.resource_id
-              ) then 'subject_hold' else 'held_dependency' end,
-              resolved_at = clock_timestamp()
+              ) then 'subject_hold' else 'resource_hold' end,
+              resolved_at = case when work.outcome = 'pending'
+                then clock_timestamp() else work.resolved_at end
             where work.request_id = ${request.id}::uuid
               and work.id = any(${sql.param(heldProjectionWorkItemIds)}::uuid[])
-              and work.outcome = 'pending'
+              and work.outcome in ('pending', 'retained')
               and not exists (
                 select 1 from messaging_deletion_work_items child
                 where child.request_id = work.request_id
@@ -1492,12 +1593,17 @@ export async function completeMessagingDeletion(rawInput: {
           : sendHeld(send) ? (send.resourceHeld ? 'resource_hold' : 'subject_hold') : null
         if (!retentionBasis) continue
         if (send.workOutcome === 'retained') {
-          if (retentionBasis === 'held_dependency' && send.retentionBasis !== retentionBasis) {
+          const dependencyBasisChanged = send.retentionBasis !== retentionBasis
+            && (send.retentionBasis === 'held_dependency' || retentionBasis === 'held_dependency')
+          if (dependencyBasisChanged) {
             await tx.execute(sql`
-              update messaging_deletion_work_items set retention_basis = 'held_dependency'
+              update messaging_deletion_work_items set retention_basis = ${retentionBasis}
               where id = ${send.workItemId}::uuid and request_id = ${request.id}::uuid
                 and outcome = 'retained'
-                and retention_basis in ('resource_hold', 'subject_hold')
+                and ((retention_basis = 'held_dependency'
+                    and ${retentionBasis}::text in ('resource_hold', 'subject_hold'))
+                  or (retention_basis in ('resource_hold', 'subject_hold')
+                    and ${retentionBasis}::text = 'held_dependency'))
             `)
           }
           continue

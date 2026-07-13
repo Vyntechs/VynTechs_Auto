@@ -1345,8 +1345,10 @@ begin
       (old.outcome = 'pending' and new.outcome in ('deleted', 'detached', 'retained'))
       or (old.outcome = 'retained' and new.outcome in ('deleted', 'detached'))
       or (old.outcome = 'retained' and new.outcome = 'retained'
-        and old.retention_basis in ('resource_hold', 'subject_hold')
-        and new.retention_basis = 'held_dependency'
+        and ((old.retention_basis in ('resource_hold', 'subject_hold')
+            and new.retention_basis = 'held_dependency')
+          or (old.retention_basis = 'held_dependency'
+            and new.retention_basis in ('resource_hold', 'subject_hold')))
         and new.detached_suppression_sources = old.detached_suppression_sources
         and new.resolved_at is not distinct from old.resolved_at)
     ) then
@@ -1668,9 +1670,10 @@ begin
       and parent.id = child.parent_work_item_id
     where child.request_id = request_row.id
       and child.outcome = 'retained'
-      and child.resource_type in ('sms_log', 'notification')
+      and child.resource_type in ('consent_event', 'sms_log', 'notification')
       and child.parent_work_item_id is not null
-      and (parent.resource_type <> 'quote_send'
+      and (parent.resource_type <> case child.resource_type
+          when 'consent_event' then 'consent_projection' else 'quote_send' end
         or parent.outcome <> 'retained'
         or parent.retention_basis <> 'held_dependency')
   ) then

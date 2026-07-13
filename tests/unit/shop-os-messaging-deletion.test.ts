@@ -1615,7 +1615,7 @@ describe('suppression-first messaging deletion', () => {
 
   it('does not charge valid retained families against a later eligible notification budget', async () => {
     await seedPhaseTwoResource('sends', recoveryLimits.sends)
-    await seedPhaseTwoResource('consentEvents', recoveryLimits.consentEvents)
+    await seedPhaseTwoResource('consentEvents', recoveryLimits.consentEvents + 1)
     await seedPhaseTwoResource('consentProjections', recoveryLimits.consentProjections, {
       reuseEvents: true,
     })
@@ -1630,7 +1630,7 @@ describe('suppression-first messaging deletion', () => {
     const startsAt = new Date(Date.now() - 60_000)
     const expiresAt = new Date(Date.now() + 86_400_000)
     const holdValues = [
-      ...Array.from({ length: recoveryLimits.consentEvents }, (_, index) => ({
+      ...Array.from({ length: recoveryLimits.consentEvents + 1 }, (_, index) => ({
         id: uuid(90_200 + index), shopId,
         resourceType: 'messaging_consent_event' as const, resourceId: uuid(20_000 + index),
         reasonCode: 'legal_claim' as const, authorizingActorProfileId: owner.profileId,
@@ -1659,15 +1659,25 @@ describe('suppression-first messaging deletion', () => {
     expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
       proofSummary: {
         retained: {
-          heldConsentEvents: 256,
+          heldConsentEvents: 257,
           heldConsentProjections: 128,
           heldQuoteSends: 128,
           heldSmsLogs: 512,
           heldNotifications: 0,
-          total: 1024,
+          total: 1025,
         },
       },
     })
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile('lib/shop-os/messaging-deletion.ts', 'utf8'))
+    const phaseTwo = source.slice(source.indexOf('export async function completeMessagingDeletion'))
+    expect(phaseTwo).not.toContain('validRetainedWorkItemIds')
+    expect(phaseTwo.match(/work\.outcome = 'pending' or not \(/g)).toHaveLength(5)
+    for (const limit of [
+      'limit ${MAX_SENDS + 1}', 'limit ${MAX_CONSENT_PROJECTIONS + 1}',
+      'limit ${MAX_CONSENT_EVENTS + 1}', 'limit ${MAX_SMS_LOGS + 1}',
+      'limit ${MAX_NOTIFICATIONS + 1}',
+    ]) expect(phaseTwo).toContain(limit)
   })
 
   it('deletes a below-order notification inserted between retry pages', async () => {
@@ -1778,6 +1788,39 @@ describe('suppression-first messaging deletion', () => {
     expect(result).toMatchObject({ ok: true, state: 'completed' })
     expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
       proofSummary: { retained: { heldQuoteSends: 1, heldSmsLogs: 1 } },
+    })
+  })
+
+  it('normalizes a stale dependency basis to the surviving direct parent hold', async () => {
+    const sendId = uuid(72_620)
+    const smsId = uuid(72_621)
+    await insertSend(sendId, 'submitted')
+    await db.insert(smsLog).values({
+      id: smsId, shopId, quoteSendId: sendId,
+      templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent',
+      serverReceivedAt: new Date('2026-07-12T10:00:00Z'),
+      retainUntil: new Date('2027-07-12T10:00:00Z'),
+    })
+    await activeHold({ resourceType: 'quote_send', resourceId: sendId })
+    const [childHold] = await activeHold({ resourceType: 'sms_log', resourceId: smsId })
+      .returning({ id: messagingRetentionHolds.id })
+    await seedPhaseTwoResource('notifications', 257)
+    const pending = await request({ requestKey: uuid(72_622) })
+    if (!pending.ok) throw new Error('request failed')
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    await db.update(messagingRetentionHolds).set({ releasedAt: new Date() })
+      .where(eq(messagingRetentionHolds.id, childHold!.id))
+
+    const { result } = await completeUntilTerminal(pending.requestId, 4)
+    expect(result).toMatchObject({
+      ok: true, state: 'completed',
+      counts: { quoteSendsRetained: 1, smsLogsDeleted: 1 },
+    })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      proofSummary: {
+        retained: { heldQuoteSends: 1, heldSmsLogs: 0, total: 1 },
+      },
     })
   })
 

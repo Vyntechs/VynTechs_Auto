@@ -830,6 +830,91 @@ describe('finalizes deletion work journal atomically', () => {
       await fixture.close()
     }
   })
+
+  it('rejects a terminal consent parent and completes the exact lawful retained chain', async () => {
+    const fixture = await createTestDb()
+    try {
+      const seedChain = async (
+        tenant: Awaited<ReturnType<typeof seedTenant>>,
+        parentOutcome: 'deleted' | 'retained',
+      ) => {
+        const requestId = await insertDeletionRequest(fixture.client, tenant, {
+          subjectKey: tenant.customerId,
+        })
+        await insertSuppression(fixture.client, tenant)
+        const eventId = await insertConsentEvent(fixture.client, tenant, {
+          subjectKey: tenant.customerId,
+        })
+        const projectionId = crypto.randomUUID()
+        await fixture.client.query(
+          `insert into messaging_consent_state (
+            id, shop_id, subject_key, customer_id, destination_fingerprint,
+            fingerprint_key_version, program_version, status, source_event_id,
+            revoked_at, retain_until, updated_at
+          ) select $1, shop_id, subject_key, customer_id, destination_fingerprint,
+            fingerprint_key_version, program_version, 'revoked', id,
+            committed_at, retain_until, committed_at
+          from messaging_consent_events where id = $2`,
+          [projectionId, eventId],
+        )
+        const parentId = crypto.randomUUID()
+        const childId = crypto.randomUUID()
+        await fixture.client.query(
+          `insert into messaging_deletion_work_items (
+            id, shop_id, request_id, resource_type, resource_id
+          ) values ($1, $2, $3, 'consent_projection', $4)`,
+          [parentId, tenant.shopId, requestId, projectionId],
+        )
+        await fixture.client.query(
+          `insert into messaging_deletion_work_items (
+            id, shop_id, request_id, resource_type, resource_id, parent_work_item_id
+          ) values ($1, $2, $3, 'consent_event', $4, $5)`,
+          [childId, tenant.shopId, requestId, eventId, parentId],
+        )
+        await insertHold(fixture.client, tenant, {
+          resourceType: 'messaging_consent_event', resourceId: eventId,
+        })
+        await fixture.client.query(
+          `update messaging_deletion_work_items set outcome = $1,
+            retention_basis = $2, resolved_at = now() where id = $3`,
+          [parentOutcome, parentOutcome === 'retained' ? 'held_dependency' : null, parentId],
+        )
+        await fixture.client.query(
+          `update messaging_deletion_work_items set outcome = 'retained',
+            retention_basis = 'resource_hold', resolved_at = now() where id = $1`,
+          [childId],
+        )
+        return requestId
+      }
+
+      const terminalTenant = await seedTenant(fixture.client)
+      const terminalRequestId = await seedChain(terminalTenant, 'deleted')
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [terminalTenant.shopId, terminalRequestId],
+      )).rows[0]?.state).toBe('pending')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [terminalRequestId],
+      )).rows[0]?.count).toBe(2)
+
+      const lawfulTenant = await seedTenant(fixture.client)
+      const lawfulRequestId = await seedChain(lawfulTenant, 'retained')
+      expect((await fixture.client.query<{
+        state: string
+        proof_summary: { retained: Record<string, number> }
+      }>('select * from finalize_messaging_deletion_request($1, $2)', [
+        lawfulTenant.shopId, lawfulRequestId,
+      ])).rows[0]).toMatchObject({
+        state: 'completed',
+        proof_summary: {
+          retained: { heldConsentEvents: 1, heldConsentProjections: 1, total: 2 },
+        },
+      })
+    } finally {
+      await fixture.close()
+    }
+  })
 })
 
 describe('Shop OS messaging retention source schema', () => {
