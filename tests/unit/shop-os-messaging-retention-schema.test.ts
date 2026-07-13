@@ -396,7 +396,7 @@ describe('deletion work journal', () => {
     await fixture.close()
   })
 
-  it('accepts same-customer historical subjects and fingerprint keys with exact parents', async () => {
+  it('accepts a same-customer historical quote-send subject and fingerprint key', async () => {
     const fixture = await createTestDb()
     const tenant = await seedOperationalTenant(fixture.client)
     const requestId = await insertDeletionRequest(fixture.client, tenant, {
@@ -416,6 +416,19 @@ describe('deletion work journal', () => {
       ) values ($1, $2, 'quote_send', $3)`,
       [tenant.shopId, requestId, historicalQuoteSendId],
     )
+
+    await fixture.close()
+  })
+
+  it('accepts same-customer historical consent with its exact projection parent', async () => {
+    const fixture = await createTestDb()
+    const tenant = await seedOperationalTenant(fixture.client)
+    const requestId = await insertDeletionRequest(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+      destinationFingerprint: hex,
+      fingerprintKeyVersion: 'key_v1',
+    })
+    const historicalSubjectKey = crypto.randomUUID()
 
     const historicalEventId = await insertConsentEvent(fixture.client, tenant, {
       subjectKey: historicalSubjectKey,
