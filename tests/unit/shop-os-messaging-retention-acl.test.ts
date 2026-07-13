@@ -20,6 +20,7 @@ const MESSAGING_TABLES = [
   'sms_log',
   'notifications',
   'messaging_deletion_requests',
+  'messaging_deletion_work_items',
   'messaging_retention_holds',
 ] as const
 
@@ -29,6 +30,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'reject_messaging_consent_event_mutation()', serviceExecute: false },
   { signature: 'require_messaging_compaction_completion()', serviceExecute: false },
   { signature: 'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)', serviceExecute: true },
+  { signature: 'guard_messaging_deletion_work_item_mutation()', serviceExecute: false },
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
   { signature: 'purge_expired_messaging_consent_event(uuid,uuid)', serviceExecute: true },
@@ -37,6 +39,69 @@ const FUNCTION_EXECUTION = [
 ] as const
 
 describe('Shop OS messaging retention ACL hardening', () => {
+  it('keeps the deletion work journal server-only', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    const table = await client.query<{
+      table_name: string
+      rls_enabled: boolean
+      policy_count: number
+      client_privilege_count: number
+      service_grants: string[]
+    }>(`
+      select c.relname as table_name, c.relrowsecurity as rls_enabled,
+        (select count(*)::int from pg_policies p
+         where p.schemaname = 'public' and p.tablename = c.relname
+           and p.policyname = 'messaging_deletion_work_items_server_only_deny_direct'
+           and p.roles::text = '{anon,authenticated}' and p.cmd = 'ALL'
+           and p.qual = 'false' and p.with_check = 'false') as policy_count,
+        (select count(*)::int
+         from (values ('anon'), ('authenticated')) roles(role_name)
+         cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+           ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')) privileges(privilege_name)
+         where has_table_privilege(roles.role_name, c.oid, privileges.privilege_name))
+          as client_privilege_count,
+        coalesce((select array_agg(g.privilege_type order by g.privilege_type)
+         from information_schema.role_table_grants g
+         where g.table_schema = 'public' and g.table_name = c.relname
+           and g.grantee = 'service_role'), array[]::text[]) as service_grants
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+      where c.relname = 'messaging_deletion_work_items'
+    `)
+    expect(table.rows).toEqual([{
+      table_name: 'messaging_deletion_work_items',
+      rls_enabled: true,
+      policy_count: 1,
+      client_privilege_count: 0,
+      service_grants: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
+    }])
+
+    const functions = await client.query<{
+      signature: string
+      anon_execute: boolean
+      authenticated_execute: boolean
+      service_execute: boolean
+    }>(`
+      with expected(signature, service_execute) as (values
+        ('guard_messaging_deletion_work_item_mutation()', false)
+      )
+      select e.signature,
+        has_function_privilege('anon', p.oid, 'execute') as anon_execute,
+        has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+        has_function_privilege('service_role', p.oid, 'execute') as service_execute
+      from expected e
+      join pg_proc p on p.oid = to_regprocedure('public.' || e.signature)
+    `)
+    expect(functions.rows).toEqual([{
+      signature: 'guard_messaging_deletion_work_item_mutation()',
+      anon_execute: false,
+      authenticated_execute: false,
+      service_execute: false,
+    }])
+  })
+
   it('proves exact RLS, policy, client isolation, service CRUD, and function execution', async () => {
     const migrationPath = path.join(
       process.cwd(),

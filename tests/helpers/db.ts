@@ -325,6 +325,7 @@ const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'purge_expired_messaging_consent_event(uuid,uuid)': '33f378ecff1afb6dc5f34263a92063433e8dcf5a5ccf79481430ac2749951948',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
   'guard_messaging_deletion_request_mutation()': '4324d067e7b1fa109d99c38bf93f0771508d1b9bd22e550c2927f3960c2a06a1',
+  'guard_messaging_deletion_work_item_mutation()': '2558e9266a03468091123dc779d40f16d8d16ce0d335d99efa5e151382d5a53a',
   'purge_expired_messaging_deletion_request(uuid,uuid)': '8b4aae451704d22bbd987724e442241914506384f92d8ef1db0536afd8d5002a',
 } as const
 
@@ -347,6 +348,7 @@ async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
       ('reject_messaging_consent_event_mutation()', false),
       ('require_messaging_compaction_completion()', false),
       ('compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)', true),
+      ('guard_messaging_deletion_work_item_mutation()', false),
       ('guard_messaging_deletion_request_mutation()', false),
       ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
       ('purge_expired_messaging_consent_event(uuid,uuid)', true),
@@ -398,6 +400,7 @@ async function messagingRetentionMarkers(
       ('messaging_consent_state'),
       ('sms_suppressions'),
       ('messaging_deletion_requests'),
+      ('messaging_deletion_work_items'),
       ('messaging_retention_holds'),
       ('quote_sends'),
       ('sms_log'),
@@ -434,6 +437,13 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests', 'completed_at'), ('messaging_deletion_requests', 'latest_relevant_at'),
       ('messaging_deletion_requests', 'prior_record_counts'),
       ('messaging_deletion_requests', 'proof_summary'), ('messaging_deletion_requests', 'retain_until'),
+      ('messaging_deletion_work_items', 'id'), ('messaging_deletion_work_items', 'shop_id'),
+      ('messaging_deletion_work_items', 'request_id'), ('messaging_deletion_work_items', 'resource_type'),
+      ('messaging_deletion_work_items', 'resource_id'), ('messaging_deletion_work_items', 'parent_work_item_id'),
+      ('messaging_deletion_work_items', 'outcome'), ('messaging_deletion_work_items', 'retention_basis'),
+      ('messaging_deletion_work_items', 'counts_toward_proof'),
+      ('messaging_deletion_work_items', 'detached_suppression_sources'),
+      ('messaging_deletion_work_items', 'discovered_at'), ('messaging_deletion_work_items', 'resolved_at'),
       ('messaging_retention_holds', 'id'), ('messaging_retention_holds', 'shop_id'),
       ('messaging_retention_holds', 'resource_type'), ('messaging_retention_holds', 'resource_id'),
       ('messaging_retention_holds', 'subject_key'), ('messaging_retention_holds', 'reason_code'),
@@ -488,6 +498,14 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests_prior_counts_size'), ('messaging_deletion_requests_proof_summary_object'),
       ('messaging_deletion_requests_proof_summary_size'), ('messaging_deletion_requests_state_consistent'),
       ('messaging_deletion_requests_retention_window_exact'),
+      ('messaging_deletion_work_items_pkey'),
+      ('messaging_deletion_work_items_shop_request_fk'),
+      ('messaging_deletion_work_items_parent_fk'),
+      ('messaging_deletion_work_items_resource_type_valid'),
+      ('messaging_deletion_work_items_outcome_valid'),
+      ('messaging_deletion_work_items_retention_basis_valid'),
+      ('messaging_deletion_work_items_state_consistent'),
+      ('messaging_deletion_work_items_detached_count_valid'),
       ('messaging_retention_holds_pkey'), ('messaging_retention_holds_shop_fk'),
       ('messaging_retention_holds_shop_actor_fk'), ('messaging_retention_holds_resource_type_valid'),
       ('messaging_retention_holds_reason_code_valid'), ('messaging_retention_holds_target_consistent'),
@@ -519,6 +537,10 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests_shop_actor_request_uq'),
       ('messaging_deletion_requests_shop_customer_pending_uq'),
       ('messaging_deletion_requests_pending_idx'),
+      ('messaging_deletion_work_items_request_resource_uq'),
+      ('messaging_deletion_work_items_request_id_uq'),
+      ('messaging_deletion_work_items_pending_idx'),
+      ('messaging_deletion_work_items_parent_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
       ('messaging_retention_holds_purge_idx'), ('messaging_retention_holds_active_resource_idx'),
       ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
@@ -553,6 +575,11 @@ async function messagingRetentionMarkers(
         'and (e.committed_at, e.id) > (cursor_at, p_after_event_id)',
         'limit p_batch_limit + 1',
         'array_agg(distinct event_id order by event_id)'),
+      ('guard_messaging_deletion_work_item_mutation()', 'trigger', false, false,
+        'deletion work items must be inserted pending',
+        'deletion work item resource identity is immutable',
+        'consent-event work item counts_toward_proof is derived from its source',
+        'deletion work item detached count requires controlled compaction'),
       ('guard_messaging_deletion_request_mutation()', 'trigger', false, false,
         'messaging deletion request identity is immutable',
         'invalid messaging deletion progress proof',
@@ -592,6 +619,8 @@ async function messagingRetentionMarkers(
         'require_messaging_compaction_completion()', 9, true, null),
       ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
         'guard_messaging_deletion_request_mutation()', 27, false, null),
+      ('messaging_deletion_work_items', 'messaging_deletion_work_items_guard',
+        'guard_messaging_deletion_work_item_mutation()', 23, false, null),
       ('messaging_retention_holds', 'messaging_retention_holds_serialize_target',
         'serialize_messaging_retention_hold_target()', 31, false, null)
     ), client_roles(role_name) as (values
@@ -696,21 +725,21 @@ async function messagingRetentionMarkers(
 }
 
 function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boolean {
-  return markers.table_count === 8
-    && markers.column_count === 115
-    && markers.constraint_count === 90
-    && markers.index_count === 29
+  return markers.table_count === 9
+    && markers.column_count === 127
+    && markers.constraint_count === 98
+    && markers.index_count === 33
     && markers.active_resource_index_count === 1
-    && markers.rls_count === 8
-    && markers.policy_count === 8
-    && markers.function_marker_count === 10
-    && markers.function_digest_count === 10
-    && markers.function_authority_count === 10
-    && markers.trigger_binding_count === 6
+    && markers.rls_count === 9
+    && markers.policy_count === 9
+    && markers.function_marker_count === 11
+    && markers.function_digest_count === 11
+    && markers.function_authority_count === 11
+    && markers.trigger_binding_count === 7
     && markers.nullable_quote_send_customer_count === 1
     && markers.direct_client_grant_count === 0
     && markers.effective_client_privilege_count === 0
-    && markers.service_crud_count === 32
+    && markers.service_crud_count === 36
 }
 
 function hasAnyMessagingRetentionMarker(markers: MessagingRetentionMarkers): boolean {
@@ -742,6 +771,7 @@ const MESSAGING_RETENTION_ACL_TABLES = [
   'sms_log',
   'notifications',
   'messaging_deletion_requests',
+  'messaging_deletion_work_items',
   'messaging_retention_holds',
 ] as const
 
@@ -776,6 +806,7 @@ async function messagingRetentionAclMarkers(
         ('reject_messaging_consent_event_mutation()', false),
         ('require_messaging_compaction_completion()', false),
         ('compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)', true),
+        ('guard_messaging_deletion_work_item_mutation()', false),
         ('guard_messaging_deletion_request_mutation()', false),
         ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
         ('purge_expired_messaging_consent_event(uuid,uuid)', true),
@@ -870,10 +901,10 @@ function hasCompleteMessagingRetentionAcl(
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
-    && markers.function_count === 10
+    && markers.function_count === 11
     && markers.required_service_function_count === 4
-    && markers.exact_function_acl_count === 10
-    && markers.function_authority_count === 10
+    && markers.exact_function_acl_count === 11
+    && markers.function_authority_count === 11
 }
 
 export async function ensureMessagingRetentionAclMigration(
@@ -885,7 +916,7 @@ export async function ensureMessagingRetentionAclMigration(
     || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
-    || before.function_count !== 10
+    || before.function_count !== 11
     || before.required_service_function_count !== 4
   ) {
     throw new Error('partial messaging retention ACL in ephemeral database')

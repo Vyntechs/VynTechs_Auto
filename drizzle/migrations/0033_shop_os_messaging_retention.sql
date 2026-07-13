@@ -153,6 +153,55 @@ where state = 'pending' and customer_id is not null;
 create index messaging_deletion_requests_pending_idx on messaging_deletion_requests (shop_id, requested_at) where state = 'pending';
 --> statement-breakpoint
 
+create table messaging_deletion_work_items (
+  id uuid primary key default gen_random_uuid(),
+  shop_id uuid not null,
+  request_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  parent_work_item_id uuid,
+  outcome text not null default 'pending',
+  retention_basis text,
+  counts_toward_proof boolean not null default true,
+  detached_suppression_sources integer not null default 0,
+  discovered_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  constraint messaging_deletion_work_items_shop_request_fk
+    foreign key (shop_id, request_id)
+    references messaging_deletion_requests(shop_id, id) on delete cascade,
+  constraint messaging_deletion_work_items_parent_fk
+    foreign key (parent_work_item_id)
+    references messaging_deletion_work_items(id) on delete cascade,
+  constraint messaging_deletion_work_items_resource_type_valid check (
+    resource_type in ('consent_event','consent_projection','quote_send','sms_log','notification')
+  ),
+  constraint messaging_deletion_work_items_outcome_valid check (
+    outcome in ('pending','deleted','detached','retained')
+  ),
+  constraint messaging_deletion_work_items_retention_basis_valid check (
+    retention_basis is null
+    or retention_basis in ('resource_hold','subject_hold','held_dependency')
+  ),
+  constraint messaging_deletion_work_items_state_consistent check (
+    (outcome = 'pending' and retention_basis is null and resolved_at is null)
+    or (outcome in ('deleted','detached') and retention_basis is null and resolved_at is not null)
+    or (outcome = 'retained' and retention_basis is not null and resolved_at is not null)
+  ),
+  constraint messaging_deletion_work_items_detached_count_valid check (
+    detached_suppression_sources >= 0
+    and (resource_type = 'consent_event' or detached_suppression_sources = 0)
+  )
+);
+create unique index messaging_deletion_work_items_request_resource_uq
+on messaging_deletion_work_items (request_id, resource_type, resource_id);
+create unique index messaging_deletion_work_items_request_id_uq
+on messaging_deletion_work_items (request_id, id);
+create index messaging_deletion_work_items_pending_idx
+on messaging_deletion_work_items (request_id, outcome, resource_type, id);
+create index messaging_deletion_work_items_parent_idx
+on messaging_deletion_work_items (request_id, parent_work_item_id, outcome);
+--> statement-breakpoint
+
 create table messaging_retention_holds (
   id uuid primary key default gen_random_uuid(),
   shop_id uuid not null,
@@ -1392,6 +1441,186 @@ end;
 $$;
 --> statement-breakpoint
 
+create function guard_messaging_deletion_work_item_mutation()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  request_customer_id uuid;
+  request_subject_key uuid;
+  request_destination_fingerprint text;
+  request_fingerprint_key_version text;
+  parent_request_id uuid;
+  parent_resource_type text;
+  parent_resource_id uuid;
+  expected_counts_toward_proof boolean;
+  matching_projection_id uuid;
+  notification_entity_type text;
+  notification_entity_id uuid;
+begin
+  if tg_op = 'UPDATE' then
+    if (new.id, new.shop_id, new.request_id, new.resource_type, new.resource_id,
+        new.parent_work_item_id, new.counts_toward_proof, new.discovered_at)
+      is distinct from
+       (old.id, old.shop_id, old.request_id, old.resource_type, old.resource_id,
+        old.parent_work_item_id, old.counts_toward_proof, old.discovered_at)
+    then
+      raise exception 'deletion work item resource identity is immutable';
+    end if;
+
+    if not (
+      (old.outcome = 'pending' and new.outcome in ('deleted', 'detached', 'retained'))
+      or (old.outcome = 'retained' and new.outcome in ('deleted', 'detached'))
+    ) then
+      raise exception 'invalid deletion work item outcome transition';
+    end if;
+
+    if new.detached_suppression_sources <> 0
+      and current_setting(
+        'vyntechs.messaging_deletion_work_item_compaction_request', true
+      ) is distinct from new.request_id::text
+    then
+      raise exception 'deletion work item detached count requires controlled compaction';
+    end if;
+    return new;
+  end if;
+
+  if new.outcome <> 'pending'
+    or new.retention_basis is not null
+    or new.resolved_at is not null
+    or new.detached_suppression_sources <> 0
+  then
+    raise exception 'deletion work items must be inserted pending';
+  end if;
+
+  select customer_id, subject_key, destination_fingerprint, fingerprint_key_version
+  into request_customer_id, request_subject_key,
+    request_destination_fingerprint, request_fingerprint_key_version
+  from public.messaging_deletion_requests
+  where shop_id = new.shop_id
+    and id = new.request_id
+    and state = 'pending'
+    and customer_id is not null
+  for update;
+  if not found then
+    raise exception 'deletion work item requires a canonical pending deletion request';
+  end if;
+
+  if new.parent_work_item_id is not null then
+    select request_id, resource_type, resource_id
+    into parent_request_id, parent_resource_type, parent_resource_id
+    from public.messaging_deletion_work_items
+    where id = new.parent_work_item_id
+    for key share;
+    if not found or parent_request_id <> new.request_id then
+      raise exception 'deletion parent work item must belong to the same request';
+    end if;
+  end if;
+
+  if new.resource_type = 'quote_send' then
+    if new.parent_work_item_id is not null or not exists (
+      select 1 from public.quote_sends q
+      where q.id = new.resource_id
+        and q.shop_id = new.shop_id
+        and q.customer_id = request_customer_id
+        and q.subject_key = request_subject_key
+    ) then
+      raise exception 'quote-send work item must match the pending request customer';
+    end if;
+  elsif new.resource_type = 'consent_projection' then
+    if new.parent_work_item_id is not null or not exists (
+      select 1 from public.messaging_consent_state s
+      where s.id = new.resource_id
+        and s.shop_id = new.shop_id
+        and s.customer_id = request_customer_id
+        and s.subject_key = request_subject_key
+        and s.destination_fingerprint = request_destination_fingerprint
+        and s.fingerprint_key_version = request_fingerprint_key_version
+    ) then
+      raise exception 'consent projection work item must match the pending request customer';
+    end if;
+  elsif new.resource_type = 'consent_event' then
+    select not (e.event_type = 'deleted' and e.program_version = 'internal_deletion_v1')
+    into expected_counts_toward_proof
+    from public.messaging_consent_events e
+    where e.id = new.resource_id
+      and e.shop_id = new.shop_id
+      and e.customer_id = request_customer_id
+      and e.subject_key = request_subject_key
+      and e.destination_fingerprint = request_destination_fingerprint
+      and e.fingerprint_key_version = request_fingerprint_key_version;
+    if not found then
+      raise exception 'consent-event work item must match the pending request customer';
+    end if;
+    if new.counts_toward_proof is distinct from expected_counts_toward_proof then
+      raise exception 'consent-event work item counts_toward_proof is derived from its source';
+    end if;
+
+    select s.id into matching_projection_id
+    from public.messaging_consent_events e
+    join public.messaging_consent_state s
+      on s.shop_id = e.shop_id
+      and s.subject_key = e.subject_key
+      and s.destination_fingerprint = e.destination_fingerprint
+      and s.fingerprint_key_version = e.fingerprint_key_version
+      and s.program_version = e.program_version
+    where e.id = new.resource_id and e.shop_id = new.shop_id;
+    if found and (
+      new.parent_work_item_id is null
+      or parent_resource_type <> 'consent_projection'
+      or parent_resource_id <> matching_projection_id
+    ) then
+      raise exception 'consent-event work item requires its exact projection parent';
+    elsif not found and new.parent_work_item_id is not null then
+      raise exception 'consent-event work item has no matching projection parent';
+    end if;
+  elsif new.resource_type = 'sms_log' then
+    if new.parent_work_item_id is null
+      or parent_resource_type <> 'quote_send'
+      or not exists (
+        select 1 from public.sms_log l
+        where l.id = new.resource_id
+          and l.shop_id = new.shop_id
+          and l.quote_send_id = parent_resource_id
+      )
+    then
+      raise exception 'SMS-log work item requires its exact quote-send parent';
+    end if;
+  elsif new.resource_type = 'notification' then
+    select n.entity_type, n.entity_id
+    into notification_entity_type, notification_entity_id
+    from public.notifications n
+    where n.id = new.resource_id and n.shop_id = new.shop_id;
+    if not found then
+      raise exception 'notification work item must match a live source';
+    end if;
+    if notification_entity_type = 'customer'
+      and notification_entity_id = request_customer_id
+    then
+      if new.parent_work_item_id is not null then
+        raise exception 'customer notification work item cannot have a parent';
+      end if;
+    elsif notification_entity_type = 'quote_send'
+      and new.parent_work_item_id is not null
+      and parent_resource_type = 'quote_send'
+      and parent_resource_id = notification_entity_id
+    then
+      null;
+    else
+      raise exception 'quote-send notification work item requires its exact quote-send parent';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+--> statement-breakpoint
+create trigger messaging_deletion_work_items_guard
+before insert or update on messaging_deletion_work_items
+for each row execute function guard_messaging_deletion_work_item_mutation();
+--> statement-breakpoint
+
 create function guard_messaging_deletion_request_mutation()
 returns trigger
 language plpgsql
@@ -1669,6 +1898,7 @@ alter table messaging_consent_events enable row level security;
 alter table messaging_consent_state enable row level security;
 alter table sms_suppressions enable row level security;
 alter table messaging_deletion_requests enable row level security;
+alter table messaging_deletion_work_items enable row level security;
 alter table messaging_retention_holds enable row level security;
 alter table quote_sends enable row level security;
 alter table sms_log enable row level security;
@@ -1677,12 +1907,14 @@ alter table notifications enable row level security;
 
 revoke all privileges on table
   messaging_consent_events, messaging_consent_state, sms_suppressions,
-  messaging_deletion_requests, messaging_retention_holds, quote_sends, sms_log, notifications
+  messaging_deletion_requests, messaging_deletion_work_items, messaging_retention_holds,
+  quote_sends, sms_log, notifications
 from public, anon, authenticated;
 --> statement-breakpoint
 grant select, insert, update, delete on table
   messaging_consent_events, messaging_consent_state, sms_suppressions,
-  messaging_deletion_requests, messaging_retention_holds, quote_sends, sms_log, notifications
+  messaging_deletion_requests, messaging_deletion_work_items, messaging_retention_holds,
+  quote_sends, sms_log, notifications
 to service_role;
 --> statement-breakpoint
 
@@ -1693,6 +1925,8 @@ create policy messaging_consent_state_server_only_deny_direct on messaging_conse
 create policy sms_suppressions_server_only_deny_direct on sms_suppressions
   for all to anon, authenticated using (false) with check (false);
 create policy messaging_deletion_requests_server_only_deny_direct on messaging_deletion_requests
+  for all to anon, authenticated using (false) with check (false);
+create policy messaging_deletion_work_items_server_only_deny_direct on messaging_deletion_work_items
   for all to anon, authenticated using (false) with check (false);
 create policy messaging_retention_holds_server_only_deny_direct on messaging_retention_holds
   for all to anon, authenticated using (false) with check (false);
@@ -1709,6 +1943,7 @@ revoke all on function validate_quote_event_send_reference() from public, anon, 
 revoke all on function guard_quote_send_lifecycle() from public, anon, authenticated, service_role;
 revoke all on function serialize_messaging_retention_hold_target() from public, anon, authenticated, service_role;
 revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
+revoke all on function guard_messaging_deletion_work_item_mutation() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
 revoke all on function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;

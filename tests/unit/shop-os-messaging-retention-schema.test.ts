@@ -4,6 +4,7 @@ import { getTableColumns } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { describe, expect, it } from 'vitest'
 import type { PGlite } from '@electric-sql/pglite'
+import * as dbSchema from '@/lib/db/schema'
 import {
   messagingConsentEvents,
   messagingConsentState,
@@ -288,6 +289,144 @@ async function insertHold(
   )
   return result.rows[0]!.id
 }
+
+describe('deletion work journal', () => {
+  it('enforces request-scoped source-backed pending work items', async () => {
+    const fixture = await createTestDb()
+    await ensureMessagingRetentionMigration(fixture.client)
+    const tenant = await seedOperationalTenant(fixture.client)
+    const requestId = await insertDeletionRequest(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+    })
+    const quoteSendId = await insertQuoteSend(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+    })
+    const workItemId = crypto.randomUUID()
+
+    await fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        id, shop_id, request_id, resource_type, resource_id,
+        parent_work_item_id, outcome, retention_basis,
+        counts_toward_proof, detached_suppression_sources,
+        discovered_at, resolved_at
+      ) values (
+        $1, $2, $3, 'quote_send', $4,
+        null, 'pending', null,
+        true, 0,
+        now(), null
+      )`,
+      [workItemId, tenant.shopId, requestId, quoteSendId],
+    )
+
+    await expect(fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id
+      ) values ($1, $2, 'quote_send', $3)`,
+      [tenant.shopId, requestId, quoteSendId],
+    )).rejects.toThrow(/messaging_deletion_work_items_request_resource_uq/)
+
+    const otherTenant = await seedOperationalTenant(fixture.client)
+    const otherRequestId = await insertDeletionRequest(fixture.client, otherTenant, {
+      subjectKey: otherTenant.customerId,
+    })
+    const otherQuoteSendId = await insertQuoteSend(fixture.client, otherTenant, {
+      subjectKey: otherTenant.customerId,
+    })
+    const otherParentId = crypto.randomUUID()
+    await fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        id, shop_id, request_id, resource_type, resource_id
+      ) values ($1, $2, $3, 'quote_send', $4)`,
+      [otherParentId, otherTenant.shopId, otherRequestId, otherQuoteSendId],
+    )
+
+    await expect(fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id
+      ) values ($1, $2, 'quote_send', $3)`,
+      [otherTenant.shopId, requestId, otherQuoteSendId],
+    )).rejects.toThrow(/shop_request_fk|pending deletion request/)
+
+    const smsLogId = crypto.randomUUID()
+    await fixture.client.query(
+      `insert into sms_log (
+        id, shop_id, quote_send_id, template_key, template_version,
+        state, server_received_at, retain_until
+      ) values ($1, $2, $3, 'quote_ready', 'v1', 'queued', now(), now() + interval '1 year')`,
+      [smsLogId, tenant.shopId, quoteSendId],
+    )
+    await expect(fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, parent_work_item_id
+      ) values ($1, $2, 'sms_log', $3, $4)`,
+      [tenant.shopId, requestId, smsLogId, otherParentId],
+    )).rejects.toThrow(/parent work item/)
+
+    for (const [outcome, retentionBasis, resolvedAt, detachedCount] of [
+      ['deleted', null, 'now()', 0],
+      ['retained', null, 'now()', 0],
+      ['pending', null, 'now()', 0],
+      ['pending', null, 'null', 1],
+    ] as const) {
+      const resourceId = await insertQuoteSend(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await expect(fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          shop_id, request_id, resource_type, resource_id, outcome,
+          retention_basis, detached_suppression_sources, resolved_at
+        ) values ($1, $2, 'quote_send', $3, $4, $5, $6, ${resolvedAt})`,
+        [tenant.shopId, requestId, resourceId, outcome, retentionBasis, detachedCount],
+      )).rejects.toThrow(/pending|state_consistent|detached_count_valid/)
+    }
+
+    const consentEventId = await insertConsentEvent(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+      customerId: tenant.customerId,
+      eventType: 'consented',
+      programVersion: 'repair_updates_v1',
+    })
+    await expect(fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, counts_toward_proof
+      ) values ($1, $2, 'consent_event', $3, false)`,
+      [tenant.shopId, requestId, consentEventId],
+    )).rejects.toThrow(/counts_toward_proof/)
+
+    await fixture.close()
+  })
+
+  it('declares the exact journal columns, indexes, checks, and foreign keys', () => {
+    const table = (dbSchema as typeof dbSchema & {
+      messagingDeletionWorkItems: Parameters<typeof getTableConfig>[0]
+    }).messagingDeletionWorkItems
+    const config = getTableConfig(table)
+
+    expect(config.name).toBe('messaging_deletion_work_items')
+    expect(Object.keys(getTableColumns(table))).toEqual([
+      'id', 'shopId', 'requestId', 'resourceType', 'resourceId',
+      'parentWorkItemId', 'outcome', 'retentionBasis', 'countsTowardProof',
+      'detachedSuppressionSources', 'discoveredAt', 'resolvedAt',
+    ])
+    expect(config.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining([
+      'messaging_deletion_work_items_request_resource_uq',
+      'messaging_deletion_work_items_request_id_uq',
+      'messaging_deletion_work_items_pending_idx',
+      'messaging_deletion_work_items_parent_idx',
+    ]))
+    expect(config.foreignKeys.map((key) => key.getName())).toEqual(expect.arrayContaining([
+      'messaging_deletion_work_items_shop_request_fk',
+      'messaging_deletion_work_items_parent_fk',
+    ]))
+    expect(config.checks.map((check) => check.name)).toEqual(expect.arrayContaining([
+      'messaging_deletion_work_items_resource_type_valid',
+      'messaging_deletion_work_items_outcome_valid',
+      'messaging_deletion_work_items_retention_basis_valid',
+      'messaging_deletion_work_items_state_consistent',
+      'messaging_deletion_work_items_detached_count_valid',
+    ]))
+  })
+})
 
 describe('Shop OS messaging retention source schema', () => {
   it('declares the five core compliance tables', () => {

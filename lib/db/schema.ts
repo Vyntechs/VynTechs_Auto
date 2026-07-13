@@ -1398,6 +1398,77 @@ export const messagingDeletionRequests = pgTable(
   ],
 )
 
+export const messagingDeletionWorkItems = pgTable(
+  'messaging_deletion_work_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    requestId: uuid('request_id').notNull(),
+    resourceType: text('resource_type', {
+      enum: ['consent_event', 'consent_projection', 'quote_send', 'sms_log', 'notification'],
+    }).notNull(),
+    resourceId: uuid('resource_id').notNull(),
+    parentWorkItemId: uuid('parent_work_item_id'),
+    outcome: text('outcome', {
+      enum: ['pending', 'deleted', 'detached', 'retained'],
+    }).default('pending').notNull(),
+    retentionBasis: text('retention_basis', {
+      enum: ['resource_hold', 'subject_hold', 'held_dependency'],
+    }),
+    countsTowardProof: boolean('counts_toward_proof').default(true).notNull(),
+    detachedSuppressionSources: integer('detached_suppression_sources').default(0).notNull(),
+    discoveredAt: timestamp('discovered_at', { withTimezone: true }).defaultNow().notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'messaging_deletion_work_items_shop_request_fk',
+      columns: [table.shopId, table.requestId],
+      foreignColumns: [messagingDeletionRequests.shopId, messagingDeletionRequests.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'messaging_deletion_work_items_parent_fk',
+      columns: [table.parentWorkItemId],
+      foreignColumns: [table.id],
+    }).onDelete('cascade'),
+    uniqueIndex('messaging_deletion_work_items_request_resource_uq')
+      .on(table.requestId, table.resourceType, table.resourceId),
+    uniqueIndex('messaging_deletion_work_items_request_id_uq')
+      .on(table.requestId, table.id),
+    index('messaging_deletion_work_items_pending_idx')
+      .on(table.requestId, table.outcome, table.resourceType, table.id),
+    index('messaging_deletion_work_items_parent_idx')
+      .on(table.requestId, table.parentWorkItemId, table.outcome),
+    check(
+      'messaging_deletion_work_items_resource_type_valid',
+      sql`${table.resourceType} in ('consent_event','consent_projection','quote_send','sms_log','notification')`,
+    ),
+    check(
+      'messaging_deletion_work_items_outcome_valid',
+      sql`${table.outcome} in ('pending','deleted','detached','retained')`,
+    ),
+    check(
+      'messaging_deletion_work_items_retention_basis_valid',
+      sql`${table.retentionBasis} is null
+        or ${table.retentionBasis} in ('resource_hold','subject_hold','held_dependency')`,
+    ),
+    check(
+      'messaging_deletion_work_items_state_consistent',
+      sql`(${table.outcome} = 'pending'
+          and ${table.retentionBasis} is null and ${table.resolvedAt} is null)
+        or (${table.outcome} in ('deleted','detached')
+          and ${table.retentionBasis} is null and ${table.resolvedAt} is not null)
+        or (${table.outcome} = 'retained'
+          and ${table.retentionBasis} is not null and ${table.resolvedAt} is not null)`,
+    ),
+    check(
+      'messaging_deletion_work_items_detached_count_valid',
+      sql`${table.detachedSuppressionSources} >= 0
+        and (${table.resourceType} = 'consent_event' or ${table.detachedSuppressionSources} = 0)`,
+    ),
+  ],
+)
+
 export const messagingRetentionHolds = pgTable(
   'messaging_retention_holds',
   {
