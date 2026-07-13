@@ -70,6 +70,7 @@ type ReleaseSnapshot = {
 
 type PurgeSnapshot = { db: AppDb; now: Date; batchSize: number }
 type Hint = { retainUntil: Date | string; id: string; shopId: string }
+type CandidateCursor = Readonly<{ retainUntil: Date; id: string }>
 type Family =
   | 'notifications'
   | 'smsLog'
@@ -345,12 +346,16 @@ async function candidateHints(
   family: Family,
   now: Date,
   limit: number,
+  cursor?: CandidateCursor,
 ): Promise<Hint[]> {
   switch (family) {
     case 'notifications': return unwrapRows(await db.execute(sql`
       select n.shop_id as "shopId", n.id, n.retain_until as "retainUntil"
       from notifications n
       where n.retain_until <= ${now}::timestamptz and n.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (n.retain_until, n.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from messaging_retention_holds h
           where h.shop_id = n.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -365,6 +370,9 @@ async function candidateHints(
       select l.shop_id as "shopId", l.id, l.retain_until as "retainUntil"
       from sms_log l
       where l.retain_until <= ${now}::timestamptz and l.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (l.retain_until, l.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from messaging_retention_holds h
           where h.shop_id = l.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -379,6 +387,9 @@ async function candidateHints(
       from quote_sends q
       where q.state in ('cancelled', 'failed', 'responded', 'expired')
         and q.retain_until <= ${now}::timestamptz and q.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (q.retain_until, q.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from sms_log l
           where l.shop_id = q.shop_id and l.quote_send_id = q.id)
         and not exists (select 1 from messaging_retention_holds h
@@ -392,6 +403,9 @@ async function candidateHints(
       select s.shop_id as "shopId", s.id, s.retain_until as "retainUntil"
       from messaging_consent_state s
       where s.retain_until <= ${now}::timestamptz and s.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (s.retain_until, s.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and exists (select 1 from messaging_consent_events e
           where e.shop_id = s.shop_id and e.id = s.source_event_id
             and e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp())
@@ -412,6 +426,9 @@ async function candidateHints(
       select x.shop_id as "shopId", x.id, x.retain_until as "retainUntil"
       from sms_suppressions x
       where x.retain_until <= ${now}::timestamptz and x.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (x.retain_until, x.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from messaging_consent_state s
           where s.shop_id = x.shop_id and s.status = 'consented'
             and s.destination_fingerprint = x.destination_fingerprint
@@ -441,6 +458,9 @@ async function candidateHints(
       select e.shop_id as "shopId", e.id, e.retain_until as "retainUntil"
       from messaging_consent_events e
       where e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (e.retain_until, e.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from messaging_consent_state s
           where s.shop_id = e.shop_id and s.source_event_id = e.id)
         and not exists (select 1 from sms_suppressions x
@@ -457,6 +477,9 @@ async function candidateHints(
       from messaging_deletion_requests r
       where r.state = 'completed' and r.retain_until <= ${now}::timestamptz
         and r.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (r.retain_until, r.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
         and not exists (select 1 from messaging_retention_holds h
           where h.shop_id = r.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -468,9 +491,16 @@ async function candidateHints(
       select h.shop_id as "shopId", h.id, h.retain_until as "retainUntil"
       from messaging_retention_holds h
       where h.retain_until <= ${now}::timestamptz and h.retain_until <= clock_timestamp()
+        and (${cursor?.retainUntil ?? null}::timestamptz is null
+          or (h.retain_until, h.id) > (
+            ${cursor?.retainUntil ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
       order by h.retain_until, h.id limit ${limit}
     `))
   }
+}
+
+function nextCursor(hint: Hint): CandidateCursor {
+  return Object.freeze({ retainUntil: new Date(hint.retainUntil), id: hint.id })
 }
 
 async function boundedHeldCount(
@@ -518,6 +548,14 @@ async function boundedHeldCount(
     case 'consentProjections': rows = unwrapRows(await db.execute(sql`
       select count(*)::int as count from (select s.id from messaging_consent_state s
       where s.retain_until <= ${now}::timestamptz and s.retain_until <= clock_timestamp()
+        and exists (select 1 from messaging_consent_events e
+          where e.shop_id = s.shop_id and e.id = s.source_event_id
+            and e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp())
+        and not exists (select 1 from sms_suppressions x
+          where x.shop_id = s.shop_id
+            and x.destination_fingerprint = s.destination_fingerprint
+            and x.fingerprint_key_version = s.fingerprint_key_version
+            and (x.retain_until > ${now}::timestamptz or x.retain_until > clock_timestamp()))
         and exists (select 1 from messaging_retention_holds h
           where h.shop_id = s.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -527,6 +565,10 @@ async function boundedHeldCount(
     case 'suppressions': rows = unwrapRows(await db.execute(sql`
       select count(*)::int as count from (select x.id from sms_suppressions x
       where x.retain_until <= ${now}::timestamptz and x.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_consent_state s
+          where s.shop_id = x.shop_id and s.status = 'consented'
+            and s.destination_fingerprint = x.destination_fingerprint
+            and s.fingerprint_key_version = x.fingerprint_key_version)
         and exists (select 1 from messaging_retention_holds h
           where h.shop_id = x.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -534,11 +576,23 @@ async function boundedHeldCount(
               or (h.subject_key is not null and exists (select 1 from messaging_consent_events e
                 where e.shop_id = x.shop_id and e.subject_key = h.subject_key
                   and e.destination_fingerprint = x.destination_fingerprint
-                  and e.fingerprint_key_version = x.fingerprint_key_version))))
+                  and e.fingerprint_key_version = x.fingerprint_key_version))
+              or (h.subject_key is not null and exists (select 1 from messaging_consent_state s
+                where s.shop_id = x.shop_id and s.subject_key = h.subject_key
+                  and s.destination_fingerprint = x.destination_fingerprint
+                  and s.fingerprint_key_version = x.fingerprint_key_version))
+              or (h.subject_key is not null and exists (select 1 from messaging_deletion_requests r
+                where r.shop_id = x.shop_id and r.subject_key = h.subject_key
+                  and r.destination_fingerprint = x.destination_fingerprint
+                  and r.fingerprint_key_version = x.fingerprint_key_version))))
       order by x.retain_until, x.id limit ${limit}) held`)); break
     case 'consentEvents': rows = unwrapRows(await db.execute(sql`
       select count(*)::int as count from (select e.id from messaging_consent_events e
       where e.retain_until <= ${now}::timestamptz and e.retain_until <= clock_timestamp()
+        and not exists (select 1 from messaging_consent_state s
+          where s.shop_id = e.shop_id and s.source_event_id = e.id)
+        and not exists (select 1 from sms_suppressions x
+          where x.shop_id = e.shop_id and x.source_event_id = e.id)
         and exists (select 1 from messaging_retention_holds h
           where h.shop_id = e.shop_id and h.released_at is null
             and h.starts_at <= clock_timestamp() and h.expires_at > clock_timestamp()
@@ -763,11 +817,29 @@ async function runAtomicFamily(
   })
 }
 
-function firstShopPrefix(hints: ReadonlyArray<Hint>): ReadonlyArray<Hint> {
-  const firstShopId = hints[0]?.shopId
-  if (!firstShopId) return []
-  const firstDifferentShop = hints.findIndex(({ shopId }) => shopId !== firstShopId)
-  return firstDifferentShop === -1 ? hints : hints.slice(0, firstDifferentShop)
+async function runFirstProcessableShop(
+  db: AppDb,
+  family: Family,
+  now: Date,
+  limit: number,
+): Promise<{ deleted: number; newlyHeld: number }> {
+  let cursor: CandidateCursor | undefined
+  while (true) {
+    const hints = await candidateHints(db, family, now, limit, cursor)
+    if (hints.length === 0) return { deleted: 0, newlyHeld: 0 }
+
+    for (let start = 0; start < hints.length;) {
+      let end = start + 1
+      while (end < hints.length && hints[end]!.shopId === hints[start]!.shopId) end += 1
+      const run = hints.slice(start, end)
+      const result = await runAtomicFamily(db, family, run, now)
+      if (result.deleted > 0 || result.newlyHeld > 0) return result
+      cursor = nextCursor(run[run.length - 1]!)
+      start = end
+    }
+
+    if (hints.length < limit) return { deleted: 0, newlyHeld: 0 }
+  }
 }
 
 function emptyCounts(): PurgeCounts {
@@ -816,10 +888,9 @@ export async function purgeExpiredMessagingRecords(rawInput: {
       counts.skippedHeld += await boundedHeldCount(
         input.db, family, input.now, remaining,
       )
-      const hints = firstShopPrefix(
-        await candidateHints(input.db, family, input.now, remaining),
+      const result = await runFirstProcessableShop(
+        input.db, family, input.now, remaining,
       )
-      const result = await runAtomicFamily(input.db, family, hints, input.now)
       counts[family] += result.deleted
       counts.skippedHeld += result.newlyHeld
       remaining -= result.deleted

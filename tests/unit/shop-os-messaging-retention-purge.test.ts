@@ -24,6 +24,7 @@ import {
   vehicles,
 } from '@/lib/db/schema'
 import type { MessagingActor } from '@/lib/shop-os/messaging-consent'
+import type { AppDb } from '@/lib/db/queries'
 import {
   completeMessagingDeletion,
   requestMessagingDeletion,
@@ -43,6 +44,96 @@ const keyRing: FingerprintKeyRing = Object.freeze({
     key_v1: 'task-seven-current-key-material-at-least-32-bytes',
   }),
 })
+
+type PurgeHint = Readonly<{ retainUntil: Date; id: string; shopId: string }>
+
+function purgeHint(id: string, shopId: string, order: number): PurgeHint {
+  return Object.freeze({
+    id,
+    shopId,
+    retainUntil: new Date(`2020-01-${order.toString().padStart(2, '0')}T00:00:00.000Z`),
+  })
+}
+
+function queryParts(query: unknown): { text: string; params: unknown[] } {
+  const chunks = (query as { queryChunks: unknown[] }).queryChunks
+  const params: unknown[] = []
+  const text = chunks.map((chunk) => {
+    if (typeof chunk === 'object' && chunk !== null && 'value' in chunk) {
+      return (chunk as { value: string[] }).value.join('')
+    }
+    params.push(chunk)
+    return '?'
+  }).join('')
+  return { text, params }
+}
+
+function purgeDb(input: {
+  pages: ReadonlyArray<ReadonlyArray<PurgeHint>>
+  locked: ReadonlySet<string>
+}): { db: AppDb; deleted: string[] } {
+  const candidates = input.pages.flat()
+  const deleted: string[] = []
+  let transactionState: {
+    lockedShop?: string
+    lockCount: number
+    candidateShops: Set<string>
+  } | undefined
+
+  const execute = async (query: unknown) => {
+    const { text, params } = queryParts(query)
+    if (/select count\(\*\)::int as count/.test(text)) return [{ count: 0 }]
+    if (/select n\.shop_id as "shopId"/.test(text)) {
+      const limit = params.findLast((param): param is number => typeof param === 'number') ?? 0
+      const cursorId = params.find((param) =>
+        typeof param === 'string' && candidates.some(({ id }) => id === param))
+      const cursorIndex = cursorId
+        ? candidates.findIndex(({ id }) => id === cursorId) + 1
+        : 0
+      return candidates.slice(cursorIndex, cursorIndex + limit)
+    }
+    if (/select [a-z]\.shop_id as "shopId"/.test(text)) return []
+    if (/select id from shops/.test(text)) {
+      expect(transactionState).toBeDefined()
+      const shopId = params.find((param): param is string => typeof param === 'string')
+      expect(shopId).toBeDefined()
+      transactionState!.lockCount += 1
+      transactionState!.lockedShop = shopId
+      return [{ id: shopId }]
+    }
+    if (/from notifications n where/.test(text) && /for update skip locked/.test(text)) {
+      expect(transactionState?.lockCount).toBe(1)
+      const [shopId, id] = params.filter((param): param is string => typeof param === 'string')
+      expect(shopId).toBe(transactionState?.lockedShop)
+      transactionState!.candidateShops.add(shopId!)
+      expect(transactionState!.candidateShops.size).toBe(1)
+      return input.locked.has(id!) ? [] : [{ held: false }]
+    }
+    if (/delete from notifications/.test(text)) {
+      const [, id] = params.filter((param): param is string => typeof param === 'string')
+      deleted.push(id!)
+      return [{ id }]
+    }
+    throw new Error(`unexpected purge query: ${text}`)
+  }
+
+  const fake = {
+    execute,
+    transaction: async (callback: (tx: AppDb) => Promise<unknown>) => {
+      expect(transactionState).toBeUndefined()
+      transactionState = { lockCount: 0, candidateShops: new Set() }
+      try {
+        const result = await callback(fake as unknown as AppDb)
+        expect(transactionState.lockCount).toBe(1)
+        expect(transactionState.candidateShops.size).toBe(1)
+        return result
+      } finally {
+        transactionState = undefined
+      }
+    },
+  }
+  return { db: fake as unknown as AppDb, deleted }
+}
 
 describe('messaging retention holds and bounded purge', () => {
   let db: TestDb
@@ -683,6 +774,166 @@ describe('messaging retention holds and bounded purge', () => {
     })).notifications).toBe(1)
   })
 
+  it('walks past an arbitrary locked prefix to the next eligible shop', async () => {
+    const shopA = uuid(401)
+    const shopB = uuid(402)
+    const shopC = uuid(403)
+    const fake = purgeDb({
+      pages: [
+        [purgeHint('A1', shopA, 1)],
+        [purgeHint('B1', shopB, 2)],
+        [purgeHint('C1', shopC, 3)],
+      ],
+      locked: new Set(['A1', 'B1']),
+    })
+
+    const result = await purgeExpiredMessagingRecords({
+      db: fake.db,
+      now: new Date('2026-07-12T00:00:00.000Z'),
+      batchSize: 1,
+    })
+
+    expect(result.notifications).toBe(1)
+    expect(fake.deleted).toEqual(['C1'])
+  })
+
+  it('does not coalesce non-contiguous runs from the same shop', async () => {
+    const shopA = uuid(411)
+    const shopB = uuid(412)
+    const fake = purgeDb({
+      pages: [
+        [purgeHint('A1', shopA, 1), purgeHint('B1', shopB, 2)],
+        [purgeHint('A2', shopA, 3)],
+      ],
+      locked: new Set(['A1']),
+    })
+
+    await purgeExpiredMessagingRecords({
+      db: fake.db,
+      now: new Date('2026-07-12T00:00:00.000Z'),
+      batchSize: 2,
+    })
+
+    expect(fake.deleted).toEqual(['B1'])
+  })
+
+  it('does not count a held projection whose source event is not purge-eligible', async () => {
+    await db.delete(notifications)
+    const eventId = uuid(301)
+    const heldSubject = uuid(302)
+    await db.insert(messagingConsentEvents).values({
+      id: eventId, shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: '1'.repeat(64), fingerprintKeyVersion: 'key_v1',
+      programVersion: 'projection_dependency', eventType: 'revoked',
+      committedAt: new Date('2020-01-01T00:00:00.000Z'),
+      occurredAt: new Date('2020-01-01T00:00:00.000Z'), captureMethod: 'staff_request',
+      customerControlled: true, evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+      requestKey: uuid(303), requestFingerprint: '2'.repeat(64),
+      retainUntil: new Date('2035-01-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingConsentState).values({
+      id: uuid(304), shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: '1'.repeat(64), fingerprintKeyVersion: 'key_v1',
+      programVersion: 'projection_dependency', status: 'revoked', sourceEventId: eventId,
+      revokedAt: new Date('2020-01-01T00:00:00.000Z'),
+      retainUntil: new Date('2020-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingRetentionHolds).values({
+      id: uuid(305), shopId, subjectKey: heldSubject, reasonCode: 'legal_claim',
+      authorizingActorProfileId: owner.profileId,
+      startsAt: new Date('2026-07-11T00:00:00.000Z'),
+      reviewAt: new Date('2026-07-12T00:00:00.000Z'),
+      expiresAt: new Date('2026-07-13T00:00:00.000Z'),
+      retainUntil: new Date('2031-07-13T00:00:00.000Z'),
+    })
+
+    const result = await purgeExpiredMessagingRecords({ db, now: new Date(), batchSize: 100 })
+    expect(result.skippedHeld).toBe(0)
+    expect(await db.select().from(messagingConsentState)).toHaveLength(1)
+  })
+
+  it('does not count a held suppression blocked by a consented projection', async () => {
+    await db.delete(notifications)
+    const eventId = uuid(311)
+    const heldSubject = uuid(312)
+    const heldFingerprint = '3'.repeat(64)
+    await db.insert(messagingConsentEvents).values({
+      id: eventId, shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: heldFingerprint, fingerprintKeyVersion: 'key_v1',
+      programVersion: 'suppression_dependency', eventType: 'consented',
+      committedAt: new Date('2020-01-01T00:00:00.000Z'),
+      occurredAt: new Date('2020-01-01T00:00:00.000Z'), captureMethod: 'staff_request',
+      customerControlled: true, evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+      requestKey: uuid(313), requestFingerprint: '4'.repeat(64),
+      retainUntil: new Date('2035-01-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingConsentState).values({
+      id: uuid(314), shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: heldFingerprint, fingerprintKeyVersion: 'key_v1',
+      programVersion: 'suppression_dependency', status: 'consented', sourceEventId: eventId,
+      consentedAt: new Date('2020-01-01T00:00:00.000Z'),
+      retainUntil: new Date('2020-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    await db.insert(smsSuppressions).values({
+      id: uuid(315), shopId, destinationFingerprint: heldFingerprint,
+      fingerprintKeyVersion: 'key_v1', sourceEventId: eventId, reason: 'customer_revocation',
+      suppressedAt: new Date('2020-01-01T00:00:00.000Z'),
+      liftedAt: new Date('2020-02-01T00:00:00.000Z'),
+      retainUntil: new Date('2020-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2020-02-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingRetentionHolds).values({
+      id: uuid(316), shopId, resourceType: 'sms_suppression', resourceId: uuid(315),
+      reasonCode: 'legal_claim', authorizingActorProfileId: owner.profileId,
+      startsAt: new Date('2026-07-11T00:00:00.000Z'),
+      reviewAt: new Date('2026-07-12T00:00:00.000Z'),
+      expiresAt: new Date('2026-07-13T00:00:00.000Z'),
+      retainUntil: new Date('2031-07-13T00:00:00.000Z'),
+    })
+
+    const result = await purgeExpiredMessagingRecords({ db, now: new Date(), batchSize: 100 })
+    expect(result.skippedHeld).toBe(0)
+    expect(await db.select().from(smsSuppressions)).toHaveLength(1)
+  })
+
+  it('does not count a held consent event still referenced by a projection', async () => {
+    await db.delete(notifications)
+    const eventId = uuid(321)
+    const heldSubject = uuid(322)
+    await db.insert(messagingConsentEvents).values({
+      id: eventId, shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: '5'.repeat(64), fingerprintKeyVersion: 'key_v1',
+      programVersion: 'event_dependency', eventType: 'revoked',
+      committedAt: new Date('2020-01-01T00:00:00.000Z'),
+      occurredAt: new Date('2020-01-01T00:00:00.000Z'), captureMethod: 'staff_request',
+      customerControlled: true, evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+      requestKey: uuid(323), requestFingerprint: '6'.repeat(64),
+      retainUntil: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingConsentState).values({
+      id: uuid(324), shopId, subjectKey: heldSubject, customerId,
+      destinationFingerprint: '5'.repeat(64), fingerprintKeyVersion: 'key_v1',
+      programVersion: 'event_dependency', status: 'revoked', sourceEventId: eventId,
+      revokedAt: new Date('2020-01-01T00:00:00.000Z'),
+      retainUntil: new Date('2035-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2020-01-01T00:00:00.000Z'),
+    })
+    await db.insert(messagingRetentionHolds).values({
+      id: uuid(325), shopId, resourceType: 'messaging_consent_event', resourceId: eventId,
+      reasonCode: 'legal_claim', authorizingActorProfileId: owner.profileId,
+      startsAt: new Date('2026-07-11T00:00:00.000Z'),
+      reviewAt: new Date('2026-07-12T00:00:00.000Z'),
+      expiresAt: new Date('2026-07-13T00:00:00.000Z'),
+      retainUntil: new Date('2031-07-13T00:00:00.000Z'),
+    })
+
+    const result = await purgeExpiredMessagingRecords({ db, now: new Date(), batchSize: 100 })
+    expect(result.skippedHeld).toBe(0)
+    expect(await db.select().from(messagingConsentEvents)).toHaveLength(1)
+  })
+
   it('underfills event and hold families at the first different-shop prefix', async () => {
     await db.delete(notifications)
     const otherCustomerId = uuid(120)
@@ -808,6 +1059,13 @@ describe('messaging retention holds and bounded purge', () => {
     )
     expect(source).toContain('select purge_expired_messaging_deletion_request(')
     expect(source).not.toContain('q.customer_id')
-    expect(purge.indexOf('firstShopPrefix')).toBeLessThan(purge.indexOf('runAtomicFamily'))
+    expect(source.match(/\([a-z]\.retain_until, [a-z]\.id\) >/g)).toHaveLength(8)
+    const scheduler = source.slice(
+      source.indexOf('async function runFirstProcessableShop'),
+      source.indexOf('function emptyCounts'),
+    )
+    expect(scheduler.indexOf('candidateHints')).toBeLessThan(scheduler.indexOf('runAtomicFamily'))
+    expect(purge).toContain('runFirstProcessableShop')
+    expect(purge).not.toContain('remaining + 1')
   })
 })
