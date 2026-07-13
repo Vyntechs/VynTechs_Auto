@@ -858,6 +858,7 @@ declare
   cursor_at timestamptz;
   stored_cursor_id uuid;
   returned_cursor_at timestamptz;
+  cursor_advanced boolean;
 begin
   if nullif(current_setting('vyntechs.messaging_consent_purge_shop', true), '') is not null
     or nullif(current_setting('vyntechs.messaging_consent_purge_events', true), '') is not null
@@ -987,14 +988,66 @@ begin
     for update
   ) page;
 
+  if coalesce(page_count, 0) = 0 and exists (
+    select 1
+    from public.messaging_consent_events eligible
+    where eligible.shop_id = p_shop_id
+      and eligible.subject_key = p_subject_key
+      and eligible.customer_id = request_customer_id
+      and not exists (
+        select 1
+        from public.messaging_retention_holds event_hold
+        where event_hold.shop_id = p_shop_id
+          and event_hold.resource_type = 'messaging_consent_event'
+          and event_hold.resource_id = eligible.id
+          and event_hold.released_at is null
+          and event_hold.starts_at <= now()
+          and event_hold.expires_at > now()
+      )
+  ) then
+    select
+      array_agg(page.id order by page.committed_at, page.id),
+      array_agg(page.committed_at order by page.committed_at, page.id),
+      array_agg(page.event_type order by page.committed_at, page.id),
+      array_agg(page.program_version order by page.committed_at, page.id),
+      count(*)::integer
+    into page_event_ids, page_committed_ats, page_event_types, page_program_versions, page_count
+    from (
+      select e.id, e.committed_at, e.event_type, e.program_version
+      from public.messaging_consent_events e
+      where e.shop_id = p_shop_id
+        and e.subject_key = p_subject_key
+        and e.customer_id = request_customer_id
+        and not exists (
+          select 1
+          from public.messaging_retention_holds event_hold
+          where event_hold.shop_id = p_shop_id
+            and event_hold.resource_type = 'messaging_consent_event'
+            and event_hold.resource_id = e.id
+            and event_hold.released_at is null
+            and event_hold.starts_at <= now()
+            and event_hold.expires_at > now()
+        )
+      order by e.committed_at, e.id
+      limit p_batch_limit + 1
+      for update
+    ) page;
+  end if;
+
   page_event_ids := coalesce(page_event_ids, array[]::uuid[]);
   page_count := coalesce(page_count, 0);
   deleted_count := least(page_count, p_batch_limit);
-  exhausted := page_count <= p_batch_limit;
+  cursor_advanced := false;
   if deleted_count > 0 then
     selected_event_ids := page_event_ids[1:deleted_count];
     returned_cursor_at := page_committed_ats[deleted_count];
-    next_event_id := selected_event_ids[deleted_count];
+    if (returned_cursor_at, selected_event_ids[deleted_count]) > (cursor_at, stored_cursor_id) then
+      next_event_id := selected_event_ids[deleted_count];
+      cursor_advanced := true;
+    else
+      returned_cursor_at := cursor_at;
+      next_event_id := stored_cursor_id;
+    end if;
   else
     selected_event_ids := array[]::uuid[];
     returned_cursor_at := cursor_at;
@@ -1058,6 +1111,24 @@ begin
   delete from public.messaging_consent_events
   where shop_id = p_shop_id and id = any(selected_event_ids);
 
+  exhausted := not exists (
+    select 1
+    from public.messaging_consent_events remaining
+    where remaining.shop_id = p_shop_id
+      and remaining.subject_key = p_subject_key
+      and remaining.customer_id = request_customer_id
+      and not exists (
+        select 1
+        from public.messaging_retention_holds event_hold
+        where event_hold.shop_id = p_shop_id
+          and event_hold.resource_type = 'messaging_consent_event'
+          and event_hold.resource_id = remaining.id
+          and event_hold.released_at is null
+          and event_hold.starts_at <= now()
+          and event_hold.expires_at > now()
+      )
+  );
+
   select count(*)::integer
   into countable_deleted
   from generate_subscripts(selected_event_ids, 1) position
@@ -1104,7 +1175,7 @@ begin
     to_jsonb(coalesce((request_proof->>'detachedSuppressionSources')::integer, 0)
       + detached_suppression_sources)
   );
-  if deleted_count > 0 then
+  if cursor_advanced then
     request_proof := jsonb_set(
       request_proof, '{cursors,consentEvents}',
       jsonb_build_object('at', returned_cursor_at, 'id', next_event_id), true

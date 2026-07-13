@@ -140,6 +140,7 @@ async function insertConsentEvent(
     subjectKey: string
     customerId: string
     retainUntil: string
+    committedAt: string
   }> = {},
 ) {
   const id = crypto.randomUUID()
@@ -156,16 +157,17 @@ async function insertConsentEvent(
     subjectKey: crypto.randomUUID(),
     customerId: tenant.customerId,
     retainUntil: "now() + interval '5 years'",
+    committedAt: 'now()',
     ...overrides,
   }
   await client.query(
     `insert into messaging_consent_events (
       id, shop_id, subject_key, customer_id, destination_fingerprint,
-      fingerprint_key_version, program_version, event_type, occurred_at,
+      fingerprint_key_version, program_version, event_type, committed_at, occurred_at,
       capture_method, customer_controlled, disclosure_snapshot, disclosure_hash,
       evidence_kind, actor_profile_id, request_key, request_fingerprint, retain_until
     ) values (
-      $1, $2, $3, $4, $5, $6, $7, $8, now(), $9, true, $10, $11,
+      $1, $2, $3, $4, $5, $6, $7, $8, ${values.committedAt}, now(), $9, true, $10, $11,
       $12, $13, $14, $15, ${values.retainUntil}
     )`,
     [
@@ -2076,6 +2078,110 @@ describe('Shop OS messaging retention source schema', () => {
       expect(finalProgress.prior_record_counts.consentEvents).toBe(257)
       expect(finalProgress.proof_summary.resultCounts.consentEventsDeleted).toBe(257)
       expect(finalProgress.proof_summary.detachedSuppressionSources).toBe(1)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('cursor-independent consent compaction wraps to a late event below the high-water cursor', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const subjectKey = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, {
+        subjectKey,
+        committedAt: "'2026-07-12 10:00:01+00'",
+      })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
+      const first = await fixture.client.query<{
+        deleted_count: number
+        next_event_id: string
+        exhausted: boolean
+      }>(
+        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
+        [tenant.shopId, subjectKey, requestId,
+          '00000000-0000-0000-0000-000000000000', 256],
+      )
+      expect(first.rows[0]).toMatchObject({ deleted_count: 1, exhausted: true })
+
+      await insertConsentEvent(fixture.client, tenant, {
+        subjectKey,
+        committedAt: "'2026-07-12 10:00:00+00'",
+      })
+      const wrapped = await fixture.client.query<{
+        deleted_count: number
+        next_event_id: string
+        exhausted: boolean
+      }>(
+        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
+        [tenant.shopId, subjectKey, requestId, first.rows[0]!.next_event_id, 256],
+      )
+      expect(wrapped.rows[0]).toEqual({
+        deleted_count: 1,
+        detached_suppression_sources: 0,
+        next_event_id: first.rows[0]!.next_event_id,
+        exhausted: true,
+      })
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
+        [subjectKey],
+      )).rows[0]?.count).toBe(0)
+      expect((await fixture.client.query<{
+        cursor_id: string
+        deleted: number
+      }>(`
+        select proof_summary->'cursors'->'consentEvents'->>'id' as cursor_id,
+          (proof_summary->'resultCounts'->>'consentEventsDeleted')::int as deleted
+        from messaging_deletion_requests where id = $1
+      `, [requestId])).rows[0]).toEqual({
+        cursor_id: first.rows[0]!.next_event_id,
+        deleted: 2,
+      })
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('cursor-independent consent compaction reconciles a second subject below global high-water', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const firstSubject = crypto.randomUUID()
+      const secondSubject = crypto.randomUUID()
+      await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: firstSubject,
+        committedAt: "'2026-07-12 10:00:01+00'",
+      })
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: firstSubject,
+      })
+      const first = await fixture.client.query<{ next_event_id: string }>(
+        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
+        [tenant.shopId, firstSubject, requestId,
+          '00000000-0000-0000-0000-000000000000', 256],
+      )
+      await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: secondSubject,
+        committedAt: "'2026-07-12 10:00:00+00'",
+      })
+
+      const wrapped = await fixture.client.query<{
+        deleted_count: number
+        next_event_id: string
+        exhausted: boolean
+      }>(
+        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
+        [tenant.shopId, secondSubject, requestId, first.rows[0]!.next_event_id, 256],
+      )
+      expect(wrapped.rows[0]).toMatchObject({
+        deleted_count: 1,
+        next_event_id: first.rows[0]!.next_event_id,
+        exhausted: true,
+      })
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_consent_events where subject_key = $1',
+        [secondSubject],
+      )).rows[0]?.count).toBe(0)
     } finally {
       await fixture.close()
     }

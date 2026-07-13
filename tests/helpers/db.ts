@@ -321,7 +321,7 @@ const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'serialize_messaging_retention_hold_target()': 'c324faa9988827a2e66824118c1b5ea4481ffd5321eb9582a556eca374e0e82e',
   'reject_messaging_consent_event_mutation()': '08bcf2f07ea5c34bdd6ccdd822467bcfa4f6cc967d2bf014aba7b6918eb740a9',
   'require_messaging_compaction_completion()': 'af771807e893482a0ae55236cc7118ea9b95ab0d28737948aff318693508b20e',
-  'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)': '4097e5c00b3a1bb5517ee6894b1baf0259a41f1e4a78dd36a0ba0bbbc17e3823',
+  'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)': '097d6abb8000c54ae7896f3b63be5f5cfaa23b39dd2ad3d487703a4cfb82e658',
   'purge_expired_messaging_consent_event(uuid,uuid)': '33f378ecff1afb6dc5f34263a92063433e8dcf5a5ccf79481430ac2749951948',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
   'guard_messaging_deletion_request_mutation()': '4324d067e7b1fa109d99c38bf93f0771508d1b9bd22e550c2927f3960c2a06a1',
