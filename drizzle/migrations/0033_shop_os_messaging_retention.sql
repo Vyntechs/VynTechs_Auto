@@ -1344,6 +1344,11 @@ begin
     if not (
       (old.outcome = 'pending' and new.outcome in ('deleted', 'detached', 'retained'))
       or (old.outcome = 'retained' and new.outcome in ('deleted', 'detached'))
+      or (old.outcome = 'retained' and new.outcome = 'retained'
+        and old.retention_basis in ('resource_hold', 'subject_hold')
+        and new.retention_basis = 'held_dependency'
+        and new.detached_suppression_sources = old.detached_suppression_sources
+        and new.resolved_at is not distinct from old.resolved_at)
     ) then
       raise exception 'invalid deletion work item outcome transition';
     end if;
@@ -1657,6 +1662,27 @@ begin
 
   if exists (
     select 1
+    from public.messaging_deletion_work_items child
+    join public.messaging_deletion_work_items parent
+      on parent.request_id = child.request_id
+      and parent.id = child.parent_work_item_id
+    where child.request_id = request_row.id
+      and child.outcome = 'retained'
+      and child.resource_type in ('sms_log', 'notification')
+      and child.parent_work_item_id is not null
+      and (parent.resource_type <> 'quote_send'
+        or parent.outcome <> 'retained'
+        or parent.retention_basis <> 'held_dependency')
+  ) then
+    state := 'pending';
+    prior_record_counts := null;
+    proof_summary := null;
+    return next;
+    return;
+  end if;
+
+  if exists (
+    select 1
     from public.messaging_deletion_work_items work
     where work.request_id = request_row.id and work.outcome = 'retained'
       and not case work.retention_basis
@@ -1779,7 +1805,9 @@ begin
       where resource_type = 'sms_log' and outcome = 'retained'),
     'heldNotifications', count(*) filter (
       where resource_type = 'notification' and outcome = 'retained'),
-    'total', count(*) filter (where outcome = 'retained')
+    'total', count(*) filter (
+      where outcome = 'retained'
+        and (resource_type <> 'consent_event' or counts_toward_proof))
   ), coalesce(sum(detached_suppression_sources), 0)
   into prior_record_counts, result_counts, retained_counts, detached_count
   from public.messaging_deletion_work_items

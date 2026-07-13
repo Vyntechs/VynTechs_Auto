@@ -717,6 +717,119 @@ describe('finalizes deletion work journal atomically', () => {
       await fixture.close()
     }
   })
+
+  it('publishes retained total as the sum of countable held families', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const eventId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+        customerId: tenant.customerId,
+        programVersion: 'internal_deletion_v1',
+        eventType: 'deleted',
+        captureMethod: 'staff_request',
+        disclosureSnapshot: null,
+        disclosureHash: null,
+        evidenceKind: 'staff_request',
+      })
+      const workId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id, counts_toward_proof
+        ) values ($1, $2, $3, 'consent_event', $4, false)`,
+        [workId, tenant.shopId, requestId, eventId],
+      )
+      await insertHold(fixture.client, tenant, {
+        resourceType: 'messaging_consent_event', resourceId: eventId,
+      })
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = 'retained',
+          retention_basis = 'resource_hold', resolved_at = now() where id = $1`,
+        [workId],
+      )
+
+      const finalized = (await fixture.client.query<{
+        state: string
+        proof_summary: { retained: Record<string, number> }
+      }>('select * from finalize_messaging_deletion_request($1, $2)', [
+        tenant.shopId, requestId,
+      ])).rows[0]
+      expect(finalized).toMatchObject({
+        state: 'completed',
+        proof_summary: {
+          retained: {
+            heldConsentEvents: 0, heldConsentProjections: 0, heldQuoteSends: 0,
+            heldSmsLogs: 0, heldNotifications: 0, total: 0,
+          },
+        },
+      })
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('returns pending when a retained quote-send notification has a terminal parent', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      const notificationId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into notifications (
+          id, shop_id, recipient_profile_id, event_type, entity_type, entity_id,
+          dedupe_key, created_at, retain_until
+        ) values ($1, $2, $3, 'quote_sent', 'quote_send', $4, $5, now(),
+          now() + interval '90 days')`,
+        [notificationId, tenant.shopId, tenant.actorId, sendId, crypto.randomUUID()],
+      )
+      const parentId = crypto.randomUUID()
+      const childId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'quote_send', $4)`,
+        [parentId, tenant.shopId, requestId, sendId],
+      )
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id, parent_work_item_id
+        ) values ($1, $2, $3, 'notification', $4, $5)`,
+        [childId, tenant.shopId, requestId, notificationId, parentId],
+      )
+      await insertHold(fixture.client, tenant, {
+        resourceType: 'notification', resourceId: notificationId,
+      })
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = case id
+            when $1 then 'deleted' else 'retained' end,
+          retention_basis = case when id = $2 then 'resource_hold' end,
+          resolved_at = now()
+        where id = any($3::uuid[])`,
+        [parentId, childId, [parentId, childId]],
+      )
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('pending')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [requestId],
+      )).rows[0]?.count).toBe(2)
+    } finally {
+      await fixture.close()
+    }
+  })
 })
 
 describe('Shop OS messaging retention source schema', () => {

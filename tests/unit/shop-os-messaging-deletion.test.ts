@@ -1613,6 +1613,63 @@ describe('suppression-first messaging deletion', () => {
     })
   })
 
+  it('does not charge valid retained families against a later eligible notification budget', async () => {
+    await seedPhaseTwoResource('sends', recoveryLimits.sends)
+    await seedPhaseTwoResource('consentEvents', recoveryLimits.consentEvents)
+    await seedPhaseTwoResource('consentProjections', recoveryLimits.consentProjections, {
+      reuseEvents: true,
+    })
+    const smsCreatedAt = new Date('2026-07-12T10:00:00.000Z')
+    await db.insert(smsLog).values(Array.from({ length: recoveryLimits.smsLogs }, (_, index) => ({
+      id: uuid(31_000 + index), shopId,
+      quoteSendId: uuid(10_000 + (index % recoveryLimits.sends)),
+      templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent' as const,
+      serverReceivedAt: smsCreatedAt, retainUntil: new Date('2027-07-12T10:00:00Z'),
+    })))
+    await seedPhaseTwoResource('notifications', 1)
+    const startsAt = new Date(Date.now() - 60_000)
+    const expiresAt = new Date(Date.now() + 86_400_000)
+    const holdValues = [
+      ...Array.from({ length: recoveryLimits.consentEvents }, (_, index) => ({
+        id: uuid(90_200 + index), shopId,
+        resourceType: 'messaging_consent_event' as const, resourceId: uuid(20_000 + index),
+        reasonCode: 'legal_claim' as const, authorizingActorProfileId: owner.profileId,
+        startsAt, reviewAt: new Date(Date.now() + 3_600_000), expiresAt,
+        retainUntil: addCalendarYears(expiresAt, 5),
+      })),
+      ...Array.from({ length: recoveryLimits.smsLogs }, (_, index) => ({
+        id: uuid(90_500 + index), shopId,
+        resourceType: 'sms_log' as const, resourceId: uuid(31_000 + index),
+        reasonCode: 'legal_claim' as const, authorizingActorProfileId: owner.profileId,
+        startsAt, reviewAt: new Date(Date.now() + 3_600_000), expiresAt,
+        retainUntil: addCalendarYears(expiresAt, 5),
+      })),
+    ]
+    await db.insert(messagingRetentionHolds).values(holdValues)
+    const pending = await request({ requestKey: uuid(91_100) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    expect(await db.select().from(notifications)).toHaveLength(1)
+    const { result } = await completeUntilTerminal(pending.requestId, 4)
+    expect(result).toMatchObject({
+      ok: true, state: 'completed', counts: { notificationsDeleted: 1 },
+    })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      proofSummary: {
+        retained: {
+          heldConsentEvents: 256,
+          heldConsentProjections: 128,
+          heldQuoteSends: 128,
+          heldSmsLogs: 512,
+          heldNotifications: 0,
+          total: 1024,
+        },
+      },
+    })
+  })
+
   it('deletes a below-order notification inserted between retry pages', async () => {
     await seedPhaseTwoResource('notifications', 257)
     const pending = await request({ requestKey: uuid(72_504) })
@@ -1690,6 +1747,40 @@ describe('suppression-first messaging deletion', () => {
     expect(await journalRows(pending.requestId)).toEqual([])
   })
 
+  it('re-enters and normalizes a retained parent with a stale direct basis', async () => {
+    const sendId = uuid(72_610)
+    const smsId = uuid(72_611)
+    await insertSend(sendId, 'submitted')
+    await db.insert(smsLog).values({
+      id: smsId, shopId, quoteSendId: sendId,
+      templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent',
+      serverReceivedAt: new Date('2026-07-12T10:00:00Z'),
+      retainUntil: new Date('2027-07-12T10:00:00Z'),
+    })
+    await activeHold({ resourceType: 'quote_send', resourceId: sendId })
+    await activeHold({ resourceType: 'sms_log', resourceId: smsId })
+    await seedPhaseTwoResource('notifications', 257)
+    const pending = await request({ requestKey: uuid(72_612) })
+    if (!pending.ok) throw new Error('request failed')
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    const [parent] = await db.select({ id: messagingDeletionWorkItems.id })
+      .from(messagingDeletionWorkItems)
+      .where(eq(messagingDeletionWorkItems.resourceId, sendId))
+    await db.execute(sql`alter table messaging_deletion_work_items
+      disable trigger messaging_deletion_work_items_guard`)
+    await db.execute(sql`update messaging_deletion_work_items
+      set retention_basis = 'resource_hold' where id = ${parent!.id}::uuid`)
+    await db.execute(sql`alter table messaging_deletion_work_items
+      enable trigger messaging_deletion_work_items_guard`)
+
+    const { result } = await completeUntilTerminal(pending.requestId, 4)
+    expect(result).toMatchObject({ ok: true, state: 'completed' })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      proofSummary: { retained: { heldQuoteSends: 1, heldSmsLogs: 1 } },
+    })
+  })
+
   it('isolates final tombstones from another customer detached and held records', async () => {
     await insertSend(uuid(72_700), 'submitted')
     await insertSend(
@@ -1749,7 +1840,7 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
   })
 
-  it('serializes a late consent writer behind finalization and returns suppression rejection', async () => {
+  it('documents shared queue and exact lock order before late-writer suppression rejection', async () => {
     const finalizerDefinition = (await client.query<{ definition: string }>(`
       select regexp_replace(
         pg_get_functiondef('finalize_messaging_deletion_request(uuid,uuid)'::regprocedure),
@@ -1772,6 +1863,8 @@ describe('suppression-first messaging deletion', () => {
 
     const pending = await request({ requestKey: uuid(72_800) })
     if (!pending.ok) throw new Error('request failed')
+    // These wrappers share one PGlite engine and transaction queue. The wait below is queue
+    // evidence; the SQL/function source assertions above prove the production lock order.
     const finalizerDb = createTestDbClient(client)
     const writerDb = createTestDbClient(client)
     const disclosureSnapshot = Object.freeze({
