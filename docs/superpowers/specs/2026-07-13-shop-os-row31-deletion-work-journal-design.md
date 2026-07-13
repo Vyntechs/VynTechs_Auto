@@ -1,6 +1,6 @@
 # Shop OS Row 31 Request-Scoped Deletion Work Journal Design
 
-**Status:** Owner-approved direction 2026-07-13; written-spec review pending
+**Status:** Owner-approved 2026-07-13
 
 **Supersedes:** Task 3 runtime batching in `2026-07-12-shop-os-row31-deletion-convergence.md`
 
