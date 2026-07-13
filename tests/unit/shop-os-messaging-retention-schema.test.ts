@@ -19,11 +19,23 @@ import {
 } from '@/lib/db/schema'
 import {
   createTestDb,
+  ensureMessagingRetentionFkIndexMigration,
   ensureMessagingRetentionMigration,
 } from '@/tests/helpers/db'
 
 const hex = 'a'.repeat(64)
 const otherHex = 'b'.repeat(64)
+
+const ROW_31_FK_INDEX_COLUMNS = {
+  messaging_consent_events_shop_customer_idx: ['shop_id', 'customer_id'],
+  messaging_consent_state_shop_customer_idx: ['shop_id', 'customer_id'],
+  messaging_consent_state_shop_source_event_idx: ['shop_id', 'source_event_id'],
+  messaging_deletion_work_items_parent_work_item_idx: ['parent_work_item_id'],
+  messaging_deletion_work_items_shop_request_idx: ['shop_id', 'request_id'],
+  messaging_retention_holds_shop_actor_idx: ['shop_id', 'authorizing_actor_profile_id'],
+  quote_sends_shop_customer_idx: ['shop_id', 'customer_id'],
+  sms_suppressions_shop_source_event_idx: ['shop_id', 'source_event_id'],
+} as const
 
 async function seedTenant(client: PGlite) {
   const shopId = crypto.randomUUID()
@@ -1102,27 +1114,21 @@ describe('finalizes deletion work journal atomically', () => {
   })
 })
 
-describe('Shop OS messaging retention source schema', () => {
+describe('Shop OS messaging retention source schema', { timeout: 15_000 }, () => {
   it('declares correctly ordered covering indexes for every Row 31 foreign key', () => {
-    const indexNames = [
+    const indexColumns = Object.fromEntries([
       messagingConsentEvents,
       messagingConsentState,
       smsSuppressions,
       messagingDeletionWorkItems,
       messagingRetentionHolds,
       quoteSends,
-    ].flatMap((table) => getTableConfig(table).indexes.map((index) => index.config.name))
+    ].flatMap((table) => getTableConfig(table).indexes.map((index) => [
+      index.config.name,
+      index.config.columns.map((column) => (column as { name?: string }).name),
+    ])))
 
-    expect(indexNames).toEqual(expect.arrayContaining([
-      'messaging_consent_events_shop_customer_idx',
-      'messaging_consent_state_shop_customer_idx',
-      'messaging_consent_state_shop_source_event_idx',
-      'messaging_deletion_work_items_parent_work_item_idx',
-      'messaging_deletion_work_items_shop_request_idx',
-      'messaging_retention_holds_shop_actor_idx',
-      'quote_sends_shop_customer_idx',
-      'sms_suppressions_shop_source_event_idx',
-    ]))
+    expect(indexColumns).toMatchObject(ROW_31_FK_INDEX_COLUMNS)
   })
 
   it('applies the exact foreign-key covering indexes through the standard fixture', async () => {
@@ -1159,6 +1165,81 @@ describe('Shop OS messaging retention source schema', () => {
       })
       expect(Object.keys(definitions)).toHaveLength(8)
     } finally {
+      await fixture.close()
+    }
+  })
+
+  it('fails closed for partial, alternate-name, reversed, filtered, and wrong-table index drift', async () => {
+    const fixture = await createTestDb()
+    const migration = (await readFile(
+      path.join(process.cwd(), 'drizzle/migrations/0035_shop_os_messaging_retention_fk_indexes.sql'),
+      'utf8',
+    )).replaceAll('--> statement-breakpoint', '')
+    const expectedNames = Object.keys(ROW_31_FK_INDEX_COLUMNS)
+    const reset = async () => {
+      await fixture.client.exec([
+        ...expectedNames.map((name) => `drop index if exists ${name};`),
+        'drop index if exists alternate_messaging_consent_events_shop_customer_idx;',
+      ].join('\n'))
+    }
+    const scenarios: Array<() => Promise<void>> = [
+      async () => {
+        await fixture.client.exec(`
+          create index messaging_consent_events_shop_customer_idx
+          on messaging_consent_events (shop_id, customer_id);
+        `)
+      },
+      async () => {
+        await fixture.client.exec(`
+          create index alternate_messaging_consent_events_shop_customer_idx
+          on messaging_consent_events (shop_id, customer_id);
+        `)
+      },
+      async () => {
+        await fixture.client.exec(migration)
+        await fixture.client.exec(`
+          drop index messaging_consent_events_shop_customer_idx;
+          create index messaging_consent_events_shop_customer_idx
+          on messaging_consent_events (customer_id, shop_id);
+        `)
+      },
+      async () => {
+        await fixture.client.exec(migration)
+        await fixture.client.exec(`
+          drop index sms_suppressions_shop_source_event_idx;
+          create index sms_suppressions_shop_source_event_idx
+          on sms_suppressions (shop_id, source_event_id)
+          where source_event_id is not null;
+        `)
+      },
+      async () => {
+        await fixture.client.exec(migration)
+        await fixture.client.exec(`
+          drop index messaging_consent_events_shop_customer_idx;
+          create index messaging_consent_events_shop_customer_idx
+          on messaging_consent_state (shop_id, customer_id);
+        `)
+      },
+    ]
+
+    try {
+      const outcomes: string[] = []
+      for (const arrange of scenarios) {
+        await reset()
+        await arrange()
+        try {
+          await ensureMessagingRetentionFkIndexMigration(fixture.client)
+          outcomes.push('resolved')
+        } catch (error) {
+          outcomes.push(error instanceof Error ? error.message : 'non-error rejection')
+        }
+      }
+      expect(outcomes).toEqual(Array.from(
+        { length: scenarios.length },
+        () => 'partial messaging retention foreign-key indexes in ephemeral database',
+      ))
+    } finally {
+      await reset()
       await fixture.close()
     }
   })
