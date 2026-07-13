@@ -615,7 +615,7 @@ export async function requestMessagingDeletion(rawInput: {
 
 type CleanupRequest = RequestRow & { shopId: string; subjectKey: string; requestKey: string }
 type SendRow = { id: string; state: string; customerId: string | null; subjectKey: string }
-type HoldRow = { resourceType: string | null; resourceId: string | null; subjectKey: string | null }
+type HoldRow = { id: string; startsAt: Date | string; resourceType: string | null; resourceId: string | null; subjectKey: string | null }
 type ConsentProjectionRow = MessagingPair & { id: string; subjectKey: string }
 type ConsentEventRow = MessagingPair & { id: string; subjectKey: string }
 type SmsRow = { id: string; quoteSendId: string }
@@ -660,6 +660,21 @@ function parsePendingProgress(row: CleanupRequest): { prior: PriorRecordCounts; 
   const cursors = row.proof.cursors
   if (!cursors || typeof cursors !== 'object' || Array.isArray(cursors)
     || Object.getPrototypeOf(cursors) !== Object.prototype) throw new Error('invalid_progress')
+  const allowed = new Set(['quoteSends', 'consentSubjects', 'consentEvents',
+    'smsLogs', 'notifications', 'holds'])
+  for (const [key, cursor] of Object.entries(cursors)) {
+    if (!allowed.has(key) || !cursor || typeof cursor !== 'object' || Array.isArray(cursor)
+      || Object.getPrototypeOf(cursor) !== Object.prototype
+      || Object.keys(cursor).sort().join() !== 'at,id') throw new Error('invalid_progress')
+    const descriptorAt = Object.getOwnPropertyDescriptor(cursor, 'at')
+    const descriptorId = Object.getOwnPropertyDescriptor(cursor, 'id')
+    if (!descriptorAt?.enumerable || !descriptorId?.enumerable
+      || !('value' in descriptorAt) || !('value' in descriptorId)
+      || typeof descriptorAt.value !== 'string' || !Number.isFinite(Date.parse(descriptorAt.value))
+      || typeof descriptorId.value !== 'string' || !uuid.safeParse(descriptorId.value).success) {
+      throw new Error('invalid_progress')
+    }
+  }
   return { prior, progress: { progressVersion: 1, resultCounts, heldCounts,
     detachedSuppressionSources: row.proof.detachedSuppressionSources as number,
     cursors: cursors as PendingDeletionProgress['cursors'] } }
@@ -723,7 +738,20 @@ export async function completeMessagingDeletion(rawInput: {
 
       const sendPage = unwrapRows<SendRow>(await tx.execute(sql`
         select id, state, customer_id as "customerId", subject_key as "subjectKey" from quote_sends
-        where shop_id = ${request.shopId}::uuid and customer_id = ${request.customerId}::uuid
+        where shop_id = ${request.shopId}::uuid and (customer_id = ${request.customerId}::uuid
+          or (customer_id is null and exists (
+            select 1 from messaging_retention_holds history
+            where history.shop_id = quote_sends.shop_id
+              and (history.resource_type = 'quote_send' and history.resource_id = quote_sends.id
+                or history.subject_key = quote_sends.subject_key)
+          ) and not exists (
+            select 1 from messaging_retention_holds active
+            where active.shop_id = quote_sends.shop_id
+              and (active.resource_type = 'quote_send' and active.resource_id = quote_sends.id
+                or active.subject_key = quote_sends.subject_key)
+              and active.released_at is null and active.starts_at <= clock_timestamp()
+              and active.expires_at > clock_timestamp()
+          )))
         order by id limit ${MAX_SENDS + 1} for update
       `))
       const projectionPage = unwrapRows<ConsentProjectionRow>(await tx.execute(sql`
@@ -774,6 +802,10 @@ export async function completeMessagingDeletion(rawInput: {
         Math.min(MAX_NOTIFICATIONS, totalRemaining),
       )
       totalRemaining -= notificationRows.length
+      const deferredSendIds = new Set(notificationPage.slice(notificationRows.length)
+        .filter(({ entityType }) => entityType === 'quote_send')
+        .map(({ entityId }) => entityId))
+      for (const row of smsPage.slice(smsRows.length)) deferredSendIds.add(row.quoteSendId)
       const subjectKeys = [...new Set([
         request.subjectKey,
         ...sends.map(({ subjectKey }) => subjectKey),
@@ -783,11 +815,14 @@ export async function completeMessagingDeletion(rawInput: {
       const smsIds = smsRows.map(({ id }) => id)
       const notificationIds = notificationRows.map(({ id }) => id)
       const consentEventIds = consentEvents.map(({ id }) => id)
-      const holds = unwrapRows<HoldRow>(await tx.execute(sql`
-        select resource_type as "resourceType", resource_id as "resourceId", subject_key as "subjectKey"
+      const holdCursor = stored.progress.cursors.holds
+      const holdPage = unwrapRows<HoldRow>(await tx.execute(sql`
+        select id, starts_at as "startsAt", resource_type as "resourceType",
+          resource_id as "resourceId", subject_key as "subjectKey"
         from messaging_retention_holds
         where shop_id = ${request.shopId}::uuid and released_at is null
           and starts_at <= clock_timestamp() and expires_at > clock_timestamp()
+          and (${holdCursor ? sql`(starts_at, id) > (${holdCursor.at}::timestamptz, ${holdCursor.id}::uuid)` : sql`true`})
           and (subject_key = any(${sql.param(subjectKeys)}::uuid[])
             or (resource_type = 'quote_send'
               and resource_id = any(${sql.param(sendIds)}::uuid[]))
@@ -797,13 +832,15 @@ export async function completeMessagingDeletion(rawInput: {
               and resource_id = any(${sql.param(notificationIds)}::uuid[]))
             or (resource_type = 'messaging_consent_event'
               and resource_id = any(${sql.param(consentEventIds)}::uuid[])))
-        order by id limit ${MAX_HOLDS + 1} for update
+        order by starts_at, id limit ${MAX_HOLDS + 1} for update
       `))
+      const holds = holdPage.slice(0, Math.min(MAX_HOLDS, totalRemaining))
+      totalRemaining -= holds.length
 
       const overLimit = sendPage.length > sends.length || eventPage.length > consentEvents.length
         || projectionPage.length > consentProjections.length || smsPage.length > smsRows.length
         || notificationPage.length > notificationRows.length
-        || Math.min(holds.length, MAX_HOLDS) > totalRemaining
+        || holdPage.length > holds.length
 
       const heldSubjectKeys = new Set(subjectKeys.filter((subjectKey) =>
         holds.some((hold) => hold.subjectKey === subjectKey)
@@ -824,27 +861,22 @@ export async function completeMessagingDeletion(rawInput: {
           && heldSubjectKeys.has(sendsById.get(row.entityId)?.subjectKey ?? ''))
       const heldSmsParents = new Set(smsRows.filter(smsHeld)
         .map(({ quoteSendId }) => quoteSendId))
-      if (smsPage.length > MAX_SMS_LOGS) {
-        for (const row of smsPage.slice(MAX_SMS_LOGS)) heldSmsParents.add(row.quoteSendId)
-      }
 
-      let priorCounts = Object.freeze({
-        consentEvents: consentEvents.length,
-        consentProjections: consentProjections.length,
-        notifications: notificationRows.length,
-        quoteSends: sends.length,
-        smsLogs: smsRows.length,
+      let priorCounts: PriorRecordCounts = Object.freeze({
+        consentEvents: 0,
+        consentProjections: 0,
+        notifications: 0,
+        quoteSends: 0,
+        smsLogs: 0,
       })
 
       let consentDeleted = 0
       let detachedSuppressionSources = 0
-      let consentCompacted = false
       const consentSubjectKeys = [...new Set([
         ...consentProjections.map(({ subjectKey }) => subjectKey),
         ...consentEvents.map(({ subjectKey }) => subjectKey),
       ])].sort().filter((subjectKey) => !heldSubjectKeys.has(subjectKey))
       for (const subjectKey of consentSubjectKeys) {
-        consentCompacted = true
         const subjectEvents = consentEvents.filter((event) => event.subjectKey === subjectKey)
         const subjectProjections = consentProjections.filter((projection) =>
           projection.subjectKey === subjectKey)
@@ -911,10 +943,16 @@ export async function completeMessagingDeletion(rawInput: {
                 and h.expires_at > clock_timestamp()) returning 1)
         select count(*)::int as count from deleted
       `))[0]?.count ?? 0
+      priorCounts = Object.freeze({
+        ...priorCounts,
+        notifications: notificationsDeleted,
+        smsLogs: smsDeleted,
+      })
 
       let sendsDeleted = 0
       let sendsRetained = 0
       for (const send of sends) {
+        if (deferredSendIds.has(send.id)) continue
         if (!sendHeld(send) && !heldSmsParents.has(send.id)) {
           await tx.execute(sql`delete from quote_sends where id = ${send.id}::uuid`)
           sendsDeleted += 1
@@ -934,6 +972,7 @@ export async function completeMessagingDeletion(rawInput: {
         }
         sendsRetained += 1
       }
+      priorCounts = Object.freeze({ ...priorCounts, quoteSends: sendsDeleted + sendsRetained })
 
       const completedAt = unwrapRows<{ at: Date | string }>(await tx.execute(sql`
         with barriers(at) as (
@@ -964,8 +1003,29 @@ export async function completeMessagingDeletion(rawInput: {
         heldSubjectKeys.has(subjectKey)).length
       const heldConsentProjections = consentProjections.filter(({ subjectKey }) =>
         heldSubjectKeys.has(subjectKey)).length
-      const heldQuoteSends = sendsRetained
-      const heldSmsLogs = smsRows.filter(smsHeld).length
+      const reconciledHeldSends = unwrapRows<{ count: number }>(await tx.execute(sql`
+        select count(distinct q.id)::int as count
+        from quote_sends q
+        join messaging_retention_holds h on h.shop_id = q.shop_id
+          and (h.resource_type = 'quote_send' and h.resource_id = q.id
+            or h.subject_key = q.subject_key)
+        where q.shop_id = ${request.shopId}::uuid
+          and (q.customer_id = ${request.customerId}::uuid or q.customer_id is null)
+          and h.released_at is null and h.starts_at <= clock_timestamp()
+          and h.expires_at > clock_timestamp()
+      `))[0]?.count ?? 0
+      const heldQuoteSends = Math.max(sendsRetained, reconciledHeldSends)
+      const reconciledHeldSms = unwrapRows<{ count: number }>(await tx.execute(sql`
+        select count(distinct l.id)::int as count
+        from sms_log l join quote_sends q on q.id = l.quote_send_id and q.shop_id = l.shop_id
+        join messaging_retention_holds h on h.shop_id = l.shop_id
+          and (h.resource_type = 'sms_log' and h.resource_id = l.id
+            or h.subject_key = q.subject_key)
+        where l.shop_id = ${request.shopId}::uuid
+          and h.released_at is null and h.starts_at <= clock_timestamp()
+          and h.expires_at > clock_timestamp()
+      `))[0]?.count ?? 0
+      const heldSmsLogs = Math.max(smsRows.filter(smsHeld).length, reconciledHeldSms)
       const heldNotifications = notificationRows.filter(notificationHeld).length
       const retained = Object.freeze({
         heldConsentEvents,
@@ -978,24 +1038,28 @@ export async function completeMessagingDeletion(rawInput: {
       })
       const finalPrior = Object.freeze({
         ...accumulatedPrior,
-        consentEvents: consentCompacted
-          ? addCount(accumulatedPrior.consentEvents, heldConsentEvents)
-          : accumulatedPrior.consentEvents,
-        consentProjections: consentCompacted
-          ? addCount(accumulatedPrior.consentProjections, heldConsentProjections)
-          : accumulatedPrior.consentProjections,
+        consentEvents: addCount(accumulatedPrior.consentEvents, heldConsentEvents),
+        consentProjections: addCount(accumulatedPrior.consentProjections, heldConsentProjections),
+        notifications: addCount(accumulatedPrior.notifications, heldNotifications),
+        smsLogs: addCount(accumulatedPrior.smsLogs, heldSmsLogs),
       })
       const accumulatedDetached = addCount(
         stored.progress.detachedSuppressionSources,
         detachedSuppressionSources,
       )
       if (overLimit) {
+        const lastHold = holds.at(-1)
         const progress: PendingDeletionProgress = Object.freeze({
           progressVersion: 1,
           resultCounts: counts,
           heldCounts: emptyHeld(),
           detachedSuppressionSources: accumulatedDetached,
-          cursors: stored.progress.cursors,
+          cursors: Object.freeze({
+            ...stored.progress.cursors,
+            ...(holdPage.length > holds.length && lastHold ? { holds: {
+              at: new Date(lastHold.startsAt).toISOString(), id: lastHold.id,
+            } } : {}),
+          }),
         })
         await tx.execute(sql`
           update messaging_deletion_requests
