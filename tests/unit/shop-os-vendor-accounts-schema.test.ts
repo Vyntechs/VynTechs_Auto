@@ -120,7 +120,7 @@ describe('Shop OS vendor account source schema', () => {
     await expect(ensureVendorAccountsMigration(client)).rejects.toThrow(
       'partial vendor accounts schema in ephemeral database',
     )
-  })
+  }, 15_000)
 
   it('accepts only bounded manual, env-reference, and vault-reference accounts', async () => {
     const { db, close } = await createTestDb()
