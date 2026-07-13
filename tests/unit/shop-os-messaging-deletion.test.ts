@@ -650,6 +650,146 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select({ id: notifications.id }).from(notifications)).toHaveLength(768)
   })
 
+  it('resolves consent projection work only after every selected child outcome', async () => {
+    await seedPhaseTwoResource('consentProjections', 1)
+    await db.execute(sql`
+      create function assert_task_3_projection_child_order()
+      returns trigger language plpgsql as $function$
+      begin
+        if new.resource_type = 'consent_projection'
+          and new.outcome in ('deleted', 'retained')
+          and exists (
+            select 1 from public.messaging_deletion_work_items child
+            where child.request_id = new.request_id
+              and child.parent_work_item_id = new.id
+              and child.outcome = 'pending'
+          )
+        then
+          raise exception 'projection work resolved before child outcome';
+        end if;
+        return new;
+      end;
+      $function$
+    `)
+    await db.execute(sql`
+      create trigger assert_task_3_projection_child_order
+      before update on messaging_deletion_work_items
+      for each row execute function assert_task_3_projection_child_order()
+    `)
+    const pending = await request({ requestKey: uuid(75_200) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'completed', counts: { consentEventsDeleted: 1 } })
+    expect(await db.select().from(messagingConsentEvents)).toHaveLength(0)
+    expect(await db.select().from(messagingConsentState)).toHaveLength(0)
+    expect((await journalRows(pending.requestId)).map(({ resourceType, outcome }) => ({
+      resourceType, outcome,
+    }))).toEqual(expect.arrayContaining([
+      { resourceType: 'consent_event', outcome: 'deleted' },
+      { resourceType: 'consent_projection', outcome: 'deleted' },
+    ]))
+  })
+
+  it('retains a projection source event behind its held sibling and converges', async () => {
+    const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
+    const committedAt = new Date('2026-07-12T10:00:00.000Z')
+    const sourceEventId = uuid(75_300)
+    const heldSiblingId = uuid(75_301)
+    await db.insert(messagingConsentEvents).values([
+      {
+        id: sourceEventId, shopId, subjectKey: customerId, customerId,
+        destinationFingerprint: current, fingerprintKeyVersion: 'key_v2',
+        programVersion: 'shared_hold_v1', eventType: 'revoked', committedAt, occurredAt: committedAt,
+        captureMethod: 'staff_request', customerControlled: false, evidenceKind: 'staff_request',
+        actorProfileId: owner.profileId, requestKey: uuid(75_310),
+        requestFingerprint: '1'.repeat(64), retainUntil: new Date('2031-07-12T10:00:00Z'),
+      },
+      {
+        id: heldSiblingId, shopId, subjectKey: customerId, customerId,
+        destinationFingerprint: current, fingerprintKeyVersion: 'key_v2',
+        programVersion: 'shared_hold_v1', eventType: 'revoked',
+        committedAt: new Date(committedAt.getTime() + 1),
+        occurredAt: new Date(committedAt.getTime() + 1), captureMethod: 'staff_request',
+        customerControlled: false, evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+        requestKey: uuid(75_311), requestFingerprint: '2'.repeat(64),
+        retainUntil: new Date('2031-07-12T10:00:00Z'),
+      },
+    ])
+    const [{ id: projectionId }] = await db.insert(messagingConsentState).values({
+      shopId, subjectKey: customerId, customerId, destinationFingerprint: current,
+      fingerprintKeyVersion: 'key_v2', programVersion: 'shared_hold_v1', status: 'revoked',
+      sourceEventId, revokedAt: committedAt, retainUntil: new Date('2031-07-12T10:00:00Z'),
+      updatedAt: committedAt,
+    }).returning({ id: messagingConsentState.id })
+    await activeHold({ resourceType: 'messaging_consent_event', resourceId: heldSiblingId })
+    const pending = await request({ requestKey: uuid(75_320) })
+    if (!pending.ok) throw new Error('request failed')
+
+    const { result } = await completeUntilTerminal(pending.requestId, 3)
+    expect(result).toMatchObject({ ok: true, state: 'completed' })
+    expect(await db.select({ id: messagingConsentEvents.id }).from(messagingConsentEvents))
+      .toEqual(expect.arrayContaining([{ id: sourceEventId }, { id: heldSiblingId }]))
+    expect(await db.select({ id: messagingConsentState.id }).from(messagingConsentState))
+      .toEqual([{ id: projectionId! }])
+    const outcomes = await db.select({
+      resourceType: messagingDeletionWorkItems.resourceType,
+      resourceId: messagingDeletionWorkItems.resourceId,
+      outcome: messagingDeletionWorkItems.outcome,
+      retentionBasis: messagingDeletionWorkItems.retentionBasis,
+    }).from(messagingDeletionWorkItems)
+      .where(eq(messagingDeletionWorkItems.requestId, pending.requestId))
+    expect(outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceType: 'consent_event', resourceId: sourceEventId,
+        outcome: 'retained', retentionBasis: 'held_dependency',
+      }),
+      expect.objectContaining({
+        resourceType: 'consent_event', resourceId: heldSiblingId,
+        outcome: 'retained', retentionBasis: 'resource_hold',
+      }),
+      expect.objectContaining({
+        resourceType: 'consent_projection', resourceId: projectionId,
+        outcome: 'retained', retentionBasis: 'held_dependency',
+      }),
+    ]))
+  })
+
+  it('keeps internal consent work inside the family and total outcome budgets', async () => {
+    await seedPhaseTwoResource('sends', recoveryLimits.sends)
+    await seedPhaseTwoResource('smsLogs', recoveryLimits.smsLogs, { sendId: uuid(10_000) })
+    await seedPhaseTwoResource('notifications', 128)
+    const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
+    const committedAt = new Date('2026-07-12T10:00:00.000Z')
+    await db.insert(messagingConsentEvents).values(Array.from(
+      { length: recoveryLimits.consentEvents },
+      (_, index) => ({
+        id: uuid(76_000 + index), shopId, subjectKey: uuid(77_000 + index), customerId,
+        destinationFingerprint: current, fingerprintKeyVersion: 'key_v2',
+        programVersion: `bounded_program_${index}_v1`, eventType: 'revoked' as const,
+        committedAt, occurredAt: committedAt, captureMethod: 'staff_request' as const,
+        customerControlled: false, evidenceKind: 'staff_request' as const,
+        actorProfileId: owner.profileId, requestKey: uuid(78_000 + index),
+        requestFingerprint: '3'.repeat(64), retainUntil: new Date('2031-07-12T10:00:00Z'),
+      }),
+    ))
+    const pending = await request({ requestKey: uuid(79_000) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    const work = await db.select().from(messagingDeletionWorkItems)
+      .where(eq(messagingDeletionWorkItems.requestId, pending.requestId))
+    expect(work).toHaveLength(recoveryLimits.totalResources)
+    expect(work.filter(({ outcome }) => outcome !== 'pending')).toHaveLength(
+      recoveryLimits.totalResources,
+    )
+    expect(work.filter(({ resourceType }) => resourceType === 'consent_event')).toHaveLength(
+      recoveryLimits.consentEvents,
+    )
+    expect(work.filter(({ countsTowardProof }) => !countsTowardProof)).toHaveLength(0)
+  })
+
   it('binds completed retries to the original customer without retaining a raw customer ID', async () => {
     const pending = await request()
     if (!pending.ok) throw new Error('request failed')
@@ -1637,6 +1777,7 @@ describe('suppression-first messaging deletion', () => {
   it('documents the exact cleanup state, hold, and lock contract in executable source', async () => {
     const source = await import('node:fs/promises').then(({ readFile }) =>
       readFile('lib/shop-os/messaging-deletion.ts', 'utf8'))
+    const phaseTwo = source.slice(source.indexOf('export async function completeMessagingDeletion'))
     expect(source).toContain("new Set(['queued', 'claimed'])")
     expect(source).toContain("new Set(['submitting', 'submitted'])")
     expect(source).toMatch(/for update/i)
@@ -1644,12 +1785,11 @@ describe('suppression-first messaging deletion', () => {
     expect(source).toContain("resource_type = 'sms_log'")
     expect(source).toContain("resource_type = 'quote_send'")
     expect(source).toContain("resource_type = 'notification'")
-    expect(source).toContain("'deleted', clock_timestamp()")
+    expect(phaseTwo).not.toContain('insert into messaging_consent_events')
     expect(source).not.toContain('sql.raw')
     expect(source).toContain('sql.param')
     expect(source).toContain('MAX_HISTORICAL_PAIRS = 64')
     expect(source).toContain('MAX_TOTAL_RESOURCES = 1024')
-    const phaseTwo = source.slice(source.indexOf('export async function completeMessagingDeletion'))
     const dedicatedHoldsLock = 'select id, starts_at as "startsAt", resource_type as "resourceType"'
     const positions = [
       'select id from shops', 'from messaging_deletion_requests',

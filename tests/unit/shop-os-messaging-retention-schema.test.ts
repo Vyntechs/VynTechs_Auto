@@ -2276,6 +2276,36 @@ describe('Shop OS messaging retention source schema', () => {
         from generate_series(1, 258) series(i) order by i`)).rows
       const selected = seeded.slice(0, 256)
 
+      const invalidExactSelections: Array<ReadonlyArray<string | null>> = [
+        [],
+        seeded.slice(0, 257).map(({ work_item_id }) => work_item_id),
+        [seeded[0]!.work_item_id, seeded[0]!.work_item_id],
+        [seeded[0]!.work_item_id, null],
+        [seeded[0]!.work_item_id, crypto.randomUUID()],
+      ]
+      for (const workItemIds of invalidExactSelections) {
+        await expect(fixture.client.query(
+          'select compact_messaging_consent_work_items($1, $2, $3::uuid[])',
+          [tenant.shopId, requestId, workItemIds],
+        )).rejects.toThrow(/compaction requires/)
+      }
+      expect((await fixture.client.query<{
+        event_count: number
+        pending_count: number
+        attached_suppression_count: number
+      }>(`select
+          (select count(*)::int from messaging_consent_events
+            where shop_id = $1) as event_count,
+          (select count(*)::int from messaging_deletion_work_items
+            where request_id = $2 and outcome = 'pending') as pending_count,
+          (select count(*)::int from sms_suppressions
+            where shop_id = $1 and source_event_id is not null) as attached_suppression_count`,
+      [tenant.shopId, requestId])).rows[0]).toEqual({
+        event_count: 258,
+        pending_count: 258,
+        attached_suppression_count: 258,
+      })
+
       expect((await fixture.client.query<{ advanced: number }>(
         'select compact_messaging_consent_work_items($1, $2, $3::uuid[]) as advanced',
         [tenant.shopId, requestId, selected.map(({ work_item_id }) => work_item_id)],
@@ -2318,6 +2348,25 @@ describe('Shop OS messaging retention source schema', () => {
         'select compact_messaging_consent_work_items($1, $2, $3::uuid[])',
         [tenant.shopId, requestId, selected.map(({ work_item_id }) => work_item_id)],
       )).rejects.toThrow(/pending consent-event work items|required/)
+
+      const remaining = seeded.slice(256)
+      expect((await fixture.client.query<{ advanced: number }>(
+        'select compact_messaging_consent_work_items($1, $2, $3::uuid[]) as advanced',
+        [tenant.shopId, requestId, remaining.map(({ work_item_id }) => work_item_id)],
+      )).rows[0]?.advanced).toBe(2)
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_consent_events where shop_id = $1',
+        [tenant.shopId],
+      )).rows[0]?.count).toBe(0)
+      expect((await fixture.client.query<{
+        outcome: string
+        counts_toward_proof: boolean
+      }>(`select outcome, counts_toward_proof
+          from messaging_deletion_work_items where id = $1`,
+      [seeded[257]!.work_item_id])).rows[0]).toEqual({
+        outcome: 'deleted',
+        counts_toward_proof: false,
+      })
     } finally {
       await fixture.close()
     }

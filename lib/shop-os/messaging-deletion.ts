@@ -1159,89 +1159,79 @@ export async function completeMessagingDeletion(rawInput: {
               )
             order by work.id
           `)).map(({ id }) => id)
-        if (deletableProjectionWorkItemIds.length > 0) {
-          await tx.execute(sql`
-            with deleted as (
-              delete from messaging_consent_state projection
-              using messaging_deletion_work_items work
-              where work.id = any(${sql.param(deletableProjectionWorkItemIds)}::uuid[])
-                and work.request_id = ${request.id}::uuid
-                and work.resource_type = 'consent_projection'
-                and work.outcome = 'pending'
-                and projection.shop_id = work.shop_id and projection.id = work.resource_id
-              returning work.id
-            )
-            update messaging_deletion_work_items work set outcome = 'deleted',
-              retention_basis = null, resolved_at = clock_timestamp()
-            from deleted where work.id = deleted.id
-          `)
-          projectionsDeleted += deletableProjectionWorkItemIds.length
-        }
-        const heldProjectionWorkItemIds = projectionWorkItemIds.filter((id) =>
-          !deletableProjectionWorkItemIds.includes(id)
-            && (heldSubjectKeys.has(subjectKey)
-              || subjectEvents.length === 0
-              || consentEvents.some((event) => event.subjectKey === subjectKey
-                && consentEventHeld(event))))
-        if (heldProjectionWorkItemIds.length > 0) {
+        const heldProjectionWorkItemIds = projectionWorkItemIds.length === 0
+          ? []
+          : unwrapRows<{ id: string }>(await tx.execute(sql`
+            select work.id
+            from messaging_deletion_work_items work
+            join messaging_consent_state projection
+              on projection.shop_id = work.shop_id and projection.id = work.resource_id
+            where work.request_id = ${request.id}::uuid
+              and work.id = any(${sql.param(projectionWorkItemIds)}::uuid[])
+              and work.outcome = 'pending'
+              and exists (
+                select 1 from messaging_retention_holds hold
+                where hold.shop_id = projection.shop_id
+                  and hold.released_at is null
+                  and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+                  and (hold.subject_key = projection.subject_key
+                    or (hold.resource_type = 'messaging_consent_event' and exists (
+                      select 1 from messaging_consent_events held_child
+                      where held_child.shop_id = projection.shop_id
+                        and held_child.subject_key = projection.subject_key
+                        and held_child.destination_fingerprint = projection.destination_fingerprint
+                        and held_child.fingerprint_key_version = projection.fingerprint_key_version
+                        and held_child.program_version = projection.program_version
+                        and held_child.id = hold.resource_id
+                    )))
+              )
+            order by work.id
+          `)).map(({ id }) => id)
+        const heldProjectionIds = new Set(heldProjectionWorkItemIds)
+        const dependencyRetainedEvents = subjectEvents.filter((event) =>
+          subjectProjections.some((projection) =>
+            heldProjectionIds.has(projection.workItemId)
+              && projection.sourceEventId === event.id))
+        const dependencyRetainedEventWorkItemIds = dependencyRetainedEvents
+          .map(({ workItemId }) => workItemId)
+        if (dependencyRetainedEventWorkItemIds.length > 0) {
           await tx.execute(sql`
             update messaging_deletion_work_items set outcome = 'retained',
-              retention_basis = ${heldSubjectKeys.has(subjectKey)
-                ? sql`'subject_hold'` : sql`'held_dependency'`},
-              resolved_at = clock_timestamp()
+              retention_basis = 'held_dependency', resolved_at = clock_timestamp()
             where request_id = ${request.id}::uuid
-              and id = any(${sql.param(heldProjectionWorkItemIds)}::uuid[])
+              and id = any(${sql.param(dependencyRetainedEventWorkItemIds)}::uuid[])
               and outcome = 'pending'
           `)
         }
-        if (heldSubjectKeys.has(subjectKey)) continue
-        const remainingProjectionSources = new Set(unwrapRows<{ sourceEventId: string }>(
-          await tx.execute(sql`
-            select source_event_id as "sourceEventId"
+        let compactableEvents = subjectEvents.filter(({ workItemId }) =>
+          !dependencyRetainedEventWorkItemIds.includes(workItemId))
+        if (deletableProjectionWorkItemIds.length > 0) {
+          const removedProjectionWorkItemIds = unwrapRows<{ id: string }>(await tx.execute(sql`
+            delete from messaging_consent_state projection
+            using messaging_deletion_work_items work
+            where work.id = any(${sql.param(deletableProjectionWorkItemIds)}::uuid[])
+              and work.request_id = ${request.id}::uuid
+              and work.resource_type = 'consent_projection'
+              and work.outcome = 'pending'
+              and projection.shop_id = work.shop_id and projection.id = work.resource_id
+            returning work.id
+          `)).map(({ id }) => id)
+          if (removedProjectionWorkItemIds.length !== deletableProjectionWorkItemIds.length) {
+            throw new Error('consent_projection_source_delete_incomplete')
+          }
+        }
+        if (compactableEvents.length > 0) {
+          const stillReferencedEventIds = new Set(unwrapRows<{ id: string }>(await tx.execute(sql`
+            select source_event_id as id
             from messaging_consent_state
             where shop_id = ${request.shopId}::uuid
-              and source_event_id = any(${sql.param(selectedEventIds)}::uuid[])
-          `),
-        ).map(({ sourceEventId }) => sourceEventId))
-        const compactableEvents = subjectEvents.filter(({ id }) => !remainingProjectionSources.has(id))
-        if (compactableEvents.length < subjectEvents.length) overLimit = true
-        if (compactableEvents.length === 0 && deletableProjectionWorkItemIds.length === 0) continue
-        const insertedInternal = unwrapRows<{ id: string }>(await tx.execute(sql`
-          insert into messaging_consent_events (
-            shop_id, subject_key, customer_id, destination_fingerprint,
-            fingerprint_key_version, program_version, event_type, committed_at, occurred_at,
-            capture_method, customer_controlled, evidence_kind, actor_profile_id,
-            request_key, request_fingerprint, retain_until
-          ) values (
-            ${request.shopId}::uuid, ${subjectKey}::uuid, ${request.customerId}::uuid,
-            ${source.destinationFingerprint}, ${source.fingerprintKeyVersion}, 'internal_deletion_v1',
-            'deleted', clock_timestamp(), clock_timestamp(), 'staff_request', false,
-            'staff_request', ${input.actor.profileId}::uuid,
-            (md5(${request.id}::text || ':' || ${subjectKey}::text))::uuid,
-            ${request.requestFingerprint}, clock_timestamp() + interval '5 years'
-          )
-          on conflict do nothing
-          returning id
-        `))
-        let internalWorkItemId: string | undefined
-        const internalEventId = insertedInternal[0]?.id
-        if (internalEventId) {
-          internalWorkItemId = unwrapRows<{ id: string }>(await tx.execute(sql`
-            insert into messaging_deletion_work_items (
-              shop_id, request_id, resource_type, resource_id,
-              outcome, counts_toward_proof
-            ) values (
-              ${request.shopId}::uuid, ${request.id}::uuid, 'consent_event',
-              ${internalEventId}::uuid, 'pending', false
-            )
-            on conflict (request_id, resource_type, resource_id) do nothing
-            returning id
-          `))[0]?.id
+              and source_event_id = any(${sql.param(compactableEvents.map(({ id }) => id))}::uuid[])
+            order by source_event_id
+          `)).map(({ id }) => id))
+          compactableEvents = compactableEvents.filter(({ id }) => !stillReferencedEventIds.has(id))
         }
-        const compactionItems = [
-          ...compactableEvents.map(({ workItemId }) => workItemId),
-          ...(internalWorkItemId ? [internalWorkItemId] : []),
-        ]
+        const compactionItems = compactableEvents.map(({ workItemId }) => workItemId)
         for (let offset = 0; offset < compactionItems.length; offset += MAX_CONSENT_EVENTS) {
           const workItemIds = compactionItems.slice(offset, offset + MAX_CONSENT_EVENTS)
           await tx.execute(sql`
@@ -1259,6 +1249,74 @@ export async function completeMessagingDeletion(rawInput: {
             where request_id = ${request.id}::uuid
               and id = any(${sql.param(compactionItems)}::uuid[])
           `))[0]?.count ?? 0
+        }
+        if (deletableProjectionWorkItemIds.length > 0) {
+          const resolvedProjectionCount = unwrapRows<{ count: number }>(await tx.execute(sql`
+            with resolved as (
+              update messaging_deletion_work_items work set outcome = 'deleted',
+                retention_basis = null, resolved_at = clock_timestamp()
+              where work.request_id = ${request.id}::uuid
+                and work.id = any(${sql.param(deletableProjectionWorkItemIds)}::uuid[])
+                and work.resource_type = 'consent_projection'
+                and work.outcome = 'pending'
+                and not exists (
+                  select 1 from messaging_deletion_work_items child
+                  where child.request_id = work.request_id
+                    and child.parent_work_item_id = work.id
+                    and child.outcome = 'pending'
+                )
+              returning 1
+            ) select count(*)::int as count from resolved
+          `))[0]?.count ?? 0
+          if (resolvedProjectionCount !== deletableProjectionWorkItemIds.length) {
+            throw new Error('consent_projection_outcome_advance_incomplete')
+          }
+          projectionsDeleted += resolvedProjectionCount
+        }
+        if (heldProjectionWorkItemIds.length > 0) {
+          await tx.execute(sql`
+            update messaging_deletion_work_items work set outcome = 'retained',
+              retention_basis = case when exists (
+                select 1
+                from messaging_consent_state projection
+                join messaging_retention_holds hold
+                  on hold.shop_id = projection.shop_id
+                  and hold.subject_key = projection.subject_key
+                  and hold.released_at is null
+                  and hold.starts_at <= clock_timestamp()
+                  and hold.expires_at > clock_timestamp()
+                where projection.shop_id = work.shop_id
+                  and projection.id = work.resource_id
+              ) then 'subject_hold' else 'held_dependency' end,
+              resolved_at = clock_timestamp()
+            where work.request_id = ${request.id}::uuid
+              and work.id = any(${sql.param(heldProjectionWorkItemIds)}::uuid[])
+              and work.outcome = 'pending'
+              and not exists (
+                select 1 from messaging_deletion_work_items child
+                where child.request_id = work.request_id
+                  and child.parent_work_item_id = work.id
+                  and child.outcome = 'pending'
+              )
+              and not exists (
+                select 1
+                from messaging_consent_state projection
+                join messaging_consent_events child
+                  on child.shop_id = projection.shop_id
+                  and child.subject_key = projection.subject_key
+                  and child.destination_fingerprint = projection.destination_fingerprint
+                  and child.fingerprint_key_version = projection.fingerprint_key_version
+                  and child.program_version = projection.program_version
+                where projection.shop_id = work.shop_id
+                  and projection.id = work.resource_id
+                  and not exists (
+                    select 1 from messaging_deletion_work_items child_work
+                    where child_work.request_id = work.request_id
+                      and child_work.resource_type = 'consent_event'
+                      and child_work.resource_id = child.id
+                  )
+              )
+          `)
         }
       }
       priorCounts = Object.freeze({
