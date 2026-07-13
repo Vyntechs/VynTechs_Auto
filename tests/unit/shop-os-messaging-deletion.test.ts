@@ -114,6 +114,20 @@ describe('suppression-first messaging deletion', () => {
       ...overrides,
     })
 
+  const completeUntilTerminal = async (requestId: string, maximumAttempts: number) => {
+    const snapshots: MessagingDeletionResult[] = []
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+      const result = await completeMessagingDeletion({ db, actor: owner, requestId, now })
+      snapshots.push(result)
+      const barriers = await db.select().from(smsSuppressions)
+      expect(barriers.every((row) => row.liftedAt === null
+        && ['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(row.reason)))
+        .toBe(true)
+      if (!result.ok || result.state === 'completed') return { result, snapshots }
+    }
+    throw new Error('deletion did not converge within deterministic attempt budget')
+  }
+
   const insertSend = async (
     id: string,
     state: 'queued' | 'claimed' | 'submitting' | 'submitted' | 'delivered',
@@ -995,7 +1009,7 @@ describe('suppression-first messaging deletion', () => {
           if (property !== 'execute') return Reflect.get(target, property, receiver)
           return async (...args: Parameters<typeof tx.execute>) => {
             executeCount += 1
-            if (executeCount === 17) throw new Error('injected')
+            if (executeCount === 15) throw new Error('injected')
             return tx.execute(...args)
           }
         },
@@ -1042,6 +1056,36 @@ describe('suppression-first messaging deletion', () => {
     const retry = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now: new Date(0) })
     expect(retry).toEqual(first)
     expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
+  })
+
+  it('converges repeated completion attempts above the send ceiling while suppression stays active', async () => {
+    await seedPhaseTwoResource('sends', recoveryLimits.sends + 1)
+    const pending = await request({ requestKey: uuid(64_000) })
+    if (!pending.ok) throw new Error('request failed')
+
+    let result: MessagingDeletionResult = pending
+    for (let attempt = 0; attempt < 4 && result.ok && result.state === 'pending'; attempt += 1) {
+      result = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
+      const barriers = await db.select().from(smsSuppressions)
+      expect(barriers).toHaveLength(Object.keys(keyRing.keys).length)
+      expect(barriers.every((row) => row.liftedAt === null
+        && row.reason === 'verified_deletion')).toBe(true)
+    }
+
+    expect(result).toMatchObject({
+      ok: true,
+      state: 'completed',
+      counts: { quoteSendsDeleted: recoveryLimits.sends + 1 },
+    })
+    expect(await db.select().from(quoteSends)).toHaveLength(0)
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      state: 'completed',
+      priorRecordCounts: { quoteSends: recoveryLimits.sends + 1 },
+      proofSummary: {
+        suppressionActive: 1,
+        resultCounts: { quoteSendsDeleted: recoveryLimits.sends + 1 },
+      },
+    })
   })
 
   it('allows a different live same-shop retention authority to complete the immutable request', async () => {
@@ -1096,36 +1140,28 @@ describe('suppression-first messaging deletion', () => {
     }
   })
 
-  it.each(([
+  it.each([
     ['sends', recoveryLimits.sends],
     ['consentEvents', recoveryLimits.consentEvents],
     ['consentProjections', recoveryLimits.consentProjections],
     ['smsLogs', recoveryLimits.smsLogs],
     ['notifications', recoveryLimits.notifications],
     ['holds', recoveryLimits.holds],
-  ] as const).flatMap(([type, maximum]) => [
-    [type, maximum, true] as const,
-    [type, maximum + 1, false] as const,
-  ]))('%s count %i respects its safety boundary', async (type, count, accepted) => {
+  ] as const)('%s ceiling converges with exact accumulated proof', async (type, maximum) => {
+    const count = maximum + 1
     await seedPhaseTwoResource(type, count)
     const pending = await request({ requestKey: uuid(62_000) })
     if (!pending.ok) throw new Error('request failed')
-    const result = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
-    if (accepted) {
-      expect(result).toMatchObject({ ok: true, state: 'completed' })
-    } else {
-      expect(result).toEqual({ ok: false, error: 'busy' })
-      expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
-        id: pending.requestId, state: 'pending', customerId,
-      })
-      expect((await db.select().from(smsSuppressions)).length).toBeGreaterThan(0)
-    }
+    const { result } = await completeUntilTerminal(
+      pending.requestId,
+      2 + Math.ceil(count / maximum),
+    )
+    expect(result).toMatchObject({ ok: true, state: 'completed' })
+    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
   })
 
-  it.each([
-    ['accepts', recoveryLimits.totalResources, true],
-    ['refuses', recoveryLimits.totalResources + 1, false],
-  ] as const)('%s the aggregate resource safety boundary', async (_label, total, accepted) => {
+  it('aggregate ceiling converges within its deterministic attempt budget', async () => {
+    const total = recoveryLimits.totalResources + 1
     await seedPhaseTwoResource('consentEvents', 200)
     await seedPhaseTwoResource('consentProjections', 100, { reuseEvents: true })
     await seedPhaseTwoResource('sends', 100)
@@ -1134,13 +1170,11 @@ describe('suppression-first messaging deletion', () => {
     await seedPhaseTwoResource('smsLogs', total - 800, { sendId: uuid(10_000) })
     const pending = await request({ requestKey: uuid(63_000) })
     if (!pending.ok) throw new Error('request failed')
-    const result = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
-    if (accepted) {
-      expect(result).toMatchObject({ ok: true, state: 'completed' })
-    } else {
-      expect(result).toEqual({ ok: false, error: 'busy' })
-      expect((await db.select().from(messagingDeletionRequests))[0]!.state).toBe('pending')
-    }
+    const { result } = await completeUntilTerminal(
+      pending.requestId,
+      10 + Math.ceil(total / recoveryLimits.totalResources),
+    )
+    expect(result).toMatchObject({ ok: true, state: 'completed' })
   })
 
   it('documents the exact cleanup state, hold, and lock contract in executable source', async () => {
@@ -1160,7 +1194,7 @@ describe('suppression-first messaging deletion', () => {
     expect(source).toContain('MAX_TOTAL_RESOURCES = 1024')
     const phaseTwo = source.slice(source.indexOf('export async function completeMessagingDeletion'))
     const positions = [
-      'select id from shops', 'select id from messaging_deletion_requests',
+      'select id from shops', 'from messaging_deletion_requests',
       'select id from customers', 'select id, state', 'from messaging_consent_state',
       'from sms_log', 'from notifications', 'from messaging_retention_holds',
     ].map((marker) => phaseTwo.indexOf(marker))
