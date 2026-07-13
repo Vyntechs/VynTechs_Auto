@@ -30,6 +30,7 @@ import {
   getMessagingEligibility,
   recordMessagingConsentEvent,
 } from '@/lib/shop-os/messaging-consent'
+import { updateTeamMember } from '@/lib/shop-os/team'
 import { createTestDb, createTestDbClient, type TestDb } from '@/tests/helpers/db'
 
 const uuid = (suffix: number) =>
@@ -355,6 +356,8 @@ describe('suppression-first messaging deletion', () => {
     const pending = await request()
     expect(pending).toMatchObject({ ok: true, state: 'pending' })
     if (!pending.ok) return
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, counts: { quoteSendsRetained: 2 } })
     const suppressions = await db.select().from(smsSuppressions)
       .where(eq(smsSuppressions.shopId, shopId))
     expect(suppressions.map((row) => [
@@ -367,9 +370,6 @@ describe('suppression-first messaging deletion', () => {
     ]))
     expect(suppressions.some(({ destinationFingerprint }) =>
       destinationFingerprint === unrelatedV1)).toBe(false)
-
-    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
-      .toMatchObject({ ok: true, counts: { quoteSendsRetained: 2 } })
     expect(await db.select().from(quoteSends)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: uuid(80), customerId: null, tokenHash: null }),
       expect.objectContaining({ id: uuid(81), customerId: null, tokenHash: null }),
@@ -412,7 +412,7 @@ describe('suppression-first messaging deletion', () => {
       .toMatchObject({ ok: true, counts: { quoteSendsRetained: 4 } })
   })
 
-  it('fails phase one without acceptance when a historical pair is malformed', async () => {
+  it('keeps the canonical request pending when a historical pair is malformed', async () => {
     await db.execute(sql`
       alter table quote_sends drop constraint quote_sends_destination_fingerprint_valid
     `)
@@ -425,9 +425,13 @@ describe('suppression-first messaging deletion', () => {
       requestFingerprint: 'e'.repeat(64), state: 'queued', createdAt, updatedAt: createdAt,
     })
 
-    expect(await request()).toEqual({ ok: false, error: 'retryable' })
-    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(0)
-    expect(await db.select().from(smsSuppressions)).toHaveLength(0)
+    const pending = await request()
+    expect(pending).toMatchObject({ ok: true, state: 'pending' })
+    if (!pending.ok) return
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toEqual({ ok: false, error: 'retryable' })
+    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
+    expect(await db.select().from(smsSuppressions)).toHaveLength(Object.keys(keyRing.keys).length)
   })
 
   it('uses actor-bound semantic idempotency and rejects changed or spoofed retries', async () => {
@@ -2141,6 +2145,77 @@ describe('suppression-first messaging deletion', () => {
     })).toEqual({ ok: false, error: 'not_found' })
   })
 
+  it('locks live deletion authority through request commit before a queued demotion', async () => {
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile('lib/shop-os/messaging-deletion.ts', 'utf8'))
+    const liveAuthoritySource = source.slice(
+      source.indexOf('async function liveAuthority'),
+      source.indexOf('async function recoverRequest'),
+    )
+    expect(liveAuthoritySource).toMatch(/from profiles[\s\S]*for update/i)
+
+    const secondOwnerUserId = uuid(124)
+    await db.insert(profiles).values({
+      id: uuid(24), userId: secondOwnerUserId, shopId,
+      fullName: 'Second Owner', role: 'owner',
+    })
+    const requestDb = createTestDbClient(client)
+    const teamDb = createTestDbClient(client)
+    const strings = (value: unknown, seen = new Set<unknown>()): string => {
+      if (typeof value === 'string') return value
+      if (!value || typeof value !== 'object' || seen.has(value)) return ''
+      seen.add(value)
+      if (Array.isArray(value)) return value.map((item) => strings(item, seen)).join(' ')
+      return Object.values(value).map((item) => strings(item, seen)).join(' ')
+    }
+    let releaseAuthority!: () => void
+    const holdAuthority = new Promise<void>((resolve) => { releaseAuthority = resolve })
+    let authorityReady!: () => void
+    const authorityChecked = new Promise<void>((resolve) => { authorityReady = resolve })
+    const controlledDb = {
+      transaction: (callback: (tx: TestDb) => Promise<unknown>) => requestDb.transaction(
+        async (tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== 'execute') return Reflect.get(target, property, receiver)
+            return async (...args: Parameters<typeof tx.execute>) => {
+              const result = await tx.execute(...args)
+              if (strings(args[0]).includes('from profiles')) {
+                authorityReady()
+                await holdAuthority
+              }
+              return result
+            }
+          },
+        }) as TestDb),
+      ),
+    } as unknown as TestDb
+
+    const deletion = request({ db: controlledDb, requestKey: uuid(72_750) })
+    await authorityChecked
+    // PGlite exposes a shared transaction queue, not independent PostgreSQL row locks. The
+    // structural assertion above proves the production lock; this wait proves queue ordering.
+    const demotion = updateTeamMember(teamDb, {
+      actor: {
+        userId: secondOwnerUserId, shopId, role: 'owner',
+        membershipStatus: 'active', isFounder: false,
+      },
+      targetUserId: uuid(120),
+      role: 'advisor',
+    })
+    expect(await Promise.race([
+      demotion.then((result) => ({ state: 'settled' as const, result })),
+      new Promise<{ state: 'waiting' }>((resolve) => setTimeout(
+        () => resolve({ state: 'waiting' }), 20,
+      )),
+    ])).toEqual({ state: 'waiting' })
+
+    releaseAuthority()
+    expect(await deletion).toMatchObject({ ok: true, state: 'pending' })
+    expect(await demotion).toEqual({ ok: true })
+    expect((await db.select({ role: profiles.role }).from(profiles)
+      .where(eq(profiles.id, owner.profileId)))[0]?.role).toBe('advisor')
+  })
+
   it('converges concurrent completion attempts behind the shop lock', async () => {
     const pending = await request()
     if (!pending.ok) throw new Error('request failed')
@@ -2257,10 +2332,11 @@ describe('suppression-first messaging deletion', () => {
   })
 
   it.each([
-    ['accepts', recoveryLimits.historicalPairs, true],
-    ['refuses', recoveryLimits.historicalPairs + 1, false],
-  ] as const)('%s the exact historical-pair safety boundary', async (_label, totalPairs, accepted) => {
-    const historicalCount = totalPairs - Object.keys(keyRing.keys).length
+    ['one overflow page', recoveryLimits.historicalPairs + 1],
+    ['multiple overflow pages', recoveryLimits.historicalPairs * 2 + 1],
+  ] as const)('converges %s of exact historical pairs with bounded durable progress', async (
+    _label, historicalCount,
+  ) => {
     const createdAt = new Date('2026-07-12T10:00:00Z')
     await db.insert(quoteSends).values(Array.from({ length: historicalCount }, (_, index) => ({
       id: uuid(60_000 + index), shopId, ticketId, quoteVersionId: versionId, customerId,
@@ -2271,14 +2347,23 @@ describe('suppression-first messaging deletion', () => {
       requestFingerprint: 'c'.repeat(64), state: 'queued' as const, createdAt, updatedAt: createdAt,
     })))
     const result = await request({ requestKey: uuid(61999) })
-    if (accepted) {
-      expect(result).toMatchObject({ ok: true, state: 'pending' })
-      expect(await db.select().from(smsSuppressions)).toHaveLength(totalPairs)
-    } else {
-      expect(result).toEqual({ ok: false, error: 'busy' })
-      expect(await db.select().from(messagingDeletionRequests)).toHaveLength(0)
-      expect(await db.select().from(smsSuppressions)).toHaveLength(0)
-    }
+    expect(result).toMatchObject({ ok: true, state: 'pending' })
+    if (!result.ok) throw new Error('request failed')
+    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
+    expect(await db.select().from(smsSuppressions)).toHaveLength(Object.keys(keyRing.keys).length)
+
+    const { result: completed, snapshots } = await completeUntilTerminal(
+      result.requestId,
+      2 + Math.ceil(historicalCount / recoveryLimits.historicalPairs),
+    )
+    expect(completed).toMatchObject({
+      ok: true,
+      state: 'completed',
+      counts: { quoteSendsDeleted: historicalCount },
+    })
+    expect(snapshots[0]).toMatchObject({ ok: true, state: 'pending' })
+    expect(await db.select().from(smsSuppressions))
+      .toHaveLength(historicalCount + Object.keys(keyRing.keys).length)
   })
 
   it.each([

@@ -212,65 +212,98 @@ function exactMessagingPairs(rows: ReadonlyArray<MessagingPair>): ReadonlyArray<
       || left.fingerprintKeyVersion.localeCompare(right.fingerprintKeyVersion)))
 }
 
-function sameMessagingPairs(
-  left: ReadonlyArray<MessagingPair>,
-  right: ReadonlyArray<MessagingPair>,
-): boolean {
-  return left.length === right.length && left.every((pair, index) =>
-    pair.destinationFingerprint === right[index]?.destinationFingerprint
-      && pair.fingerprintKeyVersion === right[index]?.fingerprintKeyVersion)
+async function normalizeSuppressionPairs(input: {
+  tx: AppDb
+  shopId: string
+  pairs: ReadonlyArray<MessagingPair>
+  requestedAt: Date
+}): Promise<void> {
+  const retainUntil = addUtcCalendarYearsClamped(input.requestedAt, 5)
+  for (const pair of input.pairs) {
+    await input.tx.execute(sql`
+      insert into sms_suppressions (
+        shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
+        reason, suppressed_at, lifted_at, retain_until, updated_at
+      ) values (
+        ${input.shopId}::uuid, ${pair.destinationFingerprint},
+        ${pair.fingerprintKeyVersion}, null, 'verified_deletion',
+        ${input.requestedAt}::timestamptz, null, ${retainUntil}::timestamptz,
+        ${input.requestedAt}::timestamptz
+      )
+      on conflict (shop_id, destination_fingerprint, fingerprint_key_version) do update
+      set reason = case when sms_suppressions.reason = 'customer_revocation'
+                        then 'verified_deletion' else sms_suppressions.reason end,
+          lifted_at = null,
+          retain_until = greatest(excluded.retain_until, sms_suppressions.retain_until),
+          updated_at = greatest(
+            excluded.updated_at, sms_suppressions.updated_at + interval '1 millisecond'
+          )
+    `)
+  }
+  if (input.pairs.length === 0) return
+  const normalized = unwrapRows<{
+    reason: string
+    liftedAt: Date | null
+    retainUntil: Date | string
+  }>(await input.tx.execute(sql`
+    select reason, lifted_at as "liftedAt", retain_until as "retainUntil"
+    from sms_suppressions where shop_id = ${input.shopId}::uuid
+      and (${sql.join(input.pairs.map((pair) => sql`
+        (destination_fingerprint = ${pair.destinationFingerprint}
+          and fingerprint_key_version = ${pair.fingerprintKeyVersion})
+      `), sql` or `)})
+    order by destination_fingerprint, fingerprint_key_version
+    for update
+  `))
+  if (normalized.length !== input.pairs.length || normalized.some((row) =>
+    !['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(row.reason)
+    || row.liftedAt !== null
+    || timestampMilliseconds(row.retainUntil) < retainUntil.getTime()
+  )) throw new Error('suppression_normalization_failed')
 }
 
-async function lockCustomerMessagingPairs(input: {
+async function normalizeHistoricalMessagingPairs(input: {
   tx: AppDb
   shopId: string
   customerId: string
-  current: ReadonlyArray<{ fingerprint: string; keyVersion: string }>
-}): Promise<ReadonlyArray<MessagingPair> | null> {
-  const sends = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select distinct destination_fingerprint as "destinationFingerprint",
-      fingerprint_key_version as "fingerprintKeyVersion"
-    from quote_sends
-    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by destination_fingerprint, fingerprint_key_version
+  requestedAt: Date
+}): Promise<boolean> {
+  const retainUntil = addUtcCalendarYearsClamped(input.requestedAt, 5)
+  const candidates = unwrapRows<MessagingPair>(await input.tx.execute(sql`
+    with source_pairs(destination_fingerprint, fingerprint_key_version) as (
+      select destination_fingerprint, fingerprint_key_version from quote_sends
+      where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+      union
+      select destination_fingerprint, fingerprint_key_version from messaging_consent_state
+      where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+      union
+      select destination_fingerprint, fingerprint_key_version from messaging_consent_events
+      where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+      union
+      select destination_fingerprint, fingerprint_key_version from messaging_deletion_requests
+      where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
+        and state = 'pending'
+    )
+    select source.destination_fingerprint as "destinationFingerprint",
+      source.fingerprint_key_version as "fingerprintKeyVersion"
+    from source_pairs source
+    where not exists (
+      select 1 from sms_suppressions suppression
+      where suppression.shop_id = ${input.shopId}::uuid
+        and suppression.destination_fingerprint = source.destination_fingerprint
+        and suppression.fingerprint_key_version = source.fingerprint_key_version
+        and suppression.reason in ('verified_deletion', 'permanent_failure', 'number_reassigned')
+        and suppression.lifted_at is null
+        and suppression.retain_until >= ${retainUntil}::timestamptz
+    )
+    order by source.destination_fingerprint, source.fingerprint_key_version
     limit ${MAX_HISTORICAL_PAIRS + 1}
   `))
-  const projections = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select distinct destination_fingerprint as "destinationFingerprint",
-      fingerprint_key_version as "fingerprintKeyVersion"
-    from messaging_consent_state
-    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by destination_fingerprint, fingerprint_key_version
-    limit ${MAX_HISTORICAL_PAIRS + 1}
-  `))
-  const events = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select distinct destination_fingerprint as "destinationFingerprint",
-      fingerprint_key_version as "fingerprintKeyVersion"
-    from messaging_consent_events
-    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-    order by destination_fingerprint, fingerprint_key_version
-    limit ${MAX_HISTORICAL_PAIRS + 1}
-  `))
-  const requests = unwrapRows<MessagingPair>(await input.tx.execute(sql`
-    select distinct destination_fingerprint as "destinationFingerprint",
-      fingerprint_key_version as "fingerprintKeyVersion"
-    from messaging_deletion_requests
-    where shop_id = ${input.shopId}::uuid and customer_id = ${input.customerId}::uuid
-      and state = 'pending'
-    order by destination_fingerprint, fingerprint_key_version
-    limit ${MAX_HISTORICAL_PAIRS + 1}
-  `))
-  const pairs = exactMessagingPairs([
-    ...input.current.map(({ fingerprint: destinationFingerprint, keyVersion }) => ({
-      destinationFingerprint,
-      fingerprintKeyVersion: keyVersion,
-    })),
-    ...sends,
-    ...projections,
-    ...events,
-    ...requests,
-  ])
-  return pairs.length <= MAX_HISTORICAL_PAIRS ? pairs : null
+  await normalizeSuppressionPairs({
+    ...input,
+    pairs: candidates.slice(0, MAX_HISTORICAL_PAIRS),
+  })
+  return candidates.length > MAX_HISTORICAL_PAIRS
 }
 
 function semanticCustomerBinding(input: {
@@ -333,6 +366,7 @@ async function liveAuthority(tx: AppDb, input: Snapshot): Promise<'ok' | 'forbid
     select role, membership_status as "membershipStatus", deactivated_at as "deactivatedAt"
     from profiles
     where id = ${input.actor.profileId}::uuid and shop_id = ${input.actor.shopId}::uuid
+    for update
   `)
   const actor = unwrapRows<{ role: string; membershipStatus: string; deactivatedAt: Date | null }>(result)[0]
   if (!actor) return 'not_found'
@@ -385,36 +419,19 @@ async function recoverRequest(input: Snapshot): Promise<MessagingDeletionResult>
     `))[0]
     if (!canonical?.requestedAt) return { ok: false, error: 'retryable' }
 
-    const pairs = await lockCustomerMessagingPairs({
-      tx: tx as AppDb,
-      shopId: input.actor.shopId,
-      customerId: input.customerId!,
-      current: input.fingerprints!,
-    })
-    if (!pairs) return { ok: false, error: 'busy' }
-    const suppressions = unwrapRows<{
-      reason: string
-      liftedAt: Date | null
-      retainUntil: Date | string
-    }>(await tx.execute(sql`
-      select reason, lifted_at as "liftedAt", retain_until as "retainUntil"
-      from sms_suppressions where shop_id = ${input.actor.shopId}::uuid
-        and (${sql.join(pairs.map((item) => sql`
-          (destination_fingerprint = ${item.destinationFingerprint}
-            and fingerprint_key_version = ${item.fingerprintKeyVersion})
-        `), sql` or `)})
-      order by destination_fingerprint, fingerprint_key_version
-      limit ${MAX_HISTORICAL_PAIRS + 1} for update
-    `))
     const requestedAt = canonical.requestedAt instanceof Date
       ? canonical.requestedAt
       : new Date(canonical.requestedAt)
-    const barrierAt = addUtcCalendarYearsClamped(requestedAt, 5)
-    if (suppressions.length !== pairs.length || suppressions.some((suppression) =>
-      !['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(suppression.reason)
-      || suppression.liftedAt !== null
-      || timestampMilliseconds(suppression.retainUntil) < barrierAt.getTime()
-    )) return { ok: false, error: 'retryable' }
+    const currentPairs = exactMessagingPairs(input.fingerprints!.map((item) => ({
+      destinationFingerprint: item.fingerprint,
+      fingerprintKeyVersion: item.keyVersion,
+    })))
+    await normalizeSuppressionPairs({
+      tx: tx as AppDb,
+      shopId: input.actor.shopId,
+      pairs: currentPairs,
+      requestedAt,
+    })
     return { ok: true, requestId: canonical.id, state: 'pending' }
   })
 }
@@ -461,7 +478,7 @@ export async function requestMessagingDeletion(rawInput: {
           destination_fingerprint as "destinationFingerprint",
           fingerprint_key_version as "fingerprintKeyVersion", state, reason_code as "reasonCode",
           requesting_actor_profile_id as "requestingActorProfileId", prior_record_counts as counts,
-          proof_summary as proof
+          proof_summary as proof, requested_at as "requestedAt"
         from messaging_deletion_requests
         where shop_id = ${input.actor.shopId}::uuid
           and requesting_actor_profile_id = ${input.actor.profileId}::uuid
@@ -470,13 +487,11 @@ export async function requestMessagingDeletion(rawInput: {
       `))[0]
       if (existing) return retry(existing, input)
 
-      const historicalPairs = await lockCustomerMessagingPairs({
-        tx: tx as AppDb,
-        shopId: input.actor.shopId,
-        customerId: input.customerId!,
-        current: input.fingerprints!,
-      })
-      if (!historicalPairs) return { ok: false, error: 'busy' }
+      const currentPairs = exactMessagingPairs(input.fingerprints!.map((item) => ({
+        destinationFingerprint: item.fingerprint,
+        fingerprintKeyVersion: item.keyVersion,
+      })))
+      if (currentPairs.length > MAX_HISTORICAL_PAIRS) return { ok: false, error: 'busy' }
 
       const subject = unwrapRows<{ subjectKey: string }>(await tx.execute(sql`
         select subject_key as "subjectKey" from messaging_consent_state
@@ -501,63 +516,15 @@ export async function requestMessagingDeletion(rawInput: {
       `))[0]?.at
       if (!transition) throw new Error('transition_time_unavailable')
 
-      for (const item of historicalPairs) {
-        await tx.execute(sql`
-          insert into sms_suppressions (
-            shop_id, destination_fingerprint, fingerprint_key_version, source_event_id,
-            reason, suppressed_at, lifted_at, retain_until, updated_at
-          ) values (
-            ${input.actor.shopId}::uuid, ${item.destinationFingerprint},
-            ${item.fingerprintKeyVersion}, null,
-            'verified_deletion', ${transition}::timestamptz, null,
-            ${transition}::timestamptz + interval '5 years', ${transition}::timestamptz
-          )
-          on conflict (shop_id, destination_fingerprint, fingerprint_key_version) do update
-          set reason = case when sms_suppressions.reason = 'customer_revocation'
-                            then 'verified_deletion' else sms_suppressions.reason end,
-              lifted_at = null,
-              retain_until = greatest(excluded.retain_until, sms_suppressions.retain_until),
-              updated_at = excluded.updated_at
-        `)
-      }
-      const normalized = unwrapRows<{
-        destinationFingerprint: string
-        fingerprintKeyVersion: string
-        reason: string
-        liftedAt: Date | null
-        retainUntil: Date | string
-        updatedAt: Date | string
-      }>(await tx.execute(sql`
-        select destination_fingerprint as "destinationFingerprint",
-          fingerprint_key_version as "fingerprintKeyVersion", reason,
-          lifted_at as "liftedAt", retain_until as "retainUntil", updated_at as "updatedAt"
-        from sms_suppressions where shop_id = ${input.actor.shopId}::uuid
-          and (${sql.join(historicalPairs.map((item) => sql`
-            (destination_fingerprint = ${item.destinationFingerprint}
-              and fingerprint_key_version = ${item.fingerprintKeyVersion})
-          `), sql` or `)})
-        order by destination_fingerprint, fingerprint_key_version
-        limit ${MAX_HISTORICAL_PAIRS + 1} for update
-      `))
       const transitionAt = transition instanceof Date
         ? new Date(transition.getTime())
         : new Date(transition)
-      const barrierAt = addUtcCalendarYearsClamped(transitionAt, 5)
-      if (normalized.length !== historicalPairs.length || normalized.some((row) =>
-        !['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(row.reason)
-        || row.liftedAt !== null
-        || timestampMilliseconds(row.retainUntil) < barrierAt.getTime()
-        || timestampMilliseconds(row.updatedAt) !== transitionAt.getTime()
-      )) throw new Error('suppression_normalization_failed')
-      const verifiedPairs = await lockCustomerMessagingPairs({
+      await normalizeSuppressionPairs({
         tx: tx as AppDb,
         shopId: input.actor.shopId,
-        customerId: input.customerId!,
-        current: input.fingerprints!,
+        pairs: currentPairs,
+        requestedAt: transitionAt,
       })
-      if (!verifiedPairs || !sameMessagingPairs(historicalPairs, verifiedPairs)) {
-        throw new Error('historical_messaging_pairs_changed')
-      }
       const canonical = unwrapRows<RequestRow>(await tx.execute(sql`
         select id, shop_id as "shopId", request_key as "requestKey",
           request_fingerprint as "requestFingerprint", customer_id as "customerId",
@@ -857,7 +824,7 @@ export async function completeMessagingDeletion(rawInput: {
           destination_fingerprint as "destinationFingerprint",
           fingerprint_key_version as "fingerprintKeyVersion", state, reason_code as "reasonCode",
           requesting_actor_profile_id as "requestingActorProfileId", prior_record_counts as counts,
-          proof_summary as proof
+          proof_summary as proof, requested_at as "requestedAt"
         from messaging_deletion_requests
         where id = ${input.requestId}::uuid and shop_id = ${input.actor.shopId}::uuid
         for update
@@ -877,6 +844,20 @@ export async function completeMessagingDeletion(rawInput: {
           and id = ${request.customerId}::uuid for update
       `))[0]
       if (!customer) return { ok: false, error: 'not_found' }
+
+      const requestedAt = request.requestedAt instanceof Date
+        ? request.requestedAt
+        : request.requestedAt ? new Date(request.requestedAt) : null
+      if (!requestedAt) throw new Error('request_time_unavailable')
+      const historicalPairsRemain = await normalizeHistoricalMessagingPairs({
+        tx: tx as AppDb,
+        shopId: request.shopId,
+        customerId: request.customerId,
+        requestedAt,
+      })
+      if (historicalPairsRemain) {
+        return { ok: true, requestId: request.id, state: 'pending' }
+      }
 
       await discoverDeletionWorkItems(tx as AppDb, {
         id: request.id,

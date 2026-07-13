@@ -1330,7 +1330,28 @@ declare
   matching_projection_id uuid;
   notification_entity_type text;
   notification_entity_id uuid;
+  finalizer_shop text;
+  finalizer_request text;
 begin
+  if tg_op = 'DELETE' then
+    finalizer_shop := nullif(current_setting(
+      'vyntechs.messaging_deletion_finalizer_shop', true
+    ), '');
+    finalizer_request := nullif(current_setting(
+      'vyntechs.messaging_deletion_finalizer_request', true
+    ), '');
+    if finalizer_shop = old.shop_id::text
+      and finalizer_request = old.request_id::text
+      and current_user = pg_catalog.pg_get_userbyid((
+        select p.proowner from pg_catalog.pg_proc p
+        where p.oid = 'public.finalize_messaging_deletion_request(uuid,uuid)'::pg_catalog.regprocedure
+      ))
+    then
+      return old;
+    end if;
+    raise exception 'deletion work journal delete requires its exact finalizer';
+  end if;
+
   if tg_op = 'UPDATE' then
     if (new.id, new.shop_id, new.request_id, new.resource_type, new.resource_id,
         new.parent_work_item_id, new.counts_toward_proof, new.discovered_at)
@@ -1361,6 +1382,7 @@ begin
     then
       raise exception 'deletion work item detached count requires controlled compaction';
     end if;
+
     return new;
   end if;
 
@@ -1491,7 +1513,7 @@ end;
 $$;
 --> statement-breakpoint
 create trigger messaging_deletion_work_items_guard
-before insert or update on messaging_deletion_work_items
+before insert or update or delete on messaging_deletion_work_items
 for each row execute function guard_messaging_deletion_work_item_mutation();
 --> statement-breakpoint
 
@@ -1618,6 +1640,53 @@ begin
     proof_summary := null;
     return next;
     return;
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_deletion_work_items work
+    where work.request_id = request_row.id and work.outcome = 'deleted'
+      and (
+        (work.resource_type = 'quote_send' and exists (
+          select 1 from public.quote_sends source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'consent_projection' and exists (
+          select 1 from public.messaging_consent_state source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'consent_event' and exists (
+          select 1 from public.messaging_consent_events source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'sms_log' and exists (
+          select 1 from public.sms_log source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'notification' and exists (
+          select 1 from public.notifications source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+      )
+  ) then
+    raise exception 'deleted terminal work item retains an exact source';
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_deletion_work_items work
+    where work.request_id = request_row.id and work.outcome = 'detached'
+      and not (
+        work.resource_type = 'quote_send' and exists (
+          select 1 from public.quote_sends source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+            and source.customer_id is null
+            and source.token_hash is null
+            and source.token_expires_at is null
+        )
+      )
+  ) then
+    raise exception 'detached terminal work item lacks an exact scrubbed quote send';
   end if;
 
   if exists (

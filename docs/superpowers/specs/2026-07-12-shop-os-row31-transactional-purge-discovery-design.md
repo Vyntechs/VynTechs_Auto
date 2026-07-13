@@ -1,6 +1,6 @@
 # Shop OS Row 31 Transactional Purge Discovery Design
 
-**Status:** Owner-approved 2026-07-12  
+**Status:** Owner-approved 2026-07-12
 **Scope:** Close the remaining Task 7 locked-candidate starvation defect without schema, route, provider, cron, UI, or production changes.
 
 ## Problem

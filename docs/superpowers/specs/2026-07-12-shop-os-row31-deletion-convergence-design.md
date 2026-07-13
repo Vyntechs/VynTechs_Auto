@@ -1,6 +1,6 @@
 # Shop OS Row 31 Bounded Deletion Convergence Design
 
-**Status:** Owner-approved 2026-07-12  
+**Status:** Owner-approved 2026-07-12
 **Scope:** Replace permanent `busy` ceilings with bounded, retry-safe verified deletion. Source only; production application remains a separate gate.
 
 ## Invariants

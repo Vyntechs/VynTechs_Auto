@@ -326,11 +326,11 @@ const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'reject_messaging_consent_event_mutation()': '3e6750e1e10eb90b7bd6343ae4709aa7aa6cd5cbba3a3c70ba3d523119ac4a21',
   'require_messaging_compaction_completion()': 'af771807e893482a0ae55236cc7118ea9b95ab0d28737948aff318693508b20e',
   'compact_messaging_consent_work_items(uuid,uuid,uuid[])': '2a3c12eebb6c6ef10da88114a51f2a402b68e3e5345dee05507beeb93580447b',
-  'finalize_messaging_deletion_request(uuid,uuid)': 'e473f030545a36ca21692e4ad22593931df27d0d443ad1e749a0404bec1af2e3',
+  'finalize_messaging_deletion_request(uuid,uuid)': '0177717f2f30d4f3a1a6203eeb59295e6d070a69442f8ee89dbcb2ae59268638',
   'purge_expired_messaging_consent_event(uuid,uuid)': '33f378ecff1afb6dc5f34263a92063433e8dcf5a5ccf79481430ac2749951948',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
   'guard_messaging_deletion_request_mutation()': '56e59cec5b96c75d5c3185c99acc701b9676c04c4eb202b72ed76018191cadcf',
-  'guard_messaging_deletion_work_item_mutation()': 'a3991b9a0e704ff2d6c281beaf10a49cb46458a01045e2d2870d9117bb343d42',
+  'guard_messaging_deletion_work_item_mutation()': '7fa255e7e301e8119d43630276d796c55cc4c2b8800ce2ce1da60b950e50f6ce',
   'purge_expired_messaging_deletion_request(uuid,uuid)': '8b4aae451704d22bbd987724e442241914506384f92d8ef1db0536afd8d5002a',
 } as const
 
@@ -631,7 +631,7 @@ async function messagingRetentionMarkers(
       ('messaging_deletion_requests', 'messaging_deletion_requests_guard',
         'guard_messaging_deletion_request_mutation()', 27, false, null),
       ('messaging_deletion_work_items', 'messaging_deletion_work_items_guard',
-        'guard_messaging_deletion_work_item_mutation()', 23, false, null),
+        'guard_messaging_deletion_work_item_mutation()', 31, false, null),
       ('messaging_retention_holds', 'messaging_retention_holds_serialize_target',
         'serialize_messaging_retention_hold_target()', 31, false, null)
     ), client_roles(role_name) as (values

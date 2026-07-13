@@ -582,11 +582,24 @@ describe('finalizes deletion work journal atomically', () => {
   it('rejects direct completion and deletes the journal only through the finalizer', async () => {
     const fixture = await createTestDb()
     try {
-      const tenant = await seedTenant(fixture.client)
+      const tenant = await seedOperationalTenant(fixture.client)
       const requestId = await insertDeletionRequest(fixture.client, tenant, {
         subjectKey: tenant.customerId,
       })
       await insertSuppression(fixture.client, tenant)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+      const workItemId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'quote_send', $4)`,
+        [workItemId, tenant.shopId, requestId, sendId],
+      )
 
       await expect(fixture.client.query(
         `update messaging_deletion_requests set
@@ -597,6 +610,18 @@ describe('finalizes deletion work journal atomically', () => {
         where id = $1`,
         [requestId],
       )).rejects.toThrow(/finalizer|pending to completed/)
+
+      await expect(fixture.client.query(
+        'delete from messaging_deletion_work_items where id = $1',
+        [workItemId],
+      )).rejects.toThrow(/finalizer|journal delete/)
+
+      await fixture.client.query('delete from quote_sends where id = $1', [sendId])
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = 'deleted',
+          resolved_at = now() where id = $1`,
+        [workItemId],
+      )
 
       const first = (await fixture.client.query<{
         state: string
@@ -610,9 +635,12 @@ describe('finalizes deletion work journal atomically', () => {
         state: 'completed',
         prior_record_counts: {
           consentEvents: 0, consentProjections: 0, notifications: 0,
-          quoteSends: 0, smsLogs: 0,
+          quoteSends: 1, smsLogs: 0,
         },
-        proof_summary: { version: 2, suppressionActive: 1, deletedBarrier: 1 },
+        proof_summary: {
+          version: 2, suppressionActive: 1, deletedBarrier: 1,
+          resultCounts: { quoteSendsDeleted: 1 },
+        },
       })
       expect((await fixture.client.query<{ count: number }>(
         'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
@@ -624,6 +652,102 @@ describe('finalizes deletion work journal atomically', () => {
         [tenant.shopId, requestId],
       )).rows[0]
       expect(retry).toEqual(first)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it.each(['deleted', 'detached'] as const)(
+    'rejects a fabricated %s terminal outcome while a readable quote send survives',
+    async (outcome) => {
+      const fixture = await createTestDb()
+      try {
+        const tenant = await seedOperationalTenant(fixture.client)
+        const requestId = await insertDeletionRequest(fixture.client, tenant, {
+          subjectKey: tenant.customerId,
+        })
+        await insertSuppression(fixture.client, tenant)
+        const sendId = await insertQuoteSend(fixture.client, tenant, {
+          subjectKey: tenant.customerId,
+        })
+        const workItemId = crypto.randomUUID()
+        await fixture.client.query(
+          `insert into messaging_deletion_work_items (
+            id, shop_id, request_id, resource_type, resource_id
+          ) values ($1, $2, $3, 'quote_send', $4)`,
+          [workItemId, tenant.shopId, requestId, sendId],
+        )
+
+        await fixture.client.query(
+          `update messaging_deletion_work_items set outcome = $1,
+            resolved_at = now() where id = $2`,
+          [outcome, workItemId],
+        )
+        await expect(fixture.client.query(
+          'select * from finalize_messaging_deletion_request($1, $2)',
+          [tenant.shopId, requestId],
+        )).rejects.toThrow(/terminal|source|detached/)
+        expect((await fixture.client.query(
+          'select customer_id, token_hash from quote_sends where id = $1',
+          [sendId],
+        )).rows[0]).toMatchObject({
+          customer_id: tenant.customerId,
+          token_hash: expect.any(String),
+        })
+        expect((await fixture.client.query<{ state: string }>(
+          'select state from messaging_deletion_requests where id = $1',
+          [requestId],
+        )).rows[0]?.state).toBe('pending')
+        expect((await fixture.client.query<{ outcome: string }>(
+          'select outcome from messaging_deletion_work_items where id = $1',
+          [workItemId],
+        )).rows[0]?.outcome).toBe(outcome)
+      } finally {
+        await fixture.close()
+      }
+    },
+  )
+
+  it('accepts an exact lawfully detached quote send and removes its journal in the finalizer', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+        state: 'submitted',
+        submittingAt: 'now()',
+        submittedAt: 'now()',
+      })
+      const workItemId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'quote_send', $4)`,
+        [workItemId, tenant.shopId, requestId, sendId],
+      )
+      await fixture.client.query(
+        `update quote_sends set customer_id = null, token_hash = null,
+          token_expires_at = null where id = $1`,
+        [sendId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = 'detached',
+          resolved_at = now() where id = $1`,
+        [workItemId],
+      )
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('completed')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [requestId],
+      )).rows[0]?.count).toBe(0)
     } finally {
       await fixture.close()
     }
@@ -832,7 +956,7 @@ describe('finalizes deletion work journal atomically', () => {
     }
   })
 
-  it('returns pending when a retained quote-send notification has a terminal parent', async () => {
+  it('rejects a retained quote-send notification with a fabricated terminal parent', async () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedOperationalTenant(fixture.client)
@@ -878,10 +1002,10 @@ describe('finalizes deletion work journal atomically', () => {
         [parentId, childId, [parentId, childId]],
       )
 
-      expect((await fixture.client.query<{ state: string }>(
+      await expect(fixture.client.query<{ state: string }>(
         'select * from finalize_messaging_deletion_request($1, $2)',
         [tenant.shopId, requestId],
-      )).rows[0]?.state).toBe('pending')
+      )).rejects.toThrow(/deleted terminal|exact source/)
       expect((await fixture.client.query<{ count: number }>(
         'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
         [requestId],
@@ -949,10 +1073,10 @@ describe('finalizes deletion work journal atomically', () => {
 
       const terminalTenant = await seedTenant(fixture.client)
       const terminalRequestId = await seedChain(terminalTenant, 'deleted')
-      expect((await fixture.client.query<{ state: string }>(
+      await expect(fixture.client.query<{ state: string }>(
         'select * from finalize_messaging_deletion_request($1, $2)',
         [terminalTenant.shopId, terminalRequestId],
-      )).rows[0]?.state).toBe('pending')
+      )).rejects.toThrow(/deleted terminal|exact source/)
       expect((await fixture.client.query<{ count: number }>(
         'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
         [terminalRequestId],
