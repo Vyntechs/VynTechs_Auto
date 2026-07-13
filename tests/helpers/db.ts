@@ -896,12 +896,7 @@ export async function ensureMessagingRetentionAclMigration(
     path.join(process.cwd(), 'drizzle/migrations/0034_shop_os_messaging_retention_acl.sql'),
     'utf8',
   )
-  await client.exec(migration
-    .replaceAll(
-      'compact_messaging_consent_events(uuid, uuid, uuid)',
-      'compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)',
-    )
-    .replaceAll('--> statement-breakpoint', ''))
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
 
   const after = await messagingRetentionAclMarkers(client)
   if (!hasCompleteMessagingRetentionAcl(after)) {

@@ -2263,7 +2263,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('requires a matching pending request and keeps compaction atomic with tombstone completion', async () => {
+  it('requires a matching canonical request and commits bounded progress while pending', async () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
@@ -2274,68 +2274,39 @@ describe('Shop OS messaging retention source schema', () => {
         'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
         [tenant.shopId, subjectKey, crypto.randomUUID(),
           '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/matching pending messaging deletion request required/)
+      )).rejects.toThrow(/matching canonical pending messaging deletion request required/)
 
       const requestId = await insertDeletionRequest(fixture.client, tenant, { subjectKey })
-      await expect(fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )).rejects.toThrow(/compaction requires completed tombstone in the same transaction/)
-
-      const afterAutocommit = await fixture.client.query<{ event_count: number; state: string }>(`
-        select
-          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
-          (select state from messaging_deletion_requests where id = $2) as state
-      `, [subjectKey, requestId])
-      expect(afterAutocommit.rows[0]).toEqual({ event_count: 1, state: 'pending' })
-
-      await fixture.client.exec('begin')
-      await fixture.client.query(
+      const compacted = await fixture.client.query<{
+        deleted_count: number
+        exhausted: boolean
+      }>(
         'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
         [tenant.shopId, subjectKey, requestId,
           '00000000-0000-0000-0000-000000000000', 256],
       )
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null, completed_at = now(),
-          latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = now() + interval '5 years'
-        where id = $1`,
-        [requestId],
-      )
-      await fixture.client.exec('rollback')
+      expect(compacted.rows[0]).toMatchObject({ deleted_count: 1, exhausted: true })
 
-      const afterRollback = await fixture.client.query<{ event_count: number; state: string }>(`
+      const afterAutocommit = await fixture.client.query<{
+        event_count: number
+        state: string
+        consent_events: number
+        consent_events_deleted: number
+      }>(`
         select
           (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
-          (select state from messaging_deletion_requests where id = $2) as state
+          state,
+          (prior_record_counts->>'consentEvents')::int as consent_events,
+          (proof_summary->'resultCounts'->>'consentEventsDeleted')::int
+            as consent_events_deleted
+        from messaging_deletion_requests where id = $2
       `, [subjectKey, requestId])
-      expect(afterRollback.rows[0]).toEqual({ event_count: 1, state: 'pending' })
-
-      await fixture.client.exec('begin')
-      await fixture.client.query(
-        'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, subjectKey, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null, completed_at = now(),
-          latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = now() + interval '5 years'
-        where id = $1`,
-        [requestId],
-      )
-      await fixture.client.exec('commit')
-      const afterCommit = await fixture.client.query<{ event_count: number; state: string }>(`
-        select
-          (select count(*)::int from messaging_consent_events where subject_key = $1) as event_count,
-          (select state from messaging_deletion_requests where id = $2) as state
-      `, [subjectKey, requestId])
-      expect(afterCommit.rows[0]).toEqual({ event_count: 0, state: 'completed' })
+      expect(afterAutocommit.rows[0]).toEqual({
+        event_count: 0,
+        state: 'pending',
+        consent_events: 1,
+        consent_events_deleted: 1,
+      })
     } finally {
       await fixture.close()
     }
@@ -2348,30 +2319,21 @@ describe('Shop OS messaging retention source schema', () => {
       const firstSubject = crypto.randomUUID()
       const secondSubject = crypto.randomUUID()
       await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
       const requestId = await insertDeletionRequest(fixture.client, tenant, {
         subjectKey: firstSubject,
       })
 
       await fixture.client.exec('begin')
-      await fixture.client.query(
+      const first = await fixture.client.query<{ next_event_id: string }>(
         'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
         [tenant.shopId, firstSubject, requestId,
           '00000000-0000-0000-0000-000000000000', 256],
       )
+      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
       await fixture.client.query(
         'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
         [tenant.shopId, secondSubject, requestId,
-          '00000000-0000-0000-0000-000000000000', 256],
-      )
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null, completed_at = now(),
-          latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = now() + interval '5 years'
-        where id = $1`,
-        [requestId],
+          first.rows[0]!.next_event_id, 256],
       )
       await fixture.client.exec('commit')
 
@@ -2381,6 +2343,13 @@ describe('Shop OS messaging retention source schema', () => {
         [firstSubject, secondSubject],
       )
       expect(remaining.rows[0]?.count).toBe(0)
+      expect((await fixture.client.query<{
+        state: string
+        consent_events: number
+      }>(`
+        select state, (prior_record_counts->>'consentEvents')::int as consent_events
+        from messaging_deletion_requests where id = $1
+      `, [requestId])).rows[0]).toEqual({ state: 'pending', consent_events: 2 })
     } finally {
       await fixture.close()
     }
@@ -2440,15 +2409,6 @@ describe('Shop OS messaging retention source schema', () => {
         [tenant.shopId, unheldSubject, requestId,
           '00000000-0000-0000-0000-000000000000', 256],
       )
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null, completed_at = now(),
-          latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = now() + interval '5 years'
-        where id = $1`,
-        [requestId],
-      )
       await fixture.client.exec('commit')
 
       const remaining = await fixture.client.query<{ subject_key: string }>(
@@ -2466,18 +2426,19 @@ describe('Shop OS messaging retention source schema', () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
+      const secondTenant = await seedTenant(fixture.client)
       const firstSubject = crypto.randomUUID()
       const secondSubject = crypto.randomUUID()
       const malformedSubject = crypto.randomUUID()
       await insertConsentEvent(fixture.client, tenant, { subjectKey: firstSubject })
-      await insertConsentEvent(fixture.client, tenant, { subjectKey: secondSubject })
+      await insertConsentEvent(fixture.client, secondTenant, { subjectKey: secondSubject })
       const malformedEvent = await insertConsentEvent(fixture.client, tenant, {
         subjectKey: malformedSubject,
       })
       const firstRequest = await insertDeletionRequest(fixture.client, tenant, {
         subjectKey: firstSubject,
       })
-      const secondRequest = await insertDeletionRequest(fixture.client, tenant, {
+      const secondRequest = await insertDeletionRequest(fixture.client, secondTenant, {
         subjectKey: secondSubject,
       })
 
@@ -2489,7 +2450,7 @@ describe('Shop OS messaging retention source schema', () => {
       )
       await expect(fixture.client.query(
         'select * from compact_messaging_consent_events($1, $2, $3, $4, $5)',
-        [tenant.shopId, secondSubject, secondRequest,
+        [secondTenant.shopId, secondSubject, secondRequest,
           '00000000-0000-0000-0000-000000000000', 256],
       )).rejects.toThrow(/compaction transaction cannot mix deletion requests or shops/)
       await fixture.client.exec('rollback')
@@ -2871,6 +2832,16 @@ describe('Shop OS messaging retention source schema', () => {
           where id = $2`,
           [retainUntil, invalidId],
         )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
+        await fixture.client.query(
+          `update messaging_deletion_requests set
+            state = 'completed', customer_id = null,
+            completed_at = '2024-02-28 12:00:00+00',
+            latest_relevant_at = '2024-02-28 12:00:00+00',
+            prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+            retain_until = '2029-02-28 12:00:00+00'
+          where id = $1`,
+          [invalidId],
+        )
       }
 
       const immediateRetentionId = await insertDeletionRequest(fixture.client, tenant, {
@@ -2885,6 +2856,16 @@ describe('Shop OS messaging retention source schema', () => {
         where id = $1`,
         [immediateRetentionId],
       )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
+      await fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null,
+          completed_at = '2024-02-28 12:00:00+00',
+          latest_relevant_at = '2024-02-28 12:00:00+00',
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = '2029-02-28 12:00:00+00'
+        where id = $1`,
+        [immediateRetentionId],
+      )
 
       const beforeCompletionId = await insertDeletionRequest(fixture.client, tenant, {
         subjectKey: crypto.randomUUID(),
@@ -2953,8 +2934,15 @@ describe('Shop OS messaging retention source schema', () => {
       const tenant = await seedTenant(fixture.client)
       const firstSubject = crypto.randomUUID()
       const secondSubject = crypto.randomUUID()
+      const secondCustomerId = crypto.randomUUID()
+      await fixture.client.query(
+        'insert into customers (id, shop_id, name, phone) values ($1, $2, $3, $4)',
+        [secondCustomerId, tenant.shopId, 'Second Hold Customer', '+15550000002'],
+      )
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
-      await insertDeletionRequest(fixture.client, tenant, { subjectKey: firstSubject })
+      await insertDeletionRequest(fixture.client, {
+        ...tenant, customerId: secondCustomerId,
+      }, { subjectKey: firstSubject })
       const hold = await fixture.client.query<{ id: string }>(
         `insert into messaging_retention_holds (
           shop_id, subject_key, reason_code, authorizing_actor_profile_id,
