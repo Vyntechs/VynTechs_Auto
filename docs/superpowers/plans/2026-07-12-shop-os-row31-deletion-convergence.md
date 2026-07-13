@@ -461,7 +461,9 @@ Rollback/stop gate: revert Task 2 if exact event IDs cannot authorize a committe
 
 ---
 
-### Task 3: Runtime Family Batching, Exact Accumulation, and Final Reconciliation
+### Task 3: Runtime Family Batching, Exact Accumulation, and Final Reconciliation — Superseded Before Production
+
+**Status:** Replaced before production by the request-scoped deletion work journal in `2026-07-13-shop-os-row31-deletion-work-journal.md`. The cursor-based runtime in this section was never applied; it is retained only as historical planning context.
 
 **Files:**
 - Modify: `lib/shop-os/messaging-deletion.ts:156-850`

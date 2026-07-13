@@ -1,6 +1,6 @@
 # Shop OS Row 31 Request-Scoped Deletion Work Journal Design
 
-**Status:** Owner-approved 2026-07-13
+**Status:** Implemented and verified in source 2026-07-13; ready to ship. Migrations `0033` and `0034` have not been applied.
 
 **Supersedes:** Task 3 runtime batching in `2026-07-12-shop-os-row31-deletion-convergence.md`
 

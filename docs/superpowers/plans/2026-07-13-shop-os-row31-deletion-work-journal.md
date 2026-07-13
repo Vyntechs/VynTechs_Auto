@@ -452,11 +452,13 @@ Rollback gate: revert if completion can occur with any unjournaled, eligible, cr
 - Consumes: Tasks 1–4.
 - Produces: one reviewable Row 31 source branch with no known correctness finding and a clean verification packet.
 
-- [ ] **Step 1: Remove superseded Task 3 code and tests**
+**Closure proof (2026-07-13):** Ready-to-ship source passes 273/273 focused Row 31 tests, the complete 268-file/3,032-test suite, TypeScript, the 65-page production build, diff checks, and independent PASS/PASS closure review with no Critical or Important findings. Migrations `0033` and `0034` have not been applied; production application remains a separate owner gate.
+
+- [x] **Step 1: Remove superseded Task 3 code and tests**
 
 Search for `cursors`, `holdCursor`, `holdPage`, `reconciledHeld`, and the old consent compaction signature. Keep only historical documentation references and tests that explicitly prove their removal.
 
-- [ ] **Step 2: Run the focused Row 31 suites serially**
+- [x] **Step 2: Run the focused Row 31 suites serially**
 
 Run:
 
@@ -470,7 +472,7 @@ pnpm test tests/unit/shop-os-messaging-retention-purge.test.ts
 
 Expected: every suite passes with no concurrent heavy test process.
 
-- [ ] **Step 3: Run project verification**
+- [x] **Step 3: Run project verification**
 
 Run:
 
@@ -483,15 +485,15 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Review the exact branch diff**
+- [x] **Step 4: Review the exact branch diff**
 
 Fetch current `origin/main`, identify the Row 31-only base, and inspect the branch diff for production actions, readable journal identity, unbounded SQL, unrelated changes, stale cursor code, weakened ACL/RLS, and scope drift. Confirm `tasks/lessons.md` is unstaged.
 
-- [ ] **Step 5: Run one severity-gated final review**
+- [x] **Step 5: Run one severity-gated final review**
 
 Review only for concrete critical/important correctness or security defects with a reproducer. Fix at most one bounded remediation wave. Stop and re-approach if the same architecture fails again; do not enter an open-ended review loop.
 
-- [ ] **Step 6: Update durable status and commit closure**
+- [x] **Step 6: Update durable status and commit closure**
 
 Change the work-journal spec status to implemented/verified, mark the superseded Task 3 plan section accordingly, and update the active Shop OS status only if the branch is actually ready to ship. Commit only source-controlled Row 31 files.
 
