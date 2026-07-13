@@ -9,6 +9,10 @@ import * as schema from '@/lib/db/schema'
 
 export type TestDb = PgliteDatabase<typeof schema>
 
+export function createTestDbClient(client: PGlite): TestDb {
+  return drizzle(client, { schema })
+}
+
 export async function createTestDb(): Promise<{
   db: TestDb
   client: PGlite
@@ -25,7 +29,7 @@ export async function createTestDb(): Promise<{
   // never actually used.
   await client.query('CREATE SCHEMA IF NOT EXISTS auth;')
   await client.query(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT '00000000-0000-0000-0000-000000000000'::uuid $$;`)
-  const db = drizzle(client, { schema })
+  const db = createTestDbClient(client)
   await migrate(db, {
     migrationsFolder: path.join(process.cwd(), 'drizzle/migrations'),
   })
@@ -321,10 +325,11 @@ const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'serialize_messaging_retention_hold_target()': 'c324faa9988827a2e66824118c1b5ea4481ffd5321eb9582a556eca374e0e82e',
   'reject_messaging_consent_event_mutation()': '3e6750e1e10eb90b7bd6343ae4709aa7aa6cd5cbba3a3c70ba3d523119ac4a21',
   'require_messaging_compaction_completion()': 'af771807e893482a0ae55236cc7118ea9b95ab0d28737948aff318693508b20e',
-  'compact_messaging_consent_work_items(uuid,uuid,uuid[])': 'f40a0f194021ee0a5ad2ce5cd6690f85e929a86ed0df24ce354c34b8edff3860',
+  'compact_messaging_consent_work_items(uuid,uuid,uuid[])': '2a3c12eebb6c6ef10da88114a51f2a402b68e3e5345dee05507beeb93580447b',
+  'finalize_messaging_deletion_request(uuid,uuid)': '9c6701040e8c434d07019035f08656fa15b5334e858155a38704195cf79c4b6b',
   'purge_expired_messaging_consent_event(uuid,uuid)': '33f378ecff1afb6dc5f34263a92063433e8dcf5a5ccf79481430ac2749951948',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
-  'guard_messaging_deletion_request_mutation()': '4324d067e7b1fa109d99c38bf93f0771508d1b9bd22e550c2927f3960c2a06a1',
+  'guard_messaging_deletion_request_mutation()': '56e59cec5b96c75d5c3185c99acc701b9676c04c4eb202b72ed76018191cadcf',
   'guard_messaging_deletion_work_item_mutation()': '2a81c7c4605480ba21ffc3e508a18bd940a9788b730207d89a538ca6083b9874',
   'purge_expired_messaging_deletion_request(uuid,uuid)': '8b4aae451704d22bbd987724e442241914506384f92d8ef1db0536afd8d5002a',
 } as const
@@ -348,6 +353,7 @@ async function messagingRetentionFunctionInspection(client: PGlite): Promise<{
       ('reject_messaging_consent_event_mutation()', false),
       ('require_messaging_compaction_completion()', false),
       ('compact_messaging_consent_work_items(uuid,uuid,uuid[])', true),
+      ('finalize_messaging_deletion_request(uuid,uuid)', true),
       ('guard_messaging_deletion_work_item_mutation()', false),
       ('guard_messaging_deletion_request_mutation()', false),
       ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
@@ -573,8 +579,13 @@ async function messagingRetentionMarkers(
       ('compact_messaging_consent_work_items(uuid,uuid,uuid[])', 'integer', true, true,
         'between 1 and 256 distinct exact work item IDs',
         'work_item.id = any(p_work_item_ids)',
-        'work_item.outcome = ''pending''',
+        'work_item.outcome in (''pending'', ''retained'')',
         'return advanced_count'),
+      ('finalize_messaging_deletion_request(uuid,uuid)', 'record', true, true,
+        'messaging deletion finalizer requires an exact shop',
+        'work.request_id = request_row.id and work.outcome = ''pending''',
+        'delete from public.messaging_deletion_work_items work',
+        'vyntechs.messaging_deletion_finalizer_request'),
       ('guard_messaging_deletion_work_item_mutation()', 'trigger', false, false,
         'deletion work items must be inserted pending',
         'deletion work item resource identity is immutable',
@@ -582,8 +593,8 @@ async function messagingRetentionMarkers(
         'deletion work item detached count requires controlled compaction'),
       ('guard_messaging_deletion_request_mutation()', 'trigger', false, false,
         'messaging deletion request identity is immutable',
-        'invalid messaging deletion progress proof',
-        'messaging deletion progress must be monotonic',
+        'vyntechs.messaging_deletion_finalizer_shop',
+        'vyntechs.messaging_deletion_finalizer_request',
         'completed messaging deletion tombstones are immutable'),
       ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
         'clock_timestamp()',
@@ -732,9 +743,9 @@ function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boole
     && markers.active_resource_index_count === 1
     && markers.rls_count === 9
     && markers.policy_count === 9
-    && markers.function_marker_count === 11
-    && markers.function_digest_count === 11
-    && markers.function_authority_count === 11
+    && markers.function_marker_count === 12
+    && markers.function_digest_count === 12
+    && markers.function_authority_count === 12
     && markers.trigger_binding_count === 7
     && markers.nullable_quote_send_customer_count === 1
     && markers.direct_client_grant_count === 0
@@ -806,6 +817,7 @@ async function messagingRetentionAclMarkers(
         ('reject_messaging_consent_event_mutation()', false),
         ('require_messaging_compaction_completion()', false),
         ('compact_messaging_consent_work_items(uuid,uuid,uuid[])', true),
+        ('finalize_messaging_deletion_request(uuid,uuid)', true),
         ('guard_messaging_deletion_work_item_mutation()', false),
         ('guard_messaging_deletion_request_mutation()', false),
         ('purge_expired_messaging_deletion_request(uuid,uuid)', true),
@@ -901,10 +913,10 @@ function hasCompleteMessagingRetentionAcl(
     && markers.service_crud_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_grant_count === MESSAGING_RETENTION_ACL_TABLES.length * 4
     && markers.service_effective_acl_count === MESSAGING_RETENTION_ACL_TABLES.length * 8
-    && markers.function_count === 11
-    && markers.required_service_function_count === 4
-    && markers.exact_function_acl_count === 11
-    && markers.function_authority_count === 11
+    && markers.function_count === 12
+    && markers.required_service_function_count === 5
+    && markers.exact_function_acl_count === 12
+    && markers.function_authority_count === 12
 }
 
 export async function ensureMessagingRetentionAclMigration(
@@ -916,8 +928,8 @@ export async function ensureMessagingRetentionAclMigration(
     || before.rls_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.matching_policy_count !== MESSAGING_RETENTION_ACL_TABLES.length
     || before.service_crud_count !== MESSAGING_RETENTION_ACL_TABLES.length * 4
-    || before.function_count !== 11
-    || before.required_service_function_count !== 4
+    || before.function_count !== 12
+    || before.required_service_function_count !== 5
   ) {
     throw new Error('partial messaging retention ACL in ephemeral database')
   }

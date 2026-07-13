@@ -30,6 +30,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'reject_messaging_consent_event_mutation()', serviceExecute: false },
   { signature: 'require_messaging_compaction_completion()', serviceExecute: false },
   { signature: 'compact_messaging_consent_work_items(uuid,uuid,uuid[])', serviceExecute: true },
+  { signature: 'finalize_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
   { signature: 'guard_messaging_deletion_work_item_mutation()', serviceExecute: false },
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },

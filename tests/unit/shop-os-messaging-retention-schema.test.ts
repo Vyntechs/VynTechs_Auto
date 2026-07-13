@@ -20,7 +20,6 @@ import {
   createTestDb,
   ensureMessagingRetentionMigration,
 } from '@/tests/helpers/db'
-import type { PendingDeletionProgress } from '@/lib/shop-os/messaging-deletion'
 
 const hex = 'a'.repeat(64)
 const otherHex = 'b'.repeat(64)
@@ -516,6 +515,207 @@ describe('deletion work journal', () => {
       'messaging_deletion_work_items_state_consistent',
       'messaging_deletion_work_items_detached_count_valid',
     ]))
+  })
+})
+
+describe('finalizes deletion work journal atomically', () => {
+  it('rejects direct completion and deletes the journal only through the finalizer', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+
+      await expect(fixture.client.query(
+        `update messaging_deletion_requests set
+          state = 'completed', customer_id = null,
+          completed_at = now(), latest_relevant_at = now(),
+          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          retain_until = now() + interval '5 years'
+        where id = $1`,
+        [requestId],
+      )).rejects.toThrow(/finalizer|pending to completed/)
+
+      const first = (await fixture.client.query<{
+        state: string
+        prior_record_counts: Record<string, number>
+        proof_summary: Record<string, unknown>
+      }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]
+      expect(first).toMatchObject({
+        state: 'completed',
+        prior_record_counts: {
+          consentEvents: 0, consentProjections: 0, notifications: 0,
+          quoteSends: 0, smsLogs: 0,
+        },
+        proof_summary: { version: 2, suppressionActive: 1, deletedBarrier: 1 },
+      })
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [requestId],
+      )).rows[0]?.count).toBe(0)
+
+      const retry = (await fixture.client.query(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]
+      expect(retry).toEqual(first)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('returns pending for an unjournaled source row or unresolved child', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const sendId = await insertQuoteSend(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('pending')
+
+      const parentId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'quote_send', $4)`,
+        [parentId, tenant.shopId, requestId, sendId],
+      )
+      const smsId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into sms_log (
+          id, shop_id, quote_send_id, template_key, template_version,
+          state, server_received_at, retain_until
+        ) values ($1, $2, $3, 'quote_ready', 'v1', 'sent', now(), now() + interval '1 year')`,
+        [smsId, tenant.shopId, sendId],
+      )
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          shop_id, request_id, resource_type, resource_id, parent_work_item_id
+        ) values ($1, $2, 'sms_log', $3, $4)`,
+        [tenant.shopId, requestId, smsId, parentId],
+      )
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('pending')
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('returns pending when a retained basis has expired or been released', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const eventId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      const workId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'consent_event', $4)`,
+        [workId, tenant.shopId, requestId, eventId],
+      )
+      const holdId = await insertHold(fixture.client, tenant, {
+        resourceType: 'messaging_consent_event', resourceId: eventId,
+      })
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = 'retained',
+          retention_basis = 'resource_hold', resolved_at = now() where id = $1`,
+        [workId],
+      )
+      await fixture.client.query(
+        'update messaging_retention_holds set released_at = now() where id = $1',
+        [holdId],
+      )
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('pending')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [requestId],
+      )).rows[0]?.count).toBe(1)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('returns pending when a held-dependency chain does not reach a direct hold', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      await insertSuppression(fixture.client, tenant)
+      const eventId = await insertConsentEvent(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      const projectionId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_consent_state (
+          id, shop_id, subject_key, customer_id, destination_fingerprint,
+          fingerprint_key_version, program_version, status, source_event_id,
+          revoked_at, retain_until, updated_at
+        ) select $1, shop_id, subject_key, customer_id, destination_fingerprint,
+          fingerprint_key_version, program_version, 'revoked', id,
+          committed_at, retain_until, committed_at
+        from messaging_consent_events where id = $2`,
+        [projectionId, eventId],
+      )
+      const parentId = crypto.randomUUID()
+      const childId = crypto.randomUUID()
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id
+        ) values ($1, $2, $3, 'consent_projection', $4)`,
+        [parentId, tenant.shopId, requestId, projectionId],
+      )
+      await fixture.client.query(
+        `insert into messaging_deletion_work_items (
+          id, shop_id, request_id, resource_type, resource_id, parent_work_item_id
+        ) values ($1, $2, $3, 'consent_event', $4, $5)`,
+        [childId, tenant.shopId, requestId, eventId, parentId],
+      )
+      await fixture.client.query(
+        `update messaging_deletion_work_items set outcome = 'retained',
+          retention_basis = 'held_dependency', resolved_at = now()
+        where id = any($1::uuid[])`,
+        [[parentId, childId]],
+      )
+
+      expect((await fixture.client.query<{ state: string }>(
+        'select * from finalize_messaging_deletion_request($1, $2)',
+        [tenant.shopId, requestId],
+      )).rows[0]?.state).toBe('pending')
+      expect((await fixture.client.query<{ count: number }>(
+        'select count(*)::int as count from messaging_deletion_work_items where request_id = $1',
+        [requestId],
+      )).rows[0]?.count).toBe(2)
+    } finally {
+      await fixture.close()
+    }
   })
 })
 
@@ -2041,158 +2241,6 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('allows monotonic pending cleanup progress and rejects tampering before final completion', async () => {
-    const fixture = await createTestDb()
-    try {
-      const tenant = await seedTenant(fixture.client)
-      const requestId = crypto.randomUUID()
-      await fixture.client.query(
-        `insert into messaging_deletion_requests (
-          id, request_key, request_fingerprint, shop_id, subject_key, customer_id,
-          destination_fingerprint, fingerprint_key_version, state, reason_code,
-          requesting_actor_profile_id
-        ) values ($1, $2, $3, $4, $5, $6, $7, 'key_v1', 'pending', 'customer_request', $8)`,
-        [requestId, crypto.randomUUID(), hex, tenant.shopId, crypto.randomUUID(),
-          tenant.customerId, hex, tenant.actorId],
-      )
-      const zeroProgress: PendingDeletionProgress = {
-        progressVersion: 1,
-        resultCounts: {
-          consentEventsDeleted: 0, notificationsDeleted: 0, smsLogsDeleted: 0,
-          quoteSendsDeleted: 0, quoteSendsRetained: 0,
-        },
-        heldCounts: {
-          heldConsentEvents: 0, heldConsentProjections: 0, heldQuoteSends: 0,
-          heldSmsLogs: 0, heldNotifications: 0, total: 0,
-        },
-        detachedSuppressionSources: 0,
-        cursors: {},
-      }
-      const firstCounts = {
-        consentEvents: 0, consentProjections: 0, notifications: 1, quoteSends: 2, smsLogs: 1,
-      }
-      const cursorId = crypto.randomUUID()
-      const firstProgress: PendingDeletionProgress = {
-        ...zeroProgress,
-        resultCounts: {
-          ...zeroProgress.resultCounts,
-          notificationsDeleted: 1, smsLogsDeleted: 1, quoteSendsDeleted: 2,
-        },
-        cursors: {
-          quoteSends: { at: '2026-07-12T10:00:00.000Z', id: cursorId },
-        },
-      }
-      await fixture.client.query(
-        `update messaging_deletion_requests
-        set prior_record_counts = $1, proof_summary = $2
-        where id = $3`,
-        [firstCounts, firstProgress, requestId],
-      )
-      const progressed = await fixture.client.query<{
-        state: string
-        customer_id: string
-        prior_record_counts: string
-        proof_summary: string
-      }>(`
-        select state, customer_id, prior_record_counts::text, proof_summary::text
-        from messaging_deletion_requests where id = $1
-      `, [requestId])
-      expect(progressed.rows[0]?.state).toBe('pending')
-      expect(progressed.rows[0]?.customer_id).toBe(tenant.customerId)
-      const committed = {
-        prior_record_counts: progressed.rows[0]!.prior_record_counts,
-        proof_summary: progressed.rows[0]!.proof_summary,
-      }
-      const rejectProgress = async (
-        counts: unknown,
-        proof: unknown,
-        message: RegExp = /invalid messaging deletion progress proof/,
-      ) => {
-        await expect(fixture.client.query(
-          `update messaging_deletion_requests
-          set prior_record_counts = $1, proof_summary = $2 where id = $3`,
-          [counts, proof, requestId],
-        )).rejects.toThrow(message)
-        expect((await fixture.client.query<{
-          prior_record_counts: string
-          proof_summary: string
-        }>(`
-          select prior_record_counts::text, proof_summary::text
-          from messaging_deletion_requests where id = $1
-        `, [requestId])).rows[0]).toEqual(committed)
-      }
-
-      await rejectProgress(
-        { ...firstCounts, quoteSends: 1 },
-        { ...firstProgress, resultCounts: { ...firstProgress.resultCounts, quoteSendsDeleted: 1 } },
-        /messaging deletion progress must be monotonic/,
-      )
-      const { smsLogs: _missing, ...missingCount } = firstCounts
-      await rejectProgress(missingCount, firstProgress)
-      await rejectProgress(firstCounts, { ...firstProgress, destination: '+12025550123' })
-      await rejectProgress(
-        { ...firstCounts, smsLogs: Number.MAX_SAFE_INTEGER + 1 }, firstProgress,
-      )
-      await rejectProgress(firstCounts, {
-        ...firstProgress,
-        cursors: { quoteSends: { at: '2026-07-12T09:59:59.999Z', id: cursorId } },
-      }, /messaging deletion progress must be monotonic/)
-      await rejectProgress(firstCounts, {
-        ...firstProgress,
-        cursors: {
-          quoteSends: { at: '2026-07-12T10:00:00.000Z', id: '00000000-0000-0000-0000-000000000000' },
-        },
-      }, /messaging deletion progress must be monotonic/)
-
-      const identityMutations = [
-        ['customer_id', crypto.randomUUID()],
-        ['subject_key', crypto.randomUUID()],
-        ['request_key', crypto.randomUUID()],
-        ['request_fingerprint', otherHex],
-        ['destination_fingerprint', otherHex],
-        ['fingerprint_key_version', 'key_v2'],
-        ['reason_code', 'shop_request'],
-        ['requesting_actor_profile_id', crypto.randomUUID()],
-        ['requested_at', new Date('2026-07-12T10:00:01.000Z')],
-        ['state', 'completed'],
-        ['completed_at', new Date('2026-07-12T10:00:01.000Z')],
-        ['latest_relevant_at', new Date('2026-07-12T10:00:01.000Z')],
-        ['retain_until', new Date('2031-07-12T10:00:01.000Z')],
-      ] as const
-      for (const [column, value] of identityMutations) {
-        await expect(fixture.client.query(
-          `update messaging_deletion_requests set ${column} = $1 where id = $2`,
-          [value, requestId],
-        )).rejects.toThrow(
-          /identity is immutable|pending to completed exactly once|state_consistent/,
-        )
-        expect((await fixture.client.query<{
-          prior_record_counts: string
-          proof_summary: string
-        }>(`
-          select prior_record_counts::text, proof_summary::text
-          from messaging_deletion_requests where id = $1
-        `, [requestId])).rows[0]).toEqual(committed)
-      }
-
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null, completed_at = now(),
-          latest_relevant_at = now(),
-          prior_record_counts = $1, proof_summary = $2,
-          retain_until = now() + interval '5 years'
-        where id = $3`,
-        [firstCounts, firstProgress, requestId],
-      )
-      await expect(fixture.client.query(
-        'update messaging_deletion_requests set proof_summary = $1 where id = $2',
-        [{ changed: true }, requestId],
-      )).rejects.toThrow(/completed messaging deletion tombstones are immutable/)
-    } finally {
-      await fixture.close()
-    }
-  })
-
   it('enforces one canonical pending deletion per shop and customer', async () => {
     const fixture = await createTestDb()
     try {
@@ -2347,7 +2395,7 @@ describe('Shop OS messaging retention source schema', () => {
       await expect(fixture.client.query(
         'select compact_messaging_consent_work_items($1, $2, $3::uuid[])',
         [tenant.shopId, requestId, selected.map(({ work_item_id }) => work_item_id)],
-      )).rejects.toThrow(/pending consent-event work items|required/)
+      )).rejects.toThrow(/pending or retained consent-event work items|required/)
 
       const remaining = seeded.slice(256)
       expect((await fixture.client.query<{ advanced: number }>(
@@ -2688,19 +2736,26 @@ describe('Shop OS messaging retention source schema', () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
-      const exactId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: crypto.randomUUID(),
-      })
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null,
-          completed_at = '2024-02-29 12:00:00+00',
-          latest_relevant_at = '2024-02-29 12:00:00+00',
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = '2029-02-28 12:00:00+00'
-        where id = $1`,
-        [exactId],
-      )
+      const insertCompleted = (
+        retainUntil: string,
+        latestRelevantAt = '2024-02-29 12:00:00+00',
+      ) => {
+        const id = crypto.randomUUID()
+        return fixture.client.query(
+          `insert into messaging_deletion_requests (
+            id, request_key, request_fingerprint, shop_id, subject_key, customer_id,
+            destination_fingerprint, fingerprint_key_version, state, reason_code,
+            requesting_actor_profile_id, completed_at, latest_relevant_at,
+            prior_record_counts, proof_summary, retain_until
+          ) values (
+            $1, $2, $3, $4, $5, null, $6, 'key_v1', 'completed',
+            'customer_request', $7, $8, $8, '{}'::jsonb, '{}'::jsonb, $9
+          )`,
+          [id, crypto.randomUUID(), hex, tenant.shopId, crypto.randomUUID(), hex,
+            tenant.actorId, latestRelevantAt, retainUntil],
+        ).then(() => id)
+      }
+      const exactId = await insertCompleted('2029-02-28 12:00:00+00')
       const exact = await fixture.client.query<{
         latest_relevant_at: Date
         retain_until: Date
@@ -2722,67 +2777,10 @@ describe('Shop OS messaging retention source schema', () => {
         '2029-02-28 11:59:59+00',
         '2029-02-28 12:00:01+00',
       ]) {
-        const invalidId = await insertDeletionRequest(fixture.client, tenant, {
-          subjectKey: crypto.randomUUID(),
-        })
-        await expect(fixture.client.query(
-          `update messaging_deletion_requests set
-            state = 'completed', customer_id = null,
-            completed_at = '2024-02-29 12:00:00+00',
-            latest_relevant_at = '2024-02-29 12:00:00+00',
-            prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-            retain_until = $1
-          where id = $2`,
-          [retainUntil, invalidId],
-        )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
-        await fixture.client.query(
-          `update messaging_deletion_requests set
-            state = 'completed', customer_id = null,
-            completed_at = '2024-02-28 12:00:00+00',
-            latest_relevant_at = '2024-02-28 12:00:00+00',
-            prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-            retain_until = '2029-02-28 12:00:00+00'
-          where id = $1`,
-          [invalidId],
+        await expect(insertCompleted(retainUntil)).rejects.toThrow(
+          /messaging_deletion_requests_retention_window_exact/,
         )
       }
-
-      const immediateRetentionId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: crypto.randomUUID(),
-      })
-      await expect(fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null,
-          completed_at = now(), latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = now()
-        where id = $1`,
-        [immediateRetentionId],
-      )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
-      await fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null,
-          completed_at = '2024-02-28 12:00:00+00',
-          latest_relevant_at = '2024-02-28 12:00:00+00',
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = '2029-02-28 12:00:00+00'
-        where id = $1`,
-        [immediateRetentionId],
-      )
-
-      const beforeCompletionId = await insertDeletionRequest(fixture.client, tenant, {
-        subjectKey: crypto.randomUUID(),
-      })
-      await expect(fixture.client.query(
-        `update messaging_deletion_requests set
-          state = 'completed', customer_id = null,
-          completed_at = '2024-03-01 12:00:00+00',
-          latest_relevant_at = '2024-02-29 12:00:00+00',
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
-          retain_until = '2029-02-28 12:00:00+00'
-        where id = $1`,
-        [beforeCompletionId],
-      )).rejects.toThrow(/messaging_deletion_requests_retention_window_exact/)
     } finally {
       await fixture.close()
     }

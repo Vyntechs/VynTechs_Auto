@@ -966,10 +966,10 @@ begin
     and work_item.shop_id = p_shop_id
     and work_item.request_id = p_request_id
     and work_item.resource_type = 'consent_event'
-    and work_item.outcome = 'pending';
+    and work_item.outcome in ('pending', 'retained');
 
   if selected_count is distinct from cardinality(p_work_item_ids) then
-    raise exception 'compaction requires exact pending consent-event work items';
+    raise exception 'compaction requires exact pending or retained consent-event work items';
   end if;
 
   perform 1
@@ -1072,7 +1072,7 @@ begin
         and work_item.shop_id = p_shop_id
         and work_item.request_id = p_request_id
         and work_item.resource_type = 'consent_event'
-        and work_item.outcome = 'pending'
+        and work_item.outcome in ('pending', 'retained')
     ),
     locked_suppressions as materialized (
       select suppression.id, suppression.source_event_id
@@ -1489,21 +1489,370 @@ before insert or update on messaging_deletion_work_items
 for each row execute function guard_messaging_deletion_work_item_mutation();
 --> statement-breakpoint
 
+create function finalize_messaging_deletion_request(p_shop_id uuid, p_request_id uuid)
+returns table(state text, prior_record_counts jsonb, proof_summary jsonb)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  request_row public.messaging_deletion_requests%rowtype;
+  completed_at_value timestamptz;
+  customer_binding_value text;
+  result_counts jsonb;
+  retained_counts jsonb;
+  detached_count bigint;
+  updated_count integer;
+begin
+  perform 1
+  from public.shops locked_shop
+  where locked_shop.id = p_shop_id
+  for update;
+  if not found then
+    raise exception 'messaging deletion finalizer requires an exact shop';
+  end if;
+
+  select request.* into request_row
+  from public.messaging_deletion_requests request
+  where request.id = p_request_id
+  for update;
+  if not found or request_row.shop_id <> p_shop_id then
+    raise exception 'messaging deletion finalizer request/shop mismatch';
+  end if;
+
+  if request_row.state = 'completed' then
+    if exists (
+      select 1 from public.messaging_deletion_work_items work
+      where work.request_id = p_request_id
+    ) then
+      raise exception 'completed messaging deletion request cannot retain journal work';
+    end if;
+    state := request_row.state;
+    prior_record_counts := request_row.prior_record_counts;
+    proof_summary := request_row.proof_summary;
+    return next;
+    return;
+  end if;
+
+  if request_row.state <> 'pending' or request_row.customer_id is null then
+    raise exception 'messaging deletion finalizer requires a canonical pending request';
+  end if;
+  if not exists (
+    select 1
+    from public.sms_suppressions suppression
+    where suppression.shop_id = request_row.shop_id
+      and suppression.destination_fingerprint = request_row.destination_fingerprint
+      and suppression.fingerprint_key_version = request_row.fingerprint_key_version
+      and suppression.reason in ('verified_deletion', 'permanent_failure', 'number_reassigned')
+      and suppression.lifted_at is null
+      and suppression.retain_until >= request_row.requested_at + interval '5 years'
+  ) then
+    raise exception 'messaging deletion finalizer requires an active suppression barrier';
+  end if;
+
+  if exists (
+    select 1 from public.quote_sends source
+    where source.shop_id = request_row.shop_id
+      and source.customer_id = request_row.customer_id
+      and not exists (
+        select 1 from public.messaging_deletion_work_items work
+        where work.request_id = request_row.id
+          and work.resource_type = 'quote_send' and work.resource_id = source.id
+      )
+    union all
+    select 1 from public.messaging_consent_state source
+    where source.shop_id = request_row.shop_id
+      and source.customer_id = request_row.customer_id
+      and not exists (
+        select 1 from public.messaging_deletion_work_items work
+        where work.request_id = request_row.id
+          and work.resource_type = 'consent_projection' and work.resource_id = source.id
+      )
+    union all
+    select 1 from public.messaging_consent_events source
+    where source.shop_id = request_row.shop_id
+      and source.customer_id = request_row.customer_id
+      and not exists (
+        select 1 from public.messaging_deletion_work_items work
+        where work.request_id = request_row.id
+          and work.resource_type = 'consent_event' and work.resource_id = source.id
+      )
+    union all
+    select 1
+    from public.sms_log source
+    join public.messaging_deletion_work_items parent
+      on parent.request_id = request_row.id
+      and parent.resource_type = 'quote_send'
+      and parent.resource_id = source.quote_send_id
+    where source.shop_id = request_row.shop_id
+      and not exists (
+        select 1 from public.messaging_deletion_work_items work
+        where work.request_id = request_row.id
+          and work.resource_type = 'sms_log' and work.resource_id = source.id
+      )
+    union all
+    select 1
+    from public.notifications source
+    left join public.messaging_deletion_work_items parent
+      on source.entity_type = 'quote_send'
+      and parent.request_id = request_row.id
+      and parent.resource_type = 'quote_send'
+      and parent.resource_id = source.entity_id
+    where source.shop_id = request_row.shop_id
+      and ((source.entity_type = 'customer' and source.entity_id = request_row.customer_id)
+        or (source.entity_type = 'quote_send' and parent.id is not null))
+      and not exists (
+        select 1 from public.messaging_deletion_work_items work
+        where work.request_id = request_row.id
+          and work.resource_type = 'notification' and work.resource_id = source.id
+      )
+  ) then
+    state := 'pending';
+    prior_record_counts := null;
+    proof_summary := null;
+    return next;
+    return;
+  end if;
+
+  if exists (
+    select 1 from public.messaging_deletion_work_items work
+    where work.request_id = request_row.id and work.outcome = 'pending'
+  ) then
+    state := 'pending';
+    prior_record_counts := null;
+    proof_summary := null;
+    return next;
+    return;
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_deletion_work_items work
+    where work.request_id = request_row.id and work.outcome = 'retained'
+      and not (
+        (work.resource_type = 'consent_event' and exists (
+          select 1 from public.messaging_consent_events source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'consent_projection' and exists (
+          select 1 from public.messaging_consent_state source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'quote_send' and exists (
+          select 1 from public.quote_sends source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'sms_log' and exists (
+          select 1 from public.sms_log source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+        or (work.resource_type = 'notification' and exists (
+          select 1 from public.notifications source
+          where source.shop_id = work.shop_id and source.id = work.resource_id
+        ))
+      )
+  ) then
+    raise exception 'retained deletion work item source disappeared';
+  end if;
+
+  if exists (
+    select 1
+    from public.messaging_deletion_work_items work
+    where work.request_id = request_row.id and work.outcome = 'retained'
+      and not case work.retention_basis
+        when 'resource_hold' then exists (
+          select 1 from public.messaging_retention_holds hold
+          where hold.shop_id = work.shop_id
+            and hold.resource_id = work.resource_id
+            and hold.resource_type = case work.resource_type
+              when 'consent_event' then 'messaging_consent_event'
+              else work.resource_type
+            end
+            and hold.released_at is null
+            and hold.starts_at <= clock_timestamp()
+            and hold.expires_at > clock_timestamp()
+        )
+        when 'subject_hold' then exists (
+          select 1 from public.messaging_retention_holds hold
+          where hold.shop_id = work.shop_id
+            and hold.subject_key = case
+              when work.resource_type = 'consent_event' then (
+                select source.subject_key from public.messaging_consent_events source
+                where source.shop_id = work.shop_id and source.id = work.resource_id
+              )
+              when work.resource_type = 'consent_projection' then (
+                select source.subject_key from public.messaging_consent_state source
+                where source.shop_id = work.shop_id and source.id = work.resource_id
+              )
+              when work.resource_type = 'quote_send' then (
+                select source.subject_key from public.quote_sends source
+                where source.shop_id = work.shop_id and source.id = work.resource_id
+              )
+              when work.resource_type = 'sms_log' then (
+                select parent_source.subject_key
+                from public.sms_log source
+                join public.quote_sends parent_source
+                  on parent_source.shop_id = source.shop_id
+                  and parent_source.id = source.quote_send_id
+                where source.shop_id = work.shop_id and source.id = work.resource_id
+              )
+              when work.resource_type = 'notification' then coalesce((
+                select parent_source.subject_key
+                from public.notifications source
+                join public.quote_sends parent_source
+                  on source.entity_type = 'quote_send'
+                  and parent_source.shop_id = source.shop_id
+                  and parent_source.id = source.entity_id
+                where source.shop_id = work.shop_id and source.id = work.resource_id
+              ), request_row.subject_key)
+            end
+            and hold.released_at is null
+            and hold.starts_at <= clock_timestamp()
+            and hold.expires_at > clock_timestamp()
+        )
+        when 'held_dependency' then (
+          (work.resource_type in ('quote_send', 'consent_projection') and exists (
+            select 1 from public.messaging_deletion_work_items child
+            where child.request_id = work.request_id
+              and child.parent_work_item_id = work.id
+              and child.outcome = 'retained'
+              and child.retention_basis in ('resource_hold', 'subject_hold')
+          ))
+          or (work.resource_type = 'consent_event' and exists (
+            select 1
+            from public.messaging_deletion_work_items parent
+            join public.messaging_consent_state projection
+              on projection.shop_id = parent.shop_id
+              and projection.id = parent.resource_id
+            where parent.id = work.parent_work_item_id
+              and parent.request_id = work.request_id
+              and parent.outcome = 'retained'
+              and parent.retention_basis = 'held_dependency'
+              and projection.source_event_id = work.resource_id
+              and exists (
+                select 1
+                from public.messaging_deletion_work_items held_sibling
+                where held_sibling.request_id = work.request_id
+                  and held_sibling.parent_work_item_id = parent.id
+                  and held_sibling.id <> work.id
+                  and held_sibling.outcome = 'retained'
+                  and held_sibling.retention_basis in ('resource_hold', 'subject_hold')
+              )
+          ))
+        )
+        else false
+      end
+  ) then
+    state := 'pending';
+    prior_record_counts := null;
+    proof_summary := null;
+    return next;
+    return;
+  end if;
+
+  select jsonb_build_object(
+    'consentEvents', count(*) filter (
+      where resource_type = 'consent_event' and counts_toward_proof),
+    'consentProjections', count(*) filter (where resource_type = 'consent_projection'),
+    'notifications', count(*) filter (where resource_type = 'notification'),
+    'quoteSends', count(*) filter (where resource_type = 'quote_send'),
+    'smsLogs', count(*) filter (where resource_type = 'sms_log')
+  ), jsonb_build_object(
+    'consentEventsDeleted', count(*) filter (
+      where resource_type = 'consent_event' and counts_toward_proof and outcome = 'deleted'),
+    'notificationsDeleted', count(*) filter (
+      where resource_type = 'notification' and outcome = 'deleted'),
+    'smsLogsDeleted', count(*) filter (
+      where resource_type = 'sms_log' and outcome = 'deleted'),
+    'quoteSendsDeleted', count(*) filter (
+      where resource_type = 'quote_send' and outcome = 'deleted'),
+    'quoteSendsRetained', count(*) filter (
+      where resource_type = 'quote_send' and outcome = 'retained')
+  ), jsonb_build_object(
+    'heldConsentEvents', count(*) filter (
+      where resource_type = 'consent_event' and counts_toward_proof and outcome = 'retained'),
+    'heldConsentProjections', count(*) filter (
+      where resource_type = 'consent_projection' and outcome = 'retained'),
+    'heldQuoteSends', count(*) filter (
+      where resource_type = 'quote_send' and outcome = 'retained'),
+    'heldSmsLogs', count(*) filter (
+      where resource_type = 'sms_log' and outcome = 'retained'),
+    'heldNotifications', count(*) filter (
+      where resource_type = 'notification' and outcome = 'retained'),
+    'total', count(*) filter (where outcome = 'retained')
+  ), coalesce(sum(detached_suppression_sources), 0)
+  into prior_record_counts, result_counts, retained_counts, detached_count
+  from public.messaging_deletion_work_items
+  where request_id = request_row.id;
+
+  select greatest(clock_timestamp(), coalesce(max(barrier.at) + interval '1 millisecond', '-infinity'))
+  into completed_at_value
+  from (
+    select requested_at as at from public.messaging_deletion_requests
+      where shop_id = request_row.shop_id
+    union all select completed_at from public.messaging_deletion_requests
+      where shop_id = request_row.shop_id
+    union all select committed_at from public.messaging_consent_events
+      where shop_id = request_row.shop_id
+    union all select updated_at from public.quote_sends where shop_id = request_row.shop_id
+    union all select updated_at from public.sms_suppressions where shop_id = request_row.shop_id
+  ) barrier;
+  customer_binding_value := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+    '[' || pg_catalog.to_json('vyntechs:messaging-deletion-customer:v1'::text)::text || ','
+      || pg_catalog.to_json(request_row.shop_id::text)::text || ','
+      || pg_catalog.to_json(request_row.customer_id::text)::text || ','
+      || pg_catalog.to_json(request_row.request_key::text)::text || ','
+      || pg_catalog.to_json(request_row.request_fingerprint)::text || ','
+      || pg_catalog.to_json(request_row.reason_code)::text || ','
+      || pg_catalog.to_json(request_row.requesting_actor_profile_id::text)::text || ']',
+    'UTF8'
+  )), 'hex');
+  proof_summary := jsonb_build_object(
+    'version', 2,
+    'customerBinding', customer_binding_value,
+    'suppressionActive', 1,
+    'deletedBarrier', 1,
+    'suppressionSourceReferencesDetached', detached_count,
+    'suppressionSourcesDetached', detached_count > 0,
+    'retained', retained_counts,
+    'resultCounts', result_counts
+  );
+
+  perform set_config(
+    'vyntechs.messaging_deletion_finalizer_shop', request_row.shop_id::text, true
+  );
+  perform set_config(
+    'vyntechs.messaging_deletion_finalizer_request', request_row.id::text, true
+  );
+  delete from public.messaging_deletion_work_items work
+  where work.request_id = request_row.id;
+  update public.messaging_deletion_requests request set
+    customer_id = null,
+    state = 'completed',
+    completed_at = completed_at_value,
+    latest_relevant_at = completed_at_value,
+    prior_record_counts = finalize_messaging_deletion_request.prior_record_counts,
+    proof_summary = finalize_messaging_deletion_request.proof_summary,
+    retain_until = completed_at_value + interval '5 years'
+  where request.id = request_row.id and request.state = 'pending';
+  get diagnostics updated_count = row_count;
+  if updated_count <> 1 then
+    raise exception 'messaging deletion finalizer transition failed';
+  end if;
+  state := 'completed';
+  return next;
+end;
+$$;
+--> statement-breakpoint
+
 create function guard_messaging_deletion_request_mutation()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 declare
-  progress_key text;
-  cursor_value jsonb;
-  old_cursor_value jsonb;
-  new_count numeric;
-  old_count numeric;
-  new_cursor_at timestamptz;
-  old_cursor_at timestamptz;
-  new_cursor_id uuid;
-  old_cursor_id uuid;
+  finalizer_shop text;
+  finalizer_request text;
 begin
   if tg_op = 'DELETE' then
     if current_setting('vyntechs.messaging_retention_purge', true) = 'on'
@@ -1527,152 +1876,27 @@ begin
   if old.state = 'pending' and new.state = 'pending' then
     if (new.id, new.request_key, new.request_fingerprint, new.shop_id,
         new.subject_key, new.customer_id, new.destination_fingerprint,
-        new.fingerprint_key_version, new.reason_code,
-        new.requesting_actor_profile_id, new.requested_at,
-        new.completed_at, new.latest_relevant_at, new.retain_until)
+        new.fingerprint_key_version, new.state, new.reason_code,
+        new.requesting_actor_profile_id, new.requested_at, new.completed_at,
+        new.latest_relevant_at, new.prior_record_counts, new.proof_summary, new.retain_until)
       is distinct from
        (old.id, old.request_key, old.request_fingerprint, old.shop_id,
         old.subject_key, old.customer_id, old.destination_fingerprint,
-        old.fingerprint_key_version, old.reason_code,
-        old.requesting_actor_profile_id, old.requested_at,
-        old.completed_at, old.latest_relevant_at, old.retain_until)
+        old.fingerprint_key_version, old.state, old.reason_code,
+        old.requesting_actor_profile_id, old.requested_at, old.completed_at,
+        old.latest_relevant_at, old.prior_record_counts, old.proof_summary, old.retain_until)
     then
       raise exception 'messaging deletion request identity is immutable';
     end if;
-
-    if new.prior_record_counts is null and new.proof_summary is null then
-      if old.prior_record_counts is not null or old.proof_summary is not null then
-        raise exception 'messaging deletion progress must be monotonic';
-      end if;
-      return new;
-    end if;
-
-    if jsonb_typeof(new.prior_record_counts) <> 'object'
-      or jsonb_typeof(new.proof_summary) <> 'object'
-      or (select array_agg(key order by key) from jsonb_object_keys(new.prior_record_counts) key)
-        <> array['consentEvents','consentProjections','notifications','quoteSends','smsLogs']
-      or (select array_agg(key order by key) from jsonb_object_keys(new.proof_summary) key)
-        <> array['cursors','detachedSuppressionSources','heldCounts','progressVersion','resultCounts']
-      or new.proof_summary->>'progressVersion' <> '1'
-      or jsonb_typeof(new.proof_summary->'progressVersion') <> 'number'
-      or jsonb_typeof(new.proof_summary->'resultCounts') <> 'object'
-      or jsonb_typeof(new.proof_summary->'heldCounts') <> 'object'
-      or jsonb_typeof(new.proof_summary->'cursors') <> 'object'
-      or (select array_agg(key order by key)
-          from jsonb_object_keys(new.proof_summary->'resultCounts') key)
-        <> array['consentEventsDeleted','notificationsDeleted','quoteSendsDeleted',
-                 'quoteSendsRetained','smsLogsDeleted']
-      or (select array_agg(key order by key)
-          from jsonb_object_keys(new.proof_summary->'heldCounts') key)
-        <> array['heldConsentEvents','heldConsentProjections','heldNotifications',
-                 'heldQuoteSends','heldSmsLogs','total']
-      or not coalesce(
-        (select array_agg(key order by key)
-          from jsonb_object_keys(new.proof_summary->'cursors') key),
-        array[]::text[]
-      ) <@ array['quoteSends','consentSubjects','consentEvents','smsLogs','notifications','holds']
-    then
-      raise exception 'invalid messaging deletion progress proof';
-    end if;
-
-    foreach progress_key in array array[
-      'consentEvents','consentProjections','notifications','quoteSends','smsLogs'
-    ] loop
-      if jsonb_typeof(new.prior_record_counts->progress_key) <> 'number'
-        or (new.prior_record_counts->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
-        or (new.prior_record_counts->>progress_key)::numeric > 9007199254740991
-      then
-        raise exception 'invalid messaging deletion progress proof';
-      end if;
-      new_count := (new.prior_record_counts->>progress_key)::numeric;
-      old_count := coalesce((old.prior_record_counts->>progress_key)::numeric, 0);
-      if old_count > new_count then
-        raise exception 'messaging deletion progress must be monotonic';
-      end if;
-    end loop;
-
-    foreach progress_key in array array[
-      'consentEventsDeleted','notificationsDeleted','quoteSendsDeleted',
-      'quoteSendsRetained','smsLogsDeleted'
-    ] loop
-      if jsonb_typeof(new.proof_summary->'resultCounts'->progress_key) <> 'number'
-        or (new.proof_summary->'resultCounts'->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
-        or (new.proof_summary->'resultCounts'->>progress_key)::numeric > 9007199254740991
-      then
-        raise exception 'invalid messaging deletion progress proof';
-      end if;
-      new_count := (new.proof_summary->'resultCounts'->>progress_key)::numeric;
-      old_count := coalesce((old.proof_summary->'resultCounts'->>progress_key)::numeric, 0);
-      if old_count > new_count then
-        raise exception 'messaging deletion progress must be monotonic';
-      end if;
-    end loop;
-
-    foreach progress_key in array array[
-      'heldConsentEvents','heldConsentProjections','heldNotifications',
-      'heldQuoteSends','heldSmsLogs','total'
-    ] loop
-      if jsonb_typeof(new.proof_summary->'heldCounts'->progress_key) <> 'number'
-        or (new.proof_summary->'heldCounts'->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
-        or (new.proof_summary->'heldCounts'->>progress_key)::numeric > 9007199254740991
-      then
-        raise exception 'invalid messaging deletion progress proof';
-      end if;
-      new_count := (new.proof_summary->'heldCounts'->>progress_key)::numeric;
-      old_count := coalesce((old.proof_summary->'heldCounts'->>progress_key)::numeric, 0);
-      if old_count > new_count then
-        raise exception 'messaging deletion progress must be monotonic';
-      end if;
-    end loop;
-
-    if jsonb_typeof(new.proof_summary->'detachedSuppressionSources') <> 'number'
-      or (new.proof_summary->>'detachedSuppressionSources') !~ '^(0|[1-9][0-9]{0,15})$'
-      or (new.proof_summary->>'detachedSuppressionSources')::numeric > 9007199254740991
-    then
-      raise exception 'invalid messaging deletion progress proof';
-    end if;
-    if coalesce((old.proof_summary->>'detachedSuppressionSources')::numeric, 0)
-      > (new.proof_summary->>'detachedSuppressionSources')::numeric
-    then
-      raise exception 'messaging deletion progress must be monotonic';
-    end if;
-
-    for progress_key, cursor_value in
-      select key, value from jsonb_each(new.proof_summary->'cursors')
-    loop
-      if jsonb_typeof(cursor_value) <> 'object'
-        or (select array_agg(key order by key) from jsonb_object_keys(cursor_value) key)
-          <> array['at','id']
-        or jsonb_typeof(cursor_value->'at') <> 'string'
-        or jsonb_typeof(cursor_value->'id') <> 'string'
-      then
-        raise exception 'invalid messaging deletion progress proof';
-      end if;
-      begin
-        new_cursor_at := (cursor_value->>'at')::timestamptz;
-        new_cursor_id := (cursor_value->>'id')::uuid;
-      exception when others then
-        raise exception 'invalid messaging deletion progress proof';
-      end;
-
-      old_cursor_value := old.proof_summary->'cursors'->progress_key;
-      if old_cursor_value is not null then
-        old_cursor_at := (old_cursor_value->>'at')::timestamptz;
-        old_cursor_id := (old_cursor_value->>'id')::uuid;
-        if (new_cursor_at, new_cursor_id) < (old_cursor_at, old_cursor_id) then
-          raise exception 'messaging deletion progress must be monotonic';
-        end if;
-      end if;
-    end loop;
-
-    if old.proof_summary is not null and exists (
-      select 1 from jsonb_object_keys(old.proof_summary->'cursors') old_key
-      where not (new.proof_summary->'cursors' ? old_key)
-    ) then
-      raise exception 'messaging deletion progress must be monotonic';
-    end if;
     return new;
   end if;
+
+  finalizer_shop := nullif(current_setting(
+    'vyntechs.messaging_deletion_finalizer_shop', true
+  ), '');
+  finalizer_request := nullif(current_setting(
+    'vyntechs.messaging_deletion_finalizer_request', true
+  ), '');
 
   if old.state <> 'pending' or new.state <> 'completed'
     or new.id is distinct from old.id
@@ -1685,8 +1909,18 @@ begin
     or new.reason_code is distinct from old.reason_code
     or new.requesting_actor_profile_id is distinct from old.requesting_actor_profile_id
     or new.requested_at is distinct from old.requested_at
+    or finalizer_shop is distinct from old.shop_id::text
+    or finalizer_request is distinct from old.id::text
+    or current_user <> pg_catalog.pg_get_userbyid((
+      select p.proowner from pg_catalog.pg_proc p
+      where p.oid = 'public.finalize_messaging_deletion_request(uuid,uuid)'::pg_catalog.regprocedure
+    ))
+    or exists (
+      select 1 from public.messaging_deletion_work_items work
+      where work.request_id = old.id
+    )
   then
-    raise exception 'messaging deletion requests permit pending to completed exactly once';
+    raise exception 'messaging deletion requests permit finalizer completion exactly once';
   end if;
   return new;
 end;
@@ -1814,10 +2048,12 @@ revoke all on function require_messaging_compaction_completion() from public, an
 revoke all on function guard_messaging_deletion_work_item_mutation() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
 revoke all on function compact_messaging_consent_work_items(uuid, uuid, uuid[]) from public, anon, authenticated;
+revoke all on function finalize_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_consent_event(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_retention_hold(uuid, uuid) from public, anon, authenticated;
 grant execute on function compact_messaging_consent_work_items(uuid, uuid, uuid[]) to service_role;
+grant execute on function finalize_messaging_deletion_request(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_consent_event(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_retention_hold(uuid, uuid) to service_role;

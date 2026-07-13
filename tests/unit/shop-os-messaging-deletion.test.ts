@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm'
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   completeMessagingDeletion,
@@ -25,8 +26,11 @@ import {
 } from '@/lib/db/schema'
 import { fingerprintDestination, type FingerprintKeyRing } from '@/lib/shop-os/messaging-retention-policy'
 import type { MessagingActor } from '@/lib/shop-os/messaging-consent'
-import { getMessagingEligibility } from '@/lib/shop-os/messaging-consent'
-import { createTestDb, type TestDb } from '@/tests/helpers/db'
+import {
+  getMessagingEligibility,
+  recordMessagingConsentEvent,
+} from '@/lib/shop-os/messaging-consent'
+import { createTestDb, createTestDbClient, type TestDb } from '@/tests/helpers/db'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -52,6 +56,7 @@ const recoveryLimits = Object.freeze({
 
 describe('suppression-first messaging deletion', () => {
   let db: TestDb
+  let client: Awaited<ReturnType<typeof createTestDb>>['client']
   let close: () => Promise<void>
   let shopId: string
   let otherShopId: string
@@ -65,7 +70,7 @@ describe('suppression-first messaging deletion', () => {
   let versionId: string
 
   beforeEach(async () => {
-    ;({ db, close } = await createTestDb())
+    ;({ db, client, close } = await createTestDb())
     ;[{ id: shopId }, { id: otherShopId }] = await db.insert(shops).values([
       { id: uuid(1), name: 'North Shop' },
       { id: uuid(2), name: 'South Shop' },
@@ -569,16 +574,18 @@ describe('suppression-first messaging deletion', () => {
     const pending = await request({ requestKey: uuid(73_500) })
     if (!pending.ok) throw new Error('request failed')
 
-    await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
-    const rows = await journalRows(pending.requestId)
-    expect(rows.map(({ resourceId }) => resourceId).sort())
-      .toEqual([customerSend, customerNotification].sort())
-    expect(rows.find(({ resourceId }) => resourceId === customerNotification)).toEqual({
-      requestId: pending.requestId,
-      resourceType: 'notification',
-      resourceId: customerNotification,
-      parentWorkItemId: null,
-      outcome: 'deleted',
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({
+        ok: true,
+        state: 'completed',
+        counts: { quoteSendsDeleted: 1, notificationsDeleted: 1 },
+      })
+    expect(await journalRows(pending.requestId)).toEqual([])
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: { quoteSends: 1, notifications: 1 },
+      proofSummary: {
+        resultCounts: { quoteSendsDeleted: 1, notificationsDeleted: 1 },
+      },
     })
     expect(await db.select({ id: quoteSends.id }).from(quoteSends)
       .where(eq(quoteSends.id, otherCustomerSend))).toHaveLength(1)
@@ -599,21 +606,13 @@ describe('suppression-first messaging deletion', () => {
       counts: { notificationsDeleted: 1 },
     })
     expect(await db.select().from(notifications)).toHaveLength(0)
-    expect(await journalRows(pending.requestId)).toEqual([expect.objectContaining({
-      resourceType: 'notification',
-      resourceId: uuid(40_000),
-      outcome: 'deleted',
-    })])
+    expect(await journalRows(pending.requestId)).toEqual([])
 
     const retry = await completeMessagingDeletion({
       db, actor: owner, requestId: pending.requestId, now: new Date(0),
     })
     expect(retry).toEqual(first)
-    expect(await journalRows(pending.requestId)).toEqual([expect.objectContaining({
-      resourceType: 'notification',
-      resourceId: uuid(40_000),
-      outcome: 'deleted',
-    })])
+    expect(await journalRows(pending.requestId)).toEqual([])
   })
 
   it('never deletes a parent before children are resolved and fully discovered', async () => {
@@ -683,12 +682,7 @@ describe('suppression-first messaging deletion', () => {
       .toMatchObject({ ok: true, state: 'completed', counts: { consentEventsDeleted: 1 } })
     expect(await db.select().from(messagingConsentEvents)).toHaveLength(0)
     expect(await db.select().from(messagingConsentState)).toHaveLength(0)
-    expect((await journalRows(pending.requestId)).map(({ resourceType, outcome }) => ({
-      resourceType, outcome,
-    }))).toEqual(expect.arrayContaining([
-      { resourceType: 'consent_event', outcome: 'deleted' },
-      { resourceType: 'consent_projection', outcome: 'deleted' },
-    ]))
+    expect(await journalRows(pending.requestId)).toEqual([])
   })
 
   it('retains a projection source event behind its held sibling and converges', async () => {
@@ -726,39 +720,32 @@ describe('suppression-first messaging deletion', () => {
     const pending = await request({ requestKey: uuid(75_320) })
     if (!pending.ok) throw new Error('request failed')
 
-    const { result } = await completeUntilTerminal(pending.requestId, 3)
-    expect(result).toMatchObject({ ok: true, state: 'completed' })
+    const snapshots: MessagingDeletionResult[] = []
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const latest = await completeMessagingDeletion({
+        db, actor: owner, requestId: pending.requestId, now,
+      })
+      snapshots.push(latest)
+      if (latest.ok && latest.state === 'completed') break
+    }
     expect(await db.select({ id: messagingConsentEvents.id }).from(messagingConsentEvents))
       .toEqual(expect.arrayContaining([{ id: sourceEventId }, { id: heldSiblingId }]))
     expect(await db.select({ id: messagingConsentState.id }).from(messagingConsentState))
       .toEqual([{ id: projectionId! }])
-    const outcomes = await db.select({
-      resourceType: messagingDeletionWorkItems.resourceType,
-      resourceId: messagingDeletionWorkItems.resourceId,
-      outcome: messagingDeletionWorkItems.outcome,
-      retentionBasis: messagingDeletionWorkItems.retentionBasis,
-    }).from(messagingDeletionWorkItems)
-      .where(eq(messagingDeletionWorkItems.requestId, pending.requestId))
-    expect(outcomes).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        resourceType: 'consent_event', resourceId: sourceEventId,
-        outcome: 'retained', retentionBasis: 'held_dependency',
-      }),
-      expect.objectContaining({
-        resourceType: 'consent_event', resourceId: heldSiblingId,
-        outcome: 'retained', retentionBasis: 'resource_hold',
-      }),
-      expect.objectContaining({
-        resourceType: 'consent_projection', resourceId: projectionId,
-        outcome: 'retained', retentionBasis: 'held_dependency',
-      }),
-    ]))
+    expect(snapshots.at(-1)).toMatchObject({ ok: true, state: 'completed' })
+    expect(await journalRows(pending.requestId)).toEqual([])
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: { consentEvents: 2, consentProjections: 1 },
+      proofSummary: {
+        retained: { heldConsentEvents: 2, heldConsentProjections: 1, total: 3 },
+      },
+    })
   })
 
   it('keeps internal consent work inside the family and total outcome budgets', async () => {
     await seedPhaseTwoResource('sends', recoveryLimits.sends)
     await seedPhaseTwoResource('smsLogs', recoveryLimits.smsLogs, { sendId: uuid(10_000) })
-    await seedPhaseTwoResource('notifications', 128)
+    await seedPhaseTwoResource('notifications', 129)
     const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
     const committedAt = new Date('2026-07-12T10:00:00.000Z')
     await db.insert(messagingConsentEvents).values(Array.from(
@@ -1433,7 +1420,7 @@ describe('suppression-first messaging deletion', () => {
     ['SMS mutation', 'smsLogs', 1, 'delete from sms_log', false],
     ['notification mutation', 'notifications', 1, 'delete from notifications', false],
     ['consent mutation', 'consentEvents', 1, 'compact_messaging_consent_work_items', false],
-    ['pending progress write', 'sends', 129, 'update messaging_deletion_requests', true],
+    ['request finalization', 'sends', 129, 'finalize_messaging_deletion_request', true],
   ] as const)('commits source and work outcome atomically by rolling back %s', async (
     _label, family, count, marker, throwAfter,
   ) => {
@@ -1493,6 +1480,11 @@ describe('suppression-first messaging deletion', () => {
     await db.execute(sql`alter table messaging_deletion_requests disable trigger messaging_deletion_requests_guard`)
     await db.execute(sql`update messaging_deletion_requests set requested_at = '2028-02-29T12:00:00Z' where id = ${pending.requestId}`)
     await db.execute(sql`alter table messaging_deletion_requests enable trigger messaging_deletion_requests_guard`)
+    await db.execute(sql`
+      update sms_suppressions
+      set retain_until = '2033-02-28T12:00:00.001Z', updated_at = clock_timestamp()
+      where shop_id = ${shopId}::uuid
+    `)
     expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now: new Date(0) }))
       .toMatchObject({ ok: true })
     const [row] = await db.select().from(messagingDeletionRequests)
@@ -1514,12 +1506,15 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select().from(quoteVersions)).toEqual(before.version)
   })
 
-  it('serializes repeated completion to one immutable tombstone', async () => {
+  it('deletes journal on completion and returns the same completed tombstone on retry', async () => {
+    await insertSend(uuid(72_550), 'queued')
     const pending = await request()
     if (!pending.ok) throw new Error('request failed')
     const first = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
+    expect(await journalRows(pending.requestId)).toEqual([])
     const retry = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now: new Date(0) })
     expect(retry).toEqual(first)
+    expect(await journalRows(pending.requestId)).toEqual([])
     expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
   })
 
@@ -1567,6 +1562,10 @@ describe('suppression-first messaging deletion', () => {
     if (!pending.ok) throw new Error('request failed')
     const first = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
     expect(first).toMatchObject({ ok: true, state: 'pending' })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: null,
+      proofSummary: null,
+    })
     expect(await db.select().from(quoteSends)).toHaveLength(1)
     expect(await db.select().from(notifications)).toHaveLength(1)
     const { result } = await completeUntilTerminal(pending.requestId, 4)
@@ -1587,35 +1586,31 @@ describe('suppression-first messaging deletion', () => {
       .toMatchObject({ retained: { heldQuoteSends: 129, total: 129 } })
   })
 
-  it('pages 257 active holds through pending progress before completion', async () => {
-    await seedPhaseTwoResource('holds', 257)
+  it('held work converges for 257 consent records while later eligible work advances', async () => {
+    await seedPhaseTwoResource('consentEvents', 258)
+    for (let index = 0; index < 257; index += 1) {
+      await activeHold({
+        resourceType: 'messaging_consent_event', resourceId: uuid(20_000 + index),
+      })
+    }
     const pending = await request({ requestKey: uuid(72_502) })
     if (!pending.ok) throw new Error('request failed')
     const first = await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
     expect(first).toMatchObject({ ok: true, state: 'pending' })
-    expect((await db.select().from(messagingDeletionRequests))[0]?.proofSummary)
-      .toMatchObject({ cursors: { holds: expect.objectContaining({ id: uuid(50_255) }) } })
-    const { result } = await completeUntilTerminal(pending.requestId, 4)
-    expect(result).toMatchObject({ ok: true, state: 'completed' })
-  })
-
-  it('rejects malformed stored cursor tuples instead of finalizing', async () => {
-    const pending = await request({ requestKey: uuid(72_503) })
-    if (!pending.ok) throw new Error('request failed')
-    await db.execute(sql`alter table messaging_deletion_requests disable trigger messaging_deletion_requests_guard`)
-    await db.execute(sql`update messaging_deletion_requests set
-      prior_record_counts = ${JSON.stringify({ consentEvents: 0, consentProjections: 0,
-        notifications: 0, quoteSends: 0, smsLogs: 0 })}::jsonb,
-      proof_summary = ${JSON.stringify({ progressVersion: 1, resultCounts: {
-        consentEventsDeleted: 0, notificationsDeleted: 0, smsLogsDeleted: 0,
-        quoteSendsDeleted: 0, quoteSendsRetained: 0 }, heldCounts: {
-        heldConsentEvents: 0, heldConsentProjections: 0, heldQuoteSends: 0,
-        heldSmsLogs: 0, heldNotifications: 0, total: 0 }, detachedSuppressionSources: 0,
-        cursors: { holds: { at: 'not-a-date', id: 'not-a-uuid' } } })}::jsonb
-      where id = ${pending.requestId}::uuid`)
-    await db.execute(sql`alter table messaging_deletion_requests enable trigger messaging_deletion_requests_guard`)
-    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
-      .toEqual({ ok: false, error: 'retryable' })
+    expect(await db.select().from(messagingConsentEvents)
+      .where(eq(messagingConsentEvents.id, uuid(20_257)))).toEqual([])
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: null,
+      proofSummary: null,
+    })
+    const { result } = await completeUntilTerminal(pending.requestId, 5)
+    expect(result).toMatchObject({
+      ok: true, state: 'completed', counts: { consentEventsDeleted: 1 },
+    })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: { consentEvents: 258 },
+      proofSummary: { retained: { heldConsentEvents: 257, total: 257 } },
+    })
   })
 
   it('deletes a below-order notification inserted between retry pages', async () => {
@@ -1624,6 +1619,10 @@ describe('suppression-first messaging deletion', () => {
     if (!pending.ok) throw new Error('request failed')
     expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
       .toMatchObject({ ok: true, state: 'pending' })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: null,
+      proofSummary: null,
+    })
     await db.insert(notifications).values({
       id: uuid(39_999), shopId, recipientProfileId: owner.profileId,
       eventType: 'quote_sent', entityType: 'customer', entityId: customerId,
@@ -1647,7 +1646,7 @@ describe('suppression-first messaging deletion', () => {
     } })
   })
 
-  it('reconciles a detached send after its hold is released between retries', async () => {
+  it('held work converges after a released hold advances its retained item on retry', async () => {
     await seedPhaseTwoResource('sends', 129)
     const [hold] = await activeHold({ resourceType: 'quote_send', resourceId: uuid(10_000) })
       .returning({ id: messagingRetentionHolds.id })
@@ -1655,6 +1654,10 @@ describe('suppression-first messaging deletion', () => {
     if (!pending.ok) throw new Error('request failed')
     expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
       .toMatchObject({ ok: true, state: 'pending' })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: null,
+      proofSummary: null,
+    })
     await db.update(messagingRetentionHolds).set({ releasedAt: new Date() })
       .where(eq(messagingRetentionHolds.id, hold!.id))
     const { result } = await completeUntilTerminal(pending.requestId, 5)
@@ -1662,6 +1665,61 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select().from(quoteSends)).toHaveLength(0)
     expect((await db.select().from(messagingDeletionRequests))[0]?.proofSummary)
       .toMatchObject({ retained: { heldQuoteSends: 0 } })
+  })
+
+  it('held work converges with exact held dependency parent and child counts', async () => {
+    const sendId = uuid(72_600)
+    await insertSend(sendId, 'submitted')
+    await db.insert(smsLog).values({
+      id: uuid(72_601), shopId, quoteSendId: sendId,
+      templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent',
+      serverReceivedAt: new Date('2026-07-12T10:00:00Z'),
+      retainUntil: new Date('2027-07-12T10:00:00Z'),
+    })
+    await activeHold({ resourceType: 'sms_log', resourceId: uuid(72_601) })
+    const pending = await request({ requestKey: uuid(72_602) })
+    if (!pending.ok) throw new Error('request failed')
+    const { result } = await completeUntilTerminal(pending.requestId, 3)
+    expect(result).toMatchObject({
+      ok: true, state: 'completed', counts: { quoteSendsRetained: 1, smsLogsDeleted: 0 },
+    })
+    expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+      priorRecordCounts: { quoteSends: 1, smsLogs: 1 },
+      proofSummary: { retained: { heldQuoteSends: 1, heldSmsLogs: 1, total: 2 } },
+    })
+    expect(await journalRows(pending.requestId)).toEqual([])
+  })
+
+  it('isolates final tombstones from another customer detached and held records', async () => {
+    await insertSend(uuid(72_700), 'submitted')
+    await insertSend(
+      uuid(72_701), 'submitted', 'key_v2', destination,
+      duplicateCustomerId, duplicateCustomerId,
+    )
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(72_700) })
+    await activeHold({ resourceType: 'quote_send', resourceId: uuid(72_701) })
+
+    const other = await request({
+      customerId: duplicateCustomerId,
+      requestKey: uuid(72_702),
+      requestFingerprint: 'b'.repeat(64),
+    })
+    if (!other.ok) throw new Error('other request failed')
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: other.requestId, now }))
+      .toMatchObject({ ok: true, state: 'completed', counts: { quoteSendsRetained: 1 } })
+
+    const pending = await request({ requestKey: uuid(72_703) })
+    if (!pending.ok) throw new Error('request failed')
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'completed', counts: { quoteSendsRetained: 1 } })
+    const requestRows = await db.select().from(messagingDeletionRequests)
+    expect(requestRows).toHaveLength(2)
+    expect(requestRows.map(({ priorRecordCounts }) => priorRecordCounts))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ quoteSends: 1 }),
+        expect.objectContaining({ quoteSends: 1 }),
+      ]))
+    expect(await db.select().from(messagingDeletionWorkItems)).toEqual([])
   })
 
   it('allows a different live same-shop retention authority to complete the immutable request', async () => {
@@ -1689,6 +1747,107 @@ describe('suppression-first messaging deletion', () => {
     expect(left).toMatchObject({ ok: true, state: 'completed' })
     expect(right).toEqual(left)
     expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
+  })
+
+  it('serializes a late consent writer behind finalization and returns suppression rejection', async () => {
+    const finalizerDefinition = (await client.query<{ definition: string }>(`
+      select regexp_replace(
+        pg_get_functiondef('finalize_messaging_deletion_request(uuid,uuid)'::regprocedure),
+        '\\s+', ' ', 'g'
+      ) as definition
+    `)).rows[0]?.definition.toLowerCase()
+    expect(finalizerDefinition).toContain(
+      'from public.shops locked_shop where locked_shop.id = p_shop_id for update',
+    )
+    const consentSource = await import('node:fs/promises').then(({ readFile }) =>
+      readFile('lib/shop-os/messaging-consent.ts', 'utf8'))
+    const consentWriter = consentSource.slice(
+      consentSource.indexOf('export async function recordMessagingConsentEvent'),
+    )
+    expect(consentWriter.indexOf(".from(shops).where(")).toBeGreaterThan(-1)
+    expect(consentWriter.indexOf(".limit(1).for('update')"))
+      .toBeGreaterThan(consentWriter.indexOf(".from(shops).where("))
+    expect(consentWriter.indexOf('tx.insert(messagingConsentEvents)'))
+      .toBeGreaterThan(consentWriter.indexOf(".limit(1).for('update')"))
+
+    const pending = await request({ requestKey: uuid(72_800) })
+    if (!pending.ok) throw new Error('request failed')
+    const finalizerDb = createTestDbClient(client)
+    const writerDb = createTestDbClient(client)
+    const disclosureSnapshot = Object.freeze({
+      disclosureVersion: 'signed_repair_updates_v1',
+      programVersion: 'repair_updates_v1',
+      senderIdentity: 'North Shop',
+      messagePurpose: 'estimates_authorizations_repair_status_pickup',
+      messageFrequency: 'varies_by_repair_order',
+      messageAndDataRates: 'may_apply',
+      stopKeyword: 'STOP',
+      helpKeyword: 'HELP',
+      consentNotConditionOfPurchase: true,
+      smsTermsUrl: 'https://example.com/sms-terms',
+      privacyPolicyUrl: 'https://example.com/privacy',
+      technologyProvider: 'Vyntechs',
+      renderedDisclosure: 'By signing below, I agree to receive recurring transactional text messages from North Shop about estimates, authorizations, repair status, and pickup for vehicles I bring to this shop. Message frequency varies by repair order. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help. Consent is not a condition of purchase. SMS Terms: https://example.com/sms-terms. Privacy Policy: https://example.com/privacy. Vyntechs provides the messaging technology.',
+    } as const)
+    const canonicalDisclosure = JSON.stringify(Object.fromEntries(
+      Object.keys(disclosureSnapshot).sort().map((key) => [
+        key, disclosureSnapshot[key as keyof typeof disclosureSnapshot],
+      ]),
+    ))
+
+    let releaseFinalizer!: () => void
+    const keepFinalizerOpen = new Promise<void>((resolve) => {
+      releaseFinalizer = resolve
+    })
+    let finalizerReady!: () => void
+    const finalizerStarted = new Promise<void>((resolve) => {
+      finalizerReady = resolve
+    })
+    const finalization = finalizerDb.transaction(async (tx) => {
+      await tx.execute(sql`select id from shops where id = ${shopId}::uuid for update`)
+      await tx.execute(sql`
+        select * from finalize_messaging_deletion_request(
+          ${shopId}::uuid, ${pending.requestId}::uuid
+        )
+      `)
+      finalizerReady()
+      await keepFinalizerOpen
+    })
+    await finalizerStarted
+
+    const writerResult = recordMessagingConsentEvent({
+      db: writerDb,
+      actor: owner,
+      customerId,
+      destination,
+      programVersion: 'repair_updates_v1',
+      eventType: 'consented',
+      captureMethod: 'signed_form',
+      customerControlled: true,
+      disclosureSnapshot,
+      disclosureHash: createHash('sha256').update(canonicalDisclosure).digest('hex'),
+      evidenceKind: 'signed_form_reference',
+      evidenceRef: 'late-finalization-writer',
+      requestKey: uuid(72_801),
+      requestFingerprint: 'c'.repeat(64),
+      occurredAt: new Date('2026-07-13T10:00:00Z'),
+      now: new Date('2026-07-13T10:00:00Z'),
+      keyRing,
+    })
+    const race = await Promise.race([
+      writerResult.then((result) => ({ state: 'settled' as const, result })),
+      new Promise<{ state: 'waiting' }>((resolve) => setTimeout(
+        () => resolve({ state: 'waiting' }), 20,
+      )),
+    ])
+    expect(race).toEqual({ state: 'waiting' })
+
+    releaseFinalizer()
+    await finalization
+    expect(await writerResult).toEqual({ ok: false, error: 'invalid_transition' })
+    expect(await db.select().from(messagingConsentEvents)).toEqual([])
+    expect((await db.select().from(messagingDeletionRequests))[0]?.state).toBe('completed')
+    expect(await client.query('select 1')).toBeDefined()
   })
 
   it.each([
@@ -1733,7 +1892,10 @@ describe('suppression-first messaging deletion', () => {
       2 + Math.ceil(count / maximum),
     )
     expect(result).toMatchObject({ ok: true, state: 'completed' })
-    expect(snapshots[0]).toMatchObject({ ok: true, state: 'pending' })
+    expect(snapshots[0]).toMatchObject({
+      ok: true,
+      state: type === 'holds' ? 'completed' : 'pending',
+    })
     expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
     const row = (await db.select().from(messagingDeletionRequests))[0]!
     const expected = {
@@ -1765,7 +1927,7 @@ describe('suppression-first messaging deletion', () => {
       10 + Math.ceil(total / recoveryLimits.totalResources),
     )
     expect(result).toMatchObject({ ok: true, state: 'completed' })
-    expect(snapshots[0]).toMatchObject({ ok: true, state: 'pending' })
+    expect(snapshots[0]).toMatchObject({ ok: true, state: 'completed' })
     expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
       priorRecordCounts: {
         consentEvents: 200, consentProjections: 100, quoteSends: 100,
@@ -1790,15 +1952,16 @@ describe('suppression-first messaging deletion', () => {
     expect(source).toContain('sql.param')
     expect(source).toContain('MAX_HISTORICAL_PAIRS = 64')
     expect(source).toContain('MAX_TOTAL_RESOURCES = 1024')
-    const dedicatedHoldsLock = 'select id, starts_at as "startsAt", resource_type as "resourceType"'
     const positions = [
       'select id from shops', 'from messaging_deletion_requests',
       'select id from customers', 'select source.id, source.state',
       'join messaging_consent_state source', 'join sms_log source',
-      'join notifications source', dedicatedHoldsLock,
+      'join notifications source', 'finalize_messaging_deletion_request',
     ].map((marker) => phaseTwo.indexOf(marker))
     expect(positions.every((position) => position >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(phaseTwo).not.toContain('update messaging_deletion_requests')
+    expect(phaseTwo).not.toContain('progressVersion')
   })
 
   it('uses the public result contract without leaking failure details', () => {

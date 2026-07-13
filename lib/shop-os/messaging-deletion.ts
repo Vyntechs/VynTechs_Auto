@@ -40,20 +40,6 @@ export type DeletionHeldCounts = Readonly<{
   total: number
 }>
 
-export type DeletionCursor = Readonly<{ at: string; id: string }>
-
-export type PendingDeletionProgress = Readonly<{
-  progressVersion: 1
-  resultCounts: DeletionResultCounts
-  heldCounts: DeletionHeldCounts
-  detachedSuppressionSources: number
-  cursors: Readonly<Partial<Record<
-    'quoteSends' | 'consentSubjects' | 'consentEvents' |
-    'smsLogs' | 'notifications' | 'holds',
-    DeletionCursor
-  >>>
-}>
-
 type Snapshot = {
   db: AppDb
   actor: Readonly<MessagingActor>
@@ -81,7 +67,6 @@ const MAX_CONSENT_EVENTS = 256
 const MAX_CONSENT_PROJECTIONS = 128
 const MAX_SMS_LOGS = 512
 const MAX_NOTIFICATIONS = 256
-const MAX_HOLDS = 256
 const MAX_TOTAL_RESOURCES = 1024
 
 function retentionAuthority(role: string): boolean {
@@ -614,95 +599,31 @@ export async function requestMessagingDeletion(rawInput: {
 }
 
 type CleanupRequest = RequestRow & { shopId: string; subjectKey: string; requestKey: string }
-type SendRow = WorkItemSource & {
+type HeldWorkSource = WorkItemSource & {
+  workOutcome: 'pending' | 'retained'
+  resourceHeld: boolean
+  subjectHeld: boolean
+}
+type SendRow = HeldWorkSource & {
   id: string
   state: string
   customerId: string | null
   subjectKey: string
-  workOutcome: 'pending' | 'retained'
 }
-type HoldRow = { id: string; startsAt: Date | string; resourceType: string | null; resourceId: string | null; subjectKey: string | null }
 type WorkItemSource = { workItemId: string }
-type ConsentProjectionRow = MessagingPair & WorkItemSource & {
+type ConsentProjectionRow = MessagingPair & HeldWorkSource & {
   id: string
   subjectKey: string
   programVersion: string
   sourceEventId: string
 }
-type ConsentEventRow = MessagingPair & WorkItemSource & {
+type ConsentEventRow = MessagingPair & HeldWorkSource & {
   id: string
   subjectKey: string
   programVersion: string
   countsTowardProof: boolean
 }
-type SmsRow = WorkItemSource & { id: string; quoteSendId: string }
-
-const emptyPrior = (): PriorRecordCounts => ({ consentEvents: 0, consentProjections: 0,
-  notifications: 0, quoteSends: 0, smsLogs: 0 })
-const emptyResults = (): DeletionResultCounts => ({ consentEventsDeleted: 0,
-  notificationsDeleted: 0, smsLogsDeleted: 0, quoteSendsDeleted: 0, quoteSendsRetained: 0 })
-const emptyHeld = (): DeletionHeldCounts => ({ heldConsentEvents: 0, heldConsentProjections: 0,
-  heldQuoteSends: 0, heldSmsLogs: 0, heldNotifications: 0, total: 0 })
-
-function exactCounts<T extends Record<string, number>>(value: unknown, keys: string[]): T {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.getPrototypeOf(value) !== Object.prototype
-    || Object.keys(value).sort().join() !== [...keys].sort().join()) throw new Error('invalid_progress')
-  for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor?.enumerable || !('value' in descriptor)
-      || !Number.isSafeInteger(descriptor.value) || descriptor.value < 0) throw new Error('invalid_progress')
-  }
-  return value as T
-}
-
-function parsePendingProgress(row: CleanupRequest): { prior: PriorRecordCounts; progress: PendingDeletionProgress } {
-  if (row.counts === null && row.proof === null) return { prior: emptyPrior(), progress: {
-    progressVersion: 1, resultCounts: emptyResults(), heldCounts: emptyHeld(),
-    detachedSuppressionSources: 0, cursors: {},
-  } }
-  const prior = exactCounts<PriorRecordCounts>(row.counts,
-    ['consentEvents', 'consentProjections', 'notifications', 'quoteSends', 'smsLogs'])
-  if (!row.proof || typeof row.proof !== 'object' || Array.isArray(row.proof)
-    || Object.getPrototypeOf(row.proof) !== Object.prototype
-    || Object.keys(row.proof).sort().join() !== ['progressVersion', 'resultCounts', 'heldCounts',
-      'detachedSuppressionSources', 'cursors'].sort().join()
-    || row.proof.progressVersion !== 1
-    || !Number.isSafeInteger(row.proof.detachedSuppressionSources)
-    || (row.proof.detachedSuppressionSources as number) < 0) throw new Error('invalid_progress')
-  const resultCounts = exactCounts<DeletionResultCounts>(row.proof.resultCounts,
-    ['consentEventsDeleted', 'notificationsDeleted', 'smsLogsDeleted', 'quoteSendsDeleted', 'quoteSendsRetained'])
-  const heldCounts = exactCounts<DeletionHeldCounts>(row.proof.heldCounts,
-    ['heldConsentEvents', 'heldConsentProjections', 'heldQuoteSends', 'heldSmsLogs', 'heldNotifications', 'total'])
-  const cursors = row.proof.cursors
-  if (!cursors || typeof cursors !== 'object' || Array.isArray(cursors)
-    || Object.getPrototypeOf(cursors) !== Object.prototype) throw new Error('invalid_progress')
-  const allowed = new Set(['quoteSends', 'consentSubjects', 'consentEvents',
-    'smsLogs', 'notifications', 'holds'])
-  for (const [key, cursor] of Object.entries(cursors)) {
-    if (!allowed.has(key) || !cursor || typeof cursor !== 'object' || Array.isArray(cursor)
-      || Object.getPrototypeOf(cursor) !== Object.prototype
-      || Object.keys(cursor).sort().join() !== 'at,id') throw new Error('invalid_progress')
-    const descriptorAt = Object.getOwnPropertyDescriptor(cursor, 'at')
-    const descriptorId = Object.getOwnPropertyDescriptor(cursor, 'id')
-    if (!descriptorAt?.enumerable || !descriptorId?.enumerable
-      || !('value' in descriptorAt) || !('value' in descriptorId)
-      || typeof descriptorAt.value !== 'string' || !Number.isFinite(Date.parse(descriptorAt.value))
-      || typeof descriptorId.value !== 'string' || !uuid.safeParse(descriptorId.value).success) {
-      throw new Error('invalid_progress')
-    }
-  }
-  return { prior, progress: { progressVersion: 1, resultCounts, heldCounts,
-    detachedSuppressionSources: row.proof.detachedSuppressionSources as number,
-    cursors: cursors as PendingDeletionProgress['cursors'] } }
-}
-
-function addCount(left: number, right: number): number {
-  const result = left + right
-  if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right) || left < 0 || right < 0
-    || !Number.isSafeInteger(result)) throw new Error('count_overflow')
-  return result
-}
+type SmsRow = HeldWorkSource & { id: string; quoteSendId: string }
 
 async function discoverDeletionWorkItems(
   tx: AppDb,
@@ -917,14 +838,13 @@ export async function completeMessagingDeletion(rawInput: {
         }
       }
       if (!request.customerId) return { ok: false, error: 'request_conflict' }
-      let stored = parsePendingProgress(request)
       const customer = unwrapRows(await tx.execute<{ id: string }>(sql`
         select id from customers where shop_id = ${request.shopId}::uuid
           and id = ${request.customerId}::uuid for update
       `))[0]
       if (!customer) return { ok: false, error: 'not_found' }
 
-      const discoveredWorkItems = await discoverDeletionWorkItems(tx as AppDb, {
+      await discoverDeletionWorkItems(tx as AppDb, {
         id: request.id,
         shopId: request.shopId,
         customerId: request.customerId,
@@ -933,12 +853,21 @@ export async function completeMessagingDeletion(rawInput: {
       const sendPage = unwrapRows<SendRow>(await tx.execute(sql`
         select source.id, source.state, source.customer_id as "customerId",
           source.subject_key as "subjectKey", work.id as "workItemId",
-          work.outcome as "workOutcome"
+          work.outcome as "workOutcome",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.resource_type = 'quote_send'
+              and hold.resource_id = source.id and hold.released_at is null
+              and hold.starts_at <= clock_timestamp() and hold.expires_at > clock_timestamp())
+            as "resourceHeld",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+              and hold.released_at is null and hold.starts_at <= clock_timestamp()
+              and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join quote_sends source on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
           and work.resource_type = 'quote_send' and work.outcome in ('pending', 'retained')
-        order by (work.outcome = 'pending') desc, source.id
+        order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
         limit ${MAX_SENDS + 1} for update of source, work
       `))
       const projectionPage = unwrapRows<ConsentProjectionRow>(await tx.execute(sql`
@@ -946,13 +875,19 @@ export async function completeMessagingDeletion(rawInput: {
           source.destination_fingerprint as "destinationFingerprint",
           source.fingerprint_key_version as "fingerprintKeyVersion",
           source.program_version as "programVersion", source.source_event_id as "sourceEventId",
-          work.id as "workItemId"
+          work.id as "workItemId", work.outcome as "workOutcome", false as "resourceHeld",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+              and hold.released_at is null and hold.starts_at <= clock_timestamp()
+              and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join messaging_consent_state source
           on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
-          and work.resource_type = 'consent_projection' and work.outcome = 'pending'
-        order by source.subject_key, source.id limit ${MAX_CONSENT_PROJECTIONS + 1}
+          and work.resource_type = 'consent_projection' and work.outcome in ('pending', 'retained')
+        order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc,
+          source.subject_key, source.id
+        limit ${MAX_CONSENT_PROJECTIONS + 1}
         for update of source, work
       `))
       const eventPage = unwrapRows<ConsentEventRow>(await tx.execute(sql`
@@ -960,13 +895,25 @@ export async function completeMessagingDeletion(rawInput: {
           source.destination_fingerprint as "destinationFingerprint",
           source.fingerprint_key_version as "fingerprintKeyVersion",
           source.program_version as "programVersion", work.id as "workItemId",
-          work.counts_toward_proof as "countsTowardProof"
+          work.counts_toward_proof as "countsTowardProof", work.outcome as "workOutcome",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id
+              and hold.resource_type = 'messaging_consent_event'
+              and hold.resource_id = source.id and hold.released_at is null
+              and hold.starts_at <= clock_timestamp() and hold.expires_at > clock_timestamp())
+            as "resourceHeld",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.subject_key = source.subject_key
+              and hold.released_at is null and hold.starts_at <= clock_timestamp()
+              and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join messaging_consent_events source
           on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
-          and work.resource_type = 'consent_event' and work.outcome = 'pending'
-        order by source.subject_key, source.id limit ${MAX_CONSENT_EVENTS + 1}
+          and work.resource_type = 'consent_event' and work.outcome in ('pending', 'retained')
+        order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc,
+          source.subject_key, source.id
+        limit ${MAX_CONSENT_EVENTS + 1}
         for update of source, work
       `))
       let totalRemaining = MAX_TOTAL_RESOURCES
@@ -981,27 +928,56 @@ export async function completeMessagingDeletion(rawInput: {
       totalRemaining -= consentEvents.length
       const sendIds = sends.map(({ id }) => id)
       const smsPage = unwrapRows<SmsRow>(await tx.execute(sql`
-        select source.id, source.quote_send_id as "quoteSendId", work.id as "workItemId"
+        select source.id, source.quote_send_id as "quoteSendId", work.id as "workItemId",
+          work.outcome as "workOutcome",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.resource_type = 'sms_log'
+              and hold.resource_id = source.id and hold.released_at is null
+              and hold.starts_at <= clock_timestamp() and hold.expires_at > clock_timestamp())
+            as "resourceHeld",
+          exists (select 1 from messaging_retention_holds hold
+            join quote_sends parent_source on parent_source.shop_id = source.shop_id
+              and parent_source.id = source.quote_send_id
+            where hold.shop_id = source.shop_id and hold.subject_key = parent_source.subject_key
+              and hold.released_at is null and hold.starts_at <= clock_timestamp()
+              and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join sms_log source on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
-          and work.resource_type = 'sms_log' and work.outcome = 'pending'
+          and work.resource_type = 'sms_log' and work.outcome in ('pending', 'retained')
           and source.quote_send_id = any(${sql.param(sendIds)}::uuid[])
-        order by source.id limit ${MAX_SMS_LOGS + 1} for update of source, work
+        order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
+        limit ${MAX_SMS_LOGS + 1} for update of source, work
       `))
       const notificationPage = unwrapRows<WorkItemSource & {
-        id: string; entityType: string; entityId: string
+        id: string; entityType: string; entityId: string; workOutcome: 'pending' | 'retained'
+        resourceHeld: boolean; subjectHeld: boolean
       }>(await tx.execute(sql`
         select source.id, source.entity_type as "entityType", source.entity_id as "entityId",
-          work.id as "workItemId"
+          work.id as "workItemId", work.outcome as "workOutcome",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id and hold.resource_type = 'notification'
+              and hold.resource_id = source.id and hold.released_at is null
+              and hold.starts_at <= clock_timestamp() and hold.expires_at > clock_timestamp())
+            as "resourceHeld",
+          exists (select 1 from messaging_retention_holds hold
+            where hold.shop_id = source.shop_id
+              and hold.subject_key = case when source.entity_type = 'customer'
+                then ${request.subjectKey}::uuid else (
+                  select parent_source.subject_key from quote_sends parent_source
+                  where parent_source.shop_id = source.shop_id and parent_source.id = source.entity_id
+                ) end
+              and hold.released_at is null and hold.starts_at <= clock_timestamp()
+              and hold.expires_at > clock_timestamp()) as "subjectHeld"
         from messaging_deletion_work_items work
         join notifications source on source.shop_id = work.shop_id and source.id = work.resource_id
         where work.request_id = ${request.id}::uuid
-          and work.resource_type = 'notification' and work.outcome = 'pending'
+          and work.resource_type = 'notification' and work.outcome in ('pending', 'retained')
           and ((source.entity_type = 'customer' and source.entity_id = ${request.customerId}::uuid)
             or (source.entity_type = 'quote_send'
               and source.entity_id = any(${sql.param(sendIds)}::uuid[])))
-        order by source.id limit ${MAX_NOTIFICATIONS + 1} for update of source, work
+        order by "resourceHeld", "subjectHeld", (work.outcome = 'pending') desc, source.id
+        limit ${MAX_NOTIFICATIONS + 1} for update of source, work
       `))
       const smsRows = smsPage.slice(0, Math.min(MAX_SMS_LOGS, totalRemaining))
       totalRemaining -= smsRows.length
@@ -1014,80 +990,20 @@ export async function completeMessagingDeletion(rawInput: {
         .filter(({ entityType }) => entityType === 'quote_send')
         .map(({ entityId }) => entityId))
       for (const row of smsPage.slice(smsRows.length)) deferredSendIds.add(row.quoteSendId)
-      const subjectKeys = [...new Set([
-        request.subjectKey,
-        ...sends.map(({ subjectKey }) => subjectKey),
-        ...consentProjections.map(({ subjectKey }) => subjectKey),
-        ...consentEvents.map(({ subjectKey }) => subjectKey),
-      ])].sort()
-      const smsIds = smsRows.map(({ id }) => id)
-      const notificationIds = notificationRows.map(({ id }) => id)
-      const consentEventIds = consentEvents.map(({ id }) => id)
-      const holdCursor = stored.progress.cursors.holds
-      const holdPage = unwrapRows<HoldRow>(await tx.execute(sql`
-        select id, starts_at as "startsAt", resource_type as "resourceType",
-          resource_id as "resourceId", subject_key as "subjectKey"
-        from messaging_retention_holds
-        where shop_id = ${request.shopId}::uuid and released_at is null
-          and starts_at <= clock_timestamp() and expires_at > clock_timestamp()
-          and (${holdCursor ? sql`(starts_at, id) > (${holdCursor.at}::timestamptz, ${holdCursor.id}::uuid)` : sql`true`})
-          and (subject_key = any(${sql.param(subjectKeys)}::uuid[])
-            or (resource_type = 'quote_send'
-              and resource_id = any(${sql.param(sendIds)}::uuid[]))
-            or (resource_type = 'sms_log'
-              and resource_id = any(${sql.param(smsIds)}::uuid[]))
-            or (resource_type = 'notification'
-              and resource_id = any(${sql.param(notificationIds)}::uuid[]))
-            or (resource_type = 'messaging_consent_event'
-              and resource_id = any(${sql.param(consentEventIds)}::uuid[])))
-        order by starts_at, id limit ${MAX_HOLDS + 1} for update
-      `))
-      const holds = holdPage.slice(0, Math.min(MAX_HOLDS, totalRemaining))
-      totalRemaining -= holds.length
-
-      let overLimit = sendPage.slice(sends.length).some(({ workOutcome }) => workOutcome === 'pending')
-        || eventPage.length > consentEvents.length
-        || projectionPage.length > consentProjections.length || smsPage.length > smsRows.length
-        || notificationPage.length > notificationRows.length
-        || holdPage.length > holds.length || discoveredWorkItems === MAX_TOTAL_RESOURCES
-
-      const heldSubjectKeys = new Set(subjectKeys.filter((subjectKey) =>
-        holds.some((hold) => hold.subjectKey === subjectKey)))
-      const resourceHeld = (type: string, id: string) => holds.some((hold) =>
-        hold.resourceType === type && hold.resourceId === id)
       const consentEventHeld = (event: ConsentEventRow) =>
-        heldSubjectKeys.has(event.subjectKey)
-          || resourceHeld('messaging_consent_event', event.id)
-      const sendsById = new Map(sends.map((send) => [send.id, send]))
-      const sendHeld = (send: SendRow) => heldSubjectKeys.has(send.subjectKey)
-        || resourceHeld('quote_send', send.id)
-      const smsHeld = (row: SmsRow) => resourceHeld('sms_log', row.id)
-        || heldSubjectKeys.has(sendsById.get(row.quoteSendId)?.subjectKey ?? '')
-      const notificationHeld = (row: { id: string; entityType: string; entityId: string }) =>
-        resourceHeld('notification', row.id)
-        || (row.entityType === 'customer' && heldSubjectKeys.has(request.subjectKey))
-        || (row.entityType === 'quote_send'
-          && heldSubjectKeys.has(sendsById.get(row.entityId)?.subjectKey ?? ''))
+        event.subjectHeld || event.resourceHeld
+      const sendHeld = (send: SendRow) => send.subjectHeld || send.resourceHeld
+      const smsHeld = (row: SmsRow) => row.subjectHeld || row.resourceHeld
+      const notificationHeld = (row: { resourceHeld: boolean; subjectHeld: boolean }) =>
+        row.resourceHeld || row.subjectHeld
       const heldSmsParents = new Set(smsRows.filter(smsHeld)
         .map(({ quoteSendId }) => quoteSendId))
-
-      let priorCounts: PriorRecordCounts = Object.freeze({
-        consentEvents: 0,
-        consentProjections: 0,
-        notifications: 0,
-        quoteSends: 0,
-        smsLogs: 0,
-      })
-
-      let consentDeleted = 0
-      let projectionsDeleted = 0
-      let detachedSuppressionSources = 0
       const subjectHeldEventWorkItemIds = consentEvents
-        .filter((event) => heldSubjectKeys.has(event.subjectKey))
+        .filter((event) => event.workOutcome === 'pending' && event.subjectHeld)
         .map(({ workItemId }) => workItemId)
       const resourceHeldEventWorkItemIds = consentEvents
-        .filter((event) => !heldSubjectKeys.has(event.subjectKey)
-          && resourceHeld('messaging_consent_event', event.id))
+        .filter((event) => event.workOutcome === 'pending'
+          && !event.subjectHeld && event.resourceHeld)
         .map(({ workItemId }) => workItemId)
       if (subjectHeldEventWorkItemIds.length > 0) {
         await tx.execute(sql`
@@ -1130,7 +1046,7 @@ export async function completeMessagingDeletion(rawInput: {
               on projection.shop_id = work.shop_id and projection.id = work.resource_id
             where work.request_id = ${request.id}::uuid
               and work.id = any(${sql.param(projectionWorkItemIds)}::uuid[])
-              and work.outcome = 'pending'
+              and work.outcome in ('pending', 'retained')
               and not exists (
                 select 1 from messaging_consent_events child
                 where child.shop_id = projection.shop_id
@@ -1168,7 +1084,7 @@ export async function completeMessagingDeletion(rawInput: {
               on projection.shop_id = work.shop_id and projection.id = work.resource_id
             where work.request_id = ${request.id}::uuid
               and work.id = any(${sql.param(projectionWorkItemIds)}::uuid[])
-              and work.outcome = 'pending'
+              and work.outcome in ('pending', 'retained')
               and exists (
                 select 1 from messaging_retention_holds hold
                 where hold.shop_id = projection.shop_id
@@ -1213,7 +1129,7 @@ export async function completeMessagingDeletion(rawInput: {
             where work.id = any(${sql.param(deletableProjectionWorkItemIds)}::uuid[])
               and work.request_id = ${request.id}::uuid
               and work.resource_type = 'consent_projection'
-              and work.outcome = 'pending'
+              and work.outcome in ('pending', 'retained')
               and projection.shop_id = work.shop_id and projection.id = work.resource_id
             returning work.id
           `)).map(({ id }) => id)
@@ -1241,15 +1157,6 @@ export async function completeMessagingDeletion(rawInput: {
             )
           `)
         }
-        consentDeleted += compactableEvents.filter(({ countsTowardProof }) => countsTowardProof).length
-        if (compactionItems.length > 0) {
-          detachedSuppressionSources += unwrapRows<{ count: number }>(await tx.execute(sql`
-            select coalesce(sum(detached_suppression_sources), 0)::int as count
-            from messaging_deletion_work_items
-            where request_id = ${request.id}::uuid
-              and id = any(${sql.param(compactionItems)}::uuid[])
-          `))[0]?.count ?? 0
-        }
         if (deletableProjectionWorkItemIds.length > 0) {
           const resolvedProjectionCount = unwrapRows<{ count: number }>(await tx.execute(sql`
             with resolved as (
@@ -1258,7 +1165,7 @@ export async function completeMessagingDeletion(rawInput: {
               where work.request_id = ${request.id}::uuid
                 and work.id = any(${sql.param(deletableProjectionWorkItemIds)}::uuid[])
                 and work.resource_type = 'consent_projection'
-                and work.outcome = 'pending'
+                and work.outcome in ('pending', 'retained')
                 and not exists (
                   select 1 from messaging_deletion_work_items child
                   where child.request_id = work.request_id
@@ -1271,7 +1178,6 @@ export async function completeMessagingDeletion(rawInput: {
           if (resolvedProjectionCount !== deletableProjectionWorkItemIds.length) {
             throw new Error('consent_projection_outcome_advance_incomplete')
           }
-          projectionsDeleted += resolvedProjectionCount
         }
         if (heldProjectionWorkItemIds.length > 0) {
           await tx.execute(sql`
@@ -1319,18 +1225,12 @@ export async function completeMessagingDeletion(rawInput: {
           `)
         }
       }
-      priorCounts = Object.freeze({
-        ...priorCounts,
-        consentEvents: consentDeleted,
-        consentProjections: projectionsDeleted,
-      })
-
       const deletableSmsIds = smsRows.filter((row) => !smsHeld(row)).map(({ id }) => id)
-      const smsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
+      unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (
           delete from sms_log source using messaging_deletion_work_items work
           where work.request_id = ${request.id}::uuid
-            and work.resource_type = 'sms_log' and work.outcome = 'pending'
+            and work.resource_type = 'sms_log' and work.outcome in ('pending', 'retained')
             and work.resource_id = source.id and work.shop_id = source.shop_id
             and source.shop_id = ${request.shopId}::uuid
             and source.id = any(${sql.param(deletableSmsIds)}::uuid[])
@@ -1347,9 +1247,9 @@ export async function completeMessagingDeletion(rawInput: {
         ) select count(*)::int as count from resolved
       `))[0]?.count ?? 0
       const subjectHeldSmsWorkItemIds = smsRows.filter((row) => smsHeld(row)
-        && !resourceHeld('sms_log', row.id)).map(({ workItemId }) => workItemId)
+        && row.workOutcome === 'pending' && !row.resourceHeld).map(({ workItemId }) => workItemId)
       const resourceHeldSmsWorkItemIds = smsRows.filter((row) =>
-        resourceHeld('sms_log', row.id)).map(({ workItemId }) => workItemId)
+        row.workOutcome === 'pending' && row.resourceHeld).map(({ workItemId }) => workItemId)
       if (subjectHeldSmsWorkItemIds.length > 0) {
         await tx.execute(sql`
           update messaging_deletion_work_items set outcome = 'retained',
@@ -1370,11 +1270,11 @@ export async function completeMessagingDeletion(rawInput: {
       }
       const deletableNotificationIds = notificationRows.filter((row) => !notificationHeld(row))
         .map(({ id }) => id)
-      const notificationsDeleted = unwrapRows<{ count: number }>(await tx.execute(sql`
+      unwrapRows<{ count: number }>(await tx.execute(sql`
         with deleted as (
           delete from notifications source using messaging_deletion_work_items work
           where work.request_id = ${request.id}::uuid
-            and work.resource_type = 'notification' and work.outcome = 'pending'
+            and work.resource_type = 'notification' and work.outcome in ('pending', 'retained')
             and work.resource_id = source.id and work.shop_id = source.shop_id
             and source.shop_id = ${request.shopId}::uuid
             and source.id = any(${sql.param(deletableNotificationIds)}::uuid[])
@@ -1391,10 +1291,11 @@ export async function completeMessagingDeletion(rawInput: {
         ) select count(*)::int as count from resolved
       `))[0]?.count ?? 0
       const subjectHeldNotificationWorkItemIds = notificationRows
-        .filter((row) => notificationHeld(row) && !resourceHeld('notification', row.id))
+        .filter((row) => row.workOutcome === 'pending'
+          && notificationHeld(row) && !row.resourceHeld)
         .map(({ workItemId }) => workItemId)
       const resourceHeldNotificationWorkItemIds = notificationRows
-        .filter((row) => resourceHeld('notification', row.id))
+        .filter((row) => row.workOutcome === 'pending' && row.resourceHeld)
         .map(({ workItemId }) => workItemId)
       if (subjectHeldNotificationWorkItemIds.length > 0) {
         await tx.execute(sql`
@@ -1414,14 +1315,6 @@ export async function completeMessagingDeletion(rawInput: {
             and outcome = 'pending'
         `)
       }
-      priorCounts = Object.freeze({
-        ...priorCounts,
-        notifications: notificationsDeleted,
-        smsLogs: smsDeleted,
-      })
-
-      let sendsDeleted = 0
-      let sendsRetained = 0
       const retainedChildParentWorkItemIds = new Set(unwrapRows<{ id: string }>(await tx.execute(sql`
         select distinct parent.id
         from messaging_deletion_work_items parent
@@ -1475,11 +1368,10 @@ export async function completeMessagingDeletion(rawInput: {
             ) select count(*)::int as count from resolved
           `))[0]?.count ?? 0
           if (resolved !== 1) throw new Error('quote_send_outcome_mismatch')
-          sendsDeleted += 1
           continue
         }
         const retentionBasis = sendHeld(send)
-          ? (resourceHeld('quote_send', send.id) ? 'resource_hold' : 'subject_hold')
+          ? (send.resourceHeld ? 'resource_hold' : 'subject_hold')
           : (retainedChildParentWorkItemIds.has(send.workItemId)
               || heldSmsParents.has(send.id) ? 'held_dependency' : null)
         if (!retentionBasis) continue
@@ -1519,156 +1411,35 @@ export async function completeMessagingDeletion(rawInput: {
               and work.request_id = ${request.id}::uuid and work.outcome = 'pending'
           `)
         }
-        sendsRetained += 1
       }
-      priorCounts = Object.freeze({ ...priorCounts, quoteSends: sendsDeleted + sendsRetained })
-
-      overLimit ||= (unwrapRows<{ count: number }>(await tx.execute(sql`
-        select count(*)::int as count
-        from messaging_deletion_work_items
-        where request_id = ${request.id}::uuid and outcome = 'pending'
-      `))[0]?.count ?? 0) > 0
-
-      const completedAt = unwrapRows<{ at: Date | string }>(await tx.execute(sql`
-        with barriers(at) as (
-          select requested_at from messaging_deletion_requests where shop_id = ${request.shopId}::uuid
-          union all select completed_at from messaging_deletion_requests where shop_id = ${request.shopId}::uuid
-          union all select committed_at from messaging_consent_events where shop_id = ${request.shopId}::uuid
-          union all select updated_at from quote_sends where shop_id = ${request.shopId}::uuid
-          union all select updated_at from sms_suppressions where shop_id = ${request.shopId}::uuid
-        ) select greatest(clock_timestamp(), coalesce(max(at) + interval '1 millisecond', '-infinity')) as at
-          from barriers
-      `))[0]?.at
-      if (!completedAt) throw new Error('completion_time_unavailable')
-      const journal = unwrapRows<{
-        consentEvents: number
-        consentProjections: number
-        notifications: number
-        quoteSends: number
-        smsLogs: number
-        consentEventsDeleted: number
-        notificationsDeleted: number
-        smsLogsDeleted: number
-        quoteSendsDeleted: number
-        quoteSendsRetained: number
-        heldConsentEvents: number
-        heldConsentProjections: number
-        heldQuoteSends: number
-        heldSmsLogs: number
-        heldNotifications: number
-        detachedSuppressionSources: number
+      const finalized = unwrapRows<{
+        state: 'pending' | 'completed'
+        priorRecordCounts: Record<string, number> | null
+        proofSummary: Record<string, unknown> | null
       }>(await tx.execute(sql`
-        select
-          count(*) filter (where resource_type = 'consent_event'
-            and counts_toward_proof and outcome <> 'pending')::int as "consentEvents",
-          count(*) filter (where resource_type = 'consent_projection'
-            and outcome <> 'pending')::int as "consentProjections",
-          count(*) filter (where resource_type = 'notification'
-            and outcome <> 'pending')::int as notifications,
-          count(*) filter (where resource_type = 'quote_send'
-            and outcome <> 'pending')::int as "quoteSends",
-          count(*) filter (where resource_type = 'sms_log'
-            and outcome <> 'pending')::int as "smsLogs",
-          count(*) filter (where resource_type = 'consent_event'
-            and counts_toward_proof and outcome = 'deleted')::int as "consentEventsDeleted",
-          count(*) filter (where resource_type = 'notification'
-            and outcome = 'deleted')::int as "notificationsDeleted",
-          count(*) filter (where resource_type = 'sms_log'
-            and outcome = 'deleted')::int as "smsLogsDeleted",
-          count(*) filter (where resource_type = 'quote_send'
-            and outcome = 'deleted')::int as "quoteSendsDeleted",
-          count(*) filter (where resource_type = 'quote_send'
-            and outcome = 'retained')::int as "quoteSendsRetained",
-          count(*) filter (where resource_type = 'consent_event'
-            and counts_toward_proof and outcome = 'retained')::int as "heldConsentEvents",
-          count(*) filter (where resource_type = 'consent_projection'
-            and outcome = 'retained')::int as "heldConsentProjections",
-          count(*) filter (where resource_type = 'quote_send'
-            and outcome = 'retained')::int as "heldQuoteSends",
-          count(*) filter (where resource_type = 'sms_log'
-            and outcome = 'retained')::int as "heldSmsLogs",
-          count(*) filter (where resource_type = 'notification'
-            and outcome = 'retained')::int as "heldNotifications",
-          coalesce(sum(detached_suppression_sources), 0)::int as "detachedSuppressionSources"
-        from messaging_deletion_work_items
-        where request_id = ${request.id}::uuid
+        select state, prior_record_counts as "priorRecordCounts",
+          proof_summary as "proofSummary"
+        from finalize_messaging_deletion_request(
+          ${request.shopId}::uuid, ${request.id}::uuid
+        )
       `))[0]
-      if (!journal) throw new Error('deletion_journal_aggregate_unavailable')
-      const counts = Object.freeze({
-        consentEventsDeleted: journal.consentEventsDeleted,
-        notificationsDeleted: journal.notificationsDeleted,
-        smsLogsDeleted: journal.smsLogsDeleted,
-        quoteSendsDeleted: journal.quoteSendsDeleted,
-        quoteSendsRetained: journal.quoteSendsRetained,
-      })
-      const accumulatedPrior = Object.freeze({
-        consentEvents: journal.consentEvents,
-        consentProjections: journal.consentProjections,
-        notifications: journal.notifications,
-        quoteSends: journal.quoteSends,
-        smsLogs: journal.smsLogs,
-      })
-      const retained = Object.freeze({
-        heldConsentEvents: journal.heldConsentEvents,
-        heldConsentProjections: journal.heldConsentProjections,
-        heldQuoteSends: journal.heldQuoteSends,
-        heldSmsLogs: journal.heldSmsLogs,
-        heldNotifications: journal.heldNotifications,
-        total: journal.heldConsentEvents + journal.heldConsentProjections
-          + journal.heldQuoteSends + journal.heldSmsLogs + journal.heldNotifications,
-      })
-      const finalPrior = accumulatedPrior
-      const accumulatedDetached = journal.detachedSuppressionSources
-
-      if (overLimit) {
-        const lastHold = holds.at(-1)
-        const progress: PendingDeletionProgress = Object.freeze({
-          progressVersion: 1,
-          resultCounts: counts,
-          heldCounts: emptyHeld(),
-          detachedSuppressionSources: accumulatedDetached,
-          cursors: Object.freeze({
-            ...stored.progress.cursors,
-            ...(holdPage.length > holds.length && lastHold ? { holds: {
-              at: new Date(lastHold.startsAt).toISOString(), id: lastHold.id,
-            } } : {}),
-          }),
-        })
-        await tx.execute(sql`
-          update messaging_deletion_requests
-          set prior_record_counts = ${JSON.stringify(accumulatedPrior)}::jsonb,
-              proof_summary = ${JSON.stringify(progress)}::jsonb
-          where id = ${request.id}::uuid and state = 'pending'
-        `)
-        return { ok: true, requestId: request.id, state: 'pending', counts }
+      if (!finalized) throw new Error('deletion_finalizer_result_unavailable')
+      if (finalized.state === 'pending') {
+        return { ok: true, requestId: request.id, state: 'pending' }
       }
-      const proof = Object.freeze({
-        version: 2,
-        customerBinding: semanticCustomerBinding({
-          shopId: request.shopId,
-          customerId: request.customerId,
-          requestKey: request.requestKey,
-          requestFingerprint: request.requestFingerprint,
-          reasonCode: request.reasonCode,
-          requestingActorProfileId: request.requestingActorProfileId,
-        }),
-        suppressionActive: 1,
-        deletedBarrier: 1,
-        suppressionSourceReferencesDetached: accumulatedDetached,
-        suppressionSourcesDetached: accumulatedDetached > 0,
-        retained,
-        resultCounts: counts,
-      })
-      await tx.execute(sql`
-        update messaging_deletion_requests set customer_id = null, state = 'completed',
-          completed_at = ${completedAt}::timestamptz,
-          latest_relevant_at = ${completedAt}::timestamptz,
-          prior_record_counts = ${JSON.stringify(finalPrior)}::jsonb,
-          proof_summary = ${JSON.stringify(proof)}::jsonb,
-          retain_until = ${completedAt}::timestamptz + interval '5 years'
-        where id = ${request.id}::uuid
-      `)
-      return { ok: true, requestId: request.id, state: 'completed', counts }
+      const completed: RequestRow = {
+        ...request,
+        state: 'completed',
+        customerId: null,
+        counts: finalized.priorRecordCounts,
+        proof: finalized.proofSummary,
+      }
+      return {
+        ok: true,
+        requestId: request.id,
+        state: 'completed',
+        counts: storedResultCounts(completed),
+      }
     })
   } catch {
     return { ok: false, error: 'retryable' }
