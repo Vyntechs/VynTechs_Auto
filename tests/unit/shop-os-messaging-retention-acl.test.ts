@@ -28,7 +28,7 @@ const FUNCTION_EXECUTION = [
   { signature: 'guard_quote_send_lifecycle()', serviceExecute: false },
   { signature: 'reject_messaging_consent_event_mutation()', serviceExecute: false },
   { signature: 'require_messaging_compaction_completion()', serviceExecute: false },
-  { signature: 'compact_messaging_consent_events(uuid,uuid,uuid)', serviceExecute: true },
+  { signature: 'compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)', serviceExecute: true },
   { signature: 'guard_messaging_deletion_request_mutation()', serviceExecute: false },
   { signature: 'purge_expired_messaging_deletion_request(uuid,uuid)', serviceExecute: true },
   { signature: 'purge_expired_messaging_consent_event(uuid,uuid)', serviceExecute: true },
@@ -284,7 +284,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
 
     await client.exec(`
       grant select on public.notifications to service_role;
-      revoke execute on function public.compact_messaging_consent_events(uuid, uuid, uuid)
+      revoke execute on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
         from service_role;
     `)
     await expect(ensureMessagingRetentionAclMigration(client)).rejects.toThrow(
@@ -292,7 +292,7 @@ describe('Shop OS messaging retention ACL hardening', () => {
     )
 
     await client.exec(`
-      grant execute on function public.compact_messaging_consent_events(uuid, uuid, uuid)
+      grant execute on function public.compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer)
         to service_role;
       revoke execute on function public.purge_expired_messaging_consent_event(uuid, uuid)
         from service_role;

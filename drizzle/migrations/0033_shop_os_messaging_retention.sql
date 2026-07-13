@@ -692,18 +692,32 @@ language plpgsql
 set search_path = ''
 as $$
 declare
+  compaction_shop_id uuid;
+  compaction_event_ids uuid[];
   purge_shop_id uuid;
   purge_event_ids uuid[];
 begin
-  if current_setting('vyntechs.messaging_consent_compaction_request', true) is not null
+  if tg_op = 'DELETE'
     and current_user = pg_catalog.pg_get_userbyid((
       select p.proowner
       from pg_catalog.pg_proc p
-      where p.oid = 'public.compact_messaging_consent_events(uuid,uuid,uuid)'::pg_catalog.regprocedure
+      where p.oid = 'public.compact_messaging_consent_events(uuid,uuid,uuid,uuid,integer)'::pg_catalog.regprocedure
     ))
-    and tg_op = 'DELETE'
   then
-    return old;
+    begin
+      compaction_shop_id := nullif(current_setting(
+        'vyntechs.messaging_consent_compaction_shop', true
+      ), '')::uuid;
+      compaction_event_ids := nullif(current_setting(
+        'vyntechs.messaging_consent_compaction_events', true
+      ), '')::uuid[];
+    exception when others then
+      compaction_shop_id := null;
+      compaction_event_ids := null;
+    end;
+    if compaction_shop_id = old.shop_id and old.id = any(compaction_event_ids) then
+      return old;
+    end if;
   end if;
 
   if tg_op = 'DELETE'
@@ -745,7 +759,7 @@ as $$
 declare
   compaction_request_id uuid;
   compaction_shop_id uuid;
-  authorized_subjects uuid[];
+  compaction_event_ids uuid[];
   purge_shop_id uuid;
   purge_event_ids uuid[];
 begin
@@ -779,24 +793,24 @@ begin
       'vyntechs.messaging_consent_compaction_shop',
       true
     )::uuid;
-    authorized_subjects := current_setting(
-      'vyntechs.messaging_consent_compaction_subjects',
+    compaction_event_ids := current_setting(
+      'vyntechs.messaging_consent_compaction_events',
       true
     )::uuid[];
   exception when others then
-    raise exception 'compaction requires completed tombstone in the same transaction';
+    raise exception 'compaction requires exact canonical request authorization';
   end;
 
   if compaction_shop_id is distinct from old.shop_id
-    or not (old.subject_key = any(authorized_subjects))
+    or not (old.id = any(compaction_event_ids))
     or not exists (
     select 1
     from public.messaging_deletion_requests r
     where r.id = compaction_request_id
       and r.shop_id = old.shop_id
-      and r.state = 'completed'
+      and r.state in ('pending', 'completed')
   ) then
-    raise exception 'compaction requires completed tombstone in the same transaction';
+    raise exception 'compaction requires exact canonical request authorization';
   end if;
   return old;
 end;
@@ -811,25 +825,60 @@ for each row execute function require_messaging_compaction_completion();
 create function compact_messaging_consent_events(
   p_shop_id uuid,
   p_subject_key uuid,
-  p_request_id uuid
+  p_request_id uuid,
+  p_after_event_id uuid,
+  p_batch_limit integer
 )
-returns integer
+returns table (
+  deleted_count integer,
+  detached_suppression_sources integer,
+  next_event_id uuid,
+  exhausted boolean
+)
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  deleted_count integer;
   request_customer_id uuid;
+  request_prior_counts jsonb;
+  request_proof jsonb;
   existing_request_text text;
   existing_shop_text text;
-  existing_subjects_text text;
-  authorized_subjects uuid[];
+  existing_events_text text;
+  authorized_event_ids uuid[];
+  page_event_ids uuid[];
+  selected_event_ids uuid[];
+  page_committed_ats timestamptz[];
+  page_event_types text[];
+  page_program_versions text[];
+  page_count integer;
+  countable_deleted integer;
+  projection_deleted integer;
+  cursor_at timestamptz;
+  stored_cursor_id uuid;
+  returned_cursor_at timestamptz;
 begin
   if nullif(current_setting('vyntechs.messaging_consent_purge_shop', true), '') is not null
     or nullif(current_setting('vyntechs.messaging_consent_purge_events', true), '') is not null
   then
     raise exception 'compaction transaction cannot mix consent event purge context';
+  end if;
+
+  if p_batch_limit is null or p_batch_limit < 1 or p_batch_limit > 256 then
+    raise exception 'compaction batch limit must be between 1 and 256';
+  end if;
+
+  select r.customer_id, r.prior_record_counts, r.proof_summary
+  into request_customer_id, request_prior_counts, request_proof
+  from public.messaging_deletion_requests r
+  where r.id = p_request_id
+    and r.shop_id = p_shop_id
+    and r.state = 'pending'
+    and r.customer_id is not null
+  for update;
+  if not found then
+    raise exception 'matching canonical pending messaging deletion request required';
   end if;
 
   existing_request_text := nullif(current_setting(
@@ -838,41 +887,50 @@ begin
   existing_shop_text := nullif(current_setting(
     'vyntechs.messaging_consent_compaction_shop', true
   ), '');
-  existing_subjects_text := nullif(current_setting(
-    'vyntechs.messaging_consent_compaction_subjects', true
+  existing_events_text := nullif(current_setting(
+    'vyntechs.messaging_consent_compaction_events', true
   ), '');
 
   if existing_request_text is not null
     or existing_shop_text is not null
-    or existing_subjects_text is not null
+    or existing_events_text is not null
   then
     begin
       if existing_request_text is null
         or existing_shop_text is null
-        or existing_subjects_text is null
+        or existing_events_text is null
         or existing_request_text::uuid is distinct from p_request_id
         or existing_shop_text::uuid is distinct from p_shop_id
       then
         raise exception 'compaction transaction cannot mix deletion requests or shops';
       end if;
-      authorized_subjects := existing_subjects_text::uuid[];
+      authorized_event_ids := existing_events_text::uuid[];
     exception when invalid_text_representation then
       raise exception 'invalid messaging consent compaction authorization context';
     end;
   else
-    authorized_subjects := array[]::uuid[];
+    authorized_event_ids := array[]::uuid[];
   end if;
 
-  select r.customer_id
-  into request_customer_id
-  from public.messaging_deletion_requests r
-  where r.id = p_request_id
-    and r.shop_id = p_shop_id
-    and r.state = 'pending'
-    and r.customer_id is not null
-  for update;
-  if not found then
-    raise exception 'matching pending messaging deletion request required';
+  if request_proof is null then
+    cursor_at := '-infinity'::timestamptz;
+    stored_cursor_id := '00000000-0000-0000-0000-000000000000'::uuid;
+  else
+    begin
+      cursor_at := coalesce(
+        (request_proof->'cursors'->'consentEvents'->>'at')::timestamptz,
+        '-infinity'::timestamptz
+      );
+      stored_cursor_id := coalesce(
+        (request_proof->'cursors'->'consentEvents'->>'id')::uuid,
+        '00000000-0000-0000-0000-000000000000'::uuid
+      );
+    exception when others then
+      raise exception 'invalid canonical consent compaction cursor';
+    end;
+  end if;
+  if p_after_event_id is distinct from stored_cursor_id then
+    raise exception 'compaction cursor must match canonical progress';
   end if;
 
   perform 1
@@ -880,12 +938,6 @@ begin
   where s.shop_id = p_shop_id
     and s.subject_key = p_subject_key
   order by s.id
-  for update;
-  perform 1
-  from public.messaging_consent_events e
-  where e.shop_id = p_shop_id
-    and e.subject_key = p_subject_key
-  order by e.id
   for update;
 
   if not exists (
@@ -916,6 +968,39 @@ begin
     raise exception 'consent subject must belong to deletion request customer';
   end if;
 
+  select
+    array_agg(page.id order by page.committed_at, page.id),
+    array_agg(page.committed_at order by page.committed_at, page.id),
+    array_agg(page.event_type order by page.committed_at, page.id),
+    array_agg(page.program_version order by page.committed_at, page.id),
+    count(*)::integer
+  into page_event_ids, page_committed_ats, page_event_types, page_program_versions, page_count
+  from (
+    select e.id, e.committed_at, e.event_type, e.program_version
+    from public.messaging_consent_events e
+    where e.shop_id = p_shop_id
+      and e.subject_key = p_subject_key
+      and e.customer_id = request_customer_id
+      and (e.committed_at, e.id) > (cursor_at, p_after_event_id)
+    order by e.committed_at, e.id
+    limit p_batch_limit + 1
+    for update
+  ) page;
+
+  page_event_ids := coalesce(page_event_ids, array[]::uuid[]);
+  page_count := coalesce(page_count, 0);
+  deleted_count := least(page_count, p_batch_limit);
+  exhausted := page_count <= p_batch_limit;
+  if deleted_count > 0 then
+    selected_event_ids := page_event_ids[1:deleted_count];
+    returned_cursor_at := page_committed_ats[deleted_count];
+    next_event_id := selected_event_ids[deleted_count];
+  else
+    selected_event_ids := array[]::uuid[];
+    returned_cursor_at := cursor_at;
+    next_event_id := stored_cursor_id;
+  end if;
+
   if exists (
     select 1
     from public.messaging_retention_holds h
@@ -925,19 +1010,31 @@ begin
       and h.expires_at > now()
       and (
         h.subject_key = p_subject_key
-        or (
-          h.resource_type = 'messaging_consent_event'
-          and exists (
-            select 1
-            from public.messaging_consent_events e
-            where e.shop_id = p_shop_id
-              and e.subject_key = p_subject_key
-              and e.id = h.resource_id
-          )
-        )
+        or (h.resource_type = 'messaging_consent_event'
+          and h.resource_id = any(selected_event_ids))
       )
   ) then
     raise exception 'active messaging retention hold blocks compaction';
+  end if;
+
+  update public.sms_suppressions suppression
+  set source_event_id = null, updated_at = now()
+  where suppression.shop_id = p_shop_id
+    and suppression.source_event_id = any(selected_event_ids);
+  get diagnostics detached_suppression_sources = row_count;
+
+  projection_deleted := 0;
+  if not exists (
+    select 1 from public.messaging_consent_events remaining
+    where remaining.shop_id = p_shop_id
+      and remaining.subject_key = p_subject_key
+      and not (remaining.id = any(selected_event_ids))
+  ) then
+    delete from public.messaging_consent_state state
+    where state.shop_id = p_shop_id
+      and state.subject_key = p_subject_key
+      and state.customer_id = request_customer_id;
+    get diagnostics projection_deleted = row_count;
   end if;
 
   perform set_config(
@@ -950,18 +1047,81 @@ begin
     p_shop_id::text,
     true
   );
-  select array_agg(distinct subject_key order by subject_key)
-  into authorized_subjects
-  from unnest(authorized_subjects || p_subject_key) as subjects(subject_key);
+  select array_agg(distinct event_id order by event_id)
+  into authorized_event_ids
+  from unnest(authorized_event_ids || selected_event_ids) as events(event_id);
   perform set_config(
-    'vyntechs.messaging_consent_compaction_subjects',
-    authorized_subjects::text,
+    'vyntechs.messaging_consent_compaction_events',
+    coalesce(authorized_event_ids, array[]::uuid[])::text,
     true
   );
   delete from public.messaging_consent_events
-    where shop_id = p_shop_id and subject_key = p_subject_key;
-  get diagnostics deleted_count = row_count;
-  return deleted_count;
+  where shop_id = p_shop_id and id = any(selected_event_ids);
+
+  select count(*)::integer
+  into countable_deleted
+  from generate_subscripts(selected_event_ids, 1) position
+  where not (
+    page_event_types[position] = 'deleted'
+    and page_program_versions[position] = 'internal_deletion_v1'
+  );
+  countable_deleted := coalesce(countable_deleted, 0);
+
+  request_prior_counts := coalesce(request_prior_counts, jsonb_build_object(
+    'consentEvents', 0, 'consentProjections', 0, 'notifications', 0,
+    'quoteSends', 0, 'smsLogs', 0
+  ));
+  request_proof := coalesce(request_proof, jsonb_build_object(
+    'progressVersion', 1,
+    'resultCounts', jsonb_build_object(
+      'consentEventsDeleted', 0, 'notificationsDeleted', 0, 'smsLogsDeleted', 0,
+      'quoteSendsDeleted', 0, 'quoteSendsRetained', 0
+    ),
+    'heldCounts', jsonb_build_object(
+      'heldConsentEvents', 0, 'heldConsentProjections', 0, 'heldQuoteSends', 0,
+      'heldSmsLogs', 0, 'heldNotifications', 0, 'total', 0
+    ),
+    'detachedSuppressionSources', 0,
+    'cursors', '{}'::jsonb
+  ));
+  request_prior_counts := jsonb_set(
+    request_prior_counts, '{consentEvents}',
+    to_jsonb(coalesce((request_prior_counts->>'consentEvents')::integer, 0) + countable_deleted)
+  );
+  request_prior_counts := jsonb_set(
+    request_prior_counts, '{consentProjections}',
+    to_jsonb(coalesce((request_prior_counts->>'consentProjections')::integer, 0)
+      + projection_deleted)
+  );
+  request_proof := jsonb_set(
+    request_proof, '{resultCounts,consentEventsDeleted}',
+    to_jsonb(coalesce(
+      (request_proof->'resultCounts'->>'consentEventsDeleted')::integer, 0
+    ) + countable_deleted)
+  );
+  request_proof := jsonb_set(
+    request_proof, '{detachedSuppressionSources}',
+    to_jsonb(coalesce((request_proof->>'detachedSuppressionSources')::integer, 0)
+      + detached_suppression_sources)
+  );
+  if deleted_count > 0 then
+    request_proof := jsonb_set(
+      request_proof, '{cursors,consentEvents}',
+      jsonb_build_object('at', returned_cursor_at, 'id', next_event_id), true
+    );
+  end if;
+
+  update public.messaging_deletion_requests request
+  set prior_record_counts = request_prior_counts,
+      proof_summary = request_proof
+  where request.id = p_request_id
+    and request.shop_id = p_shop_id
+    and request.state = 'pending'
+    and request.customer_id = request_customer_id;
+  if not found then
+    raise exception 'canonical pending messaging deletion request changed during compaction';
+  end if;
+  return next;
 end;
 $$;
 --> statement-breakpoint
@@ -981,7 +1141,7 @@ declare
 begin
   if nullif(current_setting('vyntechs.messaging_consent_compaction_request', true), '') is not null
     or nullif(current_setting('vyntechs.messaging_consent_compaction_shop', true), '') is not null
-    or nullif(current_setting('vyntechs.messaging_consent_compaction_subjects', true), '') is not null
+    or nullif(current_setting('vyntechs.messaging_consent_compaction_events', true), '') is not null
   then
     raise exception 'consent event purge transaction cannot mix compaction context';
   end if;
@@ -1479,11 +1639,11 @@ revoke all on function guard_quote_send_lifecycle() from public, anon, authentic
 revoke all on function serialize_messaging_retention_hold_target() from public, anon, authenticated, service_role;
 revoke all on function require_messaging_compaction_completion() from public, anon, authenticated, service_role;
 revoke all on function guard_messaging_deletion_request_mutation() from public, anon, authenticated, service_role;
-revoke all on function compact_messaging_consent_events(uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_deletion_request(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_consent_event(uuid, uuid) from public, anon, authenticated;
 revoke all on function purge_expired_messaging_retention_hold(uuid, uuid) from public, anon, authenticated;
-grant execute on function compact_messaging_consent_events(uuid, uuid, uuid) to service_role;
+grant execute on function compact_messaging_consent_events(uuid, uuid, uuid, uuid, integer) to service_role;
 grant execute on function purge_expired_messaging_deletion_request(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_consent_event(uuid, uuid) to service_role;
 grant execute on function purge_expired_messaging_retention_hold(uuid, uuid) to service_role;
