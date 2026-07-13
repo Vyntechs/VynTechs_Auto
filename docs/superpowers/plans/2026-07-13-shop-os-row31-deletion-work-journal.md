@@ -270,6 +270,7 @@ Rollback gate: revert if any discovery query infers ownership from a null-custom
 
 **Files:**
 - Modify: `drizzle/migrations/0033_shop_os_messaging_retention.sql:825-1215`
+- Modify: `drizzle/migrations/0034_shop_os_messaging_retention_acl.sql` — replace the old consent-compaction function ACL signature so the idempotent ACL repair migration remains clean-source compatible.
 - Modify: `lib/shop-os/messaging-deletion.ts:760-1010`
 - Modify: `tests/helpers/db.ts`
 - Modify: `tests/unit/shop-os-messaging-retention-schema.test.ts`
