@@ -472,6 +472,10 @@ export async function requestMessagingDeletion(rawInput: {
       if (!customer) return { ok: false, error: 'not_found' }
       if (customer.phone !== input.destination) return { ok: false, error: 'request_conflict' }
 
+      const currentPairs = exactMessagingPairs(input.fingerprints!.map((item) => ({
+        destinationFingerprint: item.fingerprint,
+        fingerprintKeyVersion: item.keyVersion,
+      })))
       const existing = unwrapRows<RequestRow>(await tx.execute(sql`
         select id, shop_id as "shopId", request_key as "requestKey",
           request_fingerprint as "requestFingerprint", customer_id as "customerId",
@@ -485,12 +489,23 @@ export async function requestMessagingDeletion(rawInput: {
           and request_key = ${input.requestKey}::uuid
         for update
       `))[0]
-      if (existing) return retry(existing, input)
+      if (existing) {
+        const result = retry(existing, input)
+        if (!result.ok) return result
+        if (currentPairs.length > MAX_HISTORICAL_PAIRS) return { ok: false, error: 'busy' }
+        const requestedAt = existing.requestedAt instanceof Date
+          ? existing.requestedAt
+          : existing.requestedAt ? new Date(existing.requestedAt) : null
+        if (!requestedAt) throw new Error('request_time_unavailable')
+        await normalizeSuppressionPairs({
+          tx: tx as AppDb,
+          shopId: input.actor.shopId,
+          pairs: currentPairs,
+          requestedAt,
+        })
+        return result
+      }
 
-      const currentPairs = exactMessagingPairs(input.fingerprints!.map((item) => ({
-        destinationFingerprint: item.fingerprint,
-        fingerprintKeyVersion: item.keyVersion,
-      })))
       if (currentPairs.length > MAX_HISTORICAL_PAIRS) return { ok: false, error: 'busy' }
 
       const subject = unwrapRows<{ subjectKey: string }>(await tx.execute(sql`

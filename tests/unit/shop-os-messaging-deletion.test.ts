@@ -44,6 +44,13 @@ const keyRing: FingerprintKeyRing = Object.freeze({
     key_v1: 'legacy-shop-key-material-that-is-at-least-32-bytes',
   }),
 })
+const rotatedKeyRing: FingerprintKeyRing = Object.freeze({
+  currentVersion: 'key_v3',
+  keys: Object.freeze({
+    key_v3: 'rotated-shop-key-material-that-is-at-least-32-bytes',
+    ...keyRing.keys,
+  }),
+})
 const recoveryLimits = Object.freeze({
   historicalPairs: 64,
   sends: 128,
@@ -442,6 +449,49 @@ describe('suppression-first messaging deletion', () => {
       error: 'request_conflict',
     })
     expect(JSON.stringify(first)).not.toContain(destination)
+  })
+
+  it.each([
+    ['pending', false],
+    ['completed', true],
+  ] as const)('normalizes rotated current keys before an exact %s retry returns', async (
+    expectedState, completeFirst,
+  ) => {
+    const first = await request()
+    if (!first.ok) throw new Error('request failed')
+    if (completeFirst) {
+      expect(await completeMessagingDeletion({ db, actor: owner, requestId: first.requestId, now }))
+        .toMatchObject({ ok: true, state: 'completed' })
+    }
+    const [canonical] = await db.select().from(messagingDeletionRequests)
+    const rotatedFingerprint = fingerprintDestination(
+      destination,
+      rotatedKeyRing.currentVersion,
+      rotatedKeyRing.keys[rotatedKeyRing.currentVersion]!,
+    )
+
+    expect(await request({
+      keyRing: rotatedKeyRing,
+      requestFingerprint: 'b'.repeat(64),
+      now: new Date('2040-01-01T00:00:00.000Z'),
+    })).toEqual({ ok: false, error: 'request_conflict' })
+    expect((await db.select().from(smsSuppressions)).some((row) =>
+      row.destinationFingerprint === rotatedFingerprint)).toBe(false)
+
+    expect(await request({
+      keyRing: rotatedKeyRing,
+      now: new Date('2040-01-01T00:00:00.000Z'),
+    })).toMatchObject({ ok: true, state: expectedState, requestId: first.requestId })
+    const rotated = (await db.select().from(smsSuppressions)).find((row) =>
+      row.destinationFingerprint === rotatedFingerprint)
+    expect(rotated).toMatchObject({
+      fingerprintKeyVersion: 'key_v3',
+      reason: 'verified_deletion',
+      liftedAt: null,
+      suppressedAt: canonical!.requestedAt,
+      updatedAt: canonical!.requestedAt,
+    })
+    expect(rotated?.retainUntil).toEqual(addCalendarYears(canonical!.requestedAt, 5))
   })
 
   it('coalesces a second deletion request onto the canonical pending operation', async () => {
