@@ -60,6 +60,7 @@ export async function createTestDb(): Promise<{
   await ensureShopOsServerOnlyAclMigration(client)
   await ensureMessagingRetentionMigration(client)
   await ensureMessagingRetentionAclMigration(client)
+  await ensureMessagingRetentionFkIndexMigration(client)
   return {
     db,
     client,
@@ -944,5 +945,104 @@ export async function ensureMessagingRetentionAclMigration(
   const after = await messagingRetentionAclMarkers(client)
   if (!hasCompleteMessagingRetentionAcl(after)) {
     throw new Error('messaging retention ACL hardening failed in ephemeral database')
+  }
+}
+
+const MESSAGING_RETENTION_FK_INDEXES = [
+  { name: 'messaging_consent_events_shop_customer_idx', table: 'messaging_consent_events', columns: ['shop_id', 'customer_id'] },
+  { name: 'messaging_consent_state_shop_customer_idx', table: 'messaging_consent_state', columns: ['shop_id', 'customer_id'] },
+  { name: 'messaging_consent_state_shop_source_event_idx', table: 'messaging_consent_state', columns: ['shop_id', 'source_event_id'] },
+  { name: 'messaging_deletion_work_items_parent_work_item_idx', table: 'messaging_deletion_work_items', columns: ['parent_work_item_id'] },
+  { name: 'messaging_deletion_work_items_shop_request_idx', table: 'messaging_deletion_work_items', columns: ['shop_id', 'request_id'] },
+  { name: 'messaging_retention_holds_shop_actor_idx', table: 'messaging_retention_holds', columns: ['shop_id', 'authorizing_actor_profile_id'] },
+  { name: 'quote_sends_shop_customer_idx', table: 'quote_sends', columns: ['shop_id', 'customer_id'] },
+  { name: 'sms_suppressions_shop_source_event_idx', table: 'sms_suppressions', columns: ['shop_id', 'source_event_id'] },
+] as const
+
+async function inspectMessagingRetentionFkIndexes(client: PGlite): Promise<{
+  present: number
+  exact: number
+  alternateCovering: number
+}> {
+  const names = MESSAGING_RETENTION_FK_INDEXES
+    .map(({ name }) => `'${name}'`)
+    .join(', ')
+  const tables = [...new Set(MESSAGING_RETENTION_FK_INDEXES.map(({ table }) => table))]
+    .map((table) => `'${table}'`)
+    .join(', ')
+  const result = await client.query<{
+    indexname: string
+    tablename: string
+    access_method: string
+    is_valid: boolean
+    is_ready: boolean
+    predicate: string | null
+    key_columns: string[]
+  }>(`
+    select
+      index_class.relname as indexname,
+      table_class.relname as tablename,
+      access_method.amname as access_method,
+      index_catalog.indisvalid as is_valid,
+      index_catalog.indisready as is_ready,
+      pg_get_expr(index_catalog.indpred, index_catalog.indrelid) as predicate,
+      array(
+        select attribute.attname
+        from unnest(index_catalog.indkey::smallint[]) with ordinality
+          as index_key(attribute_number, position)
+        join pg_attribute attribute
+          on attribute.attrelid = table_class.oid
+         and attribute.attnum = index_key.attribute_number
+        where index_key.position <= index_catalog.indnkeyatts
+        order by index_key.position
+      ) as key_columns
+    from pg_index index_catalog
+    join pg_class index_class on index_class.oid = index_catalog.indexrelid
+    join pg_class table_class on table_class.oid = index_catalog.indrelid
+    join pg_namespace namespace on namespace.oid = table_class.relnamespace
+    join pg_am access_method on access_method.oid = index_class.relam
+    where namespace.nspname = 'public'
+      and (table_class.relname in (${tables}) or index_class.relname in (${names}))
+  `)
+  const expectedNames = new Set<string>(MESSAGING_RETENTION_FK_INDEXES.map(({ name }) => name))
+  const structurallyMatches = (
+    row: (typeof result.rows)[number],
+    expected: (typeof MESSAGING_RETENTION_FK_INDEXES)[number],
+    allowTrailingColumns = false,
+  ) => row.tablename === expected.table
+    && row.access_method === 'btree'
+    && row.is_valid
+    && row.is_ready
+    && row.predicate === null
+    && (allowTrailingColumns
+      ? expected.columns.every((column, index) => row.key_columns[index] === column)
+      : row.key_columns.length === expected.columns.length
+        && expected.columns.every((column, index) => row.key_columns[index] === column))
+  const exact = MESSAGING_RETENTION_FK_INDEXES.filter((expected) => result.rows.some(
+    (row) => row.indexname === expected.name && structurallyMatches(row, expected),
+  )).length
+  const alternateCovering = MESSAGING_RETENTION_FK_INDEXES.filter((expected) => result.rows.some(
+    (row) => !expectedNames.has(row.indexname) && structurallyMatches(row, expected, true),
+  )).length
+  const present = result.rows.filter((row) => expectedNames.has(row.indexname)).length
+  return { present, exact, alternateCovering }
+}
+
+export async function ensureMessagingRetentionFkIndexMigration(client: PGlite): Promise<void> {
+  const before = await inspectMessagingRetentionFkIndexes(client)
+  if (before.exact === MESSAGING_RETENTION_FK_INDEXES.length) return
+  if (before.present > 0 || before.alternateCovering > 0) {
+    throw new Error('partial messaging retention foreign-key indexes in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0035_shop_os_messaging_retention_fk_indexes.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await inspectMessagingRetentionFkIndexes(client)
+  if (after.exact !== MESSAGING_RETENTION_FK_INDEXES.length) {
+    throw new Error('messaging retention foreign-key index hardening failed in ephemeral database')
   }
 }
