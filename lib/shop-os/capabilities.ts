@@ -33,5 +33,18 @@ export function canManageTeam(
   return founderOverride || role === 'owner'
 }
 
+export function canManageCustomerMessaging(
+  role: string | null | undefined,
+): boolean {
+  return role === 'advisor' || role === 'owner'
+}
+
+export function canManageMessagingRetention(
+  role: string | null | undefined,
+  founderOverride = false,
+): boolean {
+  return founderOverride || role === 'owner'
+}
+
 export const canManageRates = canManageTeam
 export const canManageIntegrations = canManageTeam

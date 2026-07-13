@@ -271,7 +271,7 @@ expect(tableNames(quoteEvents).foreignKeys)
 
 Require:
 
-- quote sends: shop/ticket/version/customer, destination fingerprint/key version, channel `sms`, nullable token hash/expiry, actor-bound request key/fingerprint, state `queued|claimed|submitting|submitted|cancelled|delivered|failed|responded|expired`, submission/terminal/retention timestamps.
+- quote sends: shop/ticket/version/customer, an immutable opaque `subject_key` used as the durable hold association after customer detachment and by purge eligibility checks, destination fingerprint/key version, channel `sms`, nullable token hash/expiry, actor-bound request key/fingerprint, state `queued|claimed|submitting|submitted|cancelled|delivered|failed|responded|expired`, submission/terminal/retention timestamps. The subject key is not readable identity and has no customer foreign key.
 - SMS log: shop/send, nullable bounded provider message/event IDs, template key/version, state `accepted|queued|sent|delivered|undelivered|failed|opt_out|help|start`, bounded error code, provider occurrence/server receipt/retain-until timestamps.
 - notifications: shop/recipient, bounded type, bounded entity type/id, dedupe key, created/read/retain-until timestamps.
 
@@ -718,9 +718,12 @@ Cover:
 - retry completes exactly one tombstone;
 - queued/claimed sends become cancelled;
 - submitting/submitted sends remain honestly in flight;
-- token hashes/expiries are nulled before ordinary metadata deletion;
+- token hashes/expiries are nulled for submitting, submitted, and delivered sends before ordinary metadata deletion;
 - consent events and projection are compacted/deleted;
-- SMS log, quote sends, and notifications are removed unless held;
+- unheld notifications and SMS logs are deleted;
+- a quote send is deleted only when it has no held child SMS log;
+- retained quote sends detach customer identity and strip token material;
+- quote events never change, and their quote-send ID remains an immutable historical identifier that may no longer resolve;
 - completed request has null customer ID, bounded counts/proof, and five-year retain-until;
 - same request retry is stable and changed fingerprint conflicts;
 - customer/vehicle/ticket/quote/repair history is unchanged;
@@ -737,20 +740,20 @@ Expected: FAIL because the deletion module does not exist.
 
 - [ ] **Step 3: Implement suppression-gate transaction**
 
-Authorize with `canManageMessagingRetention`. Lock the customer and supported suppression keys. Reuse an exact actor/request retry when present. Otherwise upsert `verified_deletion` suppression and insert one pending request in the same transaction.
+Authorize with `canManageMessagingRetention`. Lock the customer and supported suppression keys. Reuse an exact actor/request retry when present. Otherwise normalize every relevant current and still-supported legacy suppression row to an active, non-liftable deletion barrier (`verified_deletion`, `permanent_failure`, or `number_reassigned`) retained through at least the request timestamp plus five calendar years, then insert one pending request in the same transaction. A `customer_revocation` row must be strengthened to `verified_deletion`; phase one must never leave a relevant supported-key row liftable or short-retained.
 
 Return pending only after commit. Any database error returns `retryable`; never claim acceptance.
 
 - [ ] **Step 4: Implement cleanup transaction**
 
-Lock pending request, customer, sends in stable ID order, consent projection/events, SMS log, notifications, and active holds. Apply the exact state rule:
+Use one global lock order: shop → matching pending deletion requests → customer → quote sends → consent projection/events → child SMS logs → notifications → active holds. Here, consent projection/events means every consent row for the customer, locked in `(subject_key, id)` order, not only the request row's one stored subject. Lock the existing shop row `FOR UPDATE` as the cleanup transaction's first operation, then lock every matching pending request in stable ascending ID order. Preserve shop → request → customer → send order: the quote-send lifecycle guard deterministically reacquires those already-held request rows `FOR SHARE`, which conflicts with pending → completed updates and prevents completion from committing around authorized detachment or token revocation. The guard then consumes phase one's suppression contract for the old send key: it locks the exact shop/destination-fingerprint/key-version suppression row, requires an active non-liftable deletion reason, and requires retention through at least the latest matching pending request's requested-at plus five years. The request may store only the current key; a held send under any still-supported legacy key is authorized only by its own exact phase-one suppression barrier. `customer_revocation`, lifted, short-retained, missing, or mismatched suppressions never authorize deletion. This request-first then suppression validation is deterministic and remains under the already-held shop lock, matching the shop-first order used by consent transitions and hold insertion without introducing an inverted Task 5 lock path. Hold the shop lock through the final hold scan, every cleanup delete or update, and transaction commit. Hold targets are immutable: cleanup never mutates or reparents a hold target, and renewal creates a new hold row with a new authorization. Apply the exact state rule:
 
 ```ts
 const cancellable = new Set(['queued', 'claimed'])
 const inFlight = new Set(['submitting', 'submitted'])
 ```
 
-Delete unheld ordinary records, append the internal deleted event, create the bounded proof/count summary from already loaded metadata, delete consent events through the authorized compaction function, set customer ID null, state completed, completed-at, and retain-until. Do not touch unrelated Shop OS records.
+Delete unheld notifications and SMS logs. Evaluate each quote send against its own immutable opaque `subject_key`, so multiple subjects attached to one customer remain independently holdable after readable customer identity is detached. Delete a quote send only when it has no held child SMS log; otherwise detach its customer identity, retain its subject key, and strip token material. Quote events never change, and their quote-send ID remains an immutable historical identifier that may no longer resolve. Revoke tokens for submitting, submitted, and delivered sends without fabricating state or lifecycle anchors. After the final hold scan, classify consent holds per subject. In ascending `subject_key` order, retain a held subject's projection and events without attempting compaction; for each unheld subject, detach exact suppression source references, append its internal deleted event, delete only that subject's projection, and call `compact_messaging_consent_events(shop_id, subject_key, request_id)`. The definer function reacquires the one still-pending request, requires its non-null customer, locks that subject's projections then events by ascending ID, proves the same-shop subject belongs to that customer, rejects active subject/event holds, and accumulates the authorized subject in transaction-local request/shop/subject context. Every call in the transaction must use the same request and shop. Complete the one tombstone only after all unheld subjects have been processed; the deferred trigger requires every deleted event's subject in that accumulated authorization and the same-shop request completed at commit. Then set customer ID null, state completed, completed-at, and retain-until. Do not touch unrelated Shop OS records.
 
 If held records remain, detach their readable customer link where lawful, record only held counts in the tombstone, and leave suppression active. Do not copy their content into the tombstone.
 
@@ -784,19 +787,21 @@ git commit -m "Add suppression-first messaging deletion"
 
 ```ts
 export type PurgeCounts = {
+  consentProjections: number
   consentEvents: number
   suppressions: number
   quoteSends: number
   smsLog: number
   notifications: number
   deletionRequests: number
+  retentionHolds: number
   skippedHeld: number
   failed: number
 }
 export async function createMessagingRetentionHold(input: {
   db: AppDb
   actor: MessagingActor
-  resourceType: 'consent_event' | 'suppression' | 'quote_send' | 'sms_log' | 'notification' | 'deletion_request' | 'subject'
+  resourceType?: 'messaging_consent_event' | 'sms_suppression' | 'quote_send' | 'sms_log' | 'notification' | 'messaging_deletion_request'
   resourceId?: string
   subjectKey?: string
   reasonCode: 'legal_claim' | 'subpoena' | 'fraud_review' | 'security_investigation'
@@ -850,6 +855,10 @@ Expected: FAIL because the purge module does not exist.
 
 Validate exact bounded enums and times, authorize, insert immutable hold, and release only by setting released-at once. Reject free text and silent extension. A renewal creates a new row referencing the same target after a fresh authorization check.
 
+Resource-targeted holds use exactly the canonical `resourceType` vocabulary above with one `resourceId`. Subject-targeted holds use `subjectKey` with both resource fields null. An unreleased hold has `retainUntil = expiresAt + 5 calendar years`; the one allowed release recalculates it to `releasedAt + 5 calendar years`. Every hold operation locks the shop row first, before target/request locks.
+
+Hold creation owns polymorphic target validation at runtime; the database stores only the canonical target shape and does not use speculative polymorphic foreign keys. In the same transaction, creation must lock the shop first and then lock and verify the exact same-shop canonical target. Missing or cross-shop resources fail. A subject target must already exist for that same shop in at least one consent event, consent projection, or messaging deletion request. The public count field is exactly `consentProjections` everywhere.
+
 - [ ] **Step 4: Implement bounded purge**
 
 Process record families in dependency order:
@@ -857,9 +866,9 @@ Process record families in dependency order:
 1. notifications;
 2. SMS log;
 3. terminal quote sends;
-4. stale consent projection;
-5. expired consent events;
-6. lifted/expired suppressions;
+4. stale consent projections;
+5. eligible lifted/expired suppressions;
+6. expired consent events after projection and suppression source references are gone;
 7. completed deletion tombstones; and
 8. expired hold audit rows after their five-year proof window.
 
