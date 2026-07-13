@@ -1573,6 +1573,77 @@ describe('suppression-first messaging deletion', () => {
     expect(await db.select().from(notifications)).toHaveLength(0)
   })
 
+  it('locks bounded exact parents before independently paged quote children', async () => {
+    await seedPhaseTwoResource('sends', recoveryLimits.sends + 1)
+    const createdAt = new Date('2026-07-12T10:00:00Z')
+    await db.insert(smsLog).values(Array.from(
+      { length: recoveryLimits.sends + 1 },
+      (_, index) => ({
+        id: uuid(73_000 + index), shopId, quoteSendId: uuid(10_000 + index),
+        templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent' as const,
+        serverReceivedAt: createdAt, retainUntil: new Date('2027-07-12T10:00:00Z'),
+      }),
+    ))
+    await db.insert(notifications).values(Array.from(
+      { length: recoveryLimits.sends + 1 },
+      (_, index) => ({
+        id: uuid(73_200 + index), shopId, recipientProfileId: owner.profileId,
+        eventType: 'quote_sent', entityType: 'quote_send', entityId: uuid(10_000 + index),
+        dedupeKey: `bounded-parent-${index}`, createdAt,
+        retainUntil: new Date('2026-10-10T10:00:00Z'),
+      }),
+    ))
+    const pending = await request({ requestKey: uuid(73_500) })
+    if (!pending.ok) throw new Error('request failed')
+    const { result } = await completeUntilTerminal(pending.requestId, 4)
+    expect(result).toMatchObject({
+      ok: true,
+      state: 'completed',
+      counts: {
+        quoteSendsDeleted: recoveryLimits.sends + 1,
+        smsLogsDeleted: recoveryLimits.sends + 1,
+        notificationsDeleted: recoveryLimits.sends + 1,
+      },
+    })
+
+    const source = await import('node:fs/promises').then(({ readFile }) =>
+      readFile('lib/shop-os/messaging-deletion.ts', 'utf8'))
+    const phaseTwo = source.slice(source.indexOf('export async function completeMessagingDeletion'))
+    const smsCandidatesAt = phaseTwo.indexOf('const smsCandidatePage =')
+    const notificationCandidatesAt = phaseTwo.indexOf('const notificationCandidatePage =')
+    const parentCandidatesAt = phaseTwo.indexOf('const quoteParentWorkItemIds =')
+    const parentLocksAt = phaseTwo.indexOf('const quoteParentLocks =')
+    const projectionPageAt = phaseTwo.indexOf('const projectionPage =')
+    const smsPageAt = phaseTwo.indexOf('const smsPage =')
+    const notificationPageAt = phaseTwo.indexOf('const notificationPage =')
+    expect(smsCandidatesAt).toBeGreaterThan(-1)
+    expect(notificationCandidatesAt).toBeGreaterThan(smsCandidatesAt)
+    expect(parentCandidatesAt).toBeGreaterThan(notificationCandidatesAt)
+    expect(parentLocksAt).toBeGreaterThan(parentCandidatesAt)
+    expect(projectionPageAt).toBeGreaterThan(parentLocksAt)
+    expect(smsPageAt).toBeGreaterThan(projectionPageAt)
+    expect(notificationPageAt).toBeGreaterThan(smsPageAt)
+
+    const smsCandidates = phaseTwo.slice(smsCandidatesAt, notificationCandidatesAt)
+    const notificationCandidates = phaseTwo.slice(notificationCandidatesAt, parentCandidatesAt)
+    const parentLocks = phaseTwo.slice(parentCandidatesAt, projectionPageAt)
+    const smsPage = phaseTwo.slice(smsPageAt, notificationPageAt)
+    const notificationPage = phaseTwo.slice(notificationPageAt)
+    expect(smsCandidates).toContain('order by source.id')
+    expect(smsCandidates).toContain('limit ${MAX_SMS_LOGS + 1}')
+    expect(notificationCandidates).toContain('order by source.id')
+    expect(notificationCandidates).toContain('limit ${MAX_NOTIFICATIONS + 1}')
+    expect(parentLocks).toContain('smsCandidatePage.map(({ parentWorkItemId })')
+    expect(parentLocks).toContain("notificationCandidatePage.filter(({ entityType }) => entityType === 'quote_send')")
+    expect(parentLocks).toContain('for update of parent_source, parent')
+    expect(smsPage).toContain('source.id = any(${sql.param(smsCandidateIds)}::uuid[])')
+    expect(smsPage).toContain('order by source.id')
+    expect(notificationPage).toContain(
+      'source.id = any(${sql.param(notificationCandidateIds)}::uuid[])',
+    )
+    expect(notificationPage).toContain('order by source.id')
+  })
+
   it('reconciles all 129 held sends exactly once across retry pages', async () => {
     await seedPhaseTwoResource('sends', 129)
     await Promise.all(Array.from({ length: 129 }, (_, index) => activeHold({
@@ -1823,6 +1894,205 @@ describe('suppression-first messaging deletion', () => {
       },
     })
   })
+
+  it.each([
+    ['quote_send', 'quoteSendsRetained', 'heldQuoteSends', 73_600],
+    ['consent_event', 'consentEventsDeleted', 'heldConsentEvents', 73_620],
+    ['sms_log', 'smsLogsDeleted', 'heldSmsLogs', 73_640],
+    ['notification', 'notificationsDeleted', 'heldNotifications', 73_660],
+  ] as const)(
+    'normalizes a retained %s to its surviving alternate direct hold',
+    async (family, _resultCount, retainedCounter, suffix) => {
+      const subjectKey = uuid(suffix)
+      const targetId = family === 'notification' ? uuid(39_900) : uuid(suffix + 1)
+      let parentId: string | null = null
+      if (family === 'quote_send') {
+        await insertSend(targetId, 'submitted', 'key_v2', destination, customerId, subjectKey)
+      } else if (family === 'consent_event') {
+        const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
+        await db.insert(messagingConsentEvents).values({
+          id: targetId, shopId, subjectKey, customerId,
+          destinationFingerprint: current, fingerprintKeyVersion: 'key_v2',
+          programVersion: `direct_swap_${suffix}_v1`, eventType: 'revoked',
+          committedAt: new Date('2026-07-12T10:00:00Z'),
+          occurredAt: new Date('2026-07-12T10:00:00Z'), captureMethod: 'staff_request',
+          customerControlled: false, evidenceKind: 'staff_request',
+          actorProfileId: owner.profileId, requestKey: uuid(suffix + 2),
+          requestFingerprint: '7'.repeat(64),
+          retainUntil: new Date('2031-07-12T10:00:00Z'),
+        })
+      } else {
+        parentId = uuid(suffix + 2)
+        await insertSend(parentId, 'submitted', 'key_v2', destination, customerId, subjectKey)
+        if (family === 'sms_log') {
+          await db.insert(smsLog).values({
+            id: targetId, shopId, quoteSendId: parentId,
+            templateKey: 'quote_ready', templateVersion: 'v1', state: 'sent',
+            serverReceivedAt: new Date('2026-07-12T10:00:00Z'),
+            retainUntil: new Date('2027-07-12T10:00:00Z'),
+          })
+        } else {
+          await db.insert(notifications).values({
+            id: targetId, shopId, recipientProfileId: owner.profileId,
+            eventType: 'quote_sent', entityType: 'quote_send', entityId: parentId,
+            dedupeKey: `direct-swap-${suffix}`, createdAt: new Date('2026-07-12T10:00:00Z'),
+            retainUntil: new Date('2026-10-10T10:00:00Z'),
+          })
+        }
+      }
+      const resourceType = family === 'consent_event' ? 'messaging_consent_event' : family
+      const [resourceHold] = await activeHold({ resourceType, resourceId: targetId })
+        .returning({ id: messagingRetentionHolds.id })
+      const [subjectHold] = await activeHold({ subjectKey })
+        .returning({ id: messagingRetentionHolds.id })
+      await seedPhaseTwoResource(family === 'notification' ? 'consentEvents' : 'notifications', 513)
+      const pending = await request({ requestKey: uuid(suffix + 3) })
+      if (!pending.ok) throw new Error('request failed')
+      expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+        .toMatchObject({ ok: true, state: 'pending' })
+      const [before] = await db.select({
+        id: messagingDeletionWorkItems.id,
+        outcome: messagingDeletionWorkItems.outcome,
+        retentionBasis: messagingDeletionWorkItems.retentionBasis,
+        detachedSuppressionSources: messagingDeletionWorkItems.detachedSuppressionSources,
+        resolvedAt: messagingDeletionWorkItems.resolvedAt,
+      }).from(messagingDeletionWorkItems)
+        .where(eq(messagingDeletionWorkItems.resourceId, targetId))
+      expect(before).toMatchObject({ outcome: 'retained', detachedSuppressionSources: 0 })
+      expect(before!.resolvedAt).not.toBeNull()
+      const recordedBasis = before!.retentionBasis
+      expect(['resource_hold', 'subject_hold']).toContain(recordedBasis)
+      const recordedHoldId = recordedBasis === 'resource_hold' ? resourceHold!.id : subjectHold!.id
+      const expectedBasis = recordedBasis === 'resource_hold' ? 'subject_hold' : 'resource_hold'
+      await db.update(messagingRetentionHolds).set({ releasedAt: new Date() })
+        .where(eq(messagingRetentionHolds.id, recordedHoldId))
+
+      expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+        .toMatchObject({ ok: true, state: 'pending' })
+      const [after] = await db.select({
+        id: messagingDeletionWorkItems.id,
+        outcome: messagingDeletionWorkItems.outcome,
+        retentionBasis: messagingDeletionWorkItems.retentionBasis,
+        detachedSuppressionSources: messagingDeletionWorkItems.detachedSuppressionSources,
+        resolvedAt: messagingDeletionWorkItems.resolvedAt,
+      }).from(messagingDeletionWorkItems)
+        .where(eq(messagingDeletionWorkItems.resourceId, targetId))
+      expect(after).toEqual({ ...before, retentionBasis: expectedBasis })
+
+      const { result } = await completeUntilTerminal(pending.requestId, 5)
+      expect(result).toMatchObject({ ok: true, state: 'completed' })
+      const retained = (await db.select().from(messagingDeletionRequests))[0]!
+        .proofSummary!.retained as Record<string, number>
+      expect(retained[retainedCounter]).toBe(1)
+      if (parentId) expect(retained.heldQuoteSends).toBe(1)
+    },
+  )
+
+  it.each([
+    ['direct_to_dependency', 2, 3, 73_700],
+    ['dependency_to_direct', 1, 2, 73_720],
+  ] as const)(
+    'normalizes a retained consent event %s through its exact projection chain',
+    async (direction, expectedHeldEvents, expectedTotal, suffix) => {
+      const subjectKey = uuid(suffix)
+      const sourceEventId = uuid(suffix + 1)
+      const siblingEventId = uuid(suffix + 2)
+      const current = fingerprintDestination(destination, 'key_v2', keyRing.keys.key_v2!)
+      const committedAt = new Date('2026-07-12T10:00:00Z')
+      const programVersion = `dependency_swap_${suffix}_v1`
+      await db.insert(messagingConsentEvents).values([
+        {
+          id: sourceEventId, shopId, subjectKey, customerId,
+          destinationFingerprint: current, fingerprintKeyVersion: 'key_v2', programVersion,
+          eventType: 'revoked', committedAt, occurredAt: committedAt,
+          captureMethod: 'staff_request', customerControlled: false,
+          evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+          requestKey: uuid(suffix + 3), requestFingerprint: '8'.repeat(64),
+          retainUntil: new Date('2031-07-12T10:00:00Z'),
+        },
+        {
+          id: siblingEventId, shopId, subjectKey, customerId,
+          destinationFingerprint: current, fingerprintKeyVersion: 'key_v2', programVersion,
+          eventType: 'revoked', committedAt, occurredAt: committedAt,
+          captureMethod: 'staff_request', customerControlled: false,
+          evidenceKind: 'staff_request', actorProfileId: owner.profileId,
+          requestKey: uuid(suffix + 4), requestFingerprint: '9'.repeat(64),
+          retainUntil: new Date('2031-07-12T10:00:00Z'),
+        },
+      ])
+      await db.insert(messagingConsentState).values({
+        shopId, subjectKey, customerId, destinationFingerprint: current,
+        fingerprintKeyVersion: 'key_v2', programVersion, status: 'revoked',
+        sourceEventId, revokedAt: committedAt,
+        retainUntil: new Date('2031-07-12T10:00:00Z'), updatedAt: committedAt,
+      })
+      const [siblingHold] = await activeHold({
+        resourceType: 'messaging_consent_event', resourceId: siblingEventId,
+      }).returning({ id: messagingRetentionHolds.id })
+      let sourceHoldId: string | null = null
+      if (direction === 'direct_to_dependency') {
+        const [sourceHold] = await activeHold({
+          resourceType: 'messaging_consent_event', resourceId: sourceEventId,
+        }).returning({ id: messagingRetentionHolds.id })
+        sourceHoldId = sourceHold!.id
+      }
+      await seedPhaseTwoResource('notifications', 513)
+      const pending = await request({ requestKey: uuid(suffix + 5) })
+      if (!pending.ok) throw new Error('request failed')
+      expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+        .toMatchObject({ ok: true, state: 'pending' })
+      const [before] = await db.select({
+        id: messagingDeletionWorkItems.id,
+        outcome: messagingDeletionWorkItems.outcome,
+        retentionBasis: messagingDeletionWorkItems.retentionBasis,
+        detachedSuppressionSources: messagingDeletionWorkItems.detachedSuppressionSources,
+        resolvedAt: messagingDeletionWorkItems.resolvedAt,
+      }).from(messagingDeletionWorkItems)
+        .where(eq(messagingDeletionWorkItems.resourceId, sourceEventId))
+      expect(before).toMatchObject({
+        outcome: 'retained',
+        retentionBasis: direction === 'direct_to_dependency' ? 'resource_hold' : 'held_dependency',
+        detachedSuppressionSources: 0,
+      })
+      if (direction === 'direct_to_dependency') {
+        await db.update(messagingRetentionHolds).set({ releasedAt: new Date() })
+          .where(eq(messagingRetentionHolds.id, sourceHoldId!))
+      } else {
+        await activeHold({
+          resourceType: 'messaging_consent_event', resourceId: sourceEventId,
+        })
+        await db.update(messagingRetentionHolds).set({ releasedAt: new Date() })
+          .where(eq(messagingRetentionHolds.id, siblingHold!.id))
+      }
+
+      expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+        .toMatchObject({ ok: true, state: 'pending' })
+      const [after] = await db.select({
+        id: messagingDeletionWorkItems.id,
+        outcome: messagingDeletionWorkItems.outcome,
+        retentionBasis: messagingDeletionWorkItems.retentionBasis,
+        detachedSuppressionSources: messagingDeletionWorkItems.detachedSuppressionSources,
+        resolvedAt: messagingDeletionWorkItems.resolvedAt,
+      }).from(messagingDeletionWorkItems)
+        .where(eq(messagingDeletionWorkItems.resourceId, sourceEventId))
+      expect(after).toEqual({
+        ...before,
+        retentionBasis: direction === 'direct_to_dependency' ? 'held_dependency' : 'resource_hold',
+      })
+
+      const { result } = await completeUntilTerminal(pending.requestId, 5)
+      expect(result).toMatchObject({ ok: true, state: 'completed' })
+      expect((await db.select().from(messagingDeletionRequests))[0]).toMatchObject({
+        proofSummary: {
+          retained: {
+            heldConsentEvents: expectedHeldEvents,
+            heldConsentProjections: 1,
+            total: expectedTotal,
+          },
+        },
+      })
+    },
+  )
 
   it('isolates final tombstones from another customer detached and held records', async () => {
     await insertSend(uuid(72_700), 'submitted')
@@ -2091,8 +2361,10 @@ describe('suppression-first messaging deletion', () => {
     const positions = [
       'select id from shops', 'from messaging_deletion_requests',
       'select id from customers', 'select source.id, source.state',
-      'join messaging_consent_state source', 'join sms_log source',
-      'join notifications source', 'finalize_messaging_deletion_request',
+      'const smsCandidatePage =', 'const notificationCandidatePage =',
+      'const quoteParentLocks =', 'join messaging_consent_state source',
+      'const smsPage =', 'const notificationPage =',
+      'finalize_messaging_deletion_request',
     ].map((marker) => phaseTwo.indexOf(marker))
     expect(positions.every((position) => position >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))

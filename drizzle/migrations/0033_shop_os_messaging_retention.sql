@@ -1345,10 +1345,9 @@ begin
       (old.outcome = 'pending' and new.outcome in ('deleted', 'detached', 'retained'))
       or (old.outcome = 'retained' and new.outcome in ('deleted', 'detached'))
       or (old.outcome = 'retained' and new.outcome = 'retained'
-        and ((old.retention_basis in ('resource_hold', 'subject_hold')
-            and new.retention_basis = 'held_dependency')
-          or (old.retention_basis = 'held_dependency'
-            and new.retention_basis in ('resource_hold', 'subject_hold')))
+        and old.retention_basis in ('resource_hold', 'subject_hold', 'held_dependency')
+        and new.retention_basis in ('resource_hold', 'subject_hold', 'held_dependency')
+        and new.retention_basis <> old.retention_basis
         and new.detached_suppression_sources = old.detached_suppression_sources
         and new.resolved_at is not distinct from old.resolved_at)
     ) then

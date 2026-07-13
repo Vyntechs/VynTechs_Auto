@@ -486,6 +486,66 @@ describe('deletion work journal', () => {
     await fixture.close()
   })
 
+  it('permits only protected-field-preserving retained direct-basis swaps', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedOperationalTenant(fixture.client)
+      const requestId = await insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: tenant.customerId,
+      })
+      const retainedAt = new Date('2026-07-13T12:00:00.000Z')
+
+      for (const [fromBasis, toBasis] of [
+        ['resource_hold', 'subject_hold'],
+        ['subject_hold', 'resource_hold'],
+      ] as const) {
+        const sendId = await insertQuoteSend(fixture.client, tenant, {
+          subjectKey: tenant.customerId,
+        })
+        const workItemId = crypto.randomUUID()
+        await fixture.client.query(
+          `insert into messaging_deletion_work_items (
+            id, shop_id, request_id, resource_type, resource_id
+          ) values ($1, $2, $3, 'quote_send', $4)`,
+          [workItemId, tenant.shopId, requestId, sendId],
+        )
+        await fixture.client.query(
+          `update messaging_deletion_work_items set outcome = 'retained',
+            retention_basis = $1, resolved_at = $2 where id = $3`,
+          [fromBasis, retainedAt, workItemId],
+        )
+        const before = (await fixture.client.query<{
+          id: string
+          outcome: string
+          detached_suppression_sources: number
+          resolved_at: Date
+        }>(`select id, outcome, detached_suppression_sources, resolved_at
+          from messaging_deletion_work_items where id = $1`, [workItemId])).rows[0]!
+
+        await fixture.client.query(
+          `update messaging_deletion_work_items set retention_basis = $1 where id = $2`,
+          [toBasis, workItemId],
+        )
+        expect((await fixture.client.query(
+          `select id, outcome, retention_basis, detached_suppression_sources, resolved_at
+          from messaging_deletion_work_items where id = $1`,
+          [workItemId],
+        )).rows[0]).toMatchObject({
+          ...before,
+          retention_basis: toBasis,
+        })
+
+        await expect(fixture.client.query(
+          `update messaging_deletion_work_items set retention_basis = $1,
+            detached_suppression_sources = detached_suppression_sources + 1 where id = $2`,
+          [fromBasis, workItemId],
+        )).rejects.toThrow(/immutable|transition/)
+      }
+    } finally {
+      await fixture.close()
+    }
+  })
+
   it('declares the exact journal columns, indexes, checks, and foreign keys', () => {
     const table = (dbSchema as typeof dbSchema & {
       messagingDeletionWorkItems: Parameters<typeof getTableConfig>[0]
