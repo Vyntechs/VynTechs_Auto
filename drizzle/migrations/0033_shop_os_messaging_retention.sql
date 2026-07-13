@@ -1448,9 +1448,6 @@ set search_path = ''
 as $$
 declare
   request_customer_id uuid;
-  request_subject_key uuid;
-  request_destination_fingerprint text;
-  request_fingerprint_key_version text;
   parent_request_id uuid;
   parent_resource_type text;
   parent_resource_id uuid;
@@ -1494,9 +1491,12 @@ begin
     raise exception 'deletion work items must be inserted pending';
   end if;
 
-  select customer_id, subject_key, destination_fingerprint, fingerprint_key_version
-  into request_customer_id, request_subject_key,
-    request_destination_fingerprint, request_fingerprint_key_version
+  if new.resource_type <> 'consent_event' and not new.counts_toward_proof then
+    raise exception 'non-consent work item counts_toward_proof must be true';
+  end if;
+
+  select customer_id
+  into request_customer_id
   from public.messaging_deletion_requests
   where shop_id = new.shop_id
     and id = new.request_id
@@ -1524,7 +1524,6 @@ begin
       where q.id = new.resource_id
         and q.shop_id = new.shop_id
         and q.customer_id = request_customer_id
-        and q.subject_key = request_subject_key
     ) then
       raise exception 'quote-send work item must match the pending request customer';
     end if;
@@ -1534,9 +1533,6 @@ begin
       where s.id = new.resource_id
         and s.shop_id = new.shop_id
         and s.customer_id = request_customer_id
-        and s.subject_key = request_subject_key
-        and s.destination_fingerprint = request_destination_fingerprint
-        and s.fingerprint_key_version = request_fingerprint_key_version
     ) then
       raise exception 'consent projection work item must match the pending request customer';
     end if;
@@ -1546,10 +1542,7 @@ begin
     from public.messaging_consent_events e
     where e.id = new.resource_id
       and e.shop_id = new.shop_id
-      and e.customer_id = request_customer_id
-      and e.subject_key = request_subject_key
-      and e.destination_fingerprint = request_destination_fingerprint
-      and e.fingerprint_key_version = request_fingerprint_key_version;
+      and e.customer_id = request_customer_id;
     if not found then
       raise exception 'consent-event work item must match the pending request customer';
     end if;

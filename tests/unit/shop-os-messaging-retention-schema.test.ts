@@ -396,6 +396,84 @@ describe('deletion work journal', () => {
     await fixture.close()
   })
 
+  it('accepts same-customer historical subjects and fingerprint keys with exact parents', async () => {
+    const fixture = await createTestDb()
+    const tenant = await seedOperationalTenant(fixture.client)
+    const requestId = await insertDeletionRequest(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+      destinationFingerprint: hex,
+      fingerprintKeyVersion: 'key_v1',
+    })
+    const historicalSubjectKey = crypto.randomUUID()
+    const historicalQuoteSendId = await insertQuoteSend(fixture.client, tenant, {
+      subjectKey: historicalSubjectKey,
+      destinationFingerprint: otherHex,
+      fingerprintKeyVersion: 'key_v0',
+    })
+    await fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id
+      ) values ($1, $2, 'quote_send', $3)`,
+      [tenant.shopId, requestId, historicalQuoteSendId],
+    )
+
+    const historicalEventId = await insertConsentEvent(fixture.client, tenant, {
+      subjectKey: historicalSubjectKey,
+      customerId: tenant.customerId,
+      destinationFingerprint: otherHex,
+      fingerprintKeyVersion: 'key_v0',
+      programVersion: 'repair_updates_v1',
+    })
+    const historicalProjectionId = crypto.randomUUID()
+    await fixture.client.query(
+      `insert into messaging_consent_state (
+        id, shop_id, subject_key, customer_id, destination_fingerprint,
+        fingerprint_key_version, program_version, status, source_event_id,
+        consented_at, retain_until
+      ) values (
+        $1, $2, $3, $4, $5, $6, 'repair_updates_v1', 'consented', $7,
+        now(), now() + interval '5 years'
+      )`,
+      [historicalProjectionId, tenant.shopId, historicalSubjectKey, tenant.customerId,
+        otherHex, 'key_v0', historicalEventId],
+    )
+    const projectionWorkItemId = crypto.randomUUID()
+    await fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        id, shop_id, request_id, resource_type, resource_id
+      ) values ($1, $2, $3, 'consent_projection', $4)`,
+      [projectionWorkItemId, tenant.shopId, requestId, historicalProjectionId],
+    )
+    await fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, parent_work_item_id
+      ) values ($1, $2, 'consent_event', $3, $4)`,
+      [tenant.shopId, requestId, historicalEventId, projectionWorkItemId],
+    )
+
+    await fixture.close()
+  })
+
+  it('rejects proof-excluded non-consent work items', async () => {
+    const fixture = await createTestDb()
+    const tenant = await seedOperationalTenant(fixture.client)
+    const requestId = await insertDeletionRequest(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+    })
+    const quoteSendId = await insertQuoteSend(fixture.client, tenant, {
+      subjectKey: tenant.customerId,
+    })
+
+    await expect(fixture.client.query(
+      `insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, counts_toward_proof
+      ) values ($1, $2, 'quote_send', $3, false)`,
+      [tenant.shopId, requestId, quoteSendId],
+    )).rejects.toThrow(/counts_toward_proof/)
+
+    await fixture.close()
+  })
+
   it('declares the exact journal columns, indexes, checks, and foreign keys', () => {
     const table = (dbSchema as typeof dbSchema & {
       messagingDeletionWorkItems: Parameters<typeof getTableConfig>[0]

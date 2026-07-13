@@ -325,7 +325,7 @@ const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'purge_expired_messaging_consent_event(uuid,uuid)': '33f378ecff1afb6dc5f34263a92063433e8dcf5a5ccf79481430ac2749951948',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
   'guard_messaging_deletion_request_mutation()': '4324d067e7b1fa109d99c38bf93f0771508d1b9bd22e550c2927f3960c2a06a1',
-  'guard_messaging_deletion_work_item_mutation()': '2558e9266a03468091123dc779d40f16d8d16ce0d335d99efa5e151382d5a53a',
+  'guard_messaging_deletion_work_item_mutation()': '2a81c7c4605480ba21ffc3e508a18bd940a9788b730207d89a538ca6083b9874',
   'purge_expired_messaging_deletion_request(uuid,uuid)': '8b4aae451704d22bbd987724e442241914506384f92d8ef1db0536afd8d5002a',
 } as const
 
