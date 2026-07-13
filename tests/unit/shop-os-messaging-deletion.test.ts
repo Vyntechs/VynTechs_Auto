@@ -411,6 +411,22 @@ describe('suppression-first messaging deletion', () => {
     expect(JSON.stringify(first)).not.toContain(destination)
   })
 
+  it('coalesces a second deletion request onto the canonical pending operation', async () => {
+    const first = await request({ requestKey: uuid(60_000), requestFingerprint: '6'.repeat(64) })
+    if (!first.ok) throw new Error('first request failed')
+    const second = await request({ requestKey: uuid(60_001), requestFingerprint: '7'.repeat(64) })
+    expect(second).toEqual({
+      ok: true,
+      requestId: first.requestId,
+      state: 'pending',
+    })
+    expect(await db.select().from(messagingDeletionRequests)).toHaveLength(1)
+    expect(await db.select().from(smsSuppressions)).toHaveLength(Object.keys(keyRing.keys).length)
+    expect(await request({
+      requestKey: uuid(60_000), requestFingerprint: '8'.repeat(64),
+    })).toEqual({ ok: false, error: 'request_conflict' })
+  })
+
   it('binds completed retries to the original customer without retaining a raw customer ID', async () => {
     const pending = await request()
     if (!pending.ok) throw new Error('request failed')
@@ -446,6 +462,30 @@ describe('suppression-first messaging deletion', () => {
     } as unknown as TestDb
     expect(await request({
       db: exactRaceDb, requestKey: uuid(170), requestFingerprint: '7'.repeat(64),
+    })).toEqual({ ok: true, requestId: uuid(70), state: 'pending' })
+    for (const [keyVersion, keyMaterial] of Object.entries(keyRing.keys)) {
+      await db.insert(smsSuppressions).values({
+        shopId,
+        destinationFingerprint: fingerprintDestination(destination, keyVersion, keyMaterial),
+        fingerprintKeyVersion: keyVersion,
+        reason: 'verified_deletion',
+        suppressedAt: now,
+        retainUntil: new Date('2036-01-01T00:00:00.000Z'),
+        updatedAt: now,
+      })
+    }
+    let canonicalCalls = 0
+    const canonicalRaceDb = {
+      transaction: async (callback: (tx: TestDb) => Promise<unknown>) => {
+        canonicalCalls += 1
+        if (canonicalCalls === 1) throw Object.assign(new Error('opaque'), {
+          code: '23505', constraint: 'messaging_deletion_requests_shop_customer_pending_uq',
+        })
+        return db.transaction(callback)
+      },
+    } as unknown as TestDb
+    expect(await request({
+      db: canonicalRaceDb, requestKey: uuid(173), requestFingerprint: '3'.repeat(64),
     })).toEqual({ ok: true, requestId: uuid(70), state: 'pending' })
     let spoofCalls = 0
     const spoofDb = {

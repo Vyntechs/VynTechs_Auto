@@ -130,7 +130,10 @@ create table messaging_deletion_requests (
   constraint messaging_deletion_requests_proof_summary_object check (proof_summary is null or jsonb_typeof(proof_summary) = 'object'),
   constraint messaging_deletion_requests_proof_summary_size check (proof_summary is null or octet_length(proof_summary::text) <= 4096),
   constraint messaging_deletion_requests_state_consistent check (
-    (state = 'pending' and customer_id is not null and completed_at is null and latest_relevant_at is null and prior_record_counts is null and proof_summary is null and retain_until is null)
+    (state = 'pending' and customer_id is not null
+      and completed_at is null and latest_relevant_at is null and retain_until is null
+      and ((prior_record_counts is null and proof_summary is null)
+        or (prior_record_counts is not null and proof_summary is not null)))
     or (state = 'completed' and customer_id is null and completed_at is not null and latest_relevant_at is not null and prior_record_counts is not null and proof_summary is not null and retain_until is not null)
   ),
   constraint messaging_deletion_requests_retention_window_exact check (
@@ -142,6 +145,10 @@ create table messaging_deletion_requests (
 create unique index messaging_deletion_requests_shop_id_uq on messaging_deletion_requests (shop_id, id);
 --> statement-breakpoint
 create unique index messaging_deletion_requests_shop_actor_request_uq on messaging_deletion_requests (shop_id, requesting_actor_profile_id, request_key);
+--> statement-breakpoint
+create unique index messaging_deletion_requests_shop_customer_pending_uq
+on messaging_deletion_requests (shop_id, customer_id)
+where state = 'pending' and customer_id is not null;
 --> statement-breakpoint
 create index messaging_deletion_requests_pending_idx on messaging_deletion_requests (shop_id, requested_at) where state = 'pending';
 --> statement-breakpoint
@@ -415,20 +422,17 @@ begin
   end if;
 
   if customer_detached or (new.state = old.state and token_revoked) then
-    for locked_request_id, locked_request_requested_at in
-      select deletion_request.id, deletion_request.requested_at
-      from public.messaging_deletion_requests deletion_request
-      where deletion_request.shop_id = old.shop_id
-        and deletion_request.customer_id = old.customer_id
-        and deletion_request.state = 'pending'
-      order by deletion_request.id
-      for share
-    loop
-      approved_deletion_barrier := greatest(
-        coalesce(approved_deletion_barrier, '-infinity'::timestamptz),
-        locked_request_requested_at + interval '5 years'
-      );
-    end loop;
+    select deletion_request.id, deletion_request.requested_at
+    into locked_request_id, locked_request_requested_at
+    from public.messaging_deletion_requests deletion_request
+    where deletion_request.shop_id = old.shop_id
+      and deletion_request.customer_id = old.customer_id
+      and deletion_request.state = 'pending'
+    for share;
+
+    if found then
+      approved_deletion_barrier := locked_request_requested_at + interval '5 years';
+    end if;
 
     if approved_deletion_barrier is not null then
       for locked_suppression_id in
@@ -1162,6 +1166,16 @@ returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  progress_key text;
+  cursor_value jsonb;
+  old_cursor_value jsonb;
+  new_count numeric;
+  old_count numeric;
+  new_cursor_at timestamptz;
+  old_cursor_at timestamptz;
+  new_cursor_id uuid;
+  old_cursor_id uuid;
 begin
   if tg_op = 'DELETE' then
     if current_setting('vyntechs.messaging_retention_purge', true) = 'on'
@@ -1181,6 +1195,157 @@ begin
   if old.state = 'completed' then
     raise exception 'completed messaging deletion tombstones are immutable';
   end if;
+
+  if old.state = 'pending' and new.state = 'pending' then
+    if (new.id, new.request_key, new.request_fingerprint, new.shop_id,
+        new.subject_key, new.customer_id, new.destination_fingerprint,
+        new.fingerprint_key_version, new.reason_code,
+        new.requesting_actor_profile_id, new.requested_at,
+        new.completed_at, new.latest_relevant_at, new.retain_until)
+      is distinct from
+       (old.id, old.request_key, old.request_fingerprint, old.shop_id,
+        old.subject_key, old.customer_id, old.destination_fingerprint,
+        old.fingerprint_key_version, old.reason_code,
+        old.requesting_actor_profile_id, old.requested_at,
+        old.completed_at, old.latest_relevant_at, old.retain_until)
+    then
+      raise exception 'messaging deletion request identity is immutable';
+    end if;
+
+    if new.prior_record_counts is null and new.proof_summary is null then
+      if old.prior_record_counts is not null or old.proof_summary is not null then
+        raise exception 'messaging deletion progress must be monotonic';
+      end if;
+      return new;
+    end if;
+
+    if jsonb_typeof(new.prior_record_counts) <> 'object'
+      or jsonb_typeof(new.proof_summary) <> 'object'
+      or (select array_agg(key order by key) from jsonb_object_keys(new.prior_record_counts) key)
+        <> array['consentEvents','consentProjections','notifications','quoteSends','smsLogs']
+      or (select array_agg(key order by key) from jsonb_object_keys(new.proof_summary) key)
+        <> array['cursors','detachedSuppressionSources','heldCounts','progressVersion','resultCounts']
+      or new.proof_summary->>'progressVersion' <> '1'
+      or jsonb_typeof(new.proof_summary->'progressVersion') <> 'number'
+      or jsonb_typeof(new.proof_summary->'resultCounts') <> 'object'
+      or jsonb_typeof(new.proof_summary->'heldCounts') <> 'object'
+      or jsonb_typeof(new.proof_summary->'cursors') <> 'object'
+      or (select array_agg(key order by key)
+          from jsonb_object_keys(new.proof_summary->'resultCounts') key)
+        <> array['consentEventsDeleted','notificationsDeleted','quoteSendsDeleted',
+                 'quoteSendsRetained','smsLogsDeleted']
+      or (select array_agg(key order by key)
+          from jsonb_object_keys(new.proof_summary->'heldCounts') key)
+        <> array['heldConsentEvents','heldConsentProjections','heldNotifications',
+                 'heldQuoteSends','heldSmsLogs','total']
+      or not coalesce(
+        (select array_agg(key order by key)
+          from jsonb_object_keys(new.proof_summary->'cursors') key),
+        array[]::text[]
+      ) <@ array['quoteSends','consentSubjects','consentEvents','smsLogs','notifications','holds']
+    then
+      raise exception 'invalid messaging deletion progress proof';
+    end if;
+
+    foreach progress_key in array array[
+      'consentEvents','consentProjections','notifications','quoteSends','smsLogs'
+    ] loop
+      if jsonb_typeof(new.prior_record_counts->progress_key) <> 'number'
+        or (new.prior_record_counts->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
+        or (new.prior_record_counts->>progress_key)::numeric > 9007199254740991
+      then
+        raise exception 'invalid messaging deletion progress proof';
+      end if;
+      new_count := (new.prior_record_counts->>progress_key)::numeric;
+      old_count := coalesce((old.prior_record_counts->>progress_key)::numeric, 0);
+      if old_count > new_count then
+        raise exception 'messaging deletion progress must be monotonic';
+      end if;
+    end loop;
+
+    foreach progress_key in array array[
+      'consentEventsDeleted','notificationsDeleted','quoteSendsDeleted',
+      'quoteSendsRetained','smsLogsDeleted'
+    ] loop
+      if jsonb_typeof(new.proof_summary->'resultCounts'->progress_key) <> 'number'
+        or (new.proof_summary->'resultCounts'->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
+        or (new.proof_summary->'resultCounts'->>progress_key)::numeric > 9007199254740991
+      then
+        raise exception 'invalid messaging deletion progress proof';
+      end if;
+      new_count := (new.proof_summary->'resultCounts'->>progress_key)::numeric;
+      old_count := coalesce((old.proof_summary->'resultCounts'->>progress_key)::numeric, 0);
+      if old_count > new_count then
+        raise exception 'messaging deletion progress must be monotonic';
+      end if;
+    end loop;
+
+    foreach progress_key in array array[
+      'heldConsentEvents','heldConsentProjections','heldNotifications',
+      'heldQuoteSends','heldSmsLogs','total'
+    ] loop
+      if jsonb_typeof(new.proof_summary->'heldCounts'->progress_key) <> 'number'
+        or (new.proof_summary->'heldCounts'->>progress_key) !~ '^(0|[1-9][0-9]{0,15})$'
+        or (new.proof_summary->'heldCounts'->>progress_key)::numeric > 9007199254740991
+      then
+        raise exception 'invalid messaging deletion progress proof';
+      end if;
+      new_count := (new.proof_summary->'heldCounts'->>progress_key)::numeric;
+      old_count := coalesce((old.proof_summary->'heldCounts'->>progress_key)::numeric, 0);
+      if old_count > new_count then
+        raise exception 'messaging deletion progress must be monotonic';
+      end if;
+    end loop;
+
+    if jsonb_typeof(new.proof_summary->'detachedSuppressionSources') <> 'number'
+      or (new.proof_summary->>'detachedSuppressionSources') !~ '^(0|[1-9][0-9]{0,15})$'
+      or (new.proof_summary->>'detachedSuppressionSources')::numeric > 9007199254740991
+    then
+      raise exception 'invalid messaging deletion progress proof';
+    end if;
+    if coalesce((old.proof_summary->>'detachedSuppressionSources')::numeric, 0)
+      > (new.proof_summary->>'detachedSuppressionSources')::numeric
+    then
+      raise exception 'messaging deletion progress must be monotonic';
+    end if;
+
+    for progress_key, cursor_value in
+      select key, value from jsonb_each(new.proof_summary->'cursors')
+    loop
+      if jsonb_typeof(cursor_value) <> 'object'
+        or (select array_agg(key order by key) from jsonb_object_keys(cursor_value) key)
+          <> array['at','id']
+        or jsonb_typeof(cursor_value->'at') <> 'string'
+        or jsonb_typeof(cursor_value->'id') <> 'string'
+      then
+        raise exception 'invalid messaging deletion progress proof';
+      end if;
+      begin
+        new_cursor_at := (cursor_value->>'at')::timestamptz;
+        new_cursor_id := (cursor_value->>'id')::uuid;
+      exception when others then
+        raise exception 'invalid messaging deletion progress proof';
+      end;
+
+      old_cursor_value := old.proof_summary->'cursors'->progress_key;
+      if old_cursor_value is not null then
+        old_cursor_at := (old_cursor_value->>'at')::timestamptz;
+        old_cursor_id := (old_cursor_value->>'id')::uuid;
+        if (new_cursor_at, new_cursor_id) < (old_cursor_at, old_cursor_id) then
+          raise exception 'messaging deletion progress must be monotonic';
+        end if;
+      end if;
+    end loop;
+
+    if old.proof_summary is not null and exists (
+      select 1 from jsonb_object_keys(old.proof_summary->'cursors') old_key
+      where not (new.proof_summary->'cursors' ? old_key)
+    ) then
+      raise exception 'messaging deletion progress must be monotonic';
+    end if;
+    return new;
+  end if;
+
   if old.state <> 'pending' or new.state <> 'completed'
     or new.id is distinct from old.id
     or new.request_key is distinct from old.request_key

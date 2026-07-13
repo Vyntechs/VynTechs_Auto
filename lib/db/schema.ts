@@ -1330,6 +1330,9 @@ export const messagingDeletionRequests = pgTable(
       table.requestingActorProfileId,
       table.requestKey,
     ),
+    uniqueIndex('messaging_deletion_requests_shop_customer_pending_uq')
+      .on(table.shopId, table.customerId)
+      .where(sql`${table.state} = 'pending' and ${table.customerId} is not null`),
     index('messaging_deletion_requests_pending_idx')
       .on(table.shopId, table.requestedAt)
       .where(sql`${table.state} = 'pending'`),
@@ -1375,9 +1378,9 @@ export const messagingDeletionRequests = pgTable(
           and ${table.customerId} is not null
           and ${table.completedAt} is null
           and ${table.latestRelevantAt} is null
-          and ${table.priorRecordCounts} is null
-          and ${table.proofSummary} is null
-          and ${table.retainUntil} is null)
+          and ${table.retainUntil} is null
+          and ((${table.priorRecordCounts} is null and ${table.proofSummary} is null)
+            or (${table.priorRecordCounts} is not null and ${table.proofSummary} is not null)))
         or (${table.state} = 'completed'
           and ${table.customerId} is null
           and ${table.completedAt} is not null

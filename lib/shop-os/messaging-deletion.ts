@@ -15,6 +15,45 @@ export type MessagingDeletionResult =
   | { ok: true; requestId: string; state: 'pending' | 'completed'; counts?: Record<string, number> }
   | { ok: false; error: 'forbidden' | 'not_found' | 'request_conflict' | 'busy' | 'retryable' }
 
+export type PriorRecordCounts = Readonly<{
+  consentEvents: number
+  consentProjections: number
+  notifications: number
+  quoteSends: number
+  smsLogs: number
+}>
+
+export type DeletionResultCounts = Readonly<{
+  consentEventsDeleted: number
+  notificationsDeleted: number
+  smsLogsDeleted: number
+  quoteSendsDeleted: number
+  quoteSendsRetained: number
+}>
+
+export type DeletionHeldCounts = Readonly<{
+  heldConsentEvents: number
+  heldConsentProjections: number
+  heldQuoteSends: number
+  heldSmsLogs: number
+  heldNotifications: number
+  total: number
+}>
+
+export type DeletionCursor = Readonly<{ at: string; id: string }>
+
+export type PendingDeletionProgress = Readonly<{
+  progressVersion: 1
+  resultCounts: DeletionResultCounts
+  heldCounts: DeletionHeldCounts
+  detachedSuppressionSources: number
+  cursors: Readonly<Partial<Record<
+    'quoteSends' | 'consentSubjects' | 'consentEvents' |
+    'smsLogs' | 'notifications' | 'holds',
+    DeletionCursor
+  >>>
+}>
+
 type Snapshot = {
   db: AppDb
   actor: Readonly<MessagingActor>
@@ -146,7 +185,9 @@ function exactUnique(error: unknown): boolean {
   for (let depth = 0; depth < 3 && current; depth += 1) {
     if (own(current, 'code') === '23505'
       && (own(current, 'constraint') === 'messaging_deletion_requests_shop_actor_request_uq'
-        || own(current, 'constraint_name') === 'messaging_deletion_requests_shop_actor_request_uq')) {
+        || own(current, 'constraint_name') === 'messaging_deletion_requests_shop_actor_request_uq'
+        || own(current, 'constraint') === 'messaging_deletion_requests_shop_customer_pending_uq'
+        || own(current, 'constraint_name') === 'messaging_deletion_requests_shop_customer_pending_uq')) {
       return true
     }
     current = own(current, 'cause')
@@ -167,6 +208,7 @@ type RequestRow = {
   requestingActorProfileId: string
   counts: Record<string, number> | null
   proof: Record<string, unknown> | null
+  requestedAt?: Date | string
 }
 
 type MessagingPair = { destinationFingerprint: string; fingerprintKeyVersion: string }
@@ -320,6 +362,13 @@ async function recoverRequest(input: Snapshot): Promise<MessagingDeletionResult>
     await tx.execute(sql`select id from shops where id = ${input.actor.shopId}::uuid for update`)
     const authority = await liveAuthority(tx as AppDb, input)
     if (authority !== 'ok') return { ok: false, error: authority }
+    const customer = unwrapRows<{ id: string; phone: string }>(await tx.execute(sql`
+      select id, phone from customers
+      where id = ${input.customerId}::uuid and shop_id = ${input.actor.shopId}::uuid
+      for update
+    `))[0]
+    if (!customer) return { ok: false, error: 'not_found' }
+    if (customer.phone !== input.destination) return { ok: false, error: 'request_conflict' }
     const result = await tx.execute<RequestRow>(sql`
       select id, shop_id as "shopId", request_key as "requestKey",
         request_fingerprint as "requestFingerprint", customer_id as "customerId",
@@ -334,7 +383,55 @@ async function recoverRequest(input: Snapshot): Promise<MessagingDeletionResult>
       for update
     `)
     const row = unwrapRows<RequestRow>(result)[0]
-    return row ? retry(row, input) : { ok: false, error: 'retryable' }
+    if (row) return retry(row, input)
+
+    const canonical = unwrapRows<RequestRow>(await tx.execute(sql`
+      select id, shop_id as "shopId", request_key as "requestKey",
+        request_fingerprint as "requestFingerprint", customer_id as "customerId",
+        destination_fingerprint as "destinationFingerprint",
+        fingerprint_key_version as "fingerprintKeyVersion", state,
+        reason_code as "reasonCode",
+        requesting_actor_profile_id as "requestingActorProfileId",
+        prior_record_counts as counts, proof_summary as proof,
+        requested_at as "requestedAt"
+      from messaging_deletion_requests
+      where shop_id = ${input.actor.shopId}::uuid
+        and customer_id = ${input.customerId}::uuid and state = 'pending'
+      for update
+    `))[0]
+    if (!canonical?.requestedAt) return { ok: false, error: 'retryable' }
+
+    const pairs = await lockCustomerMessagingPairs({
+      tx: tx as AppDb,
+      shopId: input.actor.shopId,
+      customerId: input.customerId!,
+      current: input.fingerprints!,
+    })
+    if (!pairs) return { ok: false, error: 'busy' }
+    const suppressions = unwrapRows<{
+      reason: string
+      liftedAt: Date | null
+      retainUntil: Date | string
+    }>(await tx.execute(sql`
+      select reason, lifted_at as "liftedAt", retain_until as "retainUntil"
+      from sms_suppressions where shop_id = ${input.actor.shopId}::uuid
+        and (${sql.join(pairs.map((item) => sql`
+          (destination_fingerprint = ${item.destinationFingerprint}
+            and fingerprint_key_version = ${item.fingerprintKeyVersion})
+        `), sql` or `)})
+      order by destination_fingerprint, fingerprint_key_version
+      limit ${MAX_HISTORICAL_PAIRS + 1} for update
+    `))
+    const requestedAt = canonical.requestedAt instanceof Date
+      ? canonical.requestedAt
+      : new Date(canonical.requestedAt)
+    const barrierAt = addUtcCalendarYearsClamped(requestedAt, 5)
+    if (suppressions.length !== pairs.length || suppressions.some((suppression) =>
+      !['verified_deletion', 'permanent_failure', 'number_reassigned'].includes(suppression.reason)
+      || suppression.liftedAt !== null
+      || timestampMilliseconds(suppression.retainUntil) < barrierAt.getTime()
+    )) return { ok: false, error: 'retryable' }
+    return { ok: true, requestId: canonical.id, state: 'pending' }
   })
 }
 
@@ -477,6 +574,20 @@ export async function requestMessagingDeletion(rawInput: {
       if (!verifiedPairs || !sameMessagingPairs(historicalPairs, verifiedPairs)) {
         throw new Error('historical_messaging_pairs_changed')
       }
+      const canonical = unwrapRows<RequestRow>(await tx.execute(sql`
+        select id, shop_id as "shopId", request_key as "requestKey",
+          request_fingerprint as "requestFingerprint", customer_id as "customerId",
+          destination_fingerprint as "destinationFingerprint",
+          fingerprint_key_version as "fingerprintKeyVersion", state,
+          reason_code as "reasonCode",
+          requesting_actor_profile_id as "requestingActorProfileId",
+          prior_record_counts as counts, proof_summary as proof
+        from messaging_deletion_requests
+        where shop_id = ${input.actor.shopId}::uuid
+          and customer_id = ${input.customerId}::uuid and state = 'pending'
+        for update
+      `))[0]
+      if (canonical) return { ok: true, requestId: canonical.id, state: 'pending' }
       const current = input.fingerprints![0]!
       const inserted = unwrapRows<{ id: string }>(await tx.execute(sql`
         insert into messaging_deletion_requests (

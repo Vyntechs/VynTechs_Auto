@@ -317,14 +317,14 @@ type MessagingRetentionMarkers = {
 
 const MESSAGING_RETENTION_FUNCTION_DIGESTS = {
   'validate_quote_event_send_reference()': 'be3c718f2e44f7a71c4c0f3366de84a1ed3d949048df400a99501dbc5690191b',
-  'guard_quote_send_lifecycle()': 'e6b4d05df7f3671114b046d93edf280f13567eab07454ccbb0d451adc70c6149',
+  'guard_quote_send_lifecycle()': '7abe807df38550897a3627113b9d778a7abda964042f5b7c7a5e3c62917ac34d',
   'serialize_messaging_retention_hold_target()': 'c324faa9988827a2e66824118c1b5ea4481ffd5321eb9582a556eca374e0e82e',
   'reject_messaging_consent_event_mutation()': 'ae5135ed441581082da98ee7759016a91ec2352e8c7f575b9a6b15100281c7dd',
   'require_messaging_compaction_completion()': 'b195ef83c2f0e6139194a459978364ff68c4e17970c3a6b9fc63dba0d9325b3d',
   'compact_messaging_consent_events(uuid,uuid,uuid)': 'e57b84d24e5878655994412309bd924c7101e7ca84c5de9bc90c5d459cb80ba2',
   'purge_expired_messaging_consent_event(uuid,uuid)': 'a88035857f054ce4e0c3deed216d3a81073736ba50471798dbfb5bab793688e4',
   'purge_expired_messaging_retention_hold(uuid,uuid)': '99f9749e6bb58f8c394733314f2c7d8b8143d16fde0ba72eb97855187ea86e65',
-  'guard_messaging_deletion_request_mutation()': 'ad60c8ef2fba7815527c4b1d9579c3c4743b363707c728e088b5b6f18ed209ab',
+  'guard_messaging_deletion_request_mutation()': '4324d067e7b1fa109d99c38bf93f0771508d1b9bd22e550c2927f3960c2a06a1',
   'purge_expired_messaging_deletion_request(uuid,uuid)': '8b4aae451704d22bbd987724e442241914506384f92d8ef1db0536afd8d5002a',
 } as const
 
@@ -516,7 +516,9 @@ async function messagingRetentionMarkers(
       ('messaging_consent_events_subject_idx'), ('messaging_consent_state_shop_id_uq'),
       ('messaging_consent_state_subject_program_uq'), ('sms_suppressions_shop_id_uq'),
       ('sms_suppressions_shop_destination_uq'), ('messaging_deletion_requests_shop_id_uq'),
-      ('messaging_deletion_requests_shop_actor_request_uq'), ('messaging_deletion_requests_pending_idx'),
+      ('messaging_deletion_requests_shop_actor_request_uq'),
+      ('messaging_deletion_requests_shop_customer_pending_uq'),
+      ('messaging_deletion_requests_pending_idx'),
       ('messaging_retention_holds_shop_id_uq'), ('messaging_retention_holds_active_subject_idx'),
       ('messaging_retention_holds_purge_idx'), ('messaging_retention_holds_active_resource_idx'),
       ('quote_sends_shop_id_uq'), ('quote_sends_shop_ticket_id_uq'),
@@ -534,7 +536,7 @@ async function messagingRetentionMarkers(
         'quote event send reference must match an exact live quote send', null, null, null),
       ('guard_quote_send_lifecycle()', 'trigger', false, false,
         'matching pending messaging deletion request',
-        'order by deletion_request.id for share',
+        'into locked_request_id, locked_request_requested_at from public.messaging_deletion_requests deletion_request',
         'and suppression.destination_fingerprint = old.destination_fingerprint and suppression.fingerprint_key_version = old.fingerprint_key_version and suppression.reason in (''verified_deletion'', ''permanent_failure'', ''number_reassigned'') and suppression.lifted_at is null and suppression.retain_until >= approved_deletion_barrier order by suppression.id for share',
         'quote send subject identity is immutable'),
       ('reject_messaging_consent_event_mutation()', 'trigger', false, false,
@@ -550,7 +552,10 @@ async function messagingRetentionMarkers(
         'and e.customer_id = request_customer_id',
         'array_agg(distinct subject_key order by subject_key)', null),
       ('guard_messaging_deletion_request_mutation()', 'trigger', false, false,
-        null, null, null, null),
+        'messaging deletion request identity is immutable',
+        'invalid messaging deletion progress proof',
+        'messaging deletion progress must be monotonic',
+        'completed messaging deletion tombstones are immutable'),
       ('purge_expired_messaging_deletion_request(uuid,uuid)', 'boolean', true, true,
         'clock_timestamp()',
         'from public.shops locked_shop where locked_shop.id = p_shop_id for update',
@@ -605,7 +610,11 @@ async function messagingRetentionMarkers(
        join pg_constraint c on c.conname = e.constraint_name
        where c.connamespace = 'public'::regnamespace) as constraint_count,
       (select count(*)::int from expected_indexes e
-       join pg_indexes i on i.indexname = e.index_name and i.schemaname = 'public') as index_count,
+       join pg_indexes i on i.indexname = e.index_name and i.schemaname = 'public'
+       where e.index_name <> 'messaging_deletion_requests_shop_customer_pending_uq'
+         or (position('state' in lower(i.indexdef)) > 0
+           and position('pending' in lower(i.indexdef)) > 0
+           and position('customer_id is not null' in lower(i.indexdef)) > 0)) as index_count,
       (select count(*)::int
        from pg_indexes i
        where i.schemaname = 'public'
@@ -688,7 +697,7 @@ function isCompleteMessagingRetention(markers: MessagingRetentionMarkers): boole
   return markers.table_count === 8
     && markers.column_count === 115
     && markers.constraint_count === 90
-    && markers.index_count === 28
+    && markers.index_count === 29
     && markers.active_resource_index_count === 1
     && markers.rls_count === 8
     && markers.policy_count === 8

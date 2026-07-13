@@ -19,6 +19,7 @@ import {
   createTestDb,
   ensureMessagingRetentionMigration,
 } from '@/tests/helpers/db'
+import type { PendingDeletionProgress } from '@/lib/shop-os/messaging-deletion'
 
 const hex = 'a'.repeat(64)
 const otherHex = 'b'.repeat(64)
@@ -729,7 +730,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('locks every matching pending deletion request in stable order before send mutation', async () => {
+  it('uses the canonical pending deletion request before send mutation', async () => {
     const fixture = await createTestDb()
     try {
       const functionProof = await fixture.client.query<{ function_definition: string }>(`
@@ -739,20 +740,16 @@ describe('Shop OS messaging retention source schema', () => {
       `)
       const functionDefinition = functionProof.rows[0]!.function_definition.toLowerCase()
       expect(functionDefinition).not.toContain('select exists')
-      expect(functionDefinition).toContain('order by deletion_request.id')
+      expect(functionDefinition).toContain('select deletion_request.id, deletion_request.requested_at')
+      expect(functionDefinition).toContain('and deletion_request.customer_id = old.customer_id')
+      expect(functionDefinition).toContain("and deletion_request.state = 'pending'")
       expect(functionDefinition).toContain('for share')
-      expect(functionDefinition.indexOf('order by deletion_request.id'))
-        .toBeLessThan(functionDefinition.indexOf('for share'))
+      expect(functionDefinition).not.toContain('for locked_request_id, locked_request_requested_at in')
       expect(functionDefinition).toContain('order by suppression.id')
 
       const tenant = await seedOperationalTenant(fixture.client)
       await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
-      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
       await insertSuppression(fixture.client, tenant)
-      await insertSuppression(fixture.client, tenant, {
-        destinationFingerprint: otherHex,
-        fingerprintKeyVersion: 'key_v2',
-      })
       const sendId = await insertQuoteSend(fixture.client, tenant, {
         state: 'submitted',
         submittingAt: 'now()',
@@ -1809,7 +1806,7 @@ describe('Shop OS messaging retention source schema', () => {
     }
   })
 
-  it('allows pending-to-completed once and rejects completed tombstone mutation', async () => {
+  it('allows monotonic pending cleanup progress and rejects tampering before final completion', async () => {
     const fixture = await createTestDb()
     try {
       const tenant = await seedTenant(fixture.client)
@@ -1823,19 +1820,152 @@ describe('Shop OS messaging retention source schema', () => {
         [requestId, crypto.randomUUID(), hex, tenant.shopId, crypto.randomUUID(),
           tenant.customerId, hex, tenant.actorId],
       )
+      const zeroProgress: PendingDeletionProgress = {
+        progressVersion: 1,
+        resultCounts: {
+          consentEventsDeleted: 0, notificationsDeleted: 0, smsLogsDeleted: 0,
+          quoteSendsDeleted: 0, quoteSendsRetained: 0,
+        },
+        heldCounts: {
+          heldConsentEvents: 0, heldConsentProjections: 0, heldQuoteSends: 0,
+          heldSmsLogs: 0, heldNotifications: 0, total: 0,
+        },
+        detachedSuppressionSources: 0,
+        cursors: {},
+      }
+      const firstCounts = {
+        consentEvents: 0, consentProjections: 0, notifications: 1, quoteSends: 2, smsLogs: 1,
+      }
+      const cursorId = crypto.randomUUID()
+      const firstProgress: PendingDeletionProgress = {
+        ...zeroProgress,
+        resultCounts: {
+          ...zeroProgress.resultCounts,
+          notificationsDeleted: 1, smsLogsDeleted: 1, quoteSendsDeleted: 2,
+        },
+        cursors: {
+          quoteSends: { at: '2026-07-12T10:00:00.000Z', id: cursorId },
+        },
+      }
+      await fixture.client.query(
+        `update messaging_deletion_requests
+        set prior_record_counts = $1, proof_summary = $2
+        where id = $3`,
+        [firstCounts, firstProgress, requestId],
+      )
+      const progressed = await fixture.client.query<{
+        state: string
+        customer_id: string
+        prior_record_counts: string
+        proof_summary: string
+      }>(`
+        select state, customer_id, prior_record_counts::text, proof_summary::text
+        from messaging_deletion_requests where id = $1
+      `, [requestId])
+      expect(progressed.rows[0]?.state).toBe('pending')
+      expect(progressed.rows[0]?.customer_id).toBe(tenant.customerId)
+      const committed = {
+        prior_record_counts: progressed.rows[0]!.prior_record_counts,
+        proof_summary: progressed.rows[0]!.proof_summary,
+      }
+      const rejectProgress = async (
+        counts: unknown,
+        proof: unknown,
+        message: RegExp = /invalid messaging deletion progress proof/,
+      ) => {
+        await expect(fixture.client.query(
+          `update messaging_deletion_requests
+          set prior_record_counts = $1, proof_summary = $2 where id = $3`,
+          [counts, proof, requestId],
+        )).rejects.toThrow(message)
+        expect((await fixture.client.query<{
+          prior_record_counts: string
+          proof_summary: string
+        }>(`
+          select prior_record_counts::text, proof_summary::text
+          from messaging_deletion_requests where id = $1
+        `, [requestId])).rows[0]).toEqual(committed)
+      }
+
+      await rejectProgress(
+        { ...firstCounts, quoteSends: 1 },
+        { ...firstProgress, resultCounts: { ...firstProgress.resultCounts, quoteSendsDeleted: 1 } },
+        /messaging deletion progress must be monotonic/,
+      )
+      const { smsLogs: _missing, ...missingCount } = firstCounts
+      await rejectProgress(missingCount, firstProgress)
+      await rejectProgress(firstCounts, { ...firstProgress, destination: '+12025550123' })
+      await rejectProgress(
+        { ...firstCounts, smsLogs: Number.MAX_SAFE_INTEGER + 1 }, firstProgress,
+      )
+      await rejectProgress(firstCounts, {
+        ...firstProgress,
+        cursors: { quoteSends: { at: '2026-07-12T09:59:59.999Z', id: cursorId } },
+      }, /messaging deletion progress must be monotonic/)
+      await rejectProgress(firstCounts, {
+        ...firstProgress,
+        cursors: {
+          quoteSends: { at: '2026-07-12T10:00:00.000Z', id: '00000000-0000-0000-0000-000000000000' },
+        },
+      }, /messaging deletion progress must be monotonic/)
+
+      const identityMutations = [
+        ['customer_id', crypto.randomUUID()],
+        ['subject_key', crypto.randomUUID()],
+        ['request_key', crypto.randomUUID()],
+        ['request_fingerprint', otherHex],
+        ['destination_fingerprint', otherHex],
+        ['fingerprint_key_version', 'key_v2'],
+        ['reason_code', 'shop_request'],
+        ['requesting_actor_profile_id', crypto.randomUUID()],
+        ['requested_at', new Date('2026-07-12T10:00:01.000Z')],
+        ['state', 'completed'],
+        ['completed_at', new Date('2026-07-12T10:00:01.000Z')],
+        ['latest_relevant_at', new Date('2026-07-12T10:00:01.000Z')],
+        ['retain_until', new Date('2031-07-12T10:00:01.000Z')],
+      ] as const
+      for (const [column, value] of identityMutations) {
+        await expect(fixture.client.query(
+          `update messaging_deletion_requests set ${column} = $1 where id = $2`,
+          [value, requestId],
+        )).rejects.toThrow(
+          /identity is immutable|pending to completed exactly once|state_consistent/,
+        )
+        expect((await fixture.client.query<{
+          prior_record_counts: string
+          proof_summary: string
+        }>(`
+          select prior_record_counts::text, proof_summary::text
+          from messaging_deletion_requests where id = $1
+        `, [requestId])).rows[0]).toEqual(committed)
+      }
+
       await fixture.client.query(
         `update messaging_deletion_requests set
           state = 'completed', customer_id = null, completed_at = now(),
           latest_relevant_at = now(),
-          prior_record_counts = '{}'::jsonb, proof_summary = '{}'::jsonb,
+          prior_record_counts = $1, proof_summary = $2,
           retain_until = now() + interval '5 years'
-        where id = $1`,
-        [requestId],
+        where id = $3`,
+        [firstCounts, firstProgress, requestId],
       )
       await expect(fixture.client.query(
         'update messaging_deletion_requests set proof_summary = $1 where id = $2',
         [{ changed: true }, requestId],
       )).rejects.toThrow(/completed messaging deletion tombstones are immutable/)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('enforces one canonical pending deletion per shop and customer', async () => {
+    const fixture = await createTestDb()
+    try {
+      const tenant = await seedTenant(fixture.client)
+      await insertDeletionRequest(fixture.client, tenant, { subjectKey: crypto.randomUUID() })
+      await expect(insertDeletionRequest(fixture.client, tenant, {
+        subjectKey: crypto.randomUUID(),
+      })).rejects.toThrow(/messaging_deletion_requests_shop_customer_pending_uq/)
     } finally {
       await fixture.close()
     }
