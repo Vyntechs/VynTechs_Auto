@@ -687,6 +687,176 @@ function addCount(left: number, right: number): number {
   return result
 }
 
+async function discoverDeletionWorkItems(
+  tx: AppDb,
+  request: { id: string; shopId: string; customerId: string },
+  limit: number,
+): Promise<number> {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('invalid_discovery_limit')
+  let remaining = Math.min(limit, MAX_TOTAL_RESOURCES)
+  let discovered = 0
+  const consume = (count: number) => {
+    discovered += count
+    remaining -= count
+  }
+
+  if (remaining > 0) {
+    consume(unwrapRows<{ id: string }>(await tx.execute(sql`
+      with candidates as (
+        select source.id
+        from quote_sends source
+        where source.shop_id = ${request.shopId}::uuid
+          and source.customer_id = ${request.customerId}::uuid
+          and not exists (
+            select 1 from messaging_deletion_work_items existing
+            where existing.request_id = ${request.id}::uuid
+              and existing.resource_type = 'quote_send'
+              and existing.resource_id = source.id
+          )
+        order by source.id
+        limit ${remaining}
+      )
+      insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, outcome
+      )
+      select ${request.shopId}::uuid, ${request.id}::uuid, 'quote_send', id, 'pending'
+      from candidates order by id
+      on conflict (request_id, resource_type, resource_id) do nothing
+      returning id
+    `)).length)
+  }
+
+  if (remaining > 0) {
+    consume(unwrapRows<{ id: string }>(await tx.execute(sql`
+      with candidates as (
+        select source.id
+        from messaging_consent_state source
+        where source.shop_id = ${request.shopId}::uuid
+          and source.customer_id = ${request.customerId}::uuid
+          and not exists (
+            select 1 from messaging_deletion_work_items existing
+            where existing.request_id = ${request.id}::uuid
+              and existing.resource_type = 'consent_projection'
+              and existing.resource_id = source.id
+          )
+        order by source.id
+        limit ${remaining}
+      )
+      insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, outcome
+      )
+      select ${request.shopId}::uuid, ${request.id}::uuid, 'consent_projection', id, 'pending'
+      from candidates order by id
+      on conflict (request_id, resource_type, resource_id) do nothing
+      returning id
+    `)).length)
+  }
+
+  if (remaining > 0) {
+    consume(unwrapRows<{ id: string }>(await tx.execute(sql`
+      with candidates as (
+        select child.id, parent.id as parent_work_item_id,
+          not (child.event_type = 'deleted'
+            and child.program_version = 'internal_deletion_v1') as counts_toward_proof
+        from messaging_consent_events child
+        left join messaging_consent_state source_parent
+          on source_parent.shop_id = child.shop_id
+         and source_parent.subject_key = child.subject_key
+         and source_parent.destination_fingerprint = child.destination_fingerprint
+         and source_parent.fingerprint_key_version = child.fingerprint_key_version
+         and source_parent.program_version = child.program_version
+        left join messaging_deletion_work_items parent
+          on parent.request_id = ${request.id}::uuid
+         and parent.resource_type = 'consent_projection'
+         and parent.resource_id = source_parent.id
+        where child.shop_id = ${request.shopId}::uuid
+          and child.customer_id = ${request.customerId}::uuid
+          and (source_parent.id is null or parent.id is not null)
+          and not exists (
+            select 1 from messaging_deletion_work_items existing
+            where existing.request_id = ${request.id}::uuid
+              and existing.resource_type = 'consent_event'
+              and existing.resource_id = child.id
+          )
+        order by child.id
+        limit ${remaining}
+      )
+      insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, parent_work_item_id,
+        outcome, counts_toward_proof
+      )
+      select ${request.shopId}::uuid, ${request.id}::uuid, 'consent_event', id,
+        parent_work_item_id, 'pending', counts_toward_proof
+      from candidates order by id
+      on conflict (request_id, resource_type, resource_id) do nothing
+      returning id
+    `)).length)
+  }
+
+  if (remaining > 0) {
+    consume(unwrapRows<{ id: string }>(await tx.execute(sql`
+      with candidates as (
+        select child.id, parent.id as parent_work_item_id
+        from sms_log child
+        join messaging_deletion_work_items parent
+          on parent.request_id = ${request.id}::uuid
+         and parent.resource_type = 'quote_send'
+         and parent.resource_id = child.quote_send_id
+        left join messaging_deletion_work_items existing
+          on existing.request_id = parent.request_id
+         and existing.resource_type = 'sms_log'
+         and existing.resource_id = child.id
+        where child.shop_id = ${request.shopId}::uuid and existing.id is null
+        order by child.id
+        limit ${remaining}
+      )
+      insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, parent_work_item_id, outcome
+      )
+      select ${request.shopId}::uuid, ${request.id}::uuid, 'sms_log', id,
+        parent_work_item_id, 'pending'
+      from candidates order by id
+      on conflict (request_id, resource_type, resource_id) do nothing
+      returning id
+    `)).length)
+  }
+
+  if (remaining > 0) {
+    consume(unwrapRows<{ id: string }>(await tx.execute(sql`
+      with candidates as (
+        select child.id, parent.id as parent_work_item_id
+        from notifications child
+        left join messaging_deletion_work_items parent
+          on child.entity_type = 'quote_send'
+         and parent.request_id = ${request.id}::uuid
+         and parent.resource_type = 'quote_send'
+         and parent.resource_id = child.entity_id
+        left join messaging_deletion_work_items existing
+          on existing.request_id = ${request.id}::uuid
+         and existing.resource_type = 'notification'
+         and existing.resource_id = child.id
+        where child.shop_id = ${request.shopId}::uuid
+          and existing.id is null
+          and ((child.entity_type = 'customer'
+                and child.entity_id = ${request.customerId}::uuid)
+            or (child.entity_type = 'quote_send' and parent.id is not null))
+        order by child.id
+        limit ${remaining}
+      )
+      insert into messaging_deletion_work_items (
+        shop_id, request_id, resource_type, resource_id, parent_work_item_id, outcome
+      )
+      select ${request.shopId}::uuid, ${request.id}::uuid, 'notification', id,
+        parent_work_item_id, 'pending'
+      from candidates order by id
+      on conflict (request_id, resource_type, resource_id) do nothing
+      returning id
+    `)).length)
+  }
+
+  return discovered
+}
+
 export async function completeMessagingDeletion(rawInput: {
   db: AppDb
   actor: MessagingActor
@@ -718,6 +888,7 @@ export async function completeMessagingDeletion(rawInput: {
           proof_summary as proof
         from messaging_deletion_requests
         where id = ${input.requestId}::uuid and shop_id = ${input.actor.shopId}::uuid
+        for update
       `))[0]
       if (!request) return { ok: false, error: 'not_found' }
       if (request.state === 'completed') {
@@ -735,6 +906,12 @@ export async function completeMessagingDeletion(rawInput: {
           and id = ${request.customerId}::uuid for update
       `))[0]
       if (!customer) return { ok: false, error: 'not_found' }
+
+      await discoverDeletionWorkItems(tx as AppDb, {
+        id: request.id,
+        shopId: request.shopId,
+        customerId: request.customerId,
+      }, MAX_TOTAL_RESOURCES)
 
       const sendPage = unwrapRows<SendRow>(await tx.execute(sql`
         select id, state, customer_id as "customerId", subject_key as "subjectKey" from quote_sends

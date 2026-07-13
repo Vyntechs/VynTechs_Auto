@@ -10,6 +10,7 @@ import {
   messagingConsentEvents,
   messagingConsentState,
   messagingDeletionRequests,
+  messagingDeletionWorkItems,
   messagingRetentionHolds,
   notifications,
   profiles,
@@ -127,6 +128,15 @@ describe('suppression-first messaging deletion', () => {
     }
     throw new Error('deletion did not converge within deterministic attempt budget')
   }
+
+  const journalRows = (requestId: string) => db.select({
+    requestId: messagingDeletionWorkItems.requestId,
+    resourceType: messagingDeletionWorkItems.resourceType,
+    resourceId: messagingDeletionWorkItems.resourceId,
+    parentWorkItemId: messagingDeletionWorkItems.parentWorkItemId,
+    outcome: messagingDeletionWorkItems.outcome,
+  }).from(messagingDeletionWorkItems)
+    .where(eq(messagingDeletionWorkItems.requestId, requestId))
 
   const insertSend = async (
     id: string,
@@ -439,6 +449,140 @@ describe('suppression-first messaging deletion', () => {
     expect(await request({
       requestKey: uuid(60_000), requestFingerprint: '8'.repeat(64),
     })).toEqual({ ok: false, error: 'request_conflict' })
+  })
+
+  it('journals bounded deletion work and skips already-journaled held records on retry', async () => {
+    await seedPhaseTwoResource('consentEvents', recoveryLimits.totalResources + 1)
+    const startsAt = new Date(Date.now() - 60_000)
+    const expiresAt = new Date(Date.now() + 86_400_000)
+    await db.insert(messagingRetentionHolds).values(Array.from(
+      { length: recoveryLimits.totalResources },
+      (_, index) => ({
+        id: uuid(74_000 + index), shopId, resourceType: 'messaging_consent_event' as const,
+        resourceId: uuid(20_000 + index), reasonCode: 'legal_claim' as const,
+        authorizingActorProfileId: owner.profileId, startsAt,
+        reviewAt: new Date(Date.now() + 3_600_000), expiresAt,
+        retainUntil: addCalendarYears(expiresAt, 5),
+      }),
+    ))
+    const pending = await request({ requestKey: uuid(71_000) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    const firstJournal = await journalRows(pending.requestId)
+    expect(firstJournal).toHaveLength(recoveryLimits.totalResources)
+    expect(firstJournal.every((row) => row.requestId === pending.requestId
+      && row.resourceType === 'consent_event'
+      && row.parentWorkItemId === null
+      && row.outcome === 'pending')).toBe(true)
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    const retryJournal = await journalRows(pending.requestId)
+    expect(retryJournal).toHaveLength(recoveryLimits.totalResources + 1)
+    expect(new Set(retryJournal.map(({ resourceId }) => resourceId)).size)
+      .toBe(recoveryLimits.totalResources + 1)
+    expect(retryJournal).toContainEqual(expect.objectContaining({ resourceId: uuid(21_024) }))
+  })
+
+  it('discovers every child with its exact request-scoped parent', async () => {
+    const sendA = uuid(72_000)
+    const sendB = uuid(72_001)
+    const createdAt = new Date('2026-07-12T10:00:00.000Z')
+    const notificationRetainUntil = new Date('2026-10-10T10:00:00.000Z')
+    const smsRetainUntil = new Date('2027-07-12T10:00:00.000Z')
+    await insertSend(sendA, 'queued')
+    await insertSend(sendB, 'queued')
+    await activeHold({ subjectKey: customerId })
+    await db.insert(smsLog).values([
+      { id: uuid(72_010), shopId, quoteSendId: sendA, templateKey: 'quote_ready',
+        templateVersion: 'v1', state: 'sent', serverReceivedAt: createdAt, retainUntil: smsRetainUntil },
+      { id: uuid(72_011), shopId, quoteSendId: sendB, templateKey: 'quote_ready',
+        templateVersion: 'v1', state: 'sent', serverReceivedAt: createdAt, retainUntil: smsRetainUntil },
+    ])
+    await db.insert(notifications).values([
+      ...Array.from({ length: 257 }, (_, index) => ({
+        id: uuid(72_100 + index), shopId, recipientProfileId: owner.profileId,
+        eventType: 'quote_sent' as const, entityType: 'quote_send' as const, entityId: sendA,
+        dedupeKey: `send-a-${index}`, createdAt, retainUntil: notificationRetainUntil,
+      })),
+      { id: uuid(72_400), shopId, recipientProfileId: owner.profileId,
+        eventType: 'quote_sent', entityType: 'quote_send', entityId: sendB,
+        dedupeKey: 'send-b-258', createdAt, retainUntil: notificationRetainUntil },
+    ])
+    const pending = await request({ requestKey: uuid(72_500) })
+    if (!pending.ok) throw new Error('request failed')
+
+    expect(await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now }))
+      .toMatchObject({ ok: true, state: 'pending' })
+    const rows = await journalRows(pending.requestId)
+    const parentA = rows.find((row) => row.resourceType === 'quote_send' && row.resourceId === sendA)
+    const parentB = rows.find((row) => row.resourceType === 'quote_send' && row.resourceId === sendB)
+    expect(parentA).toBeDefined()
+    expect(parentB).toBeDefined()
+    expect(rows.filter((row) => row.resourceType === 'sms_log')).toHaveLength(2)
+    const quoteNotifications = rows.filter((row) => row.resourceType === 'notification')
+    expect(quoteNotifications).toHaveLength(258)
+    const exactChildren = await db.execute<{ smsCount: number; notificationCount: number }>(sql`
+      select
+        (select count(*)::int from messaging_deletion_work_items child
+          join sms_log source on source.id = child.resource_id and source.shop_id = child.shop_id
+          join messaging_deletion_work_items parent
+            on parent.request_id = child.request_id and parent.id = child.parent_work_item_id
+              and parent.resource_type = 'quote_send'
+              and parent.resource_id = source.quote_send_id
+          where child.request_id = ${pending.requestId}::uuid
+            and child.resource_type = 'sms_log') as "smsCount",
+        (select count(*)::int from messaging_deletion_work_items child
+          join notifications source on source.id = child.resource_id and source.shop_id = child.shop_id
+          join messaging_deletion_work_items parent
+            on parent.request_id = child.request_id and parent.id = child.parent_work_item_id
+              and parent.resource_type = 'quote_send'
+              and parent.resource_id = source.entity_id
+          where child.request_id = ${pending.requestId}::uuid
+            and child.resource_type = 'notification'
+            and source.entity_type = 'quote_send') as "notificationCount"
+    `)
+    expect(exactChildren.rows[0]).toEqual({ smsCount: 2, notificationCount: 258 })
+  })
+
+  it('isolates journal discovery to the request customer', async () => {
+    const customerSend = uuid(73_000)
+    const otherCustomerSend = uuid(73_001)
+    const customerNotification = uuid(73_010)
+    const otherCustomerNotification = uuid(73_011)
+    const createdAt = new Date('2026-07-12T10:00:00.000Z')
+    const retainUntil = new Date('2026-10-10T10:00:00.000Z')
+    await insertSend(customerSend, 'queued')
+    await insertSend(otherCustomerSend, 'queued', 'key_v2', destination,
+      duplicateCustomerId, duplicateCustomerId)
+    await db.insert(notifications).values([
+      { id: customerNotification, shopId, recipientProfileId: owner.profileId,
+        eventType: 'quote_sent', entityType: 'customer', entityId: customerId,
+        dedupeKey: 'customer-primary', createdAt, retainUntil },
+      { id: otherCustomerNotification, shopId, recipientProfileId: owner.profileId,
+        eventType: 'quote_sent', entityType: 'customer', entityId: duplicateCustomerId,
+        dedupeKey: 'customer-secondary', createdAt, retainUntil },
+    ])
+    const pending = await request({ requestKey: uuid(73_500) })
+    if (!pending.ok) throw new Error('request failed')
+
+    await completeMessagingDeletion({ db, actor: owner, requestId: pending.requestId, now })
+    const rows = await journalRows(pending.requestId)
+    expect(rows.map(({ resourceId }) => resourceId).sort())
+      .toEqual([customerSend, customerNotification].sort())
+    expect(rows.find(({ resourceId }) => resourceId === customerNotification)).toEqual({
+      requestId: pending.requestId,
+      resourceType: 'notification',
+      resourceId: customerNotification,
+      parentWorkItemId: null,
+      outcome: 'pending',
+    })
+    expect(await db.select({ id: quoteSends.id }).from(quoteSends)
+      .where(eq(quoteSends.id, otherCustomerSend))).toHaveLength(1)
+    expect(await db.select({ id: notifications.id }).from(notifications)
+      .where(eq(notifications.id, otherCustomerNotification))).toHaveLength(1)
   })
 
   it('binds completed retries to the original customer without retaining a raw customer ID', async () => {
