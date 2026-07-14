@@ -2,7 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { rateLimitReject } from '@/lib/rate-limit'
 import { requireUserAndProfile } from '@/lib/auth'
 import { createSessionFromIntake } from '@/lib/intake/session'
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, ctx.user.id)
+  const denied = await entitlementReject(db, ctx.user.id)
   if (denied) return denied
 
   // Cap creation rate — same key as /api/sessions so an attacker can't

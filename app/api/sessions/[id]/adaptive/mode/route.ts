@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireUserAndProfile } from '@/lib/auth'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { updateAdaptiveModeForUser } from '@/lib/diagnostics/adaptive/state'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -15,7 +15,7 @@ export async function POST(
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, ctx.user.id)
+  const denied = await entitlementReject(db, ctx.user.id)
   if (denied) return denied
   if (!ctx.profile.shopId) {
     return NextResponse.json({ error: 'not_eligible' }, { status: 409 })

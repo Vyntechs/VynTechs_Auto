@@ -119,7 +119,8 @@ const quoteBuilderSchema = z.strictObject({
       }
     }),
     storyMode: z.enum([
-      'ordinary_locked_tree', 'topology_manual', 'published_wizard_unsupported', 'unavailable',
+      'ordinary_locked_tree', 'topology_manual', 'manual_findings',
+      'published_wizard_unsupported', 'unavailable',
     ]).nullable(),
     decisionEligible: z.boolean(),
     approval: z.strictObject({
@@ -263,7 +264,9 @@ const safeMutationMetaSchema = z.union([
     }
   }),
   z.strictObject({
-    source: z.literal('manual'), sessionId: uuidSchema, lastEditedAt: isoTimestamp,
+    // sessionId is absent for sessionless manual findings (diagnostics
+    // add-on not on the shop) and present for the topology-manual path.
+    source: z.literal('manual'), sessionId: uuidSchema.optional(), lastEditedAt: isoTimestamp,
     reviewStatus: z.literal('reviewed'), storyRevision: z.number().int().positive(),
     reviewedAt: isoTimestamp,
   }),

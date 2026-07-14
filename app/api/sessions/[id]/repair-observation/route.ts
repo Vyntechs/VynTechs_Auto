@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client'
 import { submitRepairObservationForUser } from '@/lib/sessions'
 import { getRepairGuidance } from '@/lib/ai/repair-guidance'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 
 // Repair-guidance AI call can take several seconds on long context.
 // Cap at 60s to avoid mid-flight kills on slow turns.
@@ -22,7 +22,7 @@ export async function POST(
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, user.id)
+  const denied = await entitlementReject(db, user.id)
   if (denied) return denied
 
   const body = await req.json().catch(() => null)

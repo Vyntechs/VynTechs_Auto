@@ -1690,6 +1690,19 @@ export const stripeCustomers = pgTable('stripe_customers', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
+// Per-shop add-on entitlements (Phase 0 of the diagnostics add-on plan).
+// One row per shop; a missing row for an otherwise-paid shop resolves via
+// DIAGNOSTICS_DEFAULT_UNTIL_PRICED in lib/entitlements.ts. Migration 0036
+// backfills diagnostics=true for every shop that was paying (or comped) at
+// ship time — grandfathering is a hard requirement.
+export const shopEntitlements = pgTable('shop_entitlements', {
+  shopId: uuid('shop_id').primaryKey().references(() => shops.id, { onDelete: 'cascade' }),
+  diagnostics: boolean('diagnostics').default(false).notNull(),
+  stripePriceId: text('stripe_price_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const artifacts = pgTable(
   'artifacts',
   {

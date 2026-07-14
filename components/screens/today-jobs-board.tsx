@@ -9,6 +9,11 @@ import styles from './today-jobs-board.module.css'
 type Props = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
+  // Per-shop diagnostics add-on entitlement (plan §3). Defaults true to
+  // match DIAGNOSTICS_DEFAULT_UNTIL_PRICED — the server resolves the real
+  // value and middleware/handlers enforce it; this only picks which action
+  // fills the job's single slot.
+  diagnosticsEntitled?: boolean
 }
 
 type Announcement = {
@@ -44,7 +49,7 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
-export function TodayJobsBoard({ myJobs, openJobs }: Props) {
+export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = true }: Props) {
   const router = useRouter()
   const boardRef = useRef<HTMLElement>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
@@ -245,6 +250,7 @@ export function TodayJobsBoard({ myJobs, openJobs }: Props) {
           mode="mine"
           pendingDiagnosticJobId={pendingDiagnosticJobId}
           diagnosticsDisabled={pendingDiagnosticJobId !== null}
+          diagnosticsEntitled={diagnosticsEntitled}
           ambiguousJobStates={ambiguousJobStates}
           onStartDiagnostic={startDiagnostic}
           onRefreshDiagnostic={() => router.refresh()}
@@ -292,6 +298,7 @@ function JobSection({
   setClaimButton,
   pendingDiagnosticJobId = null,
   diagnosticsDisabled = false,
+  diagnosticsEntitled = true,
   ambiguousJobStates = new Map(),
   onStartDiagnostic,
   onRefreshDiagnostic,
@@ -307,6 +314,7 @@ function JobSection({
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   pendingDiagnosticJobId?: string | null
   diagnosticsDisabled?: boolean
+  diagnosticsEntitled?: boolean
   ambiguousJobStates?: Map<string, TodayTicketJob['diagnosticStartState']>
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
@@ -331,6 +339,7 @@ function JobSection({
             setClaimButton={setClaimButton}
             diagnosticPending={pendingDiagnosticJobId === job.id}
             diagnosticDisabled={diagnosticsDisabled}
+            diagnosticsEntitled={diagnosticsEntitled}
             forceAmbiguous={
               ambiguousJobStates.get(job.id) === (job.diagnosticStartState ?? 'idle')
             }
@@ -354,6 +363,7 @@ function JobRow({
   setClaimButton,
   diagnosticPending,
   diagnosticDisabled,
+  diagnosticsEntitled,
   forceAmbiguous,
   onStartDiagnostic,
   onRefreshDiagnostic,
@@ -368,6 +378,7 @@ function JobRow({
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   diagnosticPending: boolean
   diagnosticDisabled: boolean
+  diagnosticsEntitled?: boolean
   forceAmbiguous: boolean
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
@@ -419,6 +430,7 @@ function JobRow({
             job={job}
             pending={diagnosticPending}
             disabled={diagnosticDisabled}
+            entitled={diagnosticsEntitled ?? true}
             forceAmbiguous={forceAmbiguous}
             onStart={onStartDiagnostic}
             onRefresh={onRefreshDiagnostic}
@@ -452,6 +464,7 @@ function DiagnosticAction({
   job,
   pending,
   disabled,
+  entitled,
   forceAmbiguous,
   onStart,
   onRefresh,
@@ -461,6 +474,7 @@ function DiagnosticAction({
   job: TodayTicketJob
   pending: boolean
   disabled: boolean
+  entitled: boolean
   forceAmbiguous: boolean
   onStart?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefresh?: () => void
@@ -469,6 +483,25 @@ function DiagnosticAction({
 }) {
   const persistedState = job.diagnosticStartState ?? 'idle'
   const state = forceAmbiguous ? 'ambiguous' : persistedState
+
+  // One-slot rule (plan §3): without the diagnostics add-on the same slot
+  // carries the manual path. Record findings opens the quote workspace,
+  // where the tech fills the customer story and enters lines by hand —
+  // the same shapes the AI path fills. The single line below the action is
+  // the only permissible upsell affordance.
+  if (!entitled) {
+    return (
+      <div className={styles.ambiguity}>
+        <Link
+          href={`/tickets/${job.ticketId}/quote`}
+          className={`${styles.control} ${styles.claim}`}
+        >
+          Record findings
+        </Link>
+        <p className={styles.addOnNote}>Diagnose with AI — add-on</p>
+      </div>
+    )
+  }
 
   if (job.sessionId) {
     return (

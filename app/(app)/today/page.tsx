@@ -5,6 +5,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { listSessionsForShop } from '@/lib/db/queries'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
+import { hasDiagnostics } from '@/lib/entitlements'
 import { TodayHome } from '@/components/screens/today-home'
 import { canCreateTickets } from '@/lib/shop-os/capabilities'
 import { listTodayTicketJobs, ticketActorFromProfile } from '@/lib/tickets'
@@ -14,12 +15,16 @@ export default async function TodayPage() {
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const [all, dueFollowUps, todayJobs] = await Promise.all([
+  const [all, dueFollowUps, todayJobs, diagnosticsEntitled] = await Promise.all([
     ctx.profile.shopId
       ? listSessionsForShop(db, ctx.profile.shopId)
       : Promise.resolve([]),
     listDueFollowUpsForTech(db, ctx.profile.id),
     listTodayTicketJobs(db, { actor: ticketActorFromProfile(ctx.profile) }),
+    hasDiagnostics(db, {
+      shopId: ctx.profile.shopId,
+      isComp: ctx.profile.isComp,
+    }),
   ])
   const mine = all.filter((s) => s.techId === ctx.profile.id)
   const linkedSessionIds = new Set(todayJobs.linkedSessionIds)
@@ -47,6 +52,7 @@ export default async function TodayPage() {
       canWriteCounterOrder={ctx.profile.role === 'owner'}
       canCreateTickets={canCreateTickets(ctx.profile.role)}
       todayJobs={todayJobs}
+      diagnosticsEntitled={diagnosticsEntitled}
     />
   )
 }

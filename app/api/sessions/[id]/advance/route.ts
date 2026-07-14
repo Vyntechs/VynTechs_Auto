@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { advanceSession } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { updateTree } from '@/lib/ai/tree-engine'
 import { runRetrieval } from '@/lib/retrieval/orchestrator'
 import { validateRetrievalResults } from '@/lib/retrieval/validator'
@@ -44,7 +44,7 @@ export async function POST(
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, user.id)
+  const denied = await entitlementReject(db, user.id)
   if (denied) return denied
 
   const body = await req.json().catch(() => null)

@@ -1,6 +1,6 @@
 import Stripe from 'stripe'
 import { eq } from 'drizzle-orm'
-import { stripeCustomers } from './db/schema'
+import { shopEntitlements, stripeCustomers } from './db/schema'
 import { getProfileByUserId } from './db/queries'
 import type { AppDb } from './db/queries'
 
@@ -176,6 +176,7 @@ function readSubscriptionPeriodEnd(
 async function applySubscriptionEvent(
   db: AppDb,
   subscription: Stripe.Subscription,
+  eventType: Stripe.Event.Type,
 ): Promise<void> {
   const customerId =
     typeof subscription.customer === 'string'
@@ -188,6 +189,51 @@ async function applySubscriptionEvent(
       currentPeriodEnd: readSubscriptionPeriodEnd(subscription),
     })
     .where(eq(stripeCustomers.stripeCustomerId, customerId))
+  await applyDiagnosticsEntitlement(db, subscription, customerId, eventType)
+}
+
+// Maps the diagnostics add-on subscription item to shop_entitlements
+// (plan §3.3). Deliberately inert while STRIPE_DIAGNOSTICS_PRICE_ID is
+// unset — no price exists yet, so no entitlement row is ever written from
+// here today. Once the env var is set: item present on a live subscription
+// → diagnostics true; item absent (or the subscription deleted) →
+// diagnostics false. No pricing amounts live in code.
+async function applyDiagnosticsEntitlement(
+  db: AppDb,
+  subscription: Stripe.Subscription,
+  customerId: string,
+  eventType: Stripe.Event.Type,
+): Promise<void> {
+  const priceId = process.env.STRIPE_DIAGNOSTICS_PRICE_ID
+  if (!priceId) return
+
+  const [customer] = await db
+    .select({ shopId: stripeCustomers.shopId })
+    .from(stripeCustomers)
+    .where(eq(stripeCustomers.stripeCustomerId, customerId))
+    .limit(1)
+  if (!customer?.shopId) return
+
+  const items = subscription.items?.data ?? []
+  const diagnostics =
+    eventType !== 'customer.subscription.deleted' &&
+    items.some((item) => item.price?.id === priceId)
+  await db
+    .insert(shopEntitlements)
+    .values({
+      shopId: customer.shopId,
+      diagnostics,
+      stripePriceId: diagnostics ? priceId : null,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: shopEntitlements.shopId,
+      set: {
+        diagnostics,
+        stripePriceId: diagnostics ? priceId : null,
+        updatedAt: new Date(),
+      },
+    })
 }
 
 export async function handleStripeWebhook(opts: {
@@ -216,6 +262,7 @@ export async function handleStripeWebhook(opts: {
     await applySubscriptionEvent(
       opts.db,
       event.data.object as Stripe.Subscription,
+      event.type,
     )
   }
   return { ok: true, eventType: event.type }

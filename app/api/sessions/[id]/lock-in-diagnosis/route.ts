@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { lockDiagnosisFromWizard } from '@/lib/sessions'
 import type { Finding, WizardState } from '@/lib/flows/types'
 
@@ -11,7 +11,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const denied = await paywallReject(db, ctx.user.id)
+  const denied = await entitlementReject(db, ctx.user.id)
   if (denied) return denied
 
   const { id: sessionId } = await params

@@ -5,7 +5,7 @@ import {
   findCompletedTechQuickSessionForUser,
 } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { rateLimitReject } from '@/lib/rate-limit'
 import { generateInitialTree } from '@/lib/ai/tree-engine'
 import { retrieveCorpus } from '@/lib/corpus/retrieval'
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, user.id)
+  const denied = await entitlementReject(db, user.id)
   if (denied) return denied
 
   const body = await req.json().catch(() => null)

@@ -61,12 +61,84 @@ export async function createTestDb(): Promise<{
   await ensureMessagingRetentionMigration(client)
   await ensureMessagingRetentionAclMigration(client)
   await ensureMessagingRetentionFkIndexMigration(client)
+  await ensureShopEntitlementsMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+type ShopEntitlementsMarkers = {
+  table_exists: boolean
+  column_count: number
+  pk_fk_count: number
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function shopEntitlementsMarkers(client: PGlite): Promise<ShopEntitlementsMarkers> {
+  const result = await client.query<ShopEntitlementsMarkers>(`
+    select
+      to_regclass('public.shop_entitlements') is not null as table_exists,
+      (select count(*)::int from information_schema.columns
+       where table_schema = 'public' and table_name = 'shop_entitlements'
+         and column_name in (
+           'shop_id', 'diagnostics', 'stripe_price_id', 'created_at', 'updated_at'
+         )) as column_count,
+      (select count(*)::int from pg_constraint
+       where conrelid = to_regclass('public.shop_entitlements')
+         and contype in ('p', 'f')) as pk_fk_count,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.shop_entitlements')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'shop_entitlements'
+         and policyname = 'shop_entitlements_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'shop_entitlements'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'shop_entitlements'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('shop entitlements schema inspection failed')
+  return markers
+}
+
+function hasCompleteShopEntitlements(markers: ShopEntitlementsMarkers): boolean {
+  return markers.table_exists
+    && markers.column_count === 5
+    && markers.pk_fk_count === 2
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+export async function ensureShopEntitlementsMigration(client: PGlite): Promise<void> {
+  const before = await shopEntitlementsMarkers(client)
+  if (hasCompleteShopEntitlements(before)) return
+  if (before.table_exists) {
+    throw new Error('partial shop entitlements schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0036_shop_entitlements.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await shopEntitlementsMarkers(client)
+  if (!hasCompleteShopEntitlements(after)) {
+    throw new Error('shop entitlements schema hardening failed in ephemeral database')
   }
 }
 

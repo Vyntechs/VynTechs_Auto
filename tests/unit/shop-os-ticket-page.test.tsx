@@ -112,7 +112,7 @@ describe('TicketPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     requireUserMock.mockResolvedValue(authContext)
-    checkAccessMock.mockResolvedValue({ kind: 'allow' })
+    checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
   })
 

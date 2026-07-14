@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { declineOrDeferSessionForUser } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { generateDeclineLanguage } from '@/lib/gating/decline-language'
 
 // Defer language-generation AI call. Cap at 60s for safety on cold starts.
@@ -21,7 +21,7 @@ export async function POST(
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, user.id)
+  const denied = await entitlementReject(db, user.id)
   if (denied) return denied
 
   const body = await req.json().catch(() => null)

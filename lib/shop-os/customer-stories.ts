@@ -749,7 +749,9 @@ export type CustomerStoryReviewResult =
 
 type ReviewBinding = {
   source: 'ai' | 'manual'
-  sessionId: string
+  // null for the sessionless manual-findings path (diagnostic job with no
+  // session — shops without the diagnostics add-on).
+  sessionId: string | null
   concern: string
   waiver: string
   proof: CustomerStory['howWeKnow']
@@ -941,7 +943,14 @@ export async function saveReviewedCustomerStory(
     eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
     eq(ticketJobs.shopId, preflightShopId),
   )).limit(1)
-  if (!preflightJob?.sessionId) return fail('not_found')
+  if (!preflightJob) return fail('not_found')
+  // Sessionless diagnostic job → manual findings (the Record-findings path
+  // for shops without the diagnostics add-on). Writes the exact story shape
+  // the session-bound paths write; downstream never knows which path filled
+  // it. Everything with a session keeps the existing session-bound flow.
+  if (!preflightJob.sessionId) {
+    return saveManualFindingsStory(db, input, preflightShopId, dependencies)
+  }
   try {
     return await db.transaction(async (tx) => {
       const transactionDb = tx as AppDb
@@ -1039,6 +1048,178 @@ export async function saveReviewedCustomerStory(
           shopId: context.actor.shopId!, ticketId: input.ticketId,
           jobIds: context.jobs.map((job) => job.id),
           activeVersions: context.versions.filter((version) => version.supersededAt === null),
+        })
+        if (invalidation) throw new AbortReview(invalidation as Failure)
+      }
+      return { ok: true as const, changed: contentChanged, story: nextStory, storyMeta, storyRevision: nextRevision }
+    })
+  } catch (error) {
+    if (error instanceof AbortReview) return error.failure
+    if (lockUnavailable(error)) return fail('conflict', true)
+    throw error
+  }
+}
+
+async function lockManualFindingsContext(
+  db: AppDb,
+  input: ReviewInput,
+  shopId: string,
+  dependencies: CustomerStoryReviewDependencies,
+): Promise<void> {
+  const ticketQuery = db.select().from(tickets).where(and(eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId))).limit(1).for('update', { noWait: true })
+  const jobsQuery = db.select().from(ticketJobs).where(and(eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, shopId))).orderBy(ticketJobs.id).for('update', { noWait: true })
+  const versionsQuery = db.select().from(quoteVersions).where(and(eq(quoteVersions.ticketId, input.ticketId), eq(quoteVersions.shopId, shopId))).orderBy(quoteVersions.id).for('update', { noWait: true })
+  const actorQuery = db.select().from(profiles).where(and(eq(profiles.id, input.actor.profileId), eq(profiles.shopId, shopId))).limit(1).for('update', { noWait: true })
+  dependencies.captureLockSql?.(
+    [ticketQuery, jobsQuery, versionsQuery, actorQuery].map((query) => query.toSQL().sql),
+  )
+  await ticketQuery
+  await jobsQuery
+  await versionsQuery
+  await actorQuery
+}
+
+// The sessionless manual review path: a diagnostic job with NO linked
+// session (shop without the diagnostics add-on) gets its customer story
+// filled by the tech via the same PUT contract the session-bound manual
+// path uses. The persisted shape is identical to every other reviewed
+// manual story except that storyMeta carries no sessionId — downstream
+// (quote versions, approval, invoice) already consumes reviewed manual
+// stories and never learns which path wrote them.
+async function saveManualFindingsStory(
+  db: AppDb,
+  input: ReviewInput,
+  shopId: string,
+  dependencies: CustomerStoryReviewDependencies,
+): Promise<CustomerStoryReviewResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      await lockManualFindingsContext(transactionDb, input, shopId, dependencies)
+      await dependencies.afterLocks?.()
+
+      const [actor] = await transactionDb.select({
+        id: profiles.id, shopId: profiles.shopId, role: profiles.role,
+        membershipStatus: profiles.membershipStatus, deactivatedAt: profiles.deactivatedAt,
+      }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1)
+      if (!actor?.shopId || actor.shopId !== shopId) throw new AbortReview(fail('not_found'))
+
+      const [ticket] = await transactionDb.select().from(tickets).where(and(
+        eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId),
+      )).limit(1)
+      const [targetJob] = await transactionDb.select().from(ticketJobs).where(and(
+        eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
+        eq(ticketJobs.shopId, shopId),
+      )).limit(1)
+      if (!ticket || !targetJob || targetJob.kind !== 'diagnostic') {
+        throw new AbortReview(fail('not_found'))
+      }
+      // A session was linked between preflight and lock — this job now
+      // belongs to the session-bound path. Retryable so the client rereads.
+      if (targetJob.sessionId) throw new AbortReview(fail('conflict', true))
+      if (actor.membershipStatus !== 'active' || actor.deactivatedAt || !['tech', 'advisor', 'owner'].includes(actor.role)) {
+        throw new AbortReview(fail('forbidden'))
+      }
+      if (
+        ticket.status !== 'open' ||
+        !['open', 'in_progress', 'blocked'].includes(targetJob.workStatus)
+      ) throw new AbortReview(fail('state_conflict', false))
+      const concern = customerStoryReviewTextSchema.safeParse(ticket.concern)
+      if (!concern.success || concern.data !== ticket.concern) {
+        throw new AbortReview(fail('state_conflict', false))
+      }
+
+      const [jobs, versions, now] = await Promise.all([
+        transactionDb.select().from(ticketJobs).where(and(
+          eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, ticket.id),
+        )).orderBy(ticketJobs.id),
+        transactionDb.select().from(quoteVersions).where(and(
+          eq(quoteVersions.shopId, shopId), eq(quoteVersions.ticketId, ticket.id),
+        )).orderBy(quoteVersions.id),
+        databaseNow(transactionDb),
+      ])
+      if (versions.filter((version) => version.supersededAt === null).length > 1) {
+        throw new AbortReview(fail('conflict', false))
+      }
+
+      const rawMeta = targetJob.storyMeta
+      const persistedMeta = rawMeta === null ? null : safePersistedMeta(rawMeta)
+      const persistedStory = targetJob.customerStory === null ? null : safeStory(targetJob.customerStory)
+      if (
+        (rawMeta !== null && !persistedMeta) ||
+        (targetJob.customerStory !== null && !persistedStory) ||
+        (persistedMeta === null) !== (persistedStory === null)
+      ) throw new AbortReview(fail('conflict', false))
+
+      if (persistedMeta && persistedStory) {
+        // Only a previously saved sessionless manual finding may be
+        // re-reviewed here. Session-bound metadata on a sessionless job is
+        // drifted state — fail closed.
+        if (
+          persistedMeta.source !== 'manual' || persistedMeta.sessionId !== undefined ||
+          persistedMeta.reviewStatus !== 'reviewed' || persistedMeta.storyRevision === undefined ||
+          persistedMeta.storyRevision < 1 || !persistedMeta.reviewClientKey ||
+          !persistedMeta.reviewRequestFingerprint || !persistedMeta.reviewedByProfileId ||
+          !persistedMeta.reviewedAt ||
+          persistedStory.whatYouToldUs !== ticket.concern ||
+          persistedStory.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
+          persistedStory.howWeKnow.length > 0
+        ) throw new AbortReview(fail('conflict', false))
+      }
+
+      const binding: ReviewBinding = {
+        source: 'manual', sessionId: null, concern: ticket.concern,
+        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
+      }
+      const request = reviewRequestFingerprint(input, binding)
+
+      if (persistedMeta?.reviewClientKey === input.clientKey) {
+        if (persistedMeta.reviewedByProfileId !== actor.id || persistedMeta.reviewRequestFingerprint !== request || !persistedStory) {
+          throw new AbortReview(fail('conflict', false))
+        }
+        return {
+          ok: true as const, changed: false, story: persistedStory, storyMeta: persistedMeta,
+          storyRevision: persistedRevision(persistedMeta),
+        }
+      }
+
+      const revision = persistedRevision(persistedMeta)
+      if (revision !== input.expectedStoryRevision) throw new AbortReview(fail('conflict', false))
+
+      const nextStory: CustomerStory = {
+        whatYouToldUs: ticket.concern,
+        whatWeFound: input.whatWeFound,
+        howWeKnow: [],
+        whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
+        whatWeRecommend: input.whatWeRecommend,
+      }
+      const contentChanged = persistedStory === null || fingerprint(persistedStory) !== fingerprint(nextStory)
+      const nextRevision = revision + 1
+      const reviewedAt = now.toISOString()
+      const storyMeta: CustomerStoryMeta = {
+        source: 'manual',
+        lastEditedByProfileId: actor.id,
+        lastEditedAt: reviewedAt,
+        storyRevision: nextRevision,
+        reviewStatus: 'reviewed',
+        reviewClientKey: input.clientKey,
+        reviewRequestFingerprint: request,
+        reviewedByProfileId: actor.id,
+        reviewedAt,
+      }
+      await transactionDb.update(ticketJobs).set({
+        customerStory: nextStory,
+        storyMeta,
+        updatedAt: now,
+      }).where(and(
+        eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
+        eq(ticketJobs.shopId, shopId),
+      ))
+      if (contentChanged) {
+        const invalidation = await invalidateActiveQuoteVersion(transactionDb, {
+          shopId, ticketId: input.ticketId,
+          jobIds: jobs.map((job) => job.id),
+          activeVersions: versions.filter((version) => version.supersededAt === null),
         })
         if (invalidation) throw new AbortReview(invalidation as Failure)
       }

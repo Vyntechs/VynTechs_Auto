@@ -1165,7 +1165,11 @@ function StoryCard({
   focusRef: (element: HTMLElement | null) => void
   onServerChange: () => Promise<boolean>
 }): React.JSX.Element {
-  const [open, setOpen] = useState(job.storyMode === 'topology_manual')
+  // Manual story modes share one editor: topology_manual (locked topology
+  // session) and manual_findings (no session — shop without the diagnostics
+  // add-on records findings by hand). Both write the same story shape.
+  const manualStoryMode = job.storyMode === 'topology_manual' || job.storyMode === 'manual_findings'
+  const [open, setOpen] = useState(manualStoryMode)
   const [story, setStory] = useState(job.story.content)
   const [revision, setRevision] = useState(job.story.revision)
   const [reviewStatus, setReviewStatus] = useState(job.story.reviewStatus)
@@ -1349,7 +1353,7 @@ function StoryCard({
   return (
     <section ref={focusRef} className={styles.storyCard} role="region" aria-label={`Diagnostic story for ${job.title}`} tabIndex={-1}>
       <div className={styles.storyHeading}>
-        <div><p className={styles.eyebrow}>Diagnostic story</p><h4>{job.storyMode === 'topology_manual' ? 'Human-authored topology story' : 'Customer-ready finding'}</h4></div>
+        <div><p className={styles.eyebrow}>Diagnostic story</p><h4>{job.storyMode === 'topology_manual' ? 'Human-authored topology story' : job.storyMode === 'manual_findings' ? 'Recorded findings' : 'Customer-ready finding'}</h4></div>
         {job.storyMode === 'ordinary_locked_tree' && !open && (
           <button type="button" className={styles.lineAction} onClick={openWorkspace}>Open diagnostic story</button>
         )}
@@ -1374,10 +1378,10 @@ function StoryCard({
               <button type="button" className={styles.storyAction} disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
             </fieldset>
           )}
-          {(story || job.storyMode === 'topology_manual') && (
+          {(story || manualStoryMode) && (
             <div className={styles.storyEditor}>
               {story && <><p className={styles.storyLabel}>What you told us</p><p>{story.whatYouToldUs}</p></>}
-              {!story && job.storyMode === 'topology_manual' && <>
+              {!story && manualStoryMode && <>
                 <p className={styles.storyLabel}>What you told us</p><p>{ticketConcern}</p>
                 <p className={styles.storyLabel}>If deferred</p><p>{CUSTOMER_STORY_WAIVER}</p>
               </>}
@@ -1385,7 +1389,7 @@ function StoryCard({
               {story && story.howWeKnow.length > 0 && <details className={styles.proof}><summary>Proof · {story.howWeKnow.length} sourced {story.howWeKnow.length === 1 ? 'observation' : 'observations'}</summary>{story.howWeKnow.map((claim) => <p key={claim.claim}>{claim.claim}</p>)}</details>}
               {story && <><p className={styles.storyLabel}>If deferred</p><p>{story.whatItMeansIfWaived}</p></>}
               <label>What we recommend<textarea value={whatWeRecommend} maxLength={5000} onChange={(event) => edit('recommend', event.target.value)} /></label>
-              <button type="button" className={styles.storyAction} disabled={busy || !whatWeFound.trim() || !whatWeRecommend.trim()} onClick={saveReview}>{busy ? 'Saving…' : !story && job.storyMode === 'topology_manual' ? 'Review and save story' : 'Save reviewed story'}</button>
+              <button type="button" className={styles.storyAction} disabled={busy || !whatWeFound.trim() || !whatWeRecommend.trim()} onClick={saveReview}>{busy ? 'Saving…' : !story && manualStoryMode ? 'Review and save story' : 'Save reviewed story'}</button>
             </div>
           )}
           {busy && !story && <p role="status" aria-live="polite">Loading story truth…</p>}

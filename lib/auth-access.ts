@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import type { AppDb } from './db/queries'
 import { getProfileByUserId } from './db/queries'
 import { stripeCustomers } from './db/schema'
+import { resolveShopEntitlements, type ShopEntitlements } from './entitlements'
 
 const EXEMPT_EXACT = new Set<string>([
   '/',
@@ -59,6 +60,24 @@ export function isApiRoute(pathname: string): boolean {
   return pathname.startsWith('/api/')
 }
 
+// Diagnostic-engine surfaces gated by the per-shop diagnostics entitlement
+// (plan §3.4). Mirrors the guardCuratorRoute per-surface pattern: middleware
+// checks these after the paywall gate, and entitlementReject() repeats the
+// check inside the route handlers as defense-in-depth. Everything else
+// (tickets, quotes, invoices, history) stays entitlement-free.
+const DIAGNOSTICS_GATED_PREFIXES = [
+  '/sessions',
+  '/intake',
+  '/api/sessions',
+  '/api/intake',
+]
+
+export function isDiagnosticsGatedRoute(pathname: string): boolean {
+  return DIAGNOSTICS_GATED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  )
+}
+
 export type PaywallReason =
   | 'no_subscription'
   | 'past_due'
@@ -66,7 +85,7 @@ export type PaywallReason =
   | 'unpaid'
 
 export type AccessResult =
-  | { kind: 'allow' }
+  | { kind: 'allow'; entitlements: ShopEntitlements }
   | { kind: 'paywall'; reason: PaywallReason }
   | { kind: 'deactivated' }
 
@@ -80,7 +99,8 @@ export async function checkAccess(
   // user with isComp:true must still be locked out — the shop admin's
   // intent overrides any subscription override.
   if (profile.deactivatedAt) return { kind: 'deactivated' }
-  if (profile.isComp) return { kind: 'allow' }
+  // isComp implies every entitlement (plan §3.2) — no DB lookup needed.
+  if (profile.isComp) return { kind: 'allow', entitlements: { diagnostics: true } }
   if (!profile.shopId) return { kind: 'paywall', reason: 'no_subscription' }
 
   const [customer] = await db
@@ -90,15 +110,20 @@ export async function checkAccess(
     .limit(1)
   if (!customer) return { kind: 'paywall', reason: 'no_subscription' }
 
+  const allow = async (): Promise<AccessResult> => ({
+    kind: 'allow',
+    entitlements: await resolveShopEntitlements(db, { shopId: profile.shopId }),
+  })
+
   const status = customer.subscriptionStatus
-  if (status === 'active' || status === 'trialing') return { kind: 'allow' }
+  if (status === 'active' || status === 'trialing') return allow()
 
   if (status === 'canceled') {
     if (
       customer.currentPeriodEnd &&
       customer.currentPeriodEnd.getTime() > Date.now()
     ) {
-      return { kind: 'allow' }
+      return allow()
     }
     return { kind: 'paywall', reason: 'canceled' }
   }
@@ -127,4 +152,34 @@ export async function paywallReject(
     { error: 'paywall', reason: access.reason },
     { status: 403 },
   )
+}
+
+// Twin of paywallReject for the diagnostics add-on: same defense-in-depth
+// posture, one extra check. A strict superset — paywalled or deactivated
+// requests reject exactly as paywallReject would, and an allowed request
+// from a shop without the diagnostics entitlement rejects 403 with error
+// code 'entitlement'. Route handlers under /api/sessions/* and /api/intake/*
+// use this INSTEAD of paywallReject so a single checkAccess round-trip
+// covers both gates. Fail closed.
+export async function entitlementReject(
+  db: AppDb,
+  userId: string,
+): Promise<NextResponse | null> {
+  const access = await checkAccess(db, userId)
+  if (access.kind === 'deactivated') {
+    return NextResponse.json({ error: 'deactivated' }, { status: 403 })
+  }
+  if (access.kind === 'paywall') {
+    return NextResponse.json(
+      { error: 'paywall', reason: access.reason },
+      { status: 403 },
+    )
+  }
+  if (!access.entitlements.diagnostics) {
+    return NextResponse.json(
+      { error: 'entitlement', entitlement: 'diagnostics' },
+      { status: 403 },
+    )
+  }
+  return null
 }

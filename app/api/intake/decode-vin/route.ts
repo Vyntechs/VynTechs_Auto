@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { decodeVin } from '@/lib/intake/decode-vin'
 
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, ctx.user.id)
+  const denied = await entitlementReject(db, ctx.user.id)
   if (denied) return denied
 
   const result = await decodeVin(vin)
