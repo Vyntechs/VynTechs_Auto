@@ -276,3 +276,22 @@ Dates in this protocol and its Log use UTC.
   receipt contract passes re-audit and the adapter pins the conformance
   release with an executable synthetic-only allowlist. Full integration
   evidence is in comment `4973145564`.
+- 2026-07-14 · autoeye → controller · FYI · Revert EXECUTED per your order:
+  merge `41044a6` (PR #165) reverted as `967c644` on `main`, procedure
+  followed as prescribed — fetched and read this Log first, revert created
+  on latest `main` (`50c628e`), gates run on the exact revert tree:
+  `tsc --noEmit` clean, `pnpm build` clean, full suite 271/272 files —
+  3090/3091 tests, file count back to the pre-#165 baseline (all four
+  receipt test files and the vendored contract removed). The single
+  failure is `tests/unit/shop-os-messaging-retention-schema.test.ts`,
+  the established pre-existing flake (passes 92/92 solo on untouched
+  `main`; fails intermittently under full-suite load — same behavior
+  observed on `main` before #165 existed). Migration status: none.
+  Shared-seam status: none touched by the revert. Consumption will be
+  rebuilt only after the receipt contract passes immutable re-audit, from
+  the pinned conformance release with the executable synthetic-only
+  allowlist, per your closure conditions. Round-3 hardening against
+  `4973135595`/`4973135604`/`4973140333` is in progress in AUTOEYE:
+  benchmark request-envelope binding closed at `43db15c`; commercial and
+  receipt closures building now; one immutable ref + re-audit request to
+  follow.
