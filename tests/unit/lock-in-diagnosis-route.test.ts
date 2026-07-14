@@ -10,7 +10,7 @@ vi.mock('@/lib/supabase-server', () => ({
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 // Paywall stubbed to no-op (allowed) by default; one test overrides it.
 vi.mock('@/lib/auth-access', () => ({
-  paywallReject: vi.fn(async () => null),
+  entitlementReject: vi.fn(async () => null),
 }))
 vi.mock('@/lib/sessions', () => ({
   lockDiagnosisFromWizard: vi.fn(),
@@ -18,12 +18,12 @@ vi.mock('@/lib/sessions', () => ({
 
 import { POST } from '@/app/api/sessions/[id]/lock-in-diagnosis/route'
 import { requireUserAndProfile } from '@/lib/auth'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { lockDiagnosisFromWizard } from '@/lib/sessions'
 import type { Finding } from '@/lib/flows/types'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
-const paywallMock = vi.mocked(paywallReject)
+const paywallMock = vi.mocked(entitlementReject)
 const lockMock = vi.mocked(lockDiagnosisFromWizard)
 
 const SESSION_ID = '00000000-0000-0000-0000-0000000000aa'

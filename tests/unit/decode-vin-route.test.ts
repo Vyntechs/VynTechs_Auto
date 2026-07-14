@@ -14,7 +14,7 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 // here it would throw. Stub it to no-op so the test exercises route logic
 // only. Paywall semantics are covered separately in auth-access.test.ts.
 vi.mock('@/lib/auth-access', () => ({
-  paywallReject: vi.fn(async () => null),
+  entitlementReject: vi.fn(async () => null),
 }))
 
 import { POST } from '@/app/api/intake/decode-vin/route'

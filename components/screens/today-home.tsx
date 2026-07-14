@@ -24,6 +24,7 @@ type Props = {
   canWriteCounterOrder?: boolean
   canCreateTickets?: boolean
   todayJobs?: TodayTicketJobs
+  diagnosticsEntitled?: boolean
 }
 
 export function TodayHome({
@@ -36,6 +37,7 @@ export function TodayHome({
   canWriteCounterOrder = false,
   canCreateTickets = false,
   todayJobs = { myJobs: [], openJobs: [], linkedSessionIds: [] },
+  diagnosticsEntitled = true,
 }: Props) {
   const meta = bay ? (
     <span>
@@ -141,7 +143,11 @@ export function TodayHome({
           overflow: 'auto',
         }}
       >
-        <TodayJobsBoard myJobs={todayJobs.myJobs} openJobs={todayJobs.openJobs} />
+        <TodayJobsBoard
+          myJobs={todayJobs.myJobs}
+          openJobs={todayJobs.openJobs}
+          diagnosticsEntitled={diagnosticsEntitled}
+        />
 
         {inProgress.length > 0 && (
           <Module

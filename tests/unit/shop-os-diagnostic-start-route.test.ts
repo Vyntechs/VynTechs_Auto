@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextResponse } from 'next/server'
 
 vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
-vi.mock('@/lib/auth-access', () => ({ paywallReject: vi.fn() }))
+vi.mock('@/lib/auth-access', () => ({ entitlementReject: vi.fn() }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/db/queries', () => ({
   countOpenSessionsForTech: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('@/lib/supabase-server', () => ({
 }))
 
 import { POST, maxDuration } from '@/app/api/tickets/[id]/jobs/[jobId]/diagnostic/start/route'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import {
   countOpenSessionsForTech,
@@ -90,7 +90,7 @@ const treeState = {
 }
 
 const authMock = vi.mocked(requireUserAndProfile)
-const paywallMock = vi.mocked(paywallReject)
+const paywallMock = vi.mocked(entitlementReject)
 const acquireMock = vi.mocked(acquireDiagnosticStart)
 const quotaMock = vi.mocked(rateLimitReject)
 const countMock = vi.mocked(countOpenSessionsForTech)

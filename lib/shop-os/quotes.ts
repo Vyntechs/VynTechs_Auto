@@ -6,6 +6,7 @@ import {
   jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
   ticketJobs, tickets,
 } from '@/lib/db/schema'
+import { resolveShopEntitlements } from '@/lib/entitlements'
 import { canBuildQuotes, canRecordCustomerApproval } from '@/lib/shop-os/capabilities'
 import {
   parsePersistedCustomerStory,
@@ -160,7 +161,7 @@ export type QuoteBuilderResult =
           reviewStatus: 'pending' | 'reviewed' | null
           revision: number
         }
-        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'published_wizard_unsupported' | 'unavailable' | null
+        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'manual_findings' | 'published_wizard_unsupported' | 'unavailable' | null
         decisionEligible: boolean
         approval: {
           state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
@@ -452,6 +453,14 @@ export async function getQuoteBuilder(
       const transactionDb = tx as AppDb
       const actor = await loadActiveActor(transactionDb, input.actor)
       if (!actor?.shopId) return { ok: false as const, error: 'not_found' as const }
+      // Per-shop diagnostics entitlement decides which sessionless story
+      // path a diagnostic job offers (plan §3 one-slot rule): entitled
+      // shops keep today's behavior unchanged; unentitled shops get the
+      // manual Record-findings editor in the same slot.
+      const entitlements = await resolveShopEntitlements(transactionDb, {
+        shopId: actor.shopId as string,
+        isComp: actor.isComp,
+      })
       const [ticket] = await transactionDb.select({
         id: tickets.id,
         ticketNumber: tickets.ticketNumber,
@@ -550,7 +559,11 @@ export async function getQuoteBuilder(
         const wizardSessionIds = new Set(wizardEvents.map((event) => event.sessionId))
         const storyMode = (job: typeof eligibleJobs[number]) => {
           if (job.kind !== 'diagnostic') return null
-          if (!job.sessionId) return 'unavailable' as const
+          if (!job.sessionId) {
+            return entitlements.diagnostics
+              ? 'unavailable' as const
+              : 'manual_findings' as const
+          }
           if (job.sessionId && wizardSessionIds.has(job.sessionId)) return 'published_wizard_unsupported' as const
           const linkedSession = sessionById.get(job.sessionId)
           const treeState = linkedSession?.treeState
@@ -678,7 +691,12 @@ async function loadActiveActor(db: AppDb, actor: QuoteActor) {
   const parsed = uuidSchema.safeParse(actor.profileId)
   if (!parsed.success) return null
   const [profile] = await db
-    .select({ id: profiles.id, shopId: profiles.shopId, role: profiles.role })
+    .select({
+      id: profiles.id,
+      shopId: profiles.shopId,
+      role: profiles.role,
+      isComp: profiles.isComp,
+    })
     .from(profiles)
     .where(and(
       eq(profiles.id, parsed.data),

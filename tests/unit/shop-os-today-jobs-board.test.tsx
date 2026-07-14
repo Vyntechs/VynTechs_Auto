@@ -728,3 +728,58 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(baseStampRule).toMatch(/min-height:\s*44px/)
   })
 })
+
+describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
+  it('renders the existing Start diagnosis action by default (entitled)', () => {
+    render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
+
+    expect(screen.getByRole('button', { name: 'Start diagnosis' })).toBeInTheDocument()
+    expect(screen.queryByText('Record findings')).not.toBeInTheDocument()
+    expect(screen.queryByText('Diagnose with AI — add-on')).not.toBeInTheDocument()
+  })
+
+  it('renders Record findings in the same slot when the shop lacks the add-on', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[unlinkedDiagnostic]}
+        openJobs={[]}
+        diagnosticsEntitled={false}
+      />,
+    )
+
+    const link = screen.getByRole('link', { name: 'Record findings' })
+    expect(link).toHaveAttribute('href', '/tickets/ticket-42/quote')
+    expect(screen.queryByRole('button', { name: 'Start diagnosis' })).not.toBeInTheDocument()
+    // The quiet one-line affordance is the only permissible upsell.
+    expect(screen.getByText('Diagnose with AI — add-on')).toBeInTheDocument()
+  })
+
+  it('fails closed for linked diagnostics too: no Open diagnosis without the add-on', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[linkedDiagnostic]}
+        openJobs={[]}
+        diagnosticsEntitled={false}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Record findings' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-41/quote',
+    )
+    expect(screen.queryByRole('link', { name: 'Open diagnosis' })).not.toBeInTheDocument()
+  })
+
+  it('leaves repair and maintenance actions untouched without the add-on', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[repair, maintenance]}
+        openJobs={[]}
+        diagnosticsEntitled={false}
+      />,
+    )
+
+    expect(screen.queryByText('Record findings')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /Open work|Review blocked work|Review work order/ })).toHaveLength(2)
+  })
+})

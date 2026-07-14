@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn() }))
-vi.mock('@/lib/auth-access', () => ({ paywallReject: vi.fn() }))
+vi.mock('@/lib/auth-access', () => ({ entitlementReject: vi.fn() }))
 vi.mock('@/lib/db/queries', () => ({ getSessionById: vi.fn(async () => null) }))
 vi.mock('@/lib/sessions', () => ({
   closeSessionForUser: vi.fn(),
@@ -12,7 +12,7 @@ vi.mock('@/lib/sessions', () => ({
 import { POST as closePost } from '@/app/api/sessions/[id]/close/route'
 import { POST as observationPost } from '@/app/api/sessions/[id]/repair-observation/route'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { closeSessionForUser, submitRepairObservationForUser } from '@/lib/sessions'
 
 const sessionId = '00000000-0000-4000-8000-000000000030'
@@ -34,7 +34,7 @@ describe('Shop OS repair and close route mappings', () => {
     vi.mocked(getServerSupabase).mockResolvedValue({
       auth: { getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } } })) },
     } as never)
-    vi.mocked(paywallReject).mockResolvedValue(null)
+    vi.mocked(entitlementReject).mockResolvedValue(null)
   })
 
   it('preserves retryable lock conflicts on both routes', async () => {
@@ -76,7 +76,7 @@ describe('Shop OS repair and close route mappings', () => {
 
     expect((await closePost(request('close'), { params })).status).toBe(401)
     expect((await observationPost(request('repair-observation'), { params })).status).toBe(401)
-    expect(paywallReject).not.toHaveBeenCalled()
+    expect(entitlementReject).not.toHaveBeenCalled()
     expect(closeSessionForUser).not.toHaveBeenCalled()
     expect(submitRepairObservationForUser).not.toHaveBeenCalled()
   })

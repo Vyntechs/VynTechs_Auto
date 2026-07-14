@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { db } from '@/lib/db/client'
 import {
@@ -100,7 +100,11 @@ export async function POST(
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
 
-  const denied = await paywallReject(db, ctx.user.id)
+  // Diagnostics entitlement gate: this route creates a copilot session (and
+  // spends provider credits), so it fails closed with the /api/sessions/*
+  // surfaces even though it lives under /api/tickets/*. Middleware cannot
+  // cover it by path prefix — the handler check is the gate here.
+  const denied = await entitlementReject(db, ctx.user.id)
   if (denied) return denied
 
   if (!ctx.profile.shopId) {

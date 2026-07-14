@@ -112,7 +112,7 @@ describe('QuotePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     requireUserMock.mockResolvedValue(context)
-    checkAccessMock.mockResolvedValue({ kind: 'allow' })
+    checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
     getBuilderMock.mockResolvedValue({ ok: true, builder })
     listCannedMock.mockResolvedValue({ ok: true, cannedJobs: [], taxRateBps: 825 })
@@ -223,7 +223,7 @@ describe('QuotePage', () => {
     })
     vi.clearAllMocks()
     requireUserMock.mockResolvedValue(context)
-    checkAccessMock.mockResolvedValue({ kind: 'allow' })
+    checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
     getBuilderMock.mockResolvedValue({ ok: true, builder })
     listCannedMock.mockResolvedValue({ ok: true, cannedJobs: [], taxRateBps: 700 })

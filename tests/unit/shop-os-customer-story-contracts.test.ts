@@ -69,15 +69,18 @@ describe('customer story persisted contracts', () => {
       .toEqual({ ...pending, reviewStatus: 'reviewed', ...reviewedAudit })
   })
 
-  it('requires complete row-21 manual metadata with an exact UUID session binding', () => {
+  it('requires complete row-21 manual metadata; session binding exact when present, absent for sessionless findings', () => {
     const manual = {
       source: 'manual' as const, sessionId: uuid(2),
       lastEditedByProfileId: uuid(3), lastEditedAt: '2026-07-11T12:00:00.000Z',
       storyRevision: 1, reviewStatus: 'reviewed' as const, ...reviewedAudit,
     }
     expect(parsePersistedCustomerStoryMeta(manual)).toEqual(manual)
+    // Sessionless manual findings (diagnostics add-on not on the shop —
+    // Record-findings path) carry no session binding at all.
+    const { sessionId: _omitted, ...sessionless } = manual
+    expect(parsePersistedCustomerStoryMeta(sessionless)).toEqual(sessionless)
     for (const corrupt of [
-      { ...manual, sessionId: undefined },
       { ...manual, sessionId: 'not-a-uuid' },
       { ...manual, storyRevision: 0 },
       { ...manual, reviewClientKey: undefined },

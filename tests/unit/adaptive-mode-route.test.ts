@@ -24,12 +24,12 @@ vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => (
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/auth-access', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/auth-access')>(),
-  paywallReject: vi.fn(async () => null),
+  entitlementReject: vi.fn(async () => null),
 }))
 
 import { POST } from '@/app/api/sessions/[id]/adaptive/mode/route'
 import { requireUserAndProfile } from '@/lib/auth'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -383,7 +383,7 @@ describe('updateAdaptiveModeForUser', () => {
 
 describe('POST adaptive mode route gates', () => {
   const authMock = vi.mocked(requireUserAndProfile)
-  const paywallMock = vi.mocked(paywallReject)
+  const paywallMock = vi.mocked(entitlementReject)
   const params = Promise.resolve({ id: uuid(30) })
   const request = () => new Request(`http://localhost/api/sessions/${uuid(30)}/adaptive/mode`, {
     method: 'POST',

@@ -14,7 +14,7 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 // Stub the paywall check so the test exercises route logic only — the
 // real paywall path is covered by auth-access.test.ts.
 vi.mock('@/lib/auth-access', () => ({
-  paywallReject: vi.fn(async () => null),
+  entitlementReject: vi.fn(async () => null),
 }))
 
 const getSessionByIdMock = vi.fn().mockResolvedValue({

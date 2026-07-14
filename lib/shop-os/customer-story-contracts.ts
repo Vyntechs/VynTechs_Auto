@@ -82,9 +82,12 @@ const reviewedAiMetaSchema = z.strictObject({
   reviewStatus: z.literal('reviewed'),
   ...reviewAuditShape,
 })
+// sessionId is present for the topology-session manual path and absent for
+// sessionless manual findings (diagnostics add-on not on the shop — the
+// Record-findings path writes the same story shape with no session).
 const reviewedManualMetaSchema = z.strictObject({
   source: z.literal('manual'),
-  sessionId: canonicalUuid,
+  sessionId: canonicalUuid.optional(),
   lastEditedByProfileId: canonicalUuid,
   lastEditedAt: timestampSchema,
   storyRevision: z.number().int().positive(),
@@ -107,7 +110,7 @@ const persistedCustomerStoryMetaSchema = z.union([
 
 const quoteStorySnapshotMetaSchema = z.union([
   z.strictObject({ source: z.literal('ai'), sessionId: canonicalUuid }),
-  z.strictObject({ source: z.literal('manual'), sessionId: canonicalUuid }),
+  z.strictObject({ source: z.literal('manual'), sessionId: canonicalUuid.optional() }),
   z.strictObject({ source: z.literal('template'), sessionId: canonicalText(200).optional() }),
 ])
 

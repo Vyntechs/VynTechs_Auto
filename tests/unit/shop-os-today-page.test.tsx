@@ -24,6 +24,9 @@ vi.mock('@/lib/supabase-server', () => ({
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/db/queries', () => ({ listSessionsForShop: vi.fn() }))
 vi.mock('@/lib/comeback/list', () => ({ listDueFollowUpsForTech: vi.fn() }))
+// Entitlement resolution reads the DB; this page test uses a stub db, so
+// stub the helper. Resolution behavior is covered by entitlements.test.ts.
+vi.mock('@/lib/entitlements', () => ({ hasDiagnostics: vi.fn(async () => true) }))
 vi.mock('@/lib/tickets', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tickets')>()
   return { ...actual, listTodayTicketJobs: vi.fn() }

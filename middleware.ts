@@ -6,7 +6,12 @@ import { createServerClient } from '@supabase/ssr'
 import { type NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { guardCuratorRoute } from '@/lib/curator/role-gate'
-import { checkAccess, isApiRoute, isPaywallExempt } from '@/lib/auth-access'
+import {
+  checkAccess,
+  isApiRoute,
+  isDiagnosticsGatedRoute,
+  isPaywallExempt,
+} from '@/lib/auth-access'
 
 async function refreshSession(req: NextRequest) {
   const res = NextResponse.next({ request: req })
@@ -86,6 +91,19 @@ export async function middleware(req: NextRequest) {
       )
     }
     return NextResponse.redirect(new URL('/subscribe', req.url))
+  }
+
+  // Diagnostics entitlement gate (plan §3.4) — per-surface, mirroring the
+  // curator gate. Runs only after paywall allow; shops without the add-on
+  // are bounced off the diagnostic-engine surfaces. Fail closed.
+  if (isDiagnosticsGatedRoute(pathname) && !access.entitlements.diagnostics) {
+    if (isApiRoute(pathname)) {
+      return NextResponse.json(
+        { error: 'entitlement', entitlement: 'diagnostics' },
+        { status: 403 },
+      )
+    }
+    return NextResponse.redirect(new URL('/today', req.url))
   }
 
   return res

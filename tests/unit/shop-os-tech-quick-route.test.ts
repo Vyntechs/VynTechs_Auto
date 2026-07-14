@@ -10,7 +10,7 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/supabase-server', () => ({
   getServerSupabase: vi.fn(async () => ({ auth: { getUser: getUserMock } })),
 }))
-vi.mock('@/lib/auth-access', () => ({ paywallReject: vi.fn() }))
+vi.mock('@/lib/auth-access', () => ({ entitlementReject: vi.fn() }))
 vi.mock('@/lib/rate-limit', () => ({ rateLimitReject: vi.fn() }))
 vi.mock('@/lib/db/queries', () => ({
   getProfileByUserId: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('@/lib/retrieval/adapters/reddit', () => ({ RedditAdapter: class {} }))
 vi.mock('@/lib/retrieval/adapters/web-search', () => ({ WebSearchAdapter: class {} }))
 
 import { POST } from '@/app/api/sessions/route'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { rateLimitReject } from '@/lib/rate-limit'
 import {
   countOpenSessionsForTech,
@@ -70,7 +70,7 @@ const profile = {
 }
 const ids = { id: requestKey, ticketId: 'ticket-1', jobId: 'job-1' }
 
-const paywallMock = vi.mocked(paywallReject)
+const paywallMock = vi.mocked(entitlementReject)
 const quotaMock = vi.mocked(rateLimitReject)
 const profileMock = vi.mocked(getProfileByUserId)
 const countMock = vi.mocked(countOpenSessionsForTech)

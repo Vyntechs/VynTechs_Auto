@@ -17,7 +17,7 @@ vi.mock('@/lib/db/client', () => ({
 // Paywall runs against a real DB in production; with the stubbed db here it
 // would throw, so we stub it. Default = allowed (null). One test overrides it.
 vi.mock('@/lib/auth-access', () => ({
-  paywallReject: vi.fn(async () => null),
+  entitlementReject: vi.fn(async () => null),
 }))
 vi.mock('@/lib/sessions', () => ({
   getSessionForUser: vi.fn(),
@@ -28,13 +28,13 @@ vi.mock('@/lib/flows/lookup', () => ({
 
 import { POST } from '@/app/api/sessions/[id]/wizard-state/route'
 import { requireUserAndProfile } from '@/lib/auth'
-import { paywallReject } from '@/lib/auth-access'
+import { entitlementReject } from '@/lib/auth-access'
 import { getSessionForUser } from '@/lib/sessions'
 import { getFlowVersionById } from '@/lib/flows/lookup'
 import type { WizardState } from '@/lib/flows/types'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
-const paywallMock = vi.mocked(paywallReject)
+const paywallMock = vi.mocked(entitlementReject)
 const getSessionMock = vi.mocked(getSessionForUser)
 const getFlowMock = vi.mocked(getFlowVersionById)
 

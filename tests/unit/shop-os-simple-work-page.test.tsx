@@ -35,7 +35,7 @@ describe('simple work page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(requireUserAndProfile).mockResolvedValue({ user: { id: profile.userId }, profile } as never)
-    vi.mocked(checkAccess).mockResolvedValue({ kind: 'allow' })
+    vi.mocked(checkAccess).mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     vi.mocked(getSimpleWorkWorkspace).mockResolvedValue({ ok: true, workspace } as never)
     vi.mocked(getTicketDetail).mockResolvedValue({ ok: true, ticket } as never)
   })
