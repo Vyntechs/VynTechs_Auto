@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
 **Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and Phase 4 rows 27–28 and 30 are complete; Row 30 merged in PR #154 and is production-verified. Row 31 source is verified and ready to ship.** Approved production migrations through `0032_shop_os_server_only_acl` are live and verified; Row 31 migrations `0033` and `0034` have not been applied. External access, spend, messaging retention/legal policy, production database changes, and later feature enablement remain separate owner gates.
-**Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
+**Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. Diagnostics is an optional per-shop add-on; this plan does not redesign diagnostic-engine behavior, and the manual findings path must remain complete when the add-on is disabled or unused.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
 ---
@@ -692,7 +692,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3, 5–25, 27–28, and 30 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 31 source is verified and ready to ship, while migrations `0033` and `0034`, retention/legal publication, production messaging, later production feature enablement, and external account/spend work remain owner gates.
+3. Rows 1–3, 5–25, 27–28, and 30 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 31 source is verified and ready to ship, while migrations `0033` and `0034`, retention/legal publication, production messaging, later production feature enablement, and external account/spend work remain owner gates. The AutoEYE-owned Row 46 entitlement seam is in progress under the cross-session coordination protocol; its migration follows unapplied `0033`/`0034`, and its branch is not controller-owned.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -720,6 +720,9 @@ T   technician         /today composition and sessionless job/work UI
 P   platform           middleware/proxy, public-route policy, service worker,
                        push client, privacy/terms/subprocessor docs
 X   external owner     vendor/carrier applications, credentials, spend
+AE  AutoEYE add-on     lane/phase0* entitlement/access/manual-findings seam;
+                       ownership and shared-file rules live in the
+                       cross-session coordination protocol
 ```
 
 `S` is exclusive. Within each UI lane, only one active row may own a shared surface. Domain route shims follow their corresponding `L*` owner. Production migrations and real vendor orders are never implied by completing code.
@@ -775,6 +778,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 43 | 6 | Optional API/punchout placement + provider idempotency | LP | 29,41 | blocked | Sandbox or owner approval for real order |
 | 44 | 6 | Derived board/delivery/closeout handlers | LT | 23,36,41 | pending | — |
 | 45 | 6 | Board + delivery/closeout + vehicle-history UI | A | 24,37,42,44 | pending | — |
+| 46 | X | Per-shop diagnostics entitlement + one-slot optional/manual findings path | AE | 15,21,30,31 | in_progress | AutoEYE-owned `lane/phase0-entitlement-seam`; migration is sequenced after unapplied `0033`/`0034`; pricing/live Stripe mapping stays a founder gate; no diagnostic-engine semantic change |
 
 ---
 
