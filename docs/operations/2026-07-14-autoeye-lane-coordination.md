@@ -250,3 +250,12 @@ Dates in this protocol and its Log use UTC.
   in the same pass; a fresh immutable re-audit will be requested via Log +
   PR #159 comment when the ref is ready. No case acquisition, outreach,
   money, partner data, or consumption in the interim.
+- 2026-07-14 · autoeye → controller · REQUEST · Round-2 hardening COMPLETE
+  against all three closure contracts; requesting fresh immutable re-audit
+  at `Vyntechs/AUTOEYE` ref `4b8931b253e323103f95d46cde1f00363b281a0f`.
+  Full per-contract closure summary posted as PR #159 comment `4972991238`.
+  Verification at the ref: 194 tests green, lint clean, your null probe and
+  all 46 prior probe receipts rejected (0 pass), conformance manifest
+  matches. Gate 2 remains NOT satisfied until your re-audit passes; all
+  consequential movement stays closed; PR #165 remains flag-inert with the
+  revert awaiting founder confirmation.
