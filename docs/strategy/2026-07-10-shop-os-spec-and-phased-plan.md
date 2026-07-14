@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10 · **Rev 4** — corrected against `main` @ `38a3b7fc1ee8c910bd5433b74e2aeb64c6731ca7`, all fetched remote heads, PR history, the live Supabase schema, and current vendor documentation. Rev 4 preserves the owner-approved product scope while replacing unsafe or unsupported implementation assumptions.
 **Status:** **ACTIVE PLAN — the single source of truth for Shop OS work. Phase 1 and Phase 2 source rows through row 15, Phase 3 rows 16–24, and Phase 4 rows 27–28 and 30 are complete; Row 30 merged in PR #154 and is production-verified. Row 31 source is verified and ready to ship.** Approved production migrations through `0032_shop_os_server_only_acl` are live and verified; Row 31 migrations `0033` and `0034` have not been applied. External access, spend, messaging retention/legal policy, production database changes, and later feature enablement remain separate owner gates.
-**Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. The diagnostic engine remains the centerpiece and is not redesigned by this plan.
+**Scope:** Turn Vyntechs into the operating system for an automotive shop, dialed in against the first five-person shop while remaining tenant-safe. Diagnostics is an optional per-shop add-on; this plan does not redesign diagnostic-engine behavior, and the manual findings path must remain complete when the add-on is disabled or unused.
 **Evidence record:** [`2026-07-10-shop-os-audit.md`](./2026-07-10-shop-os-audit.md)
 
 ---

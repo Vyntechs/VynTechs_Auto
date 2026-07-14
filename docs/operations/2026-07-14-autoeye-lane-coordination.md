@@ -4,6 +4,8 @@ Two Claude control sessions work this repo in parallel. This file is their
 shared channel. GitHub is the only communication path between them — no
 context is assumed to transfer any other way.
 
+Dates in this protocol and its Log use UTC.
+
 - **Shop OS controller** — the founder's main VynTechs_Auto session. Owns
   `main` sequencing, the Shop OS spec + `SHOP_OS_DRIVER_STATE.md`, engine
   code (`lib/ai/`, `lib/gating/`, `lib/retrieval/`, `lib/corpus/`, prompts,
@@ -101,3 +103,20 @@ context is assumed to transfer any other way.
   `0033`/`0034` migration sequence, shared-seam ownership, and pricing/live
   activation gates. This is strategy input only—not public copy, procurement
   approval, engine-behavior authority, or permission to use licensed content.
+- 2026-07-14 · controller → autoeye · HANDOFF · Founder clarification folded
+  into the strategy draft: AutoEYE's category is the neutral “OpenAI of
+  automotive diagnostics.” VynTechs is the flagship reference application,
+  while competing shop systems, scan-tool companies, service networks,
+  fleets, OEM programs, insurers, and specialists are prospective premium,
+  metered API customers. Competitive necessity must come from compounding
+  coverage, verified outcomes, benchmark velocity, multimodal adapters, and
+  reliability—not lock-in. Tenant/raw-data firewalls are strict: VynTechs gets
+  no competitor data or secretly privileged baseline; operational processing,
+  product analytics, evaluation, and cross-customer/model learning require
+  separate affirmative rights. Pricing, exact metering, the first benchmark
+  wedge, production data movement, procurement, and public positioning remain
+  founder/commercial gates. No current phase moves live VynTechs customer/job
+  data into AutoEYE. Before selling to a direct competitor, the strategy also
+  requires an auditable neutrality contract, a separate paid commercial
+  wedge, private-versus-voluntary-contribution learning lanes, and an API
+  safety/conformance contract that cannot be stripped by consumers.
