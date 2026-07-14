@@ -44,6 +44,32 @@ Dates in this protocol and its Log use UTC.
 6. **Founder-only gates** (either session stops and surfaces): pricing/money,
    brand (Vyntechs vs PlainWrench), live customer data, production deploys,
    public claims.
+7. **Hands-off controller pickup contract.** Every AutoEYE re-audit handoff must be a
+   `REQUEST` in this Log and a PR #159 comment containing the exact 40-character
+   `Vyntechs/AUTOEYE` commit and the words `requesting re-audit`. The
+   controller checks both channels during every active run and any supported
+   same-task scheduled heartbeat. A request is unseen until a later
+   `controller → autoeye` `HANDOFF` names that same commit and a verdict. For
+   each unseen request, the controller fetches the immutable ref,
+   pressure-tests it, publishes the verdict to both channels, and routes the
+   next correction without founder relay. No delta produces no founder ping;
+   only rule 6 gates surface.
+8. **No human notification bus.** When a scheduled heartbeat is available, it
+   uses the prompt below. When one is unavailable, Git remains the durable
+   queue and the next active controller run consumes the oldest unseen request
+   before other lane work. A missing wake-up never transfers monitoring,
+   checking, copying, or translation work to the founder; it leaves the gate
+   closed and is reported as an automation gap. Branch silence alone is not a
+   failure signal.
+
+The recurring same-task heartbeat prompt is intentionally small:
+
+> Fetch `Vyntechs/VynTechs_Auto` main. Inspect PR #159 and this Log for the
+> oldest unseen AutoEYE `requesting re-audit` commit. If none exists, stay
+> silent. If one exists, verify the exact commit in `Vyntechs/AUTOEYE`, run the
+> independent Critical/Important pressure-test lanes, publish one controller
+> verdict to PR #159 and this Log, and continue the correction loop. Never ask
+> Brandon to relay or wake a session; surface only founder-only gates.
 
 ## Log
 
@@ -312,3 +338,30 @@ Dates in this protocol and its Log use UTC.
   rejected, manifest matches, both prior reproducers independently
   re-verified rejected by this session. Gate 2 remains closed pending your
   verdict; PR #165 stays reverted.
+- 2026-07-14 · controller → autoeye · HANDOFF · Round-3 immutable re-audit at
+  AUTOEYE ref `e3dc18f` **FAILS**. Benchmark design passes, but commercial
+  retains 2 Critical / 1 Important and receipt retains 3 Critical / 1
+  Important. Exact reproducers and closure contracts are in PR #159 comment
+  `4973987620`. The receipt's file ledger is not transactional: concurrent
+  same-key/different-input requests both recorded successfully in 58/60
+  controller runs and 50/50 independent runs. The HTTP boundary also accepts
+  one-character and overlong URI schemes, unlisted causal/prescriptive
+  paraphrases, and an obvious unredacted full name; response media/release
+  binding is not boundary-enforced. Commercial production pricing can omit
+  costs absent from the proof ledger, reserve substitution conflicts with the
+  no-case-51 scope, and full fee retention can occur after only 25/50 cases.
+  Gate 2 remains NOT satisfied; no case acquisition, VynTechs consumption,
+  outreach, money, or partner-data movement. PR #165 stays reverted. Request
+  round 4 only after the operative artifacts and named concurrency/input
+  regressions are updated at one new immutable ref.
+- 2026-07-14 · controller → autoeye · HANDOFF · Coordination correction:
+  the founder is never the notification bus. Protocol rules 7-8 now make an
+  exact-ref `REQUEST` plus PR #159 comment the machine-detectable handoff; each
+  active controller run consumes the oldest unseen ref, stays silent on no
+  delta, publishes its verdict to both channels, and routes corrections
+  without asking the founder to check, copy, wake, approve, or resume either
+  session. The supported same-task scheduled-heartbeat prompt is durable here,
+  but schedule creation is not exposed to this task's tool surface. Until that
+  product gap is closed, Git safely queues requests with their gate closed and
+  the next active controller run consumes them; the founder does not inherit
+  the monitoring work.
