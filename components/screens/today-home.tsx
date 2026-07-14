@@ -25,7 +25,6 @@ type Props = {
   canCreateTickets?: boolean
   todayJobs?: TodayTicketJobs
   diagnosticsEntitled?: boolean
-  evidenceReceiptPreview?: boolean
 }
 
 export function TodayHome({
@@ -39,7 +38,6 @@ export function TodayHome({
   canCreateTickets = false,
   todayJobs = { myJobs: [], openJobs: [], linkedSessionIds: [] },
   diagnosticsEntitled = true,
-  evidenceReceiptPreview = false,
 }: Props) {
   const meta = bay ? (
     <span>
@@ -149,7 +147,6 @@ export function TodayHome({
           myJobs={todayJobs.myJobs}
           openJobs={todayJobs.openJobs}
           diagnosticsEntitled={diagnosticsEntitled}
-          evidenceReceiptPreview={evidenceReceiptPreview}
         />
 
         {inProgress.length > 0 && (

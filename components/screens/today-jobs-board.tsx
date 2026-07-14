@@ -4,8 +4,6 @@ import Link from 'next/link'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TodayTicketJob } from '@/lib/tickets'
-import { EvidenceReceiptPreview } from '@/components/screens/evidence-receipt-preview'
-import syntheticReceiptFixture from '@/lib/autoeye/receipt/fixtures/valid_full.json'
 import styles from './today-jobs-board.module.css'
 
 type Props = {
@@ -16,11 +14,6 @@ type Props = {
   // value and middleware/handlers enforce it; this only picks which action
   // fills the job's single slot.
   diagnosticsEntitled?: boolean
-  // EVIDENCE_RECEIPT_PREVIEW flag (server-resolved, default OFF). When on —
-  // and only for an entitled shop's diagnostic job — the existing action-slot
-  // card additionally shows the read-only synthetic Evidence-Receipt preview.
-  // The fixture above is imported statically; no network is involved.
-  evidenceReceiptPreview?: boolean
 }
 
 type Announcement = {
@@ -56,12 +49,7 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
-export function TodayJobsBoard({
-  myJobs,
-  openJobs,
-  diagnosticsEntitled = true,
-  evidenceReceiptPreview = false,
-}: Props) {
+export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = true }: Props) {
   const router = useRouter()
   const boardRef = useRef<HTMLElement>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
@@ -263,7 +251,6 @@ export function TodayJobsBoard({
           pendingDiagnosticJobId={pendingDiagnosticJobId}
           diagnosticsDisabled={pendingDiagnosticJobId !== null}
           diagnosticsEntitled={diagnosticsEntitled}
-          evidenceReceiptPreview={evidenceReceiptPreview}
           ambiguousJobStates={ambiguousJobStates}
           onStartDiagnostic={startDiagnostic}
           onRefreshDiagnostic={() => router.refresh()}
@@ -312,7 +299,6 @@ function JobSection({
   pendingDiagnosticJobId = null,
   diagnosticsDisabled = false,
   diagnosticsEntitled = true,
-  evidenceReceiptPreview = false,
   ambiguousJobStates = new Map(),
   onStartDiagnostic,
   onRefreshDiagnostic,
@@ -329,7 +315,6 @@ function JobSection({
   pendingDiagnosticJobId?: string | null
   diagnosticsDisabled?: boolean
   diagnosticsEntitled?: boolean
-  evidenceReceiptPreview?: boolean
   ambiguousJobStates?: Map<string, TodayTicketJob['diagnosticStartState']>
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
@@ -355,7 +340,6 @@ function JobSection({
             diagnosticPending={pendingDiagnosticJobId === job.id}
             diagnosticDisabled={diagnosticsDisabled}
             diagnosticsEntitled={diagnosticsEntitled}
-            evidenceReceiptPreview={evidenceReceiptPreview}
             forceAmbiguous={
               ambiguousJobStates.get(job.id) === (job.diagnosticStartState ?? 'idle')
             }
@@ -380,7 +364,6 @@ function JobRow({
   diagnosticPending,
   diagnosticDisabled,
   diagnosticsEntitled,
-  evidenceReceiptPreview,
   forceAmbiguous,
   onStartDiagnostic,
   onRefreshDiagnostic,
@@ -396,7 +379,6 @@ function JobRow({
   diagnosticPending: boolean
   diagnosticDisabled: boolean
   diagnosticsEntitled?: boolean
-  evidenceReceiptPreview?: boolean
   forceAmbiguous: boolean
   onStartDiagnostic?: (job: TodayTicketJob, confirmAmbiguousRetry?: boolean) => void
   onRefreshDiagnostic?: () => void
@@ -459,19 +441,6 @@ function JobRow({
           <SimpleWorkAction job={job} />
         )}
       </div>
-      {/* Receipt lane gate 3: the synthetic Evidence-Receipt preview lives
-          inside this existing diagnostic action-slot card — no new page, no
-          nav change. Renders only when the server-resolved flag is on AND
-          the shop holds the diagnostics entitlement AND the job is the
-          mine-mode diagnostic slot. Read-only; fixture data only. */}
-      {evidenceReceiptPreview &&
-        diagnosticsEntitled &&
-        mode === 'mine' &&
-        job.kind === 'diagnostic' && (
-          <div className={styles.receiptSlot}>
-            <EvidenceReceiptPreview receiptData={syntheticReceiptFixture} />
-          </div>
-        )}
     </article>
   )
 }

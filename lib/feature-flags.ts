@@ -13,13 +13,3 @@ export function isColdCaseSynthesisEnabled(): boolean {
 export function isAdaptiveCanvasEnabled(): boolean {
   return process.env.SHOP_OS_ADAPTIVE_CANVAS_ENABLED === 'true'
 }
-
-// Gates the read-only SYNTHETIC Evidence-Receipt preview inside the existing
-// diagnostic-job action slot (wedge decision, receipt lane gate 3). OFF by
-// default — when unset/!= 'true' the entire preview is invisible and nothing
-// changes for anyone. Server-side only: resolved in app/(app)/today/page.tsx
-// and passed down as a prop; also requires the shop's diagnostics
-// entitlement (hasDiagnostics) at the consuming slot.
-export function isEvidenceReceiptPreviewEnabled(): boolean {
-  return process.env.EVIDENCE_RECEIPT_PREVIEW === 'true'
-}
