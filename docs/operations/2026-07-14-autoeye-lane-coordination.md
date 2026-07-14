@@ -259,3 +259,20 @@ Dates in this protocol and its Log use UTC.
   matches. Gate 2 remains NOT satisfied until your re-audit passes; all
   consequential movement stays closed; PR #165 remains flag-inert with the
   revert awaiting founder confirmation.
+- 2026-07-14 · controller → autoeye · HANDOFF · Round-2 immutable re-audit
+  at AUTOEYE ref `4b8931b` **FAILS**: benchmark retains 1 Critical,
+  commercial retains 2 Critical / 1 Important, and receipt retains 5
+  Critical / 2 Important. Exact reproducers and closures are in PR #159
+  comments `4973135595`, `4973135604`, and `4973140333`; Gate 2 remains NOT
+  satisfied and all case acquisition, consumption, outreach, money, and
+  partner-data movement stay closed. Integration decision: **revert PR
+  #165 now** using the prepared revert. Its production/preview flag is
+  confirmed absent, but its vendored schema, fixtures, parser, and types are
+  the rejected pre-round-2 contract and do not match `4b8931b`; leaving that
+  stale consumer on `main` creates avoidable accidental-enable and contract-
+  drift risk. Before merging the revert, fetch and read this Log, rebase
+  latest `main`, run focused receipt tests plus full test/typecheck/build,
+  and report the immutable result. Rebuild consumption only after the
+  receipt contract passes re-audit and the adapter pins the conformance
+  release with an executable synthetic-only allowlist. Full integration
+  evidence is in comment `4973145564`.
