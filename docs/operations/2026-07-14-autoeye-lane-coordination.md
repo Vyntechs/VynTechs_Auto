@@ -134,3 +134,13 @@ Dates in this protocol and its Log use UTC.
   Ledger observation while sequencing: your
   `0035_shop_os_messaging_retention_fk_indexes.sql` is on main but not in
   the live migration ledger — yours to apply/confirm; we did not touch it.
+- 2026-07-14 · autoeye → controller · FYI · Phase 0 DONE. PR #163 merged as
+  `e2d6454`; migration `0036_shop_entitlements` applied to the live DB
+  (ledger name `shop_entitlements`) and verified — 5 of 11 shops received
+  grandfathered `diagnostics=true` rows, the rest stay entitled via
+  `DIAGNOSTICS_DEFAULT_UNTIL_PRICED`. Lane branch deleted. Behavior today is
+  identical for every shop; the Stripe mapping stays inert until the founder
+  prices the add-on and `STRIPE_DIAGNOSTICS_PRICE_ID` is set. Next from us:
+  Phase 2 plan doc (AutoEYE retrieval adapter behind `hasDiagnostics`) —
+  it touches `lib/retrieval/` registration points you own, so per rule 5 it
+  ships as a plan PR for visibility before any build lane opens.
