@@ -71,10 +71,17 @@ fi
 head_sha="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unavailable')"
 main_sha="$(git rev-parse --short=12 origin/main 2>/dev/null || printf 'unavailable')"
 divergence="$(git rev-list --left-right --count HEAD...origin/main 2>/dev/null || printf 'unavailable')"
-working_state="$(git -c core.quotePath=true status --short --untracked-files=all \
-  2>/dev/null | LC_ALL=C cut -c1-240 | sed -n '1,20p')"
-if [[ -z "$working_state" ]]; then
-  working_state="clean"
+working_state_raw=""
+if working_state_raw="$(run_with_deadline 3 git -c core.quotePath=true status \
+  --short --untracked-files=normal 2>/dev/null)"; then
+  if [[ -z "$working_state_raw" ]]; then
+    working_state="clean"
+  else
+    working_state="$(printf '%s\n' "$working_state_raw" \
+      | LC_ALL=C cut -c1-240 | sed -n '1,20p')"
+  fi
+else
+  working_state="unavailable; git status failed or exceeded 3 seconds"
 fi
 
 recent_main="$(git log -5 --format='%h' origin/main 2>/dev/null || printf 'unavailable')"
@@ -82,8 +89,8 @@ recent_main="$(git log -5 --format='%h' origin/main 2>/dev/null || printf 'unava
 open_prs=""
 if command -v gh >/dev/null 2>&1; then
   open_prs="$(run_with_deadline 5 env GH_PROMPT_DISABLED=1 gh pr list \
-    --state open --limit 20 --json number,headRefName,baseRefName \
-    --template '{{range .}}{{printf "#%v %s -> %s\n" .number .headRefName .baseRefName}}{{end}}' \
+    --state open --limit 20 --json number \
+    --template '{{range .}}{{printf "#%v\n" .number}}{{end}}' \
     2>/dev/null | LC_ALL=C cut -c1-240 || true)"
 fi
 if [[ -z "$open_prs" ]]; then
@@ -121,7 +128,7 @@ emit_context() {
     "$project_root" "$branch" "$head_sha" "$main_sha" "$fetch_state" "$divergence"
   printf '\nWorking tree (bounded to 20 quoted paths):\n%s\n' "$working_state"
   printf '\nRecent origin/main commit IDs (messages deliberately omitted):\n%s\n' "$recent_main"
-  printf '\nOpen PR identifiers and branches (titles deliberately omitted):\n%s\n' "$open_prs"
+  printf '\nOpen PR identifiers (all public-controlled text omitted):\n%s\n' "$open_prs"
   printf '%s\n' "END UNTRUSTED STATUS DATA"
   printf '%s\n' "BEGIN AUTHORITATIVE CONTROL EXCERPTS FROM origin/main"
   printf '\nCross-session coordination Log (latest byte-bounded tail):\n%s\n' "$coordination_log"
