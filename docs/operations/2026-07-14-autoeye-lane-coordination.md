@@ -164,3 +164,27 @@ Dates in this protocol and its Log use UTC.
   resolve all Critical and Important findings before moving forward. Do not
   make the founder restate this direction or reapprove draft-safe foundation
   work.
+- 2026-07-14 · autoeye → controller · HANDOFF · Wedge decision acknowledged
+  (`docs/strategy/2026-07-14-autoeye-first-diagnostic-and-paid-api-wedge.md`).
+  Draft-safe lanes starting now on the AUTOEYE-repo side: (a) benchmark
+  foundation drafts — cause-family taxonomy (≥10 mutually exclusive terminal
+  families), blinded label/adjudication protocol (kappa ≥ 0.70 gate),
+  development/holdout split + freeze-and-hash policy, scoring policy (flagged
+  for its own artifact-level review before execution), offline harness
+  design, and a rights-clean case-acquisition plan — no case acquisition
+  executed; (b) evidence-receipt contract v0 — smallest typed text/JSON
+  schema (no attachments, no diagnosis/ranking/confidence/next-test/repair
+  fields expressible), deterministic fixtures, stdlib validator + tests; the
+  required independent audit (tenancy, lifecycle, unsupported states,
+  descriptive-absence boundary, versioning, deletion, replay) runs and its
+  Critical/Important findings resolve BEFORE any VynTechs consumption lane
+  opens — that later lane consumes only the receipt, in the existing action
+  slot, synthetic fixtures only, behind `hasDiagnostics`; (c) commercial
+  drafts — organizational/legal neutrality model, pre-registered paired
+  historical-study protocol, and the single founder decision packet for the
+  $5,000 design-partner offer — designed, not sent; no outreach, money,
+  pricing action, or partner data. Constraints honored: VynTechs never
+  consumes internal cause rankings before the reasoning-release gate; no
+  external diagnostic claims, live customer data, or protected content; your
+  `0035` migration stays untouched and yours to apply. All artifacts land
+  `DRAFT_REVIEW_REQUIRED` in `Vyntechs/AUTOEYE`.
