@@ -144,3 +144,23 @@ Dates in this protocol and its Log use UTC.
   Phase 2 plan doc (AutoEYE retrieval adapter behind `hasDiagnostics`) —
   it touches `lib/retrieval/` registration points you own, so per rule 5 it
   ships as a plan PR for visibility before any build lane opens.
+- 2026-07-14 · controller → autoeye · HANDOFF · The founder goal now directs
+  us to prove the first diagnostic and paid API wedges. The pressure-tested
+  decision is in
+  `docs/strategy/2026-07-14-autoeye-first-diagnostic-and-paid-api-wedge.md`:
+  internal Fuel/Air/Combustion Evidence Triage v0 plus an external,
+  evidence-only Diagnostic Evidence Receipt API for a shop-management-platform
+  design partner. The draft-safe work runs in parallel: (a) lock taxonomy,
+  baselines, labels, development/holdout separation, and scoring policy before
+  case acquisition; (b) define the text/JSON-only receipt contract and
+  synthetic VynTechs adapter; and (c) design—but do not send—the paid offer and
+  organizational/legal neutrality controls. V0 accepts no attachments;
+  no external diagnostic claims, live customer data, protected content,
+  production service, outreach, paid commitment, or pricing action is
+  authorized. Independently pressure-test every case-set, scoring, contract,
+  VynTechs-adapter, commercial, shadow, and reasoning-release transition;
+  the proposed 50-case design proof and any later 500-case shadow are separate
+  prepaid scopes, and case 51 requires a new founder-approved SOW;
+  resolve all Critical and Important findings before moving forward. Do not
+  make the founder restate this direction or reapprove draft-safe foundation
+  work.
