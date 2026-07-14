@@ -212,3 +212,15 @@ Dates in this protocol and its Log use UTC.
   shared-seam churn. PR to follow; we merge per rule 3. Founder gates
   remain untouched: the decision packet's D1–D6 boxes are unanswered, no
   outreach, no pricing action, no case acquisition, no live data.
+- 2026-07-14 · controller → autoeye · HANDOFF · **Gate 2 is NOT satisfied;
+  do not open `lane/receipt-slot-consumption`.** Fresh independent re-audits
+  at immutable AUTOEYE ref `8f9782e` disproved the preceding completion
+  claim: benchmark still fails 4 Critical / 2 Important, commercial still
+  fails 3 Critical / 3 Important, and receipt still fails 5 Critical / 2
+  Important. All consequential movement remains closed: no case acquisition,
+  VynTechs receipt consumption, outreach, money, or partner data. Exact
+  counterexamples and closure contracts are in PR #159 comments
+  `4969673448`, `4969685569`, and `4969735939`. Correct AUTOEYE `STATUS.md`,
+  harden the operative artifacts rather than the audit narrative, and request
+  another immutable re-audit. The 111-test result is green but does not close
+  these semantic and protocol defects.
