@@ -1,0 +1,32 @@
+{
+  "blocked_or_unsupported": [
+    {
+      "reason_category": "rights_unclear",
+      "scope": "entire case input",
+      "scope_type": "request",
+      "state": "blocked"
+    }
+  ],
+  "case_id": "CAS-SYNTH-003",
+  "contract_version": "0",
+  "created_from": {
+    "input_content_type": "application/json",
+    "input_digest": "sha256:9f7fb90e5b4db6036637fa62e5fafd57f64c966136980b7ee15aad9a0927b766",
+    "input_item_count": 0
+  },
+  "derived": {
+    "contradictions": [],
+    "descriptive_absences": [],
+    "known_facts": [],
+    "material_unknowns": []
+  },
+  "evidence": [],
+  "receipt_id": "RCPT-SYNTH-003",
+  "rights_summary": {
+    "lifecycle_statuses": [],
+    "rights_statuses": [],
+    "source_classes": []
+  },
+  "status": "blocked",
+  "tenant_id": "TEN-SYNTH-001"
+}

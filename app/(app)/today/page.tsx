@@ -6,6 +6,7 @@ import { listSessionsForShop } from '@/lib/db/queries'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
 import { hasDiagnostics } from '@/lib/entitlements'
+import { isEvidenceReceiptPreviewEnabled } from '@/lib/feature-flags'
 import { TodayHome } from '@/components/screens/today-home'
 import { canCreateTickets } from '@/lib/shop-os/capabilities'
 import { listTodayTicketJobs, ticketActorFromProfile } from '@/lib/tickets'
@@ -53,6 +54,7 @@ export default async function TodayPage() {
       canCreateTickets={canCreateTickets(ctx.profile.role)}
       todayJobs={todayJobs}
       diagnosticsEntitled={diagnosticsEntitled}
+      evidenceReceiptPreview={isEvidenceReceiptPreviewEnabled()}
     />
   )
 }

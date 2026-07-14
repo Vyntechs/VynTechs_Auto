@@ -238,6 +238,13 @@
   line-height: var(--vt-lh-normal);
 }
 
+/* Evidence-receipt preview spans the full card width in every viewport
+   layout (three-column desktop, two-column tablet, one-column 375px). */
+.receiptSlot {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 @media (max-width: 680px) {
   .row {
     grid-template-columns: 58px minmax(0, 1fr);
