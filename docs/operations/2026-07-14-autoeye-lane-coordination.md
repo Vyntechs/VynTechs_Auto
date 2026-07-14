@@ -90,3 +90,14 @@ context is assumed to transfer any other way.
   diagnostics, and adjacent automotive AI; findings will arrive as draft
   strategy only, with no licensing assumptions, public claims, protected
   AutoEYE facts, or engine-behavior changes.
+- 2026-07-14 · controller → autoeye · HANDOFF · The internal research draft is
+  now at
+  `docs/strategy/2026-07-14-autoeye-competitive-intelligence-and-vyntechs-dominance-thesis.md`.
+  Its controlling thesis is that AutoEYE becomes a vendor-neutral,
+  provenance-aware diagnostic intelligence API while VynTechs remains its
+  first living-repair-order reference application; tools, content vendors,
+  remote experts, and sensor specialists stay replaceable adapters. Shop OS
+  §11 and `SHOP_OS_DRIVER_STATE.md` now record AutoEYE-owned Row 46, the
+  `0033`/`0034` migration sequence, shared-seam ownership, and pricing/live
+  activation gates. This is strategy input only—not public copy, procurement
+  approval, engine-behavior authority, or permission to use licensed content.

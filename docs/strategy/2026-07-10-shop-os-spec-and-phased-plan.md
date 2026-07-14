@@ -692,7 +692,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3, 5–25, 27–28, and 30 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 31 source is verified and ready to ship, while migrations `0033` and `0034`, retention/legal publication, production messaging, later production feature enablement, and external account/spend work remain owner gates.
+3. Rows 1–3, 5–25, 27–28, and 30 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 31 source is verified and ready to ship, while migrations `0033` and `0034`, retention/legal publication, production messaging, later production feature enablement, and external account/spend work remain owner gates. The AutoEYE-owned Row 46 entitlement seam is in progress under the cross-session coordination protocol; its migration follows unapplied `0033`/`0034`, and its branch is not controller-owned.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -720,6 +720,9 @@ T   technician         /today composition and sessionless job/work UI
 P   platform           middleware/proxy, public-route policy, service worker,
                        push client, privacy/terms/subprocessor docs
 X   external owner     vendor/carrier applications, credentials, spend
+AE  AutoEYE add-on     lane/phase0* entitlement/access/manual-findings seam;
+                       ownership and shared-file rules live in the
+                       cross-session coordination protocol
 ```
 
 `S` is exclusive. Within each UI lane, only one active row may own a shared surface. Domain route shims follow their corresponding `L*` owner. Production migrations and real vendor orders are never implied by completing code.
@@ -775,6 +778,7 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 43 | 6 | Optional API/punchout placement + provider idempotency | LP | 29,41 | blocked | Sandbox or owner approval for real order |
 | 44 | 6 | Derived board/delivery/closeout handlers | LT | 23,36,41 | pending | — |
 | 45 | 6 | Board + delivery/closeout + vehicle-history UI | A | 24,37,42,44 | pending | — |
+| 46 | X | Per-shop diagnostics entitlement + one-slot optional/manual findings path | AE | 15,21,30,31 | in_progress | AutoEYE-owned `lane/phase0-entitlement-seam`; migration is sequenced after unapplied `0033`/`0034`; pricing/live Stripe mapping stays a founder gate; no diagnostic-engine semantic change |
 
 ---
 
