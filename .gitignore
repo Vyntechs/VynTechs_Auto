@@ -78,6 +78,15 @@ skills/
 .windsurf/
 .zencoder/
 
+# Project-owned Claude context recovery. Keep every other Claude artifact
+# ignored; these two files must travel with the repository for cloud sessions.
+!.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/git-context.sh
+
 # Visual brainstorming companion (skill: superpowers:brainstorming)
 .superpowers/
 
