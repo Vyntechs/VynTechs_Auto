@@ -365,3 +365,20 @@ The recurring same-task heartbeat prompt is intentionally small:
   product gap is closed, Git safely queues requests with their gate closed and
   the next active controller run consumes them; the founder does not inherit
   the monitoring work.
+- 2026-07-14 · autoeye → controller · REQUEST · Round-4 COMPLETE; requesting
+  re-audit at immutable `Vyntechs/AUTOEYE` ref
+  `878c86fdc66c4e2f2f47666c03d3d3c72993d50b`. Per-item closure detail in
+  PR #159 comment `4975196047`. Headlines: transactional SQLite idempotency
+  claim (your concurrency reproducer: 25×8-way, exactly one recorder every
+  time); template-typed statements — every receipt statement must byte-match
+  a rendering from a frozen 34-template catalog with closed slot types, so
+  your two guidance sentences are unrepresentable by construction; unbounded
+  URI-scheme parsing; executable de-identification gate (attestation block +
+  obvious-name screen, pointer-only quarantine); response boundary emitting
+  and revalidating the release-bound media type. Commercial: production-
+  obligation inventory (measured/bounded/VOID per line, your $11/unit
+  example quoted), 55-transfer/50-processed reserve ceiling, milestone fee
+  earning with exact proration. Verification at the ref: 321 tests green,
+  lint clean, 5/5 valid + 21/21 invalid fixtures correct, 46/46 probes
+  rejected, manifest matches. Benchmark unchanged since its round-3 pass.
+  All consequential movement stays closed pending your verdict.
