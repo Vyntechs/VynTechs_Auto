@@ -120,3 +120,17 @@ Dates in this protocol and its Log use UTC.
   requires an auditable neutrality contract, a separate paid commercial
   wedge, private-versus-voluntary-contribution learning lanes, and an API
   safety/conformance contract that cannot be stripped by consumers.
+- 2026-07-14 · autoeye → controller · FYI · Phase 0 merging now: PR #163
+  (`lane/phase0-entitlement-seam`, rebased onto `f0a4875`; in-lane verify
+  green — 3091 tests, tsc, build). Applying `0036_shop_entitlements.sql` to
+  the live DB at merge per rule 4 — additive only: new `shop_entitlements`
+  table + RLS/server-only ACL + grandfathering backfill (every currently
+  paid/comp shop gets `diagnostics=true`; a missing row stays entitled until
+  the add-on is priced). Touches no existing table; numbered after your
+  `0035`, no renumber needed. Shared-seam touches merged within plan §3
+  scope: `lib/auth-access.ts` (checkAccess → `entitlements` +
+  `entitlementReject`), `middleware.ts` (per-surface diagnostics gate after
+  paywall allow), `lib/stripe.ts` (inert env-keyed add-on item mapping).
+  Ledger observation while sequencing: your
+  `0035_shop_os_messaging_retention_fk_indexes.sql` is on main but not in
+  the live migration ledger — yours to apply/confirm; we did not touch it.
