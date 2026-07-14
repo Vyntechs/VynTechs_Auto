@@ -1,0 +1,365 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagnostic Evidence Receipt v0",
+  "description": "A Diagnostic Evidence Receipt: a typed, provenance-complete record of what is known, unknown, contradictory, blocked, or unsupported in one diagnostic case, derived from typed text/JSON inputs a technician or shop system already produced. Evidence only, never guidance: this schema deliberately contains no field where a diagnosis, root cause, ranked hypothesis, confidence score, probability, next-test prescription, priority, recommendation, repair direction, OEM procedure, or customer promise could live, and no attachment, URL, binary, or media field — v0 accepts typed text/JSON only and rejects all attachments, fetchable URLs, data:/mailto: URIs, scheme-less hosts, and embedded base64 content. Beyond field shape, scripts/validate_evidence_receipt.py enforces a value-level guidance lint over every string (diagnosis/causality, ranking, confidence/probability, prescription, and customer-promise language are rejected wherever they appear), a PII/vehicle-identity sweep (VIN-shaped values, emails, phone-shaped values, personal-name-adjacent and plate-adjacent text), a rights/source coherence matrix, and silent-discard reconciliation against created_from.input_item_count. Statements never contain restricted service data (no pin/terminal/cavity/position numbers, no wire or conductor colors, no OEM or labeled connector IDs, no harness routing). additionalProperties is false at every level. Validated by scripts/validate_evidence_receipt.py (stdlib, no jsonschema dependency). Consumer contract: docs/product/EVIDENCE_RECEIPT_CONTRACT_v0.md. This contract is draft (v0) and never production data.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "receipt_id",
+    "tenant_id",
+    "case_id",
+    "created_from",
+    "status",
+    "evidence",
+    "derived",
+    "rights_summary",
+    "blocked_or_unsupported"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "0",
+      "description": "Receipt contract version. Any breaking change requires a new contract version (new const and new contract document); v0 receipts are frozen as-is for existing consumers. v0 is an unreleased draft: strengthening changes are recorded in the contract document changelog without a version bump until first release."
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^RCPT-[A-Z0-9][A-Z0-9-]*$",
+      "description": "Receipt identifier, unique per tenant. Synthetic fixtures use RCPT-SYNTH-*."
+    },
+    "tenant_id": {
+      "type": "string",
+      "pattern": "^TEN-[A-Z0-9]{2,12}-[0-9]{3,6}$",
+      "description": "Opaque tenant identifier assigned by AutoEYE, constrained to a closed grammar so it structurally cannot carry customer meaning: it is never a shop name, account name, or any value derivable from customer identity."
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^CAS-[A-Z0-9]{2,12}-[0-9]{3,6}$",
+      "description": "Opaque case identifier within the tenant, constrained to a closed grammar so it structurally cannot carry customer meaning: it is never a VIN, plate, customer name, or any value derivable from customer identity."
+    },
+    "created_from": {
+      "type": "object",
+      "description": "Digest reference to the typed text/JSON input the receipt was derived from, plus the input item count for silent-discard reconciliation. Never the raw input and never a fetchable location; a receipt is reproducible by replaying the retained typed input that hashes to this digest.",
+      "required": ["input_digest", "input_item_count"],
+      "properties": {
+        "input_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 digest of the canonical typed input payload. Canonicalization is normative: Unicode NFC normalization of all strings (keys and values), then json.dumps with sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False, then sha256 over the UTF-8 bytes. Implemented as canonical_input_digest() in scripts/validate_evidence_receipt.py."
+        },
+        "input_content_type": {
+          "const": "application/json",
+          "description": "v0 inputs are typed text/JSON only; there is no other content type."
+        },
+        "input_item_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of typed input items in the canonical input payload. The validator enforces count(evidence) + count(blocked_or_unsupported entries with scope_type input_item) == input_item_count, so silent discard is structurally detectable. A receipt blocked before the input was decomposed into items carries 0 and a request-scoped blocked entry. A dishonest count is caught by input-replay reconciliation in the conformance suite."
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "enum": ["completed", "blocked", "unsupported", "human_review"],
+      "description": "Receipt outcome. blocked, unsupported, and human_review receipts are valid receipts and must carry at least one blocked_or_unsupported entry stating their reason; unsupported never means silently discarded."
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/evidence_item" },
+      "description": "Typed evidence items preserved from the input, each with provenance, rights status, and lifecycle status. May be empty only when a receipt is blocked before any evidence could be typed."
+    },
+    "derived": {
+      "type": "object",
+      "description": "Sections derived from the evidence items above. Derivation is descriptive restatement and cross-referencing only; nothing in this block interprets, ranks, or prescribes.",
+      "required": [
+        "known_facts",
+        "contradictions",
+        "material_unknowns",
+        "descriptive_absences"
+      ],
+      "properties": {
+        "known_facts": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/known_fact" },
+          "description": "Facts restated from evidence, each traceable to the evidence ids that support it."
+        },
+        "contradictions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/contradiction" },
+          "description": "Disagreements between evidence items. Each entry references at least two evidence ids; the receipt records the disagreement and never resolves it."
+        },
+        "material_unknowns": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/absence_entry" },
+          "description": "Evidence categories whose state is materially unknown for this case. Descriptive only, same rules as descriptive_absences, including canonical sort order by (category, description)."
+        },
+        "descriptive_absences": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/absence_entry" },
+          "description": "An UNORDERED set of descriptive absences. The validator requires canonical sort order by (category, description) so position cannot carry priority, sequence, or recommendation. Each description is descriptive only — never an action, imperative, priority, question, recommendation, severity claim, ordinal, or implied/named test."
+        }
+      },
+      "additionalProperties": false
+    },
+    "rights_summary": {
+      "type": "object",
+      "description": "Audit summary of the rights, source-class, and lifecycle values present across the evidence items: the sorted distinct values, nothing more. Lets a consumer audit provenance without walking every item.",
+      "required": ["rights_statuses", "source_classes", "lifecycle_statuses"],
+      "properties": {
+        "rights_statuses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/rights_status" }
+        },
+        "source_classes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/source_class" }
+        },
+        "lifecycle_statuses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/lifecycle_status" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "blocked_or_unsupported": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/blocked_entry" },
+      "description": "Every blocked, unsupported, or insufficient-evidence slice of the input, named with its reason category and scope type. Unsupported never means silently discarded: anything the receipt could not carry is accounted for here, and entries with scope_type input_item participate in the input_item_count reconciliation."
+    }
+  },
+  "additionalProperties": false,
+  "if": {
+    "properties": {
+      "status": { "enum": ["blocked", "unsupported", "human_review"] }
+    }
+  },
+  "then": {
+    "properties": {
+      "blocked_or_unsupported": { "minItems": 1 }
+    }
+  },
+  "definitions": {
+    "evidence_category": {
+      "enum": [
+        "reported_concern",
+        "operating_context",
+        "dtc_family",
+        "scan_observation",
+        "physical_observation",
+        "completed_test_result",
+        "first_party_measurement"
+      ],
+      "description": "Closed set of generic evidence categories. dtc_family means a generic (SAE-style) code family, never an OEM-enhanced identifier."
+    },
+    "absence_category": {
+      "enum": [
+        "operating_context_evidence",
+        "reported_concern_evidence",
+        "dtc_scan_evidence",
+        "scan_data_evidence",
+        "physical_observation_evidence",
+        "physical_response_evidence",
+        "measurement_evidence",
+        "completed_test_evidence",
+        "service_history_evidence",
+        "environmental_condition_evidence",
+        "symptom_reproduction_evidence",
+        "component_condition_evidence"
+      ],
+      "description": "Closed set of generic evidence categories for descriptive absences and material unknowns (v0 draft, tunable pre-release). An absence names WHAT CATEGORY of evidence is not present — never which test would produce it."
+    },
+    "rights_status": {
+      "enum": [
+        "RIGHTS.FIRST_PARTY_OBSERVED",
+        "RIGHTS.CLEAN_ORIGINAL"
+      ],
+      "description": "Rights values permitted inside a receipt. The shared rights vocabulary (schemas/observation_record.schema.json) also defines RIGHTS.QUARANTINED and RIGHTS.REJECTED; those are structurally excluded from receipts — rejected or quarantined material never rides along as evidence and surfaces only as a blocked_or_unsupported entry with a reason (e.g. rights_unclear, restricted_content_input)."
+    },
+    "source_class": {
+      "enum": [
+        "FIRST_PARTY_OBSERVATION",
+        "FIRST_PARTY_MEASUREMENT",
+        "CUSTOMER_REPORT",
+        "SHOP_SYSTEM_RECORD",
+        "SCAN_TOOL_OUTPUT"
+      ],
+      "description": "Generic source classes for receipt evidence. Never a licensed or OEM service-information source. Each source class permits a fixed set of rights_status values (coherence matrix enforced by scripts/validate_evidence_receipt.py and documented in the contract doc): first-party and scan-tool classes require RIGHTS.FIRST_PARTY_OBSERVED; customer-report and shop-system classes carry RIGHTS.CLEAN_ORIGINAL (reported, not observed)."
+    },
+    "lifecycle_status": {
+      "enum": ["RECEIVED", "NORMALIZED"],
+      "description": "Evidence-item lifecycle within receipt processing: received as typed input or normalized into a category. QUARANTINED is structurally excluded from receipts — quarantined material never rides along as evidence and surfaces only as a blocked_or_unsupported entry with a reason."
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "ISO 8601 UTC date-time with seconds precision and Z suffix."
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Where an evidence item came from: a source class and a reporter role (roles only, never a person's name), plus exactly one of observed_at or tested_at.",
+      "required": ["source_class", "reporter_role"],
+      "properties": {
+        "source_class": { "$ref": "#/definitions/source_class" },
+        "reporter_role": {
+          "enum": [
+            "technician",
+            "service_advisor",
+            "vehicle_owner",
+            "shop_system",
+            "measurement_device"
+          ],
+          "description": "Role of the reporter. Never a name or any other personal identifier."
+        },
+        "observed_at": { "$ref": "#/definitions/utc_timestamp" },
+        "tested_at": { "$ref": "#/definitions/utc_timestamp" }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["observed_at"] },
+        { "required": ["tested_at"] }
+      ]
+    },
+    "measurement": {
+      "type": "object",
+      "description": "First-party measurement payload: the reading with its units and the conditions under which it was taken. The receipt never supplies or interprets pass/fail thresholds — a measurement is preserved evidence, not a judgment.",
+      "required": ["value", "units", "conditions"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The reading as typed text, with no interpretation attached."
+        },
+        "units": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conditions": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Conditions under which the reading was taken, as typed text."
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence_item": {
+      "type": "object",
+      "description": "One typed evidence item. Every item — including first_party_measurement items — must carry provenance. first_party_measurement items must also carry the measurement payload (units and conditions); no other category may carry one. rights_status must cohere with provenance.source_class per the coherence matrix in the contract doc.",
+      "required": [
+        "id",
+        "category",
+        "statement",
+        "provenance",
+        "rights_status",
+        "lifecycle_status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^EV-[A-Z0-9][A-Z0-9-]*$",
+          "description": "Evidence-item identifier, unique within the receipt. Synthetic fixtures use EV-SYNTH-*."
+        },
+        "category": { "$ref": "#/definitions/evidence_category" },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Typed-text restatement of the evidence. Descriptive only: plain factual reporting is legal, but the value-level guidance lint rejects diagnosis/causality, ranking, confidence/probability, prescription, and customer-promise language. Never contains restricted service data (no pin/terminal/cavity numbers, no wire/conductor colors, no OEM or labeled connector IDs, no harness routing), never PII or vehicle identity (no VINs, plates, names, emails, phone numbers), and never a fetchable URL or embedded content."
+        },
+        "provenance": { "$ref": "#/definitions/provenance" },
+        "rights_status": { "$ref": "#/definitions/rights_status" },
+        "lifecycle_status": { "$ref": "#/definitions/lifecycle_status" },
+        "measurement": { "$ref": "#/definitions/measurement" }
+      },
+      "additionalProperties": false,
+      "if": {
+        "properties": { "category": { "const": "first_party_measurement" } },
+        "required": ["category"]
+      },
+      "then": { "required": ["measurement"] },
+      "else": { "not": { "required": ["measurement"] } }
+    },
+    "known_fact": {
+      "type": "object",
+      "description": "A fact restated from evidence, always traceable to the evidence ids that support it. Statements are subject to the same value-level guidance lint as every string in the receipt: internal ranking, cause-family, or confidence output is a prohibited input and is rejected on sight.",
+      "required": ["statement", "evidence_ids"],
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^EV-[A-Z0-9][A-Z0-9-]*$" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "contradiction": {
+      "type": "object",
+      "description": "Two or more evidence items that disagree. Must reference at least two distinct evidence ids present in this receipt (cross-reference enforced by scripts/validate_evidence_receipt.py). The receipt records the disagreement and never resolves it.",
+      "required": ["description", "evidence_ids"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^EV-[A-Z0-9][A-Z0-9-]*$" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "absence_entry": {
+      "type": "object",
+      "description": "A descriptive absence or material unknown: a closed absence category with a DESCRIPTIVE-ONLY description. The description may never be phrased or ordered as an action, imperative, priority, question, recommendation, severity claim, ordinal, or implied/named test; it must open with an allowed descriptive word and names what category of evidence is not present, never which test would produce it. Phrasing and canonical (category, description) sort order are enforced by scripts/validate_evidence_receipt.py.",
+      "required": ["category", "description"],
+      "properties": {
+        "category": { "$ref": "#/definitions/absence_category" },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "blocked_entry": {
+      "type": "object",
+      "description": "One blocked, unsupported, or insufficient-evidence slice of the input, with its scope type and reason category. Unsupported never means silently discarded: entries with scope_type input_item count toward the created_from.input_item_count reconciliation.",
+      "required": ["scope", "scope_type", "state", "reason_category"],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which slice of the input this entry accounts for (e.g. the entire case, or a named input segment)."
+        },
+        "scope_type": {
+          "enum": ["input_item", "section", "request"],
+          "description": "Granularity of the scope: input_item is one typed input item (counts toward input_item_count reconciliation), section is a sub-part of the input that is not itself an input item, request is the entire request. Only input_item entries count toward reconciliation."
+        },
+        "state": {
+          "enum": ["blocked", "unsupported", "insufficient_evidence"]
+        },
+        "reason_category": {
+          "enum": [
+            "out_of_envelope",
+            "rights_unclear",
+            "attachment_or_url_input",
+            "restricted_content_input",
+            "insufficient_evidence",
+            "threshold_interpretation_requested",
+            "human_review_required"
+          ],
+          "description": "Closed reason vocabulary. attachment_or_url_input covers all binary uploads, media, files, and fetchable URLs — v0 rejects them at validation."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

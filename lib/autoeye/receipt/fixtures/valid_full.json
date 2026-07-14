@@ -1,0 +1,163 @@
+{
+  "blocked_or_unsupported": [
+    {
+      "reason_category": "threshold_interpretation_requested",
+      "scope": "typed input item asking whether the recorded fuel rail pressure reading is within specification",
+      "scope_type": "input_item",
+      "state": "unsupported"
+    }
+  ],
+  "case_id": "CAS-SYNTH-002",
+  "contract_version": "0",
+  "created_from": {
+    "input_content_type": "application/json",
+    "input_digest": "sha256:c96bb2ca70512f1929869229344f134d66a9234061a66b24f3062259748f8302",
+    "input_item_count": 8
+  },
+  "derived": {
+    "contradictions": [
+      {
+        "description": "The completed intake smoke test reports no leaks found, while a physical observation describes a hissing sound near the intake at idle.",
+        "evidence_ids": [
+          "EV-SYNTH-005",
+          "EV-SYNTH-006"
+        ]
+      }
+    ],
+    "descriptive_absences": [
+      {
+        "category": "completed_test_evidence",
+        "description": "No completed-test evidence covering fuel-supply volume is present in the supplied inputs."
+      },
+      {
+        "category": "measurement_evidence",
+        "description": "No reading of intake manifold vacuum is present in the supplied inputs."
+      }
+    ],
+    "known_facts": [
+      {
+        "evidence_ids": [
+          "EV-SYNTH-003",
+          "EV-SYNTH-004"
+        ],
+        "statement": "A lean-family generic powertrain code and positive long-term fuel trim at idle were both recorded."
+      }
+    ],
+    "material_unknowns": [
+      {
+        "category": "operating_context_evidence",
+        "description": "The fuel quality and recent refueling history for this synthetic case are unknown."
+      }
+    ]
+  },
+  "evidence": [
+    {
+      "category": "reported_concern",
+      "id": "EV-SYNTH-001",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "observed_at": "2026-07-01T09:00:00Z",
+        "reporter_role": "service_advisor",
+        "source_class": "CUSTOMER_REPORT"
+      },
+      "rights_status": "RIGHTS.CLEAN_ORIGINAL",
+      "statement": "Customer reports rough running at idle after a cold start."
+    },
+    {
+      "category": "operating_context",
+      "id": "EV-SYNTH-002",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "observed_at": "2026-07-01T09:05:00Z",
+        "reporter_role": "shop_system",
+        "source_class": "SHOP_SYSTEM_RECORD"
+      },
+      "rights_status": "RIGHTS.CLEAN_ORIGINAL",
+      "statement": "Synthetic light-duty gasoline pickup used for short urban trips; entirely invented case for contract testing."
+    },
+    {
+      "category": "dtc_family",
+      "id": "EV-SYNTH-003",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "observed_at": "2026-07-01T09:30:00Z",
+        "reporter_role": "technician",
+        "source_class": "SCAN_TOOL_OUTPUT"
+      },
+      "rights_status": "RIGHTS.FIRST_PARTY_OBSERVED",
+      "statement": "Generic powertrain code family P0171 (system too lean) reported as current."
+    },
+    {
+      "category": "scan_observation",
+      "id": "EV-SYNTH-004",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "observed_at": "2026-07-01T09:35:00Z",
+        "reporter_role": "technician",
+        "source_class": "SCAN_TOOL_OUTPUT"
+      },
+      "rights_status": "RIGHTS.FIRST_PARTY_OBSERVED",
+      "statement": "Recorded scan data shows long-term fuel trim positive at idle."
+    },
+    {
+      "category": "completed_test_result",
+      "id": "EV-SYNTH-005",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "reporter_role": "technician",
+        "source_class": "FIRST_PARTY_OBSERVATION",
+        "tested_at": "2026-07-01T10:00:00Z"
+      },
+      "rights_status": "RIGHTS.FIRST_PARTY_OBSERVED",
+      "statement": "Technician notes state an intake smoke test was completed with no leaks found."
+    },
+    {
+      "category": "physical_observation",
+      "id": "EV-SYNTH-006",
+      "lifecycle_status": "NORMALIZED",
+      "provenance": {
+        "observed_at": "2026-07-01T09:50:00Z",
+        "reporter_role": "technician",
+        "source_class": "FIRST_PARTY_OBSERVATION"
+      },
+      "rights_status": "RIGHTS.FIRST_PARTY_OBSERVED",
+      "statement": "Technician notes describe a hissing sound near the intake at idle."
+    },
+    {
+      "category": "first_party_measurement",
+      "id": "EV-SYNTH-007",
+      "lifecycle_status": "NORMALIZED",
+      "measurement": {
+        "conditions": "engine idling at operating temperature; synthetic bench case",
+        "units": "psi",
+        "value": "52"
+      },
+      "provenance": {
+        "reporter_role": "technician",
+        "source_class": "FIRST_PARTY_MEASUREMENT",
+        "tested_at": "2026-07-01T10:15:00Z"
+      },
+      "rights_status": "RIGHTS.FIRST_PARTY_OBSERVED",
+      "statement": "Fuel rail pressure reading recorded at idle."
+    }
+  ],
+  "receipt_id": "RCPT-SYNTH-002",
+  "rights_summary": {
+    "lifecycle_statuses": [
+      "NORMALIZED"
+    ],
+    "rights_statuses": [
+      "RIGHTS.CLEAN_ORIGINAL",
+      "RIGHTS.FIRST_PARTY_OBSERVED"
+    ],
+    "source_classes": [
+      "CUSTOMER_REPORT",
+      "FIRST_PARTY_MEASUREMENT",
+      "FIRST_PARTY_OBSERVATION",
+      "SCAN_TOOL_OUTPUT",
+      "SHOP_SYSTEM_RECORD"
+    ]
+  },
+  "status": "completed",
+  "tenant_id": "TEN-SYNTH-001"
+}
