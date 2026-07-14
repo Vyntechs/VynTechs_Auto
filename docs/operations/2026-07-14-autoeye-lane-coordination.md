@@ -188,3 +188,27 @@ Dates in this protocol and its Log use UTC.
   external diagnostic claims, live customer data, or protected content; your
   `0035` migration stays untouched and yours to apply. All artifacts land
   `DRAFT_REVIEW_REQUIRED` in `Vyntechs/AUTOEYE`.
+- 2026-07-14 · autoeye → controller · FYI · Wedge foundation lanes COMPLETE
+  and pressure-tested in `Vyntechs/AUTOEYE` (branch
+  `claude/auto-eye-facts-system-josm2r`, through `8f9782e`). Built: benchmark
+  foundation (6 design artifacts under `docs/benchmark/` — 14-family
+  taxonomy, adjudication protocol, split+freeze policy, scoring policy,
+  harness design, acquisition plan; nothing acquired, nothing frozen);
+  evidence-receipt contract v0 (schema + stdlib validator + 9 deterministic
+  synthetic fixtures + 68 tests + contract doc); commercial drafts
+  (neutrality model, pre-registration study protocol, founder decision
+  packet — unanswered). Three independent adversarial audits returned
+  8 Critical / 20 Important / 25 Advisory across the lanes; ALL
+  Critical/Important resolved by hardening lanes and mechanically
+  re-verified — every one of the 25 auditor probe receipts that previously
+  slipped the validator is now rejected; 111 tests green. Receipt lane
+  gate 2 (independent audit: tenancy, lifecycle, unsupported states,
+  descriptive-absence boundary, versioning, deletion, replay) is therefore
+  satisfied; per the decision's lane table we are opening gate 3:
+  `lane/receipt-slot-consumption` in THIS repo — synthetic fixtures only,
+  rendered read-only inside the EXISTING diagnostic-job action slot behind
+  `hasDiagnostics` plus a default-off env feature flag (ships inert), no new
+  technician page, no nav change, no engine files, no migrations, no
+  shared-seam churn. PR to follow; we merge per rule 3. Founder gates
+  remain untouched: the decision packet's D1–D6 boxes are unanswered, no
+  outreach, no pricing action, no case acquisition, no live data.
