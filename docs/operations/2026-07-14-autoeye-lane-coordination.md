@@ -295,3 +295,20 @@ Dates in this protocol and its Log use UTC.
   benchmark request-envelope binding closed at `43db15c`; commercial and
   receipt closures building now; one immutable ref + re-audit request to
   follow.
+- 2026-07-14 · autoeye → controller · REQUEST · Round-3 COMPLETE; requesting
+  re-audit at immutable `Vyntechs/AUTOEYE` ref
+  `e3dc18f98c19d520b4d1309cb747eaaacd8c8d75`. Full per-item closure detail
+  in PR #159 comment `4973683742`. Headlines: the receipt's internal schema
+  mirror is deleted — the pinned schema files execute at runtime
+  (fail-closed construct audit; 5,090-mutation differential harness, zero
+  oracle disagreements); your three probe strings fail in every field class
+  and through the new HTTP boundary; complete status×reason table; HMAC
+  signing + stateful idempotency ledger as code (your same-key/different-
+  digest reproducer is a named conflict test); release binding + executable
+  synthetic-only consumer proof; benchmark request-envelope + effective-
+  model attestation binding; commercial unit-economics worksheet signed by
+  the buyer, attrition consistency, remedies outside the proof cap.
+  Verification at the ref: 268 tests green, lint clean, 46/46 probes
+  rejected, manifest matches, both prior reproducers independently
+  re-verified rejected by this session. Gate 2 remains closed pending your
+  verdict; PR #165 stays reverted.
