@@ -1,18 +1,18 @@
 # ShopOS Repair Order Continuity Design
 
-**Date:** 2026-07-15  
-**Status:** Direction approved through the active goal; written specification awaiting founder review  
-**Implementation authority:** None until this written specification is approved  
+**Date:** 2026-07-15
+**Status:** Direction approved through the active goal; written specification awaiting founder review
+**Implementation authority:** None until this written specification is approved
 **Product definition:** One living repair order per vehicle visit by default, with independently truthful work items and explicit exceptions
 
 ## Intent
 
-**Project:** Vyntechs ShopOS  
-**Plain-language outcome:** A person can add every concern, requested service, discovered issue, assignment, authorization, and result to the correct vehicle visit without losing it, duplicating the repair order, or refreshing the whole application.  
-**Why now:** Production use exposed two open repair orders for the same vehicle, hidden work after assignment, and no reliable way to recover or close the visit.  
-**Done when:** The same repair order remains visible and correct from intake through delivery and vehicle history for every intended shop role on phone, tablet, laptop, and desktop.  
-**Hard no:** No hard one-open-RO constraint, silent merge, destructive cleanup, new page maze, diagnostic-engine entrance, operational media, inherited approval, client-trusted authorization, or production migration without its explicit gate.  
-**Assumptions:** `tickets` remains the vehicle-visit spine; `ticket_jobs` remains the unit of work and approval; appointments, payments, accounting-grade invoicing, and diagnostic-engine redesign remain outside this design.  
+**Project:** Vyntechs ShopOS
+**Plain-language outcome:** A person can add every concern, requested service, discovered issue, assignment, authorization, and result to the correct vehicle visit without losing it, duplicating the repair order, or refreshing the whole application.
+**Why now:** Production use exposed two open repair orders for the same vehicle, hidden work after assignment, and no reliable way to recover or close the visit.
+**Done when:** The same repair order remains visible and correct from intake through delivery and vehicle history for every intended shop role on phone, tablet, laptop, and desktop.
+**Hard no:** No hard one-open-RO constraint, silent merge, destructive cleanup, new page maze, diagnostic-engine entrance, operational media, inherited approval, client-trusted authorization, or production migration without its explicit gate.
+**Assumptions:** `tickets` remains the vehicle-visit spine; `ticket_jobs` remains the unit of work and approval; appointments, payments, accounting-grade invoicing, and diagnostic-engine redesign remain outside this design.
 
 ## Product vision
 
@@ -1015,15 +1015,15 @@ one giant implementation plan.
 ### Packet A — Additive migration and mutation foundation
 
 **Outcome:** The database and shared mutation primitives can represent job
-truth, revision ordering, receipt replay, and lifecycle evidence safely.  
+truth, revision ordering, receipt replay, and lifecycle evidence safely.
 **Includes:** held source schema/migration artifact, local PGlite proof,
 composite constraints/RLS/ACLs, total lock order, revision helper, immutable
 receipt header/results/replay helper, and retrofit inventory for every existing
-ticket/job writer.  
+ticket/job writer.
 **Release boundary:** Stop at the named production-DDL gate. Runtime schema
 declarations and helpers merge/deploy only after the exact DDL is live and
-verified.  
-**Excludes:** backfill execution, job-truth consumers, resolver behavior, UI.  
+verified.
+**Excludes:** backfill execution, job-truth consumers, resolver behavior, UI.
 **Done when:** Local proof is complete; then, only if the DDL gate is approved,
 the deployed schema and every participating writer satisfy the lock/revision/
 receipt contracts before Packet D can consume them.
@@ -1031,25 +1031,25 @@ receipt contracts before Packet D can consume them.
 ### Packet B — Job-local work truth and compatibility
 
 **Outcome:** Every job owns the exact request/context used by downstream
-consumers while the immutable legacy root remains readable.  
+consumers while the immutable legacy root remains readable.
 **Includes:** ordered batch contract, exact backfill program/dry run,
 job-local readers/writers, root-only creation compatibility, and diagnostic,
 story, quote, manual-finding, detail, found-concern binding, and the guarded
-legacy-statement confirmation mutation.  
+legacy-statement confirmation mutation.
 **Release boundary:** Production backfill is a separate data-mutation gate;
-compat readers remain safe before it runs.  
-**Excludes:** active append, approval pinning changes, role-home/UI redesign.  
+compat readers remain safe before it runs.
+**Excludes:** active append, approval pinning changes, role-home/UI redesign.
 **Done when:** Every row has deterministic truth/review state and two concerns
 on one ticket cannot cross-bind anywhere.
 
 ### Packet C — Immutable per-job authorization continuity
 
 **Outcome:** Unrelated added work neither authorizes itself nor revokes an
-unchanged approved job.  
+unchanged approved job.
 **Includes:** versioned canonical authorization fingerprint, immutable
 version/event/fingerprint pin, job-local invalidation, sent-link behavior, and
-repair-access validation.  
-**Excludes:** customer messaging transport and resolver UI.  
+repair-access validation.
+**Excludes:** customer messaging transport and resolver UI.
 **Done when:** Adding an unrelated job/version preserves an unchanged approval,
 while changing one fingerprinted field invalidates only that job. Packet D is
 blocked until this proof passes.
@@ -1057,69 +1057,69 @@ blocked until this proof passes.
 ### Packet D — Transactional RO resolver
 
 **Outcome:** Existing-vehicle intake creates, batch-appends, or starts separate
-exactly as the current locked candidate set permits.  
+exactly as the current locked candidate set permits.
 **Includes:** candidate projection, central route policy, customer/vehicle lock,
 atomic 1-to-25 item-plus-normalized-quote-seed mutation, quick/canned line
 insertion, create/append/separate intents, and consumption of Packet A
-receipts/revisions.  
-**Excludes:** production cleanup, hard uniqueness, and receipt schema changes.  
+receipts/revisions.
+**Excludes:** production cleanup, hard uniqueness, and receipt schema changes.
 **Done when:** Concurrent submissions cannot silently duplicate an RO, retries
 replay every ordered result, and every legitimate separate RO preserves why.
 
 ### Packet E — Lifecycle and direct recovery kernel
 
-**Active-plan ownership:** Replaces the unfinished base scope of Row 44.  
+**Active-plan ownership:** Replaces the unfinished base scope of Row 44.
 **Outcome:** Every living RO can reach one honest terminal state and be found
-later using currently deployed truth.  
+later using currently deployed truth.
 **Includes:** exact stage precedence/checks, base deliver/close/cancel handlers,
-job-only return-to-open-queue, direct RO recovery, and vehicle history.  
+job-only return-to-open-queue, direct RO recovery, and vehicle history.
 **Excludes:** messaging/order-aware closeout, role-home exception presentation,
-payments, accounting invoice, and appointments.  
+payments, accounting invoice, and appointments.
 **Done when:** Every lifecycle matrix case is exact and a terminal-child/open-
 parent exception remains recoverable by direct link and vehicle history.
 
 ### Packet F — Server role projections and action authority
 
-**Active-plan ownership:** Replaces the unfinished base scope of Row 45.  
+**Active-plan ownership:** Replaces the unfinished base scope of Row 45.
 **Outcome:** Each role receives the correct grouped RO queue, exact exceptions,
-and server-permitted actions.  
+and server-permitted actions.
 **Includes:** `ShopTodayProjection`, `MyWorkProjection`, deployed-truth
 `PartsQueueProjection`, ticket/action envelopes, role matrix, and minimal
-semantic route wiring, including confirmation authority for migrated work.  
+semantic route wiring, including confirmation authority for migrated work.
 **Excludes:** adaptive composition, gestures, reviewer-console redesign, and
-unshipped provider-order actions.  
+unshipped provider-order actions.
 **Done when:** Owner/advisor, technician, and parts discovery remains correct
 before/after assignment and lifecycle changes, including closeout exceptions.
 
 ### Packet G — Adaptive living repair order
 
 **Active-plan ownership:** Supersedes Row 48; any still-live shared-path lease
-remains a file-ownership gate, not an AutoEYE product dependency.  
+remains a file-ownership gate, not an AutoEYE product dependency.
 **Outcome:** Existing role queues and the living RO compose continuously across
-all screen sizes with precise local updates.  
+all screen sizes with precise local updates.
 **Includes:** exclusive ownership of `AdaptiveWorkbench`, Today/ticket-detail
 responsive composition, sheets/rails, entity reducer, focus/history/reconnect,
 inline legacy-statement confirmation, and optional gestures only after visible
-actions pass.  
+actions pass.
 **Interface:** Consumes Packet F projections/action envelopes and may not
-rederive role or lifecycle authority in the client.  
+rederive role or lifecycle authority in the client.
 **Excludes:** new routes/pages, native applications, domain mutation semantics,
-and broad real-time payloads.  
+and broad real-time payloads.
 **Done when:** Acting on one element changes only that element and declared
 summaries without losing context on any supported viewport/input mode.
 
 ### Packet H — Message/order-aware lifecycle extension
 
 **Active-plan ownership:** Preserves the deferred dependency-bound portion of
-Rows 44-45 after their base scope moves to Packets E-F.  
+Rows 44-45 after their base scope moves to Packets E-F.
 **Outcome:** Remote quote and consequential order truth participates in
-closeout and Parts Queue without weakening the base kernel.  
+closeout and Parts Queue without weakening the base kernel.
 **Depends on:** Live/verified messaging migrations and Rows 36-38, 41-42 as
-applicable; absent dependencies keep this packet unavailable.  
+applicable; absent dependencies keep this packet unavailable.
 **Includes:** active-send revocation/expiry guards,
 `LifecycleSendAdapter` activation, `remote_quote_not_proceeding`, parts-order
-legality, order-aware exceptions, and already-authorized parts actions.  
-**Excludes:** provider transport/spend and accounting payments.  
+legality, order-aware exceptions, and already-authorized parts actions.
+**Excludes:** provider transport/spend and accounting payments.
 **Done when:** Message/order states cannot be bypassed during lifecycle and no
 code path queries an undeployed table.
 
