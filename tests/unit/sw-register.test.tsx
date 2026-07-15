@@ -175,6 +175,29 @@ describe('SwRegister', () => {
     expect(removeRegistrationListener).toHaveBeenCalledWith('updatefound', expect.any(Function))
     expect(removeInstallingListener).toHaveBeenCalledWith('statechange', expect.any(Function))
   })
+
+  it('releases redundant installers from their listener and tracking collections', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const installing = createServiceWorker()
+    const registration = createRegistration({ installing })
+    const addInstallingListener = vi.spyOn(installing, 'addEventListener')
+    const removeInstallingListener = vi.spyOn(installing, 'removeEventListener')
+    register.mockResolvedValue(registration)
+    const { unmount } = render(<SwRegister />)
+    await waitFor(() => {
+      expect(addInstallingListener).toHaveBeenCalledWith('statechange', expect.any(Function))
+    })
+
+    installing.state = 'redundant'
+    installing.dispatchEvent(new Event('statechange'))
+
+    expect(removeInstallingListener).toHaveBeenCalledOnce()
+    registration.dispatchEvent(new Event('updatefound'))
+    expect(addInstallingListener).toHaveBeenCalledTimes(2)
+
+    unmount()
+    expect(removeInstallingListener).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('public/sw.js', () => {

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PwaUpdateStatus } from '@/components/app-shell/pwa-update-status'
@@ -8,14 +8,48 @@ import {
 } from '@/components/app-shell/pwa-update-events'
 
 let serviceWorkerContainer: ServiceWorkerContainer
+let getRegistration: ReturnType<typeof vi.fn>
 
-function createWaitingWorker(postMessage = vi.fn()): ServiceWorker {
-  const worker = new EventTarget() as ServiceWorker
-  Object.defineProperty(worker, 'postMessage', {
-    configurable: true,
-    value: postMessage,
+type MutableServiceWorker = ServiceWorker & { state: ServiceWorkerState }
+
+function createWaitingWorker(postMessage = vi.fn()): MutableServiceWorker {
+  const worker = new EventTarget() as MutableServiceWorker
+  Object.defineProperties(worker, {
+    postMessage: {
+      configurable: true,
+      value: postMessage,
+    },
+    state: {
+      configurable: true,
+      writable: true,
+      value: 'installed',
+    },
   })
   return worker
+}
+
+function createRegistration(waiting: ServiceWorker | null): ServiceWorkerRegistration {
+  const registration = new EventTarget() as ServiceWorkerRegistration
+  Object.defineProperty(registration, 'waiting', {
+    configurable: true,
+    value: waiting,
+  })
+  return registration
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
+function setController(controller: ServiceWorker | null) {
+  Object.defineProperty(serviceWorkerContainer, 'controller', {
+    configurable: true,
+    value: controller,
+  })
 }
 
 function announceWaitingWorker(waiting: ServiceWorker) {
@@ -29,7 +63,18 @@ function announceWaitingWorker(waiting: ServiceWorker) {
 }
 
 beforeEach(() => {
+  getRegistration = vi.fn().mockResolvedValue(undefined)
   serviceWorkerContainer = new EventTarget() as ServiceWorkerContainer
+  Object.defineProperties(serviceWorkerContainer, {
+    controller: {
+      configurable: true,
+      value: null,
+    },
+    getRegistration: {
+      configurable: true,
+      value: getRegistration,
+    },
+  })
   Object.defineProperty(navigator, 'serviceWorker', {
     configurable: true,
     value: serviceWorkerContainer,
@@ -47,6 +92,45 @@ describe('PwaUpdateStatus', () => {
     expect(container.innerHTML).toBe('')
   })
 
+  it('replays waiting readiness that predates the component mount', async () => {
+    const postMessage = vi.fn()
+    const reload = vi.fn()
+    const waiting = createWaitingWorker(postMessage)
+    getRegistration.mockResolvedValue(createRegistration(waiting))
+
+    render(<PwaUpdateStatus reload={reload} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Update when ready' })).toBeEnabled()
+    })
+    expect(getRegistration).toHaveBeenCalledOnce()
+    expect(postMessage).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does not let a late registration replay replace a newer ready event', async () => {
+    const user = userEvent.setup()
+    const replay = createDeferred<ServiceWorkerRegistration | undefined>()
+    const stalePostMessage = vi.fn()
+    const currentPostMessage = vi.fn()
+    const staleWaiting = createWaitingWorker(stalePostMessage)
+    const currentWaiting = createWaitingWorker(currentPostMessage)
+    getRegistration.mockReturnValue(replay.promise)
+    render(<PwaUpdateStatus reload={vi.fn()} />)
+    await waitFor(() => expect(getRegistration).toHaveBeenCalledOnce())
+
+    announceWaitingWorker(currentWaiting)
+    await act(async () => {
+      replay.resolve(createRegistration(staleWaiting))
+      await replay.promise
+    })
+    await user.click(screen.getByRole('button', { name: 'Update when ready' }))
+
+    expect(currentPostMessage).toHaveBeenCalledOnce()
+    expect(currentPostMessage).toHaveBeenCalledWith({ type: 'ACTIVATE' })
+    expect(stalePostMessage).not.toHaveBeenCalled()
+  })
+
   it('announces readiness without messaging, activating, or reloading automatically', () => {
     const postMessage = vi.fn()
     const reload = vi.fn()
@@ -59,7 +143,10 @@ describe('PwaUpdateStatus', () => {
     expect(screen.getByText('Application update ready. Finish the current task, then update.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Update when ready' })).toBeEnabled()
     expect(postMessage).not.toHaveBeenCalled()
-    expect(addServiceWorkerListener).not.toHaveBeenCalled()
+    expect(addServiceWorkerListener).toHaveBeenCalledWith(
+      'controllerchange',
+      expect.any(Function),
+    )
     expect(reload).not.toHaveBeenCalled()
   })
 
@@ -96,6 +183,63 @@ describe('PwaUpdateStatus', () => {
     serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
     serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
 
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('observes external activation without reloading until the explicit reload action', async () => {
+    const user = userEvent.setup()
+    const postMessage = vi.fn()
+    const reload = vi.fn()
+    const waiting = createWaitingWorker(postMessage)
+    setController(createWaitingWorker())
+    render(<PwaUpdateStatus reload={reload} />)
+    announceWaitingWorker(waiting)
+
+    act(() => {
+      waiting.state = 'activating'
+      waiting.dispatchEvent(new Event('statechange'))
+    })
+
+    expect(screen.getByRole('button', { name: 'Update when ready' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Application update is being applied in another tab…',
+    )
+    expect(postMessage).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+
+    setController(createWaitingWorker())
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Application update applied. Reload when ready.',
+    )
+    expect(reload).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Reload when ready' }))
+    expect(reload).toHaveBeenCalledOnce()
+    expect(postMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores new ready workers during local activation and reloads only once', async () => {
+    const user = userEvent.setup()
+    const firstPostMessage = vi.fn()
+    const secondPostMessage = vi.fn()
+    const reload = vi.fn()
+    render(<PwaUpdateStatus reload={reload} />)
+    announceWaitingWorker(createWaitingWorker(firstPostMessage))
+
+    await user.click(screen.getByRole('button', { name: 'Update when ready' }))
+    announceWaitingWorker(createWaitingWorker(secondPostMessage))
+    const updateButton = screen.getByRole('button', { name: 'Update when ready' })
+
+    expect(updateButton).toBeDisabled()
+    await user.click(updateButton)
+    serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+
+    expect(firstPostMessage).toHaveBeenCalledOnce()
+    expect(secondPostMessage).not.toHaveBeenCalled()
     expect(reload).toHaveBeenCalledOnce()
   })
 

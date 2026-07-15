@@ -35,12 +35,22 @@ export function SwRegister() {
 
           observedWorkers.add(installing)
           const handleStateChange = () => {
-            if (installing.state !== 'installed') return
+            if (
+              installing.state !== 'installed' &&
+              installing.state !== 'redundant'
+            ) {
+              return
+            }
 
             installing.removeEventListener('statechange', handleStateChange)
             stateListeners.delete(installing)
+            observedWorkers.delete(installing)
 
-            if (!disposed && navigator.serviceWorker.controller) {
+            if (
+              installing.state === 'installed' &&
+              !disposed &&
+              navigator.serviceWorker.controller
+            ) {
               announcePwaUpdateReady(installing)
             }
           }
@@ -59,6 +69,7 @@ export function SwRegister() {
             worker.removeEventListener('statechange', listener)
           }
           stateListeners.clear()
+          observedWorkers.clear()
         }
       } catch {
         if (!disposed) {
