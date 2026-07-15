@@ -1,8 +1,9 @@
 # Adaptive ShopOS Application Design
 
 **Date:** 2026-07-15  
-**Status:** Approved after delegated product review; implementation planning next
+**Status:** Approved with sequencing and safety modifications; Wave 1A plan ready
 **Product definition:** An installable, real-time Progressive Web App with single-page application behavior
+**Wave 1A execution:** [Adaptive ShopOS Wave 1A implementation plan](../plans/2026-07-15-adaptive-shop-os-wave-1a.md)
 
 ## Outcome
 
@@ -371,8 +372,10 @@ than replaced.
 - Browser use remains fully supported.
 - Supported browsers may install Vyntechs with its own icon and standalone
   window.
-- The service worker may cache versioned application-shell assets and
-  explicitly approved non-personal reference assets.
+- Wave 1A caches only its static public offline document and explicitly
+  allowlisted public icon/brand assets. Broader versioned shell-asset caching
+  requires separate executable proof that authenticated or user-controlled
+  content cannot enter the cache.
 - Authenticated HTML, API responses, customer records, repair orders, messages,
   diagnostic observations, signed URLs, and payment data are network-only
   unless a later privacy-reviewed design explicitly proves safe storage.
@@ -412,8 +415,10 @@ The pilot proves the architecture without changing diagnostic-engine behavior.
    composition tokens while preserving current routes and authorization.
 3. Add the bounded entity/version, precise mutation-result, focus, reconnect,
    and application-version contracts with isolated tests.
-4. Prove compact, split, workbench, and expanded-workbench compositions using
-   honest existing content without editing a Row-46-owned surface.
+4. Prove the compact, split, workbench, and expanded-workbench composition
+   primitive in isolated tests, and prove the persistent shell on an honest
+   existing authenticated route without editing a Row-46-owned surface. The
+   first live multi-rail composition belongs to Wave 1B.
 5. Keep current production navigation available as the rollback path.
 
 ### Wave 1B — My Jobs pilot after path release
