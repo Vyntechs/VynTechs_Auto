@@ -7,20 +7,36 @@ import { Module } from '@/components/vt'
 import { formatVehicleName } from '@/lib/format'
 import type { DueFollowUp } from '@/lib/comeback/list'
 
-export function FollowUpPanel({ items }: { items: DueFollowUp[] }) {
+export function FollowUpPanel({
+  items,
+  diagnosticsAvailable = false,
+}: {
+  items: DueFollowUp[]
+  diagnosticsAvailable?: boolean
+}) {
   if (items.length === 0) return null
   return (
     <Module num="—" label={`Check-ins · ${items.length}`}>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
         {items.map((it) => (
-          <FollowUpRow key={it.id} item={it} />
+          <FollowUpRow
+            key={it.id}
+            item={it}
+            diagnosticsAvailable={diagnosticsAvailable}
+          />
         ))}
       </ul>
     </Module>
   )
 }
 
-function FollowUpRow({ item }: { item: DueFollowUp }) {
+function FollowUpRow({
+  item,
+  diagnosticsAvailable,
+}: {
+  item: DueFollowUp
+  diagnosticsAvailable: boolean
+}) {
   const router = useRouter()
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<'held' | 'comeback' | null>(null)
@@ -122,20 +138,22 @@ function FollowUpRow({ item }: { item: DueFollowUp }) {
         >
           {busy === 'comeback' ? 'Saving…' : 'Came back'}
         </button>
-        <Link
-          href={`/sessions/${item.sessionId}`}
-          style={{
-            marginLeft: 'auto',
-            fontFamily: 'var(--vt-font-mono)',
-            fontSize: 11,
-            color: 'var(--vt-fg-2)',
-            textDecoration: 'none',
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-          }}
-        >
-          View case →
-        </Link>
+        {diagnosticsAvailable && (
+          <Link
+            href={`/sessions/${item.sessionId}`}
+            style={{
+              marginLeft: 'auto',
+              fontFamily: 'var(--vt-font-mono)',
+              fontSize: 11,
+              color: 'var(--vt-fg-2)',
+              textDecoration: 'none',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            View case →
+          </Link>
+        )}
       </div>
     </li>
   )

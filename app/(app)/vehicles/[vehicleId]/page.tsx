@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
-import { listSessionsForVehicle } from '@/lib/db/queries'
 import { customers, vehicles } from '@/lib/db/schema'
 import { VehicleHistory } from '@/components/screens/vehicle-history'
 
@@ -30,8 +29,6 @@ export default async function VehicleHistoryPage({
 
   if (!row || row.customer.shopId !== ctx.profile.shopId) notFound()
 
-  const sessions = await listSessionsForVehicle(db, vehicleId)
-
   return (
     <VehicleHistory
       vehicle={{
@@ -43,7 +40,6 @@ export default async function VehicleHistoryPage({
         plate: row.vehicle.plate,
       }}
       customer={{ id: row.customer.id, name: row.customer.name }}
-      sessions={sessions}
     />
   )
 }

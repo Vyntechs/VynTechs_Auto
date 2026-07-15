@@ -34,6 +34,7 @@ export default async function TicketPage({
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
       currentProfileId={ctx.profile.id}
+      diagnosticsAvailable={access.entitlements.diagnostics}
     />
   )
 }

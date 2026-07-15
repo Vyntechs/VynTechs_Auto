@@ -260,7 +260,7 @@ describe('TicketDetailScreen', () => {
     expect(css).toMatch(/:global\(\.app-header__back\)[\s\S]*min-block-size:\s*44px/)
   })
 
-  it('renders jobs in projection order with open and assigned ownership plus a real diagnosis link', () => {
+  it('preserves job ownership while hiding diagnostic links by default', () => {
     render(
       <TicketDetailScreen
         ticket={ticket({
@@ -297,7 +297,18 @@ describe('TicketDetailScreen', () => {
     expect(within(jobs[1]).getByRole('heading', { name: 'Diagnose front brake pulsation' })).toBeInTheDocument()
     expect(within(jobs[1]).getByText('Diagnostic · A-tech')).toBeInTheDocument()
     expect(within(jobs[1]).getByText('Assigned · Angel Rivera')).toBeInTheDocument()
-    expect(within(jobs[1]).getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
+    expect(within(jobs[1]).queryByRole('link', { name: 'Open diagnosis' })).toBeNull()
+  })
+
+  it('shows the legacy diagnostic link only when diagnostics are explicitly available', () => {
+    render(
+      <TicketDetailScreen
+        diagnosticsAvailable
+        ticket={ticket({ jobs: [job({ sessionId: 'session-1' })] })}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
       'href',
       '/sessions/session-1',
     )

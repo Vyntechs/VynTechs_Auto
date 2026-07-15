@@ -1,10 +1,14 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { TodayHome } from '@/components/screens/today-home'
+import { TodayHome as TodayHomeComponent } from '@/components/screens/today-home'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
 import type { TodayTicketJobs } from '@/lib/tickets'
-import type { ImgHTMLAttributes } from 'react'
+import type { ComponentProps, ImgHTMLAttributes } from 'react'
+
+function TodayHome(props: ComponentProps<typeof TodayHomeComponent>) {
+  return <TodayHomeComponent diagnosticsEntitled {...props} />
+}
 
 vi.mock('next/image', () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
@@ -307,6 +311,32 @@ describe('TodayHome', () => {
   it('does not render the Quick ticket entry without the create capability', () => {
     render(<TodayHome techName="Avery" inProgress={[]} closedToday={[]} />)
     expect(screen.queryByRole('link', { name: 'Quick ticket' })).toBeNull()
+  })
+
+  it('defaults to an honest ShopOS surface with no diagnostic engine entrance', () => {
+    render(
+      <TodayHomeComponent
+        techName="Avery"
+        inProgress={[baseSession]}
+        closedToday={[closedSession]}
+        dueFollowUps={[dueFollowUp]}
+        canWriteCounterOrder
+        canCreateTickets
+        todayJobs={todayJobs}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'New work order' })).toHaveAttribute('href', '/intake')
+    expect(screen.getByRole('link', { name: 'Quick ticket' })).toHaveAttribute('href', '/tickets/new')
+    expect(screen.getByRole('link', { name: 'Record findings' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-mine/quote',
+    )
+    expect(screen.queryByRole('link', { name: /new diagnosis|open diagnosis|view case/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /start diagnosis/i })).toBeNull()
+    expect(screen.queryByText('Diagnose with AI — add-on')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'In progress' })).toBeNull()
+    expect(screen.queryByText(/Closed today/i)).toBeNull()
   })
 })
 
