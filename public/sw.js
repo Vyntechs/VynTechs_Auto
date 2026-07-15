@@ -6,10 +6,40 @@ const PUBLIC_SHELL = ['/offline.html', '/icons/icon-192.png', '/icons/icon-512.p
 const POLICY_PROBE = 'VYNTECHS_CACHE_POLICY_PROBE'
 const POLICY_PROOF = 'VYNTECHS_CACHE_POLICY_PROOF'
 const POLICY_SCRIPT = '/sw.js?cache-policy=public-v4'
+const POLICY_RECEIPT_REQUEST = '/icons/icon-192.png?cache-policy=public-v4'
+const POLICY_RECEIPT_HEADER = 'x-vyntechs-cache-policy'
 const PROBE_TIMEOUT_MS = 500
+const OPERATION_TIMEOUT_MS = 500
+let durableProofRevoked = false
 
 function requestImmediateActivation() {
   return self.skipWaiting()
+}
+
+function settleOperation(operation) {
+  return new Promise((resolve) => {
+    let settled = false
+
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
+    }
+    const timeout = setTimeout(
+      () => finish({ ok: false }),
+      OPERATION_TIMEOUT_MS,
+    )
+
+    try {
+      Promise.resolve(operation()).then(
+        (value) => finish({ ok: true, value }),
+        () => finish({ ok: false }),
+      )
+    } catch {
+      finish({ ok: false })
+    }
+  })
 }
 
 function workerMatchesCurrentPolicy(activeWorker) {
@@ -24,17 +54,70 @@ function workerMatchesCurrentPolicy(activeWorker) {
 }
 
 async function hasDurablePublicOnlyProof(activeWorker) {
+  if (durableProofRevoked) return false
   if (!workerMatchesCurrentPolicy(activeWorker)) return false
 
-  try {
-    if (!(await caches.has(POLICY_MARKER))) return false
-    const marker = await caches.open(POLICY_MARKER)
-    if ((await marker.keys()).length !== 0) return false
+  const firstCatalog = await settleOperation(() => caches.keys())
+  if (!firstCatalog.ok || !catalogProvesPublicOnly(firstCatalog.value)) {
+    return false
+  }
 
-    const allowed = new Set([CACHE, POLICY_MARKER])
-    return (await caches.keys()).every((key) => allowed.has(key))
+  const receipt = await settleOperation(() =>
+    caches.match(POLICY_RECEIPT_REQUEST, { cacheName: POLICY_MARKER }),
+  )
+  if (!receipt.ok || !receiptProvesPublicOnly(receipt.value)) return false
+
+  const markerResult = await settleOperation(() => caches.open(POLICY_MARKER))
+  if (!markerResult.ok) return false
+
+  const markerKeys = await settleOperation(() => markerResult.value.keys())
+  if (
+    !markerKeys.ok ||
+    !Array.isArray(markerKeys.value) ||
+    markerKeys.value.length !== 1 ||
+    requestHref(markerKeys.value[0]) !==
+      new URL(POLICY_RECEIPT_REQUEST, self.location.origin).href
+  ) {
+    durableProofRevoked = true
+    await deleteCacheAndVerify(POLICY_MARKER)
+    return false
+  }
+
+  const finalCatalog = await settleOperation(() => caches.keys())
+  return Boolean(
+    finalCatalog.ok && catalogProvesPublicOnly(finalCatalog.value),
+  )
+}
+
+function catalogProvesPublicOnly(keys) {
+  const allowed = new Set([CACHE, POLICY_MARKER])
+  return (
+    Array.isArray(keys) &&
+    keys.includes(POLICY_MARKER) &&
+    keys.every((key) => allowed.has(key))
+  )
+}
+
+function receiptProvesPublicOnly(response) {
+  try {
+    return (
+      response &&
+      response.headers.get(POLICY_RECEIPT_HEADER) ===
+        self.VyntechsSwPolicy.cachePolicyCapability
+    )
   } catch {
     return false
+  }
+}
+
+function requestHref(request) {
+  try {
+    return new URL(
+      typeof request === 'string' ? request : request.url,
+      self.location.origin,
+    ).href
+  } catch {
+    return ''
   }
 }
 
@@ -72,8 +155,11 @@ function activeWorkerProvesPublicOnly(activeWorker) {
 }
 
 async function seedPublicShell() {
-  const cache = await caches.open(CACHE)
-  await cache.addAll(PUBLIC_SHELL)
+  const cache = await settleOperation(() => caches.open(CACHE))
+  if (!cache.ok) throw new Error('Public shell cache unavailable')
+
+  const seeded = await settleOperation(() => cache.value.addAll(PUBLIC_SHELL))
+  if (!seeded.ok) throw new Error('Public shell seed unavailable')
 }
 
 async function installSafely() {
@@ -116,48 +202,82 @@ self.addEventListener('message', (event) => {
 })
 
 async function scrubObsoleteCaches() {
-  try {
-    const allowed = new Set([CACHE, POLICY_MARKER])
-    const keys = await caches.keys()
-    await Promise.all(
-      keys.filter((key) => !allowed.has(key)).map((key) => caches.delete(key)),
-    )
-    return true
-  } catch {
-    return false
-  }
+  const catalog = await settleOperation(() => caches.keys())
+  if (!catalog.ok || !Array.isArray(catalog.value)) return false
+
+  const allowed = new Set([CACHE, POLICY_MARKER])
+  const results = await Promise.all(
+    catalog.value
+      .filter((key) => !allowed.has(key))
+      .map((key) => deleteCacheAndVerify(key)),
+  )
+  return results.every(Boolean)
+}
+
+async function deleteCacheAndVerify(name) {
+  await settleOperation(() => caches.delete(name))
+  const remaining = await settleOperation(() => caches.has(name))
+  return Boolean(remaining.ok && !remaining.value)
 }
 
 async function removeActivationMarker() {
-  try {
-    await caches.delete(POLICY_MARKER)
-  } catch {
-    // Validation rejects a surviving non-empty or inaccessible marker.
-  }
+  durableProofRevoked = true
+  return deleteCacheAndVerify(POLICY_MARKER)
 }
 
-async function recreateEmptyActivationMarker() {
-  try {
+async function recreateActivationReceipt() {
+  if (!(await removeActivationMarker())) return false
+
+  const markerResult = await settleOperation(() => caches.open(POLICY_MARKER))
+  if (!markerResult.ok) {
     await removeActivationMarker()
-    const marker = await caches.open(POLICY_MARKER)
-    if ((await marker.keys()).length === 0) return true
-  } catch {
-    // The fetch path validates the marker and remains network-only without it.
+    return false
   }
 
-  await removeActivationMarker()
-  return false
+  const receipt = new Response('', {
+    headers: {
+      [POLICY_RECEIPT_HEADER]:
+        self.VyntechsSwPolicy.cachePolicyCapability,
+    },
+  })
+  const stored = await settleOperation(() =>
+    markerResult.value.put(POLICY_RECEIPT_REQUEST, receipt),
+  )
+  if (!stored.ok) {
+    await removeActivationMarker()
+    return false
+  }
+
+  const markerKeys = await settleOperation(() => markerResult.value.keys())
+  const catalog = await settleOperation(() => caches.keys())
+  const valid =
+    markerKeys.ok &&
+    Array.isArray(markerKeys.value) &&
+    markerKeys.value.length === 1 &&
+    requestHref(markerKeys.value[0]) ===
+      new URL(POLICY_RECEIPT_REQUEST, self.location.origin).href &&
+    catalog.ok &&
+    catalogProvesPublicOnly(catalog.value)
+
+  if (!valid) {
+    await removeActivationMarker()
+    return false
+  }
+
+  durableProofRevoked = false
+  return true
 }
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      durableProofRevoked = true
       const scrubbedBeforeClaim = await scrubObsoleteCaches()
-      await self.clients.claim()
+      const claimed = await settleOperation(() => self.clients.claim())
       const scrubbedAfterClaim = await scrubObsoleteCaches()
 
-      if (scrubbedBeforeClaim && scrubbedAfterClaim) {
-        await recreateEmptyActivationMarker()
+      if (scrubbedBeforeClaim && scrubbedAfterClaim && claimed.ok) {
+        await recreateActivationReceipt()
       } else {
         await removeActivationMarker()
       }
@@ -185,25 +305,26 @@ async function fetchPublicAsset(request) {
 
   let cache
 
-  try {
-    cache = await caches.open(CACHE)
-    const cached = await cache.match(request)
-    if (cached) return cached
-  } catch {
-    // Cache Storage is optional; the public network response remains authoritative.
+  const cacheResult = await settleOperation(() => caches.open(CACHE))
+  if (cacheResult.ok) {
+    cache = cacheResult.value
+    const cached = await settleOperation(() => cache.match(request))
+    if (cached.ok && cached.value) return cached.value
   }
 
   const response = await fetch(request)
 
   if (response.ok && cache) {
-    try {
-      await cache.put(request, response.clone())
-    } catch {
-      // A cache write failure must not hide a successful public response.
-    }
+    const copy = response.clone()
+    void storePublicResponse(cache, request, copy)
   }
 
   return response
+}
+
+async function storePublicResponse(cache, request, response) {
+  if (!(await hasDurablePublicOnlyProof(self.registration.active))) return
+  await settleOperation(() => cache.put(request, response))
 }
 
 async function fetchNavigation(request) {
@@ -214,12 +335,10 @@ async function fetchNavigation(request) {
       throw networkError
     }
 
-    try {
-      const offline = await caches.match('/offline.html', { cacheName: CACHE })
-      if (offline) return offline
-    } catch {
-      // Cache Storage is optional; preserve the original network failure.
-    }
+    const offline = await settleOperation(() =>
+      caches.match('/offline.html', { cacheName: CACHE }),
+    )
+    if (offline.ok && offline.value) return offline.value
 
     throw networkError
   }

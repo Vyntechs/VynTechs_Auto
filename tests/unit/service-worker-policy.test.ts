@@ -84,6 +84,15 @@ describe('service worker cache-policy proof', () => {
         type: 'VYNTECHS_CACHE_POLICY_PROOF',
         capability: 'public-only-v2',
       },
+      {
+        type: 'VYNTECHS_CACHE_POLICY_PROOF',
+        capability: 'public-only-v1',
+        extra: true,
+      },
+      Object.create({
+        type: 'VYNTECHS_CACHE_POLICY_PROOF',
+        capability: 'public-only-v1',
+      }),
     ]) {
       expect(policy.isPublicOnlyProof(value)).toBe(false)
     }

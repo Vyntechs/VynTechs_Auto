@@ -15,9 +15,13 @@
 
   function isPublicOnlyProof(value) {
     try {
+      const keys = Reflect.ownKeys(value)
       return Boolean(
         value &&
           typeof value === 'object' &&
+          keys.length === 2 &&
+          Object.prototype.hasOwnProperty.call(value, 'type') &&
+          Object.prototype.hasOwnProperty.call(value, 'capability') &&
           value.type === 'VYNTECHS_CACHE_POLICY_PROOF' &&
           value.capability === cachePolicyCapability,
       )

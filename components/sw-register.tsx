@@ -25,13 +25,6 @@ export function SwRegister() {
             updateViaCache: 'none',
           },
         )
-        try {
-          await registration.update()
-        } catch {
-          if (!disposed) {
-            console.warn('Service worker update check failed')
-          }
-        }
         if (disposed) return
 
         if (registration.waiting) {
@@ -83,6 +76,16 @@ export function SwRegister() {
           stateListeners.clear()
           observedWorkers.clear()
         }
+
+        void (async () => {
+          try {
+            await registration.update()
+          } catch {
+            if (!disposed) {
+              console.warn('Service worker update check failed')
+            }
+          }
+        })()
       } catch {
         if (!disposed) {
           console.warn('Service worker registration failed')

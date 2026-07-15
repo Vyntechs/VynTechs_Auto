@@ -60,6 +60,9 @@ function listenForUpdateReady(listener: (event: CustomEvent<PwaUpdateReadyDetail
 
 type WorkerProof = 'valid' | 'invalid' | 'silent' | 'throw'
 type ChannelFailure = 'construct' | 'start' | 'close'
+const POLICY_MARKER = 'vyntechs-public-policy-v1'
+const POLICY_RECEIPT_REQUEST =
+  '/icons/icon-192.png?cache-policy=public-v4'
 
 class HarnessPort {
   peer: HarnessPort | null = null
@@ -111,24 +114,40 @@ function createWorkerHarness({
   const operations: string[] = []
   const cachesByName = new Map<string, ReturnType<typeof makeCache>>()
   const failDeleteNames = new Set<string>()
+  const failOpenNames = new Set<string>()
+  const hangDeleteNames = new Set<string>()
+  const hangOpenNames = new Set<string>()
   let failNextOpen = false
   let failNextFetch = false
   let failKeysCalls = new Set<number>()
+  let hangKeysCalls = new Set<number>()
   let keysCallCount = 0
+  let evictMarkerBeforeOpen = false
 
   function makeCache(name: string) {
     const entries = new Map<string, Response>()
+    let hangNextAddAll = false
     let failNextMatch = false
     let failNextPut = false
+    let hangNextMatch = false
+    let hangNextPut = false
     const cache = {
       addAll: vi.fn(async (requests: string[]) => {
         operations.push(`seed:${name}`)
+        if (hangNextAddAll) {
+          hangNextAddAll = false
+          return new Promise<void>(() => undefined)
+        }
         for (const request of requests) {
           entries.set(request, new Response(`public:${request}`, { status: 200 }))
         }
       }),
       match: vi.fn(async (request: unknown) => {
         operations.push(`match:${name}`)
+        if (hangNextMatch) {
+          hangNextMatch = false
+          return new Promise<Response | undefined>(() => undefined)
+        }
         if (failNextMatch) {
           failNextMatch = false
           throw new Error('cache match unavailable')
@@ -137,6 +156,10 @@ function createWorkerHarness({
       }),
       put: vi.fn(async (request: unknown, response: Response) => {
         operations.push(`put:${name}`)
+        if (hangNextPut) {
+          hangNextPut = false
+          return new Promise<void>(() => undefined)
+        }
         if (failNextPut) {
           failNextPut = false
           throw new Error('cache put unavailable')
@@ -150,6 +173,15 @@ function createWorkerHarness({
       failPutOnce() {
         failNextPut = true
       },
+      hangMatchOnce() {
+        hangNextMatch = true
+      },
+      hangAddAllOnce() {
+        hangNextAddAll = true
+      },
+      hangPutOnce() {
+        hangNextPut = true
+      },
       entryCount() {
         return entries.size
       },
@@ -162,6 +194,18 @@ function createWorkerHarness({
   const cacheStorage = {
     open: vi.fn(async (name: string) => {
       operations.push(`open:${name}`)
+      if (name === POLICY_MARKER && evictMarkerBeforeOpen) {
+        evictMarkerBeforeOpen = false
+        cachesByName.delete(name)
+        operations.push('marker-evicted-before-open')
+      }
+      if (hangOpenNames.has(name)) {
+        return new Promise<ReturnType<typeof makeCache>>(() => undefined)
+      }
+      if (failOpenNames.has(name)) {
+        failOpenNames.delete(name)
+        throw new Error(`cache open unavailable: ${name}`)
+      }
       if (failNextOpen) {
         failNextOpen = false
         throw new Error('cache storage unavailable')
@@ -177,6 +221,9 @@ function createWorkerHarness({
     keys: vi.fn(async () => {
       operations.push('keys')
       keysCallCount += 1
+      if (hangKeysCalls.has(keysCallCount)) {
+        return new Promise<string[]>(() => undefined)
+      }
       if (failKeysCalls.has(keysCallCount)) {
         throw new Error('cache catalog unavailable')
       }
@@ -184,6 +231,9 @@ function createWorkerHarness({
     }),
     delete: vi.fn(async (name: string) => {
       operations.push(`delete:${name}`)
+      if (hangDeleteNames.has(name)) {
+        return new Promise<boolean>(() => undefined)
+      }
       if (failDeleteNames.has(name)) {
         throw new Error(`cache deletion unavailable: ${name}`)
       }
@@ -356,8 +406,23 @@ function createWorkerHarness({
     failDeleteFor(name: string) {
       failDeleteNames.add(name)
     },
+    failOpenFor(name: string) {
+      failOpenNames.add(name)
+    },
     failKeysOn(...calls: number[]) {
       failKeysCalls = new Set(calls)
+    },
+    hangDeleteFor(name: string) {
+      hangDeleteNames.add(name)
+    },
+    hangKeysOn(...calls: number[]) {
+      hangKeysCalls = new Set(calls)
+    },
+    hangOpenFor(name: string) {
+      hangOpenNames.add(name)
+    },
+    evictMarkerBeforeNextOpen() {
+      evictMarkerBeforeOpen = true
     },
     failNetworkOnce() {
       failNextFetch = true
@@ -370,6 +435,20 @@ function createWorkerHarness({
     skipWaiting,
     cacheNames: () => [...cachesByName.keys()],
   }
+}
+
+async function installPolicyReceipt(
+  harness: ReturnType<typeof createWorkerHarness>,
+) {
+  const marker = harness.getCache(POLICY_MARKER)
+  if (!marker) throw new Error('policy marker cache is missing')
+
+  await marker.put(
+    POLICY_RECEIPT_REQUEST,
+    new Response('', {
+      headers: { 'x-vyntechs-cache-policy': 'public-only-v1' },
+    }),
+  )
 }
 
 beforeEach(() => {
@@ -435,6 +514,23 @@ describe('SwRegister', () => {
       expect(listener).toHaveBeenCalledOnce()
     })
     expect(JSON.stringify(warn.mock.calls)).not.toContain('private update detail')
+  })
+
+  it('observes an already-waiting worker while the fresh update check is still pending', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const waiting = createServiceWorker('installed')
+    const update = vi.fn(
+      () => new Promise<void>(() => undefined),
+    )
+    register.mockResolvedValue(createRegistration({ waiting, update }))
+    const listener = vi.fn<(event: CustomEvent<PwaUpdateReadyDetail>) => void>()
+    listenForUpdateReady(listener)
+
+    render(<SwRegister />)
+
+    await waitFor(() => expect(listener).toHaveBeenCalledOnce())
+    expect(update).toHaveBeenCalledOnce()
+    expect(listener.mock.calls[0][0].detail.waiting).toBe(waiting)
   })
 
   it('renders nothing visible to the DOM', () => {
@@ -623,13 +719,14 @@ describe('public/sw.js', () => {
     expect(harness.cacheNames()).not.toContain('vyntechs-public-policy-v1')
   })
 
-  it('trusts only the activation marker without waiting on live worker scheduling', async () => {
+  it('trusts only the activation receipt without waiting on live worker scheduling', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
         'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
       proof: 'silent',
       cacheNames: ['vyntechs-public-shell-v4', 'vyntechs-public-policy-v1'],
     })
+    await installPolicyReceipt(harness)
 
     await harness.dispatchInstall()
 
@@ -664,6 +761,7 @@ describe('public/sw.js', () => {
       proof: 'silent',
       cacheNames: ['vyntechs-public-policy-v1'],
     })
+    await installPolicyReceipt(harness)
     await harness.getCache('vyntechs-public-policy-v1')?.put(
       '/must-not-exist',
       new Response('not a marker'),
@@ -676,6 +774,64 @@ describe('public/sw.js', () => {
     expect(harness.activeWorker?.postMessage).toHaveBeenCalledOnce()
     expect(harness.skipWaiting).toHaveBeenCalledOnce()
     expect(harness.getCache('vyntechs-public-shell-v4')).toBeUndefined()
+  })
+
+  it.each(['empty', 'wrong-receipt'] as const)(
+    'rejects a %s marker even when identity and catalog are current',
+    async (markerState) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        activeScriptURL:
+          'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+        proof: 'silent',
+        cacheNames: [
+          'vyntechs-public-shell-v4',
+          'vyntechs-public-policy-v1',
+        ],
+      })
+      if (markerState === 'wrong-receipt') {
+        await harness.getCache(POLICY_MARKER)?.put(
+          POLICY_RECEIPT_REQUEST,
+          new Response('', {
+            headers: { 'x-vyntechs-cache-policy': 'private-cache-v3' },
+          }),
+        )
+      }
+
+      const installing = harness.dispatchInstall()
+      await vi.runAllTimersAsync()
+      await installing
+
+      expect(harness.activeWorker?.postMessage).toHaveBeenCalledOnce()
+      expect(harness.skipWaiting).toHaveBeenCalledOnce()
+      expect(
+        harness.getCache('vyntechs-public-shell-v4')?.addAll,
+      ).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not create an activation receipt while validating evicted storage', async () => {
+    vi.useFakeTimers()
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      proof: 'silent',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.evictMarkerBeforeNextOpen()
+
+    const installing = harness.dispatchInstall()
+    await vi.runAllTimersAsync()
+    await installing
+
+    expect(harness.operations).toContain('marker-evicted-before-open')
+    expect(harness.activeWorker?.postMessage).toHaveBeenCalledOnce()
+    expect(harness.skipWaiting).toHaveBeenCalledOnce()
+    expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
   })
 
   it('rejects an empty current marker beside any obsolete cache', async () => {
@@ -730,12 +886,18 @@ describe('public/sw.js', () => {
   it.each(['construct', 'start', 'close'] as const)(
     'fails closed when message-channel %s fails',
     async (channelFailure) => {
-      const harness = createWorkerHarness({ channelFailure, proof: 'invalid' })
+      const harness = createWorkerHarness({
+        channelFailure,
+        proof: channelFailure === 'close' ? 'valid' : 'invalid',
+      })
 
       await harness.dispatchInstall()
 
       expect(harness.skipWaiting).toHaveBeenCalledOnce()
       expect(harness.getCache('vyntechs-public-shell-v4')).toBeUndefined()
+      if (channelFailure === 'close') {
+        expect(harness.activeWorker?.postMessage).toHaveBeenCalledOnce()
+      }
     },
   )
 
@@ -750,6 +912,37 @@ describe('public/sw.js', () => {
     ).toHaveBeenCalledOnce()
     expect(harness.cacheNames()).not.toContain('vyntechs-public-policy-v1')
   })
+
+  it.each(['open', 'addAll'] as const)(
+    'bounds a hanging first-install public-shell %s operation',
+    async (boundary) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        active: false,
+        cacheNames: ['vyntechs-public-shell-v4'],
+      })
+      if (boundary === 'open') {
+        harness.hangOpenFor('vyntechs-public-shell-v4')
+      } else {
+        harness.getCache('vyntechs-public-shell-v4')?.hangAddAllOnce()
+      }
+
+      const installing = harness.dispatchInstall()
+      const outcome = Promise.race([
+        installing.then(
+          () => ({ kind: 'resolved' as const }),
+          () => ({ kind: 'rejected' as const }),
+        ),
+        new Promise<{ kind: 'stalled' }>((resolve) => {
+          setTimeout(() => resolve({ kind: 'stalled' }), 2_000)
+        }),
+      ])
+      await vi.runAllTimersAsync()
+
+      await expect(outcome).resolves.toEqual({ kind: 'rejected' })
+      expect(harness.skipWaiting).not.toHaveBeenCalled()
+    },
+  )
 
   it('answers the stable public-only proof challenge', async () => {
     const harness = createWorkerHarness({ active: false })
@@ -769,7 +962,7 @@ describe('public/sw.js', () => {
     })
   })
 
-  it('scrubs around takeover and creates only an empty activation marker', async () => {
+  it('scrubs around takeover and creates only the public activation receipt', async () => {
     const harness = createWorkerHarness({
       cacheNames: [
         'vyntechs-shell-v3',
@@ -795,8 +988,16 @@ describe('public/sw.js', () => {
     ])
     expect(
       harness.getCache('vyntechs-public-policy-v1')?.entryCount(),
-    ).toBe(0)
-    expect(harness.operations.filter((operation) => operation === 'keys')).toHaveLength(2)
+    ).toBe(1)
+    const receipt = await harness
+      .getCache('vyntechs-public-policy-v1')
+      ?.match(POLICY_RECEIPT_REQUEST)
+    expect(receipt?.headers.get('x-vyntechs-cache-policy')).toBe(
+      'public-only-v1',
+    )
+    expect(
+      harness.operations.filter((operation) => operation === 'keys').length,
+    ).toBeGreaterThanOrEqual(2)
     expect(harness.operations.indexOf('delete:vyntechs-shell-v3')).toBeLessThan(
       harness.operations.indexOf('claim'),
     )
@@ -807,10 +1008,15 @@ describe('public/sw.js', () => {
 
   it('returns the successful public network response when cache open fails', async () => {
     const harness = createWorkerHarness({
-      active: false,
-      cacheNames: ['vyntechs-public-policy-v1'],
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
     })
-    harness.failOpenOnce()
+    await installPolicyReceipt(harness)
+    harness.failOpenFor('vyntechs-public-shell-v4')
 
     const response = await harness.dispatchFetch({
       url: 'https://app.vyntechs.test/icons/icon-192.png',
@@ -819,16 +1025,19 @@ describe('public/sw.js', () => {
     })
 
     expect(await response?.text()).toBe('network-public')
+    expect(harness.operations).toContain('open:vyntechs-public-shell-v4')
   })
 
   it('returns the successful public network response when cache match fails', async () => {
     const harness = createWorkerHarness({
-      active: false,
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
       cacheNames: [
         'vyntechs-public-shell-v4',
         'vyntechs-public-policy-v1',
       ],
     })
+    await installPolicyReceipt(harness)
     harness.getCache('vyntechs-public-shell-v4')?.failMatchOnce()
 
     const response = await harness.dispatchFetch({
@@ -838,16 +1047,21 @@ describe('public/sw.js', () => {
     })
 
     expect(await response?.text()).toBe('network-public')
+    expect(
+      harness.getCache('vyntechs-public-shell-v4')?.match,
+    ).toHaveBeenCalledOnce()
   })
 
   it('returns the successful public network response when cache put fails', async () => {
     const harness = createWorkerHarness({
-      active: false,
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
       cacheNames: [
         'vyntechs-public-shell-v4',
         'vyntechs-public-policy-v1',
       ],
     })
+    await installPolicyReceipt(harness)
     harness.getCache('vyntechs-public-shell-v4')?.failPutOnce()
 
     const response = await harness.dispatchFetch({
@@ -858,6 +1072,90 @@ describe('public/sw.js', () => {
 
     expect(await response?.text()).toBe('network-public')
     expect(harness.fetchWorker).toHaveBeenCalledOnce()
+    await waitFor(() => {
+      expect(
+        harness.getCache('vyntechs-public-shell-v4')?.put,
+      ).toHaveBeenCalledOnce()
+    })
+  })
+
+  it.each(['open', 'match'] as const)(
+    'bounds a hanging public-cache %s and returns the successful network response',
+    async (boundary) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        activeScriptURL:
+          'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+        cacheNames: [
+          'vyntechs-public-shell-v4',
+          'vyntechs-public-policy-v1',
+        ],
+      })
+      await installPolicyReceipt(harness)
+      if (boundary === 'open') {
+        harness.hangOpenFor('vyntechs-public-shell-v4')
+      } else {
+        harness.getCache('vyntechs-public-shell-v4')?.hangMatchOnce()
+      }
+
+      const responsePromise = harness.dispatchFetch({
+        url: 'https://app.vyntechs.test/icons/icon-192.png',
+        method: 'GET',
+        destination: 'image',
+      })
+      const outcome = Promise.race([
+        responsePromise.then((response) => ({ kind: 'response' as const, response })),
+        new Promise<{ kind: 'stalled' }>((resolve) => {
+          setTimeout(() => resolve({ kind: 'stalled' }), 2_000)
+        }),
+      ])
+      await vi.runAllTimersAsync()
+      const result = await outcome
+
+      expect(result.kind).toBe('response')
+      if (result.kind !== 'response') return
+      expect(await result.response?.text()).toBe('network-public')
+      expect(harness.operations).toContain(
+        boundary === 'open'
+          ? 'open:vyntechs-public-shell-v4'
+          : 'match:vyntechs-public-shell-v4',
+      )
+    },
+  )
+
+  it('does not await a hanging cache put after the public network succeeds', async () => {
+    vi.useFakeTimers()
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.getCache('vyntechs-public-shell-v4')?.hangPutOnce()
+
+    const responsePromise = harness.dispatchFetch({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    const outcome = Promise.race([
+      responsePromise.then((response) => ({ kind: 'response' as const, response })),
+      new Promise<{ kind: 'stalled' }>((resolve) => {
+        setTimeout(() => resolve({ kind: 'stalled' }), 2_000)
+      }),
+    ])
+    await vi.runAllTimersAsync()
+    const result = await outcome
+
+    expect(result.kind).toBe('response')
+    if (result.kind !== 'response') return
+    expect(await result.response?.text()).toBe('network-public')
+    expect(
+      harness.getCache('vyntechs-public-shell-v4')?.put,
+    ).toHaveBeenCalledOnce()
   })
 
   it('stays network-only when activation cannot recreate the marker', async () => {
@@ -883,6 +1181,59 @@ describe('public/sw.js', () => {
     ).not.toHaveBeenCalled()
     expect(harness.cacheNames()).not.toContain('vyntechs-public-policy-v1')
   })
+
+  it('bounds a hanging durable-proof catalog and takes over without seeding', async () => {
+    vi.useFakeTimers()
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      proof: 'silent',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.hangKeysOn(1)
+
+    const installing = harness.dispatchInstall()
+    await vi.runAllTimersAsync()
+    await installing
+
+    expect(harness.operations).toContain('keys')
+    expect(harness.skipWaiting).toHaveBeenCalledOnce()
+    expect(
+      harness.getCache('vyntechs-public-shell-v4')?.addAll,
+    ).not.toHaveBeenCalled()
+  })
+
+  it.each(['catalog', 'delete'] as const)(
+    'bounds a hanging activation %s and still claims clients network-only',
+    async (boundary) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        cacheNames: ['vyntechs-shell-v3', 'vyntechs-public-shell-v4'],
+      })
+      if (boundary === 'catalog') {
+        harness.hangKeysOn(1, 2)
+      } else {
+        harness.hangDeleteFor('vyntechs-shell-v3')
+      }
+
+      const activation = harness.dispatchActivate()
+      const outcome = Promise.race([
+        activation.then(() => 'complete' as const),
+        new Promise<'stalled'>((resolve) => {
+          setTimeout(() => resolve('stalled'), 2_000)
+        }),
+      ])
+      await vi.runAllTimersAsync()
+      expect(await outcome).toBe('complete')
+
+      expect(harness.claim).toHaveBeenCalledOnce()
+      expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
+    },
+  )
 
   it('does not read the offline cache when durable proof is missing', async () => {
     const harness = createWorkerHarness({
@@ -911,6 +1262,7 @@ describe('public/sw.js', () => {
         'vyntechs-public-policy-v1',
       ],
     })
+    await installPolicyReceipt(harness)
     await harness.getCache('vyntechs-public-shell-v4')?.put(
       '/offline.html',
       new Response('public-offline'),
@@ -928,6 +1280,31 @@ describe('public/sw.js', () => {
     expect(harness.cacheStorage.match).toHaveBeenCalledWith('/offline.html', {
       cacheName: 'vyntechs-public-shell-v4',
     })
+  })
+
+  it('stays network-only when an empty stale marker cannot be deleted', async () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    harness.failDeleteFor(POLICY_MARKER)
+
+    await harness.dispatchActivate()
+    const response = await harness.dispatchFetch({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+
+    expect(await response?.text()).toBe('network-public')
+    expect(harness.operations).toContain(`delete:${POLICY_MARKER}`)
+    expect(
+      harness.getCache('vyntechs-public-shell-v4')?.match,
+    ).not.toHaveBeenCalled()
   })
 
   it('rejects a stale marker after scrub and marker deletion both fail', async () => {
