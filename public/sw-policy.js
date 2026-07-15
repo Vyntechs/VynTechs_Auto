@@ -1,5 +1,6 @@
 ;(function installVyntechsSwPolicy(root) {
   const publicPrefixes = ['/icons/', '/brand/']
+  const cachePolicyCapability = 'public-only-v1'
 
   function classifyRequest(request, origin) {
     const url = new URL(request.url)
@@ -12,5 +13,22 @@
       : 'network'
   }
 
-  root.VyntechsSwPolicy = Object.freeze({ classifyRequest })
+  function isPublicOnlyProof(value) {
+    try {
+      return Boolean(
+        value &&
+          typeof value === 'object' &&
+          value.type === 'VYNTECHS_CACHE_POLICY_PROOF' &&
+          value.capability === cachePolicyCapability,
+      )
+    } catch {
+      return false
+    }
+  }
+
+  root.VyntechsSwPolicy = Object.freeze({
+    cachePolicyCapability,
+    classifyRequest,
+    isPublicOnlyProof,
+  })
 })(typeof self === 'object' ? self : globalThis)

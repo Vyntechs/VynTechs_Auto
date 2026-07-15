@@ -17,7 +17,9 @@ function loadPolicy() {
   const context = { URL } as {
     URL: typeof URL
     VyntechsSwPolicy?: {
+      cachePolicyCapability: string
       classifyRequest(request: PolicyRequest, origin: string): RequestPolicy
+      isPublicOnlyProof(value: unknown): boolean
     }
   }
 
@@ -44,5 +46,46 @@ describe('service worker request policy', () => {
 
   it.each(cases)('$name → $expected', ({ request, expected }) => {
     expect(loadPolicy().classifyRequest(request, origin)).toBe(expected)
+  })
+})
+
+describe('service worker cache-policy proof', () => {
+  it('publishes one stable public-only capability', () => {
+    expect(loadPolicy().cachePolicyCapability).toBe('public-only-v1')
+  })
+
+  it('accepts only the exact typed public-only proof', () => {
+    const policy = loadPolicy()
+
+    expect(
+      policy.isPublicOnlyProof({
+        type: 'VYNTECHS_CACHE_POLICY_PROOF',
+        capability: 'public-only-v1',
+      }),
+    ).toBe(true)
+
+    for (const value of [
+      null,
+      undefined,
+      false,
+      [],
+      {},
+      { type: 'VYNTECHS_CACHE_POLICY_PROOF' },
+      { capability: 'public-only-v1' },
+      {
+        type: 'vyntechs_cache_policy_proof',
+        capability: 'public-only-v1',
+      },
+      {
+        type: 'VYNTECHS_CACHE_POLICY_PROOF',
+        capability: 'PUBLIC-ONLY-V1',
+      },
+      {
+        type: 'VYNTECHS_CACHE_POLICY_PROOF',
+        capability: 'public-only-v2',
+      },
+    ]) {
+      expect(policy.isPublicOnlyProof(value)).toBe(false)
+    }
   })
 })

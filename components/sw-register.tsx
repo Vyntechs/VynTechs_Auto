@@ -18,7 +18,20 @@ export function SwRegister() {
 
     void (async () => {
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js')
+        const registration = await navigator.serviceWorker.register(
+          '/sw.js?cache-policy=public-v4',
+          {
+            scope: '/',
+            updateViaCache: 'none',
+          },
+        )
+        try {
+          await registration.update()
+        } catch {
+          if (!disposed) {
+            console.warn('Service worker update check failed')
+          }
+        }
         if (disposed) return
 
         if (registration.waiting) {
