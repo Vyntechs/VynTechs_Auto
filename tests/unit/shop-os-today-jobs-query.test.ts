@@ -219,6 +219,7 @@ describe('Today ticket jobs read model', () => {
       requiredSkillTier: 2,
       sessionId: session.id,
       workStatus: 'open',
+      canClaim: false,
       diagnosticStartState: 'ready',
       diagnosticStartErrorCode: null,
     })
@@ -381,6 +382,30 @@ describe('Today ticket jobs read model', () => {
         linkedSessionIds: [],
       })
     }
+  })
+
+  it('keeps unassigned shop work visible to a tierless Owner without making it claimable', async () => {
+    await db.insert(ticketJobs).values({
+      shopId,
+      ticketId,
+      title: 'Unassigned Tier three diagnosis',
+      kind: 'diagnostic',
+      requiredSkillTier: 3,
+      workStatus: 'open',
+    })
+
+    const result = await listTodayTicketJobs(db, {
+      actor: { ...actor, role: 'owner', skillTier: null },
+    })
+
+    expect(result.myJobs).toEqual([])
+    expect(result.openJobs).toEqual([
+      expect.objectContaining({
+        title: 'Unassigned Tier three diagnosis',
+        requiredSkillTier: 3,
+        canClaim: false,
+      }),
+    ])
   })
 
   it('keeps linked sessions for de-duplication but exposes navigation only to the session owner', async () => {
