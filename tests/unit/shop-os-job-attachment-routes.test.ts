@@ -14,11 +14,12 @@ vi.mock('@/lib/storage/client', () => ({
   downloadJobAttachment: vi.fn(),
 }))
 
-import { POST, MAX_JOB_MULTIPART_BYTES } from '@/app/api/tickets/[id]/jobs/[jobId]/attachments/route'
+import { POST } from '@/app/api/tickets/[id]/jobs/[jobId]/attachments/route'
 import { GET } from '@/app/api/tickets/[id]/jobs/[jobId]/attachments/[attachmentId]/route'
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import { createJobAttachment, getJobAttachmentProof } from '@/lib/shop-os/simple-work'
+import { downloadJobAttachment, removeJobAttachment, uploadJobAttachment } from '@/lib/storage/client'
 
 const TICKET = '00000000-0000-4000-8000-000000000020'
 const JOB = '00000000-0000-4000-8000-000000000030'
@@ -47,51 +48,45 @@ describe('Shop OS job attachment routes', () => {
     expect(createJobAttachment).not.toHaveBeenCalled()
   })
 
-  it('rejects excessive multipart length before parsing or domain work', async () => {
-    expect(MAX_JOB_MULTIPART_BYTES).toBe(4_500_000)
-    const request = {
-      headers: { get: (name: string) => name === 'content-length' ? '4500001' : null },
-      formData: vi.fn(),
-    } as unknown as Request
+  it('preserves the non-null shop boundary before the common media response', async () => {
+    vi.mocked(requireUserAndProfile).mockResolvedValue({
+      user: { id: profile.userId },
+      profile: { ...profile, shopId: null },
+    } as never)
+    const request = { headers: { get: () => null }, formData: vi.fn() } as unknown as Request
+
     const response = await POST(request, postParams)
-    expect(response.status).toBe(413)
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'not_found' })
     expect(request.formData).not.toHaveBeenCalled()
+  })
+
+  it('closes upload before params, multipart, domain, or storage work', async () => {
+    const request = { headers: { get: vi.fn() }, formData: vi.fn() } as unknown as Request
+    const params = { then: vi.fn() } as unknown as Promise<{ id: string; jobId: string }>
+
+    const response = await POST(request, { params })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'not_available' })
+    expect(request.headers.get).not.toHaveBeenCalled()
+    expect(request.formData).not.toHaveBeenCalled()
+    expect(params.then).not.toHaveBeenCalled()
     expect(createJobAttachment).not.toHaveBeenCalled()
+    expect(uploadJobAttachment).not.toHaveBeenCalled()
+    expect(removeJobAttachment).not.toHaveBeenCalled()
   })
 
-  it('passes bounded multipart bytes and returns safe attachment metadata', async () => {
-    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
-    const form = new FormData()
-    form.set('requestKey', ATTACHMENT)
-    form.set('kind', 'photo')
-    form.set('file', new Blob([bytes], { type: 'image/jpeg' }))
-    vi.mocked(createJobAttachment).mockResolvedValue({
-      ok: true, changed: true,
-      attachment: { id: ATTACHMENT, kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, createdAt: '2026-07-11T12:00:00.000Z' },
-    })
-    const response = await POST(new Request('http://localhost/upload', { method: 'POST', body: form }), postParams)
-    expect(response.status).toBe(201)
-    expect(createJobAttachment).toHaveBeenCalledWith({}, expect.objectContaining({
-      actor: { profileId: profile.id, shopId: profile.shopId },
-      ticketId: TICKET, jobId: JOB, requestKey: ATTACHMENT, kind: 'photo',
-      file: expect.objectContaining({ mimeType: 'image/jpeg', size: 4 }),
-    }), expect.objectContaining({ upload: expect.any(Function), remove: expect.any(Function) }))
-    expect(await response.json()).toEqual({
-      changed: true,
-      attachment: { id: ATTACHMENT, kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, createdAt: '2026-07-11T12:00:00.000Z' },
-    })
-  })
+  it('closes download before params, domain, or storage work', async () => {
+    const params = { then: vi.fn() } as unknown as Promise<{ id: string; jobId: string; attachmentId: string }>
 
-  it('proxies bounded proof bytes with private defensive headers', async () => {
-    const bytes = new Uint8Array([0xff, 0xd8, 0xff])
-    vi.mocked(getJobAttachmentProof).mockResolvedValue({
-      ok: true, file: { bytes, mimeType: 'image/jpeg' },
-    })
-    const response = await GET(new Request('http://localhost/proof'), getParams)
-    expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toBe('image/jpeg')
-    expect(response.headers.get('cache-control')).toBe('private, max-age=60')
-    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
+    const response = await GET(new Request('http://localhost/proof'), { params })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'not_available' })
+    expect(params.then).not.toHaveBeenCalled()
+    expect(getJobAttachmentProof).not.toHaveBeenCalled()
+    expect(downloadJobAttachment).not.toHaveBeenCalled()
   })
 })
