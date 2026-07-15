@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Children, Fragment, isValidElement, type ReactNode } from 'react'
 import styles from '@/components/app-shell/app-shell.module.css'
 
 export type AdaptiveWorkbenchProps = {
@@ -12,10 +12,17 @@ export type AdaptiveWorkbenchProps = {
 }
 
 function hasMeaningfulContent(content: ReactNode): boolean {
-  if (content == null || typeof content === 'boolean') return false
-  if (typeof content === 'string') return content.trim().length > 0
+  return Children.toArray(content).some((child) => {
+    if (typeof child === 'string') return child.trim().length > 0
+    if (
+      isValidElement<{ children?: ReactNode }>(child) &&
+      child.type === Fragment
+    ) {
+      return hasMeaningfulContent(child.props.children)
+    }
 
-  return true
+    return true
+  })
 }
 
 export function AdaptiveWorkbench({

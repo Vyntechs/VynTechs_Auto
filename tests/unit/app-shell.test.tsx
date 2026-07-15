@@ -115,6 +115,12 @@ describe('AdaptiveWorkbench', () => {
     ['true', true],
     ['an empty string', ''],
     ['a whitespace-only string', ' \n\t '],
+    ['an empty array', []],
+    ['an array of empty descendants', [null, false, '']],
+    ['a nested empty array', [[]]],
+    ['an empty Fragment', <></>],
+    ['a Fragment of empty descendants', <>{false}{''}{[null, []]}</>],
+    ['an empty iterable', new Set<ReactNode>()],
   ])('does not mount optional landmarks for %s', (_label, emptyNode) => {
     const { container } = render(
       <AdaptiveWorkbench
