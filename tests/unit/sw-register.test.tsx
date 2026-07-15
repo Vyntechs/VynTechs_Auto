@@ -116,9 +116,11 @@ function createWorkerHarness({
   const failDeleteNames = new Set<string>()
   const failOpenNames = new Set<string>()
   const failCacheKeysNames = new Set<string>()
+  const failPutNames = new Set<string>()
   const hangDeleteNames = new Set<string>()
   const hangCacheKeysNames = new Set<string>()
   const hangOpenNames = new Set<string>()
+  const hangPutNames = new Set<string>()
   let failNextOpen = false
   let failNextFetch = false
   let failKeysCalls = new Set<number>()
@@ -158,6 +160,12 @@ function createWorkerHarness({
       }),
       put: vi.fn(async (request: unknown, response: Response) => {
         operations.push(`put:${name}`)
+        if (hangPutNames.has(name)) {
+          return new Promise<void>(() => undefined)
+        }
+        if (failPutNames.has(name)) {
+          throw new Error(`cache put unavailable: ${name}`)
+        }
         if (hangNextPut) {
           hangNextPut = false
           return new Promise<void>(() => undefined)
@@ -337,10 +345,11 @@ function createWorkerHarness({
     }
     return fetchResponse.clone()
   })
-  function bootWorker() {
+  function bootWorker(state: 'installing' | 'activated' = 'installing') {
     listeners = new Map()
     const workerSelf = {
       registration: { active: activeWorker },
+      serviceWorker: { state },
       location: { origin: 'https://app.vyntechs.test' },
       clients: { claim },
       skipWaiting,
@@ -389,23 +398,36 @@ function createWorkerHarness({
     await lifetime
   }
 
-  async function dispatchFetch(request: {
+  function dispatchFetchWithLifetime(request: {
     url: string
     method: string
     mode?: string
     destination?: string
   }) {
     let response: Promise<Response | undefined> | undefined
+    const lifetimes: Promise<unknown>[] = []
     for (const listener of listeners.get('fetch') ?? []) {
       listener({
         request,
+        waitUntil(value: Promise<unknown>) {
+          lifetimes.push(Promise.resolve(value))
+        },
         respondWith(value: Promise<Response | undefined>) {
           response = Promise.resolve(value)
         },
       })
     }
     if (!response) throw new Error('fetch was not intercepted')
-    return response
+    return { response, lifetime: Promise.all(lifetimes) }
+  }
+
+  async function dispatchFetch(request: {
+    url: string
+    method: string
+    mode?: string
+    destination?: string
+  }) {
+    return dispatchFetchWithLifetime(request).response
   }
 
   function dispatchMessage(data: unknown, ports: HarnessPort[] = []) {
@@ -420,6 +442,7 @@ function createWorkerHarness({
     claim,
     dispatchActivate: () => dispatchExtendable('activate'),
     dispatchFetch,
+    dispatchFetchWithLifetime,
     dispatchInstall: () => dispatchExtendable('install'),
     dispatchMessage,
     failOpenOnce() {
@@ -436,6 +459,9 @@ function createWorkerHarness({
     },
     failOpenFor(name: string) {
       failOpenNames.add(name)
+    },
+    failPutFor(name: string) {
+      failPutNames.add(name)
     },
     failKeysOn(...calls: number[]) {
       failKeysCalls = new Set(calls)
@@ -455,6 +481,9 @@ function createWorkerHarness({
     hangOpenFor(name: string) {
       hangOpenNames.add(name)
     },
+    hangPutFor(name: string) {
+      hangPutNames.add(name)
+    },
     evictMarkerBeforeNextOpen() {
       evictMarkerBeforeOpen = true
     },
@@ -466,7 +495,7 @@ function createWorkerHarness({
       return cachesByName.get(name)
     },
     operations,
-    rebootWorker: bootWorker,
+    rebootWorker: () => bootWorker('activated'),
     skipWaiting,
     cacheNames: () => [...cachesByName.keys()],
   }
@@ -997,6 +1026,27 @@ describe('public/sw.js', () => {
     })
   })
 
+  it('withholds live public-only proof after an active-worker restart until recovery', () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    const channel = new HarnessMessageChannel()
+    const postMessage = vi.spyOn(channel.port2, 'postMessage')
+    harness.rebootWorker()
+
+    harness.dispatchMessage(
+      { type: 'VYNTECHS_CACHE_POLICY_PROBE' },
+      [channel.port2],
+    )
+
+    expect(postMessage).not.toHaveBeenCalled()
+  })
+
   it('scrubs around takeover and creates only the public activation receipt', async () => {
     const harness = createWorkerHarness({
       cacheNames: [
@@ -1193,7 +1243,7 @@ describe('public/sw.js', () => {
     ).toHaveBeenCalledOnce()
   })
 
-  it('stays network-only when activation cannot verify its receipt', async () => {
+  it('repairs a transient activation-receipt verification failure on the next public request', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
         'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
@@ -1202,20 +1252,20 @@ describe('public/sw.js', () => {
     harness.failCacheKeysFor(POLICY_MARKER)
 
     await harness.dispatchActivate()
-    const response = await harness.dispatchFetch({
+    const fetchEvent = harness.dispatchFetchWithLifetime({
       url: 'https://app.vyntechs.test/icons/icon-192.png',
       method: 'GET',
       destination: 'image',
     })
 
-    expect(await response?.text()).toBe('network-public')
-    expect(
-      harness.getCache('vyntechs-public-shell-v4')?.match,
-    ).not.toHaveBeenCalled()
-    expect(
-      harness.getCache('vyntechs-public-shell-v4')?.put,
-    ).not.toHaveBeenCalled()
-    expect(harness.cacheNames()).not.toContain('vyntechs-public-policy-v1')
+    expect(await (await fetchEvent.response)?.text()).toBe('network-public')
+    await fetchEvent.lifetime
+    const receipt = await harness
+      .getCache(POLICY_MARKER)
+      ?.match(POLICY_RECEIPT_REQUEST)
+    expect(receipt?.headers.get('x-vyntechs-cache-policy')).toBe(
+      'public-only-v1',
+    )
   })
 
   it('bounds a hanging durable-proof catalog and takes over without seeding', async () => {
@@ -1298,7 +1348,7 @@ describe('public/sw.js', () => {
   )
 
   it.each(['throw', 'hang'] as const)(
-    'settles a %s activation-receipt key check and remains network-only',
+    'settles a %s activation-receipt key check and repairs on the next request',
     async (failure) => {
       vi.useFakeTimers()
       const harness = createWorkerHarness({
@@ -1319,7 +1369,12 @@ describe('public/sw.js', () => {
       })
 
       expect(await response?.text()).toBe('network-public')
-      expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
+      const receipt = await harness
+        .getCache(POLICY_MARKER)
+        ?.match(POLICY_RECEIPT_REQUEST)
+      expect(receipt?.headers.get('x-vyntechs-cache-policy')).toBe(
+        'public-only-v1',
+      )
     },
   )
 
@@ -1414,6 +1469,145 @@ describe('public/sw.js', () => {
     ).not.toHaveBeenCalled()
   })
 
+  it('never trusts a stale receipt after revocation write and deletion both fail', async () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    await harness.getCache('vyntechs-public-shell-v4')?.put(
+      'https://app.vyntechs.test/icons/icon-192.png',
+      new Response('cached-public'),
+    )
+    harness.failPutFor(POLICY_MARKER)
+    harness.failDeleteFor(POLICY_MARKER)
+
+    await harness.dispatchActivate()
+    harness.rebootWorker()
+    const firstRestart = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    expect(await (await firstRestart.response)?.text()).toBe('network-public')
+    await firstRestart.lifetime
+
+    harness.rebootWorker()
+    const secondRestart = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    expect(await (await secondRestart.response)?.text()).toBe('network-public')
+    await secondRestart.lifetime
+    expect(
+      harness.getCache('vyntechs-public-shell-v4')?.match,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('resumes an interrupted activation scrub during the next request lifetime', async () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+
+    harness.rebootWorker()
+    const fetchEvent = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/today',
+      method: 'GET',
+      mode: 'navigate',
+      destination: 'document',
+    })
+
+    expect(await (await fetchEvent.response)?.text()).toBe('network-public')
+    await fetchEvent.lifetime
+    expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
+    expect(harness.cacheNames()).toEqual([
+      'vyntechs-public-shell-v4',
+      'vyntechs-public-policy-v1',
+    ])
+  })
+
+  it('returns a successful navigation without waiting for bounded recovery', async () => {
+    vi.useFakeTimers()
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.hangPutFor(POLICY_MARKER)
+    harness.rebootWorker()
+
+    const fetchEvent = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/today',
+      method: 'GET',
+      mode: 'navigate',
+      destination: 'document',
+    })
+    const response = await fetchEvent.response
+
+    expect(await response?.text()).toBe('network-public')
+    expect(harness.cacheNames()).toContain('vyntechs-shell-v3')
+    await vi.runAllTimersAsync()
+    await fetchEvent.lifetime
+    expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
+  })
+
+  it('retries a transient active-worker recovery failure on the next request', async () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.getCache(POLICY_MARKER)?.failPutOnce()
+    harness.rebootWorker()
+
+    const firstFetch = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/today',
+      method: 'GET',
+      mode: 'navigate',
+      destination: 'document',
+    })
+    expect(await (await firstFetch.response)?.text()).toBe('network-public')
+    await firstFetch.lifetime
+    expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
+
+    const secondFetch = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/today',
+      method: 'GET',
+      mode: 'navigate',
+      destination: 'document',
+    })
+    expect(await (await secondFetch.response)?.text()).toBe('network-public')
+    await secondFetch.lifetime
+    const receipt = await harness
+      .getCache(POLICY_MARKER)
+      ?.match(POLICY_RECEIPT_REQUEST)
+    expect(receipt?.headers.get('x-vyntechs-cache-policy')).toBe(
+      'public-only-v1',
+    )
+  })
+
   it('rejects a stale marker after scrub and marker deletion both fail', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
@@ -1435,7 +1629,7 @@ describe('public/sw.js', () => {
     })
 
     expect(await response?.text()).toBe('network-public')
-    expect(harness.cacheNames()).toContain('vyntechs-shell-v3')
+    expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
     expect(harness.cacheNames()).toContain('vyntechs-public-policy-v1')
     expect(
       harness.getCache('vyntechs-public-shell-v4')?.match,

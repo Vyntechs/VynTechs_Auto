@@ -11,7 +11,9 @@ const POLICY_RECEIPT_HEADER = 'x-vyntechs-cache-policy'
 const POLICY_REVOKED_CAPABILITY = 'revoked-v1'
 const PROBE_TIMEOUT_MS = 500
 const OPERATION_TIMEOUT_MS = 500
-let durableProofRevoked = false
+let durableProofRevoked =
+  !self.serviceWorker || self.serviceWorker.state !== 'installing'
+let runtimeRecoveryPromise
 
 function requestImmediateActivation() {
   return self.skipWaiting()
@@ -55,21 +57,36 @@ function workerMatchesCurrentPolicy(activeWorker) {
 }
 
 async function hasDurablePublicOnlyProof(activeWorker) {
-  if (durableProofRevoked) return false
-  if (!workerMatchesCurrentPolicy(activeWorker)) return false
+  if (
+    durableProofRevoked &&
+    !(await startRuntimePublicOnlyRecovery(activeWorker))
+  ) {
+    return false
+  }
+  if (!workerMatchesCurrentPolicy(activeWorker)) {
+    durableProofRevoked = true
+    return false
+  }
 
   const firstCatalog = await settleOperation(() => caches.keys())
   if (!firstCatalog.ok || !catalogProvesPublicOnly(firstCatalog.value)) {
+    durableProofRevoked = true
     return false
   }
 
   const receipt = await settleOperation(() =>
     caches.match(POLICY_RECEIPT_REQUEST, { cacheName: POLICY_MARKER }),
   )
-  if (!receipt.ok || !receiptProvesPublicOnly(receipt.value)) return false
+  if (!receipt.ok || !receiptProvesPublicOnly(receipt.value)) {
+    durableProofRevoked = true
+    return false
+  }
 
   const markerResult = await settleOperation(() => caches.open(POLICY_MARKER))
-  if (!markerResult.ok) return false
+  if (!markerResult.ok) {
+    durableProofRevoked = true
+    return false
+  }
 
   const markerKeys = await settleOperation(() => markerResult.value.keys())
   if (
@@ -85,9 +102,11 @@ async function hasDurablePublicOnlyProof(activeWorker) {
   }
 
   const finalCatalog = await settleOperation(() => caches.keys())
-  return Boolean(
+  const valid = Boolean(
     finalCatalog.ok && catalogProvesPublicOnly(finalCatalog.value),
   )
+  if (!valid) durableProofRevoked = true
+  return valid
 }
 
 function catalogProvesPublicOnly(keys) {
@@ -194,7 +213,12 @@ self.addEventListener('message', (event) => {
     return
   }
 
-  if (event.data && event.data.type === POLICY_PROBE && event.ports[0]) {
+  if (
+    event.data &&
+    event.data.type === POLICY_PROBE &&
+    event.ports[0] &&
+    !durableProofRevoked
+  ) {
     event.ports[0].postMessage({
       type: POLICY_PROOF,
       capability: self.VyntechsSwPolicy.cachePolicyCapability,
@@ -296,6 +320,43 @@ async function recreateActivationReceipt() {
   return true
 }
 
+async function recoverRuntimePublicOnlyState(activeWorker) {
+  if (!workerMatchesCurrentPolicy(activeWorker)) return false
+
+  const receiptRevoked = await revokeActivationReceipt()
+  const scrubbed = await scrubObsoleteCaches()
+
+  if (!receiptRevoked || !scrubbed) {
+    await removeActivationMarker()
+    return false
+  }
+
+  return recreateActivationReceipt()
+}
+
+function startRuntimePublicOnlyRecovery(activeWorker) {
+  if (!durableProofRevoked) return Promise.resolve(true)
+  if (runtimeRecoveryPromise) return runtimeRecoveryPromise
+
+  let attempt
+  attempt = recoverRuntimePublicOnlyState(activeWorker).then(
+    (recovered) => {
+      if (!recovered && runtimeRecoveryPromise === attempt) {
+        runtimeRecoveryPromise = undefined
+      }
+      return recovered
+    },
+    () => {
+      if (runtimeRecoveryPromise === attempt) {
+        runtimeRecoveryPromise = undefined
+      }
+      return false
+    },
+  )
+  runtimeRecoveryPromise = attempt
+  return attempt
+}
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
@@ -321,6 +382,13 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const policy = self.VyntechsSwPolicy.classifyRequest(event.request, self.location.origin)
+
+  if (
+    (policy === 'navigate-network' || policy === 'public-cache') &&
+    durableProofRevoked
+  ) {
+    event.waitUntil(startRuntimePublicOnlyRecovery(self.registration.active))
+  }
 
   if (policy === 'navigate-network') {
     event.respondWith(fetchNavigation(event.request))
