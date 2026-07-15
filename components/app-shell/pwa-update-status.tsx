@@ -35,10 +35,12 @@ export function PwaUpdateStatus({
     if (!('serviceWorker' in navigator)) return
 
     let disposed = false
+    let hasUpdateEvidence = navigator.serviceWorker.controller !== null
 
     const showWaitingWorker = (worker: ServiceWorker) => {
       if (worker.state === 'redundant') return
 
+      hasUpdateEvidence = true
       waitingRef.current = worker
       setWaiting(worker)
       setPhase(
@@ -59,7 +61,7 @@ export function PwaUpdateStatus({
     }
 
     const handlePassiveControllerChange = () => {
-      if (localActivation.current) return
+      if (localActivation.current || !hasUpdateEvidence) return
       setPhase('reload-ready')
     }
 

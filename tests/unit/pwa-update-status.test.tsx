@@ -136,6 +136,7 @@ describe('PwaUpdateStatus', () => {
     const replay = createDeferred<ServiceWorkerRegistration | undefined>()
     const reload = vi.fn()
     getRegistration.mockReturnValue(replay.promise)
+    setController(createWaitingWorker())
     render(<PwaUpdateStatus reload={reload} />)
     await waitFor(() => expect(getRegistration).toHaveBeenCalledOnce())
 
@@ -154,6 +155,20 @@ describe('PwaUpdateStatus', () => {
     expect(reload).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Reload when ready' }))
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('does not present a first service worker install as an application update', () => {
+    const reload = vi.fn()
+    const { container } = render(<PwaUpdateStatus reload={reload} />)
+
+    expect(serviceWorkerContainer.controller).toBeNull()
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+
+    expect(container.innerHTML).toBe('')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('announces readiness without messaging, activating, or reloading automatically', () => {
