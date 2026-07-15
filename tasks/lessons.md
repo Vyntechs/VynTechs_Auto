@@ -42,3 +42,8 @@ Reason: Local schema correctness does not prove production advisor cleanliness.
 Trigger: Founder rejected photo-dependent ShopOS scope because hosted media creates unwanted ongoing cost.
 Rule: Default new ShopOS wedges to structured text; add media only with explicit storage economics and approval.
 Reason: Workflow value must not silently create infrastructure cost or adoption friction.
+
+### creation-must-remain-discoverable
+Trigger: A successful create flow redirects to a home queue that filters the creator's new record out.
+Rule: Prove every created record remains discoverable from the creator's normal role-shaped home after navigation.
+Reason: Successful persistence without a durable return path feels exactly like data loss.

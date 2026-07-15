@@ -117,6 +117,7 @@ const jobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'linked-open',
       workStatus: 'open',
+      canClaim: true,
     },
   ],
   linkedSessionIds: ['linked-open', 'linked-closed'],

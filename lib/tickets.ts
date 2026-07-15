@@ -128,6 +128,7 @@ export type TodayTicketJob = {
   requiredSkillTier: number
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
+  canClaim: boolean
   diagnosticStartState?: 'idle' | 'initializing' | 'ready' | 'failed' | 'ambiguous'
   diagnosticStartErrorCode?: TodayDiagnosticStartErrorCode | null
 }
@@ -185,6 +186,12 @@ export async function listTodayTicketJobs(
           lte(ticketJobs.requiredSkillTier, actor.skillTier),
         )
       : undefined
+  const visibleOpenWork = canAssignWork(actor.role)
+    ? and(
+        isNull(ticketJobs.assignedTechId),
+        eq(ticketJobs.workStatus, 'open'),
+      )
+    : claimable
 
   const rows = await db
     .select({
@@ -232,7 +239,7 @@ export async function listTodayTicketJobs(
             eq(ticketJobs.assignedTechId, actor.profileId),
             inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
           ),
-          claimable,
+          visibleOpenWork,
         ),
       ),
     )
@@ -257,6 +264,11 @@ export async function listTodayTicketJobs(
       requiredSkillTier: row.requiredSkillTier,
       sessionId: row.accessibleSessionId,
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
+      canClaim:
+        row.assignedTechId === null &&
+        actor.skillTier !== null &&
+        [1, 2, 3].includes(actor.skillTier) &&
+        row.requiredSkillTier <= actor.skillTier,
       diagnosticStartState: row.diagnosticStartState,
       diagnosticStartErrorCode: safeDiagnosticStartErrorCode(row.diagnosticStartErrorCode),
     }

@@ -80,6 +80,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'session-linked',
       workStatus: 'in_progress',
+      canClaim: false,
     },
   ],
   openJobs: [
@@ -94,6 +95,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 1,
       sessionId: null,
       workStatus: 'open',
+      canClaim: true,
     },
   ],
   linkedSessionIds: ['session-linked'],
@@ -163,6 +165,29 @@ describe('TodayHome', () => {
     expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
+  })
+
+  it('gives dispatch-only users a direct ticket path without offering an invalid claim', () => {
+    const dispatchOnlyJobs: TodayTicketJobs = {
+      myJobs: [],
+      openJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
+      linkedSessionIds: [],
+    }
+
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        todayJobs={dispatchOnlyJobs}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-open',
+    )
+    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
   })
 
   it('does not show legacy empty guidance when ticket work exists', () => {

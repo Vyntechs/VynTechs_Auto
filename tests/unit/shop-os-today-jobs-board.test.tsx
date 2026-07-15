@@ -34,6 +34,7 @@ const linkedDiagnostic: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: 'session-41',
   workStatus: 'in_progress',
+  canClaim: false,
   diagnosticStartState: 'ready',
   diagnosticStartErrorCode: null,
 }
@@ -48,6 +49,7 @@ const unlinkedDiagnostic: TodayTicketJob = {
   title: 'Confirm charging fault',
   sessionId: null,
   workStatus: 'open',
+  canClaim: true,
   diagnosticStartState: 'idle',
   diagnosticStartErrorCode: null,
 }

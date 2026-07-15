@@ -413,7 +413,7 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' ? (
+        {mode === 'open' && job.canClaim ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
             type="button"
@@ -423,6 +423,13 @@ function JobRow({
           >
             {pending ? 'Claiming…' : 'Claim job'}
           </button>
+        ) : mode === 'open' ? (
+          <Link
+            href={`/tickets/${job.ticketId}`}
+            className={`${styles.control} ${styles.secondary}`}
+          >
+            View ticket
+          </Link>
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
             job={job}
