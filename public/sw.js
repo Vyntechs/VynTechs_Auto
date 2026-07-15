@@ -8,6 +8,7 @@ const POLICY_PROOF = 'VYNTECHS_CACHE_POLICY_PROOF'
 const POLICY_SCRIPT = '/sw.js?cache-policy=public-v4'
 const POLICY_RECEIPT_REQUEST = '/icons/icon-192.png?cache-policy=public-v4'
 const POLICY_RECEIPT_HEADER = 'x-vyntechs-cache-policy'
+const POLICY_REVOKED_CAPABILITY = 'revoked-v1'
 const PROBE_TIMEOUT_MS = 500
 const OPERATION_TIMEOUT_MS = 500
 let durableProofRevoked = false
@@ -225,6 +226,33 @@ async function removeActivationMarker() {
   return deleteCacheAndVerify(POLICY_MARKER)
 }
 
+async function revokeActivationReceipt() {
+  durableProofRevoked = true
+  const markerResult = await settleOperation(() => caches.open(POLICY_MARKER))
+  if (!markerResult.ok) return false
+
+  const revoked = new Response('', {
+    headers: { [POLICY_RECEIPT_HEADER]: POLICY_REVOKED_CAPABILITY },
+  })
+  const stored = await settleOperation(() =>
+    markerResult.value.put(POLICY_RECEIPT_REQUEST, revoked),
+  )
+  if (!stored.ok) return false
+
+  const observed = await settleOperation(() =>
+    caches.match(POLICY_RECEIPT_REQUEST, { cacheName: POLICY_MARKER }),
+  )
+  try {
+    return Boolean(
+      observed.ok &&
+        observed.value?.headers.get(POLICY_RECEIPT_HEADER) ===
+          POLICY_REVOKED_CAPABILITY,
+    )
+  } catch {
+    return false
+  }
+}
+
 async function recreateActivationReceipt() {
   if (!(await removeActivationMarker())) return false
 
@@ -272,11 +300,17 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       durableProofRevoked = true
+      const receiptRevoked = await revokeActivationReceipt()
       const scrubbedBeforeClaim = await scrubObsoleteCaches()
       const claimed = await settleOperation(() => self.clients.claim())
       const scrubbedAfterClaim = await scrubObsoleteCaches()
 
-      if (scrubbedBeforeClaim && scrubbedAfterClaim && claimed.ok) {
+      if (
+        receiptRevoked &&
+        scrubbedBeforeClaim &&
+        scrubbedAfterClaim &&
+        claimed.ok
+      ) {
         await recreateActivationReceipt()
       } else {
         await removeActivationMarker()

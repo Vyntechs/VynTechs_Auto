@@ -110,12 +110,14 @@ function createWorkerHarness({
   proof?: WorkerProof
   cacheNames?: string[]
 } = {}) {
-  const listeners = new Map<string, Array<(event: any) => void>>()
+  let listeners = new Map<string, Array<(event: any) => void>>()
   const operations: string[] = []
   const cachesByName = new Map<string, ReturnType<typeof makeCache>>()
   const failDeleteNames = new Set<string>()
   const failOpenNames = new Set<string>()
+  const failCacheKeysNames = new Set<string>()
   const hangDeleteNames = new Set<string>()
+  const hangCacheKeysNames = new Set<string>()
   const hangOpenNames = new Set<string>()
   let failNextOpen = false
   let failNextFetch = false
@@ -166,7 +168,17 @@ function createWorkerHarness({
         }
         entries.set(cacheRequestKey(request), response)
       }),
-      keys: vi.fn(async () => [...entries.keys()]),
+      keys: vi.fn(async () => {
+        if (hangCacheKeysNames.has(name)) {
+          hangCacheKeysNames.delete(name)
+          return new Promise<string[]>(() => undefined)
+        }
+        if (failCacheKeysNames.has(name)) {
+          failCacheKeysNames.delete(name)
+          throw new Error(`cache keys unavailable: ${name}`)
+        }
+        return [...entries.keys()]
+      }),
       failMatchOnce() {
         failNextMatch = true
       },
@@ -309,8 +321,13 @@ function createWorkerHarness({
   const skipWaiting = vi.fn(async () => {
     operations.push('skipWaiting')
   })
+  let claimFailure: 'throw' | 'hang' | undefined
   const claim = vi.fn(async () => {
     operations.push('claim')
+    const failure = claimFailure
+    claimFailure = undefined
+    if (failure === 'throw') throw new Error('client claim unavailable')
+    if (failure === 'hang') return new Promise<void>(() => undefined)
   })
   const fetchResponse = new Response('network-public', { status: 200 })
   const fetchWorker = vi.fn(async () => {
@@ -320,39 +337,44 @@ function createWorkerHarness({
     }
     return fetchResponse.clone()
   })
-  const workerSelf = {
-    registration: { active: activeWorker },
-    location: { origin: 'https://app.vyntechs.test' },
-    clients: { claim },
-    skipWaiting,
-    addEventListener(type: string, listener: (event: any) => void) {
-      listeners.set(type, [...(listeners.get(type) ?? []), listener])
-    },
-  } as Record<string, unknown>
-  const context = {
-    self: workerSelf,
-    caches: cacheStorage,
-    fetch: fetchWorker,
-    importScripts: vi.fn(),
-    URL,
-    Response,
-    Request,
-    Headers,
-    MessageChannel: WorkerMessageChannel,
-    setTimeout,
-    clearTimeout,
-    queueMicrotask,
-    console,
+  function bootWorker() {
+    listeners = new Map()
+    const workerSelf = {
+      registration: { active: activeWorker },
+      location: { origin: 'https://app.vyntechs.test' },
+      clients: { claim },
+      skipWaiting,
+      addEventListener(type: string, listener: (event: any) => void) {
+        listeners.set(type, [...(listeners.get(type) ?? []), listener])
+      },
+    } as Record<string, unknown>
+    const context = {
+      self: workerSelf,
+      caches: cacheStorage,
+      fetch: fetchWorker,
+      importScripts: vi.fn(),
+      URL,
+      Response,
+      Request,
+      Headers,
+      MessageChannel: WorkerMessageChannel,
+      setTimeout,
+      clearTimeout,
+      queueMicrotask,
+      console,
+    }
+
+    runInNewContext(
+      readFileSync(resolve(__dirname, '../../public/sw-policy.js'), 'utf-8'),
+      context,
+    )
+    runInNewContext(
+      readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8'),
+      context,
+    )
   }
 
-  runInNewContext(
-    readFileSync(resolve(__dirname, '../../public/sw-policy.js'), 'utf-8'),
-    context,
-  )
-  runInNewContext(
-    readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8'),
-    context,
-  )
+  bootWorker()
 
   async function dispatchExtendable(type: 'install' | 'activate') {
     let lifetime: Promise<unknown> | undefined
@@ -406,6 +428,12 @@ function createWorkerHarness({
     failDeleteFor(name: string) {
       failDeleteNames.add(name)
     },
+    failCacheKeysFor(name: string) {
+      failCacheKeysNames.add(name)
+    },
+    failClaimOnce() {
+      claimFailure = 'throw'
+    },
     failOpenFor(name: string) {
       failOpenNames.add(name)
     },
@@ -414,6 +442,12 @@ function createWorkerHarness({
     },
     hangDeleteFor(name: string) {
       hangDeleteNames.add(name)
+    },
+    hangCacheKeysFor(name: string) {
+      hangCacheKeysNames.add(name)
+    },
+    hangClaimOnce() {
+      claimFailure = 'hang'
     },
     hangKeysOn(...calls: number[]) {
       hangKeysCalls = new Set(calls)
@@ -432,6 +466,7 @@ function createWorkerHarness({
       return cachesByName.get(name)
     },
     operations,
+    rebootWorker: bootWorker,
     skipWaiting,
     cacheNames: () => [...cachesByName.keys()],
   }
@@ -1158,12 +1193,13 @@ describe('public/sw.js', () => {
     ).toHaveBeenCalledOnce()
   })
 
-  it('stays network-only when activation cannot recreate the marker', async () => {
+  it('stays network-only when activation cannot verify its receipt', async () => {
     const harness = createWorkerHarness({
-      active: false,
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
       cacheNames: ['vyntechs-public-shell-v4'],
     })
-    harness.failOpenOnce()
+    harness.failCacheKeysFor(POLICY_MARKER)
 
     await harness.dispatchActivate()
     const response = await harness.dispatchFetch({
@@ -1235,6 +1271,58 @@ describe('public/sw.js', () => {
     },
   )
 
+  it.each(['throw', 'hang'] as const)(
+    'settles a %s client claim without restoring the legacy cache or receipt',
+    async (failure) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        cacheNames: ['vyntechs-shell-v3', 'vyntechs-public-shell-v4'],
+      })
+      if (failure === 'throw') harness.failClaimOnce()
+      else harness.hangClaimOnce()
+
+      const activation = harness.dispatchActivate()
+      const outcome = Promise.race([
+        activation.then(() => 'complete' as const),
+        new Promise<'stalled'>((resolve) => {
+          setTimeout(() => resolve('stalled'), 2_000)
+        }),
+      ])
+      await vi.runAllTimersAsync()
+
+      expect(await outcome).toBe('complete')
+      expect(harness.claim).toHaveBeenCalledOnce()
+      expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
+      expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
+    },
+  )
+
+  it.each(['throw', 'hang'] as const)(
+    'settles a %s activation-receipt key check and remains network-only',
+    async (failure) => {
+      vi.useFakeTimers()
+      const harness = createWorkerHarness({
+        activeScriptURL:
+          'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+        cacheNames: ['vyntechs-public-shell-v4'],
+      })
+      if (failure === 'throw') harness.failCacheKeysFor(POLICY_MARKER)
+      else harness.hangCacheKeysFor(POLICY_MARKER)
+
+      const activation = harness.dispatchActivate()
+      await vi.runAllTimersAsync()
+      await activation
+      const response = await harness.dispatchFetch({
+        url: 'https://app.vyntechs.test/icons/icon-192.png',
+        method: 'GET',
+        destination: 'image',
+      })
+
+      expect(await response?.text()).toBe('network-public')
+      expect(harness.cacheNames()).not.toContain(POLICY_MARKER)
+    },
+  )
+
   it('does not read the offline cache when durable proof is missing', async () => {
     const harness = createWorkerHarness({
       active: false,
@@ -1282,7 +1370,7 @@ describe('public/sw.js', () => {
     })
   })
 
-  it('stays network-only when an empty stale marker cannot be deleted', async () => {
+  it('keeps failed receipt deletion revoked across a worker-global restart', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
         'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
@@ -1291,17 +1379,36 @@ describe('public/sw.js', () => {
         'vyntechs-public-policy-v1',
       ],
     })
+    await installPolicyReceipt(harness)
+    await harness.getCache('vyntechs-public-shell-v4')?.put(
+      'https://app.vyntechs.test/icons/icon-192.png',
+      new Response('cached-public'),
+    )
     harness.failDeleteFor(POLICY_MARKER)
 
     await harness.dispatchActivate()
-    const response = await harness.dispatchFetch({
+    const firstResponse = await harness.dispatchFetch({
       url: 'https://app.vyntechs.test/icons/icon-192.png',
       method: 'GET',
       destination: 'image',
     })
 
-    expect(await response?.text()).toBe('network-public')
+    expect(await firstResponse?.text()).toBe('network-public')
+    harness.rebootWorker()
+    const restartedResponse = await harness.dispatchFetch({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+
+    expect(await restartedResponse?.text()).toBe('network-public')
     expect(harness.operations).toContain(`delete:${POLICY_MARKER}`)
+    const receipt = await harness
+      .getCache(POLICY_MARKER)
+      ?.match(POLICY_RECEIPT_REQUEST)
+    expect(receipt?.headers.get('x-vyntechs-cache-policy')).not.toBe(
+      'public-only-v1',
+    )
     expect(
       harness.getCache('vyntechs-public-shell-v4')?.match,
     ).not.toHaveBeenCalled()
