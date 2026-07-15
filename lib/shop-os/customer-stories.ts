@@ -3,7 +3,6 @@ import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
-  artifacts,
   profiles,
   quoteVersions,
   sessionEvents,
@@ -33,8 +32,6 @@ const PAGE_SIZE = 25
 const MAX_LOCK_FUTURE_MS = 5 * 60 * 1000
 const MAX_CANONICAL_FIELD_BYTES = 5_000
 const MAX_EVENT_BYTES = 2_000
-const MAX_ARTIFACT_TEXT_BYTES = 10_000
-const MAX_STRUCTURED_BYTES = 20_000
 const MAX_PROVIDER_BYTES = 64_000
 const WORKSPACE_SCAN_CHUNK = 50
 const MAX_WORKSPACE_SCAN_CHUNKS = 4
@@ -105,7 +102,7 @@ export type CustomerStoryReviewDependencies = {
 }
 
 export type CustomerStoryWorkspaceDependencies = {
-  onEvidenceQuery?: (kind: 'event' | 'artifact') => void
+  onEvidenceQuery?: (kind: 'event') => void
 }
 
 const workspaceInputSchema = z.strictObject({
@@ -113,7 +110,6 @@ const workspaceInputSchema = z.strictObject({
   ticketId: uuidSchema,
   jobId: uuidSchema,
   eventCursor: z.string().max(1_000).optional(),
-  artifactCursor: z.string().max(1_000).optional(),
 })
 
 const generationInputSchema = z.strictObject({
@@ -123,7 +119,7 @@ const generationInputSchema = z.strictObject({
   clientKey: uuidSchema,
   expectedStoryRevision: z.number().int().nonnegative(),
   sourceEventIds: idListSchema,
-  sourceArtifactIds: idListSchema,
+  sourceArtifactIds: z.array(z.never()).length(0),
 })
 
 const reviewInputSchema = z.strictObject({
@@ -138,7 +134,6 @@ const reviewInputSchema = z.strictObject({
 
 type GenerationInput = z.infer<typeof generationInputSchema>
 type SelectedEvent = typeof sessionEvents.$inferSelect
-type SelectedArtifact = typeof artifacts.$inferSelect
 type Context = {
   actor: Pick<typeof profiles.$inferSelect, 'id' | 'shopId' | 'role' | 'membershipStatus' | 'deactivatedAt'>
   ticket: typeof tickets.$inferSelect
@@ -148,7 +143,6 @@ type Context = {
   session: typeof sessions.$inferSelect
   wizardEvents: SelectedEvent[]
   selectedEvents: SelectedEvent[]
-  selectedArtifacts: SelectedArtifact[]
   providerInput: CustomerStoryGenerationInput
   lockAt: Date
   now: Date
@@ -199,48 +193,12 @@ function boundedRequiredText(value: unknown, max = MAX_CANONICAL_FIELD_BYTES): v
   return typeof value === 'string' && value.length > 0 && utf8Bytes(value) <= max
 }
 
-function validateStructuredValue(value: unknown): boolean {
-  let keys = 0
-  let items = 0
-  const visit = (current: unknown, depth: number): boolean => {
-    if (depth > 8) return false
-    if (current === null || typeof current === 'string' || typeof current === 'boolean') return true
-    if (typeof current === 'number') return Number.isFinite(current)
-    if (Array.isArray(current)) {
-      items += current.length
-      return items <= 200 && current.every((item) => visit(item, depth + 1))
-    }
-    if (!current || typeof current !== 'object') return false
-    const entries = Object.entries(current as Record<string, unknown>)
-    keys += entries.length
-    return keys <= 200 && entries.every(([, item]) => visit(item, depth + 1))
-  }
-  try {
-    return visit(value, 0) && utf8Bytes(JSON.stringify(stableValue(value))) <= MAX_STRUCTURED_BYTES
-  } catch {
-    return false
-  }
-}
-
-function artifactContent(row: SelectedArtifact): string | null {
-  if (row.extractionStatus !== 'done' || !row.extraction || typeof row.extraction !== 'object') return null
-  const extraction = row.extraction as { text?: unknown; summary?: unknown; structured?: unknown }
-  if (extraction.text !== undefined && !boundedRequiredText(extraction.text, MAX_ARTIFACT_TEXT_BYTES)) return null
-  if (extraction.summary !== undefined && !boundedRequiredText(extraction.summary, MAX_ARTIFACT_TEXT_BYTES)) return null
-  if (extraction.structured !== undefined && !validateStructuredValue(extraction.structured)) return null
-  const pieces: string[] = []
-  if (typeof extraction.summary === 'string') pieces.push(`Summary: ${extraction.summary}`)
-  if (typeof extraction.text === 'string') pieces.push(`Text: ${extraction.text}`)
-  if (extraction.structured !== undefined) pieces.push(`Structured: ${JSON.stringify(stableValue(extraction.structured))}`)
-  return pieces.length > 0 ? pieces.join('\n') : null
-}
-
 function evidenceLabel(value: string): string {
   const normalized = value.replace(/\s+/gu, ' ').trim()
   return normalized.length <= 160 ? normalized : `${normalized.slice(0, 157)}...`
 }
 
-function providerEvidence(events: SelectedEvent[], artifactRows: SelectedArtifact[]): CustomerStoryGenerationInput | null {
+function providerEvidence(events: SelectedEvent[]): CustomerStoryGenerationInput | null {
   const evidence: CustomerStoryGenerationInput['evidence'] = []
   for (const row of events) {
     if (row.eventType !== 'observation' || !boundedRequiredText(row.observationText, MAX_EVENT_BYTES)) return null
@@ -248,11 +206,6 @@ function providerEvidence(events: SelectedEvent[], artifactRows: SelectedArtifac
       sourceKind: 'event', sourceId: row.id,
       label: evidenceLabel(row.observationText), content: row.observationText,
     })
-  }
-  for (const row of artifactRows) {
-    const content = artifactContent(row)
-    if (!content || utf8Bytes(content) > 20_000) return null
-    evidence.push({ sourceKind: 'artifact', sourceId: row.id, label: row.kind, content })
   }
   const input = { evidence }
   return utf8Bytes(JSON.stringify(input)) <= MAX_PROVIDER_BYTES ? input : null
@@ -313,16 +266,13 @@ async function loadGenerationContext(
 
   const selectedEvents = input.sourceEventIds.length === 0 ? [] : await db.select().from(sessionEvents)
     .where(inArray(sessionEvents.id, input.sourceEventIds)).orderBy(sessionEvents.id)
-  const selectedArtifacts = input.sourceArtifactIds.length === 0 ? [] : await db.select().from(artifacts)
-    .where(inArray(artifacts.id, input.sourceArtifactIds)).orderBy(artifacts.id)
-  if (selectedEvents.length !== input.sourceEventIds.length || selectedArtifacts.length !== input.sourceArtifactIds.length) {
+  if (selectedEvents.length !== input.sourceEventIds.length) {
     return { ok: false, failure: fail('not_found') }
   }
   if (
-    selectedEvents.some((row) => row.sessionId !== session.id || row.createdAt.getTime() > lockAt.getTime()) ||
-    selectedArtifacts.some((row) => row.sessionId !== session.id || row.createdAt.getTime() > lockAt.getTime())
+    selectedEvents.some((row) => row.sessionId !== session.id || row.createdAt.getTime() > lockAt.getTime())
   ) return { ok: false, failure: fail('not_found') }
-  const safeProviderInput = providerEvidence(selectedEvents, selectedArtifacts)
+  const safeProviderInput = providerEvidence(selectedEvents)
   if (!safeProviderInput) return { ok: false, failure: fail('invalid_evidence') }
 
   const jobs = await db.select().from(ticketJobs).where(and(
@@ -337,7 +287,7 @@ async function loadGenerationContext(
   return {
     ok: true,
     context: {
-      actor, ticket, targetJob, jobs, versions, session, wizardEvents, selectedEvents, selectedArtifacts,
+      actor, ticket, targetJob, jobs, versions, session, wizardEvents, selectedEvents,
       providerInput: safeProviderInput, lockAt, now, concern: ticket.concern,
       rootCause: tree.rootCauseSummary, action: tree.proposedAction.description,
       confidence: tree.proposedAction.confidence,
@@ -370,7 +320,6 @@ function casFingerprint(context: Context): string {
     session: context.session,
     wizardEvents: context.wizardEvents,
     selectedEvents: context.selectedEvents,
-    selectedArtifacts: context.selectedArtifacts,
   })
 }
 
@@ -399,7 +348,7 @@ function persistedRevision(meta: unknown): number {
   return typeof revision === 'number' && Number.isInteger(revision) && revision >= 0 ? revision : 0
 }
 
-type Cursor = { kind: 'event' | 'artifact'; sessionId: string; createdAt: Date; id: string }
+type Cursor = { kind: 'event'; sessionId: string; createdAt: Date; id: string }
 function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify({ v: 1, k: cursor.kind, s: cursor.sessionId, t: cursor.createdAt.toISOString(), i: cursor.id })).toString('base64url')
 }
@@ -420,7 +369,7 @@ function parseCursor(raw: string | undefined, kind: Cursor['kind']): Cursor | nu
   }
 }
 
-function cursorCondition(columnDate: typeof sessionEvents.createdAt | typeof artifacts.createdAt, columnId: typeof sessionEvents.id | typeof artifacts.id, cursor: Cursor | null) {
+function cursorCondition(columnDate: typeof sessionEvents.createdAt, columnId: typeof sessionEvents.id, cursor: Cursor | null) {
   return cursor ? or(lt(columnDate, cursor.createdAt), and(eq(columnDate, cursor.createdAt), lt(columnId, cursor.id))) : undefined
 }
 
@@ -440,7 +389,7 @@ async function eligibleEventPage(db: AppDb, sessionId: string, lockAt: Date, ini
       cursorCondition(sessionEvents.createdAt, sessionEvents.id, scanCursor),
     )).orderBy(desc(sessionEvents.createdAt), desc(sessionEvents.id)).limit(WORKSPACE_SCAN_CHUNK)
     lastRaw = rows.at(-1) ?? lastRaw
-    eligible.push(...rows.filter((row) => providerEvidence([row], []) !== null))
+    eligible.push(...rows.filter((row) => providerEvidence([row]) !== null))
     if (rows.length < WORKSPACE_SCAN_CHUNK) {
       exhausted = true
       break
@@ -460,57 +409,19 @@ async function eligibleEventPage(db: AppDb, sessionId: string, lockAt: Date, ini
   return { rows, nextCursor }
 }
 
-async function eligibleArtifactPage(db: AppDb, sessionId: string, lockAt: Date, initialCursor: Cursor | null, dependencies: CustomerStoryWorkspaceDependencies): Promise<EligiblePage<SelectedArtifact>> {
-  const eligible: SelectedArtifact[] = []
-  let scanCursor = initialCursor
-  let lastRaw: SelectedArtifact | null = null
-  let capped = false
-  let exhausted = false
-  for (let chunk = 0; chunk < MAX_WORKSPACE_SCAN_CHUNKS && eligible.length < PAGE_SIZE + 1; chunk += 1) {
-    dependencies.onEvidenceQuery?.('artifact')
-    const rows = await db.select().from(artifacts).where(and(
-      eq(artifacts.sessionId, sessionId), eq(artifacts.extractionStatus, 'done'),
-      sql`${artifacts.createdAt} <= ${lockAt}`,
-      cursorCondition(artifacts.createdAt, artifacts.id, scanCursor),
-    )).orderBy(desc(artifacts.createdAt), desc(artifacts.id)).limit(WORKSPACE_SCAN_CHUNK)
-    lastRaw = rows.at(-1) ?? lastRaw
-    eligible.push(...rows.filter((row) => providerEvidence([], [row]) !== null))
-    if (rows.length < WORKSPACE_SCAN_CHUNK) {
-      exhausted = true
-      break
-    }
-    const last = rows[rows.length - 1]
-    scanCursor = { kind: 'artifact', sessionId, createdAt: last.createdAt, id: last.id }
-    capped = chunk === MAX_WORKSPACE_SCAN_CHUNKS - 1
-  }
-  const rows = eligible.slice(0, PAGE_SIZE)
-  const nextCursor = eligible.length > PAGE_SIZE
-    ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
-    : capped && eligible.length < PAGE_SIZE && lastRaw
-      ? encodeCursor({ kind: 'artifact', sessionId, createdAt: lastRaw.createdAt, id: lastRaw.id })
-      : eligible.length === PAGE_SIZE && !exhausted
-        ? encodeCursor({ kind: 'artifact', sessionId, createdAt: rows[PAGE_SIZE - 1].createdAt, id: rows[PAGE_SIZE - 1].id })
-        : null
-  return { rows, nextCursor }
-}
 
 export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown, dependencies: CustomerStoryWorkspaceDependencies = {}): Promise<CustomerStoryWorkspaceResult> {
   const parsed = workspaceInputSchema.safeParse(rawInput)
   if (!parsed.success) return fail('invalid_input')
   const eventCursor = parseCursor(parsed.data.eventCursor, 'event')
-  const artifactCursor = parseCursor(parsed.data.artifactCursor, 'artifact')
-  if (eventCursor === false || artifactCursor === false) return fail('invalid_input')
+  if (eventCursor === false) return fail('invalid_input')
   const loaded = await loadGenerationContext(db, { ...parsed.data, sourceEventIds: [], sourceArtifactIds: [] })
   if (!loaded.ok) return loaded.failure
   const context = loaded.context
-  if ((eventCursor && eventCursor.sessionId !== context.session.id) || (artifactCursor && artifactCursor.sessionId !== context.session.id)) return fail('invalid_input')
+  if (eventCursor && eventCursor.sessionId !== context.session.id) return fail('invalid_input')
 
-  const [eventPage, artifactPage] = await Promise.all([
-    eligibleEventPage(db, context.session.id, context.lockAt, eventCursor, dependencies),
-    eligibleArtifactPage(db, context.session.id, context.lockAt, artifactCursor, dependencies),
-  ])
+  const eventPage = await eligibleEventPage(db, context.session.id, context.lockAt, eventCursor, dependencies)
   const pageEvents = eventPage.rows
-  const pageArtifacts = artifactPage.rows
   const story = context.targetJob.customerStory === null ? null : safeStory(context.targetJob.customerStory)
   const persistedMeta = context.targetJob.storyMeta === null ? null : safePersistedMeta(context.targetJob.storyMeta)
   const storyMeta = persistedMeta === null ? null : workspaceMeta(persistedMeta)
@@ -523,9 +434,9 @@ export async function getCustomerStoryWorkspace(db: AppDb, rawInput: unknown, de
       storyRevision: persistedRevision(context.targetJob.storyMeta),
       evidence: {
         events: pageEvents.map((row) => ({ id: row.id, kind: 'observation', createdAt: row.createdAt.toISOString(), label: evidenceLabel(row.observationText!) })),
-        artifacts: pageArtifacts.map((row) => ({ id: row.id, kind: row.kind, createdAt: row.createdAt.toISOString(), label: evidenceLabel((row.extraction as { summary?: string }).summary ?? artifactContent(row)!) })),
+        artifacts: [],
         nextEventCursor: eventPage.nextCursor,
-        nextArtifactCursor: artifactPage.nextCursor,
+        nextArtifactCursor: null,
       },
     },
   }
@@ -545,22 +456,14 @@ function commonWordOnly(value: string): boolean {
 function assembleStory(context: Context, selected: GeneratedEvidenceSelection): CustomerStory | null {
   const parsedSelection = z.strictObject({
     selections: z.array(z.strictObject({
-      sourceKind: z.enum(['event', 'artifact']), sourceId: uuidSchema, excerpt: z.string(),
+      sourceKind: z.literal('event'), sourceId: uuidSchema, excerpt: z.string(),
     })).max(5),
   }).safeParse(selected)
   if (!parsedSelection.success) return null
   const sources = new Map(context.providerInput.evidence.map((row) => [`${row.sourceKind}:${row.sourceId}`, row.content]))
-  const rawSources = new Map<string, readonly string[]>([
-    ...context.selectedEvents.map((row) => [`event:${row.id}`, [row.observationText!]] as const),
-    ...context.selectedArtifacts.map((row) => {
-      const extraction = row.extraction as { text?: string; summary?: string; structured?: unknown }
-      return [`artifact:${row.id}`, [
-        ...(typeof extraction.summary === 'string' ? [extraction.summary] : []),
-        ...(typeof extraction.text === 'string' ? [extraction.text] : []),
-        ...(extraction.structured !== undefined ? [JSON.stringify(stableValue(extraction.structured))] : []),
-      ]] as const
-    }),
-  ])
+  const rawSources = new Map<string, readonly string[]>(
+    context.selectedEvents.map((row) => [`event:${row.id}`, [row.observationText!]] as const),
+  )
   const identities = new Set<string>()
   const howWeKnow: CustomerStory['howWeKnow'] = []
   for (const selection of parsedSelection.data.selections) {
@@ -576,8 +479,8 @@ function assembleStory(context: Context, selected: GeneratedEvidenceSelection): 
     identities.add(identity)
     howWeKnow.push({
       claim: selection.excerpt,
-      sourceEventIds: selection.sourceKind === 'event' ? [selection.sourceId] : [],
-      sourceArtifactIds: selection.sourceKind === 'artifact' ? [selection.sourceId] : [],
+      sourceEventIds: [selection.sourceId],
+      sourceArtifactIds: [],
     })
   }
   return {
@@ -601,10 +504,9 @@ async function lockGenerationContext(db: AppDb, input: GenerationInput, prefligh
   const versionsQuery = db.select().from(quoteVersions).where(eq(quoteVersions.ticketId, input.ticketId)).orderBy(quoteVersions.id).for('update', { noWait: true })
   const sessionQuery = db.select().from(sessions).where(eq(sessions.id, preflight.session.id)).limit(1).for('update', { noWait: true })
   const eventQuery = input.sourceEventIds.length > 0 ? db.select().from(sessionEvents).where(inArray(sessionEvents.id, input.sourceEventIds)).orderBy(sessionEvents.id).for('update', { noWait: true }) : null
-  const artifactQuery = input.sourceArtifactIds.length > 0 ? db.select().from(artifacts).where(inArray(artifacts.id, input.sourceArtifactIds)).orderBy(artifacts.id).for('update', { noWait: true }) : null
   const actorQuery = db.select().from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1).for('update', { noWait: true })
   dependencies.captureLockSql?.(
-    [ticketQuery, jobsQuery, versionsQuery, sessionQuery, eventQuery, artifactQuery, actorQuery]
+    [ticketQuery, jobsQuery, versionsQuery, sessionQuery, eventQuery, actorQuery]
       .filter((query): query is Exclude<typeof query, null> => query !== null)
       .map((query) => query.toSQL().sql),
   )
@@ -613,7 +515,6 @@ async function lockGenerationContext(db: AppDb, input: GenerationInput, prefligh
   await versionsQuery
   await sessionQuery
   if (eventQuery) await eventQuery
-  if (artifactQuery) await artifactQuery
   await actorQuery
 }
 

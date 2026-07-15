@@ -54,7 +54,7 @@ describe('Shop OS immutable quote version creation', () => {
         id: jobId, shopId, ticketId, title: 'Front brakes', kind: 'repair', requiredSkillTier: 1,
         customerStory: {
           whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn',
-          howWeKnow: [{ claim: 'Pad thickness is low', sourceEventIds: [uuid(81), uuid(80)], sourceArtifactIds: [uuid(82)] }],
+          howWeKnow: [{ claim: 'Pad thickness is low', sourceEventIds: [uuid(81), uuid(80)], sourceArtifactIds: [] }],
           whatItMeansIfWaived: 'Stopping distance may increase', whatWeRecommend: 'Replace front pads',
         },
         storyMeta: {
@@ -114,8 +114,24 @@ describe('Shop OS immutable quote version creation', () => {
   it('captures ticket-first stable NOWAIT locks through actor reauthorization', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
     const helper = source.slice(source.indexOf('async function lockVersionContext'), source.indexOf('function buildQuoteSnapshot'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(shops\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobAttachments\)[\s\S]*?orderBy\(jobAttachments\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(shops\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
     expect(source).not.toMatch(/createQuoteVersion[\s\S]*?from\(['"]@\/app\/api/)
+    expect(helper).not.toContain('jobAttachments')
+  })
+
+  it('rejects mutable media provenance while leaving legacy rows and history untouched', async () => {
+    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const story = job.customerStory as NonNullable<typeof job.customerStory>
+    await db.update(ticketJobs).set({
+      customerStory: {
+        ...story,
+        howWeKnow: [{ claim: 'Legacy image evidence.', sourceEventIds: [], sourceArtifactIds: [uuid(51)] }],
+      },
+    }).where(eq(ticketJobs.id, jobId))
+
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await db.select().from(jobAttachments)).toHaveLength(2)
+    expect(await db.select().from(quoteVersions)).toHaveLength(0)
   })
 
   it('builds the exact content-only canonical snapshot and updates only included jobs', async () => {
@@ -133,7 +149,7 @@ describe('Shop OS immutable quote version creation', () => {
       jobs: [{
         id: jobId, title: 'Front brakes', kind: 'repair',
         customerStory: {
-          howWeKnow: [{ claim: 'Pad thickness is low', sourceArtifactIds: [uuid(82)], sourceEventIds: [uuid(81), uuid(80)] }],
+          howWeKnow: [{ claim: 'Pad thickness is low', sourceArtifactIds: [], sourceEventIds: [uuid(81), uuid(80)] }],
           whatItMeansIfWaived: 'Stopping distance may increase',
           whatWeFound: 'Pads are worn', whatWeRecommend: 'Replace front pads', whatYouToldUs: 'Brake noise',
         },
@@ -152,10 +168,7 @@ describe('Shop OS immutable quote version creation', () => {
             source: 'manual', vendorContext: null,
           },
         ],
-        attachments: [
-          { id: uuid(50), jobId, kind: 'document' },
-          { id: uuid(51), jobId, kind: 'photo' },
-        ],
+        attachments: [],
         totals: { subtotalCents: 31_250, taxableSubtotalCents: 12_500 },
       }],
       totals: { subtotalCents: 31_250, taxableSubtotalCents: 12_500, taxCents: 1_031, totalCents: 32_281 },

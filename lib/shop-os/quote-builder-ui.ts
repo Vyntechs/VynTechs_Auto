@@ -283,9 +283,9 @@ const workspaceResponseSchema = z.strictObject({
   storyRevision: z.number().int().nonnegative(),
   evidence: z.strictObject({
     events: z.array(evidenceItemSchema).max(25),
-    artifacts: z.array(evidenceItemSchema).max(25),
+    artifacts: z.array(z.never()).length(0),
     nextEventCursor: z.string().min(1).max(1_000).nullable(),
-    nextArtifactCursor: z.string().min(1).max(1_000).nullable(),
+    nextArtifactCursor: z.null(),
   }),
 })
 

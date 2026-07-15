@@ -9,14 +9,11 @@ import {
 import { MODEL } from '@/lib/ai/client'
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111'
-const ARTIFACT_ID = '22222222-2222-4222-8222-222222222222'
 const EVENT_TEXT = 'Voltage at the battery measured 10.8 volts during the no-start condition.'
-const ARTIFACT_TEXT = 'Scan report confirmed code P0562 with low system voltage recorded.'
 
 const input: CustomerStoryGenerationInput = {
   evidence: [
     { sourceKind: 'event', sourceId: EVENT_ID, label: 'Technician observation', content: EVENT_TEXT },
-    { sourceKind: 'artifact', sourceId: ARTIFACT_ID, label: 'Scan report', content: ARTIFACT_TEXT },
   ],
 }
 

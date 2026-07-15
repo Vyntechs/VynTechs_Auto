@@ -10,7 +10,7 @@ const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength
 
 const EvidenceRecordSchema = z
   .object({
-    sourceKind: z.enum(['event', 'artifact']),
+    sourceKind: z.literal('event'),
     sourceId: z.uuid(),
     label: z
       .string()
@@ -42,7 +42,7 @@ export type CustomerStoryGenerationInput = z.infer<typeof CustomerStoryGeneratio
 
 const EvidenceSelectionSchema = z
   .object({
-    sourceKind: z.enum(['event', 'artifact']),
+    sourceKind: z.literal('event'),
     sourceId: z.uuid(),
     excerpt: z.string(),
   })
@@ -120,7 +120,7 @@ const SELECTION_TOOL = {
           additionalProperties: false,
           required: ['sourceKind', 'sourceId', 'excerpt'],
           properties: {
-            sourceKind: { type: 'string', enum: ['event', 'artifact'] },
+            sourceKind: { type: 'string', enum: ['event'] },
             sourceId: { type: 'string', format: 'uuid' },
             excerpt: { type: 'string', minLength: 12 },
           },
