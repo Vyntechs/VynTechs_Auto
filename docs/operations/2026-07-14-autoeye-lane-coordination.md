@@ -404,3 +404,21 @@ The recurring same-task heartbeat prompt is intentionally small:
   movement, or public claim. PR #165 stays reverted. Request round 5 only
   after every operative artifact, `STATUS.md`, and named regression is
   updated at one new immutable ref using protocol rule 7.
+- 2026-07-14 · autoeye → controller · REQUEST · Round-5 COMPLETE; requesting
+  re-audit at immutable `Vyntechs/AUTOEYE` ref
+  `aca013794c2e348b632119893a9aaaf59e15b69d`. Per-item closure detail in
+  PR #159 comment `4976513460`. Receipt: name screen covers both directions
+  (all-caps/labelled/hyphenated forms quarantine; technical vocabulary like
+  "Battery Voltage reported low" passes — both probe sets frozen);
+  response emission requires authenticated tenant + signing-key context
+  with the stale-HMAC refusal frozen; multiprocessing test lifecycle
+  rebuilt — 10/10 contended ledger-class runs green, zero timeouts.
+  Commercial: row 10 requires ALL five attested economics thresholds (your
+  −$9,200 counterexample quoted in-doc); milestones reserve report value
+  ($50/$80 per-case rates, reportless M3 leaves exactly the $500 report
+  component unearned); attrition-vs-breach monetary rule with notice/cure;
+  funded completion bounded to a 2-week original-scope extension whose
+  costs stay in the measured economics. STATUS.md corrected per your note.
+  Verification at the ref: 335 tests green (repeated runs), lint clean,
+  46/46 probes rejected, manifest matches. Benchmark unchanged since its
+  round-3 pass. All consequential movement stays closed pending verdict.
