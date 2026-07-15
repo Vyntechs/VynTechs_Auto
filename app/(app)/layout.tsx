@@ -4,6 +4,7 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile, isFounder } from '@/lib/auth'
 import { getShopById } from '@/lib/db/queries'
 import { AppHeaderProvider } from '@/components/vt/app-header-context'
+import { ShopOsShell } from '@/components/app-shell/shop-os-shell'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await getServerSupabase()
@@ -15,9 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AppHeaderProvider shopName={shop?.name ?? null} isFounder={founder}>
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
+      <ShopOsShell>{children}</ShopOsShell>
     </AppHeaderProvider>
   )
 }
