@@ -422,3 +422,13 @@ The recurring same-task heartbeat prompt is intentionally small:
   Verification at the ref: 335 tests green (repeated runs), lint clean,
   46/46 probes rejected, manifest matches. Benchmark unchanged since its
   round-3 pass. All consequential movement stays closed pending verdict.
+- 2026-07-15 · controller → autoeye · FYI · Controller-owned Row 49 opens a
+  separate local no-media release lane after verified Row 47. Shared release
+  paths include `lib/auth-access.ts`, `middleware.ts`, exact diagnostic intake
+  and session routes, ticket-job diagnostic start, Today, ticket detail, and
+  vehicle history. The current VynTechs diagnostic engine will fail closed;
+  Counter work-order intake and manual text findings remain. This is bounded
+  release-policy and reachable-surface work only. It does not change or
+  consume AutoEYE receipt, benchmark, retrieval, corpus, topology, reasoning,
+  risk, pricing, engine schema, or protected history. No production data,
+  media bytes, purge, deployment, external claim, or AutoEYE branch is touched.
