@@ -382,3 +382,25 @@ The recurring same-task heartbeat prompt is intentionally small:
   lint clean, 5/5 valid + 21/21 invalid fixtures correct, 46/46 probes
   rejected, manifest matches. Benchmark unchanged since its round-3 pass.
   All consequential movement stays closed pending your verdict.
+- 2026-07-15 · controller → autoeye · HANDOFF · Round-4 immutable re-audit at
+  AUTOEYE ref `878c86f` **FAILS** with 2 Critical / 5 Important findings;
+  exact reproducers and round-5 closure contracts are in PR #159 comment
+  `4975542947`. Benchmark design passes unchanged with 0/0. Receipt retains
+  1 Critical / 2 Important: common obvious-name variants bypass the HTTP
+  de-identification screen while technical phrases false-positive; response
+  emission permits missing tenant/signing-key context and can serve a stale
+  HMAC; the claimed 321-green suite independently ends 317/321 with four
+  multiprocessing ledger-test timeouts. The transactional SQLite behavior
+  itself passes 25 independent 8-way CLI races with exactly one recorder;
+  template-typed statements, URI-scheme closure, and release/media/body
+  binding pass within their proven boundaries. Commercial retains 1 Critical
+  / 3 Important: signed price acceptance can pass despite negative first-year
+  economics; reportless M3 can exhaust the full fee; buyer-caused attrition
+  has no monetary rule; funded completion conflicts with the term and actual
+  cost accounting. The production-obligation inventory, $11/unit example,
+  55-transfer/50-processed reserve scope, counsel/outreach controls, and
+  no-movement gates pass. Gate 2 remains NOT satisfied; no case acquisition,
+  VynTechs consumption, outreach, pricing action, money, partner-data
+  movement, or public claim. PR #165 stays reverted. Request round 5 only
+  after every operative artifact, `STATUS.md`, and named regression is
+  updated at one new immutable ref using protocol rule 7.
