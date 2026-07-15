@@ -48,12 +48,10 @@ export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
   currentProfileId = null,
-  diagnosticsAvailable = false,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
   currentProfileId?: string | null
-  diagnosticsAvailable?: boolean
 }): React.JSX.Element {
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
@@ -229,11 +227,6 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job)}</p>
-                    {diagnosticsAvailable && job.sessionId && (
-                      <Link href={`/sessions/${job.sessionId}`} className={styles.diagnosisLink}>
-                        Open diagnosis
-                      </Link>
-                    )}
                     {simpleWorkLink(ticket, job, currentProfileId)}
                   </div>
                 </div>

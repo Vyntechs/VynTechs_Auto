@@ -300,20 +300,6 @@ describe('TicketDetailScreen', () => {
     expect(within(jobs[1]).queryByRole('link', { name: 'Open diagnosis' })).toBeNull()
   })
 
-  it('shows the legacy diagnostic link only when diagnostics are explicitly available', () => {
-    render(
-      <TicketDetailScreen
-        diagnosticsAvailable
-        ticket={ticket({ jobs: [job({ sessionId: 'session-1' })] })}
-      />,
-    )
-
-    expect(screen.getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
-      'href',
-      '/sessions/session-1',
-    )
-  })
-
   it('labels every persisted work and approval state without collapsing them', () => {
     const states = [
       ['open', 'pending_quote', 'Work · Open', 'Approval · Quote not built'],

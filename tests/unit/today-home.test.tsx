@@ -104,7 +104,7 @@ describe('TodayHome', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders persistent New diagnosis CTA in header when sessions exist', () => {
+  it('does not expose a standalone new-diagnosis entrance', () => {
     render(
       <TodayHome
         techName="Brandon"
@@ -112,17 +112,15 @@ describe('TodayHome', () => {
         closedToday={[]}
       />,
     )
-    const link = screen.getByRole('link', { name: /new diagnosis/i })
-    expect(link).toHaveAttribute('href', '/sessions/new')
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
   })
 
-  it('renders New diagnosis CTA in empty state too', () => {
+  it('keeps the empty state pointed at ShopOS work', () => {
     render(
       <TodayHome techName="Brandon" inProgress={[]} closedToday={[]} />,
     )
-    const links = screen.getAllByRole('link', { name: /new diagnosis/i })
-    expect(links.length).toBeGreaterThanOrEqual(1)
-    expect(links[0]).toHaveAttribute('href', '/sessions/new')
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
+    expect(screen.getByText(/new work orders and quick tickets appear here/i)).toBeInTheDocument()
   })
 
   it('renders modules in order: In-progress → Check-ins → Closed today', () => {
@@ -164,7 +162,7 @@ describe('TodayHome', () => {
     expect(screen.getByText(/Check-ins · 1/i)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /new diagnosis/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
   })
 
   it('does not show legacy empty guidance when ticket work exists', () => {

@@ -116,24 +116,6 @@ export function TodayHome({
             Quick ticket
           </Link>
         )}
-        {diagnosticsEntitled && (
-          <Link
-            href="/sessions/new"
-            aria-label="New diagnosis"
-            className="btn btn-primary"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              fontSize: 13,
-              textDecoration: 'none',
-            }}
-          >
-            <Plus size={14} weight="bold" aria-hidden="true" />
-            New diagnosis
-          </Link>
-        )}
       </div>
       <div
         style={{
@@ -173,10 +155,7 @@ export function TodayHome({
           </Module>
         )}
 
-        <FollowUpPanel
-          items={dueFollowUps}
-          diagnosticsAvailable={diagnosticsEntitled}
-        />
+        <FollowUpPanel items={dueFollowUps} />
 
         {diagnosticsEntitled && closedToday.length > 0 && (
           <Module num="02" label={`Closed today · ${closedToday.length}`}>
@@ -199,17 +178,8 @@ export function TodayHome({
           todayJobs.openJobs.length === 0 && (
             <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
-                {diagnosticsEntitled
-                  ? 'No work orders yet. Start a new diagnosis to begin.'
-                  : 'No assigned work yet. New work orders and quick tickets appear here.'}
+                No assigned work yet. New work orders and quick tickets appear here.
               </p>
-              {diagnosticsEntitled && (
-                <div style={{ marginTop: 14 }}>
-                  <Link href="/sessions/new" className="btn btn-primary">
-                    New diagnosis
-                  </Link>
-                </div>
-              )}
             </Module>
           )}
       </div>

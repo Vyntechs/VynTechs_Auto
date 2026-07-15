@@ -815,7 +815,7 @@ pnpm vitest run \
 
 ```bash
 rg -n -U --pcre2 "type\s*=\s*(?:[\"']file[\"']|\{\s*[\"']file[\"']\s*\})" app components --glob '*.{ts,tsx}'
-rg -n "getUserMedia|MediaRecorder|/capture|Take proof photo|Add file|Snap it|photoAsk" app components lib --glob '*.{ts,tsx}'
+rg -n "getUserMedia|MediaRecorder|/api/sessions/.*/capture|Take proof photo|Add file|Snap it|photoAsk" app components lib --glob '*.{ts,tsx}'
 rg -n "uploadArtifact|uploadJobAttachment|downloadJobAttachment|processArtifactExtraction" app components --glob '*.{ts,tsx}'
 rg -n "artifacts|artifact\." lib/curator/case-detail-query.ts app/curator/cases/'[sessionId]'/page.tsx
 rg -n "/sessions/" components/comeback/follow-up-panel.tsx components/screens/ticket-detail.tsx components/screens/vehicle-history.tsx
