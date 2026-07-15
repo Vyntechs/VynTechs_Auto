@@ -46,7 +46,6 @@
 - Modify `app/(app)/layout.tsx`: mount the persistent shell inside the existing authenticated provider.
 - Create `lib/ui/live-entity.ts`: opaque-version compare-and-replace/remove helpers.
 - Create `tests/unit/live-entity.test.ts`: applied, stale, mismatch, removal, and immutability regressions.
-- Modify `docs/strategy/SHOP_OS_DRIVER_STATE.md`: record the verified Wave 1A proof and the gated Wave 1B next move.
 
 ---
 
@@ -54,7 +53,6 @@
 
 **Files:**
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
-- Modify: `docs/strategy/SHOP_OS_DRIVER_STATE.md`
 
 - [ ] **Step 1: Confirm Row 46 still owns the shared technician seam**
 
@@ -71,7 +69,7 @@ Expected: Row 46 remains `in_progress`; Row 47 is available for platform foundat
 
 - [ ] **Step 2: Create the implementation branch and draft PR**
 
-Create a fresh worktree from current `origin/main`, use branch `feat/adaptive-shop-os-wave-1a`, and open a draft PR before code. Record the resulting PR number in Row 47 and `SHOP_OS_DRIVER_STATE.md`; do not use a guessed number.
+Create a fresh worktree from current `origin/main`, use branch `feat/adaptive-shop-os-wave-1a`, and open a draft PR before code. Record the resulting PR number in Row 47; do not use a guessed number.
 
 - [ ] **Step 3: Mark only Row 47 in progress**
 
@@ -80,7 +78,7 @@ Set Row 47 to `in_progress`, lane owner `P`, and name the draft PR. Leave Row 48
 - [ ] **Step 4: Commit the ownership claim**
 
 ```bash
-git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md docs/strategy/SHOP_OS_DRIVER_STATE.md
+git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md
 git commit -m "docs: claim adaptive ShopOS foundation"
 ```
 
@@ -468,7 +466,6 @@ git commit -m "feat: add version-safe live entity replacements"
 
 **Files:**
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
-- Modify: `docs/strategy/SHOP_OS_DRIVER_STATE.md`
 - Review: every file changed in Tasks 1–6
 
 - [ ] **Step 1: Run all focused proof**
@@ -503,7 +500,7 @@ pnpm exec tsc --noEmit
 pnpm build
 ```
 
-Expected: all commands exit 0. Record exact test file/test counts and the build result in the driver state and PR.
+Expected: all commands exit 0. Record exact test file/test counts and the build result in Row 47 and the PR.
 
 - [ ] **Step 4: Verify the observable browser story**
 
@@ -535,22 +532,14 @@ Fix every Critical or Important issue, rerun the affected focused tests, then re
 
 - [ ] **Step 6: Close Row 47 without unblocking Row 48**
 
-After all proof passes, set Row 47 to `complete` with the actual implementation PR, exact test counts, TypeScript/build result, and browser proof. Update `SHOP_OS_DRIVER_STATE.md` with:
-
-- `Outcome`: adaptive ShopOS application foundation;
-- `Current slice`: Wave 1A verified and ready to merge;
-- `Last proof`: exact commands and observable browser checks;
-- `Next safe move`: Row 48 My Jobs pilot after Row 46 releases all shared paths;
-- `Open gates`: Row 46 release and founder merge/deploy authority;
-- `Worker lanes`: Row 47 owner complete; Row 48 blocked;
-- `Stop only when`: merged and production-verified, or a true authority/safety gate.
+After all proof passes, set Row 47 to `complete` with the actual implementation PR, exact test counts, TypeScript/build result, and browser proof. Keep durable status in the active plan's §11 table. If implementation reality drifted from the approved phase text, add an `Implementation correction` callout at the end of the relevant phase with the verified behavior, remaining gates, and Row 48's release condition.
 
 Do not change Row 48 from `blocked` based on inference, inactivity, or a clean merge alone.
 
 - [ ] **Step 7: Commit final evidence and mark the implementation PR ready**
 
 ```bash
-git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md docs/strategy/SHOP_OS_DRIVER_STATE.md
+git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md
 git commit -m "docs: record adaptive ShopOS foundation proof"
 git status --short
 git diff --check origin/main...HEAD
