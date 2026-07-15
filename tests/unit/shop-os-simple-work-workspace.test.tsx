@@ -20,8 +20,7 @@ const REQUEST = '00000000-0000-4000-8000-000000000080'
 const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' }
 const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
-  updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved', hasCompletionProof: false,
-  attachments: [],
+  updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
 }
 
 describe('simple work workspace', () => {
@@ -53,7 +52,7 @@ describe('simple work workspace', () => {
     }))
   })
 
-  it('saves the explicit note and gates completion on authoritative proof truth', async () => {
+  it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', updatedAt: '2026-07-11T12:02:00.000Z' } }),
@@ -65,42 +64,18 @@ describe('simple work workspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), { target: { value: ' Installed and torqued. ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
     await waitFor(() => expect(screen.getByText('Work note saved.')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Complete work' })).toBeDisabled()
-    unmount()
-    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...inProgress, workNotes: 'Installed and torqued.', hasCompletionProof: true }} />)
     expect(screen.getByRole('button', { name: 'Complete work' })).toBeEnabled()
+    unmount()
   })
 
-  it('retains an uncertain file for an exact retry and sends no storage path', async () => {
-    const fetchMock = vi.fn()
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ changed: true, attachment: { id: REQUEST, kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, createdAt: '2026-07-11T12:03:00.000Z' } }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ workspace: { ...base, workStatus: 'in_progress', hasCompletionProof: true, attachments: [{ id: REQUEST, kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, createdAt: '2026-07-11T12:03:00.000Z' }] } }) })
-    vi.stubGlobal('fetch', fetchMock)
+  it('renders two text-only modules without media controls or copy', () => {
     const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
-    const input = container.querySelector('input[data-proof-camera]') as HTMLInputElement
-    const file = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'proof.jpg', { type: 'image/jpeg' })
-    fireEvent.change(input, { target: { files: [file] } })
-    expect(await screen.findByRole('alert')).toHaveTextContent('Not saved')
-    fireEvent.click(screen.getByRole('button', { name: 'Retry proof upload' }))
-    await waitFor(() => expect(screen.getByText('Proof uploaded.')).toBeInTheDocument())
-    const firstForm = fetchMock.mock.calls[0][1].body as FormData
-    const retryForm = fetchMock.mock.calls[1][1].body as FormData
-    expect(firstForm.get('requestKey')).toBe(REQUEST)
-    expect(retryForm.get('requestKey')).toBe(REQUEST)
-    expect(JSON.stringify(await Promise.all([...retryForm.entries()].map(async ([key, value]) => [key, typeof value === 'string' ? value : value.name])))).not.toContain('storageKey')
-  })
-
-  it('clears an old retry when the technician selects an invalid replacement file', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
-    const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
-    const camera = container.querySelector('input[data-proof-camera]') as HTMLInputElement
-    fireEvent.change(camera, { target: { files: [new File(['photo'], 'old.jpg', { type: 'image/jpeg' })] } })
-    expect(await screen.findByRole('button', { name: 'Retry proof upload' })).toBeInTheDocument()
-    const addFile = container.querySelector('input:not([data-proof-camera])') as HTMLInputElement
-    fireEvent.change(addFile, { target: { files: [new File(['bad'], 'new.heic', { type: 'image/heic' })] } })
-    expect(screen.queryByRole('button', { name: 'Retry proof upload' })).toBeNull()
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose a supported')
+    expect(screen.getByRole('heading', { name: 'Work note' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Complete work' })).toBeInTheDocument()
+    expect(screen.getByText('Requires a saved work note.')).toBeInTheDocument()
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    expect(container.querySelector('[capture]')).toBeNull()
+    expect(container.textContent).not.toMatch(/proof|photo|upload|filename|download/i)
   })
 
   it('keeps found concern optional and reports only unassigned/unstarted truth', async () => {
@@ -125,16 +100,13 @@ describe('simple work workspace', () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith(`/tickets/${TICKET}`))
   })
 
-  it('renders completed work as read-only history with proxy-only proof links', () => {
+  it('renders completed work as text-only read-only history', () => {
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
-      ...base, workStatus: 'done', workNotes: 'Installed and verified.', hasCompletionProof: true,
-      attachments: [{ id: REQUEST, kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, createdAt: '2026-07-11T12:03:00.000Z' }],
+      ...base, workStatus: 'done', workNotes: 'Installed and verified.',
     }} />)
     expect(screen.getByRole('heading', { name: 'Work complete' })).toBeInTheDocument()
     expect(screen.getByText('Installed and verified.')).toBeInTheDocument()
-    const proof = screen.getByRole('link', { name: /open photo proof/i })
-    expect(proof).toHaveAttribute('href', `/api/tickets/${TICKET}/jobs/${JOB}/attachments/${REQUEST}`)
-    expect(proof.getAttribute('href')).not.toMatch(/storage|token|supabase/i)
+    expect(screen.queryByRole('link', { name: /proof|photo|attachment|download/i })).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
   })
 
@@ -142,7 +114,6 @@ describe('simple work workspace', () => {
     const css = readFileSync(join(process.cwd(), 'components/screens/simple-work-workspace.module.css'), 'utf8')
     expect(css).toMatch(/\.hero h1[^}]*overflow-wrap: anywhere/)
     expect(css).toMatch(/\.savedNote[^}]*overflow-wrap: anywhere/)
-    expect(css).toMatch(/\.retryRow span[^}]*overflow-wrap: anywhere/)
-    expect(css).toMatch(/\.proofList li[^}]*min-width: 0[^}]*overflow-wrap: anywhere/)
+    expect(css).not.toMatch(/proofList|primaryFile|secondaryFile|retryRow/)
   })
 })

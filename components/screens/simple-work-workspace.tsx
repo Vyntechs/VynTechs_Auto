@@ -5,15 +5,11 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/vt'
 import {
-  classifySimpleWorkFile,
-  parseAttachmentResponse,
   parseEscalationResponse,
   parseSimpleWorkMutationResponse,
   parseSimpleWorkWorkspaceResponse,
   retainEscalationAttempt,
-  retainFileAttempt,
   type EscalationAttempt,
-  type FileUploadAttempt,
   type SimpleWorkProjectionView,
   type SimpleWorkWorkspaceView,
 } from '@/lib/shop-os/simple-work-ui'
@@ -25,7 +21,7 @@ type Props = {
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
-type Pending = 'start' | 'note' | 'proof' | 'complete' | 'escalation' | null
+type Pending = 'start' | 'note' | 'complete' | 'escalation' | null
 
 export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
   const router = useRouter()
@@ -33,8 +29,6 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
   const [note, setNote] = useState(initialWorkspace.workNotes ?? '')
   const [pending, setPending] = useState<Pending>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
-  const [selectedProof, setSelectedProof] = useState<FileUploadAttempt | null>(null)
-  const fileAttempt = useRef<FileUploadAttempt | null>(null)
   const [concern, setConcern] = useState('')
   const [tier, setTier] = useState('')
   const [createdConcern, setCreatedConcern] = useState(false)
@@ -71,7 +65,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
 
   async function mutateWork(
     action: Record<string, unknown>,
-    mode: Exclude<Pending, 'proof' | 'escalation' | null>,
+    mode: Exclude<Pending, 'escalation' | null>,
     success: string,
   ) {
     if (pending) return
@@ -101,57 +95,6 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
       setNotice({ kind: 'status', text: success })
     } catch {
       setNotice({ kind: 'error', text: 'Not saved — check your connection and retry.' })
-    } finally {
-      setPending(null)
-    }
-  }
-
-  async function chooseProof(file: File) {
-    const kind = classifySimpleWorkFile(file)
-    if (!kind) {
-      fileAttempt.current = null
-      setSelectedProof(null)
-      setNotice({ kind: 'error', text: 'Choose a supported, non-empty file no larger than 4 MiB.' })
-      return
-    }
-    const attempt = retainFileAttempt(fileAttempt.current, file, kind)
-    fileAttempt.current = attempt
-    setSelectedProof(attempt)
-    await uploadProof(attempt)
-  }
-
-  async function uploadProof(attempt: FileUploadAttempt) {
-    if (pending) return
-    setPending('proof')
-    setNotice({ kind: 'status', text: 'Uploading proof…' })
-    try {
-      const form = new FormData()
-      form.set('requestKey', attempt.requestKey)
-      form.set('kind', attempt.kind)
-      form.set('file', attempt.file)
-      const response = await fetch(`${basePath}/attachments`, { method: 'POST', body: form })
-      if (response.status === 404) {
-        stalePage()
-        return
-      }
-      const body = await response.json().catch(() => null)
-      const result = response.ok ? parseAttachmentResponse(body) : null
-      if (!result) throw new Error('upload_failed')
-      fileAttempt.current = null
-      setSelectedProof(null)
-      setWorkspace((current) => ({
-        ...current,
-        attachments: current.attachments.some((item) => item.id === result.attachment.id)
-          ? current.attachments
-          : [...current.attachments, result.attachment],
-      }))
-      const refreshed = await refreshWorkspace().catch(() => null)
-      setNotice({
-        kind: 'status',
-        text: refreshed ? 'Proof uploaded.' : 'Proof uploaded; refresh the page to confirm completion readiness.',
-      })
-    } catch {
-      setNotice({ kind: 'error', text: 'Not saved — check your connection and retry proof upload.' })
     } finally {
       setPending(null)
     }
@@ -199,7 +142,6 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
 
   const completeReady = workspace.workStatus === 'in_progress'
     && Boolean(workspace.workNotes?.trim())
-    && workspace.hasCompletionProof
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -219,7 +161,6 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
             <p className={styles.stateMark}>Complete</p>
             <h2 id="work-complete">Work complete</h2>
             <p className={styles.savedNote}>{workspace.workNotes ?? 'No work note recorded.'}</p>
-            <ProofList ticketId={ticket.id} jobId={workspace.id} workspace={workspace} />
           </section>
         ) : workspace.authorization === 'declined' ? (
           <ReadOnlyState title="Customer declined this work" copy="This work is not authorized. No work action is available." />
@@ -253,31 +194,9 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
                 </button>
               </div>
             </section>
-            <section className={styles.module} aria-labelledby="proof-heading">
-              <div className={styles.moduleHeading}><span>02</span><h2 id="proof-heading">Proof</h2></div>
-              <p className={styles.helper}>Add one work photo before completion. Supported files are private and limited to 4 MiB.</p>
-              <div className={styles.proofActions}>
-                <label className={styles.primaryFile}>Take proof photo
-                  <input data-proof-camera type="file" accept="image/jpeg,image/png,image/webp" capture="environment"
-                    disabled={pending !== null} onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseProof(file) }} />
-                </label>
-                <label className={styles.secondaryFile}>Add file
-                  <input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf,text/plain"
-                    disabled={pending !== null} onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseProof(file) }} />
-                </label>
-              </div>
-              {selectedProof && (
-                <div className={styles.retryRow}>
-                  <span>{selectedProof.file.name}</span>
-                  <button type="button" className={styles.secondary} disabled={pending !== null}
-                    onClick={() => uploadProof(selectedProof)}>Retry proof upload</button>
-                </div>
-              )}
-              <ProofList ticketId={ticket.id} jobId={workspace.id} workspace={workspace} />
-            </section>
             <section className={styles.module} aria-labelledby="complete-heading">
-              <div className={styles.moduleHeading}><span>03</span><h2 id="complete-heading">Complete work</h2></div>
-              <p className={styles.helper}>Requires a saved work note and a confirmed proof photo.</p>
+              <div className={styles.moduleHeading}><span>02</span><h2 id="complete-heading">Complete work</h2></div>
+              <p className={styles.helper}>Requires a saved work note.</p>
               <button className={styles.primary} type="button" disabled={pending !== null || !completeReady}
                 onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Work completed.')}>
                 {pending === 'complete' ? 'Completing…' : 'Complete work'}
@@ -323,20 +242,4 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
 
 function ReadOnlyState({ title, copy }: { title: string; copy: string }) {
   return <section className={styles.state}><p className={styles.stateMark}>Hold</p><h2>{title}</h2><p>{copy}</p></section>
-}
-
-function ProofList({ ticketId, jobId, workspace }: { ticketId: string; jobId: string; workspace: SimpleWorkWorkspaceView }) {
-  if (workspace.attachments.length === 0) return <p className={styles.emptyProof}>No proof attached yet.</p>
-  return <ul className={styles.proofList}>{workspace.attachments.map((attachment) => (
-    <li key={attachment.id}>
-      <a href={`/api/tickets/${ticketId}/jobs/${jobId}/attachments/${attachment.id}`} target="_blank" rel="noreferrer">
-        Open {attachment.kind} proof
-      </a>
-      <span>{formatBytes(attachment.byteSize)}</span>
-    </li>
-  ))}</ul>
-}
-
-function formatBytes(value: number) {
-  return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KB`
 }
