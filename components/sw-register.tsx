@@ -23,7 +23,6 @@ export function SwRegister() {
 
         if (registration.waiting) {
           announcePwaUpdateReady(registration.waiting)
-          return
         }
 
         const observedWorkers = new Set<ServiceWorker>()

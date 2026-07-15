@@ -110,6 +110,36 @@ describe('SwRegister', () => {
     expect(listener.mock.calls[0][0].detail).toEqual({ waiting })
   })
 
+  it('keeps observing updates after announcing an already-waiting worker', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const firstWaiting = createServiceWorker('installed')
+    const replacement = createServiceWorker()
+    const registration = createRegistration({ waiting: firstWaiting })
+    setController(createServiceWorker('activated'))
+    register.mockResolvedValue(registration)
+    const listener = vi.fn<(event: CustomEvent<PwaUpdateReadyDetail>) => void>()
+    listenForUpdateReady(listener)
+
+    render(<SwRegister />)
+
+    await waitFor(() => expect(listener).toHaveBeenCalledOnce())
+
+    firstWaiting.state = 'redundant'
+    Object.defineProperties(registration, {
+      waiting: { configurable: true, value: null },
+      installing: { configurable: true, value: replacement },
+    })
+    registration.dispatchEvent(new Event('updatefound'))
+    replacement.state = 'installed'
+    replacement.dispatchEvent(new Event('statechange'))
+
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener.mock.calls.map(([event]) => event.detail.waiting)).toEqual([
+      firstWaiting,
+      replacement,
+    ])
+  })
+
   it('announces a newly installed worker when an existing controller proves it is an update', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     const installing = createServiceWorker()

@@ -59,7 +59,7 @@ export function PwaUpdateStatus({
     }
 
     const handlePassiveControllerChange = () => {
-      if (!waitingRef.current || localActivation.current) return
+      if (localActivation.current) return
       setPhase('reload-ready')
     }
 
@@ -106,15 +106,33 @@ export function PwaUpdateStatus({
     if (!waiting) return
 
     const handleWaitingStateChange = () => {
+      if (waiting.state === 'redundant') {
+        const wasLocalActivation = localActivation.current
+
+        if (controllerChangeListener.current) {
+          navigator.serviceWorker.removeEventListener(
+            'controllerchange',
+            controllerChangeListener.current,
+          )
+          controllerChangeListener.current = null
+        }
+
+        localActivation.current = false
+        if (waitingRef.current === waiting) {
+          waitingRef.current = null
+        }
+        if (!wasLocalActivation) {
+          setWaiting(null)
+        }
+        return
+      }
+
       if (localActivation.current) return
 
       if (waiting.state === 'activating') {
         setPhase('external-updating')
       } else if (waiting.state === 'activated') {
         setPhase('reload-ready')
-      } else if (waiting.state === 'redundant') {
-        waitingRef.current = null
-        setWaiting(null)
       }
     }
 
@@ -126,7 +144,7 @@ export function PwaUpdateStatus({
     }
   }, [waiting])
 
-  if (!waiting) return null
+  if (!waiting && phase !== 'reload-ready') return null
 
   const startUpdate = () => {
     if (phase === 'reload-ready') {
@@ -134,7 +152,13 @@ export function PwaUpdateStatus({
       return
     }
 
-    if (phase === 'updating' || phase === 'external-updating') return
+    if (
+      !waiting ||
+      phase === 'updating' ||
+      phase === 'external-updating'
+    ) {
+      return
+    }
 
     const handleControllerChange = () => {
       controllerChangeListener.current = null

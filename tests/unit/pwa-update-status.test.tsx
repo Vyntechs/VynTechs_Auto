@@ -131,6 +131,31 @@ describe('PwaUpdateStatus', () => {
     expect(stalePostMessage).not.toHaveBeenCalled()
   })
 
+  it('retains an external controller change while empty registration reconciliation is pending', async () => {
+    const user = userEvent.setup()
+    const replay = createDeferred<ServiceWorkerRegistration | undefined>()
+    const reload = vi.fn()
+    getRegistration.mockReturnValue(replay.promise)
+    render(<PwaUpdateStatus reload={reload} />)
+    await waitFor(() => expect(getRegistration).toHaveBeenCalledOnce())
+
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+    await act(async () => {
+      replay.resolve(createRegistration(null))
+      await replay.promise
+    })
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Application update applied. Reload when ready.',
+    )
+    expect(reload).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Reload when ready' }))
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
   it('announces readiness without messaging, activating, or reloading automatically', () => {
     const postMessage = vi.fn()
     const reload = vi.fn()
@@ -241,6 +266,45 @@ describe('PwaUpdateStatus', () => {
     expect(firstPostMessage).toHaveBeenCalledOnce()
     expect(secondPostMessage).not.toHaveBeenCalled()
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('recovers a successor when the locally activated worker becomes redundant', async () => {
+    const user = userEvent.setup()
+    const firstPostMessage = vi.fn()
+    const successorPostMessage = vi.fn()
+    const firstWaiting = createWaitingWorker(firstPostMessage)
+    const successor = createWaitingWorker(successorPostMessage)
+    const reload = vi.fn()
+    const addContainerListener = vi.spyOn(serviceWorkerContainer, 'addEventListener')
+    const removeContainerListener = vi.spyOn(serviceWorkerContainer, 'removeEventListener')
+    const { unmount } = render(<PwaUpdateStatus reload={reload} />)
+    announceWaitingWorker(firstWaiting)
+
+    await user.click(screen.getByRole('button', { name: 'Update when ready' }))
+    expect(firstPostMessage).toHaveBeenCalledWith({ type: 'ACTIVATE' })
+
+    act(() => {
+      firstWaiting.state = 'redundant'
+      firstWaiting.dispatchEvent(new Event('statechange'))
+    })
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+    announceWaitingWorker(successor)
+
+    expect(screen.getByRole('button', { name: 'Update when ready' })).toBeEnabled()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Application update ready. Finish the current task, then update.',
+    )
+    expect(successorPostMessage).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(addContainerListener).toHaveBeenCalledTimes(2)
+
+    unmount()
+
+    expect(removeContainerListener).toHaveBeenCalledTimes(2)
+    serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('removes the reload listener and restores the control when activation throws', async () => {
