@@ -36,6 +36,9 @@ function projectRefFromUrl(url: string): string {
 
 export default async function globalSetup(_config: FullConfig) {
   loadEnvLocal()
+  // Public-only browser checks do not need, and must not require, a real test
+  // account. Curator runs keep the authenticated setup as the default.
+  if (process.env.PLAYWRIGHT_SKIP_AUTH_SETUP === '1') return
 
   const email = process.env.TEST_USER_EMAIL
   const password = process.env.TEST_USER_PASSWORD

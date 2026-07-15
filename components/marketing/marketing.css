@@ -714,7 +714,7 @@
 }
 .vm-compare-head, .vm-compare-row {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  grid-template-columns: 1.3fr 1.4fr 1.4fr;
   border-bottom: 1px solid var(--vt-bone-200);
 }
 .vm-compare-row:last-child { border-bottom: 0; }
@@ -997,7 +997,7 @@
     margin-bottom: 6px;
   }
   .vm-compare-row > div:nth-child(2)::before,
-  .vm-compare-row > div:nth-child(3)::before {
+  .vm-compare-row > div.vm-compare-us::before {
     display: block;
     font-family: var(--vt-font-mono);
     font-size: 9.5px;
@@ -1006,8 +1006,7 @@
     color: var(--vt-bone-600);
     margin-bottom: 4px;
   }
-  .vm-compare-row > div:nth-child(2)::before { content: "Generic chatbot"; }
-  .vm-compare-row > div:nth-child(3)::before { content: "Scan-tool DTC DB"; }
+  .vm-compare-row > div:nth-child(2)::before { content: "Conventional shop software"; }
   .vm-compare-row > div.vm-compare-us {
     background: oklch(50% 0.18 248 / 0.08) !important;
     padding: 12px 14px;

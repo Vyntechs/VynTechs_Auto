@@ -40,6 +40,8 @@ describe('SignInPage', () => {
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
+    expect(screen.getByText(/work orders, job flow, and quotes/i)).toBeInTheDocument()
+    expect(screen.queryByText(/your sessions/i)).toBeNull()
   })
 
   it('renders a "Forgot password?" link pointing at /forgot-password', () => {

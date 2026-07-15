@@ -16,7 +16,12 @@ export default defineConfig({
   projects: [
     {
       name: 'anonymous',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === '1'
+          ? { channel: 'chrome' as const }
+          : {}),
+      },
       testMatch: /landing\.spec\.ts/,
     },
     {

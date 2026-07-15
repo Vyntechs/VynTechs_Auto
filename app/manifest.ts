@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Vyntechs',
     short_name: 'Vyntechs',
-    description: 'AI master tech for the bay.',
+    description: 'ShopOS for automotive work orders, assignments, quotes, and job status.',
     start_url: '/today',
     display: 'standalone',
     background_color: '#fdfaf4',

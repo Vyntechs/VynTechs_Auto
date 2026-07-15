@@ -10,48 +10,34 @@ export function Hero({ isSignedIn }: HeroProps) {
       <div className="vm-hero-lead">
         <div className="vm-hero-eyebrow vm-eyebrow">
           <span className="vm-dot" />
-          Still in beta &middot; onboarding by invite
+          ShopOS &middot; still in beta &middot; onboarding by invite
         </div>
         <h1 className="vm-hero-title">
-          Knows how the system works. Won&rsquo;t guess when it
-          doesn&rsquo;t.
+          The repair order that keeps the whole shop moving.
         </h1>
         <p className="vm-hero-sub">
-          Built by a working tech who got tired of guessing. It works from how
-          your vehicle&rsquo;s system actually works, not a copied manual, so it
-          reasons about your truck and not some other one. When it isn&rsquo;t
-          sure, it says so, tells you what to check, and won&rsquo;t green-light
-          tearing into something it can&rsquo;t stand behind.
+          One living repair order connects the counter, the bay, and the
+          customer decision. Capture the concern once, assign the work, record
+          manual findings or text work notes, build the quote, and move the job
+          forward without rebuilding the story on every screen.
         </p>
         <div className="vm-hero-cta">
-          <a href={ctaHref} className="vm-btn">
-            {ctaLabel}
-          </a>
-          <a href="#how" className="vm-btn vm-btn--ghost">
-            See how it works
-          </a>
-          <span className="vm-price">
-            One tech &middot; one account &middot; cancel anytime
-          </span>
+          <a href={ctaHref} className="vm-btn">{ctaLabel}</a>
+          <a href="#how" className="vm-btn vm-btn--ghost">See the flow</a>
+          <span className="vm-price">One tech &middot; one account &middot; cancel anytime</span>
         </div>
         <div className="vm-hero-meta">
           <div className="vm-hero-meta-cell">
-            <div className="vm-hero-meta-num">
-              95<small>%</small>
-            </div>
-            <div className="vm-hero-meta-lab">
-              confidence line before it&rsquo;ll OK risky work
-            </div>
+            <div className="vm-hero-meta-num">1</div>
+            <div className="vm-hero-meta-lab">repair order from intake to closeout</div>
           </div>
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">3</div>
-            <div className="vm-hero-meta-lab">
-              questions max before it defers, not guesses
-            </div>
+            <div className="vm-hero-meta-lab">roles sharing the same job truth</div>
           </div>
           <div className="vm-hero-meta-cell">
             <div className="vm-hero-meta-num">0</div>
-            <div className="vm-hero-meta-lab">specs it&rsquo;ll make up</div>
+            <div className="vm-hero-meta-lab">duplicate stories to retype</div>
           </div>
         </div>
       </div>

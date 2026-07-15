@@ -59,7 +59,7 @@ export function SubscribeClient() {
                 color: 'var(--vt-fg-2)',
               }}
             >
-              Restart it to get back to diagnosing.
+              Restart it to regain access to work orders, assignments, quotes, and job status.
             </p>
             {error && (
               <div className="ai-reject" role="alert">

@@ -77,7 +77,7 @@ pnpm build
 
 UI-touching phases also need `chrome-devtools-mcp:a11y-debugging` on the wired surfaces.
 
-**Fresh Supabase projects** also need `supabase/storage-setup.sql` applied via Supabase MCP `execute_sql` — Drizzle doesn't manage the `storage` schema.
+**Fresh Supabase projects** intentionally have no operational object-storage bootstrap in the current release. Do not create a media bucket without a new approved plan.
 
 ## Communication preferences
 
