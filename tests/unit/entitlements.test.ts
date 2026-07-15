@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
@@ -41,6 +41,7 @@ describe('entitlement resolution', () => {
   })
 
   afterEach(async () => {
+    vi.unstubAllEnvs()
     await close()
   })
 
@@ -76,6 +77,18 @@ describe('entitlement resolution', () => {
     expect(await hasDiagnostics(db, { shopId: null })).toBe(false)
   })
 
+  it('resolves every entitlement source false before database lookup when the release is off', async () => {
+    const { shopId } = await seedPaidShop(db)
+    await db.insert(shopEntitlements).values({ shopId, diagnostics: true })
+    const select = vi.spyOn(db, 'select')
+    vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+
+    expect(await resolveShopEntitlements(db, { shopId })).toEqual({ diagnostics: false })
+    expect(await resolveShopEntitlements(db, { shopId, isComp: true })).toEqual({ diagnostics: false })
+    expect(await resolveShopEntitlements(db, { shopId: null })).toEqual({ diagnostics: false })
+    expect(select).not.toHaveBeenCalled()
+  })
+
   describe('checkAccess entitlements', () => {
     it('returns diagnostics=true for a paid shop with no entitlement row', async () => {
       const { userId } = await seedPaidShop(db)
@@ -95,6 +108,21 @@ describe('entitlement resolution', () => {
       await db.insert(shopEntitlements).values({ shopId, diagnostics: false })
       const result = await checkAccess(db, userId)
       expect(result).toEqual({ kind: 'allow', entitlements: { diagnostics: true } })
+    })
+
+    it('keeps base access but resolves diagnostics false for paid and comp profiles when release is off', async () => {
+      const paid = await seedPaidShop(db)
+      const comp = await seedPaidShop(db, { isComp: true })
+      vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+
+      expect(await checkAccess(db, paid.userId)).toEqual({
+        kind: 'allow',
+        entitlements: { diagnostics: false },
+      })
+      expect(await checkAccess(db, comp.userId)).toEqual({
+        kind: 'allow',
+        entitlements: { diagnostics: false },
+      })
     })
 
     it('resolves entitlements during the canceled-within-grace allow', async () => {
@@ -149,6 +177,17 @@ describe('entitlement resolution', () => {
       expect(rejected?.status).toBe(403)
       expect(await rejected?.json()).toEqual({ error: 'deactivated' })
     })
+
+    it('returns global not-available after base access when the release is off', async () => {
+      const { userId, shopId } = await seedPaidShop(db)
+      await db.insert(shopEntitlements).values({ shopId, diagnostics: true })
+      vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+
+      const rejected = await entitlementReject(db, userId)
+
+      expect(rejected?.status).toBe(404)
+      expect(await rejected?.json()).toEqual({ error: 'not_available' })
+    })
   })
 })
 
@@ -157,13 +196,11 @@ describe('isDiagnosticsGatedRoute', () => {
     '/sessions',
     '/sessions/abc-123',
     '/sessions/new',
-    '/intake',
-    '/intake/anything',
     '/api/sessions',
     '/api/sessions/abc/advance',
-    '/api/intake/search',
     '/api/intake/submit',
-    '/api/intake/decode-vin',
+    '/api/artifacts',
+    '/api/artifacts/abc/extract',
   ])('gates %s', (path) => {
     expect(isDiagnosticsGatedRoute(path)).toBe(true)
   })
@@ -171,16 +208,22 @@ describe('isDiagnosticsGatedRoute', () => {
   it.each([
     '/',
     '/today',
+    '/intake',
+    '/intake/anything',
     '/tickets/abc',
     '/tickets/abc/quote',
     '/api/tickets/abc/quote',
     '/api/follow-ups/abc/resolve',
+    '/api/intake/search',
+    '/api/intake/decode-vin',
     '/curator',
     // no prefix-bleed
     '/sessionsish',
     '/intake-extra',
     '/api/sessionsish',
     '/api/intakeish',
+    '/api/intake/submit-extra',
+    '/api/artifactsish',
   ])('does not gate %s', (path) => {
     expect(isDiagnosticsGatedRoute(path)).toBe(false)
   })

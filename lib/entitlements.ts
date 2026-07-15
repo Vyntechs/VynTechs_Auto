@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import type { AppDb } from './db/queries'
 import { shopEntitlements } from './db/schema'
+import { isDiagnosticsReleaseEnabled } from './release-policy'
 
 // Policy default for a paid shop with NO shop_entitlements row. Pricing for
 // the diagnostics add-on does not exist yet, so the default stays true and
@@ -46,6 +47,7 @@ export async function resolveShopEntitlements(
   db: AppDb,
   opts: { shopId: string | null; isComp?: boolean },
 ): Promise<ShopEntitlements> {
+  if (!isDiagnosticsReleaseEnabled()) return { diagnostics: false }
   if (opts.isComp) return { diagnostics: true }
   // Fail closed: a shopless (non-comp) profile has no entitlements. In
   // practice checkAccess paywalls it before entitlements are consulted.

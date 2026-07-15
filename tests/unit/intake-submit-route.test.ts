@@ -106,6 +106,7 @@ describe('POST /api/intake/submit', () => {
   afterEach(async () => {
     await close()
     vi.clearAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('persists customer + vehicle + session and returns sessionId', async () => {
@@ -176,6 +177,23 @@ describe('POST /api/intake/submit', () => {
     })
     const res = await POST(req)
     expect(res.status).toBe(401)
+  })
+
+  it('returns global not-available before parsing or creating work when diagnostics is off', async () => {
+    vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+    const { POST } = await import('@/app/api/intake/submit/route')
+    const json = vi.fn(async () => {
+      throw new Error('body must not be parsed')
+    })
+
+    const res = await POST({ json } as unknown as Request)
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'not_available' })
+    expect(json).not.toHaveBeenCalled()
+    expect(await currentDb.select().from(customers)).toHaveLength(0)
+    expect(await currentDb.select().from(vehicles)).toHaveLength(0)
+    expect(await currentDb.select().from(sessions)).toHaveLength(0)
   })
 
   it('returns 400 on invalid JSON body', async () => {

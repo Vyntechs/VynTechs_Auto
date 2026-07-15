@@ -4,6 +4,10 @@ import type { AppDb } from './db/queries'
 import { getProfileByUserId } from './db/queries'
 import { stripeCustomers } from './db/schema'
 import { resolveShopEntitlements, type ShopEntitlements } from './entitlements'
+import {
+  isDiagnosticsReleaseEnabled,
+  OPERATIONAL_MEDIA_UNAVAILABLE,
+} from './release-policy'
 
 const EXEMPT_EXACT = new Set<string>([
   '/',
@@ -65,14 +69,10 @@ export function isApiRoute(pathname: string): boolean {
 // checks these after the paywall gate, and entitlementReject() repeats the
 // check inside the route handlers as defense-in-depth. Everything else
 // (tickets, quotes, invoices, history) stays entitlement-free.
-const DIAGNOSTICS_GATED_PREFIXES = [
-  '/sessions',
-  '/intake',
-  '/api/sessions',
-  '/api/intake',
-]
+const DIAGNOSTICS_GATED_PREFIXES = ['/sessions', '/api/sessions', '/api/artifacts']
 
 export function isDiagnosticsGatedRoute(pathname: string): boolean {
+  if (pathname === '/api/intake/submit') return true
   return DIAGNOSTICS_GATED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   )
@@ -99,8 +99,16 @@ export async function checkAccess(
   // user with isComp:true must still be locked out — the shop admin's
   // intent overrides any subscription override.
   if (profile.deactivatedAt) return { kind: 'deactivated' }
-  // isComp implies every entitlement (plan §3.2) — no DB lookup needed.
-  if (profile.isComp) return { kind: 'allow', entitlements: { diagnostics: true } }
+  // Comp bypasses billing, not global release policy.
+  if (profile.isComp) {
+    return {
+      kind: 'allow',
+      entitlements: await resolveShopEntitlements(db, {
+        shopId: profile.shopId,
+        isComp: true,
+      }),
+    }
+  }
   if (!profile.shopId) return { kind: 'paywall', reason: 'no_subscription' }
 
   const [customer] = await db
@@ -173,6 +181,12 @@ export async function entitlementReject(
     return NextResponse.json(
       { error: 'paywall', reason: access.reason },
       { status: 403 },
+    )
+  }
+  if (!isDiagnosticsReleaseEnabled()) {
+    return NextResponse.json(
+      OPERATIONAL_MEDIA_UNAVAILABLE.body,
+      { status: OPERATIONAL_MEDIA_UNAVAILABLE.status },
     )
   }
   if (!access.entitlements.diagnostics) {

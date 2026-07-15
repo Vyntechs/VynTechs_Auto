@@ -79,13 +79,6 @@ function toIntOrNull(v: string | undefined): number | null {
 }
 
 export async function POST(req: Request) {
-  let body: IntakeBody
-  try {
-    body = (await req.json()) as IntakeBody
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
-  }
-
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) {
@@ -102,6 +95,13 @@ export async function POST(req: Request) {
 
   if (!ctx.profile.shopId) {
     return NextResponse.json({ error: 'no_shop' }, { status: 403 })
+  }
+
+  let body: IntakeBody
+  try {
+    body = (await req.json()) as IntakeBody
+  } catch {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
 
   const description = nonEmpty(body.complaint?.description)

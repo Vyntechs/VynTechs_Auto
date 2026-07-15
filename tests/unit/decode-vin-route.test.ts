@@ -14,15 +14,17 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 // here it would throw. Stub it to no-op so the test exercises route logic
 // only. Paywall semantics are covered separately in auth-access.test.ts.
 vi.mock('@/lib/auth-access', () => ({
-  entitlementReject: vi.fn(async () => null),
+  paywallReject: vi.fn(async () => null),
 }))
 
 import { POST } from '@/app/api/intake/decode-vin/route'
 import { decodeVin } from '@/lib/intake/decode-vin'
 import { requireUserAndProfile } from '@/lib/auth'
+import { paywallReject } from '@/lib/auth-access'
 
 const decodeVinMock = vi.mocked(decodeVin)
 const requireUserMock = vi.mocked(requireUserAndProfile)
+const paywallMock = vi.mocked(paywallReject)
 
 function makeReq(body: unknown): Request {
   return new Request('http://localhost/api/intake/decode-vin', {
@@ -35,6 +37,7 @@ function makeReq(body: unknown): Request {
 describe('POST /api/intake/decode-vin', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    paywallMock.mockResolvedValue(null)
     requireUserMock.mockResolvedValue({
       profile: {
         id: 'p1',
@@ -83,7 +86,28 @@ describe('POST /api/intake/decode-vin', () => {
 
   it('returns 401 when unauthenticated', async () => {
     requireUserMock.mockResolvedValue(null)
-    const res = await POST(makeReq({ vin: 'WBA3A5C50EJF12345' }))
+    const json = vi.fn(async () => {
+      throw new Error('body must not be parsed')
+    })
+    const res = await POST({ json } as unknown as Request)
     expect(res.status).toBe(401)
+    expect(json).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
+  })
+
+  it('returns base-access rejection before parsing or decode work', async () => {
+    const { NextResponse } = await import('next/server')
+    paywallMock.mockResolvedValue(
+      NextResponse.json({ error: 'deactivated' }, { status: 403 }),
+    )
+    const json = vi.fn(async () => {
+      throw new Error('body must not be parsed')
+    })
+
+    const res = await POST({ json } as unknown as Request)
+
+    expect(res.status).toBe(403)
+    expect(json).not.toHaveBeenCalled()
+    expect(decodeVinMock).not.toHaveBeenCalled()
   })
 })
