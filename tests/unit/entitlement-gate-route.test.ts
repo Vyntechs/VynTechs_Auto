@@ -1,13 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
 import { shopEntitlements, stripeCustomers, type Profile } from '@/lib/db/schema'
 
-// Integration-style gate test: the route runs with the REAL auth-access
-// entitlement gate against a pglite database — only authentication and the
-// intake search internals are stubbed. Proves an unentitled request to a
-// gated intake API route rejects 403 while an entitled one passes.
+// Integration-style gate test: Counter search runs with the REAL base-access
+// gate against pglite while diagnostic entitlement remains irrelevant.
 const dbRef = vi.hoisted(() => ({ current: null as unknown }))
 vi.mock('@/lib/db/client', () => ({
   get db() {
@@ -40,7 +37,7 @@ function req(body: unknown) {
   })
 }
 
-describe('diagnostics entitlement gate on /api/intake/search', () => {
+describe('base access on /api/intake/search', () => {
   let db: TestDb
   let close: () => Promise<void>
   let profile: Profile
@@ -72,14 +69,10 @@ describe('diagnostics entitlement gate on /api/intake/search', () => {
     await close()
   })
 
-  it('rejects an unentitled shop with 403 error=entitlement', async () => {
+  it('keeps Counter search available when diagnostics is explicitly false', async () => {
     await db.insert(shopEntitlements).values({ shopId, diagnostics: false })
     const res = await POST(req({ q: 'smith' }))
-    expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({
-      error: 'entitlement',
-      entitlement: 'diagnostics',
-    })
+    expect(res.status).toBe(200)
   })
 
   it('passes an explicitly entitled shop', async () => {
@@ -93,13 +86,14 @@ describe('diagnostics entitlement gate on /api/intake/search', () => {
     expect(res.status).toBe(200)
   })
 
-  it('flips from rejected to passing when the entitlement row turns true', async () => {
-    await db.insert(shopEntitlements).values({ shopId, diagnostics: false })
-    expect((await POST(req({ q: 'smith' }))).status).toBe(403)
-    await db
-      .update(shopEntitlements)
-      .set({ diagnostics: true })
-      .where(eq(shopEntitlements.shopId, shopId))
-    expect((await POST(req({ q: 'smith' }))).status).toBe(200)
+  it('rejects a paywalled profile before Counter search', async () => {
+    await db.delete(stripeCustomers)
+    const res = await POST(req({ q: 'smith' }))
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: 'paywall',
+      reason: 'no_subscription',
+    })
   })
 })

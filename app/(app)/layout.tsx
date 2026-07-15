@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AppHeaderProvider shopName={shop?.name ?? null} isFounder={founder}>
-      <ShopOsShell>{children}</ShopOsShell>
+      <ShopOsShell noticeAudienceKey={ctx.profile.id}>{children}</ShopOsShell>
     </AppHeaderProvider>
   )
 }

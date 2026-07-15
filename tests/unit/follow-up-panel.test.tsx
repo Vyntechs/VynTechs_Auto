@@ -40,13 +40,13 @@ describe('FollowUpPanel', () => {
     expect(screen.getByRole('button', { name: /came back/i })).toBeTruthy()
   })
 
-  it('renders a "View case" link to /sessions/[id]', () => {
+  it('keeps follow-up actions usable without a diagnostic case entrance', () => {
     render(<FollowUpPanel items={[sampleItem]} />)
-    const link = screen.getByRole('link', { name: /view case/i })
-    expect(link).toHaveProperty(
-      'href',
-      expect.stringContaining(`/sessions/${sampleItem.sessionId}`),
-    )
+
+    expect(screen.getByRole('button', { name: /held/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /came back/i })).toBeEnabled()
+    expect(screen.queryByRole('link', { name: /view case/i })).toBeNull()
+    expect(document.querySelector('a[href^="/sessions/"]')).toBeNull()
   })
 
   it('renders an optional notes textarea', () => {

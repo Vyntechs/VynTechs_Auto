@@ -15,16 +15,16 @@ export default async function TodayPage() {
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
 
-  const [all, dueFollowUps, todayJobs, diagnosticsEntitled] = await Promise.all([
-    ctx.profile.shopId
+  const diagnosticsEntitled = await hasDiagnostics(db, {
+    shopId: ctx.profile.shopId,
+    isComp: ctx.profile.isComp,
+  })
+  const [all, dueFollowUps, todayJobs] = await Promise.all([
+    diagnosticsEntitled && ctx.profile.shopId
       ? listSessionsForShop(db, ctx.profile.shopId)
       : Promise.resolve([]),
     listDueFollowUpsForTech(db, ctx.profile.id),
     listTodayTicketJobs(db, { actor: ticketActorFromProfile(ctx.profile) }),
-    hasDiagnostics(db, {
-      shopId: ctx.profile.shopId,
-      isComp: ctx.profile.isComp,
-    }),
   ])
   const mine = all.filter((s) => s.techId === ctx.profile.id)
   const linkedSessionIds = new Set(todayJobs.linkedSessionIds)

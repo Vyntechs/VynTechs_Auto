@@ -6,6 +6,7 @@ describe('PWA manifest', () => {
     const m = manifest()
     expect(m.name).toBe('Vyntechs')
     expect(m.short_name).toBe('Vyntechs')
+    expect(m.description).toBe('ShopOS for automotive work orders, assignments, quotes, and job status.')
   })
 
   it('declares standalone display and starts at /today', () => {

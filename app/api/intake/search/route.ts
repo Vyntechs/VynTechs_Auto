@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
-import { entitlementReject } from '@/lib/auth-access'
+import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { searchIntake } from '@/lib/intake/search'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
@@ -9,6 +9,19 @@ import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
 type Body = { q?: string }
 
 export async function POST(req: Request) {
+  const supabase = await getServerSupabase()
+  const ctx = await requireUserAndProfile({ supabase, db })
+  if (!ctx) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+
+  const denied = await paywallReject(db, ctx.user.id)
+  if (denied) return denied
+
+  if (!ctx.profile.shopId) {
+    return NextResponse.json({ error: 'no_shop' }, { status: 403 })
+  }
+
   let body: Body
   try {
     body = (await req.json()) as Body
@@ -17,19 +30,6 @@ export async function POST(req: Request) {
   }
 
   const q = typeof body.q === 'string' ? body.q : ''
-
-  const supabase = await getServerSupabase()
-  const ctx = await requireUserAndProfile({ supabase, db })
-  if (!ctx) {
-    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
-  }
-
-  const denied = await entitlementReject(db, ctx.user.id)
-  if (denied) return denied
-
-  if (!ctx.profile.shopId) {
-    return NextResponse.json({ error: 'no_shop' }, { status: 403 })
-  }
 
   const start = performance.now()
 

@@ -1175,7 +1175,6 @@ function StoryCard({
   const [reviewStatus, setReviewStatus] = useState(job.story.reviewStatus)
   const [evidence, setEvidence] = useState<StoryWorkspace['evidence'] | null>(null)
   const [selectedEvents, setSelectedEvents] = useState<string[]>([])
-  const [selectedArtifacts, setSelectedArtifacts] = useState<string[]>([])
   const [whatWeFound, setWhatWeFound] = useState(job.story.content?.whatWeFound ?? '')
   const [whatWeRecommend, setWhatWeRecommend] = useState(job.story.content?.whatWeRecommend ?? '')
   const dirtyRef = useRef(false)
@@ -1234,7 +1233,7 @@ function StoryCard({
       const response = await fetch(endpoint, {
         method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ clientKey: generationKey.current, expectedStoryRevision: revision,
-          sourceEventIds: selectedEvents, sourceArtifactIds: selectedArtifacts }),
+          sourceEventIds: selectedEvents, sourceArtifactIds: [] }),
       })
       if (response.status === 409) {
         try {
@@ -1246,9 +1245,7 @@ function StoryCard({
             return
           }
           const currentEventIds = new Set(rebased.evidence.events.map((item) => item.id))
-          const currentArtifactIds = new Set(rebased.evidence.artifacts.map((item) => item.id))
           setSelectedEvents((ids) => ids.filter((id) => currentEventIds.has(id)))
-          setSelectedArtifacts((ids) => ids.filter((id) => currentArtifactIds.has(id)))
           setStory(rebased.story)
           setRevision(rebased.storyRevision)
           setReviewStatus(rebased.storyMeta?.reviewStatus ?? null)
@@ -1365,16 +1362,14 @@ function StoryCard({
           {!story && job.storyMode === 'ordinary_locked_tree' && evidence && (
             <fieldset className={styles.evidencePicker}>
               <legend>Select proof to include</legend>
-              {[...evidence.events, ...evidence.artifacts].map((item) => (
-                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id) || selectedArtifacts.includes(item.id)} disabled={item.kind === 'observation'
-                  ? selectedEvents.length >= 20 && !selectedEvents.includes(item.id)
-                  : selectedArtifacts.length >= 20 && !selectedArtifacts.includes(item.id)} onChange={(event) => {
-                  const setter = item.kind === 'observation' ? setSelectedEvents : setSelectedArtifacts
-                  setter((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))
+              {evidence.events.map((item) => (
+                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id)}
+                  disabled={selectedEvents.length >= 20 && !selectedEvents.includes(item.id)} onChange={(event) => {
+                  setSelectedEvents((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))
                 }} /> <span>{item.label}</span></label>
               ))}
-              <p role="status" aria-label="Evidence selection" aria-live="polite">Events selected · {selectedEvents.length} of 20<br />Artifacts selected · {selectedArtifacts.length} of 20</p>
-              {selectedEvents.length + selectedArtifacts.length === 0 && <p>No proof selected. The short story will use locked diagnosis facts only.</p>}
+              <p role="status" aria-label="Evidence selection" aria-live="polite">Observations selected · {selectedEvents.length} of 20</p>
+              {selectedEvents.length === 0 && <p>No observation selected. The short story will use locked diagnosis facts only.</p>}
               <button type="button" className={styles.storyAction} disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
             </fieldset>
           )}

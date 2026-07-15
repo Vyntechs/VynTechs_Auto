@@ -1,13 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Module } from '@/components/vt'
 import { formatVehicleName } from '@/lib/format'
 import type { DueFollowUp } from '@/lib/comeback/list'
 
-export function FollowUpPanel({ items }: { items: DueFollowUp[] }) {
+export function FollowUpPanel({ items }: {
+  items: DueFollowUp[]
+}) {
   if (items.length === 0) return null
   return (
     <Module num="—" label={`Check-ins · ${items.length}`}>
@@ -20,7 +21,9 @@ export function FollowUpPanel({ items }: { items: DueFollowUp[] }) {
   )
 }
 
-function FollowUpRow({ item }: { item: DueFollowUp }) {
+function FollowUpRow({ item }: {
+  item: DueFollowUp
+}) {
   const router = useRouter()
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<'held' | 'comeback' | null>(null)
@@ -122,20 +125,6 @@ function FollowUpRow({ item }: { item: DueFollowUp }) {
         >
           {busy === 'comeback' ? 'Saving…' : 'Came back'}
         </button>
-        <Link
-          href={`/sessions/${item.sessionId}`}
-          style={{
-            marginLeft: 'auto',
-            fontFamily: 'var(--vt-font-mono)',
-            fontSize: 11,
-            color: 'var(--vt-fg-2)',
-            textDecoration: 'none',
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-          }}
-        >
-          View case →
-        </Link>
       </div>
     </li>
   )

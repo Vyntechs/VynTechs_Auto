@@ -12,6 +12,10 @@ import {
   isDiagnosticsGatedRoute,
   isPaywallExempt,
 } from '@/lib/auth-access'
+import {
+  isDiagnosticsReleaseEnabled,
+  OPERATIONAL_MEDIA_UNAVAILABLE,
+} from '@/lib/release-policy'
 
 async function refreshSession(req: NextRequest) {
   const res = NextResponse.next({ request: req })
@@ -96,8 +100,17 @@ export async function middleware(req: NextRequest) {
   // Diagnostics entitlement gate (plan §3.4) — per-surface, mirroring the
   // curator gate. Runs only after paywall allow; shops without the add-on
   // are bounced off the diagnostic-engine surfaces. Fail closed.
-  if (isDiagnosticsGatedRoute(pathname) && !access.entitlements.diagnostics) {
+  if (
+    isDiagnosticsGatedRoute(pathname) &&
+    (!isDiagnosticsReleaseEnabled() || !access.entitlements.diagnostics)
+  ) {
     if (isApiRoute(pathname)) {
+      if (!isDiagnosticsReleaseEnabled()) {
+        return NextResponse.json(
+          OPERATIONAL_MEDIA_UNAVAILABLE.body,
+          { status: OPERATIONAL_MEDIA_UNAVAILABLE.status },
+        )
+      }
       return NextResponse.json(
         { error: 'entitlement', entitlement: 'diagnostics' },
         { status: 403 },

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ReactNode } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AdaptiveWorkbench } from '@/components/app-shell/adaptive-workbench'
 import { ShopOsShell } from '@/components/app-shell/shop-os-shell'
@@ -38,7 +38,7 @@ function expectGridAreas(source: string, selector: string, areas: string) {
 describe('ShopOsShell', () => {
   it('keeps one accessible workspace target and one separate status region', () => {
     render(
-      <ShopOsShell>
+      <ShopOsShell noticeAudienceKey="profile-a">
         <main>Current repair work</main>
       </ShopOsShell>,
     )
@@ -61,6 +61,38 @@ describe('ShopOsShell', () => {
     expect(within(status).getByText('Application update control')).toBeInTheDocument()
     expect(document.querySelectorAll('#shop-os-workspace')).toHaveLength(1)
     expect(document.querySelector('[role="application"]')).not.toBeInTheDocument()
+  })
+
+  it('shows each signed-in browser the legal update notice once', async () => {
+    localStorage.clear()
+    const first = render(
+      <ShopOsShell noticeAudienceKey="profile-a">
+        <main>Current repair work</main>
+      </ShopOsShell>,
+    )
+
+    const notice = await screen.findByRole('region', { name: 'Terms and Privacy update' })
+    expect(notice).toHaveTextContent('October 15, 2026')
+    expect(within(notice).getByRole('link', { name: 'Review Terms' })).toHaveAttribute('href', '/terms')
+    expect(within(notice).getByRole('link', { name: 'Review Privacy' })).toHaveAttribute('href', '/privacy')
+    fireEvent.click(within(notice).getByRole('button', { name: 'Dismiss legal update notice' }))
+    expect(screen.queryByRole('region', { name: 'Terms and Privacy update' })).toBeNull()
+    first.unmount()
+
+    render(
+      <ShopOsShell noticeAudienceKey="profile-a">
+        <main>Current repair work</main>
+      </ShopOsShell>,
+    )
+    expect(await screen.findByRole('main')).toHaveTextContent('Current repair work')
+    expect(screen.queryByRole('region', { name: 'Terms and Privacy update' })).toBeNull()
+
+    render(
+      <ShopOsShell noticeAudienceKey="profile-b">
+        <main>Second account work</main>
+      </ShopOsShell>,
+    )
+    expect(await screen.findByRole('region', { name: 'Terms and Privacy update' })).toBeInTheDocument()
   })
 })
 
@@ -230,7 +262,7 @@ describe('AdaptiveWorkbench', () => {
   it('mounts the shell inside the existing signed-in header provider', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/(app)/layout.tsx'), 'utf8')
 
-    expect(source).toMatch(/<AppHeaderProvider[\s\S]*<ShopOsShell>\{children\}<\/ShopOsShell>[\s\S]*<\/AppHeaderProvider>/)
+    expect(source).toMatch(/<AppHeaderProvider[\s\S]*<ShopOsShell noticeAudienceKey=\{ctx\.profile\.id\}>\{children\}<\/ShopOsShell>[\s\S]*<\/AppHeaderProvider>/)
     expect(source).toContain("import { ShopOsShell } from '@/components/app-shell/shop-os-shell'")
     expect(source).not.toMatch(/minHeight:\s*['"]100vh['"]/)
   })

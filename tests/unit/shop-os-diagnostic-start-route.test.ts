@@ -155,6 +155,22 @@ describe('POST ticket job diagnostic start', () => {
     expect(initializerMock).not.toHaveBeenCalled()
   })
 
+  it('returns global not-available before parsing, acquire, quota, cap, or provider work', async () => {
+    paywallMock.mockResolvedValue(
+      NextResponse.json({ error: 'not_available' }, { status: 404 }),
+    )
+
+    const response = await POST(request('not json{'), params())
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_available' })
+    expect(paywallMock).toHaveBeenCalledWith({}, USER_ID)
+    expect(acquireMock).not.toHaveBeenCalled()
+    expect(quotaMock).not.toHaveBeenCalled()
+    expect(countMock).not.toHaveBeenCalled()
+    expect(initializerMock).not.toHaveBeenCalled()
+  })
+
   it('returns uniform not_found for an authenticated null-shop profile before domain access', async () => {
     authMock.mockResolvedValue({
       ...authContext,

@@ -3,7 +3,6 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
-  jobAttachments,
   profiles,
   quoteEvents,
   quoteVersions,
@@ -19,7 +18,6 @@ import {
 export type SimpleWorkActor = { profileId: string; shopId: string }
 export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict'
 export type SimpleWorkFailure = { ok: false; error: SimpleWorkError; retryable?: true }
-export const MAX_JOB_ATTACHMENT_BYTES = 4 * 1024 * 1024
 
 type WorkProjection = {
   status: 'open' | 'in_progress' | 'done'
@@ -50,7 +48,6 @@ type LockedContext = {
   job: typeof ticketJobs.$inferSelect
   versions: Array<typeof quoteVersions.$inferSelect>
   decisions: Array<Pick<typeof quoteEvents.$inferSelect, 'id' | 'kind' | 'jobId' | 'quoteVersionId' | 'createdAt'>>
-  attachments: Array<typeof jobAttachments.$inferSelect>
 }
 
 function failure(error: SimpleWorkError, retryable = false): SimpleWorkFailure {
@@ -138,12 +135,6 @@ async function lockContext(
     || (job.kind !== 'repair' && job.kind !== 'maintenance')
     || job.sessionId !== null) return null
 
-  const attachments = await db
-    .select()
-    .from(jobAttachments)
-    .where(and(eq(jobAttachments.shopId, input.actor.shopId), eq(jobAttachments.jobId, job.id)))
-    .orderBy(asc(jobAttachments.id))
-    .for('update', { noWait: true })
   const decisions = await db
     .select({
       id: quoteEvents.id,
@@ -160,7 +151,7 @@ async function lockContext(
       inArray(quoteEvents.kind, ['approved', 'declined']),
     ))
     .orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
-  return { ticket, job, versions, decisions, attachments }
+  return { ticket, job, versions, decisions }
 }
 
 function nextTimestamp(previous: Date) {
@@ -243,12 +234,7 @@ export async function mutateSimpleWork(
       if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
         return failure('conflict', true)
       }
-      const hasWorkPhoto = context.attachments.some((attachment) => isRow23WorkPhoto(attachment, {
-        shopId: parsedActor.data.shopId,
-        jobId: job.id,
-        actorId: parsedActor.data.profileId,
-      }))
-      if (!job.workNotes?.trim() || !hasWorkPhoto) return failure('not_ready')
+      if (!job.workNotes?.trim()) return failure('not_ready')
       const [updated] = await (tx as AppDb)
         .update(ticketJobs)
         .set({ workStatus: 'done', updatedAt: nextTimestamp(job.updatedAt) })
@@ -302,11 +288,6 @@ export async function getSimpleWorkWorkspace(
       || job.sessionId !== null
       || job.workStatus === 'blocked' || job.workStatus === 'canceled'
       || (ticket.status !== 'open' && job.workStatus !== 'done')) return failure('not_found')
-    const attachments = await transactionDb.select().from(jobAttachments).where(and(
-      eq(jobAttachments.shopId, parsedActor.data.shopId),
-      eq(jobAttachments.jobId, job.id),
-    )).orderBy(asc(jobAttachments.createdAt), asc(jobAttachments.id))
-
     const versions = await transactionDb.select().from(quoteVersions).where(and(
       eq(quoteVersions.shopId, parsedActor.data.shopId),
       eq(quoteVersions.ticketId, parsedTicket.data),
@@ -320,9 +301,7 @@ export async function getSimpleWorkWorkspace(
       eq(quoteEvents.jobId, job.id),
       inArray(quoteEvents.kind, ['approved', 'declined']),
     )).orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
-    const context: LockedContext = {
-      ticket, job, versions, decisions, attachments,
-    }
+    const context: LockedContext = { ticket, job, versions, decisions }
     const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')
       ? 'approved'
       : job.approvalState === 'declined' ? 'declined' : 'awaiting_approval'
@@ -336,106 +315,9 @@ export async function getSimpleWorkWorkspace(
         workNotes: job.workNotes,
         updatedAt: job.updatedAt.toISOString(),
         authorization,
-        hasCompletionProof: attachments.some((attachment) => isRow23WorkPhoto(attachment, {
-          shopId: parsedActor.data.shopId,
-          jobId: job.id,
-          actorId: parsedActor.data.profileId,
-        })),
-        attachments: attachments.map((attachment) => ({
-          id: attachment.id,
-          kind: attachment.kind,
-          mimeType: attachment.mimeType,
-          byteSize: attachment.byteSize,
-          createdAt: attachment.createdAt.toISOString(),
-        })),
       },
     }
   }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
-}
-
-type JobAttachmentKind = 'photo' | 'video' | 'document'
-type SafeJobAttachment = {
-  id: string
-  kind: JobAttachmentKind
-  mimeType: string
-  byteSize: number
-  createdAt: string
-}
-
-export type CreateJobAttachmentResult =
-  | { ok: true; changed: boolean; attachment: SafeJobAttachment }
-  | SimpleWorkFailure
-
-export type JobAttachmentDependencies = {
-  upload: (input: { storageKey: string; bytes: Uint8Array; mimeType: string }) => Promise<void>
-  remove: (storageKey: string) => Promise<void>
-  beforeFinalize?: () => Promise<void>
-}
-
-const attachmentKinds = z.enum(['photo', 'video', 'document'])
-const mimeByKind: Record<JobAttachmentKind, ReadonlySet<string>> = {
-  photo: new Set(['image/jpeg', 'image/png', 'image/webp']),
-  video: new Set(['video/mp4', 'video/webm']),
-  document: new Set(['application/pdf', 'text/plain']),
-}
-const extensionByMime: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
-  'video/webm': 'webm',
-  'application/pdf': 'pdf',
-  'text/plain': 'txt',
-}
-
-function canonicalMime(value: string): string {
-  return value.split(';')[0].trim().toLowerCase()
-}
-
-function isRow23WorkPhoto(
-  attachment: typeof jobAttachments.$inferSelect,
-  input: { shopId: string; jobId: string; actorId: string },
-): boolean {
-  if (attachment.kind !== 'photo' || attachment.uploadedByProfileId !== input.actorId
-    || attachment.byteSize < 1 || attachment.byteSize > MAX_JOB_ATTACHMENT_BYTES) return false
-  const mimeType = canonicalMime(attachment.mimeType)
-  if (attachment.mimeType !== mimeType || !mimeByKind.photo.has(mimeType)) return false
-  const extension = extensionByMime[mimeType]
-  const prefix = `${input.shopId}/jobs/${input.jobId}/proof/${attachment.id}/`
-  const suffix = attachment.storageKey.startsWith(prefix)
-    ? attachment.storageKey.slice(prefix.length)
-    : ''
-  return suffix.length === 64 + 1 + extension.length
-    && suffix.endsWith(`.${extension}`)
-    && /^[0-9a-f]{64}\.[a-z]+$/.test(suffix)
-}
-
-function bytesStartWith(bytes: Uint8Array, signature: number[]): boolean {
-  return signature.every((value, index) => bytes[index] === value)
-}
-
-function fileSignatureMatches(mimeType: string, bytes: Uint8Array): boolean {
-  if (mimeType === 'image/jpeg') return bytesStartWith(bytes, [0xff, 0xd8, 0xff])
-  if (mimeType === 'image/png') return bytesStartWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-  if (mimeType === 'image/webp') {
-    return bytes.length >= 12
-      && new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF'
-      && new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP'
-  }
-  if (mimeType === 'video/mp4') {
-    return bytes.length >= 12 && new TextDecoder().decode(bytes.slice(4, 8)) === 'ftyp'
-  }
-  if (mimeType === 'video/webm') return bytesStartWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])
-  if (mimeType === 'application/pdf') return new TextDecoder().decode(bytes.slice(0, 5)) === '%PDF-'
-  if (mimeType === 'text/plain') {
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-      return true
-    } catch {
-      return false
-    }
-  }
-  return false
 }
 
 function derivedUuid(label: string, parts: string[]): string {
@@ -449,227 +331,6 @@ function derivedUuid(label: string, parts: string[]): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-function safeAttachment(row: typeof jobAttachments.$inferSelect): SafeJobAttachment {
-  return {
-    id: row.id,
-    kind: row.kind,
-    mimeType: row.mimeType,
-    byteSize: row.byteSize,
-    createdAt: row.createdAt.toISOString(),
-  }
-}
-
-function exactAttachmentRetry(
-  row: typeof jobAttachments.$inferSelect,
-  expected: {
-    id: string
-    jobId: string
-    actorId: string
-    kind: JobAttachmentKind
-    mimeType: string
-    byteSize: number
-    storageKey: string
-  },
-): boolean {
-  return row.id === expected.id
-    && row.jobId === expected.jobId
-    && row.uploadedByProfileId === expected.actorId
-    && row.kind === expected.kind
-    && row.mimeType === expected.mimeType
-    && row.byteSize === expected.byteSize
-    && row.storageKey === expected.storageKey
-}
-
-async function removeUnreferencedAttachment(
-  db: AppDb,
-  expected: { id: string; shopId: string; storageKey: string },
-  remove: (storageKey: string) => Promise<void>,
-): Promise<void> {
-  try {
-    const [persisted] = await db.select({ id: jobAttachments.id }).from(jobAttachments).where(and(
-      eq(jobAttachments.shopId, expected.shopId),
-      eq(jobAttachments.id, expected.id),
-      eq(jobAttachments.storageKey, expected.storageKey),
-    )).limit(1)
-    if (!persisted) await remove(expected.storageKey)
-  } catch {
-    console.warn('job attachment cleanup skipped because orphan status was not provable')
-  }
-}
-
-async function attachmentAuthorization(
-  db: AppDb,
-  input: { actor: SimpleWorkActor; ticketId: string; jobId: string; attachmentId: string },
-  expected?: Parameters<typeof exactAttachmentRetry>[1],
-): Promise<CreateJobAttachmentResult | null> {
-  const context = await lockContext(db, input)
-  if (!context) return failure('not_found')
-  const existing = context.attachments.find((attachment) => attachment.id === input.attachmentId)
-  if (existing) {
-    return expected && exactAttachmentRetry(existing, expected)
-      ? { ok: true, changed: false, attachment: safeAttachment(existing) }
-      : failure('conflict')
-  }
-  if (context.ticket.status !== 'open' || context.job.workStatus !== 'in_progress') {
-    return failure('not_ready')
-  }
-  if (!hasPinnedApproval(context, false)) return failure('not_authorized')
-  return null
-}
-
-export async function createJobAttachment(
-  db: AppDb,
-  input: {
-    actor: SimpleWorkActor
-    ticketId: unknown
-    jobId: unknown
-    requestKey: unknown
-    kind: unknown
-    file: { bytes: Uint8Array; mimeType: string; size: number }
-  },
-  dependencies: JobAttachmentDependencies,
-): Promise<CreateJobAttachmentResult> {
-  const parsedActor = z.strictObject({ profileId: uuidSchema, shopId: uuidSchema }).safeParse(input.actor)
-  const parsedTicket = uuidSchema.safeParse(input.ticketId)
-  const parsedJob = uuidSchema.safeParse(input.jobId)
-  const parsedRequest = uuidSchema.safeParse(input.requestKey)
-  const parsedKind = attachmentKinds.safeParse(input.kind)
-  if (!parsedActor.success || !parsedTicket.success || !parsedJob.success
-    || !parsedRequest.success || !parsedKind.success
-    || !(input.file.bytes instanceof Uint8Array)
-    || !Number.isSafeInteger(input.file.size)
-    || input.file.size !== input.file.bytes.byteLength
-    || input.file.size < 1 || input.file.size > MAX_JOB_ATTACHMENT_BYTES) {
-    return failure('invalid_input')
-  }
-  const mimeType = canonicalMime(input.file.mimeType)
-  const kind = parsedKind.data
-  if (!mimeByKind[kind].has(mimeType) || !fileSignatureMatches(mimeType, input.file.bytes)) {
-    return failure('invalid_input')
-  }
-  const attachmentId = derivedUuid('shop-os-job-attachment-v1', [
-    parsedActor.data.shopId,
-    parsedJob.data,
-    parsedActor.data.profileId,
-    parsedRequest.data,
-  ])
-  const digest = createHash('sha256').update(input.file.bytes).digest('hex')
-  const storageKey = `${parsedActor.data.shopId}/jobs/${parsedJob.data}/proof/${attachmentId}/${digest}.${extensionByMime[mimeType]}`
-  const expected = {
-    id: attachmentId,
-    jobId: parsedJob.data,
-    actorId: parsedActor.data.profileId,
-    kind,
-    mimeType,
-    byteSize: input.file.size,
-    storageKey,
-  }
-
-  try {
-    const preflight = await db.transaction((tx) => attachmentAuthorization(tx as AppDb, {
-      actor: parsedActor.data,
-      ticketId: parsedTicket.data,
-      jobId: parsedJob.data,
-      attachmentId,
-    }, expected))
-    if (preflight) return preflight
-  } catch (error) {
-    if (isLockUnavailable(error)) return failure('conflict', true)
-    throw error
-  }
-
-  try {
-    await dependencies.upload({ storageKey, bytes: input.file.bytes, mimeType })
-  } catch {
-    return failure('conflict', true)
-  }
-
-  let result: CreateJobAttachmentResult
-  try {
-    await dependencies.beforeFinalize?.()
-    result = await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const finalAuthorization = await attachmentAuthorization(transactionDb, {
-        actor: parsedActor.data,
-        ticketId: parsedTicket.data,
-        jobId: parsedJob.data,
-        attachmentId,
-      }, expected)
-      if (finalAuthorization) return finalAuthorization
-      const [created] = await transactionDb.insert(jobAttachments).values({
-        id: attachmentId,
-        shopId: parsedActor.data.shopId,
-        jobId: parsedJob.data,
-        storageKey,
-        kind,
-        mimeType,
-        byteSize: input.file.size,
-        uploadedByProfileId: parsedActor.data.profileId,
-      }).returning()
-      return { ok: true as const, changed: true, attachment: safeAttachment(created) }
-    })
-  } catch (error) {
-    const retryable = isLockUnavailable(error)
-      || (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505')
-    if (retryable) return failure('conflict', true)
-    await removeUnreferencedAttachment(db, {
-      id: attachmentId, shopId: parsedActor.data.shopId, storageKey,
-    }, dependencies.remove)
-    throw error
-  }
-
-  if (!result.ok) {
-    await removeUnreferencedAttachment(db, {
-      id: attachmentId, shopId: parsedActor.data.shopId, storageKey,
-    }, dependencies.remove)
-  }
-  return result
-}
-
-export async function getJobAttachmentProof(
-  db: AppDb,
-  input: { actor: SimpleWorkActor; ticketId: unknown; jobId: unknown; attachmentId: unknown },
-  dependencies: { download: (storageKey: string) => Promise<Uint8Array> },
-): Promise<{ ok: true; file: { bytes: Uint8Array; mimeType: string } } | SimpleWorkFailure> {
-  const parsedActor = z.strictObject({ profileId: uuidSchema, shopId: uuidSchema }).safeParse(input.actor)
-  const parsedTicket = uuidSchema.safeParse(input.ticketId)
-  const parsedJob = uuidSchema.safeParse(input.jobId)
-  const parsedAttachment = uuidSchema.safeParse(input.attachmentId)
-  if (!parsedActor.success || !parsedTicket.success || !parsedJob.success || !parsedAttachment.success) {
-    return failure('invalid_input')
-  }
-  const [actor] = await db.select({ id: profiles.id, role: profiles.role }).from(profiles).where(and(
-    eq(profiles.id, parsedActor.data.profileId),
-    eq(profiles.shopId, parsedActor.data.shopId),
-    eq(profiles.membershipStatus, 'active'),
-    isNull(profiles.deactivatedAt),
-  )).limit(1)
-  const [ticket] = await db.select({ id: tickets.id }).from(tickets).where(and(
-    eq(tickets.shopId, parsedActor.data.shopId), eq(tickets.id, parsedTicket.data),
-  )).limit(1)
-  const [job] = await db.select({ id: ticketJobs.id }).from(ticketJobs).where(and(
-    eq(ticketJobs.shopId, parsedActor.data.shopId),
-    eq(ticketJobs.ticketId, parsedTicket.data),
-    eq(ticketJobs.id, parsedJob.data),
-  )).limit(1)
-  const [attachment] = await db.select().from(jobAttachments).where(and(
-    eq(jobAttachments.shopId, parsedActor.data.shopId),
-    eq(jobAttachments.jobId, parsedJob.data),
-    eq(jobAttachments.id, parsedAttachment.data),
-  )).limit(1)
-  if (!actor || !isShopRole(actor.role) || !ticket || !job || !attachment
-    || attachment.byteSize < 1 || attachment.byteSize > MAX_JOB_ATTACHMENT_BYTES
-    || !mimeByKind[attachment.kind].has(canonicalMime(attachment.mimeType))) return failure('not_found')
-  try {
-    const bytes = await dependencies.download(attachment.storageKey)
-    if (bytes.byteLength !== attachment.byteSize
-      || bytes.byteLength > MAX_JOB_ATTACHMENT_BYTES
-      || !fileSignatureMatches(attachment.mimeType, bytes)) return failure('not_found')
-    return { ok: true, file: { bytes, mimeType: attachment.mimeType } }
-  } catch {
-    return failure('conflict', true)
-  }
-}
 
 type SafeEscalatedJob = {
   id: string

@@ -227,11 +227,6 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job)}</p>
-                    {job.sessionId && (
-                      <Link href={`/sessions/${job.sessionId}`} className={styles.diagnosisLink}>
-                        Open diagnosis
-                      </Link>
-                    )}
                     {simpleWorkLink(ticket, job, currentProfileId)}
                   </div>
                 </div>

@@ -56,10 +56,6 @@ export type StorageDownloadFn = (
   path: string,
 ) => Promise<{ data: Blob | null; error: { message: string } | null }>
 
-export type StorageRemoveFn = (
-  paths: string[],
-) => Promise<{ data: unknown; error: { message: string } | null }>
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -108,35 +104,4 @@ export async function downloadArtifact(
   if (error || !data) throw new Error(`download failed: ${error?.message ?? 'no data'}`)
   const buf = await data.arrayBuffer()
   return new Uint8Array(buf)
-}
-
-export async function uploadJobAttachment(input: {
-  storageKey: string
-  bytes: Uint8Array
-  mimeType: string
-  upload?: StorageUploadFn
-}): Promise<void> {
-  const upload = input.upload
-    ?? ((path, body, opts) => supabase.storage.from(BUCKET).upload(path, body, opts))
-  const { error } = await upload(input.storageKey, input.bytes, {
-    contentType: input.mimeType,
-    upsert: true,
-  })
-  if (error) throw new Error(`job attachment upload failed: ${error.message}`)
-}
-
-export async function removeJobAttachment(
-  storageKey: string,
-  opts: { remove?: StorageRemoveFn } = {},
-): Promise<void> {
-  const remove = opts.remove ?? ((paths) => supabase.storage.from(BUCKET).remove(paths))
-  const { error } = await remove([storageKey])
-  if (error) throw new Error(`job attachment removal failed: ${error.message}`)
-}
-
-export async function downloadJobAttachment(
-  storageKey: string,
-  opts: { download?: StorageDownloadFn } = {},
-): Promise<Uint8Array> {
-  return downloadArtifact(storageKey, opts)
 }

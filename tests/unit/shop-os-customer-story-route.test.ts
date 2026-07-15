@@ -44,7 +44,7 @@ const postBody = {
   clientKey: CLIENT_KEY,
   expectedStoryRevision: 0,
   sourceEventIds: [EVENT_ID],
-  sourceArtifactIds: [ARTIFACT_ID],
+  sourceArtifactIds: [],
 }
 const story = {
   whatYouToldUs: 'Battery warning appeared.',
@@ -164,16 +164,16 @@ describe('customer story route', () => {
       storyRevision: 1,
       evidence: {
         events: Array.from({ length: 25 }, (_, index) => ({ id: EVENT_ID, kind: 'observation', createdAt: storyMeta.generatedAt, label: `Event ${index}` })),
-        artifacts: [{ id: ARTIFACT_ID, kind: 'scan', createdAt: storyMeta.generatedAt, label: 'Charging scan' }],
+        artifacts: [],
         nextEventCursor: 'next-event',
-        nextArtifactCursor: 'next-artifact',
+        nextArtifactCursor: null,
       },
     }
     workspaceMock.mockResolvedValue({ ok: true, workspace })
-    const response = await GET(request('GET', undefined, undefined, '?eventCursor=event-token&artifactCursor=artifact-token'), params())
+    const response = await GET(request('GET', undefined, undefined, '?eventCursor=event-token'), params())
     expect(workspaceMock).toHaveBeenCalledWith({}, {
       actor, ticketId: TICKET_ID, jobId: JOB_ID,
-      eventCursor: 'event-token', artifactCursor: 'artifact-token',
+      eventCursor: 'event-token',
     })
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual(workspace)

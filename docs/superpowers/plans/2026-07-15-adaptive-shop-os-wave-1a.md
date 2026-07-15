@@ -558,11 +558,11 @@ Expected: clean worktree, no whitespace errors, focused/full tests green, TypeSc
 - Modify: `tests/unit/service-worker-policy.test.ts`
 - Modify: `tests/unit/sw-register.test.tsx`
 
-- [ ] **Step 1: Prove the unsafe upgrade state with RED tests**
+- [x] **Step 1: Prove the unsafe upgrade state with RED tests**
 
 Add pure and executable worker-lifecycle tests that begin with the exact active v3 worker. Prove the safe worker does not remain waiting behind that legacy controller. Prove activation scrubs the v3 cache around controller takeover, including a delayed un-awaited v3 `cache.put`, without reloading the document. Also prove an active public-only worker with the activation-only public-policy receipt remains waiting for the explicit safe-point action even when its live response is delayed or unavailable.
 
-- [ ] **Step 2: Add a one-time fail-closed privacy migration**
+- [x] **Step 2: Add a one-time fail-closed privacy migration**
 
 Register `/sw.js?cache-policy=public-v4` at explicit scope `/` with `updateViaCache: 'none'`, then call `registration.update()` so the same-URL register fast path cannot leave v3 or an earlier waiting v4 untouched. The URL change and explicit update are migration/update triggers only; neither is safety proof alone. A distinct cache named `vyntechs-public-policy-v1` holds exactly one public receipt at the allowlisted `/icons/icon-192.png?cache-policy=public-v4`, with `x-vyntechs-cache-policy: public-only-v1`. Write it only after successful safe-worker activation or bounded active-worker recovery has scrubbed every obsolete cache and verified the clean catalog; install and durable-proof validation must never create it. The exact deployed v3 worker and any merely waiting v4 worker therefore cannot forge “migration complete.” Classify an active controller as durably safe without scheduling-sensitive messaging only when all facts agree: the active worker has the exact same-origin `/sw.js?cache-policy=public-v4` identity, a side-effect-free targeted lookup returns the exact receipt, the policy cache contains exactly that one request, and the complete cache catalog contains no name except the policy cache and current public shell. A stale, empty, extra-entry, wrong-receipt, identity-mismatched, or obsolete-cache-adjacent policy cache is not proof. Otherwise challenge the active worker over a transferred `MessageChannel` for the stable `public-only-v1` capability. The current safe worker answers that exact probe. A timely exact response preserves the normal waiting lifecycle while keeping install incapable of creating durable proof. Missing, malformed, different, timed-out, or thrown responses — including any channel setup or cleanup failure — are explicitly `unknown-and-unsafe` and permit automatic `skipWaiting()` without reload. Storage eviction or manual storage clearing erases durable safety proof; privacy-first replacement in that exceptional unknown state is intentional, not an ordinary update path. With no active worker, preserve first-install behavior. Keep the explicit `ACTIVATE` message for ordinary future updates.
 
@@ -574,7 +574,7 @@ Do not start or await public-shell seeding on the `unknown-and-unsafe` path; act
 
 > **Interrupted-activation correction (2026-07-15):** Activation handlers can be terminated while the worker still becomes active. Active-worker globals therefore start network-only and attach resumable cache cleanup to the next eligible fetch lifetime. This closes both an interrupted v3 scrub and correlated receipt-write/deletion failure without blocking a successful navigation response.
 
-- [ ] **Step 3: Preserve uninterrupted work**
+- [x] **Step 3: Preserve uninterrupted work**
 
 The privacy migration may replace the legacy controller and purge its cache without reloading the document. Existing passive-controller handling must offer a manual `Reload when ready` state; it must never call `window.location.reload()` automatically. This one-time controller replacement is a privacy exception to safe-point activation, not permission for ordinary future versions to auto-activate.
 
@@ -582,7 +582,7 @@ Activation must delete every non-current cache, claim clients, and delete non-cu
 
 The `public-cache` fetch branch must treat Cache Storage as an optional acceleration layer. Cache open, match, or put failure must never reject an otherwise successful network response or make a public asset unavailable; executable tests must cover each failure boundary.
 
-- [ ] **Step 4: Verify the correction**
+- [x] **Step 4: Verify the correction**
 
 ```bash
 pnpm vitest run \

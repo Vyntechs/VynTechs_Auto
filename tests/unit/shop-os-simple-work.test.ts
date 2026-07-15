@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
+import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import {
   customers,
@@ -14,12 +15,7 @@ import {
   tickets,
   vehicles,
 } from '@/lib/db/schema'
-import {
-  createJobAttachment,
-  getSimpleWorkWorkspace,
-  mutateSimpleWork,
-  type SimpleWorkActor,
-} from '@/lib/shop-os/simple-work'
+import { getSimpleWorkWorkspace, mutateSimpleWork, type SimpleWorkActor } from '@/lib/shop-os/simple-work'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -152,33 +148,17 @@ describe('Shop OS approved simple work', () => {
     expect(replay).toMatchObject({ ok: true, changed: false })
   })
 
-  it('requires a Row-23 actor photo and replays completion from done', async () => {
+  it('requires only an authorized saved note and replays completion from done', async () => {
     const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
     if (!started.ok) throw new Error('start failed')
+    await expect(mutateSimpleWork(db, {
+      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: started.work.updatedAt },
+    })).resolves.toEqual({ ok: false, error: 'not_ready' })
     const noted = await mutateSimpleWork(db, {
       actor, ticketId, jobId,
       body: { action: 'save_note', note: 'Installed, torqued, and road checked.', expectedUpdatedAt: started.work.updatedAt },
     })
     if (!noted.ok) throw new Error('note failed')
-    await expect(mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
-    })).resolves.toEqual({ ok: false, error: 'not_ready' })
-    await db.insert(jobAttachments).values({
-      id: uuid(80), shopId, jobId,
-      storageKey: `${shopId}/jobs/${jobId}/proof/${uuid(80)}/digest.jpg`,
-      kind: 'photo', mimeType: 'image/jpeg', byteSize: 3, uploadedByProfileId: techId,
-    })
-    await expect(mutateSimpleWork(db, {
-      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
-    })).resolves.toEqual({ ok: false, error: 'not_ready' })
-    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
-    await expect(createJobAttachment(db, {
-      actor, ticketId, jobId, requestKey: uuid(81), kind: 'photo',
-      file: { bytes: jpeg, mimeType: 'image/jpeg', size: jpeg.byteLength },
-    }, {
-      upload: async () => undefined,
-      remove: async () => undefined,
-    })).resolves.toMatchObject({ ok: true, changed: true })
     const completed = await mutateSimpleWork(db, {
       actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
     })
@@ -200,38 +180,25 @@ describe('Shop OS approved simple work', () => {
         kind: 'repair',
         workStatus: 'open',
         authorization: 'approved',
-        hasCompletionProof: false,
-        attachments: [],
       },
     })
-    expect(JSON.stringify(result)).not.toMatch(/shopId|storageKey|quoteVersion|actorProfile|customerId|vehicleId/)
+    expect(result.ok && result.workspace).not.toHaveProperty('hasCompletionProof')
+    expect(result.ok && result.workspace).not.toHaveProperty('attachments')
+    expect(JSON.stringify(result)).not.toMatch(/shopId|storageKey|quoteVersion|actorProfile|customerId|vehicleId|attachment/i)
   })
 
-  it('projects completion-proof eligibility from authoritative Row-23 provenance only', async () => {
+  it('does not query or project legacy attachment rows', async () => {
     const proofId = uuid(80)
     await db.insert(jobAttachments).values({
       id: proofId, shopId, jobId,
       storageKey: `${shopId}/jobs/${jobId}/proof/${proofId}/${'a'.repeat(64)}.jpg`,
       kind: 'photo', mimeType: 'image/jpeg', byteSize: 4, uploadedByProfileId: advisorId,
     })
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
-      ok: true, workspace: { hasCompletionProof: false },
-    })
-    await db.update(jobAttachments).set({ uploadedByProfileId: techId, storageKey: 'forged/photo.jpg' })
-      .where(eq(jobAttachments.id, proofId))
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
-      ok: true, workspace: { hasCompletionProof: false },
-    })
-    await db.delete(jobAttachments).where(eq(jobAttachments.id, proofId))
-    await db.update(ticketJobs).set({ workStatus: 'in_progress' }).where(eq(ticketJobs.id, jobId))
-    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0])
-    await createJobAttachment(db, {
-      actor, ticketId, jobId, requestKey: uuid(81), kind: 'photo',
-      file: { bytes: jpeg, mimeType: 'image/jpeg', size: jpeg.byteLength },
-    }, { upload: async () => undefined, remove: async () => undefined })
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
-      ok: true, workspace: { hasCompletionProof: true },
-    })
+    const result = await getSimpleWorkWorkspace(db, { actor, ticketId, jobId })
+    expect(result.ok && result.workspace).not.toHaveProperty('attachments')
+    expect(result.ok && result.workspace).not.toHaveProperty('hasCompletionProof')
+    const source = readFileSync('lib/shop-os/simple-work.ts', 'utf8')
+    expect(source).not.toContain('from(jobAttachments)')
   })
 
   it('uses real ticket/session truth while preserving completed closed history', async () => {

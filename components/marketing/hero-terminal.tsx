@@ -2,53 +2,14 @@
 
 import { useEffect, useRef } from 'react'
 
-// Illustrative session — a single F-150 commit path. The data is the
-// shape a real session takes; specific numbers are example.
 type Row = { time: string; kind: string; cls: string; html: string }
 
 const SCRIPT_ROWS: Row[] = [
-  {
-    time: '08:14:02',
-    kind: 'STEP',
-    cls: 'k-step',
-    html: '<em>Step 03 ·</em> Inspect cold-side intercooler boot at the throttle-body joint.',
-  },
-  {
-    time: '08:14:05',
-    kind: 'OBS',
-    cls: 'k-obs',
-    html: 'Tech: <em>visible weep at lower-clamp seam, oily film on pipe.</em>',
-  },
-  {
-    time: '08:14:08',
-    kind: 'THINK',
-    cls: 'k-rung',
-    html: 'Reasoning from how the charge-air system holds pressure on this engine.',
-  },
-  {
-    time: '08:14:11',
-    kind: 'STEP',
-    cls: 'k-step',
-    html: '<em>Step 04 ·</em> Smoke test cold-side @ 5 psi. Note where it escapes.',
-  },
-  {
-    time: '08:14:48',
-    kind: 'OBS',
-    cls: 'k-obs',
-    html: 'Smoke at lower clamp seam · <span class="vm-num">3.6 psi</span>',
-  },
-  {
-    time: '08:14:51',
-    kind: 'CONF',
-    cls: 'k-rung',
-    html: 'Confidence <span class="vm-term-dial"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="oklch(28% 0.012 260)" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="9" stroke="oklch(62% 0.15 245)" stroke-width="2" fill="none" stroke-dasharray="56.5" stroke-dashoffset="7.3" transform="rotate(-90 12 12)" stroke-linecap="round"/></svg><span class="vm-dial-num">87%</span></span> — above the line, clear to call.',
-  },
-  {
-    time: '08:14:53',
-    kind: 'OK',
-    cls: 'k-ok',
-    html: 'Replace lower clamp at the throttle-body joint.',
-  },
+  { time: '08:14', kind: 'INTAKE', cls: 'k-step', html: '<em>2018 F-250</em> · crank, no start' },
+  { time: '08:16', kind: 'ASSIGN', cls: 'k-obs', html: 'Fuel-system check assigned to <em>Bay 03</em>' },
+  { time: '08:43', kind: 'NOTE', cls: 'k-rung', html: 'Manual finding: supply pressure drops under crank.' },
+  { time: '08:48', kind: 'QUOTE', cls: 'k-step', html: 'Pump test and repair line ready for review.' },
+  { time: '08:55', kind: 'OK', cls: 'k-ok', html: 'Customer approved · work status moved to ready.' },
   { time: '', kind: '', cls: '', html: '' },
 ]
 
@@ -58,74 +19,45 @@ export function HeroTerminal() {
   useEffect(() => {
     const body = bodyRef.current
     if (!body) return
-
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    let i = 0
+    let index = 0
     let timeout: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
 
     const renderRow = (row: Row, immediate: boolean) => {
-      const el = document.createElement('div')
-      el.className = 'vm-term-row'
+      const element = document.createElement('div')
+      element.className = 'vm-term-row'
       if (immediate) {
-        el.style.animation = 'none'
-        el.style.opacity = '1'
+        element.style.animation = 'none'
+        element.style.opacity = '1'
       }
-      el.innerHTML =
-        '<div class="vm-term-time">' +
-        row.time +
-        '</div><div class="vm-term-kind ' +
-        row.cls +
-        '">' +
-        row.kind +
-        '</div><div class="vm-term-text">' +
-        row.html +
-        '</div>'
-      body.appendChild(el)
-      while (body.children.length > 10) {
-        const first = body.firstChild
-        if (first) body.removeChild(first)
-      }
+      element.innerHTML = `<div class="vm-term-time">${row.time}</div><div class="vm-term-kind ${row.cls}">${row.kind}</div><div class="vm-term-text">${row.html}</div>`
+      body.appendChild(element)
+      while (body.children.length > 8) body.firstChild?.remove()
     }
 
     const addRow = () => {
       if (cancelled) return
-      if (i >= SCRIPT_ROWS.length) {
+      if (index >= SCRIPT_ROWS.length) {
         timeout = setTimeout(() => {
           if (cancelled) return
           body.innerHTML = ''
-          i = 0
+          index = 0
           addRow()
-        }, 4000)
+        }, 3500)
         return
       }
-      const row = SCRIPT_ROWS[i++]
+      const row = SCRIPT_ROWS[index++]
       if (!row.time) {
-        timeout = setTimeout(addRow, 800)
+        timeout = setTimeout(addRow, 700)
         return
       }
       renderRow(row, false)
-      if (reduce) {
-        addRow()
-        return
-      }
-      const delay =
-        row.kind === 'STEP'
-          ? 900
-          : row.kind === 'GATE'
-            ? 1100
-            : row.kind === 'OK'
-              ? 1400
-              : 600 + Math.random() * 400
-      timeout = setTimeout(addRow, delay)
+      timeout = setTimeout(addRow, reduce ? 0 : 850)
     }
 
-    // Seed first 4 rows so the panel isn't empty on first paint
-    while (i < 4 && i < SCRIPT_ROWS.length) {
-      renderRow(SCRIPT_ROWS[i++], true)
-    }
+    while (index < 3) renderRow(SCRIPT_ROWS[index++], true)
     timeout = setTimeout(addRow, 900)
-
     return () => {
       cancelled = true
       if (timeout) clearTimeout(timeout)
@@ -135,14 +67,9 @@ export function HeroTerminal() {
   return (
     <div className="vm-term">
       <div className="vm-term-head">
-        <span>Session log</span>
-        <span className="vm-term-live">
-          <span className="vm-dot2" />
-          Live &middot; Bay 03
-        </span>
-        <span className="vm-term-vin">
-          P0299 &middot; 2018 F-150 — example session
-        </span>
+        <span>Living repair order</span>
+        <span className="vm-term-live"><span className="vm-dot2" />Live &middot; Bay 03</span>
+        <span className="vm-term-vin">RO 000127 &middot; example workflow</span>
       </div>
       <div className="vm-term-body" ref={bodyRef} />
     </div>

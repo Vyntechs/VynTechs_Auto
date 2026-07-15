@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
-  jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
+  jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
   ticketJobs, tickets,
 } from '@/lib/db/schema'
 import { resolveShopEntitlements } from '@/lib/entitlements'
@@ -851,7 +851,6 @@ type VersionContext = {
   shop: Pick<typeof shops.$inferSelect, 'id' | 'laborRateCents' | 'taxRateBps'>
   jobs: Array<typeof ticketJobs.$inferSelect>
   lines: Array<typeof jobLines.$inferSelect>
-  attachments: Array<typeof jobAttachments.$inferSelect>
   versions: Array<typeof quoteVersions.$inferSelect>
   actorId: string
 }
@@ -905,14 +904,6 @@ async function lockVersionContext(
       .where(and(eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobIds)))
       .orderBy(jobLines.id)
       .for('update', { noWait: true })
-  const attachments = jobIds.length === 0
-    ? []
-    : await db
-      .select()
-      .from(jobAttachments)
-      .where(and(eq(jobAttachments.shopId, input.shopId), inArray(jobAttachments.jobId, jobIds)))
-      .orderBy(jobAttachments.id)
-      .for('update', { noWait: true })
   const versions = await db
     .select()
     .from(quoteVersions)
@@ -931,7 +922,7 @@ async function lockVersionContext(
     .limit(1)
     .for('update', { noWait: true })
   if (!actor || !canBuildQuotes(actor.role)) return null
-  return { ticket, shop, jobs, lines, attachments, versions, actorId: actor.id }
+  return { ticket, shop, jobs, lines, versions, actorId: actor.id }
 }
 
 function safeUuid(value: string): string {
@@ -1040,6 +1031,9 @@ function requireVersionableStory(
     return
   }
   const safeStory = safeBuilderStory(story, meta)
+  if (safeStory.content?.howWeKnow.some((claim) => claim.sourceArtifactIds.length > 0)) {
+    throw new TypeError('new quote versions cannot acquire media provenance')
+  }
   if (safeStory.source === 'ai' && safeStory.reviewStatus !== 'reviewed') {
     throw new TypeError('AI customer story requires human review')
   }
@@ -1095,12 +1089,6 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
     const rows = linesByJob.get(line.jobId) ?? []
     rows.push(line)
     linesByJob.set(line.jobId, rows)
-  }
-  const attachmentsByJob = new Map<string, Array<typeof jobAttachments.$inferSelect>>()
-  for (const attachment of context.attachments) {
-    const rows = attachmentsByJob.get(attachment.jobId) ?? []
-    rows.push(attachment)
-    attachmentsByJob.set(attachment.jobId, rows)
   }
   const jobs = sortBySnapshotOrder(context.jobs)
     .filter((job) => job.workStatus !== 'canceled'
@@ -1159,11 +1147,7 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
         customerStory: safeCustomerStory(job.customerStory),
         storyMeta: buildQuoteStoryMeta(job.storyMeta),
         lines,
-        attachments: sortBySnapshotOrder(attachmentsByJob.get(job.id) ?? []).map((attachment) => ({
-          id: safeUuid(attachment.id),
-          jobId: safeUuid(attachment.jobId),
-          kind: attachment.kind,
-        })),
+        attachments: [],
         totals: {
           subtotalCents: totals.subtotalCents,
           taxableSubtotalCents: totals.taxableSubtotalCents,

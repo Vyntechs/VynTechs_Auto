@@ -16,17 +16,19 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 // Stub the paywall check so the test exercises route logic only — the
 // route's real paywall path is covered by auth-access.test.ts.
 vi.mock('@/lib/auth-access', () => ({
-  entitlementReject: vi.fn(async () => null),
+  paywallReject: vi.fn(async () => null),
 }))
 
 import { POST } from '@/app/api/intake/search/route'
 import { searchIntake } from '@/lib/intake/search'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
 import { requireUserAndProfile } from '@/lib/auth'
+import { paywallReject } from '@/lib/auth-access'
 
 const searchMock = vi.mocked(searchIntake)
 const recentsMock = vi.mocked(getRecentIntakeCustomers)
 const authMock = vi.mocked(requireUserAndProfile)
+const paywallMock = vi.mocked(paywallReject)
 
 function req(body: unknown) {
   return new Request('http://localhost/api/intake/search', {
@@ -55,6 +57,7 @@ const ownerProfile = {
 describe('POST /api/intake/search', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    paywallMock.mockResolvedValue(null)
     authMock.mockResolvedValue({ profile: ownerProfile, user: { id: 'u1', email: 'o@shop.test' } })
   })
 
@@ -86,8 +89,30 @@ describe('POST /api/intake/search', () => {
 
   it('returns 401 when unauthenticated', async () => {
     authMock.mockResolvedValue(null)
-    const res = await POST(req({ q: 'smith' }))
+    const json = vi.fn(async () => {
+      throw new Error('body must not be parsed')
+    })
+    const res = await POST({ json } as unknown as Request)
     expect(res.status).toBe(401)
+    expect(json).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
+  })
+
+  it('returns base-access rejection before parsing or search work', async () => {
+    const { NextResponse } = await import('next/server')
+    paywallMock.mockResolvedValue(
+      NextResponse.json({ error: 'paywall', reason: 'past_due' }, { status: 403 }),
+    )
+    const json = vi.fn(async () => {
+      throw new Error('body must not be parsed')
+    })
+
+    const res = await POST({ json } as unknown as Request)
+
+    expect(res.status).toBe(403)
+    expect(json).not.toHaveBeenCalled()
+    expect(searchMock).not.toHaveBeenCalled()
+    expect(recentsMock).not.toHaveBeenCalled()
   })
 
   it('returns 403 when profile has no shopId', async () => {

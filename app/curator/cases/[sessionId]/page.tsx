@@ -19,7 +19,7 @@ export default async function CuratorCasePage({
   const detail = await fetchCuratorCaseDetail(db, sessionId)
   if (!detail) notFound()
 
-  const { session, events, artifacts } = detail
+  const { session, events } = detail
 
   let novelQueueEntry: { id: string } | null = null
   if (from === 'novel') {
@@ -171,35 +171,6 @@ export default async function CuratorCasePage({
           ) : null}
         </dl>
       </section>
-
-      {/* ── Section 4: Artifacts ── */}
-      {artifacts.length > 0 ? (
-        <section>
-          <h2>Artifacts</h2>
-          {/* artifacts have no publicUrl — they use storageKey for internal storage;
-              direct browser links are not available here (signed URLs would need a server action) */}
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {artifacts.map((art) => (
-              <li key={art.id} className="vt-artifact-row">
-                <span className="vt-artifact-kind">{art.kind}</span>
-                <span style={{ color: 'var(--vt-fg-3)', fontSize: 12 }}>
-                  {art.mimeType} · {(art.bytes / 1024).toFixed(1)} KB ·{' '}
-                  {art.extractionStatus}
-                </span>
-                <time
-                  dateTime={art.createdAt.toISOString()}
-                  style={{ color: 'var(--vt-fg-3)', fontSize: 12 }}
-                >
-                  {art.createdAt.toLocaleDateString()}
-                </time>
-                {art.extraction?.summary ? (
-                  <p style={{ margin: '4px 0 0', fontSize: 13 }}>{art.extraction.summary}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
 
       {from === 'deferred' && (
         <DeferredActions sessionId={session.id} />

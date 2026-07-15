@@ -188,31 +188,7 @@ describe('DeclineOrDefer (presentational)', () => {
     expect(onNo).toHaveBeenCalledTimes(1)
   })
 
-  it('renders a photo hero with Snap-it when photoAsk is provided', () => {
-    const onSnap = vi.fn()
-    render(
-      <DeclineOrDefer
-        vehicleName="x"
-        vehicleVin="x"
-        timer="x"
-        gap="g"
-        options={[
-          { number: 1, title: 'A', description: 'a' },
-          { number: 2, title: 'B', description: 'b' },
-          { number: 3, title: 'C', description: 'c' },
-        ]}
-        photoAsk={{
-          prompt: 'Snap the C171 pinout page',
-          onSnap,
-        }}
-      />,
-    )
-    expect(screen.getByText(/Snap the C171 pinout page/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /snap it/i }))
-    expect(onSnap).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders no hero when neither confirmAsk nor photoAsk is provided', () => {
+  it('renders no hero when confirmAsk is not provided', () => {
     render(
       <DeclineOrDefer
         vehicleName="x"
@@ -243,7 +219,7 @@ describe('DeclineOrDefer (presentational)', () => {
     expect(screen.getByText(/fastest path forward/i)).toBeInTheDocument()
   })
 
-  it('omits the FASTEST PATH FORWARD eyebrow when no confirm/photo hero is shown', () => {
+  it('omits the FASTEST PATH FORWARD eyebrow when no confirm hero is shown', () => {
     render(
       <DeclineOrDefer
         vehicleName="x"
@@ -400,11 +376,7 @@ describe('DeclineOrDeferLive (wired)', () => {
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
   })
 
-  it('photo hero — uploads via /capture, then releases the gate, then routes', async () => {
-    mockFetchSequence(
-      { ok: true, body: { artifactId: 'art-xyz' } },
-      { ok: true, body: { ok: true } },
-    )
+  it('photo-shaped guidance exposes no media control or operational request', () => {
     const { container } = render(
       <DeclineOrDeferLive
         {...baseProps}
@@ -415,30 +387,18 @@ describe('DeclineOrDeferLive (wired)', () => {
         }}
       />,
     )
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
-    expect(fileInput).toBeTruthy()
-    const file = new File(['x'], 'pinout.jpg', { type: 'image/jpeg' })
-    Object.defineProperty(fileInput, 'files', { value: [file] })
-    fireEvent.change(fileInput)
-    await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/sessions/sess-abc/capture',
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    )
-    await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/sessions/sess-abc/release-gate',
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    )
-    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('/sessions/sess-abc'))
+    expect(container.querySelector('input[type="file"]')).toBeNull()
+    expect(container.querySelector('[capture]')).toBeNull()
+    expect(screen.queryByRole('button', { name: /snap|upload/i })).toBeNull()
+    expect(screen.queryByText(/Snap the C171 pinout page/i)).toBeNull()
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 
   it('does not render the hero when whatWouldClose is a legacy string', () => {
     render(<DeclineOrDeferLive {...baseProps} whatWouldClose="quote the FSM page" />)
     expect(screen.queryByRole('button', { name: /^yes$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /snap it/i })).not.toBeInTheDocument()
+    expect(screen.getByText('quote the FSM page')).toBeInTheDocument()
   })
 
   it('renders confirm hero buttons with yesLabel / noLabel when AI provides them', () => {

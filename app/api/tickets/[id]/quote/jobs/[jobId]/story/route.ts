@@ -19,7 +19,6 @@ import {
 
 const cursorQuery = z.strictObject({
   eventCursor: z.string().min(1).max(1_000).optional(),
-  artifactCursor: z.string().min(1).max(1_000).optional(),
 })
 const uuidList = z.array(z.uuid()).max(20).superRefine((ids, context) => {
   if (new Set(ids).size !== ids.length) {
@@ -30,7 +29,7 @@ const generationEnvelope = z.strictObject({
   clientKey: z.uuid(),
   expectedStoryRevision: z.number().int().nonnegative(),
   sourceEventIds: uuidList,
-  sourceArtifactIds: uuidList,
+  sourceArtifactIds: z.array(z.never()).length(0),
 })
 const reviewEnvelope = z.strictObject({
   clientKey: z.uuid(),
@@ -59,9 +58,8 @@ export async function GET(req: Request, { params }: RouteContext) {
 
   const query = new URL(req.url).searchParams
   if (
-    [...query.keys()].some((key) => key !== 'eventCursor' && key !== 'artifactCursor') ||
-    query.getAll('eventCursor').length > 1 ||
-    query.getAll('artifactCursor').length > 1
+    [...query.keys()].some((key) => key !== 'eventCursor') ||
+    query.getAll('eventCursor').length > 1
   ) return invalidInput()
   const parsedQuery = cursorQuery.safeParse(Object.fromEntries(query))
   if (!parsedQuery.success) return invalidInput()

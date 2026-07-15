@@ -2,8 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { TodayJobsBoard } from '@/components/screens/today-jobs-board'
+import { TodayJobsBoard as TodayJobsBoardComponent } from '@/components/screens/today-jobs-board'
 import type { TodayTicketJob } from '@/lib/tickets'
+import type { ComponentProps } from 'react'
+
+function TodayJobsBoard(props: ComponentProps<typeof TodayJobsBoardComponent>) {
+  return <TodayJobsBoardComponent diagnosticsEntitled {...props} />
+}
 
 const { pushMock, refreshMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -730,7 +735,7 @@ describe('TodayJobsBoard persisted ledger', () => {
 })
 
 describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
-  it('renders the existing Start diagnosis action by default (entitled)', () => {
+  it('renders the legacy Start diagnosis action only when explicitly enabled', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
 
     expect(screen.getByRole('button', { name: 'Start diagnosis' })).toBeInTheDocument()
@@ -738,28 +743,25 @@ describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
     expect(screen.queryByText('Diagnose with AI — add-on')).not.toBeInTheDocument()
   })
 
-  it('renders Record findings in the same slot when the shop lacks the add-on', () => {
+  it('defaults to Record findings with no engine control or add-on teaser', () => {
     render(
-      <TodayJobsBoard
+      <TodayJobsBoardComponent
         myJobs={[unlinkedDiagnostic]}
         openJobs={[]}
-        diagnosticsEntitled={false}
       />,
     )
 
     const link = screen.getByRole('link', { name: 'Record findings' })
     expect(link).toHaveAttribute('href', '/tickets/ticket-42/quote')
     expect(screen.queryByRole('button', { name: 'Start diagnosis' })).not.toBeInTheDocument()
-    // The quiet one-line affordance is the only permissible upsell.
-    expect(screen.getByText('Diagnose with AI — add-on')).toBeInTheDocument()
+    expect(screen.queryByText('Diagnose with AI — add-on')).not.toBeInTheDocument()
   })
 
   it('fails closed for linked diagnostics too: no Open diagnosis without the add-on', () => {
     render(
-      <TodayJobsBoard
+      <TodayJobsBoardComponent
         myJobs={[linkedDiagnostic]}
         openJobs={[]}
-        diagnosticsEntitled={false}
       />,
     )
 
@@ -772,10 +774,9 @@ describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
 
   it('leaves repair and maintenance actions untouched without the add-on', () => {
     render(
-      <TodayJobsBoard
+      <TodayJobsBoardComponent
         myJobs={[repair, maintenance]}
         openJobs={[]}
-        diagnosticsEntitled={false}
       />,
     )
 

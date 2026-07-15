@@ -1,10 +1,14 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { TodayHome } from '@/components/screens/today-home'
+import { TodayHome as TodayHomeComponent } from '@/components/screens/today-home'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
 import type { TodayTicketJobs } from '@/lib/tickets'
-import type { ImgHTMLAttributes } from 'react'
+import type { ComponentProps, ImgHTMLAttributes } from 'react'
+
+function TodayHome(props: ComponentProps<typeof TodayHomeComponent>) {
+  return <TodayHomeComponent diagnosticsEntitled {...props} />
+}
 
 vi.mock('next/image', () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
@@ -100,7 +104,7 @@ describe('TodayHome', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders persistent New diagnosis CTA in header when sessions exist', () => {
+  it('does not expose a standalone new-diagnosis entrance', () => {
     render(
       <TodayHome
         techName="Brandon"
@@ -108,17 +112,15 @@ describe('TodayHome', () => {
         closedToday={[]}
       />,
     )
-    const link = screen.getByRole('link', { name: /new diagnosis/i })
-    expect(link).toHaveAttribute('href', '/sessions/new')
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
   })
 
-  it('renders New diagnosis CTA in empty state too', () => {
+  it('keeps the empty state pointed at ShopOS work', () => {
     render(
       <TodayHome techName="Brandon" inProgress={[]} closedToday={[]} />,
     )
-    const links = screen.getAllByRole('link', { name: /new diagnosis/i })
-    expect(links.length).toBeGreaterThanOrEqual(1)
-    expect(links[0]).toHaveAttribute('href', '/sessions/new')
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
+    expect(screen.getByText(/new work orders and quick tickets appear here/i)).toBeInTheDocument()
   })
 
   it('renders modules in order: In-progress → Check-ins → Closed today', () => {
@@ -160,7 +162,7 @@ describe('TodayHome', () => {
     expect(screen.getByText(/Check-ins · 1/i)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
     expect(screen.getByText(/Closed today · 1/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /new diagnosis/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
   })
 
   it('does not show legacy empty guidance when ticket work exists', () => {
@@ -307,6 +309,32 @@ describe('TodayHome', () => {
   it('does not render the Quick ticket entry without the create capability', () => {
     render(<TodayHome techName="Avery" inProgress={[]} closedToday={[]} />)
     expect(screen.queryByRole('link', { name: 'Quick ticket' })).toBeNull()
+  })
+
+  it('defaults to an honest ShopOS surface with no diagnostic engine entrance', () => {
+    render(
+      <TodayHomeComponent
+        techName="Avery"
+        inProgress={[baseSession]}
+        closedToday={[closedSession]}
+        dueFollowUps={[dueFollowUp]}
+        canWriteCounterOrder
+        canCreateTickets
+        todayJobs={todayJobs}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'New work order' })).toHaveAttribute('href', '/intake')
+    expect(screen.getByRole('link', { name: 'Quick ticket' })).toHaveAttribute('href', '/tickets/new')
+    expect(screen.getByRole('link', { name: 'Record findings' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-mine/quote',
+    )
+    expect(screen.queryByRole('link', { name: /new diagnosis|open diagnosis|view case/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /start diagnosis/i })).toBeNull()
+    expect(screen.queryByText('Diagnose with AI — add-on')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'In progress' })).toBeNull()
+    expect(screen.queryByText(/Closed today/i)).toBeNull()
   })
 })
 

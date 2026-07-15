@@ -83,7 +83,7 @@ export default function SignInPage() {
           margin: '0 0 24px',
         }}
       >
-        Pick up where you left off — your bay, your queue, your sessions.
+        Pick up your work orders, job flow, and quotes where you left them.
       </p>
 
       <button

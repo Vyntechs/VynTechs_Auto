@@ -36,15 +36,18 @@ vi.mock('@/components/screens/today-home', () => ({
     inProgress,
     closedToday,
     todayJobs,
+    diagnosticsEntitled,
   }: {
     inProgress: Session[]
     closedToday: Session[]
     todayJobs: TodayTicketJobs
+    diagnosticsEntitled: boolean
   }) => (
     <div>
       <span>ticket jobs {todayJobs.myJobs.length + todayJobs.openJobs.length}</span>
       <span>active sessions {inProgress.map((session) => session.id).join(',')}</span>
       <span>closed sessions {closedToday.map((session) => session.id).join(',')}</span>
+      <span>diagnostics {String(diagnosticsEntitled)}</span>
     </div>
   ),
 }))
@@ -53,11 +56,13 @@ import TodayPage from '@/app/(app)/today/page'
 import { requireUserAndProfile } from '@/lib/auth'
 import { listSessionsForShop } from '@/lib/db/queries'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
+import { hasDiagnostics } from '@/lib/entitlements'
 import { listTodayTicketJobs } from '@/lib/tickets'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
 const sessionsMock = vi.mocked(listSessionsForShop)
 const followUpsMock = vi.mocked(listDueFollowUpsForTech)
+const hasDiagnosticsMock = vi.mocked(hasDiagnostics)
 const todayJobsMock = vi.mocked(listTodayTicketJobs)
 
 const profile = {
@@ -133,6 +138,7 @@ describe('TodayPage Shop OS composition', () => {
     ])
     followUpsMock.mockResolvedValue([])
     todayJobsMock.mockResolvedValue(jobs)
+    hasDiagnosticsMock.mockResolvedValue(true)
   })
 
   it('redirects before loading Today data when unauthenticated', async () => {
@@ -158,5 +164,18 @@ describe('TodayPage Shop OS composition', () => {
     expect(screen.getByText('closed sessions legacy-closed')).toBeInTheDocument()
     expect(screen.queryByText(/linked-open,/)).not.toBeInTheDocument()
     expect(screen.queryByText(/linked-closed,/)).not.toBeInTheDocument()
+  })
+
+  it('does not load or project diagnostic sessions when diagnostics are off', async () => {
+    hasDiagnosticsMock.mockResolvedValue(false)
+
+    render(await TodayPage())
+
+    expect(sessionsMock).not.toHaveBeenCalled()
+    expect(screen.getByText('active sessions')).toBeInTheDocument()
+    expect(screen.getByText('closed sessions')).toBeInTheDocument()
+    expect(screen.getByText('diagnostics false')).toBeInTheDocument()
+    expect(todayJobsMock).toHaveBeenCalledWith({}, { actor })
+    expect(followUpsMock).toHaveBeenCalledWith({}, profile.id)
   })
 })

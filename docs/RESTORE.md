@@ -62,8 +62,19 @@ Then redeploy production by pushing a no-op commit to `main`, or via Vercel dash
 
 - Sign in to vyntechs.dev
 - Check `/api/health` — should report `pingOk: true`
-- Verify a known case still exists in `/sessions`
-- Spot-check one corpus entry exists if any were promoted
+- Verify a known work order still exists in `/today`
+- Verify assignments, quotes, and text work notes are readable
+- Confirm the diagnostic release remains off
+
+## Step 7 — Reconcile the no-media boundary before reopening
+
+Operational object storage is intentionally absent in the current release.
+Old database backups may restore dormant media metadata rows, but never media bytes.
+Complete the Row 49 zero-media reconciliation before reopening the restored environment.
+
+Do not create a storage bucket, restore historical objects, or treat the daily
+database workflow as a media backup. If unexpected media bytes or a live media
+dependency appears, keep the restored environment closed and escalate.
 
 If something looks off, you can re-run the restore from a different (older) backup — they don't interfere with each other.
 
@@ -76,8 +87,7 @@ For a small dataset (a few MB compressed), under 5 minutes from "find the backup
 - Data created **between** the last backup and the disaster. If the workflow runs at 7 UTC and you wipe the DB at 18 UTC, you lose 11 hours of work.
   - Mitigation: a more recent backup means less loss. The workflow can be triggered manually any time with `gh workflow run daily-db-backup.yml`.
   - For zero data loss, you'd need Supabase Pro + Point-in-Time Recovery ($100+/mo).
-- Storage objects (Supabase Storage / S3 buckets). The DB dump is **just the database**, not uploaded files like photos.
-  - At MVP, no Storage objects yet (Phase J is parked). When that ships, add Storage to this backup workflow.
+- Operational object storage. The current release intentionally has none, and the database backup is not a media backup.
 
 ## Testing the restore (recommended)
 

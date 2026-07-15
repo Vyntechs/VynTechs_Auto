@@ -9,10 +9,8 @@ import styles from './today-jobs-board.module.css'
 type Props = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
-  // Per-shop diagnostics add-on entitlement (plan §3). Defaults true to
-  // match DIAGNOSTICS_DEFAULT_UNTIL_PRICED — the server resolves the real
-  // value and middleware/handlers enforce it; this only picks which action
-  // fills the job's single slot.
+  // Resolved server-side release availability. Fail closed so a missing prop
+  // can never reopen a diagnostic-engine entrance.
   diagnosticsEntitled?: boolean
 }
 
@@ -49,7 +47,7 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
-export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = true }: Props) {
+export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = false }: Props) {
   const router = useRouter()
   const boardRef = useRef<HTMLElement>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
@@ -298,7 +296,7 @@ function JobSection({
   setClaimButton,
   pendingDiagnosticJobId = null,
   diagnosticsDisabled = false,
-  diagnosticsEntitled = true,
+  diagnosticsEntitled = false,
   ambiguousJobStates = new Map(),
   onStartDiagnostic,
   onRefreshDiagnostic,
@@ -484,22 +482,16 @@ function DiagnosticAction({
   const persistedState = job.diagnosticStartState ?? 'idle'
   const state = forceAmbiguous ? 'ambiguous' : persistedState
 
-  // One-slot rule (plan §3): without the diagnostics add-on the same slot
-  // carries the manual path. Record findings opens the quote workspace,
-  // where the tech fills the customer story and enters lines by hand —
-  // the same shapes the AI path fills. The single line below the action is
-  // the only permissible upsell affordance.
+  // One-slot rule: when the engine is unavailable, the same slot carries the
+  // manual text path. No disabled control or upsell teaser competes with work.
   if (!entitled) {
     return (
-      <div className={styles.ambiguity}>
-        <Link
-          href={`/tickets/${job.ticketId}/quote`}
-          className={`${styles.control} ${styles.claim}`}
-        >
-          Record findings
-        </Link>
-        <p className={styles.addOnNote}>Diagnose with AI — add-on</p>
-      </div>
+      <Link
+        href={`/tickets/${job.ticketId}/quote`}
+        className={`${styles.control} ${styles.claim}`}
+      >
+        Record findings
+      </Link>
     )
   }
 

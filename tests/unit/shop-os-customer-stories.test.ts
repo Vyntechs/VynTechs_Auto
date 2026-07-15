@@ -116,7 +116,7 @@ describe('Shop OS customer story domain', () => {
     dependencyOverrides: Record<string, unknown> = {},
   ) => generateAndSaveCustomerStory(db, {
     actor, ticketId, jobId, clientKey: uuid(100), expectedStoryRevision: 0,
-    sourceEventIds: [eventId], sourceArtifactIds: [artifactId], ...overrides,
+    sourceEventIds: [eventId], sourceArtifactIds: [], ...overrides,
   }, { generateCustomerStory: provider, ...dependencyOverrides })
 
   it('captures generated PGlite SQL in the pinned NOWAIT lock order', async () => {
@@ -124,14 +124,13 @@ describe('Shop OS customer story domain', () => {
     expect(await generate({}, vi.fn(async () => ({ selections: [] })), {
       captureLockSql: (sqlStatements: string[]) => statements.push(...sqlStatements),
     })).toMatchObject({ ok: true })
-    expect(statements).toHaveLength(7)
+    expect(statements).toHaveLength(6)
     expect(statements.map((statement) => statement.replace(/\s+/g, ' '))).toEqual([
       expect.stringMatching(/from "tickets".*where "tickets"\."id" = \$1.*for update nowait/i),
       expect.stringMatching(/from "ticket_jobs".*where "ticket_jobs"\."ticket_id" = \$1.*order by "ticket_jobs"\."id".*for update nowait/i),
       expect.stringMatching(/from "quote_versions".*where "quote_versions"\."ticket_id" = \$1.*order by "quote_versions"\."id".*for update nowait/i),
       expect.stringMatching(/from "sessions".*where "sessions"\."id" = \$1.*for update nowait/i),
       expect.stringMatching(/from "session_events".*where "session_events"\."id" in \(\$1\).*order by "session_events"\."id".*for update nowait/i),
-      expect.stringMatching(/from "artifacts".*where "artifacts"\."id" in \(\$1\).*order by "artifacts"\."id".*for update nowait/i),
       expect.stringMatching(/from "profiles".*where "profiles"\."id" = \$1.*for update nowait/i),
     ])
   })
@@ -149,7 +148,6 @@ describe('Shop OS customer story domain', () => {
     })
     expect(provider).toHaveBeenCalledWith({ evidence: [
       expect.objectContaining({ sourceKind: 'event', sourceId: eventId }),
-      expect.objectContaining({ sourceKind: 'artifact', sourceId: artifactId }),
     ] })
     const serialized = JSON.stringify(provider.mock.calls[0][0])
     expect(serialized).not.toContain('SECRET AI RESPONSE')
@@ -228,17 +226,10 @@ describe('Shop OS customer story domain', () => {
     expect(await generate({ sourceArtifactIds: [] }, provider)).toEqual({ ok: false, error: 'provider_failed' })
   })
 
-  it('rejects incomplete, oversized, deep, and total-cap artifact evidence', async () => {
-    await db.update(artifacts).set({ extractionStatus: 'pending' }).where(eq(artifacts.id, artifactId))
-    expect(await generate({ sourceEventIds: [] })).toEqual({ ok: false, error: 'invalid_evidence' })
-    await db.update(artifacts).set({ extractionStatus: 'done', extraction: { text: 'x'.repeat(10_001) } }).where(eq(artifacts.id, artifactId))
-    expect(await generate({ sourceEventIds: [] })).toEqual({ ok: false, error: 'invalid_evidence' })
-    let deep: Record<string, unknown> = { value: 'measured' }
-    for (let index = 0; index < 9; index += 1) deep = { nested: deep }
-    await db.update(artifacts).set({ extraction: { structured: deep } }).where(eq(artifacts.id, artifactId))
-    expect(await generate({ sourceEventIds: [] })).toEqual({ ok: false, error: 'invalid_evidence' })
-    await db.update(artifacts).set({ extraction: { text: 'x'.repeat(10_000), summary: 'y'.repeat(10_000) } }).where(eq(artifacts.id, artifactId))
-    expect(await generate({ sourceEventIds: [] })).toEqual({ ok: false, error: 'invalid_evidence' })
+  it('rejects every non-empty artifact selection before provider or database evidence work', async () => {
+    const provider = vi.fn(async () => ({ selections: [] }))
+    expect(await generate({ sourceArtifactIds: [artifactId] }, provider)).toEqual({ ok: false, error: 'invalid_input' })
+    expect(provider).not.toHaveBeenCalled()
   })
 
   it('maps typed timeout and provider failures to stable safe errors', async () => {
@@ -278,7 +269,7 @@ describe('Shop OS customer story domain', () => {
     const retry = await generate({ expectedStoryRevision: 999 }, provider)
     expect(retry).toMatchObject({ ok: true, changed: false, storyRevision: 1 })
     expect(provider).toHaveBeenCalledTimes(1)
-    expect(await generate({ sourceArtifactIds: [] }, provider)).toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await generate({ sourceEventIds: [] }, provider)).toEqual({ ok: false, error: 'conflict', retryable: false })
     expect(await generate({ actor: { profileId: uuid(3) } }, provider)).toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
@@ -287,8 +278,8 @@ describe('Shop OS customer story domain', () => {
     expect(await generate({}, empty)).toMatchObject({ ok: true, storyRevision: 1 })
     expect(await generate({ clientKey: uuid(101), expectedStoryRevision: 1 }, empty)).toMatchObject({ ok: true, changed: false, storyRevision: 1 })
     const changed = vi.fn(async () => ({ selections: [{
-      sourceKind: 'artifact' as const, sourceId: artifactId,
-      excerpt: 'Measured charging output remained at 11.8 volts under load.',
+      sourceKind: 'event' as const, sourceId: eventId,
+      excerpt: 'Charging voltage dropped to 11.8 volts with headlights and blower operating.',
     }] }))
     expect(await generate({ clientKey: uuid(102), expectedStoryRevision: 1 }, changed)).toMatchObject({ ok: true, changed: true, storyRevision: 2 })
     expect(await generate({ clientKey: uuid(103), expectedStoryRevision: 1 }, changed)).toEqual({ ok: false, error: 'conflict', retryable: false })
@@ -396,7 +387,8 @@ describe('Shop OS customer story domain', () => {
     expect(first.ok).toBe(true)
     if (!first.ok) return
     expect(first.workspace.evidence.events).toHaveLength(25)
-    expect(first.workspace.evidence.artifacts).toHaveLength(1)
+    expect(first.workspace.evidence.artifacts).toEqual([])
+    expect(first.workspace.evidence.nextArtifactCursor).toBeNull()
     expect(first.workspace.evidence.nextEventCursor).toEqual(expect.any(String))
     expect(JSON.stringify(first)).not.toMatch(/SECRET AI RESPONSE|private\/raw-key|aiResponse|storageKey|outcome/)
     const second = await getCustomerStoryWorkspace(db, {
@@ -406,7 +398,7 @@ describe('Shop OS customer story domain', () => {
     expect(await getCustomerStoryWorkspace(db, { actor, ticketId, jobId, eventCursor: 'forged' })).toEqual({ ok: false, error: 'invalid_input' })
   })
 
-  it('scans bounded chunks past invalid event and artifact rows and preserves tied ordering independently', async () => {
+  it('scans bounded chunks past invalid event rows while never projecting artifacts', async () => {
     await db.delete(sessionEvents).where(and(eq(sessionEvents.sessionId, sessionId), eq(sessionEvents.eventType, 'observation')))
     await db.delete(artifacts).where(eq(artifacts.sessionId, sessionId))
     const tiedAt = new Date('2026-07-11T11:57:00Z')
@@ -439,19 +431,13 @@ describe('Shop OS customer story domain', () => {
     expect(first.workspace.evidence.events.map((row) => row.id)).toEqual(
       Array.from({ length: 25 }, (_, index) => uuid(2129 - index)),
     )
-    expect(first.workspace.evidence.artifacts.map((row) => row.id)).toEqual(
-      Array.from({ length: 25 }, (_, index) => uuid(3129 - index)),
-    )
+    expect(first.workspace.evidence.artifacts).toEqual([])
+    expect(first.workspace.evidence.nextArtifactCursor).toBeNull()
     const eventSecond = await getCustomerStoryWorkspace(db, {
       actor, ticketId, jobId, eventCursor: first.workspace.evidence.nextEventCursor!,
     })
     expect(eventSecond.ok && eventSecond.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 5 }, (_, index) => uuid(2104 - index)))
-    expect(eventSecond.ok && eventSecond.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(3129 - index)))
-    const artifactSecond = await getCustomerStoryWorkspace(db, {
-      actor, ticketId, jobId, artifactCursor: first.workspace.evidence.nextArtifactCursor!,
-    })
-    expect(artifactSecond.ok && artifactSecond.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(2129 - index)))
-    expect(artifactSecond.ok && artifactSecond.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 5 }, (_, index) => uuid(3104 - index)))
+    expect(eventSecond.ok && eventSecond.workspace.evidence.artifacts).toEqual([])
   })
 
   it('caps each evidence scan at four chunks and returns bound continuations that eventually reach older evidence', async () => {
@@ -482,29 +468,28 @@ describe('Shop OS customer story domain', () => {
         extraction: { text: `Older valid artifact ${index} measured a stable charging value.` }, createdAt: validAt,
       })),
     ])
-    const queryCounts = { event: 0, artifact: 0 }
+    const queryCounts = { event: 0 }
     const first = await getCustomerStoryWorkspace(db, { actor, ticketId, jobId }, {
-      onEvidenceQuery: (kind: 'event' | 'artifact') => { queryCounts[kind] += 1 },
+      onEvidenceQuery: (kind: 'event') => { queryCounts[kind] += 1 },
     })
     expect(first.ok).toBe(true)
     if (!first.ok) return
-    expect(queryCounts).toEqual({ event: 4, artifact: 4 })
+    expect(queryCounts).toEqual({ event: 4 })
     expect(first.workspace.evidence.events).toHaveLength(0)
     expect(first.workspace.evidence.artifacts).toHaveLength(0)
     expect(first.workspace.evidence.nextEventCursor).toEqual(expect.any(String))
-    expect(first.workspace.evidence.nextArtifactCursor).toEqual(expect.any(String))
+    expect(first.workspace.evidence.nextArtifactCursor).toBeNull()
 
-    const secondCounts = { event: 0, artifact: 0 }
+    const secondCounts = { event: 0 }
     const second = await getCustomerStoryWorkspace(db, {
       actor, ticketId, jobId,
       eventCursor: first.workspace.evidence.nextEventCursor!,
-      artifactCursor: first.workspace.evidence.nextArtifactCursor!,
-    }, { onEvidenceQuery: (kind: 'event' | 'artifact') => { secondCounts[kind] += 1 } })
+    }, { onEvidenceQuery: (kind: 'event') => { secondCounts[kind] += 1 } })
     expect(second.ok).toBe(true)
     if (!second.ok) return
-    expect(secondCounts).toEqual({ event: 1, artifact: 1 })
+    expect(secondCounts).toEqual({ event: 1 })
     expect(second.workspace.evidence.events.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(4329 - index)))
-    expect(second.workspace.evidence.artifacts.map((row) => row.id)).toEqual(Array.from({ length: 25 }, (_, index) => uuid(5329 - index)))
+    expect(second.workspace.evidence.artifacts).toEqual([])
   })
 
   it('binds canonical cursors to evidence kind and linked session', async () => {
