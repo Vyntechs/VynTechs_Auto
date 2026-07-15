@@ -1,62 +1,41 @@
-// Vyntechs PWA service worker
-// Strategy:
-//   - HTML / page navigations: network-first (so new deployments are seen
-//     automatically on the next refresh). Falls back to cache if offline.
-//   - Static assets: cache-first (Next.js fingerprints filenames, so the
-//     cache identifier is implicitly per-version).
-//   - API + /_next: pass through to network, never intercepted.
+importScripts('/sw-policy.js')
 
-const CACHE = 'vyntechs-shell-v3'
-const SHELL = ['/']
+const CACHE = 'vyntechs-public-shell-v4'
+const PUBLIC_SHELL = ['/offline.html', '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(SHELL)),
-  )
-  self.skipWaiting()
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PUBLIC_SHELL)))
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'ACTIVATE') self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
-    ),
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim()),
   )
-  self.clients.claim()
 })
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url)
+  const policy = self.VyntechsSwPolicy.classifyRequest(event.request, self.location.origin)
 
-  // Never intercept API or Next.js build assets — let the network handle them.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/_next/')) {
+  if (policy === 'navigate-network') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('/offline.html')))
     return
   }
 
-  // Network-first for HTML navigation requests so new deploys land immediately.
-  // Fall back to cache for offline use.
-  const isNavigate =
-    event.request.mode === 'navigate' || event.request.destination === 'document'
-
-  if (isNavigate) {
+  if (policy === 'public-cache') {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const clone = response.clone()
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone))
-          return response
-        })
-        .catch(() =>
-          caches
-            .match(event.request)
-            .then((cached) => cached ?? caches.match('/')),
-        ),
+      caches.open(CACHE).then(async (cache) => {
+        const cached = await cache.match(event.request)
+        if (cached) return cached
+        const response = await fetch(event.request)
+        if (response.ok) await cache.put(event.request, response.clone())
+        return response
+      }),
     )
-    return
   }
-
-  // Cache-first for static assets (images, fonts, anything else).
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached ?? fetch(event.request)),
-  )
 })
