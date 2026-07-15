@@ -1,7 +1,7 @@
 # Adaptive ShopOS Application Design
 
 **Date:** 2026-07-15  
-**Status:** Approved direction; pending written-spec review  
+**Status:** Approved after delegated product review; implementation planning next
 **Product definition:** An installable, real-time Progressive Web App with single-page application behavior
 
 ## Outcome
@@ -16,9 +16,10 @@ server-rendered web pages. The authenticated product becomes the application.
 This is an incremental architecture change inside the existing React/Next.js
 codebase, not a native rewrite or a second mobile product.
 
-The first implementation slice is the application shell plus `My Jobs` as the
-pilot living surface. Later ShopOS surfaces adopt the same contracts in
-separate verified waves.
+The first implementation wave is deliberately split: foundation and shell
+contracts first, then `My Jobs` as the pilot living surface only after its
+current shared-file owner releases those paths. Later ShopOS surfaces adopt
+the same contracts in separate verified waves.
 
 ## Product thesis
 
@@ -85,6 +86,41 @@ stretches a phone card or enlarges decorative whitespace.
 - new pricing, messaging providers, production migrations, credentials, or
   customer-data movement.
 
+## Relationship to the active ShopOS plan
+
+This document defines product and application architecture. It does **not**
+replace the active status table in
+`docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`, which remains the
+only implementation source of truth.
+
+Before code begins, the Wave 1 implementation plan must add bounded rows to
+that table with one owner, lane, dependency set, allowed paths, verification,
+and rollback per row. The architecture waves in this document are not status
+rows and cannot be claimed independently.
+
+Current sequencing constraints are explicit:
+
+- AutoEYE Row 46 currently owns its entitlement/access seam and may touch the
+  Today/diagnostic paths needed by the pilot. No adaptive-application row may
+  write `today-jobs-board`, `today-home`, diagnostic start/access controls, or
+  another Row-46-owned path until the coordination protocol records their
+  release.
+- The future derived board and delivery work in Rows 44–45 consumes this
+  architecture rather than being silently pulled forward. The pilot may
+  replace broad refresh behavior for existing My/Open Jobs, but it may not add
+  Row-45 board, delivery, or closeout features.
+- Existing Phase-5 notification and Phase-6 push rows retain ownership of
+  customer notifications, push subscriptions, permission UX, and service-
+  worker push behavior. Live entity invalidation is a separate privacy-
+  minimized synchronization contract and does not pre-authorize those rows.
+- Platform-shell and technician-surface changes are separate owned tasks. A
+  platform task may not use shell work as permission to edit a technician or
+  diagnostic surface.
+
+The first executable work may therefore prove shell primitives, projection
+contracts, and tests without touching a shared live surface. The My Jobs pilot
+starts only after its lane is unambiguously free.
+
 ## Application boundary
 
 ```text
@@ -129,7 +165,9 @@ or an unrecoverable authorization-boundary change.
 
 The shell owns only cross-surface continuity. Domain state remains in bounded
 stores or component islands so a job update cannot accidentally rerender or
-invalidate the entire application.
+invalidate the entire application. Wave 1 defaults to the existing React
+state/reducer patterns; it adds no global state or query-cache dependency
+unless the pilot produces a concrete requirement that cannot be met cleanly.
 
 ## Adaptive compositions
 
@@ -215,14 +253,18 @@ Each independently updating server projection has:
 
 - an entity kind;
 - stable entity ID;
-- monotonic revision or authoritative updated-at token;
+- an opaque server version token generated and compared atomically with the
+  persisted mutation;
 - bounded actor-safe data;
 - explicit available actions derived from server truth.
 
 Examples include a ticket job, repair order summary, diagnostic session
 summary, assignment count, notification, or message thread summary. The
 client keys the rendered element by stable identity and replaces only a newer
-authorized projection.
+authorized projection. An existing `updated_at` value may serve as the opaque
+version only when the handler compares it in the same transaction and tests
+prove collision-safe stale-write rejection. Client clocks and presentation
+timestamps are never concurrency tokens.
 
 A routine mutation request carries:
 
@@ -358,16 +400,30 @@ does not introduce a generic dashboard aesthetic.
   appears for a local action;
 - reduced-motion mode preserves hierarchy and feedback without movement.
 
-## First implementation slice: shell plus My Jobs
+## First implementation wave: foundation, then My Jobs
 
 The pilot proves the architecture without changing diagnostic-engine behavior.
 
-1. Introduce the persistent authenticated application shell and composition
-   tokens while preserving current routes and authorization.
+### Wave 1A — foundation and shell contracts
+
+1. Record bounded platform and technician rows in the active ShopOS status
+   table before implementation.
+2. Introduce the persistent authenticated application-shell primitives and
+   composition tokens while preserving current routes and authorization.
+3. Add the bounded entity/version, precise mutation-result, focus, reconnect,
+   and application-version contracts with isolated tests.
+4. Prove compact, split, workbench, and expanded-workbench compositions using
+   honest existing content without editing a Row-46-owned surface.
+5. Keep current production navigation available as the rollback path.
+
+### Wave 1B — My Jobs pilot after path release
+
+1. Confirm in the active plan and AutoEYE coordination log that no other lane
+   owns the Today/diagnostic files required by the pilot.
 2. Compose `My Jobs` in compact, split, workbench, and expanded-workbench
    modes from the existing role-safe job projections.
-3. Move the board's client-visible collections into one bounded jobs-board
-   store keyed by job ID.
+3. Move only the board's client-visible collections into one bounded
+   jobs-board reducer keyed by job ID.
 4. Change claim and any included assignment mutations to return the updated
    ticket/job projection and affected collection counts.
 5. Replace broad `router.refresh()` recovery with precise projection apply,
@@ -385,10 +441,12 @@ lineage, and deletion semantics receive their own approved design.
 
 There is no big-bang conversion.
 
-### Wave 1 — Foundation and My Jobs
+### Wave 1 — Foundation, then My Jobs
 
-Persistent shell, adaptive composition primitives, entity/revision helpers,
-precise jobs-board mutations, navigation/focus continuity, and device matrix.
+Wave 1A delivers the persistent shell, adaptive composition primitives,
+entity/version helpers, and navigation/focus continuity. Wave 1B begins after
+shared-path release and adds precise jobs-board mutations plus the device
+matrix on the real pilot surface.
 
 ### Wave 2 — Living repair order
 
@@ -543,4 +601,3 @@ Stop and return for a separate decision if implementation requires:
 - permanent data deletion, external provider/spend, public release claims, or
   production customer-data movement;
 - duplicated mobile and desktop domain logic.
-
