@@ -1,18 +1,77 @@
 'use client'
 
 import { useEffect } from 'react'
+import { announcePwaUpdateReady } from '@/components/app-shell/pwa-update-events'
 
 export function SwRegister() {
   useEffect(() => {
     if (
-      typeof navigator !== 'undefined' &&
-      'serviceWorker' in navigator &&
-      process.env.NODE_ENV === 'production'
+      typeof navigator === 'undefined' ||
+      !('serviceWorker' in navigator) ||
+      process.env.NODE_ENV !== 'production'
     ) {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.warn('sw register failed', err)
-      })
+      return
+    }
+
+    let disposed = false
+    let removeUpdateListeners: (() => void) | undefined
+
+    void (async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js')
+        if (disposed) return
+
+        if (registration.waiting) {
+          announcePwaUpdateReady(registration.waiting)
+          return
+        }
+
+        const observedWorkers = new Set<ServiceWorker>()
+        const stateListeners = new Map<ServiceWorker, EventListener>()
+
+        const handleUpdateFound = () => {
+          const installing = registration.installing
+          if (!installing || observedWorkers.has(installing)) return
+
+          observedWorkers.add(installing)
+          const handleStateChange = () => {
+            if (installing.state !== 'installed') return
+
+            installing.removeEventListener('statechange', handleStateChange)
+            stateListeners.delete(installing)
+
+            if (!disposed && navigator.serviceWorker.controller) {
+              announcePwaUpdateReady(installing)
+            }
+          }
+
+          stateListeners.set(installing, handleStateChange)
+          installing.addEventListener('statechange', handleStateChange)
+          handleStateChange()
+        }
+
+        registration.addEventListener('updatefound', handleUpdateFound)
+        handleUpdateFound()
+
+        removeUpdateListeners = () => {
+          registration.removeEventListener('updatefound', handleUpdateFound)
+          for (const [worker, listener] of stateListeners) {
+            worker.removeEventListener('statechange', listener)
+          }
+          stateListeners.clear()
+        }
+      } catch {
+        if (!disposed) {
+          console.warn('Service worker registration failed')
+        }
+      }
+    })()
+
+    return () => {
+      disposed = true
+      removeUpdateListeners?.()
     }
   }, [])
+
   return null
 }
