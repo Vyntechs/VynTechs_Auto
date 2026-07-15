@@ -64,6 +64,44 @@
   min-block-size: 44px;
 }
 
+.legalNotice {
+  display: grid;
+  gap: var(--vt-space-3);
+}
+
+.legalNoticeTitle {
+  color: var(--vt-fg);
+  font-family: var(--vt-font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.legalNoticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--vt-space-2);
+}
+
+.legalNoticeActions :where(a, button) {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--vt-fg);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.legalNoticeActions :where(a, button):focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 2px;
+}
+
 .workspace {
   display: flex;
   min-inline-size: 0;

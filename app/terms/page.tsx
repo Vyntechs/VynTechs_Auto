@@ -20,7 +20,8 @@ export default async function TermsPage() {
       <article className="vm-legal">
         <h1>Vyntechs Terms of Service</h1>
         <dl className="vm-legal-meta">
-          <dt>Effective</dt><dd>Effective July 15, 2026</dd>
+          <dt>Revised</dt><dd>Revised July 15, 2026</dd>
+          <dt>Effective</dt><dd>Effective for new acceptances when published; for existing subscribers 30 days after the in-app notice.</dd>
           <dt>Contact</dt><dd><a href="mailto:brandon@vyntechs.com">brandon@vyntechs.com</a></dd>
         </dl>
 
@@ -89,6 +90,7 @@ export default async function TermsPage() {
 
         <section>
           <h2>§10 — Changes</h2>
+          <p><strong>Existing subscribers keep their prior Terms until 30 days after this version is first shown in the signed-in app.</strong></p>
           <p>For new acceptances, this version is effective on the date shown above. For an existing subscriber entitled to advance notice under an earlier version, a material change takes effect only after the promised notice period.</p>
           <p>We provide at least 30 days&apos; notice before material changes to pricing, liability, arbitration, or acceptable use take effect for existing subscribers. You may cancel before the effective date. Non-material corrections may take effect when published.</p>
         </section>

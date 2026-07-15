@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ConnectionStatus } from '@/components/app-shell/connection-status'
+import { LegalUpdateNotice } from '@/components/app-shell/legal-update-notice'
 import { PwaUpdateStatus } from '@/components/app-shell/pwa-update-status'
 import styles from '@/components/app-shell/app-shell.module.css'
 
@@ -15,6 +16,7 @@ export function ShopOsShell({ children }: { children: ReactNode }): React.ReactE
         role="region"
         aria-label="Application status"
       >
+        <LegalUpdateNotice />
         <ConnectionStatus />
         <PwaUpdateStatus />
       </div>

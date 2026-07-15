@@ -186,6 +186,42 @@ describe('Shop OS reviewed customer stories', () => {
     })
   })
 
+  it('replaces legacy media-backed proof with a quoteable text-only reviewed story', async () => {
+    const eventOnlyClaim = {
+      claim: 'Charging voltage dropped to 11.8 volts under load.',
+      sourceEventIds: [uuid(11)],
+      sourceArtifactIds: [],
+    }
+    await db.update(ticketJobs).set({
+      customerStory: {
+        ...story,
+        howWeKnow: [
+          eventOnlyClaim,
+          {
+            claim: 'Legacy scan-screen proof showed low output.',
+            sourceEventIds: [],
+            sourceArtifactIds: [uuid(99)],
+          },
+        ],
+      },
+    }).where(eq(ticketJobs.id, jobId))
+
+    const reviewed = await save()
+    expect(reviewed).toMatchObject({
+      ok: true,
+      changed: true,
+      storyRevision: 2,
+      story: { howWeKnow: [eventOnlyClaim] },
+      storyMeta: { source: 'ai', reviewStatus: 'reviewed' },
+    })
+    if (!reviewed.ok) return
+    expect(JSON.stringify(reviewed.story)).not.toContain(uuid(99))
+
+    const [persisted] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(persisted.customerStory?.howWeKnow).toEqual([eventOnlyClaim])
+    expect(await save()).toMatchObject({ ok: true, changed: false, storyRevision: 2 })
+  })
+
   it('returns a canonical same-key retry before stale revision and rejects changed or cross-actor reuse', async () => {
     expect(await save()).toMatchObject({ ok: true, changed: true, storyRevision: 2 })
     expect(await save()).toMatchObject({ ok: true, changed: false, storyRevision: 2 })

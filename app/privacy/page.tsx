@@ -20,7 +20,8 @@ export default async function PrivacyPage() {
       <article className="vm-legal">
         <h1>Vyntechs Privacy Policy</h1>
         <dl className="vm-legal-meta">
-          <dt>Effective</dt><dd>Effective July 15, 2026</dd>
+          <dt>Revised</dt><dd>Revised July 15, 2026</dd>
+          <dt>Effective</dt><dd>Effective when published with in-app notice</dd>
           <dt>Contact</dt><dd><a href="mailto:brandon@vyntechs.com">brandon@vyntechs.com</a></dd>
         </dl>
 
@@ -66,6 +67,7 @@ export default async function PrivacyPage() {
         <section>
           <h2>Service providers</h2>
           <p>We use service providers for hosting, databases and authentication, payments, email, analytics, and security. They receive only the data needed for their role and operate under their own terms and privacy commitments.</p>
+          <p><strong>AI evidence provider:</strong> Anthropic receives selected technician observation text only when an authorized user requests AI-assisted evidence selection for a customer-story draft. Operational files are unavailable in this release. See the <a href="https://www.anthropic.com/legal/privacy">Anthropic Privacy Policy</a>.</p>
           <p>Stripe processes payment-card details; Vyntechs does not store full card numbers.</p>
         </section>
 
@@ -83,6 +85,7 @@ export default async function PrivacyPage() {
         <section>
           <h2>Security and changes</h2>
           <p>We use encrypted connections and access controls appropriate to a small beta service. No internet service can promise perfect security, and Vyntechs does not currently claim formal compliance certification.</p>
+          <p>We show this notice in the app the first time a signed-in browser sees this version.</p>
           <p>Material changes receive a new effective date on this page. Questions or suspected mismatches may be sent to <a href="mailto:brandon@vyntechs.com">brandon@vyntechs.com</a>.</p>
         </section>
       </article>

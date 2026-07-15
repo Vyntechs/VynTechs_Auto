@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { ReactNode } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AdaptiveWorkbench } from '@/components/app-shell/adaptive-workbench'
 import { ShopOsShell } from '@/components/app-shell/shop-os-shell'
@@ -61,6 +61,30 @@ describe('ShopOsShell', () => {
     expect(within(status).getByText('Application update control')).toBeInTheDocument()
     expect(document.querySelectorAll('#shop-os-workspace')).toHaveLength(1)
     expect(document.querySelector('[role="application"]')).not.toBeInTheDocument()
+  })
+
+  it('shows each signed-in browser the legal update notice once', async () => {
+    localStorage.clear()
+    const first = render(
+      <ShopOsShell>
+        <main>Current repair work</main>
+      </ShopOsShell>,
+    )
+
+    const notice = await screen.findByRole('region', { name: 'Terms and Privacy update' })
+    expect(within(notice).getByRole('link', { name: 'Review Terms' })).toHaveAttribute('href', '/terms')
+    expect(within(notice).getByRole('link', { name: 'Review Privacy' })).toHaveAttribute('href', '/privacy')
+    fireEvent.click(within(notice).getByRole('button', { name: 'Dismiss legal update notice' }))
+    expect(screen.queryByRole('region', { name: 'Terms and Privacy update' })).toBeNull()
+    first.unmount()
+
+    render(
+      <ShopOsShell>
+        <main>Current repair work</main>
+      </ShopOsShell>,
+    )
+    expect(await screen.findByRole('main')).toHaveTextContent('Current repair work')
+    expect(screen.queryByRole('region', { name: 'Terms and Privacy update' })).toBeNull()
   })
 })
 

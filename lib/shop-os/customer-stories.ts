@@ -875,7 +875,18 @@ export async function saveReviewedCustomerStory(
 
       const validated = validateReviewBinding(context, persistedStory, persistedMeta)
       if (!validated.ok) throw new AbortReview(validated.failure)
-      const request = reviewRequestFingerprint(input, validated.binding)
+      const reviewableStory = validated.source === 'ai' && persistedStory
+        ? {
+            ...persistedStory,
+            howWeKnow: persistedStory.howWeKnow.filter(
+              (claim) => claim.sourceArtifactIds.length === 0,
+            ),
+          }
+        : persistedStory
+      const requestBinding = validated.source === 'ai' && reviewableStory
+        ? { ...validated.binding, proof: reviewableStory.howWeKnow }
+        : validated.binding
+      const request = reviewRequestFingerprint(input, requestBinding)
 
       if (persistedMeta?.reviewClientKey === input.clientKey) {
         if (persistedMeta.reviewedByProfileId !== context.actor.id || persistedMeta.reviewRequestFingerprint !== request || !persistedStory) {
@@ -890,9 +901,9 @@ export async function saveReviewedCustomerStory(
       const revision = persistedRevision(persistedMeta)
       if (revision !== input.expectedStoryRevision) throw new AbortReview(fail('conflict', false))
       let nextStory: CustomerStory
-      if (validated.source === 'ai' && persistedStory) {
+      if (validated.source === 'ai' && reviewableStory) {
         nextStory = {
-          ...persistedStory,
+          ...reviewableStory,
           whatWeFound: input.whatWeFound,
           whatWeRecommend: input.whatWeRecommend,
         }
