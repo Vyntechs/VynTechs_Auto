@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import type { ReactNode } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AdaptiveWorkbench } from '@/components/app-shell/adaptive-workbench'
@@ -14,6 +15,25 @@ vi.mock('@/components/app-shell/pwa-update-status', () => ({
 }))
 
 const appShellDir = resolve(process.cwd(), 'components/app-shell')
+
+function cssBlock(source: string, header: string) {
+  const headerStart = source.indexOf(header)
+  if (headerStart === -1) throw new Error(`Missing CSS block: ${header}`)
+  const blockStart = source.indexOf('{', headerStart)
+  let depth = 0
+
+  for (let index = blockStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    if (source[index] === '}') depth -= 1
+    if (depth === 0) return source.slice(blockStart + 1, index)
+  }
+
+  throw new Error(`Unclosed CSS block: ${header}`)
+}
+
+function expectGridAreas(source: string, selector: string, areas: string) {
+  expect(cssBlock(source, selector)).toContain(`grid-template-areas: '${areas}'`)
+}
 
 describe('ShopOsShell', () => {
   it('keeps one accessible workspace target and one separate status region', () => {
@@ -83,6 +103,58 @@ describe('AdaptiveWorkbench', () => {
     expect(screen.getByRole('region', { name: 'Repair context' })).toHaveTextContent(
       'Vehicle context',
     )
+
+    const grid = container.querySelector('[data-workbench-region="main"]')?.parentElement
+    expect(grid).toHaveAttribute('data-has-navigation', 'true')
+    expect(grid).toHaveAttribute('data-has-queue', 'true')
+    expect(grid).toHaveAttribute('data-has-context', 'true')
+  })
+
+  it.each<[string, ReactNode]>([
+    ['false', false],
+    ['true', true],
+    ['an empty string', ''],
+    ['a whitespace-only string', ' \n\t '],
+  ])('does not mount optional landmarks for %s', (_label, emptyNode) => {
+    const { container } = render(
+      <AdaptiveWorkbench
+        navigation={emptyNode}
+        queue={emptyNode}
+        main={<p>Repair order</p>}
+        context={emptyNode}
+        mainLabel="Current repair order"
+      />,
+    )
+
+    expect(container.querySelector('[data-workbench-region="navigation"]')).toBeNull()
+    expect(container.querySelector('[data-workbench-region="queue"]')).toBeNull()
+    expect(container.querySelector('[data-workbench-region="context"]')).toBeNull()
+
+    const grid = container.querySelector('[data-workbench-region="main"]')?.parentElement
+    expect(grid).not.toHaveAttribute('data-has-navigation')
+    expect(grid).not.toHaveAttribute('data-has-queue')
+    expect(grid).not.toHaveAttribute('data-has-context')
+  })
+
+  it('preserves numeric zero as meaningful optional content and rail presence', () => {
+    const { container } = render(
+      <AdaptiveWorkbench
+        navigation={0}
+        queue={0}
+        main={<p>Repair order</p>}
+        context={0}
+        mainLabel="Current repair order"
+      />,
+    )
+
+    expect(container.querySelector('[data-workbench-region="navigation"]')).toHaveTextContent('0')
+    expect(container.querySelector('[data-workbench-region="queue"]')).toHaveTextContent('0')
+    expect(container.querySelector('[data-workbench-region="context"]')).toHaveTextContent('0')
+
+    const grid = container.querySelector('[data-workbench-region="main"]')?.parentElement
+    expect(grid).toHaveAttribute('data-has-navigation', 'true')
+    expect(grid).toHaveAttribute('data-has-queue', 'true')
+    expect(grid).toHaveAttribute('data-has-context', 'true')
   })
 
   it('uses the approved adaptive, accessible shell contract without device detection', () => {
@@ -102,6 +174,49 @@ describe('AdaptiveWorkbench', () => {
     expect(css).toMatch(/outline:\s*(?!none)/)
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce/)
     expect(css).toMatch(/min-(?:block-)?size:\s*44px/)
+
+    expectGridAreas(css, '.workbenchGrid', 'main')
+
+    const split = cssBlock(css, '@container (min-width: 840px)')
+    expect(split).not.toMatch(/(?:^|\n)\s*\.workbenchGrid\s*\{/)
+    expectGridAreas(split, '.workbenchGrid[data-has-queue]', 'queue main')
+
+    const workbench = cssBlock(css, '@container (min-width: 1280px)')
+    expect(workbench).not.toMatch(/(?:^|\n)\s*\.workbenchGrid\s*\{/)
+    expectGridAreas(
+      workbench,
+      '.workbenchGrid[data-has-navigation]:not([data-has-queue])',
+      'navigation main',
+    )
+    expectGridAreas(
+      workbench,
+      '.workbenchGrid[data-has-navigation][data-has-queue]',
+      'navigation queue main',
+    )
+
+    const expanded = cssBlock(css, '@container (min-width: 1680px)')
+    expect(expanded).not.toMatch(/(?:^|\n)\s*\.workbenchGrid\s*\{/)
+    expectGridAreas(
+      expanded,
+      '.workbenchGrid[data-has-context]:not([data-has-navigation]):not([data-has-queue])',
+      'main context',
+    )
+    expectGridAreas(
+      expanded,
+      '.workbenchGrid[data-has-context][data-has-queue]:not([data-has-navigation])',
+      'queue main context',
+    )
+    expectGridAreas(
+      expanded,
+      '.workbenchGrid[data-has-context][data-has-navigation]:not([data-has-queue])',
+      'navigation main context',
+    )
+    expectGridAreas(
+      expanded,
+      '.workbenchGrid[data-has-context][data-has-navigation][data-has-queue]',
+      'navigation queue main context',
+    )
+
     expect(source).not.toMatch(/window\.innerWidth|navigator\.userAgent/i)
     expect(source).not.toMatch(/\b(phone|tablet|laptop|desktop|mobile)\b/i)
   })

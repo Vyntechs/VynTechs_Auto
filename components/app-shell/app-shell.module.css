@@ -103,12 +103,12 @@
 }
 
 @container (min-width: 840px) {
-  .workbenchGrid {
+  .workbenchGrid[data-has-queue] {
     grid-template-areas: 'queue main';
     grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
   }
 
-  .queue {
+  .workbenchGrid[data-has-queue] > .queue {
     display: block;
     grid-area: queue;
     border-inline-end: var(--vt-stroke-hair);
@@ -116,12 +116,17 @@
 }
 
 @container (min-width: 1280px) {
-  .workbenchGrid {
+  .workbenchGrid[data-has-navigation]:not([data-has-queue]) {
+    grid-template-areas: 'navigation main';
+    grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+  }
+
+  .workbenchGrid[data-has-navigation][data-has-queue] {
     grid-template-areas: 'navigation queue main';
     grid-template-columns: minmax(12rem, 16rem) minmax(14rem, 20rem) minmax(0, 1fr);
   }
 
-  .navigation {
+  .workbenchGrid[data-has-navigation] > .navigation {
     display: block;
     grid-area: navigation;
     border-inline-end: var(--vt-stroke-hair);
@@ -129,7 +134,22 @@
 }
 
 @container (min-width: 1680px) {
-  .workbenchGrid {
+  .workbenchGrid[data-has-context]:not([data-has-navigation]):not([data-has-queue]) {
+    grid-template-areas: 'main context';
+    grid-template-columns: minmax(0, 72rem) minmax(18rem, 1fr);
+  }
+
+  .workbenchGrid[data-has-context][data-has-queue]:not([data-has-navigation]) {
+    grid-template-areas: 'queue main context';
+    grid-template-columns: minmax(14rem, 20rem) minmax(0, 72rem) minmax(18rem, 1fr);
+  }
+
+  .workbenchGrid[data-has-context][data-has-navigation]:not([data-has-queue]) {
+    grid-template-areas: 'navigation main context';
+    grid-template-columns: minmax(12rem, 16rem) minmax(0, 72rem) minmax(18rem, 1fr);
+  }
+
+  .workbenchGrid[data-has-context][data-has-navigation][data-has-queue] {
     grid-template-areas: 'navigation queue main context';
     grid-template-columns:
       minmax(12rem, 16rem)
@@ -138,7 +158,7 @@
       minmax(18rem, 1fr);
   }
 
-  .context {
+  .workbenchGrid[data-has-context] > .context {
     display: block;
     grid-area: context;
     border-inline-start: var(--vt-stroke-hair);

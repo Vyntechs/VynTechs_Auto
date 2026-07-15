@@ -11,6 +11,13 @@ export type AdaptiveWorkbenchProps = {
   contextLabel?: string
 }
 
+function hasMeaningfulContent(content: ReactNode): boolean {
+  if (content == null || typeof content === 'boolean') return false
+  if (typeof content === 'string') return content.trim().length > 0
+
+  return true
+}
+
 export function AdaptiveWorkbench({
   navigation,
   queue,
@@ -20,10 +27,19 @@ export function AdaptiveWorkbench({
   mainLabel,
   contextLabel = 'Work context',
 }: AdaptiveWorkbenchProps): React.ReactElement {
+  const hasNavigation = hasMeaningfulContent(navigation)
+  const hasQueue = hasMeaningfulContent(queue)
+  const hasContext = hasMeaningfulContent(context)
+
   return (
     <div className={styles.workbench}>
-      <div className={styles.workbenchGrid}>
-        {navigation != null ? (
+      <div
+        className={styles.workbenchGrid}
+        data-has-navigation={hasNavigation ? 'true' : undefined}
+        data-has-queue={hasQueue ? 'true' : undefined}
+        data-has-context={hasContext ? 'true' : undefined}
+      >
+        {hasNavigation ? (
           <nav
             className={styles.navigation}
             data-workbench-region="navigation"
@@ -33,7 +49,7 @@ export function AdaptiveWorkbench({
           </nav>
         ) : null}
 
-        {queue != null ? (
+        {hasQueue ? (
           <section
             className={styles.queue}
             data-workbench-region="queue"
@@ -51,7 +67,7 @@ export function AdaptiveWorkbench({
           {main}
         </section>
 
-        {context != null ? (
+        {hasContext ? (
           <section
             className={styles.context}
             data-workbench-region="context"
