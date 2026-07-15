@@ -136,7 +136,7 @@ Missing, malformed, or unknown configuration also resolves to `off`. No
 browser state, shop role, query parameter, or client feature flag can enable
 media.
 
-This release supports only `off`; it does not name or implement a future
+Operational media supports only `off`; it does not name or implement a future
 provider. Re-enabling media requires a new reviewed release, an explicit
 storage owner, and a production gate.
 
@@ -199,18 +199,27 @@ current non-media evidence or explicit human-reviewed text.
 ### Diagnostic boundary
 
 Diagnostics remains unavailable in the ShopOS release direction already set
-by the founder. One global diagnostics-release gate resolves to `off` before
-shop entitlement or comp status is considered, so neither a grandfathered nor
-comped shop can enter a diagnostic surface. Direct media capture and every
-`/api/artifacts/*` extraction route fail closed before body parsing, storage
-download, or an external extraction call, even if a stale link or client calls
-them.
+by the founder. `DIAGNOSTICS_RELEASE` recognizes `off` and the existing
+`legacy` engine; missing or unknown values fail to `off`, production is
+hard-off in code, and using `legacy` outside local/test verification requires
+a new reviewed code release and production gate. This global release gate
+resolves before shop entitlement or comp status is considered, so neither a
+grandfathered nor comped shop can enter a diagnostic surface while it is off.
+Direct media capture and every `/api/artifacts/*` extraction route fail closed
+before body parsing, storage download, or an external extraction call, even if
+a stale link or client calls them.
 
 The no-media release does not change diagnostic reasoning, risk thresholds,
 topology semantics, retrieval, corpus, AutoEYE contracts, or historical text
 events. Ambient conditions remain allowed only when represented as structured
 non-file data. Existing diagnostic sessions are not deleted or closed by this
 design; they remain inaccessible while the global diagnostic release is off.
+
+The signed-in Counter intake at `/intake` is core ShopOS work-order creation,
+not the diagnostic engine. It and its customer-search and VIN-decode helpers
+remain available. Only diagnostic session creation and navigation are closed;
+an owner can still create a repair order and a technician can still record
+manual findings without invoking diagnostic generation or a media path.
 
 ## Production preflight
 
@@ -258,11 +267,16 @@ apart. Any drift restarts the drain and inventory sequence.
    120 seconds, then require two identical row inventories 60 seconds apart.
    Any late `artifacts` or `job_attachments` row restarts this drain and row
    inventory sequence.
-7. In one database transaction, delete all rows from `artifacts` and
-   `job_attachments`.
+7. In one database transaction, acquire write-blocking locks on the bucket and
+   object catalogs plus both media tables, re-prove the bucket absent and
+   object count zero, delete all rows from `artifacts` and `job_attachments`,
+   then repeat the absence/zero checks immediately before commit.
 8. Require both media tables to contain zero rows after commit.
-9. Repeat the protected-record fingerprints and compare them byte-for-byte or
-   identity-for-identity, as appropriate.
+9. Inside the serializable deletion transaction, fingerprint every classified
+   protected table immediately before and after the two deletes and require
+   byte-for-byte equality. This in-transaction comparison is authoritative;
+   final live verification does not misclassify unrelated post-commit shop
+   activity as purge damage.
 10. Run product smoke proof for simple-work completion, historical quote
    reading, direct media-route refusal, and authenticated application health.
 
@@ -298,8 +312,10 @@ It must preserve:
 - entitlement and billing records.
 
 No migration may cascade from a media row into a protected record. The plan
-must prove the actual production constraints before deletion rather than rely
-only on source schema.
+must classify every current public table, fingerprint every non-media public
+table plus authentication identities, and fail closed on an unclassified
+catalog entry. It must prove the actual production constraints before deletion
+rather than rely only on source schema.
 
 ## Security and privacy
 
@@ -308,10 +324,14 @@ only on source schema.
 - Multipart bodies are rejected before buffering.
 - No media content is downloaded for preflight or verification.
 - No signed URLs are created.
-- Logs contain bounded counts and non-reversible aggregate fingerprints only.
+- Logs contain bounded counts, aggregate manifest hashes, and keyed HMAC-SHA-256
+  preservation fingerprints only; the per-run key remains environment-only.
 - Service-worker and browser caches continue to exclude authenticated media.
 - Secrets, customer content, object keys, and personal identifiers never enter
   Git, task reports, screenshots, or test fixtures.
+- Production credentials live only inside a dedicated operator child process
+  with exit/signal cleanup; an interrupted run preserves aggregate recovery
+  state but no long-lived shell credentials.
 - The purge claims deletion only from Vyntechs-controlled object storage and
   media tables. It does not claim deletion from an external AI provider's
   temporary processing systems or infrastructure backups without separate
