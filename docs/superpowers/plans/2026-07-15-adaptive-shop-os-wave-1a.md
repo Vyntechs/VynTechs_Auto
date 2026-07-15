@@ -46,7 +46,6 @@
 - Modify `app/(app)/layout.tsx`: mount the persistent shell inside the existing authenticated provider.
 - Create `lib/ui/live-entity.ts`: opaque-version compare-and-replace/remove helpers.
 - Create `tests/unit/live-entity.test.ts`: applied, stale, mismatch, removal, and immutability regressions.
-- Modify `docs/strategy/SHOP_OS_DRIVER_STATE.md`: record the verified Wave 1A proof and the gated Wave 1B next move.
 
 ---
 
@@ -54,7 +53,6 @@
 
 **Files:**
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
-- Modify: `docs/strategy/SHOP_OS_DRIVER_STATE.md`
 
 - [ ] **Step 1: Confirm Row 46 still owns the shared technician seam**
 
@@ -71,7 +69,7 @@ Expected: Row 46 remains `in_progress`; Row 47 is available for platform foundat
 
 - [ ] **Step 2: Create the implementation branch and draft PR**
 
-Create a fresh worktree from current `origin/main`, use branch `feat/adaptive-shop-os-wave-1a`, and open a draft PR before code. Record the resulting PR number in Row 47 and `SHOP_OS_DRIVER_STATE.md`; do not use a guessed number.
+Create a fresh worktree from current `origin/main`, use branch `feat/adaptive-shop-os-wave-1a`, and open a draft PR before code. Record the resulting PR number in Row 47; do not use a guessed number.
 
 - [ ] **Step 3: Mark only Row 47 in progress**
 
@@ -80,7 +78,7 @@ Set Row 47 to `in_progress`, lane owner `P`, and name the draft PR. Leave Row 48
 - [ ] **Step 4: Commit the ownership claim**
 
 ```bash
-git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md docs/strategy/SHOP_OS_DRIVER_STATE.md
+git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md
 git commit -m "docs: claim adaptive ShopOS foundation"
 ```
 
@@ -468,7 +466,6 @@ git commit -m "feat: add version-safe live entity replacements"
 
 **Files:**
 - Modify: `docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md`
-- Modify: `docs/strategy/SHOP_OS_DRIVER_STATE.md`
 - Review: every file changed in Tasks 1–6
 
 - [ ] **Step 1: Run all focused proof**
@@ -503,7 +500,7 @@ pnpm exec tsc --noEmit
 pnpm build
 ```
 
-Expected: all commands exit 0. Record exact test file/test counts and the build result in the driver state and PR.
+Expected: all commands exit 0. Record exact test file/test counts and the build result in Row 47 and the PR.
 
 - [ ] **Step 4: Verify the observable browser story**
 
@@ -535,22 +532,14 @@ Fix every Critical or Important issue, rerun the affected focused tests, then re
 
 - [ ] **Step 6: Close Row 47 without unblocking Row 48**
 
-After all proof passes, set Row 47 to `complete` with the actual implementation PR, exact test counts, TypeScript/build result, and browser proof. Update `SHOP_OS_DRIVER_STATE.md` with:
-
-- `Outcome`: adaptive ShopOS application foundation;
-- `Current slice`: Wave 1A verified and ready to merge;
-- `Last proof`: exact commands and observable browser checks;
-- `Next safe move`: Row 48 My Jobs pilot after Row 46 releases all shared paths;
-- `Open gates`: Row 46 release and founder merge/deploy authority;
-- `Worker lanes`: Row 47 owner complete; Row 48 blocked;
-- `Stop only when`: merged and production-verified, or a true authority/safety gate.
+After all proof passes, set Row 47 to `complete` with the actual implementation PR, exact test counts, TypeScript/build result, and browser proof. Keep durable status in the active plan's §11 table. If implementation reality drifted from the approved phase text, add an `Implementation correction` callout at the end of the relevant phase with the verified behavior, remaining gates, and Row 48's release condition.
 
 Do not change Row 48 from `blocked` based on inference, inactivity, or a clean merge alone.
 
 - [ ] **Step 7: Commit final evidence and mark the implementation PR ready**
 
 ```bash
-git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md docs/strategy/SHOP_OS_DRIVER_STATE.md
+git add docs/strategy/2026-07-10-shop-os-spec-and-phased-plan.md
 git commit -m "docs: record adaptive ShopOS foundation proof"
 git status --short
 git diff --check origin/main...HEAD
@@ -558,15 +547,62 @@ git diff --check origin/main...HEAD
 
 Expected: clean worktree, no whitespace errors, focused/full tests green, TypeScript/build green, browser proof recorded, Row 48 still blocked. Push the branch and mark the implementation PR ready for founder-authorized merge; do not merge or deploy without that hard gate.
 
+### Task 8: Close the legacy private-cache migration before release
+
+**Root cause:** The privacy-safe worker waits for explicit activation, but the currently deployed `vyntechs-shell-v3` worker remains active during that wait. V3 continues writing and serving authenticated navigation responses, so merely installing v4 does not satisfy the private-cache prohibition.
+
+**Files:**
+- Modify: `public/sw-policy.js`
+- Modify: `public/sw.js`
+- Modify: `components/sw-register.tsx`
+- Modify: `tests/unit/service-worker-policy.test.ts`
+- Modify: `tests/unit/sw-register.test.tsx`
+
+- [ ] **Step 1: Prove the unsafe upgrade state with RED tests**
+
+Add pure and executable worker-lifecycle tests that begin with the exact active v3 worker. Prove the safe worker does not remain waiting behind that legacy controller. Prove activation scrubs the v3 cache around controller takeover, including a delayed un-awaited v3 `cache.put`, without reloading the document. Also prove an active public-only worker with the activation-only public-policy receipt remains waiting for the explicit safe-point action even when its live response is delayed or unavailable.
+
+- [ ] **Step 2: Add a one-time fail-closed privacy migration**
+
+Register `/sw.js?cache-policy=public-v4` at explicit scope `/` with `updateViaCache: 'none'`, then call `registration.update()` so the same-URL register fast path cannot leave v3 or an earlier waiting v4 untouched. The URL change and explicit update are migration/update triggers only; neither is safety proof alone. A distinct cache named `vyntechs-public-policy-v1` holds exactly one public receipt at the allowlisted `/icons/icon-192.png?cache-policy=public-v4`, with `x-vyntechs-cache-policy: public-only-v1`. Write it only after successful safe-worker activation or bounded active-worker recovery has scrubbed every obsolete cache and verified the clean catalog; install and durable-proof validation must never create it. The exact deployed v3 worker and any merely waiting v4 worker therefore cannot forge “migration complete.” Classify an active controller as durably safe without scheduling-sensitive messaging only when all facts agree: the active worker has the exact same-origin `/sw.js?cache-policy=public-v4` identity, a side-effect-free targeted lookup returns the exact receipt, the policy cache contains exactly that one request, and the complete cache catalog contains no name except the policy cache and current public shell. A stale, empty, extra-entry, wrong-receipt, identity-mismatched, or obsolete-cache-adjacent policy cache is not proof. Otherwise challenge the active worker over a transferred `MessageChannel` for the stable `public-only-v1` capability. The current safe worker answers that exact probe. A timely exact response preserves the normal waiting lifecycle while keeping install incapable of creating durable proof. Missing, malformed, different, timed-out, or thrown responses — including any channel setup or cleanup failure — are explicitly `unknown-and-unsafe` and permit automatic `skipWaiting()` without reload. Storage eviction or manual storage clearing erases durable safety proof; privacy-first replacement in that exceptional unknown state is intentional, not an ordinary update path. With no active worker, preserve first-install behavior. Keep the explicit `ACTIVATE` message for ordinary future updates.
+
+Do not start or await public-shell seeding on the `unknown-and-unsafe` path; activate network-only so quota, asset, interruption, late work, or a hanging cache cannot preserve v3. Bound every Cache Storage operation and client claim so failure cannot strand takeover indefinitely. Seed normally only on first install or behind a durably proven/timely-attested safe controller, where failure must preserve the existing safe controller. At activation start, overwrite the policy receipt with `revoked-v1` before attempting deletion, so a failed deletion remains untrusted for that worker global. Retain only the current public-shell and policy caches, scrub every other cache, claim clients, scrub again, then replace the revoked policy cache with the exact receipt only after deletion is verified. A freshly booted active worker must assume proof is revoked rather than trust any stored receipt. Its next intercepted navigation or public-asset event extends its lifetime with bounded recovery: revoke the old receipt, resume the obsolete-cache scrub, and recreate exact proof only after the clean catalog is verified. A failed recovery stays network-only and retries on the next eligible event; it never trusts the pre-existing receipt, including when revocation write and marker deletion both fail. Any timeout, throw, failed deletion, malformed result, wrong or extra receipt, or dirty catalog withholds durable proof and leaves the worker network-only. Every cache read and write — including the fixed offline-navigation fallback — requires the full identity/receipt/clean-catalog proof. A successful public network response must return without waiting for bounded recovery or its bounded background cache write.
+
+> **Implementation correction (2026-07-15):** Cache Storage has no non-creating “open existing cache” operation, so an empty marker has an unavoidable eviction race: validation can recreate the very proof it is checking. The single allowlisted activation receipt makes the first lookup side-effect-free, makes provenance observable, and keeps every stored key public-only.
+
+> **Controller-transfer correction (2026-07-15):** The Service Workers Activate algorithm terminates the prior active worker and transfers every client already using the registration before dispatching the new worker's `activate` event. The later bounded `clients.claim()` covers other matching clients; a claim failure cannot leave an existing tab on v3, but it still withholds the durable receipt. See the [Service Workers Activate algorithm](https://w3c.github.io/ServiceWorker/#activate-algorithm).
+
+> **Interrupted-activation correction (2026-07-15):** Activation handlers can be terminated while the worker still becomes active. Active-worker globals therefore start network-only and attach resumable cache cleanup to the next eligible fetch lifetime. This closes both an interrupted v3 scrub and correlated receipt-write/deletion failure without blocking a successful navigation response.
+
+- [ ] **Step 3: Preserve uninterrupted work**
+
+The privacy migration may replace the legacy controller and purge its cache without reloading the document. Existing passive-controller handling must offer a manual `Reload when ready` state; it must never call `window.location.reload()` automatically. This one-time controller replacement is a privacy exception to safe-point activation, not permission for ordinary future versions to auto-activate.
+
+Activation must delete every non-current cache, claim clients, and delete non-current caches again. Executable browser proof must model the deployed v3 ordering: its navigation response calls `caches.open('vyntechs-shell-v3')` before its `respondWith` promise settles, while its un-awaited `cache.put` may finish after takeover. The final named Cache Storage catalog must contain no v3 cache or private entry. A synthetic race that delays `caches.open` until after the v3 fetch event has settled is not representative of the deployed worker and does not substitute for this proof.
+
+The `public-cache` fetch branch must treat Cache Storage as an optional acceleration layer. Cache open, match, or put failure must never reject an otherwise successful network response or make a public asset unavailable; executable tests must cover each failure boundary.
+
+- [ ] **Step 4: Verify the correction**
+
+```bash
+pnpm vitest run \
+  tests/unit/service-worker-policy.test.ts \
+  tests/unit/sw-register.test.tsx \
+  tests/unit/pwa-update-status.test.tsx
+pnpm exec tsc --noEmit
+```
+
+Then repeat every Task 7 gate and browser scenario. Include active v3 plus a waiting v4 that already seeded `vyntechs-public-shell-v4`; absence of the exact activation receipt must still force privacy takeover. Include hanging and throwing cache catalog, open, shell-seed, match, put, delete, marker-key, and client-claim operations; every one must settle fail-closed. Any path in which an active worker lacking both identity-bound receipt proof and timely live public-only proof can keep controlling the app after the safe worker finishes installation, install creates the durable receipt, shell seeding gates that takeover, a delayed exact-v3 write restores a named private cache, an identity-bound safely receipted worker is automatically replaced, the policy cache is empty or gains an extra/wrong entry, proof failure still permits cache reads or writes, or a cache failure rejects a successful public network response is a stop-ship failure.
+
 ## Rollback
 
-Wave 1A has no data migration. The shell, status controls, workbench primitive, and live-entity helpers are source-reversible. The service-worker privacy fix is not safely reversible to the old authenticated-navigation cache; if another part of the wave must be rolled back, retain Task 2 or ship a higher cache-name safe worker that deletes `vyntechs-public-shell-v4` during activation. Never restore the previous authenticated-navigation cache. A service-worker privacy regression is a stop-ship defect.
+Wave 1A has no data migration. The shell, status controls, workbench primitive, and live-entity helpers are source-reversible. The service-worker privacy fix is not safely reversible to the old authenticated-navigation cache; if another part of the wave must be rolled back, retain Task 2 and Task 8 or ship a separately proven higher public-only policy generation. Every rollback must preserve the changed migration URL, explicit `registration.update()`, explicit scope, `updateViaCache: 'none'`, the activation-or-recovery exact public receipt, fresh-active-global network-only default, resumable v3 scrub, the `public-only-v1` responder/challenge contract, bounded unknown-and-unsafe takeover, double v3 scrub, and cache-failure network fallback. Never restore the previous authenticated-navigation cache. A service-worker privacy regression is a stop-ship defect.
 
 ## Done when
 
 - Row 47 is implemented and verified in its own PR with no Row-46-owned path changes.
 - Authenticated documents, API data, and non-allowlisted assets cannot enter service-worker Cache Storage.
-- New application versions wait without disturbing active work and activate only after the explicit safe-point action.
+- Durably marked or timely-attested public-only updates wait without disturbing active work and activate only after the explicit safe-point action; only missing/erased proof may fail closed to a no-reload privacy takeover.
 - The authenticated route group has one persistent, accessible, container-aware shell.
 - The adaptive workbench primitive is tested but not prematurely composed into Today/My Jobs.
 - Opaque-version entity replacements fail closed on stale or mismatched state.
