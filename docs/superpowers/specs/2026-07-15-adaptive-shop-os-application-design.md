@@ -1,6 +1,6 @@
 # Adaptive ShopOS Application Design
 
-**Date:** 2026-07-15  
+**Date:** 2026-07-15
 **Status:** Approved with sequencing and safety modifications; Wave 1A plan ready
 **Product definition:** An installable, real-time Progressive Web App with single-page application behavior
 **Wave 1A execution:** [Adaptive ShopOS Wave 1A implementation plan](../plans/2026-07-15-adaptive-shop-os-wave-1a.md)
