@@ -547,15 +547,56 @@ git diff --check origin/main...HEAD
 
 Expected: clean worktree, no whitespace errors, focused/full tests green, TypeScript/build green, browser proof recorded, Row 48 still blocked. Push the branch and mark the implementation PR ready for founder-authorized merge; do not merge or deploy without that hard gate.
 
+### Task 8: Close the legacy private-cache migration before release
+
+**Root cause:** The privacy-safe worker waits for explicit activation, but the currently deployed `vyntechs-shell-v3` worker remains active during that wait. V3 continues writing and serving authenticated navigation responses, so merely installing v4 does not satisfy the private-cache prohibition.
+
+**Files:**
+- Modify: `public/sw-policy.js`
+- Modify: `public/sw.js`
+- Modify: `components/sw-register.tsx`
+- Modify: `tests/unit/service-worker-policy.test.ts`
+- Modify: `tests/unit/sw-register.test.tsx`
+
+- [ ] **Step 1: Prove the unsafe upgrade state with RED tests**
+
+Add pure and executable worker-lifecycle tests that begin with the exact active v3 worker. Prove the safe worker does not remain waiting behind that legacy controller. Prove activation scrubs the v3 cache around controller takeover, including a delayed un-awaited v3 `cache.put`, without reloading the document. Also prove an active public-only worker with the durable safe-cache marker remains waiting for the explicit safe-point action even when its live response is delayed or unavailable.
+
+- [ ] **Step 2: Add a one-time fail-closed privacy migration**
+
+Register `/sw.js?cache-policy=public-v4` at explicit scope `/` with `updateViaCache: 'none'`, then call `registration.update()` so the same-URL register fast path cannot leave v3 or an earlier waiting v4 untouched. The URL change and explicit update are migration/update triggers only; neither is safety proof. A distinct empty cache named `vyntechs-public-policy-v1` is the durable public-only policy marker. It must be created only at the end of successful safe-worker activation, after both legacy-cache scrubs; install must never create it. The exact deployed v3 worker and any merely waiting v4 worker therefore cannot forge “migration complete.” If an active worker and the activation-only marker both exist, classify the controller as durably safe without waiting on scheduling-sensitive messaging. If the marker is absent, challenge the active worker over a transferred `MessageChannel` for the stable `public-only-v1` capability. The current safe worker answers that exact probe. A timely exact response repairs the missing marker and preserves the normal waiting lifecycle. Missing, malformed, different, timed-out, or thrown responses are explicitly `unknown-and-unsafe` and permit automatic `skipWaiting()` without reload. Storage eviction or manual storage clearing erases durable safety proof; privacy-first replacement in that exceptional unknown state is intentional, not an ordinary update path. With no active worker, preserve first-install behavior. Keep the explicit `ACTIVATE` message for ordinary future updates.
+
+Do not start or await public-shell seeding on the `unknown-and-unsafe` path; activate network-only so quota, asset, interruption, late work, or a hanging cache cannot preserve v3. Seed normally only on first install or behind a durably marked/timely-attested safe controller, where failure must preserve the existing safe controller. During activation, retain only the current public-shell cache and activation-only marker, scrub every other cache, claim clients, scrub again, then best-effort open the empty marker cache. The marker cache must contain zero entries, so Cache Storage entries remain limited to `/offline.html` and allowlisted public assets. If even that marker write fails, remain network-only and require live proof on the next update.
+
+- [ ] **Step 3: Preserve uninterrupted work**
+
+The privacy migration may replace the legacy controller and purge its cache without reloading the document. Existing passive-controller handling must offer a manual `Reload when ready` state; it must never call `window.location.reload()` automatically. This one-time controller replacement is a privacy exception to safe-point activation, not permission for ordinary future versions to auto-activate.
+
+Activation must delete every non-current cache, claim clients, and delete non-current caches again. Executable browser proof must model the deployed v3 ordering: its navigation response calls `caches.open('vyntechs-shell-v3')` before its `respondWith` promise settles, while its un-awaited `cache.put` may finish after takeover. The final named Cache Storage catalog must contain no v3 cache or private entry. A synthetic race that delays `caches.open` until after the v3 fetch event has settled is not representative of the deployed worker and does not substitute for this proof.
+
+The `public-cache` fetch branch must treat Cache Storage as an optional acceleration layer. Cache open, match, or put failure must never reject an otherwise successful network response or make a public asset unavailable; executable tests must cover each failure boundary.
+
+- [ ] **Step 4: Verify the correction**
+
+```bash
+pnpm vitest run \
+  tests/unit/service-worker-policy.test.ts \
+  tests/unit/sw-register.test.tsx \
+  tests/unit/pwa-update-status.test.tsx
+pnpm exec tsc --noEmit
+```
+
+Then repeat every Task 7 gate and browser scenario. Include active v3 plus a waiting v4 that already seeded `vyntechs-public-shell-v4`; absence of the activation-only marker must still force privacy takeover. Any path in which an active worker lacking both durable and timely live public-only proof can keep controlling the app after the safe worker finishes installation, install creates the durable marker, shell seeding gates that takeover, a delayed exact-v3 write restores a named private cache, a durably marked worker is automatically replaced, the marker cache gains an entry, or a cache failure rejects a successful public network response is a stop-ship failure.
+
 ## Rollback
 
-Wave 1A has no data migration. The shell, status controls, workbench primitive, and live-entity helpers are source-reversible. The service-worker privacy fix is not safely reversible to the old authenticated-navigation cache; if another part of the wave must be rolled back, retain Task 2 or ship a higher cache-name safe worker that deletes `vyntechs-public-shell-v4` during activation. Never restore the previous authenticated-navigation cache. A service-worker privacy regression is a stop-ship defect.
+Wave 1A has no data migration. The shell, status controls, workbench primitive, and live-entity helpers are source-reversible. The service-worker privacy fix is not safely reversible to the old authenticated-navigation cache; if another part of the wave must be rolled back, retain Task 2 and Task 8 or ship a separately proven higher public-only policy generation. Every rollback must preserve the changed migration URL, explicit `registration.update()`, explicit scope, `updateViaCache: 'none'`, the activation-only empty policy marker, the `public-only-v1` responder/challenge contract, unknown-and-unsafe takeover, double v3 scrub, and cache-failure network fallback. Never restore the previous authenticated-navigation cache. A service-worker privacy regression is a stop-ship defect.
 
 ## Done when
 
 - Row 47 is implemented and verified in its own PR with no Row-46-owned path changes.
 - Authenticated documents, API data, and non-allowlisted assets cannot enter service-worker Cache Storage.
-- New application versions wait without disturbing active work and activate only after the explicit safe-point action.
+- Durably marked or timely-attested public-only updates wait without disturbing active work and activate only after the explicit safe-point action; only missing/erased proof may fail closed to a no-reload privacy takeover.
 - The authenticated route group has one persistent, accessible, container-aware shell.
 - The adaptive workbench primitive is tested but not prematurely composed into Today/My Jobs.
 - Opaque-version entity replacements fail closed on stale or mismatched state.
