@@ -37,3 +37,8 @@ Reason: RLS does not protect every table privilege, and partial ACL checks can f
 Trigger: Production verification found unindexed foreign keys after source had been called ready.
 Rule: Prove exact FK index coverage before merge, then run security and performance advisors after apply.
 Reason: Local schema correctness does not prove production advisor cleanliness.
+
+### media-needs-explicit-economics
+Trigger: Founder rejected photo-dependent ShopOS scope because hosted media creates unwanted ongoing cost.
+Rule: Default new ShopOS wedges to structured text; add media only with explicit storage economics and approval.
+Reason: Workflow value must not silently create infrastructure cost or adoption friction.
