@@ -1362,13 +1362,15 @@ describe('public/sw.js', () => {
       const activation = harness.dispatchActivate()
       await vi.runAllTimersAsync()
       await activation
-      const response = await harness.dispatchFetch({
+      const fetchEvent = harness.dispatchFetchWithLifetime({
         url: 'https://app.vyntechs.test/icons/icon-192.png',
         method: 'GET',
         destination: 'image',
       })
 
-      expect(await response?.text()).toBe('network-public')
+      expect(await (await fetchEvent.response)?.text()).toBe('network-public')
+      await vi.runAllTimersAsync()
+      await fetchEvent.lifetime
       const receipt = await harness
         .getCache(POLICY_MARKER)
         ?.match(POLICY_RECEIPT_REQUEST)
@@ -1568,6 +1570,46 @@ describe('public/sw.js', () => {
     expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
   })
 
+  it('returns a successful public asset without waiting for bounded recovery', async () => {
+    vi.useFakeTimers()
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.hangPutFor(POLICY_MARKER)
+    harness.rebootWorker()
+
+    const fetchEvent = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    const responseOutcome = Promise.race([
+      fetchEvent.response.then(
+        (response) => ({ kind: 'response' as const, response }),
+      ),
+      new Promise<{ kind: 'blocked' }>((resolve) => {
+        setTimeout(() => resolve({ kind: 'blocked' }), 1)
+      }),
+    ])
+    await vi.advanceTimersByTimeAsync(1)
+    const result = await responseOutcome
+
+    expect(result.kind).toBe('response')
+    if (result.kind !== 'response') return
+    expect(await result.response?.text()).toBe('network-public')
+    expect(harness.cacheNames()).toContain('vyntechs-shell-v3')
+    await vi.runAllTimersAsync()
+    await fetchEvent.lifetime
+    expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
+  })
+
   it('retries a transient active-worker recovery failure on the next request', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
@@ -1608,6 +1650,50 @@ describe('public/sw.js', () => {
     )
   })
 
+  it('starts a new recovery after proof is lost following a successful recovery', async () => {
+    const harness = createWorkerHarness({
+      activeScriptURL:
+        'https://app.vyntechs.test/sw.js?cache-policy=public-v4',
+      cacheNames: [
+        'vyntechs-shell-v3',
+        'vyntechs-public-shell-v4',
+        'vyntechs-public-policy-v1',
+      ],
+    })
+    await installPolicyReceipt(harness)
+    harness.rebootWorker()
+
+    const initialRecovery = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/today',
+      method: 'GET',
+      mode: 'navigate',
+      destination: 'document',
+    })
+    await initialRecovery.response
+    await initialRecovery.lifetime
+    await harness.cacheStorage.delete(POLICY_MARKER)
+
+    await harness.dispatchFetch({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    const retry = harness.dispatchFetchWithLifetime({
+      url: 'https://app.vyntechs.test/icons/icon-192.png',
+      method: 'GET',
+      destination: 'image',
+    })
+    expect(await (await retry.response)?.text()).toBe('network-public')
+    await retry.lifetime
+
+    const receipt = await harness
+      .getCache(POLICY_MARKER)
+      ?.match(POLICY_RECEIPT_REQUEST)
+    expect(receipt?.headers.get('x-vyntechs-cache-policy')).toBe(
+      'public-only-v1',
+    )
+  })
+
   it('rejects a stale marker after scrub and marker deletion both fail', async () => {
     const harness = createWorkerHarness({
       activeScriptURL:
@@ -1622,13 +1708,14 @@ describe('public/sw.js', () => {
     harness.failDeleteFor('vyntechs-public-policy-v1')
 
     await harness.dispatchActivate()
-    const response = await harness.dispatchFetch({
+    const fetchEvent = harness.dispatchFetchWithLifetime({
       url: 'https://app.vyntechs.test/icons/icon-192.png',
       method: 'GET',
       destination: 'image',
     })
 
-    expect(await response?.text()).toBe('network-public')
+    expect(await (await fetchEvent.response)?.text()).toBe('network-public')
+    await fetchEvent.lifetime
     expect(harness.cacheNames()).not.toContain('vyntechs-shell-v3')
     expect(harness.cacheNames()).toContain('vyntechs-public-policy-v1')
     expect(

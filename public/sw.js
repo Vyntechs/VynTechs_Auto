@@ -339,20 +339,13 @@ function startRuntimePublicOnlyRecovery(activeWorker) {
   if (runtimeRecoveryPromise) return runtimeRecoveryPromise
 
   let attempt
-  attempt = recoverRuntimePublicOnlyState(activeWorker).then(
-    (recovered) => {
-      if (!recovered && runtimeRecoveryPromise === attempt) {
-        runtimeRecoveryPromise = undefined
-      }
-      return recovered
-    },
-    () => {
+  attempt = recoverRuntimePublicOnlyState(activeWorker)
+    .catch(() => false)
+    .finally(() => {
       if (runtimeRecoveryPromise === attempt) {
         runtimeRecoveryPromise = undefined
       }
-      return false
-    },
-  )
+    })
   runtimeRecoveryPromise = attempt
   return attempt
 }
@@ -382,10 +375,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const policy = self.VyntechsSwPolicy.classifyRequest(event.request, self.location.origin)
+  const recoveryRequired = durableProofRevoked
 
   if (
     (policy === 'navigate-network' || policy === 'public-cache') &&
-    durableProofRevoked
+    recoveryRequired
   ) {
     event.waitUntil(startRuntimePublicOnlyRecovery(self.registration.active))
   }
@@ -396,11 +390,12 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (policy === 'public-cache') {
-    event.respondWith(fetchPublicAsset(event.request))
+    event.respondWith(fetchPublicAsset(event.request, recoveryRequired))
   }
 })
 
-async function fetchPublicAsset(request) {
+async function fetchPublicAsset(request, recoveryRequired) {
+  if (recoveryRequired) return fetch(request)
   if (!(await hasDurablePublicOnlyProof(self.registration.active))) {
     return fetch(request)
   }
