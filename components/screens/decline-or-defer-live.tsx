@@ -1,6 +1,6 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { DeclineOrDefer } from './decline-or-defer'
 import type { WhatWouldClose } from '@/lib/ai/tree-engine'
 
@@ -60,7 +60,6 @@ export function DeclineOrDeferLive(props: {
   const [pending, setPending] = useState<1 | 2 | 3 | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [heroBusy, setHeroBusy] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const wwc = props.whatWouldClose
   const wwcObj = wwc && typeof wwc === 'object' ? wwc : null
@@ -108,37 +107,6 @@ export function DeclineOrDeferLive(props: {
     } catch (err) {
       setHeroBusy(false)
       setError(describeFetchError(err))
-    }
-  }
-
-  function handleSnap() {
-    fileInputRef.current?.click()
-  }
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setHeroBusy(true)
-    setError(null)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('kind', 'photo')
-      const res = await fetch(`/api/sessions/${props.sessionId}/capture`, {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error ?? `${res.status}`)
-      }
-      await releaseGate()
-      router.push(`/sessions/${props.sessionId}`)
-    } catch (err) {
-      setHeroBusy(false)
-      setError(describeFetchError(err))
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -191,19 +159,6 @@ export function DeclineOrDeferLive(props: {
   }
 
   return (
-    <>
-      {wwcObj?.kind === 'photo' && (
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFile}
-          style={{ display: 'none' }}
-          aria-hidden="true"
-          tabIndex={-1}
-        />
-      )}
       <DeclineOrDefer
         vehicleName={props.vehicleName}
         vehicleVin={props.vehicleVin}
@@ -230,16 +185,6 @@ export function DeclineOrDeferLive(props: {
               }
             : undefined
         }
-        photoAsk={
-          wwcObj?.kind === 'photo'
-            ? {
-                prompt: wwcObj.prompt,
-                onSnap: handleSnap,
-                busy: heroBusy,
-              }
-            : undefined
-        }
       />
-    </>
   )
 }

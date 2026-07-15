@@ -48,8 +48,6 @@ type Props = {
     yesLabel?: string
     noLabel?: string
   }
-  /** Hero interactive ask — single-tap camera button. Renders above the compass. */
-  photoAsk?: { prompt: string; onSnap: () => void; busy?: boolean }
 }
 
 const SPOKE_META: Record<SpokeReason, { bearing: string }> = {
@@ -288,7 +286,6 @@ export function DeclineOrDefer({
   error = null,
   back,
   confirmAsk,
-  photoAsk,
 }: Props) {
   const deficit =
     typeof confidence === 'number' && typeof gate === 'number'
@@ -336,7 +333,7 @@ export function DeclineOrDefer({
 
         <h2 className="dod-headline">{headline}</h2>
 
-        {(confirmAsk || photoAsk) && (
+        {confirmAsk && (
           <div
             style={{
               margin: '0 auto 4px',
@@ -411,43 +408,6 @@ export function DeclineOrDefer({
                 {confirmAsk.busy ? 'Working…' : (confirmAsk.noLabel ?? 'No')}
               </button>
             </div>
-          </div>
-        )}
-
-        {photoAsk && (
-          <div
-            role="group"
-            aria-label="Snap to close gap"
-            style={{
-              margin: '8px auto 16px',
-              padding: '14px 16px',
-              maxWidth: '36ch',
-              border: '0.5px solid var(--vt-rule-strong)',
-              borderRadius: 'var(--vt-radius-2)',
-              background: 'var(--vt-bone-100)',
-            }}
-          >
-            <p
-              style={{
-                fontFamily: 'var(--vt-font-serif)',
-                fontSize: 14,
-                color: 'var(--vt-fg)',
-                lineHeight: 1.4,
-                margin: '0 0 10px',
-                textAlign: 'center',
-              }}
-            >
-              {photoAsk.prompt}
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={photoAsk.onSnap}
-              disabled={photoAsk.busy}
-              style={{ minHeight: 48, width: '100%' }}
-            >
-              {photoAsk.busy ? 'Uploading…' : 'Snap it'}
-            </button>
           </div>
         )}
 
