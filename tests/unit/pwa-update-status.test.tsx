@@ -164,11 +164,39 @@ describe('PwaUpdateStatus', () => {
     expect(serviceWorkerContainer.controller).toBeNull()
     act(() => {
       serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
     })
 
     expect(container.innerHTML).toBe('')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('silently records first-install control and recognizes a later controller replacement', async () => {
+    const user = userEvent.setup()
+    const reload = vi.fn()
+    const { container } = render(<PwaUpdateStatus reload={reload} />)
+
+    setController(createWaitingWorker())
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+
+    expect(container.innerHTML).toBe('')
+    expect(reload).not.toHaveBeenCalled()
+
+    setController(createWaitingWorker())
+    act(() => {
+      serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Application update applied. Reload when ready.',
+    )
+    expect(reload).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Reload when ready' }))
+    expect(reload).toHaveBeenCalledOnce()
   })
 
   it('announces readiness without messaging, activating, or reloading automatically', () => {
@@ -318,6 +346,31 @@ describe('PwaUpdateStatus', () => {
     unmount()
 
     expect(removeContainerListener).toHaveBeenCalledTimes(2)
+    serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('clears a locally activated worker that becomes redundant without a successor', async () => {
+    const user = userEvent.setup()
+    const waiting = createWaitingWorker()
+    const reload = vi.fn()
+    const removeContainerListener = vi.spyOn(serviceWorkerContainer, 'removeEventListener')
+    const { container } = render(<PwaUpdateStatus reload={reload} />)
+    announceWaitingWorker(waiting)
+
+    await user.click(screen.getByRole('button', { name: 'Update when ready' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Updating application…')
+
+    act(() => {
+      waiting.state = 'redundant'
+      waiting.dispatchEvent(new Event('statechange'))
+    })
+
+    await waitFor(() => expect(container.innerHTML).toBe(''))
+    expect(removeContainerListener).toHaveBeenCalledWith(
+      'controllerchange',
+      expect.any(Function),
+    )
     serviceWorkerContainer.dispatchEvent(new Event('controllerchange'))
     expect(reload).not.toHaveBeenCalled()
   })

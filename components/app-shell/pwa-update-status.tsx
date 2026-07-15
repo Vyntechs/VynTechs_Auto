@@ -61,7 +61,11 @@ export function PwaUpdateStatus({
     }
 
     const handlePassiveControllerChange = () => {
-      if (localActivation.current || !hasUpdateEvidence) return
+      if (localActivation.current) return
+      if (!hasUpdateEvidence) {
+        hasUpdateEvidence = navigator.serviceWorker.controller !== null
+        return
+      }
       setPhase('reload-ready')
     }
 
@@ -109,7 +113,7 @@ export function PwaUpdateStatus({
 
     const handleWaitingStateChange = () => {
       if (waiting.state === 'redundant') {
-        const wasLocalActivation = localActivation.current
+        if (waitingRef.current !== waiting) return
 
         if (controllerChangeListener.current) {
           navigator.serviceWorker.removeEventListener(
@@ -120,12 +124,8 @@ export function PwaUpdateStatus({
         }
 
         localActivation.current = false
-        if (waitingRef.current === waiting) {
-          waitingRef.current = null
-        }
-        if (!wasLocalActivation) {
-          setWaiting(null)
-        }
+        waitingRef.current = null
+        setWaiting(null)
         return
       }
 
