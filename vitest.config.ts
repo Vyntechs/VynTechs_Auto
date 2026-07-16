@@ -17,6 +17,9 @@ export default defineConfig({
     ],
   },
   resolve: {
-    alias: { '@': path.resolve(__dirname, '.') },
+    alias: {
+      'server-only': path.resolve(__dirname, 'tests/helpers/server-only-stub.ts'),
+      '@': path.resolve(__dirname, '.'),
+    },
   },
 })
