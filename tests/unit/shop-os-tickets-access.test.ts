@@ -131,7 +131,6 @@ describe('ticket detail access and job mutation', () => {
     const ticket = await createTicket(db, {
       actor: actors.owner,
       body: {
-        source: 'counter',
         customerId: customer.id,
         vehicleId: vehicle.id,
         concern: 'Intermittent front-end noise',
@@ -284,12 +283,31 @@ describe('ticket detail access and job mutation', () => {
   })
 
   it('refuses closed and canceled tickets without adding a job', async () => {
+    const terminalAt = new Date('2026-07-16T12:00:00.000Z')
     for (const status of ['closed', 'canceled'] as const) {
-      await db.update(tickets).set({ status }).where(eq(tickets.id, ticketId))
+      const [terminalTicket] = await db.insert(tickets).values({
+        shopId: shopA.id,
+        ticketNumber: status === 'closed' ? 2 : 3,
+        source: 'tech_quick',
+        concern: `Already ${status}`,
+        createdByProfileId: actors.owner.profileId,
+        status,
+        ...(status === 'closed'
+          ? {
+              closedAt: terminalAt,
+              closedByProfileId: actors.owner.profileId,
+              closeDisposition: 'customer_declined' as const,
+            }
+          : {
+              canceledAt: terminalAt,
+              canceledByProfileId: actors.owner.profileId,
+              cancelReasonCode: 'administrative_error' as const,
+            }),
+      }).returning()
       await expect(
         addTicketJob(db, {
           actor: actors.owner,
-          ticketId,
+          ticketId: terminalTicket.id,
           body: { title: 'Must not be added', kind: 'repair', requiredSkillTier: 1 },
         }),
       ).resolves.toEqual({ ok: false, error: 'ticket_not_open' })
@@ -373,11 +391,6 @@ describe('ticket detail access and job mutation', () => {
   it('returns only the safe projection with jobs ordered by createdAt then id', async () => {
     const initialJob = (await db.select().from(ticketJobs))[0]
     const early = new Date('2026-01-01T00:00:00.000Z')
-    const late = new Date('2026-01-02T00:00:00.000Z')
-    await db
-      .update(ticketJobs)
-      .set({ createdAt: late, updatedAt: late })
-      .where(eq(ticketJobs.id, initialJob.id))
     await db.insert(ticketJobs).values([
       {
         id: uuid(102),

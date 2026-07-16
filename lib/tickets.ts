@@ -35,7 +35,13 @@ import type {
   TicketOperationOriginV1,
   TicketCreatingEnvelopeBaseV1,
 } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
-import type { LockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import { ShopOsMutationNotFound } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
+import { ShopOsMutationConflict } from '@/lib/shop-os/continuity/mutation-foundation/conflicts'
+import type {
+  LockedMutationScopeV1,
+  MutationLockRequestV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 import {
   insertMutationReceiptPrimitiveV1,
   lockAndClassifyMutationReceiptV1,
@@ -53,7 +59,10 @@ import { consumeCanonicalQuickReceiptRequestForCreationV1 } from '@/lib/intake/q
 import { consumeMaterializedTicketIntakeIdentityForCreationV1 } from '@/lib/intake/ticket-identity'
 import { consumeResolvedLockedQuickTemplateForCreationV1 } from '@/lib/shop-os/canned-jobs'
 import { parseScaledDecimal } from '@/lib/shop-os/quote-math'
-import { resolveTrustedTicketOriginInLockedScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/ticket-origin.server'
+import {
+  createCounterTicketOriginV1,
+  resolveTrustedTicketOriginInLockedScopeV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/ticket-origin.server'
 
 export type TicketActor = {
   profileId: string
@@ -347,6 +356,8 @@ export function ticketDomainStatus(
 const optionalTrimmedText = (max: number) =>
   z.string().trim().max(max).nullable().optional()
 
+const canonicalUuid = z.uuid().transform((value) => value.toLowerCase())
+
 const ticketJobBodySchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -354,6 +365,12 @@ const ticketJobBodySchema = z
     requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     assignedTechId: z.uuid().nullable().optional(),
     confirmBelowTier: z.boolean().optional(),
+  })
+  .strict()
+
+const createTicketJobBodySchema = ticketJobBodySchema
+  .extend({
+    assignedTechId: canonicalUuid.nullable().optional(),
   })
   .strict()
 
@@ -371,22 +388,22 @@ const assignmentBodySchema = z.discriminatedUnion('action', [
 
 const createTicketBodySchema = z
   .object({
-    source: z.enum(['counter', 'tech_quick', 'quick_quote']),
-    customerId: z.uuid().nullable(),
-    vehicleId: z.uuid().nullable(),
+    customerId: canonicalUuid,
+    vehicleId: canonicalUuid,
     concern: z.string().trim().min(1).max(5_000),
     whenStarted: optionalTrimmedText(1_000),
     howOften: optionalTrimmedText(1_000),
     diagnosticAuthorizedCents: z.number().int().safe().nonnegative().nullable().optional(),
     diagnosticAuthorizationNote: optionalTrimmedText(2_000),
     jobs: z
-      .array(ticketJobBodySchema)
+      .array(createTicketJobBodySchema)
       .min(1)
       .max(25),
   })
   .strict()
 
 type TicketJobBody = z.infer<typeof ticketJobBodySchema>
+type CreateTicketBody = z.infer<typeof createTicketBodySchema>
 
 type TransactionTicketJob = {
   title: string
@@ -691,78 +708,234 @@ async function validateAssignment(
   return { ok: true, assignedTechId: assignee.id }
 }
 
+type CreateTicketFailure = Exclude<CreateTicketResult, { ok: true }>
+
+type GenericTicketDiscovery = Readonly<{
+  ticketId: string
+  jobIds: readonly string[]
+}>
+
+class GenericTicketRollback extends Error {
+  constructor(readonly result: CreateTicketFailure) {
+    super('generic_ticket_rollback')
+  }
+}
+
+function genericTicketLockRequest(
+  actor: TicketActor & { shopId: string },
+  body: CreateTicketBody,
+  ticketId: string,
+  jobIds: readonly string[],
+): MutationLockRequestV1 {
+  const profileIds = [...new Set([
+    actor.profileId,
+    ...body.jobs.flatMap(({ assignedTechId }) =>
+      assignedTechId === null || assignedTechId === undefined ? [] : [assignedTechId]),
+  ])].sort()
+  return {
+    shopId: actor.shopId,
+    actorProfileId: actor.profileId,
+    profileIds,
+    lockShop: true,
+    customerIds: [body.customerId],
+    vehicleIds: [body.vehicleId],
+    ticketIds: [],
+    jobIds: [],
+    includeAllJobsForTickets: true,
+    includeAllLinesForJobs: true,
+    includeAllQuoteVersionsForTickets: false,
+    includeAllQuoteEventsForTickets: false,
+    sessionIds: [],
+    sessionEventIds: [],
+    vendorAccountIds: [],
+    cannedJobIds: [],
+    receiptRequestKey: null,
+    receiptConditionalInsert: null,
+    insertionIntents: {
+      sessions: [],
+      customers: [],
+      vehicles: [],
+      tickets: [ticketId],
+      jobs: jobIds.map((id) => ({ id, ticketId })),
+    },
+  }
+}
+
+function resolveGenericTicketAssignments(
+  scope: LockedMutationScopeV1,
+  jobs: readonly z.infer<typeof createTicketJobBodySchema>[],
+):
+  | Readonly<{ ok: true; assignedTechIds: readonly (string | null)[] }>
+  | CreateTicketFailure {
+  const assignedTechIds: Array<string | null> = []
+  for (const job of jobs) {
+    if (!job.assignedTechId) {
+      assignedTechIds.push(null)
+      continue
+    }
+    const assignee = scope.profiles.find(({ id }) => id === job.assignedTechId)
+    if (!assignee || assignee.shopId !== scope.actor.shopId) {
+      return { ok: false, error: 'not_found' }
+    }
+    const assignedSkillTier = assignee.skillTier
+    if (
+      assignee.membershipStatus !== 'active' ||
+      assignee.deactivatedAt !== null ||
+      !canCreateTickets(assignee.role) ||
+      (assignedSkillTier !== 1 && assignedSkillTier !== 2 && assignedSkillTier !== 3)
+    ) {
+      return { ok: false, error: 'invalid_assignee' }
+    }
+    if (assignee.id === scope.actor.id) {
+      if (assignedSkillTier < job.requiredSkillTier) {
+        return { ok: false, error: 'invalid_assignee' }
+      }
+      assignedTechIds.push(assignee.id)
+      continue
+    }
+    if (!canAssignWork(scope.actor.role)) {
+      return { ok: false, error: 'invalid_assignee' }
+    }
+    if (assignedSkillTier < job.requiredSkillTier && !job.confirmBelowTier) {
+      return {
+        ok: false,
+        error: 'tier_confirmation_required',
+        warning: {
+          code: 'below_required_tier',
+          assignedTechId: assignee.id,
+          assignedSkillTier,
+          requiredSkillTier: job.requiredSkillTier,
+        },
+      }
+    }
+    assignedTechIds.push(assignee.id)
+  }
+  return Object.freeze({
+    ok: true,
+    assignedTechIds: Object.freeze(assignedTechIds),
+  })
+}
+
 export async function createTicket(
   db: AppDb,
-  input: { actor: TicketActor; body: unknown; internal?: { ticketId: string } },
+  input: { actor: TicketActor; body: unknown },
 ): Promise<CreateTicketResult> {
-  const denied = actorGate(input.actor)
+  const callerActor: TicketActor = {
+    profileId: input.actor.profileId,
+    shopId: input.actor.shopId,
+    role: input.actor.role,
+    skillTier: input.actor.skillTier,
+    membershipStatus: input.actor.membershipStatus,
+    deactivatedAt: input.actor.deactivatedAt,
+  }
+  const denied = actorGate(callerActor)
   if (denied) return denied
 
   const parsed = createTicketBodySchema.safeParse(input.body)
   if (!parsed.success) return { ok: false, error: 'invalid_input' }
+  const actorIds = z
+    .object({ profileId: canonicalUuid, shopId: canonicalUuid })
+    .strict()
+    .safeParse({ profileId: callerActor.profileId, shopId: callerActor.shopId })
+  if (!actorIds.success) return { ok: false, error: 'invalid_input' }
   const body = parsed.data
-  const internalTicketId = input.internal
-    ? z.uuid().safeParse(input.internal.ticketId)
-    : null
-  if (input.internal && !internalTicketId?.success) return { ok: false, error: 'invalid_input' }
-  const shopId = input.actor.shopId as string
+  const actor = Object.freeze({
+    ...callerActor,
+    profileId: actorIds.data.profileId,
+    shopId: actorIds.data.shopId,
+  }) as TicketActor & { shopId: string }
+  const origin = createCounterTicketOriginV1()
 
-  if (body.source === 'tech_quick') {
-    if (body.customerId !== null || body.vehicleId !== null) {
-      return { ok: false, error: 'invalid_input' }
-    }
-  } else if (!body.customerId || !body.vehicleId) {
-    return { ok: false, error: 'invalid_input' }
-  }
-
-  return db.transaction(async (tx) => {
-    if (body.source !== 'tech_quick') {
-      const [context] = await tx
-        .select({ vehicleId: vehicles.id })
-        .from(customers)
-        .innerJoin(
-          vehicles,
-          and(eq(vehicles.id, body.vehicleId as string), eq(vehicles.customerId, customers.id)),
+  try {
+    return await runBoundedShopOsMutationV1<CreateTicketResult, GenericTicketDiscovery>(db, {
+      discover: async (_tx, _attempt) => {
+        const ticketId = randomUUID()
+        const jobIds = body.jobs.map(() => randomUUID())
+        return {
+          lockRequest: genericTicketLockRequest(actor, body, ticketId, jobIds),
+          payload: Object.freeze({
+            ticketId,
+            jobIds: Object.freeze(jobIds),
+          }),
+        }
+      },
+      executeLocked: async (tx, scope, discovery) => {
+        const assignments = resolveGenericTicketAssignments(scope, body.jobs)
+        if (!assignments.ok) throw new GenericTicketRollback(assignments)
+        const jobs: readonly NormalizedTicketJobCreateV1[] = body.jobs.map((job, index) => ({
+          id: discovery.jobIds[index]!,
+          title: job.title,
+          kind: job.kind,
+          requiredSkillTier: job.requiredSkillTier,
+          assignedTechId: assignments.assignedTechIds[index]!,
+          sessionId: null,
+          createdFromJobId: null,
+        }))
+        const resolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'insert',
+          origin,
+          ticket: {
+            id: discovery.ticketId,
+            customerId: body.customerId,
+            vehicleId: body.vehicleId,
+            concern: body.concern,
+            whenStarted: body.whenStarted ?? null,
+            howOften: body.howOften ?? null,
+            diagnosticAuthorizedCents: body.diagnosticAuthorizedCents ?? null,
+            diagnosticAuthorizationNote: body.diagnosticAuthorizationNote ?? null,
+          },
+          jobs,
+          seededLinesByJobIndex: new Map(),
+        })
+        const batch = await insertResolvedTicketBatchInTransactionV1(tx, scope, resolved)
+        if (
+          batch.ticketId !== discovery.ticketId ||
+          batch.jobIds.length !== discovery.jobIds.length ||
+          batch.jobIds.some((id, index) => id !== discovery.jobIds[index])
+        ) throw new Error('generic_ticket_batch_result_mismatch')
+        const finalized = await finalizeResolvedTicketCreationInTransactionV1(
+          tx,
+          scope,
+          resolved,
+          [{
+            ticketId: discovery.ticketId,
+            createdTicket: true,
+            createdJobIds: [...discovery.jobIds],
+            existingChangedJobIds: [],
+            actorVisibleTicketFieldsChanged: true,
+          }],
         )
-        .where(
-          and(eq(customers.id, body.customerId as string), eq(customers.shopId, shopId)),
-        )
-        .limit(1)
-      if (!context) return { ok: false, error: 'not_found' as const }
-    }
-
-    const assignments: Array<string | null> = []
-    for (const job of body.jobs) {
-      const assignment = await validateAssignment(tx as AppDb, input.actor, job)
-      if (!assignment.ok) return assignment
-      assignments.push(assignment.assignedTechId)
-    }
-
-    const created = await insertTicketInTransaction(tx as AppDb, {
-      ticketId: internalTicketId?.success ? internalTicketId.data : undefined,
-      shopId,
-      source: body.source,
-      customerId: body.customerId,
-      vehicleId: body.vehicleId,
-      concern: body.concern,
-      whenStarted: body.whenStarted,
-      howOften: body.howOften,
-      diagnosticAuthorizedCents: body.diagnosticAuthorizedCents,
-      diagnosticAuthorizationNote: body.diagnosticAuthorizationNote,
-      createdByProfileId: input.actor.profileId,
-      jobs: body.jobs.map((job, index) => ({
-        title: job.title,
-        kind: job.kind,
-        requiredSkillTier: job.requiredSkillTier,
-        assignedTechId: assignments[index],
-      })),
+        const safe = readFinalizedTicketCreationResultV1(tx, scope, finalized)
+        if (
+          safe.ticketId !== discovery.ticketId ||
+          safe.jobIds.length !== discovery.jobIds.length ||
+          safe.jobIds.some((id, index) => id !== discovery.jobIds[index])
+        ) throw new Error('generic_ticket_creation_result_mismatch')
+        const detail = await getTicketDetail(tx, {
+          actor: {
+            profileId: scope.actor.id,
+            shopId: scope.actor.shopId,
+            role: scope.actor.role,
+            skillTier: scope.actor.skillTier,
+            membershipStatus: 'active',
+            deactivatedAt: null,
+          },
+          ticketId: safe.ticketId,
+        })
+        if (!detail.ok) throw new GenericTicketRollback(detail)
+        return detail
+      },
     })
-    if (!created) return { ok: false, error: 'not_found' as const }
-
-    const detail = await loadTicketDetail(tx as AppDb, shopId, created.ticketId)
-    if (!detail) throw new Error('created_ticket_not_found')
-    return { ok: true, ticket: detail }
-  })
+  } catch (error) {
+    if (error instanceof GenericTicketRollback) return error.result
+    if (error instanceof ShopOsMutationNotFound) {
+      return { ok: false, error: 'not_found' }
+    }
+    if (error instanceof ShopOsMutationConflict) {
+      return { ok: false, error: 'conflict', retryable: true }
+    }
+    throw error
+  }
 }
 
 export async function getTicketDetail(

@@ -3291,7 +3291,6 @@ describe('createTicket', () => {
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
-      source: 'counter',
       customerId: customerA.id,
       vehicleId: vehicleA.id,
       concern: '  Intermittent front-end noise  ',
@@ -3309,6 +3308,514 @@ describe('createTicket', () => {
       ...overrides,
     }
   }
+
+  async function genericMutationState() {
+    const [shop] = await db
+      .select({ nextTicketNumber: shops.nextTicketNumber })
+      .from(shops)
+      .where(eq(shops.id, shopA.id))
+    return {
+      nextTicketNumber: shop.nextTicketNumber,
+      tickets: await db.select().from(tickets),
+      jobs: await db.select().from(ticketJobs),
+      lines: await db.select().from(jobLines),
+      sessions: await db.select().from(sessions),
+      receipts: await db.select().from(ticketMutationReceipts),
+      receiptJobs: await db.select().from(ticketMutationReceiptJobs),
+    }
+  }
+
+  describe('Task 7E strict source-free boundary', () => {
+    it('accepts a source-free body for every active Shop OS role', async () => {
+      for (const role of ['tech', 'advisor', 'parts', 'owner'] as const) {
+        await expect(
+          createTicket(db, { actor: actors[role], body: body() }),
+        ).resolves.toMatchObject({ ok: true, ticket: { source: 'counter' } })
+      }
+    })
+
+    it('rejects every supplied source before database access', async () => {
+      const inaccessibleDb = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error('database must not be accessed')
+          },
+        },
+      ) as AppDb
+
+      for (const source of [
+        'counter',
+        'tech_quick',
+        'quick_quote',
+        'unknown',
+        null,
+        42,
+        {},
+        undefined,
+      ]) {
+        await expect(
+          createTicket(inaccessibleDb, {
+            actor: actors.owner,
+            body: body({ source }),
+          }),
+        ).resolves.toEqual({ ok: false, error: 'invalid_input' })
+      }
+    })
+
+    it('rejects null identity, extra fields, malformed UUIDs, and job bounds before access', async () => {
+      const inaccessibleDb = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error('database must not be accessed')
+          },
+        },
+      ) as AppDb
+      const invalidBodies: unknown[] = [
+        body({ customerId: null }),
+        body({ vehicleId: null }),
+        body({ customerId: 'not-a-uuid' }),
+        body({ vehicleId: 'not-a-uuid' }),
+        { ...body(), status: 'closed' },
+        body({ jobs: [] }),
+        body({
+          jobs: Array.from({ length: 26 }, () => ({
+            title: 'Job',
+            kind: 'repair',
+            requiredSkillTier: 1,
+          })),
+        }),
+      ]
+
+      for (const invalidBody of invalidBodies) {
+        await expect(
+          createTicket(inaccessibleDb, { actor: actors.owner, body: invalidBody }),
+        ).resolves.toEqual({ ok: false, error: 'invalid_input' })
+      }
+    })
+  })
+
+  it('uses the bounded generic kernel exactly once and removes caller-owned seams', async () => {
+    const source = await readFile(path.join(process.cwd(), 'lib/tickets.ts'), 'utf8')
+    const start = source.indexOf('export async function createTicket')
+    const end = source.indexOf('export async function getTicketDetail', start)
+    const slice = source.slice(start, end)
+    const callCount = (name: string) =>
+      slice.match(new RegExp(`\\b${name}(?:<[^>]+>)?\\s*\\(`, 'g'))?.length ?? 0
+
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    for (const name of [
+      'runBoundedShopOsMutationV1',
+      'createCounterTicketOriginV1',
+      'resolveTicketCreationInLockedScopeV1',
+      'insertResolvedTicketBatchInTransactionV1',
+      'finalizeResolvedTicketCreationInTransactionV1',
+      'readFinalizedTicketCreationResultV1',
+    ]) {
+      expect(callCount(name), name).toBe(1)
+    }
+    expect(slice).not.toMatch(/\b(?:insertTicketInTransaction|validateAssignment)\s*\(/)
+    expect(slice).not.toContain('db.transaction')
+    expect(slice).not.toContain('body.source')
+    expect(slice).not.toContain('internalTicketId')
+    expect(slice).not.toContain('input.internal')
+    expect(slice).not.toContain('uniqueCollisionRecovery')
+    expect(slice).not.toMatch(/\.from\((?:customers|vehicles|profiles)\)/)
+
+    const discoverStart = slice.indexOf('discover:')
+    const executeStart = slice.indexOf('executeLocked:', discoverStart)
+    const discover = slice.slice(discoverStart, executeStart)
+    expect(discover.match(/randomUUID\(\)/g)).toHaveLength(2)
+    expect(discover).toContain('body.jobs.map(() => randomUUID())')
+
+    const firstAwait = slice.indexOf('await ')
+    expect(firstAwait).toBeGreaterThan(-1)
+    expect(slice.slice(firstAwait)).not.toContain('input.actor')
+    expect(slice.slice(firstAwait)).not.toContain('input.body')
+
+    if (false) {
+      void createTicket(db, {
+        actor: actors.owner,
+        body: body(),
+        // @ts-expect-error the generic adapter has no internal ticket-ID seam
+        internal: { ticketId: uuid(999) },
+      })
+    }
+  })
+
+  it('persists one canonical Counter batch with exact IDs, order, revisions, and provenance', async () => {
+    const uppercaseActor: TicketActor = {
+      ...actors.owner,
+      profileId: actors.owner.profileId.toUpperCase(),
+      shopId: actors.owner.shopId!.toUpperCase(),
+    }
+    const result = await createTicket(db, {
+      actor: uppercaseActor,
+      body: body({
+        customerId: customerA.id.toUpperCase(),
+        vehicleId: vehicleA.id.toUpperCase(),
+        jobs: [
+          {
+            title: '  First entered job  ',
+            kind: 'repair',
+            requiredSkillTier: 1,
+            assignedTechId: sameShopTierOne.id.toUpperCase(),
+          },
+          {
+            title: 'Second entered job',
+            kind: 'maintenance',
+            requiredSkillTier: 1,
+          },
+          {
+            title: 'Third entered job',
+            kind: 'diagnostic',
+            requiredSkillTier: 3,
+          },
+        ],
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const [persistedTicket] = await db.select().from(tickets)
+    const persistedJobs = (await db.select().from(ticketJobs))
+      .sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0))
+    expect(persistedTicket).toMatchObject({
+      id: result.ticket.id,
+      shopId: shopA.id,
+      ticketNumber: 1,
+      source: 'counter',
+      customerId: customerA.id,
+      vehicleId: vehicleA.id,
+      concern: 'Intermittent front-end noise',
+      whenStarted: 'last week',
+      howOften: 'on cold starts',
+      diagnosticAuthorizedCents: 12500,
+      diagnosticAuthorizationNote: 'customer approved by phone',
+      projectionRevision: 1n,
+      continuityRevision: 1n,
+      createdByProfileId: actors.owner.profileId,
+    })
+    expect(persistedJobs.map((job) => ({
+      id: job.id,
+      title: job.title,
+      sequenceNumber: job.sequenceNumber,
+      assignedTechId: job.assignedTechId,
+      sessionId: job.sessionId,
+      createdFromJobId: job.createdFromJobId,
+      revision: job.revision,
+      createdByProfileId: job.createdByProfileId,
+      creatorProvenance: job.creatorProvenance,
+    }))).toEqual([
+      {
+        id: expect.any(String),
+        title: 'First entered job',
+        sequenceNumber: 1,
+        assignedTechId: sameShopTierOne.id,
+        sessionId: null,
+        createdFromJobId: null,
+        revision: 1n,
+        createdByProfileId: actors.owner.profileId,
+        creatorProvenance: 'direct',
+      },
+      {
+        id: expect.any(String),
+        title: 'Second entered job',
+        sequenceNumber: 2,
+        assignedTechId: null,
+        sessionId: null,
+        createdFromJobId: null,
+        revision: 1n,
+        createdByProfileId: actors.owner.profileId,
+        creatorProvenance: 'direct',
+      },
+      {
+        id: expect.any(String),
+        title: 'Third entered job',
+        sequenceNumber: 3,
+        assignedTechId: null,
+        sessionId: null,
+        createdFromJobId: null,
+        revision: 1n,
+        createdByProfileId: actors.owner.profileId,
+        creatorProvenance: 'direct',
+      },
+    ])
+    expect(new Set(result.ticket.jobs.map(({ id }) => id)))
+      .toEqual(new Set(persistedJobs.map(({ id }) => id)))
+    expect(result.ticket).not.toHaveProperty('projectionRevision')
+    expect(result.ticket).not.toHaveProperty('continuityRevision')
+    for (const job of result.ticket.jobs) {
+      expect(job).not.toHaveProperty('revision')
+      expect(job).not.toHaveProperty('sequenceNumber')
+      expect(job).not.toHaveProperty('creatorProvenance')
+    }
+    expect((await genericMutationState())).toMatchObject({
+      nextTicketNumber: 2,
+      lines: [],
+      sessions: [],
+      receipts: [],
+      receiptJobs: [],
+    })
+  })
+
+  it('persists the exact 25-job public boundary as one ordered atomic Counter batch', async () => {
+    const enteredTitles = Array.from(
+      { length: 25 },
+      (_, index) => `Boundary job ${String(index + 1).padStart(2, '0')}`,
+    )
+    const result = await createTicket(db, {
+      actor: actors.owner,
+      body: body({
+        jobs: enteredTitles.map((title) => ({
+          title,
+          kind: 'maintenance',
+          requiredSkillTier: 1,
+        })),
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const state = await genericMutationState()
+    const persistedJobs = [...state.jobs]
+      .sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0))
+    expect(state.tickets).toHaveLength(1)
+    expect(state.tickets[0]).toMatchObject({
+      id: result.ticket.id,
+      ticketNumber: 1,
+      source: 'counter',
+      projectionRevision: 1n,
+      continuityRevision: 1n,
+      createdByProfileId: actors.owner.profileId,
+    })
+    expect(persistedJobs).toHaveLength(25)
+    expect(persistedJobs.map((job) => ({
+      title: job.title,
+      sequenceNumber: job.sequenceNumber,
+      revision: job.revision,
+      createdByProfileId: job.createdByProfileId,
+      creatorProvenance: job.creatorProvenance,
+      sessionId: job.sessionId,
+      createdFromJobId: job.createdFromJobId,
+    }))).toEqual(enteredTitles.map((title, index) => ({
+      title,
+      sequenceNumber: index + 1,
+      revision: 1n,
+      createdByProfileId: actors.owner.profileId,
+      creatorProvenance: 'direct',
+      sessionId: null,
+      createdFromJobId: null,
+    })))
+    expect(result.ticket.jobs).toHaveLength(25)
+    expect(new Set(result.ticket.jobs.map(({ id }) => id)))
+      .toEqual(new Set(persistedJobs.map(({ id }) => id)))
+    expect(state).toMatchObject({
+      nextTicketNumber: 2,
+      lines: [],
+      sessions: [],
+      receipts: [],
+      receiptJobs: [],
+    })
+  })
+
+  it('uses locked persisted actor authority instead of a stale permissive caller token', async () => {
+    const before = await genericMutationState()
+    await db
+      .update(profiles)
+      .set({ role: 'tech', skillTier: 3 })
+      .where(eq(profiles.id, actors.owner.profileId))
+    await expect(
+      createTicket(db, {
+        actor: actors.owner,
+        body: body({
+          jobs: [{
+            title: 'Stale owner assignment',
+            kind: 'repair',
+            requiredSkillTier: 1,
+            assignedTechId: sameShopTierOne.id,
+          }],
+        }),
+      }),
+    ).resolves.toEqual({ ok: false, error: 'invalid_assignee' })
+
+    await db
+      .update(profiles)
+      .set({ membershipStatus: 'pending', membershipActivatedAt: null })
+      .where(eq(profiles.id, actors.advisor.profileId))
+    await expect(
+      createTicket(db, { actor: actors.advisor, body: body() }),
+    ).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await genericMutationState()).toEqual(before)
+  })
+
+  it('owns actor and body values before the first await', async () => {
+    const callerActor: TicketActor = { ...actors.owner }
+    const callerBody = body({
+      concern: '  Original owned concern  ',
+      jobs: [
+        {
+          title: 'Original first job',
+          kind: 'repair',
+          requiredSkillTier: 1,
+          assignedTechId: sameShopTierOne.id,
+        },
+        {
+          title: 'Original second job',
+          kind: 'maintenance',
+          requiredSkillTier: 1,
+        },
+      ],
+    })
+    const callerJobs = callerBody.jobs as Array<Record<string, unknown>>
+    const pending = createTicket(db, { actor: callerActor, body: callerBody })
+
+    callerActor.profileId = actors.tech.profileId
+    callerActor.shopId = shopB.id
+    callerActor.role = 'curator'
+    callerActor.skillTier = null
+    callerActor.membershipStatus = 'pending'
+    callerActor.deactivatedAt = new Date()
+    callerBody.customerId = customerB.id
+    callerBody.vehicleId = vehicleB.id
+    callerBody.concern = 'Caller mutation'
+    callerBody.whenStarted = 'caller-mutated start'
+    callerBody.howOften = 'caller-mutated frequency'
+    callerBody.diagnosticAuthorizedCents = 1
+    callerBody.diagnosticAuthorizationNote = 'caller-mutated authorization'
+    callerBody.source = 'tech_quick'
+    callerJobs[0]!.title = 'Caller-mutated first job'
+    callerJobs[0]!.kind = 'diagnostic'
+    callerJobs[0]!.requiredSkillTier = 3
+    callerJobs[0]!.assignedTechId = actors.tech.profileId
+    callerJobs.reverse()
+
+    const result = await pending
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const [persistedTicket] = await db.select().from(tickets)
+    const persistedJobs = (await db.select().from(ticketJobs))
+      .sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0))
+    expect(persistedTicket).toMatchObject({
+      shopId: shopA.id,
+      source: 'counter',
+      customerId: customerA.id,
+      vehicleId: vehicleA.id,
+      concern: 'Original owned concern',
+      whenStarted: 'last week',
+      howOften: 'on cold starts',
+      diagnosticAuthorizedCents: 12500,
+      diagnosticAuthorizationNote: 'customer approved by phone',
+      createdByProfileId: actors.owner.profileId,
+    })
+    expect(persistedJobs.map(({
+      title,
+      kind,
+      requiredSkillTier,
+      assignedTechId,
+    }) => ({ title, kind, requiredSkillTier, assignedTechId })))
+      .toEqual([
+        {
+          title: 'Original first job',
+          kind: 'repair',
+          requiredSkillTier: 1,
+          assignedTechId: sameShopTierOne.id,
+        },
+        {
+          title: 'Original second job',
+          kind: 'maintenance',
+          requiredSkillTier: 1,
+          assignedTechId: null,
+        },
+      ])
+  })
+
+  it('rolls back the number and every row when a batch insert trigger fails', async () => {
+    const before = await genericMutationState()
+    await db.execute(sql.raw(`
+      create function task_7e_fail_batch_insert() returns trigger
+      language plpgsql as $$
+      begin
+        raise exception 'task_7e_batch_insert';
+      end;
+      $$
+    `))
+    await db.execute(sql.raw(`
+      create trigger task_7e_fail_batch_insert
+      after insert on ticket_jobs
+      for each row execute function task_7e_fail_batch_insert()
+    `))
+    try {
+      await expect(
+        createTicket(db, { actor: actors.owner, body: body() }),
+      ).rejects.toThrow('Failed query: insert into "ticket_jobs"')
+    } finally {
+      await db.execute(sql.raw(
+        'drop trigger if exists task_7e_fail_batch_insert on ticket_jobs',
+      ))
+      await db.execute(sql.raw('drop function if exists task_7e_fail_batch_insert()'))
+    }
+    expect(await genericMutationState()).toEqual(before)
+  })
+
+  it('rolls back the entire generic batch when finalization detects trigger drift', async () => {
+    const before = await genericMutationState()
+    await db.execute(sql.raw(`
+      create function task_7e_drift_before_finalization() returns trigger
+      language plpgsql as $$
+      begin
+        update tickets set projection_revision = 2 where id = new.id;
+        return new;
+      end;
+      $$
+    `))
+    await db.execute(sql.raw(`
+      create trigger task_7e_drift_before_finalization
+      after insert on tickets
+      for each row execute function task_7e_drift_before_finalization()
+    `))
+    try {
+      await expect(
+        createTicket(db, { actor: actors.owner, body: body() }),
+      ).rejects.toThrow('ticket_creation_kernel_invalid')
+    } finally {
+      await db.execute(sql.raw(
+        'drop trigger if exists task_7e_drift_before_finalization on tickets',
+      ))
+      await db.execute(sql.raw('drop function if exists task_7e_drift_before_finalization()'))
+    }
+    expect(await genericMutationState()).toEqual(before)
+  })
+
+  it('rolls back after projection when a deferred commit trigger rejects the batch', async () => {
+    const before = await genericMutationState()
+    await db.execute(sql.raw(`
+      create function task_7e_fail_after_projection() returns trigger
+      language plpgsql as $$
+      begin
+        raise exception 'task_7e_after_projection';
+      end;
+      $$
+    `))
+    await db.execute(sql.raw(`
+      create constraint trigger task_7e_fail_after_projection
+      after insert on tickets deferrable initially deferred
+      for each row execute function task_7e_fail_after_projection()
+    `))
+    try {
+      await expect(
+        createTicket(db, { actor: actors.owner, body: body() }),
+      ).rejects.toThrow('task_7e_after_projection')
+    } finally {
+      await db.execute(sql.raw(
+        'drop trigger if exists task_7e_fail_after_projection on tickets',
+      ))
+      await db.execute(sql.raw('drop function if exists task_7e_fail_after_projection()'))
+    }
+    expect(await genericMutationState()).toEqual(before)
+  })
 
   it('allows every active Shop OS role and returns the trimmed canonical safe projection', async () => {
     for (const role of ['tech', 'advisor', 'parts', 'owner'] as const) {
@@ -3387,7 +3894,11 @@ describe('createTicket', () => {
   it('rejects malformed, unbounded, unsafe, empty, and client-managed body fields', async () => {
     const invalidBodies: unknown[] = [
       null,
+      body({ source: 'counter' }),
+      body({ source: 'tech_quick' }),
+      body({ source: 'quick_quote' }),
       body({ source: 'legacy_repair_order' }),
+      body({ source: null }),
       body({ customerId: 'not-a-uuid' }),
       body({ concern: '   ' }),
       body({ concern: 'x'.repeat(5001) }),
@@ -3424,7 +3935,7 @@ describe('createTicket', () => {
     expect(await db.select().from(ticketJobs)).toEqual([])
   })
 
-  it('enforces customer and vehicle pair rules without revealing cross-shop records', async () => {
+  it('reports locked pair drift while hiding cross-shop customer and vehicle records', async () => {
     const invalidPairs = [
       body({ customerId: null }),
       body({ vehicleId: null }),
@@ -3439,28 +3950,14 @@ describe('createTicket', () => {
     await expect(
       createTicket(db, { actor: actors.advisor, body: invalidPairs[1] }),
     ).resolves.toEqual({ ok: false, error: 'invalid_input' })
-    for (const invalidPair of invalidPairs.slice(2)) {
+    await expect(
+      createTicket(db, { actor: actors.advisor, body: invalidPairs[2] }),
+    ).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+    for (const invalidPair of invalidPairs.slice(3)) {
       await expect(
         createTicket(db, { actor: actors.advisor, body: invalidPair }),
       ).resolves.toEqual({ ok: false, error: 'not_found' })
     }
-
-    for (const invalidTechQuick of [
-      body({ source: 'tech_quick', customerId: customerA.id, vehicleId: null }),
-      body({ source: 'tech_quick', customerId: null, vehicleId: vehicleA.id }),
-      body({ source: 'tech_quick', customerId: customerA.id, vehicleId: vehicleA.id }),
-    ]) {
-      await expect(
-        createTicket(db, { actor: actors.tech, body: invalidTechQuick }),
-      ).resolves.toEqual({ ok: false, error: 'invalid_input' })
-    }
-
-    await expect(
-      createTicket(db, {
-        actor: actors.tech,
-        body: body({ source: 'tech_quick', customerId: null, vehicleId: null }),
-      }),
-    ).resolves.toMatchObject({ ok: true, ticket: { customer: null, vehicle: null } })
   })
 
   it('keeps open work unassigned and permits only sufficiently tiered self-assignment', async () => {
@@ -3573,7 +4070,10 @@ describe('createTicket', () => {
   })
 
   it('hides missing and cross-shop assignees and rejects invalid same-shop assignees', async () => {
-    const [crossShop, pending, deactivated, tierless] = await db
+    await db.execute(sql.raw(
+      'alter table profiles drop constraint profiles_skill_tier_range',
+    ))
+    const [crossShop, pending, deactivated, tierless, unsupported, invalidTier] = await db
       .insert(profiles)
       .values([
         { userId: uuid(20), shopId: shopB.id, role: 'tech', skillTier: 3 },
@@ -3593,6 +4093,8 @@ describe('createTicket', () => {
           deactivatedAt: new Date(),
         },
         { userId: uuid(23), shopId: shopA.id, role: 'parts', skillTier: null },
+        { userId: uuid(24), shopId: shopA.id, role: 'curator', skillTier: 3 },
+        { userId: uuid(25), shopId: shopA.id, role: 'tech', skillTier: 4 },
       ])
       .returning()
 
@@ -3628,7 +4130,13 @@ describe('createTicket', () => {
       }),
     ).resolves.toEqual({ ok: false, error: 'not_found' })
 
-    for (const assignedTechId of [pending.id, deactivated.id, tierless.id]) {
+    for (const assignedTechId of [
+      pending.id,
+      deactivated.id,
+      tierless.id,
+      unsupported.id,
+      invalidTier.id,
+    ]) {
       await expect(
         createTicket(db, {
           actor: actors.owner,
