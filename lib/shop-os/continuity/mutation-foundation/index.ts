@@ -75,3 +75,12 @@ export type {
   BoundedMutationOperationV1,
   RecoverableUniqueConstraintV1,
 } from './transaction-runner'
+export {
+  finalizeMutationRevisionsV1,
+  reserveJobSequencesForInsertionV1,
+} from './revisions'
+export type {
+  CreatedMutationRowsV1,
+  FinalizedMutationRevisionsV1,
+  TicketRevisionDeltaV1,
+} from './revisions'
