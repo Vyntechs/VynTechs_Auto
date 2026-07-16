@@ -185,7 +185,7 @@ describe('Shop OS continuity revision foundation', () => {
         source: 'counter',
         customerId: uuid(20),
         vehicleId: uuid(30),
-        concern: 'Overflow suffix',
+        concern: 'Second sorted parent',
         createdByProfileId: uuid(10),
       },
     ])
@@ -224,10 +224,10 @@ describe('Shop OS continuity revision foundation', () => {
         id: uuid(90),
         shopId: uuid(1),
         ticketId: uuid(54),
-        title: 'Maximum sequence',
+        title: 'Second parent job',
         kind: 'repair',
         requiredSkillTier: 2,
-        sequenceNumber: 2_147_483_647,
+        sequenceNumber: 1,
         createdByProfileId: uuid(10),
         creatorProvenance: 'direct',
       },
@@ -723,17 +723,23 @@ describe('Shop OS continuity revision foundation', () => {
   })
 
   it('rejects integer-overflow state and discards reservations with a rolled-back scope', async () => {
+    const overflowJobIds = new Proxy([uuid(91)], {
+      get(target, property, receiver) {
+        if (property === 'length') return 2_147_483_648
+        if (property === Symbol.iterator) return target[Symbol.iterator].bind(target)
+        if (property === 'map') return target.map.bind(target)
+        return Reflect.get(target, property, receiver)
+      },
+    }) as readonly string[]
     await runBoundedShopOsMutationV1(db, {
       discover: async () => ({
         lockRequest: lockRequest({
           lockShop: true,
-          customerIds: [uuid(20)],
-          vehicleIds: [uuid(30)],
-          ticketIds: [uuid(54)],
           includeAllJobsForTickets: true,
           insertionIntents: {
             ...EMPTY_INTENTS,
-            jobs: [{ id: uuid(91), ticketId: uuid(54) }],
+            tickets: [uuid(168)],
+            jobs: [{ id: uuid(91), ticketId: uuid(168) }],
           },
         }),
         payload: undefined,
@@ -742,8 +748,8 @@ describe('Shop OS continuity revision foundation', () => {
         expect(() => reserveJobSequencesForInsertionV1(
           tx as AppDb,
           scope,
-          uuid(54),
-          [uuid(91)],
+          uuid(168),
+          overflowJobIds,
         )).toThrow(ShopOsMutationConflict)
       },
     })

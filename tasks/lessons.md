@@ -57,3 +57,8 @@ Reason: Read-only containers do not own nested database state.
 Trigger: A locked job exposed an approval-event ID without locking and validating its exact event parent.
 Rule: Validate every non-null child reference against locked IDs and composite parent bindings; missing membership is retryable drift.
 Reason: Lock completeness requires validating outgoing references, not merely locked row membership.
+
+### mutation-test-guard-specific-proof
+Trigger: An overflow test passed through an earlier suffix rejection without exercising the overflow guard.
+Rule: Temporarily disable the named guard and prove its test fails before claiming branch-specific coverage.
+Reason: A green failure-path test can be tautological when an earlier validator dominates the intended branch.
