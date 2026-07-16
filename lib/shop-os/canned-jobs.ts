@@ -6,6 +6,16 @@ import { cannedJobs, jobLines, profiles, quoteVersions, shops, ticketJobs, ticke
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, formatScaledDecimal, parseScaledDecimal, stableStringify } from '@/lib/shop-os/quote-math'
 import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+import {
+  assertLiveLockedMutationScopeV1,
+  assertLiveMutationAttemptV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
+import type {
+  MutationAttemptCapabilityV1,
+  ResolvedLockedQuickTemplateV1,
+  ResolvedQuickTemplateV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/contracts'
+import type { LockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_TEMPLATE_BYTES = 16 * 1024
@@ -83,6 +93,39 @@ export type SafeCannedJob = {
     totalCents: number | null
   }
 }
+
+type ResolvedQuickTemplatePayload = Readonly<{
+  cannedJobId: string
+  title: string
+  kind: 'repair' | 'maintenance'
+  defaultRequiredSkillTier: 1 | 2 | 3
+  sort: number
+  lines: readonly SafeCannedJobLine[]
+  fingerprint: string
+  taxRateBps: number | null
+}>
+
+type ResolvedQuickTemplateState = Readonly<{
+  tx: AppDb
+  capability: MutationAttemptCapabilityV1
+  payload: ResolvedQuickTemplatePayload
+}>
+
+type ResolvedLockedQuickTemplateState = Readonly<{
+  tx: AppDb
+  scope: LockedMutationScopeV1
+  capability: MutationAttemptCapabilityV1
+  payload: ResolvedQuickTemplatePayload
+}>
+
+const resolvedQuickTemplateStates = new WeakMap<
+  ResolvedQuickTemplateV1,
+  ResolvedQuickTemplateState
+>()
+const resolvedLockedQuickTemplateStates = new WeakMap<
+  ResolvedLockedQuickTemplateV1,
+  ResolvedLockedQuickTemplateState
+>()
 
 type Failure = {
   ok: false
@@ -320,6 +363,233 @@ export async function loadStrictCannedJobCopy(
   const cannedJob = projectRow(row, shop.taxRateBps)
   if (!cannedJob || cannedJob.fingerprint !== input.expectedFingerprint) return conflict()
   return { ok: true, cannedJob }
+}
+
+function invalidResolvedQuickTemplate(): never {
+  throw new Error('resolved_quick_template_invalid')
+}
+
+function copyQuickTemplateLine(line: SafeCannedJobLine): SafeCannedJobLine {
+  if (line.kind === 'part') {
+    return Object.freeze({
+      kind: 'part' as const,
+      description: line.description,
+      sort: line.sort,
+      quantity: line.quantity,
+      priceCents: line.priceCents,
+      taxable: line.taxable,
+      ...(line.partNumber === undefined ? {} : { partNumber: line.partNumber }),
+      ...(line.brand === undefined ? {} : { brand: line.brand }),
+    })
+  }
+  if (line.kind === 'labor') {
+    return Object.freeze({
+      kind: 'labor' as const,
+      description: line.description,
+      sort: line.sort,
+      hours: line.hours,
+      priceCents: line.priceCents,
+      taxable: line.taxable,
+      ...(line.laborRateCents === undefined ? {} : { laborRateCents: line.laborRateCents }),
+    })
+  }
+  return Object.freeze({
+    kind: 'fee' as const,
+    description: line.description,
+    sort: line.sort,
+    priceCents: line.priceCents,
+    taxable: line.taxable,
+  })
+}
+
+function quickTemplatePayload(
+  cannedJob: SafeCannedJob,
+  taxRateBps: number | null,
+): ResolvedQuickTemplatePayload {
+  return Object.freeze({
+    cannedJobId: cannedJob.id,
+    title: cannedJob.title,
+    kind: cannedJob.kind,
+    defaultRequiredSkillTier: cannedJob.defaultRequiredSkillTier,
+    sort: cannedJob.sort,
+    lines: Object.freeze(cannedJob.lines.map(copyQuickTemplateLine)),
+    fingerprint: cannedJob.fingerprint,
+    taxRateBps,
+  })
+}
+
+function copyQuickTemplatePayload(
+  payload: ResolvedQuickTemplatePayload,
+): ResolvedQuickTemplatePayload {
+  return Object.freeze({
+    cannedJobId: payload.cannedJobId,
+    title: payload.title,
+    kind: payload.kind,
+    defaultRequiredSkillTier: payload.defaultRequiredSkillTier,
+    sort: payload.sort,
+    lines: Object.freeze(payload.lines.map(copyQuickTemplateLine)),
+    fingerprint: payload.fingerprint,
+    taxRateBps: payload.taxRateBps,
+  })
+}
+
+function resolvedQuickTemplateStateFor(
+  template: ResolvedQuickTemplateV1,
+): ResolvedQuickTemplateState {
+  if ((typeof template !== 'object' || template === null) && typeof template !== 'function') {
+    return invalidResolvedQuickTemplate()
+  }
+  return resolvedQuickTemplateStates.get(template) ?? invalidResolvedQuickTemplate()
+}
+
+function resolvedLockedQuickTemplateStateFor(
+  template: ResolvedLockedQuickTemplateV1,
+): ResolvedLockedQuickTemplateState {
+  if ((typeof template !== 'object' || template === null) && typeof template !== 'function') {
+    return invalidResolvedQuickTemplate()
+  }
+  return resolvedLockedQuickTemplateStates.get(template) ?? invalidResolvedQuickTemplate()
+}
+
+function normalizeStrictCannedJobInput(input: Readonly<{
+  shopId: string
+  cannedJobId: string
+  expectedFingerprint: string
+  expectedTaxRateBps: number | null
+}>): Readonly<{
+  shopId: string
+  cannedJobId: string
+  expectedFingerprint: string
+  expectedTaxRateBps: number | null
+}> {
+  if (typeof input !== 'object' || input === null) return invalidResolvedQuickTemplate()
+  const shopId = uuidSchema.safeParse(input.shopId)
+  const cannedJobId = uuidSchema.safeParse(input.cannedJobId)
+  const expectedFingerprint = fingerprintSchema.safeParse(input.expectedFingerprint)
+  const expectedTaxRateBps = z.union([
+    z.literal(null),
+    z.number().int().min(0).max(10_000),
+  ]).safeParse(input.expectedTaxRateBps)
+  if (
+    !shopId.success || !cannedJobId.success ||
+    !expectedFingerprint.success || !expectedTaxRateBps.success
+  ) return invalidResolvedQuickTemplate()
+  return Object.freeze({
+    shopId: shopId.data,
+    cannedJobId: cannedJobId.data,
+    expectedFingerprint: expectedFingerprint.data,
+    expectedTaxRateBps: expectedTaxRateBps.data,
+  })
+}
+
+export async function preflightStrictCannedJobV1(
+  tx: AppDb,
+  attempt: MutationAttemptCapabilityV1,
+  input: Readonly<{
+    shopId: string
+    cannedJobId: string
+    expectedFingerprint: string
+    expectedTaxRateBps: number | null
+  }>,
+): Promise<
+  | Readonly<{
+      ok: true
+      template: ResolvedQuickTemplateV1
+      cannedJobIds: readonly [string]
+    }>
+  | Readonly<{ ok: false; error: 'not_found' | 'template_drift' }>
+> {
+  assertLiveMutationAttemptV1(tx, attempt)
+  const normalized = normalizeStrictCannedJobInput(input)
+  const [shop] = await tx.select({ taxRateBps: shops.taxRateBps }).from(shops)
+    .where(eq(shops.id, normalized.shopId)).limit(1)
+  if (!shop) return Object.freeze({ ok: false, error: 'not_found' })
+  if (
+    (shop.taxRateBps !== null && (
+      !Number.isInteger(shop.taxRateBps) || shop.taxRateBps < 0 || shop.taxRateBps > 10_000
+    )) || shop.taxRateBps !== normalized.expectedTaxRateBps
+  ) return Object.freeze({ ok: false, error: 'template_drift' })
+
+  const [row] = await tx.select().from(cannedJobs).where(and(
+    eq(cannedJobs.shopId, normalized.shopId),
+    eq(cannedJobs.id, normalized.cannedJobId),
+    isNull(cannedJobs.retiredAt),
+  )).orderBy(cannedJobs.id).limit(1)
+  if (!row) return Object.freeze({ ok: false, error: 'not_found' })
+  const cannedJob = projectRow(row, shop.taxRateBps)
+  if (!cannedJob || cannedJob.fingerprint !== normalized.expectedFingerprint) {
+    return Object.freeze({ ok: false, error: 'template_drift' })
+  }
+
+  const handle = Object.freeze(Object.create(null) as ResolvedQuickTemplateV1)
+  resolvedQuickTemplateStates.set(handle, Object.freeze({
+    tx,
+    capability: attempt,
+    payload: quickTemplatePayload(cannedJob, shop.taxRateBps),
+  }))
+  return Object.freeze({
+    ok: true,
+    template: handle,
+    cannedJobIds: Object.freeze([normalized.cannedJobId]) as readonly [string],
+  })
+}
+
+export function resolveStrictCannedJobInLockedScopeV1(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  template: ResolvedQuickTemplateV1,
+): ResolvedLockedQuickTemplateV1 {
+  const capability = assertLiveLockedMutationScopeV1(tx, scope)
+  const state = resolvedQuickTemplateStateFor(template)
+  if (state.tx !== tx || state.capability !== capability) {
+    return invalidResolvedQuickTemplate()
+  }
+  const expected = state.payload
+  if (
+    scope.request.shopId !== scope.actor.shopId ||
+    scope.request.shopId !== scope.shop?.id ||
+    scope.request.lockShop !== true ||
+    scope.request.cannedJobIds.length !== 1 ||
+    scope.request.cannedJobIds[0] !== expected.cannedJobId ||
+    scope.cannedJobs.length !== 1
+  ) return invalidResolvedQuickTemplate()
+  const row = scope.cannedJobs[0]!
+  if (
+    row.id !== expected.cannedJobId ||
+    row.shopId !== scope.actor.shopId ||
+    row.retiredAt !== null ||
+    scope.shop.taxRateBps !== expected.taxRateBps
+  ) return invalidResolvedQuickTemplate()
+  const cannedJob = projectRow(row, scope.shop.taxRateBps)
+  if (!cannedJob || cannedJob.fingerprint !== expected.fingerprint) {
+    return invalidResolvedQuickTemplate()
+  }
+  const lockedPayload = quickTemplatePayload(cannedJob, scope.shop.taxRateBps)
+  if (stableStringify(lockedPayload) !== stableStringify(expected)) {
+    return invalidResolvedQuickTemplate()
+  }
+
+  const locked = Object.freeze(Object.create(null) as ResolvedLockedQuickTemplateV1)
+  resolvedLockedQuickTemplateStates.set(locked, Object.freeze({
+    tx,
+    scope,
+    capability,
+    payload: lockedPayload,
+  }))
+  return locked
+}
+
+export function consumeResolvedLockedQuickTemplateForCreationV1(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  template: ResolvedLockedQuickTemplateV1,
+): ResolvedQuickTemplatePayload {
+  const capability = assertLiveLockedMutationScopeV1(tx, scope)
+  const state = resolvedLockedQuickTemplateStateFor(template)
+  if (
+    state.tx !== tx || state.scope !== scope || state.capability !== capability
+  ) return invalidResolvedQuickTemplate()
+  return copyQuickTemplatePayload(state.payload)
 }
 
 export function cannedJobLineInsertValues(

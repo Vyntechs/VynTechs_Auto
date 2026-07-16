@@ -16,53 +16,10 @@ import {
   type TicketActor,
 } from '@/lib/tickets'
 import { upsertCustomer } from './customers'
+import { parseQuickTicketRequestV1 } from './quick-ticket-contracts'
 import { upsertVehicle } from './vehicles'
 
 const uuidSchema = z.string().uuid().transform((value) => value.toLowerCase())
-const optionalTrimmedText = (max: number) => z.string().trim().max(max).nullable().optional()
-const mileageSchema = z.number().int().nonnegative().max(2_147_483_647)
-const manualQuoteSchema = z.strictObject({
-  mode: z.literal('manual'),
-  kind: z.enum(['repair', 'maintenance']),
-  description: z.string().trim().min(1).max(200),
-})
-const cannedQuoteSchema = z.strictObject({
-  mode: z.literal('canned'),
-  cannedJobId: uuidSchema,
-  expectedFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
-  expectedTaxRateBps: z.union([z.literal(null), z.number().int().min(0).max(10_000)]),
-})
-const quoteSchema = z.discriminatedUnion('mode', [manualQuoteSchema, cannedQuoteSchema])
-const common = { clientKey: uuidSchema, quote: quoteSchema }
-const existingQuickTicketBodySchema = z.strictObject({
-  vehicleMode: z.literal('existing'),
-  existingVehicleId: uuidSchema,
-  mileage: mileageSchema.nullable().optional(),
-  ...common,
-})
-const newQuickTicketBodySchema = z.strictObject({
-  vehicleMode: z.literal('new'),
-  customer: z.strictObject({
-    name: z.string().trim().min(1).max(200),
-    phone: z.string().trim().min(1).max(100),
-    email: z.string().trim().email().max(320).nullable().optional(),
-  }),
-  vehicle: z.strictObject({
-    year: z.number().int().min(1886).max(new Date().getFullYear() + 1),
-    make: z.string().trim().min(1).max(100),
-    model: z.string().trim().min(1).max(100),
-    engine: optionalTrimmedText(200),
-    vin: z.string().trim().length(17).nullable().optional(),
-    mileage: mileageSchema.nullable().optional(),
-    plate: optionalTrimmedText(32),
-  }),
-  ...common,
-})
-const quickTicketBodySchema = z.discriminatedUnion('vehicleMode', [
-  existingQuickTicketBodySchema,
-  newQuickTicketBodySchema,
-])
-type QuickTicketBody = z.output<typeof quickTicketBodySchema>
 
 export type QuickTicketDependencies = {
   afterCustomer?: () => Promise<void>
@@ -147,9 +104,9 @@ export async function createQuickTicket(
 ): Promise<CreateTicketResult> {
   const denied = actorDenied(input.actor)
   if (denied) return denied
-  const parsed = quickTicketBodySchema.safeParse(input.body)
-  if (!parsed.success) return { ok: false, error: 'invalid_input' }
-  const body = parsed.data
+  const parsed = parseQuickTicketRequestV1(input.body)
+  if (!parsed.ok) return { ok: false, error: 'invalid_input' }
+  const body = parsed.value.body
 
   try {
     return await db.transaction(async (tx) => {
