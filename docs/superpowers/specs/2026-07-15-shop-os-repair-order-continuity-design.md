@@ -1,8 +1,8 @@
 # ShopOS Repair Order Continuity Design
 
 **Date:** 2026-07-15
-**Status:** Direction approved through the active goal; written specification awaiting founder review
-**Implementation authority:** None until this written specification is approved
+**Status:** Founder-approved 2026-07-15; Packet A exact plan independently reviewed for local implementation
+**Implementation authority:** Packets A-H are authorized within this design; named production/data/deploy gates remain closed
 **Product definition:** One living repair order per vehicle visit by default, with independently truthful work items and explicit exceptions
 
 ## Intent
@@ -219,6 +219,7 @@ additions:
 | `createdByProfileId` | Same-shop profile that added the item; new mutations require the actor to be active, but historical membership need not remain active |
 | `creatorProvenance` | `direct` for a new mutation or `ticket_creator_backfill` for migration |
 | `createdFromJobId` | Same-ticket source job for a technician-found issue, nullable |
+| `sequenceNumber` | Positive, immutable order within the repair order; new batches/appends preserve entered or serialized reservation order, while migration ranks only legacy-null jobs by deterministic `(created_at, id)` |
 | `revision` | Non-negative monotonic entity revision |
 | `approvedAuthorizationFingerprint` | Versioned canonical fingerprint of the exact customer-authorized fields, nullable until approval |
 | `approvedApprovalEventId` | Immutable same-shop/ticket approval event paired with the existing approved quote-version pointer |
@@ -249,10 +250,42 @@ Appending any later item never overwrites them. Every migrated/new consumer
 uses job-local truth; the root summary is compatibility fallback only and is
 not dropped or destructively reinterpreted by this goal.
 
+Ticket shop, number, source, creator, root summary, and parallel-RO evidence
+are immutable after insert. The only ticket-identity adoption is an explicit
+Tech Quick reconciliation from both customer/vehicle fields null to one valid
+same-shop pair; that pair is immutable once populated. Partial pairs, clearing,
+replacement, or adoption on another source fail closed.
+
+A work item's row identity and repair-order membership are equally immutable:
+`ticket_jobs.id`, `shop_id`, `ticket_id`, and `created_at` can never change
+after insert. No service-side update may rekey, move, or retime a job to evade
+its original authorization, sequence, revision, or receipt history. Title,
+kind, tier, session, and work truth remain mutable only through their named
+domain writers and normal revision contract.
+
+Ticket source is never caller-shaped. Generic ticket input contains no source
+field and derives `counter` only after strict parsing. Dedicated server-only,
+opaque operation origins derive `quick_quote` only for Quick Ticket and
+`tech_quick` only for `createSessionForUser` with the registered session intent
+and linked job in the same transaction. Any source discriminator supplied to
+the generic API is rejected rather than ignored.
+
 `createdFromJobId` uses a composite `(shop_id, ticket_id, job_id)` source-job
-foreign key. Creator, approval-event, and receipt-result relationships receive
+foreign key. `sequenceNumber` is unique per ticket when present; it remains
+nullable only through the compatibility/backfill window so the ordered
+`workItems` contract is never approximated with random UUID order or timestamp
+tricks. Creator, approval-event, and receipt-result relationships receive
 equivalent composite tenant constraints. New writes reload active membership;
 history preserves an inactive former employee as truthful provenance.
+
+One locked allocator owns every new job ordinal. For a complete locked ticket
+graph it starts at
+`max(existing_job_count, max(non_null_sequence_number, 0)) + 1` and reserves a
+contiguous range bound to the registered job insertion intents. New tickets
+therefore use `1..n`; a legacy ticket with `N` null-sequence jobs begins Packet-A
+appends at `N+1`, preserving `1..N` for Packet B's null-only immutable backfill.
+Generic add, canned apply, escalation, Counter, Quick, and Tech Quick may not
+own private max/count allocators.
 
 ### Revision contract
 
@@ -262,16 +295,18 @@ the mutation. No JavaScript number carries a revision.
 
 | Mutation | Job `revision` | Ticket `projectionRevision` | Ticket `continuityRevision` |
 | --- | --- | --- | --- |
-| Job statement, context, story, line, quote, approval, assignment, note, or diagnostic-session truth | affected jobs | yes | iff `ContinuitySignatureV1` changes |
+| Job statement, context, story, line, quote, approval, assignment, note, or ShopOS-projected diagnostic link/lease/work truth | affected jobs | yes | iff `ContinuitySignatureV1` changes |
 | Job add/remove or work status crossing `open/in_progress/blocked/done/canceled` | affected jobs | yes | yes |
 | Ticket status, delivery/closure/cancel truth, vehicle/customer/reconciliation, or separate-RO evidence | n/a | yes | yes |
 | Presentation-only preference or unrelated user state | no | no | no |
 
 Packet A defines one pure canonical `ContinuitySignatureV1` before any writer
 retrofit. It contains ticket ID, customer/vehicle IDs, status and terminal
-fields, reconciliation state, separate-RO evidence, and ordered child records
-containing job ID, kind, work statement, statement-review state, work status,
-approval state, approved-fingerprint presence, and ordered part statuses. It
+fields, reconciliation state, separate-RO evidence, and child records ordered
+by `(sequenceNumber, id)` with legacy-null sequence values ordered last by
+`(createdAt, id)`. Each child contains job ID, kind, work statement,
+statement-review state, work status, approval state, approved-fingerprint
+presence, and part statuses ordered by `(job_lines.sort, job_lines.id)`. It
 explicitly excludes assignee, claim timestamps, internal notes, UI state,
 customer-story prose, and price values. A writer derives before/after
 signatures under lock and increments `continuityRevision` iff the signatures
@@ -286,6 +321,52 @@ atomic parent/child bumps. Projection responses replace only a strictly older
 `continuityRevision`, so an unrelated assignment or note does not invalidate a
 safe intake decision.
 
+Internal diagnostic tree/events that do not mutate ShopOS ticket/job truth are
+outside the revision contract while diagnostics remain unavailable. Any such
+transaction that locks the ticket graph for authorization still follows the
+repository lock order but performs no artificial revision bump.
+
+That exclusion is top-level-function and call-edge named, not file-wide. Every
+session/event writer is classified as a winning, lock-only, or specifically
+gated non-winning top-level flow, and every low-level query helper has an
+exhaustive caller set. `appendSessionEvent` and `closeSession` may run from the
+named ticket-linked close/observation scopes, but own no locks, ticket access,
+or finalization; their top-level caller owns the shared order. Source guards
+fail on an unregistered direct or indirect writer/call edge, or if any dormant
+or nested function gains customer, vehicle, ticket, job, line, quote,
+ShopOS-lock, or independent-finalizer behavior. That exact top-level writer must
+then migrate into the shared order before release.
+
+The same exhaustive scan covers direct `app/api/**` mutations. The legacy
+wizard-state route remains classified only while both the `/api/sessions`
+diagnostics-release gate and its entitlement refusal execute before its session
+update. Global curator routes are not diagnostics-gated: their shared helper
+must transactionally lock the selected session and refuse, as generic not found,
+when any ticket job links it. The session row lock serializes a concurrent FK
+link. If ticket-linked curator behavior is ever required, that action must join
+the continuity coordinator/finalizer rather than weakening the boundary.
+
+Classification includes exact API import/call edges, not only direct database
+syntax. Every gated session/intake writer has a complete allowed-entrypoint set;
+each route stays under the diagnostics release boundary and calls the
+entitlement refusal before the writer. The removed media capture helper has zero
+production callers. A new wrapper or route is therefore an unclassified writer,
+not an inherited exemption.
+
+That rule includes session-domain functions which become winning or lock-only
+database writers: root Tech Quick create/replay, ticketed diagnostic close, and
+repair observation retain only their exact `/api/sessions` call edges and must
+remain release-gated plus entitlement-refused before invocation. Shared lock
+order is not authority to reopen diagnostics or provider work.
+
+Diagnostic retrieval may update only a session's max-corpus field through its
+exact gated advance/ambient callers, including when that session is ticket-
+linked; it cannot access or lock ticket truth. Adaptive mode is different: its
+authorization joins ticket/job truth, so Packet A migrates it to the shared
+profile → customer/vehicle → ticket/job → session/event order as a lock-only
+writer. Its locked authorizer issues no query, adaptive replay is classified
+under those locks, and it creates no ticket/job/projection/continuity revision.
+
 ### Idempotency receipt
 
 Create one server-only `ticket_mutation_receipts` header plus ordered
@@ -295,15 +376,68 @@ mutations:
 - shop-global uniqueness on `(shop_id, request_key)`, with actor stored in the
   receipt so another actor cannot reuse the same key;
 - mutation/schema version, mutation kind, actor, canonical target/candidate
-  binding, and a versioned server-keyed fingerprint of the normalized request;
-- resulting ticket ID plus zero to 25 result jobs stored as composite-FK child
-  rows with unique zero-based ordinals;
+  binding, server-derived operation origin, and a versioned server-keyed
+  fingerprint of the normalized request;
+- resulting ticket ID plus an explicit zero-to-25 result count and matching
+  composite-FK child rows with unique, complete zero-based ordinals;
 - bounded timestamps only;
 - no raw customer statement, note, phone, email, VIN, or media content;
 - an exact retry first reloads current actor authority, then returns the
-  persisted mutation identity and a current actor-safe projection;
+  persisted mutation identity and a current actor-safe projection without
+  consulting mutable insert-only customer, vehicle, or canned-template truth;
+- HMAC keys are a server-owned versioned keyring: new writes use the active
+  version, replay uses the stored historical version, and a missing retired key
+  fails closed without relabeling an exact retry as changed payload;
+- the keyring is an opaque handle with private copied bytes; only a
+  `server-only` non-barrel loader reads process environment, the deterministic
+  key-owning core is also `server-only` and absent from the barrel, no client
+  import can build, and no key map, raw-byte accessor, error, log, or returned
+  value exposes key material;
 - changed actor, mutation kind, payload, target, or candidate binding conflicts
   without a write.
+
+Every creator writes immutable `tickets.source` from the same locked opaque
+origin used by its creation handle. When an initial or explicit-separate route
+also supplies an actor-bound continuity request key, that handle alone enters
+the HMAC envelope—never a second raw source. Packet A adopts the shared receipt
+end to end only for Quick Ticket, the current ticket creator with such a key;
+Counter remains source-trusted/transactional without inventing one, and Tech
+Quick keeps its exact `sessions_pkey` recovery. Packet D adds generic/Counter
+continuity keys and actual create/append/separate receipt consumption.
+
+A ticket-creating receipt never accepts caller-shaped result IDs. Successful
+creation/finalization returns a second opaque handle bound to the same live
+transaction, scope, capability, resolved creation, exact inserted ticket, and
+complete ordered inserted jobs. Quick's request key and complete normalized
+request are first produced as one opaque request-level handle by the unchanged
+strict Quick parser. The creation resolver's sole private consumer derives the
+envelope base and validates its key, identity/mileage, and manual/canned quote
+against the locked origin/scope plus materialized identity/template before
+binding it to resolved creation; no adapter constructs an envelope base or
+supplies actor/origin. The resolved envelope builder injects those only from
+the locked actor and private origin. Its
+classification bridge derives the expectation from that private state; its
+insertion bridge independently validates the finalized handle and derives the
+same HMAC envelope plus exact receipt result graph before invoking the non-
+barrel low-level primitive. Cross-wiring request A with creation B, substituting
+another request/envelope, same-shop ticket, omitted/reordered job, pre-
+finalization/prior-attempt/collision handle, or second insertion fails before a
+receipt query or write.
+
+One runner-owned live attempt capability is privately bound to the exact
+transaction, lock scope, preflight identity/template handles, materialized
+identity, locked template, opaque resolved creation, and opaque finalized
+creation. It is revoked
+before that transaction ends. Materialization, locked resolution, creation,
+finalization, inserts, and optional envelopes independently assert that binding,
+so a forged, cross-transaction, prior-attempt, collision-recovery, rolled-back,
+or expired handle fails before a query or write. Receipt replay uses a replay-mode handle that cannot insert
+and proves the locked result ticket persists the same source. Once
+receipt-backed, identical business content under a different
+Counter/Quick/Tech origin is a generic conflict, never an exact replay of the
+wrong immutable source. Packet A proves all three values in a synthetic
+foundation harness and Quick end to end. Every mutation that does not create a
+result ticket requires a null operation origin.
 
 This receipt foundation owns schema, canonicalization, replay, collision, and
 retention behavior for create/append/separate and ticket lifecycle mutations.
@@ -345,6 +479,12 @@ of its seeded lines atomically before revision bumps and receipt creation. A
 failure rolls back the ticket, every job, every line, and the receipt; replay
 returns the ordered persisted job identities without reinserting lines.
 
+Seed-line input is a strict discriminated union of quoteable part, labor, or fee
+fields only. The trusted operation derives line ID and parents,
+`source='manual'`, `partStatus='proposed'`, and null cost, fitment, vendor,
+external-offer, snapshot, ordering, and receiving evidence. Public or internal
+seed payloads cannot supply those privileged provenance/fulfillment fields.
+
 The v1 internal `repair` kind means known/requested work, not an assertion that
 a failure was diagnosed. It includes known repair, accessory or lift-kit
 installation, customer-supplied parts, inspection, sublet work, setup,
@@ -354,6 +494,74 @@ uses `maintenance`; finding an unknown cause uses `diagnostic`.
 Quick ticket remains the fastest known-work/quote entrance and creates repair
 or maintenance work. It uses the same continuity resolver and no longer owns a
 separate duplicate-ticket behavior.
+
+Counter and Quick Ticket also share one ticketed-intake identity contract.
+For Counter and Quick insert mode, customer/vehicle discovery happens before
+locks; every proposed insert receives
+a server UUID and registered insertion intent before the shop lock, while every
+existing row joins the centralized customer/vehicle lock set. Under the held
+shop lock, a read-only revalidation must see the exact same complete natural-key
+match set. Same-shop phone, then same-customer VIN or the year/make/model/plate
+fallback accept only zero or one match; preexisting duplicates are an
+identity-ambiguous conflict, never an arbitrary first row. Drift retries from a
+fresh preflight without a partial write. Successful materialization returns only
+an opaque same-transaction/scope/capability handle containing customer/vehicle
+IDs, mileage disposition, and the exact created-row manifest. The Counter and
+Quick adapters never receive those plain values: the ticket-creation resolver
+is the sole allowlisted consumer, retains the manifest behind its own opaque
+handle, and its finalization bridge alone supplies it to the insertion-intent
+bijection. A rolled-back attempt-one mileage write therefore cannot be skipped
+by reusing its materialized identity in attempt two or collision recovery.
+
+Mileage follows one rule across both entrances: omitted or null preserves an
+existing vehicle, a supplied non-null integer updates a locked existing vehicle
+only when changed, and a new vehicle stores the supplied value or null.
+Deduplication never silently overwrites customer name/email or vehicle identity
+metadata. Legacy public customer/vehicle upserts remain reachable only through
+the diagnostics-disabled compatibility intake; ticketed Counter/Quick paths may
+not call them.
+
+Quick Ticket makes receipt classification precede insert-only discovery as an
+enforceable conditional-lock protocol. Each attempt may use a non-disclosing
+`SELECT 1` receipt-presence hint: a present hint skips identity and any canned-
+template work; an absent hint may prepare a private insert extension but cannot activate it.
+The hint's shop comes only from a fresh persisted-profile lookup for the
+authenticated profile, never request input, and the hint returns no identifier.
+Only after profile lock and actor reauthorization does the authoritative receipt
+peek choose the path. An owned receipt suppresses the extension and locks the
+persisted replay graph; an occupied key suppresses it and stays generic; no
+receipt activates a fully prepared extension or performs one fresh bounded retry
+when preparation was unavailable. Thus an exact retry survives later natural-
+key ambiguity and template retirement/replacement, while a stale hint cannot
+authorize, deny, identify, or write anything.
+
+Insert-mode canned discovery returns only an opaque preflight template handle
+whose private state is bound to the exact live transaction capability. The
+locked resolver independently asserts the same `(transaction, scope,
+capability)`, reads canonical truth only from the centrally locked shop/template
+rows, and returns a second opaque locked-template handle. One exact direct-
+import consumer inside the ticket-creation resolver independently reasserts and
+unwraps it; the Quick adapter never receives a raw canonical copy. A raw
+candidate copy, forged handle, earlier attempt, collision-recovery crossover,
+rolled-back locked result, or expired handle cannot feed ticket creation or
+receipt identity.
+
+For a canned Quick Ticket, preflight may resolve an immutable candidate copy,
+but only the template row reloaded under the shared class-9 lock is trusted for
+title, kind, tier, tax, fingerprint, and ordered lines. Template retirement,
+replacement, corruption, or tax drift before that lock produces a no-write
+conflict; no customer, vehicle, ticket, job, line, or ticket number leaks out.
+The locked canonical seed fingerprint—not raw line content—joins the normalized
+request receipt. Exact replay uses that request fingerprint and the locked
+persisted result, never current mutable template or intake-identity truth;
+changed request content
+or an old deterministic ticket without a receipt conflicts without IDs.
+
+For a manual Quick Ticket, the prepared extension contains identity truth but
+no canned-template lock. Its title/kind/tier and empty seed derive only from the
+same opaque normalized request bound to creation and receipt identity. Manual
+and canned request shapes remain unchanged and replay through the same receipt
+bridges.
 
 “Found another concern” creates a `technician_found` work item on the same
 repair order with `createdFromJobId`. It records the technician's statement even
@@ -421,24 +629,66 @@ The server never trusts the browser's candidate decision by itself.
 
 ### Repository lock order
 
-Every participating transaction follows one total order:
+Every participating transaction follows one total order. A non-locking preflight
+may discover the complete resource set, but any drift outside that set returns a
+retryable conflict instead of acquiring a late lock:
 
-1. active actor profile;
-2. shop row whenever `create`, `separate`, or `auto` may allocate a ticket
-   number—`auto` locks it before candidate inspection even when it later appends;
-3. customer, then vehicle;
+1. every participating profile row sorted by ID, including the actor and any
+   assignee/confirmer; the actor is then re-authorized as active;
+2. the shop row whenever allocation, rate, or mutable shop-template truth is
+   involved—`auto` locks it before candidate inspection even when it appends;
+3. customers sorted by ID, then vehicles sorted by ID;
 4. tickets sorted by ID;
 5. jobs sorted by ID;
 6. job lines sorted by ID;
 7. quote versions, approval events, sends, and order rows, each sorted by ID;
-8. mutation receipt header/result rows.
+8. sessions, then session events, each sorted by ID;
+9. vendor accounts, then canned-job templates, each sorted by ID;
+10. mutation receipt header/result rows.
+
+Locking all participating profiles first avoids the actor-versus-assignee
+deadlock that would remain if each writer locked its own actor and acquired a
+different profile after a ticket. Newly inserted rows require no prior row
+lock; their existing parents still follow this order.
+
+Tech Quick session creation is one such insertion path: it re-authorizes and
+locks the actor/profile and shop parents before inserting the session, ticket,
+or job, registers deterministic session/ticket/job insertion intents, and commits or
+rolls back all three together. A new session row never becomes permission to
+skip or reverse its existing parent locks. Its preflight is optimization only;
+even exact replay enters a fresh bounded transaction and locks actor, shop,
+ticket/job graph, and session before returning. Only exact `sessions_pkey`
+recovery is allowlisted; changed content or another actor/shop receives generic
+request-key refusal with no identifiers.
 
 Packets A-C must reconcile every existing writer that can join these resources,
 including quote, assignment, simple-work, story, diagnostic-start, and ticket
 creation. A transaction that cannot acquire its next stable lock returns one
 consistent retryable conflict through `NOWAIT`/bounded retry policy; it never
-locks the same resources in reverse. Receipt lookup may be a non-locking replay
-check before this sequence, but receipt insertion/locking is last.
+locks the same resources in reverse. After the profile class is locked and the
+active actor is re-authorized, an actor-scoped authoritative receipt peek occurs
+before the shop/customer classes. An owned result suppresses every insert-only
+extension, non-lockingly discovers only its current graph identifiers, and adds
+that graph to the remaining ordered locks; an occupied key reveals no IDs; no
+receipt activates a previously prepared insertion extension before the
+remaining classes. A receipt appearing after an absent hint therefore wins
+without late or unnecessary locks. Receipt insertion/locking remains last.
+
+Provider calls never hold database locks. A repair observation therefore uses
+one ordered transaction to re-authorize and persist the observation, calls the
+provider outside the transaction, then uses a second fresh ordered transaction
+to re-authorize the still-open repair session and append guidance. Close,
+reassignment, membership loss, authorization drift, or observation-anchor drift
+during the provider call prevents guidance from being appended while preserving
+the technician's already committed observation. Neither stage invents a
+ticket/job revision when no ticket/job truth changed.
+
+Stage 1 returns one immutable locked snapshot with the exact observation event,
+node, fresh tree state, and explicitly ordered prior events. Provider input is
+built only from that snapshot; there is no unlocked reload or positional “last
+event” assumption. Provider failures expose only a stable bounded error code;
+raw exceptions, prompts, secrets, and customer/technician content enter neither
+responses nor logs.
 
 ### Transaction and race behavior
 
@@ -537,7 +787,17 @@ silently voidable.
 
 ### Terminal state invariants
 
-Database checks and handlers enforce these exact shapes:
+Packet A's additive release enforces these shapes for every new row and every
+lifecycle-column mutation with a narrowly scoped database trigger plus handler
+checks. It does not add a full-row `CHECK` yet: PostgreSQL evaluates even a
+`NOT VALID` check during unrelated updates, which would strand legacy terminal
+rows before classification. The full validated check follows only after the
+separately authorized classification/reconciliation gate.
+
+The same trigger makes lifecycle truth immutable once a row is `closed` or
+`canceled`: terminal ROs cannot reopen, switch terminal state, or rewrite their
+actor/timestamp/disposition/reason evidence. A historical terminal mistake is
+preserved for the later append-only correction path, not silently overwritten.
 
 | Ticket status | Required | Forbidden |
 | --- | --- | --- |
@@ -547,10 +807,11 @@ Database checks and handlers enforce these exact shapes:
 
 `closeDisposition = delivered` additionally requires paired
 `deliveredAt/deliveredBy`. Every other close disposition forbids delivery
-fields. `no_repair` requires a bounded note. `other` cancellation requires the
-existing bounded cancellation note. Actor/timestamp pairs are both null or
-both present. Closed and canceled repair orders never reopen; correcting a
-terminal mistake requires a separately designed append-only correction event.
+fields. Every non-null close or cancellation note is trimmed and bounded;
+`no_repair` and `other` cancellation additionally require the applicable note.
+Actor/timestamp pairs are both null or both present. Closed and canceled repair
+orders never reopen; correcting a terminal mistake requires a separately
+designed append-only correction event.
 
 ### Transition matrix
 
@@ -695,6 +956,10 @@ screen-reader, touch, mouse, and reduced-motion equivalent.
   not imply that Vyntechs can start its legacy diagnostic engine.
 - The existing manual-finding path remains the complete optional work-item
   path while diagnostics are off.
+- Packet A changes only the proven adaptive-mode transaction lock order so its
+  existing ticket-linked authorization cannot invert session→ticket locks. It
+  does not change adaptive eligibility, state transitions, replay output,
+  prompts, topology, retrieval semantics, release gates, or reachability.
 - Counter intake, active-RO resolution, assignment, quoting, work notes,
   lifecycle, and history must not depend on a diagnostic session.
 - No continuity UI renders a camera, gallery, upload, attachment, disabled
@@ -776,7 +1041,12 @@ declarations are not proof of production availability.
 - add projection, continuity, and job revisions;
 - add related-RO/lifecycle fields, receipt header/results, composite FKs,
   checks, indexes, RLS, ACLs, and policies;
-- generate and verify source schema, migration SQL, and metadata together;
+- verify source schema and migration SQL together. The repository's Drizzle
+  journal currently ends at `0028` while guarded fixture adoption owns
+  `0029`–`0036`; do not hand-edit that historical metadata or register `0037`
+  ahead of deployed migrations. Packet A uses an exact fail-closed PGlite
+  adoption helper after `0036`, and historical metadata reconciliation remains
+  a separately planned scope;
 - apply only to local PGlite and run the writer/lock/revision inventory;
 - keep the artifact on an immutable held branch; do not merge or deploy runtime
   schema declarations while production lacks the columns.
@@ -811,6 +1081,18 @@ idempotent classifier:
    `review_required`; no migrated row remains semantically null.
 5. Multiple root matches or no root match on a multi-job ticket use rule 3 for
    every job. They never guess which item owns the ticket concern.
+
+Sequence backfill ranks only the still-null legacy jobs by `(created_at,id)`
+into `1..N`. Before writing, already-populated Packet-A ordinals must form the
+exact immutable contiguous suffix `N+1..total` in sequence order; they are not
+required to match transaction-start timestamps or UUID rank. Any missing,
+duplicate, overlapping, or noncontiguous suffix is an anomaly and stops the
+whole backfill. The transaction then writes only still-null ordinals to their
+precomputed prefix ranks and proves the final graph is exact contiguous `1..n`.
+It never moves or clears a populated sequence. Thus legacy jobs retain
+deterministic historical order while concurrent Packet-A appends retain their
+serialized ticket-lock/reservation order without violating the partial unique
+index or immutable-sequence trigger.
 
 The program uses the same JavaScript string-slice semantics as the historical
 writer, not an approximately equivalent SQL substring. Creator backfills from
@@ -910,17 +1192,51 @@ incorrect data interpretation.
   provenance/review state, including ambiguous and blank-title fallbacks;
 - root and additional job concerns never cross-bind in diagnostic intake,
   manual findings, stories, quotes, or history;
+- direct attempts to rekey, move across ticket/shop, or retime an existing job
+  fail at the database boundary;
 - a 1-item and 25-item intake are atomic, preserve order, and replay all result
   job IDs; an invalid item rolls back the entire batch;
+- legacy null-sequence jobs plus repeated Packet-A generic/canned/escalation
+  appends reserve a populated suffix, and Packet B's deterministic null-only
+  simulation produces a legacy-chronological prefix plus serialized append-order
+  suffix and contiguous `1..n` without rewriting it;
+- a real two-connection reverse-start/ticket-lock-order race proves append
+  ordinals follow serialized reservation order even when transaction timestamps
+  and UUID order disagree, and later prefix backfill still accepts them;
 - quick/canned seeded lines commit or roll back with their owning work item and
-  never duplicate on replay;
+  never duplicate on replay, reject every privileged line field, and persist
+  only server-derived provenance/evidence defaults;
+- generic create rejects every supplied ticket source with no rows; Counter,
+  Quick Ticket, and Tech Quick persist only their server-derived origin, with
+  Tech Quick inseparable from its registered session and linked job;
+- Counter and Quick share one preallocated identity contract; duplicate
+  phone/VIN/plate match sets fail closed, drift retries fresh, mileage semantics
+  are identical, and created-row reports exactly match insertion intents;
+- Quick exact replay bypasses current identity/template truth; its preflight and
+  materialized identity plus preflight and locked canned-template handles reject
+  cross-transaction, prior-attempt, collision-recovery, rolled-back, forged,
+  mutated, and expired use before creation/finalization, query, or write;
+- Quick receipt results derive only from the same opaque finalized creation;
+  a request-A/creation-B or wrong-key resolver bind, substituted post-resolution
+  request/envelope, another locked ticket, or omitted, duplicated, or reordered
+  jobs cannot be bound to the receipt;
+- production HMAC loading is mechanically server-only, absent from client
+  barrels, opaque to callers, mutation-resistant, and key-fragment-free in
+  every output/error/log;
 - zero, one, ready-to-close, voidable, multiple, stale, and cross-shop active-RO
   candidate cases are exact;
 - simultaneous submissions for one vehicle cannot silently create two ROs;
 - exact request retries re-authorize then replay; changed actor, kind, payload,
-  target, or candidate reuse conflicts;
+  operation origin, target, or candidate reuse conflicts, and the locked result
+  ticket source must match the expected origin;
 - every participating writer follows the lock/revision matrix, and contention
   returns one bounded retryable conflict without deadlock or partial write;
+- adaptive mode follows profile/ticket/job/session/event order without a
+  ticket/job revision; retrieval remains gated session-only; exact app call-edge
+  inventories prevent either from gaining an ungated entrance;
+- Tech Quick create/replay, ticketed close, and repair observation retain only
+  their exact diagnostics-gated and entitlement-refused API call edges after
+  winning/lock-only migration;
 - every included `ContinuitySignatureV1` field change bumps continuity revision
   and every explicitly excluded assignment/note-only change does not;
 - every old and new intake route passes the central release policy;
@@ -1019,14 +1335,17 @@ truth, revision ordering, receipt replay, and lifecycle evidence safely.
 **Includes:** held source schema/migration artifact, local PGlite proof,
 composite constraints/RLS/ACLs, total lock order, revision helper, immutable
 receipt header/results/replay helper, and retrofit inventory for every existing
-ticket/job writer.
+ticket/job writer. Quick Ticket adopts the receipt live; Counter and Tech Quick
+adopt trusted source plus their applicable transaction/recovery contract without
+fabricating a shared key.
 **Release boundary:** Stop at the named production-DDL gate. Runtime schema
 declarations and helpers merge/deploy only after the exact DDL is live and
 verified.
 **Excludes:** backfill execution, job-truth consumers, resolver behavior, UI.
 **Done when:** Local proof is complete; then, only if the DDL gate is approved,
-the deployed schema and every participating writer satisfy the lock/revision/
-receipt contracts before Packet D can consume them.
+the deployed schema and every participating writer satisfy the applicable
+lock/revision/trusted-origin contract, Quick satisfies live receipt replay, and
+the three-origin receipt harness is ready for Packet D consumption.
 
 ### Packet B — Job-local work truth and compatibility
 
@@ -1060,8 +1379,8 @@ blocked until this proof passes.
 exactly as the current locked candidate set permits.
 **Includes:** candidate projection, central route policy, customer/vehicle lock,
 atomic 1-to-25 item-plus-normalized-quote-seed mutation, quick/canned line
-insertion, create/append/separate intents, and consumption of Packet A
-receipts/revisions.
+insertion, actor-bound generic/Counter continuity keys,
+create/append/separate intents, and consumption of Packet A receipts/revisions.
 **Excludes:** production cleanup, hard uniqueness, and receipt schema changes.
 **Done when:** Concurrent submissions cannot silently duplicate an RO, retries
 replay every ordered result, and every legitimate separate RO preserves why.
@@ -1178,16 +1497,17 @@ Stop and return with exact evidence if implementation would require:
   [Tekmetric](https://support.tekmetric.com/hc/en-us/articles/36897066105111-The-Customer-Concern),
   and [Shopmonkey](https://support.shopmonkey.io/hc/en-us/articles/38743982351380-Add-Remove-Services-on-Estimates).
 
-## Written-spec review gate
+## Written-spec approval record
 
-Before implementation planning, the founder reviews this file for one decision:
+The founder approved this written design in the Codex control lane on
+2026-07-15. The approved decision was:
 
 > Approve or modify the additive job-local continuity model and its eight-packet
 > execution boundary.
 
-After approval, the control lane updates the active ShopOS status table and
-driver state, writes the Packet A implementation plan, and continues through
-the remaining safe planning/execution sequence without generic approval stops.
-Packet A will stop only at its named production-DDL gate; later production
+That approval authorizes the control lane to update the active ShopOS status
+table and driver state, write Packet A's implementation plan, and continue the
+remaining safe planning/execution sequence without generic approval stops.
+Packet A stops only at its named production-DDL gate; later production
 backfill, enablement, cleanup, deployment, spend, provider, or scope gates also
 return to the founder.

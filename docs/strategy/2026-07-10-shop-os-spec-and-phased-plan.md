@@ -644,6 +644,8 @@ The public approval route is deliberately exempted from authenticated-app middle
 
 **Done when:** push works on supported/allowed devices and degrades cleanly when denied; quote approval reaches the correct recipients once; manual order/receive works without a provider API; changed/unavailable offers block provider placement; sandbox/dry-run proves provider-order idempotency when a transport exists; ticket moves through current derived states to explicit delivery/close without losing legacy history.
 
+**Implementation correction — repair-order continuity approved 2026-07-15.** The founder-approved [Repair Order Continuity design](../superpowers/specs/2026-07-15-shop-os-repair-order-continuity-design.md) keeps `tickets` as the vehicle-visit spine but makes each `ticket_job` independently truthful, preserves unchanged job-local authorization, and makes server-locked append the safe default without a hard one-open-RO rule. It splits unfinished Rows 44-45 into a base lifecycle/recovery kernel and server role projections, supersedes Row 48 with the adaptive living-RO composition, and defers message/order-aware closeout to Packet H until those production dependencies are live. Packets A-D are new prerequisite rows 50-53; Packet H is Row 54. Packet A may correct only the existing adaptive-mode transaction's proven session-before-ticket lock inversion; its eligibility, state transitions, output, gates, and all other diagnostic semantics remain unchanged. Diagnostics and operational media remain fail-closed. The design authorizes bounded planning/execution but not production DDL, backfill, feature enablement, cleanup, deployment, spend, provider access, or destructive data work.
+
 ### Step-to-phase map
 
 | Preflight | Intake | Assign | Command center | Story | Quote | Parts | Approval | Notify/order | Work→delivery |
@@ -692,7 +694,7 @@ If `main` or live migration history changes, re-run the relevant baseline checks
 
 1. Read this plan, `AGENTS.md`, and the interaction doctrine for UI work.
 2. Run `git fetch --all --prune`, `git worktree list`, and `gh pr list --state open` before trusting the table. Compare live migrations/tables before any schema row.
-3. Rows 1–3, 5–25, 27–28, 30, and 46–47 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 46 merged in PR #163 as `e2d6454`; additive migration `0036_shop_entitlements` is live and verified. Row 47 merged in PR #167 as `5d8e106` and passed production health proof. Row 31 source is verified and ready to ship, while migrations `0033`–`0035`, production messaging, later production feature enablement, and external account/spend work remain owner gates. Row 48 remains blocked. Row 49 merged in PR #168 and deployed as `7087eeb`, but remains `in_progress` until authenticated malformed diagnostic/media refusal is proved and the separately governed permanent purge is authorized and receipted.
+3. Rows 1–3, 5–25, 27–28, 30, and 46–47 are complete. Row 30 merged in PR #154 and passed production mobile, desktop, API-health, authentication-boundary, and deployment-log proof. Row 46 merged in PR #163 as `e2d6454`; additive migration `0036_shop_entitlements` is live and verified. Row 47 merged in PR #167 as `5d8e106` and passed production health proof. Row 31 source is verified and ready to ship, while migrations `0033`–`0035`, production messaging, later production feature enablement, and external account/spend work remain owner gates. The founder approved the Repair Order Continuity design on 2026-07-15: Row 50 is the active planning/execution row, Rows 51–53 are its ordered prerequisites for resolver enablement, Rows 44–45 are re-scoped base lifecycle/role rows, Row 48 is superseded by Packet G, and Row 54 remains dependency-blocked. Row 49 merged in PR #168 and deployed as `7087eeb`, but remains independently `in_progress` until authenticated malformed diagnostic/media refusal is proved and the separately governed permanent purge is authorized and receipted.
 4. Claim one row by recording owner/branch and opening a draft PR. One named writer owns each artifact; advisory review lanes do not co-edit it.
 5. Respect `Depends on`, `Gate`, and owned paths. Two active rows may not touch the same screen/domain files.
 6. Before shipping: `pnpm test`, `pnpm exec tsc --noEmit`, and `pnpm build`. UI rows also run the repository's required browser accessibility check. Schema rows additionally prove local migration, live migration only after approval, and clean Supabase advisors.
@@ -723,9 +725,22 @@ X   external owner     vendor/carrier applications, credentials, spend
 AE  AutoEYE add-on     lane/phase0* entitlement/access/manual-findings seam;
                        ownership and shared-file rules live in the
                        cross-session coordination protocol
+CF  continuity base    schema/migration 0037, tests/helpers/db.ts,
+                       lib/shop-os/continuity/*, and exact revision/lock-only
+                       edits to ticket/intake/quote/story/work/parts writers
+JT  job truth          lib/shop-os/job-truth*, migrated-work confirmation,
+                       exact downstream job-statement consumer bindings
+AC  approval continuity lib/shop-os/authorization-continuity*, exact
+                       quote/repair-authorization integration
+RC  RO continuity      lib/shop-os/repair-order-continuity*, canonical
+                       create/append/separate intake convergence
+RL  RO lifecycle       lib/shop-os/ticket-lifecycle*, vehicle-history domain
+RH  role home          lib/shop-os/role-home*, projection/action envelopes
+AW  adaptive workspace existing Today/ticket-detail production composition
+LO  lifecycle/order    message/send/order-aware lifecycle adapters only
 ```
 
-`S` is exclusive. Within each UI lane, only one active row may own a shared surface. Domain route shims follow their corresponding `L*` owner. Production migrations and real vendor orders are never implied by completing code.
+`S` is exclusive. `CF` is also exclusive across every listed `S`/`LT`/`LQ`/`LP`/`I` file while active; it may not overlap another writer in those files. Within each UI lane, only one active row may own a shared surface. Domain route shims follow their corresponding `L*` owner. Production migrations and real vendor orders are never implied by completing code.
 
 Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 
@@ -776,12 +791,17 @@ Statuses: `pending`, `in_progress`, `blocked`, `owner_gate`, `complete`.
 | 41 | 6 | Manual order refresh/confirm/receive handlers | LP | 17,28,38 | pending | No provider API required |
 | 42 | 6 | Manual order queue/receive UI | A | 30,41 | pending | — |
 | 43 | 6 | Optional API/punchout placement + provider idempotency | LP | 29,41 | blocked | Sandbox or owner approval for real order |
-| 44 | 6 | Derived board/delivery/closeout handlers | LT | 23,36,41 | pending | — |
-| 45 | 6 | Board + delivery/closeout + vehicle-history UI | A | 24,37,42,44 | pending | — |
+| 44 | 6 | Packet E: base RO lifecycle + direct vehicle-history recovery | RL | 23,50,51,52,53 | pending | Re-scoped by the approved continuity design; exact stage/transition kernel uses only deployed truth and excludes message/order-aware closeout |
+| 45 | 6 | Packet F: server role projections + action authority | RH | 24,44,50,51,52,53 | pending | Re-scoped by the approved continuity design; Shop Today/My Work/deployed-truth Parts Queue and closeout exceptions, no adaptive composition |
 | 46 | X | Per-shop diagnostics entitlement + one-slot optional/manual findings path | AE | 15,21,30,31 | complete | PR #163 merged as `e2d6454`; additive migration `0036_shop_entitlements` is live and verified; live Stripe mapping remains inert; no diagnostic-engine semantic change |
 | 47 | X | Adaptive application foundation + privacy-safe PWA shell contracts | P | 14,24 | complete | PR #167 merged as `5d8e106`; source proof at `2d4071c48eb24e390dc6a5510b8d00ff9a1d1d4c` passed 277 files/3,211 tests, TypeScript, production build, real-Chrome v3 takeover proof, independent quality/spec reviews, and production health. PR #166 remains design/plan only. No Today/diagnostic, Row 40 push, schema, migration, provider, or production-data scope. |
-| 48 | X | My Jobs living-entity + gesture pilot | T | 46,47 | blocked | Starts only after the AutoEYE coordination log releases every shared Today/diagnostic path; consumes existing My/Open Jobs only and does not pull Rows 44–45 forward |
+| 48 | X | Packet G: adaptive living repair order | AW | 45,47,53 | pending | Supersedes the former gesture pilot; consumes Row 45 envelopes, adds no page or diagnostic/media entrance, and treats any live shared-file lease as an ownership gate—not an AutoEYE product dependency |
 | 49 | X | Global diagnostic-off + no operational-media release | NM | 17,20,23,24,46,47 | in_progress | PR #168 merged and deployed as `7087eeb`; verified release source `20f2d6dc442b1dde77e2a7ceb7985e230aa7976b`. Global diagnostics are fail-closed, operational media is refused before byte/resource access, simple work is text-only, reachable diagnostic/media entrances and false public promises are removed, manual findings and historical non-media truth remain intact, and legacy parsing remains compatible. Proof: 52 focused files/710 tests; 284 files/3,243 full tests; TypeScript; 64-page production build; source guards; whole-branch and auth/privacy independent PASS reviews; live authenticated Today, Counter intake, quote/manual story, retired-session redirect, `/design` and retired-asset 404s, legal/manifest truth, browser console, Vercel logs, and health passed. Anonymous malformed POSTs returned auth-first `401`. Mobile viewport/screenshot tooling failed twice, so no mobile screenshot claim is made; the unassigned simple-work fixture was not mutated. Authenticated malformed POST refusal remains unproved because browser security blocked the attempt and no approved `TEST_USER` credential exists. An official ephemeral Supabase-auth attempt was also blocked because Vercel exposed empty placeholder values; its temporary credentials were removed, and it does not count as direct authenticated POST proof. Next: add a separately reviewed non-production QA HTTP-auth path, rerun authenticated refusal probes, then present—but do not execute without approval—the permanent purge. |
+| 50 | X | Packet A: additive continuity migration + mutation foundation | CF | 8,13,17,20,23,28 | in_progress | Founder approved design 2026-07-15; [design](../superpowers/specs/2026-07-15-shop-os-repair-order-continuity-design.md); exact plan/spec SHA-256 `93ec537663b8f61dc6d7f985213e707f572e47b19705d96feafac716cdc7e709` / `f586e7e733cf50ae351a5e4b18dbef90c618f56c2708e8a3c526c0af0fc19fd2` independently passed spec, security, and concurrency review; source/local proof only and must stop before production DDL |
+| 51 | X | Packet B: job-local work truth + compatibility | JT | 50 | pending | Deterministic backfill and production data mutation remain a separate founder gate |
+| 52 | X | Packet C: immutable per-job authorization continuity | AC | 17,22,23,50,51 | pending | Must prove unrelated work preserves an unchanged job pin before Row 53 |
+| 53 | X | Packet D: transactional active-RO resolver | RC | 10,11,19,50,51,52 | pending | Central create/append/separate policy; preview/on enablement remains a separate founder gate |
+| 54 | X | Packet H: message/order-aware lifecycle extension | LO | 31,32,36,38,41,42,44,45 | blocked | Waits for live verified messaging/order dependencies; provider transport, spend, and production enablement remain excluded |
 
 ---
 
