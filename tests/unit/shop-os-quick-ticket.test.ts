@@ -72,7 +72,7 @@ import {
 } from '@/lib/db/schema'
 import * as schema from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
-import { createTicket, ticketDomainStatus, type TicketActor } from '@/lib/tickets'
+import { ticketDomainStatus, type TicketActor } from '@/lib/tickets'
 import {
   consumeResolvedLockedQuickTemplateForCreationV1,
   createCannedJob,
@@ -1807,31 +1807,71 @@ describe('createQuickTicket', () => {
 
   it('does not disclose or reuse a deterministic identity collision with incompatible persisted truth', async () => {
     const body = existingBody({ clientKey: uuid(806) })
-    const collision = await createTicket(db, {
-      actor,
-      internal: {
-        ticketId: deterministicQuickTicketId(
-          actor.shopId as string,
-          actor.profileId,
-          uuid(806),
-        ),
-      },
-      body: {
-        source: 'counter',
-        customerId: existingCustomer.id,
-        vehicleId: existingVehicle.id,
-        concern: 'Existing Counter work',
-        jobs: [{
-          title: 'Existing Counter work',
-          kind: 'repair',
-          requiredSkillTier: 2,
-          assignedTechId: null,
-        }],
-      },
+    const legacyTicketId = deterministicQuickTicketId(
+      actor.shopId as string,
+      actor.profileId,
+      uuid(806),
+    )
+    const legacyJobId = uuid(838)
+    const [shopBeforeFixture] = await db.select({
+      nextTicketNumber: shops.nextTicketNumber,
+    }).from(shops).where(eq(shops.id, shopA.id))
+    const nextTicketNumber = shopBeforeFixture!.nextTicketNumber + 1
+    await db.update(shops).set({ nextTicketNumber }).where(eq(shops.id, shopA.id))
+    const [legacyTicket] = await db.insert(tickets).values({
+      id: legacyTicketId,
+      shopId: shopA.id,
+      ticketNumber: shopBeforeFixture!.nextTicketNumber,
+      source: 'counter',
+      customerId: existingCustomer.id,
+      vehicleId: existingVehicle.id,
+      concern: 'Existing Counter work',
+      projectionRevision: 0n,
+      continuityRevision: 0n,
+      status: 'open',
+      createdByProfileId: actor.profileId,
+    }).returning()
+    const [legacyJob] = await db.insert(ticketJobs).values({
+      id: legacyJobId,
+      shopId: shopA.id,
+      ticketId: legacyTicketId,
+      title: 'Existing Counter work',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      assignedTechId: null,
+      sessionId: null,
+      workStatus: 'open',
+      approvalState: 'pending_quote',
+      sequenceNumber: null,
+      createdByProfileId: null,
+      creatorProvenance: null,
+      revision: 0n,
+    }).returning()
+    expect(legacyTicket).toMatchObject({
+      id: legacyTicketId,
+      shopId: shopA.id,
+      source: 'counter',
+      customerId: existingCustomer.id,
+      vehicleId: existingVehicle.id,
+      createdByProfileId: actor.profileId,
     })
-    expect(collision).toMatchObject({ ok: true, ticket: { source: 'counter' } })
-    await expect(createQuickTicket(db, { actor, body })).resolves.toEqual({ ok: false, error: 'conflict' })
+    expect(legacyJob).toMatchObject({
+      id: legacyJobId,
+      ticketId: legacyTicketId,
+      sequenceNumber: null,
+      revision: 0n,
+    })
+
+    const result = await createQuickTicket(db, { actor, body })
+    expect(result).toEqual({ ok: false, error: 'conflict' })
+    expect(JSON.stringify(result)).not.toContain(legacyTicketId)
+    expect(JSON.stringify(result)).not.toContain(legacyJobId)
     expect(await db.select().from(tickets)).toHaveLength(1)
+    expect(await db.select().from(ticketJobs)).toHaveLength(1)
+    expect(await db.select().from(ticketMutationReceipts)).toEqual([])
+    expect((await db.select({ nextTicketNumber: shops.nextTicketNumber })
+      .from(shops).where(eq(shops.id, shopA.id)))[0]!.nextTicketNumber)
+      .toBe(nextTicketNumber)
   })
 
   it('rejects stale, cross-shop, retired, and corrupt canned state with no writes', async () => {
