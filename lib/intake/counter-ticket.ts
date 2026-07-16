@@ -1,16 +1,35 @@
-import { and, eq } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { customers, vehicles } from '@/lib/db/schema'
-import { canCreateTickets } from '@/lib/shop-os/capabilities'
+import { canAssignWork, canCreateTickets } from '@/lib/shop-os/capabilities'
 import {
-  addTicketJob,
-  createTicket,
+  finalizeResolvedTicketCreationInTransactionV1,
+  getTicketDetail,
+  insertResolvedTicketBatchInTransactionV1,
+  readFinalizedTicketCreationResultV1,
+  resolveTicketCreationInLockedScopeV1,
   type CreateTicketResult,
   type TicketActor,
 } from '@/lib/tickets'
-import { upsertCustomer } from './customers'
-import { upsertVehicle } from './vehicles'
+import {
+  materializeTicketIntakeIdentityInLockedScopeV1,
+  preflightTicketIntakeIdentityV1,
+  type TicketIntakeIdentityInputV1,
+  type TicketIntakeIdentityLockPlanV1,
+  type TicketIntakeIdentitySeamsV1,
+} from './ticket-identity'
+import {
+  ShopOsMutationConflict,
+  ShopOsMutationNotFound,
+  runBoundedShopOsMutationV1,
+  type LockedMutationScopeV1,
+  type MutationLockRequestV1,
+  type NormalizedTicketJobCreateV1,
+  type ResolvedTicketIntakeIdentityV1,
+} from '@/lib/shop-os/continuity/mutation-foundation'
+import {
+  createCounterTicketOriginV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/ticket-origin.server'
 
 const optionalTrimmedText = (max: number) =>
   z.string().trim().max(max).nullable().optional()
@@ -45,7 +64,7 @@ const commonShape = {
   howOften: optionalTrimmedText(1_000),
   diagnosticAuthorization: diagnosticAuthorizationSchema,
   requestedService: requestedServiceSchema,
-  assignedTechId: z.uuid().nullable(),
+  assignedTechId: z.uuid().transform((value) => value.toLowerCase()).nullable(),
   confirmBelowTier: z.boolean().optional(),
 }
 
@@ -90,6 +109,16 @@ const counterBodySchema = z.discriminatedUnion('vehicleMode', [
 
 type CounterBody = z.infer<typeof counterBodySchema>
 
+export type CounterTicketDependencies = TicketIntakeIdentitySeamsV1 & Readonly<{
+  afterIdentityPreflight?: () => Promise<void>
+}>
+
+type CounterDiscovery = Readonly<{
+  identity: ResolvedTicketIntakeIdentityV1
+  ticketId: string
+  jobIds: readonly string[]
+}>
+
 class CounterTicketRollback extends Error {
   constructor(readonly result: Exclude<CreateTicketResult, { ok: true }>) {
     super('counter_ticket_rollback')
@@ -112,37 +141,162 @@ function actorDenied(actor: TicketActor): Exclude<CreateTicketResult, { ok: true
   return null
 }
 
-function ticketBody(
+function identityInput(
   body: CounterBody,
-  customerId: string,
-  vehicleId: string,
-): Record<string, unknown> {
-  const amount = body.diagnosticAuthorization?.amountDollars
-  const diagnosticAuthorizedCents = amount ? dollarsToCents(amount) : null
-  return {
-    source: 'counter',
-    customerId,
-    vehicleId,
-    concern: body.concern,
-    whenStarted: body.whenStarted ?? null,
-    howOften: body.howOften ?? null,
-    diagnosticAuthorizedCents,
-    diagnosticAuthorizationNote: body.diagnosticAuthorization?.note ?? null,
-    jobs: [
-      {
-        title: `Diagnose: ${body.concern}`.slice(0, 200),
-        kind: 'diagnostic',
-        requiredSkillTier: 3,
-        assignedTechId: body.assignedTechId,
-        confirmBelowTier: body.confirmBelowTier,
-      },
-    ],
+  shopId: string,
+): TicketIntakeIdentityInputV1 {
+  if (body.vehicleMode === 'existing') {
+    return {
+      mode: 'existing_vehicle',
+      shopId,
+      existingVehicleId: body.existingVehicleId,
+      ...(body.mileage === undefined ? {} : { mileage: body.mileage }),
+    }
   }
+  return {
+    mode: 'new_vehicle',
+    shopId,
+    customer: {
+      name: body.customer.name,
+      phone: body.customer.phone,
+      email: body.customer.email ?? null,
+    },
+    vehicle: {
+      year: body.vehicle.year,
+      make: body.vehicle.make,
+      model: body.vehicle.model,
+      engine: body.vehicle.engine ?? null,
+      vin: body.vehicle.vin ?? null,
+      mileage: body.vehicle.mileage ?? null,
+      plate: body.vehicle.plate ?? null,
+    },
+  }
+}
+
+function lockRequest(
+  actor: TicketActor,
+  body: CounterBody,
+  plan: TicketIntakeIdentityLockPlanV1,
+  ticketId: string,
+  jobIds: readonly string[],
+): MutationLockRequestV1 {
+  const profileIds = [...new Set([
+    actor.profileId,
+    ...(body.assignedTechId === null ? [] : [body.assignedTechId]),
+  ])].sort()
+  return {
+    shopId: actor.shopId as string,
+    actorProfileId: actor.profileId,
+    profileIds,
+    lockShop: true,
+    customerIds: [...plan.customerIds],
+    vehicleIds: [...plan.vehicleIds],
+    ticketIds: [],
+    jobIds: [],
+    includeAllJobsForTickets: true,
+    includeAllLinesForJobs: true,
+    includeAllQuoteVersionsForTickets: false,
+    includeAllQuoteEventsForTickets: false,
+    sessionIds: [],
+    sessionEventIds: [],
+    vendorAccountIds: [],
+    cannedJobIds: [],
+    receiptRequestKey: null,
+    receiptConditionalInsert: null,
+    insertionIntents: {
+      sessions: [],
+      customers: plan.insertionIntents.customers.map((intent) => ({ ...intent })),
+      vehicles: plan.insertionIntents.vehicles.map((intent) => ({ ...intent })),
+      tickets: [ticketId],
+      jobs: jobIds.map((id) => ({ id, ticketId })),
+    },
+  }
+}
+
+function lockedAssignment(
+  scope: LockedMutationScopeV1,
+  body: CounterBody,
+):
+  | Readonly<{ ok: true; assignedTechId: string | null }>
+  | Exclude<CreateTicketResult, { ok: true }> {
+  if (body.assignedTechId === null) {
+    return { ok: true, assignedTechId: null }
+  }
+  const assignee = scope.profiles.find(({ id }) => id === body.assignedTechId)
+  if (!assignee || assignee.shopId !== scope.actor.shopId) {
+    return { ok: false, error: 'not_found' }
+  }
+  const tier = assignee.skillTier
+  if (
+    assignee.membershipStatus !== 'active' || assignee.deactivatedAt !== null ||
+    !canCreateTickets(assignee.role) ||
+    (tier !== 1 && tier !== 2 && tier !== 3)
+  ) {
+    return { ok: false, error: 'invalid_assignee' }
+  }
+  if (assignee.id === scope.actor.id) {
+    return tier >= 3
+      ? { ok: true, assignedTechId: assignee.id }
+      : { ok: false, error: 'invalid_assignee' }
+  }
+  if (!canAssignWork(scope.actor.role)) {
+    return { ok: false, error: 'invalid_assignee' }
+  }
+  if (tier < 3 && !body.confirmBelowTier) {
+    return {
+      ok: false,
+      error: 'tier_confirmation_required',
+      warning: {
+        code: 'below_required_tier',
+        assignedTechId: assignee.id,
+        assignedSkillTier: tier,
+        requiredSkillTier: 3,
+      },
+    }
+  }
+  return { ok: true, assignedTechId: assignee.id }
+}
+
+function ownedAuthorizationCents(body: CounterBody): number | null {
+  const amount = body.diagnosticAuthorization?.amountDollars
+  if (amount === undefined || amount === null) return null
+  const cents = dollarsToCents(amount)
+  if (cents === null) throw new Error('counter_ticket_amount_invalid')
+  return cents
+}
+
+function creationJobs(
+  body: CounterBody,
+  jobIds: readonly string[],
+  assignedTechId: string | null,
+): readonly NormalizedTicketJobCreateV1[] {
+  const jobs: NormalizedTicketJobCreateV1[] = [{
+    id: jobIds[0]!,
+    title: `Diagnose: ${body.concern}`.slice(0, 200),
+    kind: 'diagnostic',
+    requiredSkillTier: 3,
+    assignedTechId,
+    sessionId: null,
+    createdFromJobId: null,
+  }]
+  if (body.requestedService) {
+    jobs.push({
+      id: jobIds[1]!,
+      title: body.requestedService.description,
+      kind: body.requestedService.kind,
+      requiredSkillTier: body.requestedService.kind === 'repair' ? 2 : 1,
+      assignedTechId,
+      sessionId: null,
+      createdFromJobId: null,
+    })
+  }
+  return jobs
 }
 
 export async function createCounterTicket(
   db: AppDb,
   input: { actor: TicketActor; body: unknown },
+  dependencies: CounterTicketDependencies = {},
 ): Promise<CreateTicketResult> {
   const denied = actorDenied(input.actor)
   if (denied) return denied
@@ -151,77 +305,121 @@ export async function createCounterTicket(
   if (!parsed.success) return { ok: false, error: 'invalid_input' }
   const body = parsed.data
   const shopId = input.actor.shopId as string
+  const origin = createCounterTicketOriginV1()
 
   try {
-    return await db.transaction(async (tx) => {
-      let customerId: string
-      let vehicleId: string
-
-      if (body.vehicleMode === 'existing') {
-        const [context] = await tx
-          .select({ customerId: customers.id, vehicleId: vehicles.id })
-          .from(customers)
-          .innerJoin(
-            vehicles,
-            and(eq(vehicles.id, body.existingVehicleId), eq(vehicles.customerId, customers.id)),
-          )
-          .where(eq(customers.shopId, shopId))
-          .limit(1)
-        if (!context) return { ok: false, error: 'not_found' as const }
-
-        customerId = context.customerId
-        vehicleId = context.vehicleId
-        if (body.mileage !== undefined && body.mileage !== null) {
-          await tx
-            .update(vehicles)
-            .set({ mileage: body.mileage, updatedAt: new Date() })
-            .where(eq(vehicles.id, vehicleId))
+    return await runBoundedShopOsMutationV1<CreateTicketResult, CounterDiscovery>(db, {
+      discover: async (tx, attempt) => {
+        const preflight = await preflightTicketIntakeIdentityV1(
+          tx,
+          attempt.capability,
+          identityInput(body, shopId),
+        )
+        if (!preflight.ok) {
+          throw new CounterTicketRollback({
+            ok: false,
+            error: preflight.error === 'not_found' ? 'not_found' : 'conflict',
+          })
         }
-      } else {
-        const customer = await upsertCustomer(tx as AppDb, {
-          shopId,
-          name: body.customer.name,
-          phone: body.customer.phone,
-          email: body.customer.email ?? null,
-        })
-        const vehicle = await upsertVehicle(tx as AppDb, {
-          customerId: customer.id,
-          year: body.vehicle.year,
-          make: body.vehicle.make,
-          model: body.vehicle.model,
-          engine: body.vehicle.engine ?? null,
-          vin: body.vehicle.vin ?? null,
-          mileage: body.vehicle.mileage ?? null,
-          plate: body.vehicle.plate ?? null,
-        })
-        customerId = customer.id
-        vehicleId = vehicle.id
-      }
-
-      let result = await createTicket(tx as AppDb, {
-        actor: input.actor,
-        body: ticketBody(body, customerId, vehicleId),
-      })
-      if (!result.ok) throw new CounterTicketRollback(result)
-
-      if (body.requestedService) {
-        result = await addTicketJob(tx as AppDb, {
-          actor: input.actor,
-          ticketId: result.ticket.id,
-          body: {
-            title: body.requestedService.description,
-            kind: body.requestedService.kind,
-            requiredSkillTier: body.requestedService.kind === 'repair' ? 2 : 1,
-            assignedTechId: body.assignedTechId,
-            confirmBelowTier: body.confirmBelowTier,
+        await dependencies.afterIdentityPreflight?.()
+        const ticketId = randomUUID()
+        const jobIds = [
+          randomUUID(),
+          ...(body.requestedService ? [randomUUID()] : []),
+        ]
+        return {
+          lockRequest: lockRequest(
+            input.actor,
+            body,
+            preflight.lockPlan,
+            ticketId,
+            jobIds,
+          ),
+          payload: {
+            identity: preflight.identity,
+            ticketId,
+            jobIds,
           },
+        }
+      },
+      executeLocked: async (tx, scope, discovery) => {
+        const assignment = lockedAssignment(scope, body)
+        if (!assignment.ok) throw new CounterTicketRollback(assignment)
+
+        const materialized = await materializeTicketIntakeIdentityInLockedScopeV1(
+          tx,
+          scope,
+          discovery.identity,
+          dependencies,
+        )
+        if (!materialized.ok) {
+          if (materialized.error === 'identity_drift') {
+            throw new ShopOsMutationConflict()
+          }
+          throw new CounterTicketRollback({ ok: false, error: 'conflict' })
+        }
+
+        const jobs = creationJobs(body, discovery.jobIds, assignment.assignedTechId)
+        const resolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'intake_insert',
+          origin,
+          ticket: {
+            id: discovery.ticketId,
+            concern: body.concern,
+            whenStarted: body.whenStarted ?? null,
+            howOften: body.howOften ?? null,
+            diagnosticAuthorizedCents: ownedAuthorizationCents(body),
+            diagnosticAuthorizationNote: body.diagnosticAuthorization?.note ?? null,
+          },
+          identity: materialized.materialized,
+          jobs,
+          seededLinesByJobIndex: new Map(),
         })
-        if (!result.ok) throw new CounterTicketRollback(result)
-      }
-      return result
+        await insertResolvedTicketBatchInTransactionV1(tx, scope, resolved)
+        const finalized = await finalizeResolvedTicketCreationInTransactionV1(
+          tx,
+          scope,
+          resolved,
+          [{
+            ticketId: discovery.ticketId,
+            createdTicket: true,
+            createdJobIds: [...discovery.jobIds],
+            existingChangedJobIds: [],
+            actorVisibleTicketFieldsChanged: true,
+          }],
+        )
+        const safe = readFinalizedTicketCreationResultV1(tx, scope, finalized)
+        if (
+          safe.ticketId !== discovery.ticketId ||
+          safe.jobIds.length !== discovery.jobIds.length ||
+          safe.jobIds.some((id, index) => id !== discovery.jobIds[index])
+        ) {
+          throw new Error('counter_ticket_creation_result_mismatch')
+        }
+
+        const detail = await getTicketDetail(tx, {
+          actor: {
+            profileId: scope.actor.id,
+            shopId: scope.actor.shopId,
+            role: scope.actor.role,
+            skillTier: scope.actor.skillTier,
+            membershipStatus: 'active',
+            deactivatedAt: null,
+          },
+          ticketId: safe.ticketId,
+        })
+        if (!detail.ok) throw new CounterTicketRollback(detail)
+        return detail
+      },
     })
   } catch (error) {
     if (error instanceof CounterTicketRollback) return error.result
+    if (error instanceof ShopOsMutationNotFound) {
+      return { ok: false, error: 'not_found' }
+    }
+    if (error instanceof ShopOsMutationConflict) {
+      return { ok: false, error: 'conflict', retryable: true }
+    }
     throw error
   }
 }
