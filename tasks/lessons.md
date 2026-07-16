@@ -47,3 +47,13 @@ Reason: Workflow value must not silently create infrastructure cost or adoption 
 Trigger: A successful create flow redirects to a home queue that filters the creator's new record out.
 Rule: Prove every created record remains discoverable from the creator's normal role-shaped home after navigation.
 Reason: Successful persistence without a durable return path feels exactly like data loss.
+
+### locked-scopes-own-nested-values
+Trigger: Locked scope shallow copies retained mutable JSONB aliases.
+Rule: Recursively clone and freeze every exposed database value, including Dates; reject unsupported or cyclic structures.
+Reason: Read-only containers do not own nested database state.
+
+### validate-locked-composite-references
+Trigger: A locked job exposed an approval-event ID without locking and validating its exact event parent.
+Rule: Validate every non-null child reference against locked IDs and composite parent bindings; missing membership is retryable drift.
+Reason: Lock completeness requires validating outgoing references, not merely locked row membership.

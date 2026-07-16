@@ -353,8 +353,94 @@ async function discoverOwnedReplayRequest(
   })
 }
 
+const DATE_MUTATORS = new Set<PropertyKey>([
+  'setDate',
+  'setFullYear',
+  'setHours',
+  'setMilliseconds',
+  'setMinutes',
+  'setMonth',
+  'setSeconds',
+  'setTime',
+  'setUTCDate',
+  'setUTCFullYear',
+  'setUTCHours',
+  'setUTCMilliseconds',
+  'setUTCMinutes',
+  'setUTCMonth',
+  'setUTCSeconds',
+  'setYear',
+])
+
+function invalidLockedValue(): never {
+  throw new TypeError('invalid_locked_mutation_value')
+}
+
+function immutableDateSnapshot(value: Date): Date {
+  const timestamp = value.getTime()
+  if (!Number.isFinite(timestamp)) return invalidLockedValue()
+  const target = Object.freeze(new Date(timestamp))
+  return new Proxy(target, {
+    get(date, property) {
+      if (DATE_MUTATORS.has(property)) return invalidLockedValue
+      const member = Reflect.get(date, property, date)
+      if (property === 'constructor') return member
+      return typeof member === 'function' ? member.bind(date) : member
+    },
+    set: invalidLockedValue,
+    defineProperty: invalidLockedValue,
+    deleteProperty: invalidLockedValue,
+    setPrototypeOf: invalidLockedValue,
+  })
+}
+
+function immutableSnapshot<T>(value: T, ancestors = new WeakSet<object>()): T {
+  if (
+    value === null || value === undefined ||
+    typeof value === 'string' || typeof value === 'number' ||
+    typeof value === 'boolean' || typeof value === 'bigint'
+  ) return value
+  if (typeof value !== 'object') return invalidLockedValue()
+  if (value instanceof Date) return immutableDateSnapshot(value) as T
+  if (ancestors.has(value)) return invalidLockedValue()
+
+  const prototype = Object.getPrototypeOf(value)
+  if (
+    prototype !== Object.prototype && prototype !== null &&
+    !(Array.isArray(value) && prototype === Array.prototype)
+  ) return invalidLockedValue()
+  if (Object.getOwnPropertySymbols(value).length > 0) return invalidLockedValue()
+
+  ancestors.add(value)
+  try {
+    if (Array.isArray(value)) {
+      const keys = Object.keys(value)
+      if (
+        keys.length !== value.length ||
+        keys.some((key, index) => key !== String(index))
+      ) return invalidLockedValue()
+      return Object.freeze(value.map((item) => immutableSnapshot(item, ancestors))) as T
+    }
+
+    const snapshot = Object.create(prototype) as Record<string, unknown>
+    for (const key of Object.getOwnPropertyNames(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (!descriptor || !('value' in descriptor)) return invalidLockedValue()
+      Object.defineProperty(snapshot, key, {
+        configurable: false,
+        enumerable: descriptor.enumerable,
+        writable: false,
+        value: immutableSnapshot(descriptor.value, ancestors),
+      })
+    }
+    return Object.freeze(snapshot) as T
+  } finally {
+    ancestors.delete(value)
+  }
+}
+
 function freezeRows<T extends object>(rows: readonly T[]): readonly T[] {
-  return Object.freeze(rows.map((row) => Object.freeze({ ...row })))
+  return Object.freeze(rows.map((row) => immutableSnapshot(row)))
 }
 
 function requireIds(
@@ -669,6 +755,16 @@ export async function lockMutationScopeV1(
     requireReferences([event.quoteVersionId], versionIdSet)
     if (!ownedReplay) requireReferences([event.actorProfileId], profileIdSet)
   }
+  if (!ownedReplay) {
+    const eventById = new Map(lockedEvents.map((event) => [event.id, event] as const))
+    for (const job of lockedJobs) {
+      if (job.approvedApprovalEventId === null) continue
+      const event = eventById.get(job.approvedApprovalEventId)
+      if (
+        !event || event.ticketId !== job.ticketId || event.jobId !== job.id
+      ) throw new ShopOsMutationConflict()
+    }
+  }
   await completeClass('quote_events')
 
   await completeClass('quote_sends_and_orders')
@@ -758,12 +854,13 @@ export async function lockMutationScopeV1(
   }
   await completeClass('mutation_receipts')
 
+  const frozenTickets = freezeRows(lockedTickets)
   const frozenJobs = freezeRows(lockedJobs)
   const frozenLines = freezeRows(lockedLines)
   const frozenVersions = freezeRows(lockedVersions)
   const frozenEvents = freezeRows(lockedEvents)
-  const graphs = Object.freeze(lockedTickets.map((ticket) => Object.freeze({
-    ticket: Object.freeze({ ...ticket }),
+  const graphs = Object.freeze(frozenTickets.map((ticket) => Object.freeze({
+    ticket,
     jobs: Object.freeze(frozenJobs.filter((job) => job.ticketId === ticket.id)),
     lines: Object.freeze(frozenLines.filter((line) =>
       frozenJobs.some((job) => job.ticketId === ticket.id && job.id === line.jobId))),
@@ -791,7 +888,7 @@ export async function lockMutationScopeV1(
     actor,
     request: normalized,
     profiles: freezeRows(lockedProfiles),
-    shop: lockedShopRow ? Object.freeze({ ...lockedShopRow }) : null,
+    shop: lockedShopRow ? immutableSnapshot(lockedShopRow) : null,
     customers: freezeRows(lockedCustomers),
     vehicles: freezeRows(lockedVehicles),
     tickets: graphs,

@@ -324,6 +324,11 @@ describe('ShopOS repository lock coordinator', () => {
         id: uuid(51), shopId: uuid(1), ticketNumber: 51, source: 'tech_quick',
         customerId: null, vehicleId: null, concern: 'Quick concern', createdByProfileId: uuid(10),
       },
+      {
+        id: uuid(52), shopId: uuid(1), ticketNumber: 52, source: 'counter',
+        customerId: uuid(20), vehicleId: uuid(30), concern: 'Approved work',
+        createdByProfileId: uuid(10),
+      },
     ])
     await db.insert(sessions).values({
       id: uuid(40), shopId: uuid(1), techId: uuid(11), vehicleId: uuid(30),
@@ -335,24 +340,55 @@ describe('ShopOS repository lock coordinator', () => {
         id: uuid(60), shopId: uuid(1), ticketId: uuid(50), title: 'Inspect', kind: 'diagnostic',
         requiredSkillTier: 2, assignedTechId: uuid(11), sessionId: uuid(40),
         createdByProfileId: uuid(10), creatorProvenance: 'direct',
+        customerStory: {
+          whatYouToldUs: 'Noise',
+          whatWeFound: 'Loose shield',
+          howWeKnow: [{ claim: 'Shield moved', sourceEventIds: [uuid(41)], sourceArtifactIds: [] }],
+          whatItMeansIfWaived: 'Noise may continue',
+          whatWeRecommend: 'Secure shield',
+        },
+        storyMeta: {
+          source: 'manual', lastEditedByProfileId: uuid(10),
+          lastEditedAt: '2026-07-16T00:00:00.000Z',
+        },
       },
       {
         id: uuid(61), shopId: uuid(1), ticketId: uuid(50), title: 'Repair', kind: 'repair',
+        requiredSkillTier: 2, createdByProfileId: uuid(10), creatorProvenance: 'direct',
+      },
+      {
+        id: uuid(62), shopId: uuid(1), ticketId: uuid(52), title: 'Approved repair', kind: 'repair',
         requiredSkillTier: 2, createdByProfileId: uuid(10), creatorProvenance: 'direct',
       },
     ])
     await db.insert(jobLines).values({
       id: uuid(70), shopId: uuid(1), jobId: uuid(60), kind: 'part', description: 'Part',
       quantity: 1, priceCents: 100, taxable: true,
+      vendorSnapshot: { offer: { id: 'locked-offer', warehouses: ['north'] } },
     })
     await db.insert(quoteVersions).values({
       id: uuid(80), shopId: uuid(1), ticketId: uuid(50), versionNumber: 1,
-      snapshot: {}, createdByProfileId: uuid(10),
+      snapshot: { jobs: [{ id: uuid(60), decision: 'pending' }] },
+      createdByProfileId: uuid(10),
     })
-    await db.insert(quoteEvents).values({
-      id: uuid(90), shopId: uuid(1), ticketId: uuid(50), jobId: uuid(60),
-      quoteVersionId: uuid(80), kind: 'sent', actorProfileId: uuid(10), requestKey: 'event-90',
+    await db.insert(quoteVersions).values({
+      id: uuid(81), shopId: uuid(1), ticketId: uuid(52), versionNumber: 1,
+      snapshot: { jobs: [{ id: uuid(62), decision: 'approved' }] },
+      createdByProfileId: uuid(10),
     })
+    await db.insert(quoteEvents).values([
+      {
+        id: uuid(90), shopId: uuid(1), ticketId: uuid(50), jobId: uuid(60),
+        quoteVersionId: uuid(80), kind: 'sent', actorProfileId: uuid(10), requestKey: 'event-90',
+      },
+      {
+        id: uuid(91), shopId: uuid(1), ticketId: uuid(52), jobId: uuid(62),
+        quoteVersionId: uuid(81), kind: 'approved', actorProfileId: uuid(10),
+        approvedVia: 'in_person', requestKey: 'event-91',
+      },
+    ])
+    await db.update(ticketJobs).set({ approvedApprovalEventId: uuid(91) })
+      .where(eq(ticketJobs.id, uuid(62)))
     await db.insert(sessionEvents).values({
       id: uuid(41), sessionId: uuid(40), nodeId: 'root', eventType: 'observation',
       observationText: 'Observed noise', requestKey: uuid(400), requestActorProfileId: uuid(11),
@@ -361,10 +397,15 @@ describe('ShopOS repository lock coordinator', () => {
     await db.insert(vendorAccounts).values({
       id: uuid(100), shopId: uuid(1), vendor: 'parts_co', displayName: 'Parts Co',
       mode: 'manual', enabled: true,
+      nonSecretConfig: { catalog: { region: 'central', warehouses: ['north'] } },
     })
     await db.insert(cannedJobs).values({
       id: uuid(110), shopId: uuid(1), title: 'Oil service', kind: 'maintenance',
-      defaultRequiredSkillTier: 1, defaultLines: [],
+      defaultRequiredSkillTier: 1,
+      defaultLines: [{
+        kind: 'labor', description: 'Oil service labor', sort: 0, quantity: 1,
+        priceCents: 5000, taxable: false, laborHours: 1, laborRateCents: 5000,
+      }],
     })
   })
 
@@ -488,6 +529,78 @@ describe('ShopOS repository lock coordinator', () => {
     ])
     expect(locks[0].params).toEqual([uuid(1), uuid(10), uuid(11)])
     expect(locks[5].params).toEqual([uuid(1), uuid(50)])
+  })
+
+  it('owns deeply immutable locked row truth, including JSON and timestamp values', async () => {
+    const scope = await lock(lockRequest({
+      profileIds: [uuid(10), uuid(11)],
+      lockShop: true,
+      customerIds: [uuid(20)],
+      vehicleIds: [uuid(30)],
+      ticketIds: [uuid(50)],
+      jobIds: [uuid(60), uuid(61)],
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: true,
+      includeAllQuoteEventsForTickets: true,
+      sessionIds: [uuid(40)],
+      sessionEventIds: [uuid(41)],
+      vendorAccountIds: [uuid(100)],
+      cannedJobIds: [uuid(110)],
+    }))
+
+    const graph = scope.tickets[0]
+    const job = graph.jobs.find(({ id }) => id === uuid(60))!
+    const lineSnapshot = graph.lines[0].vendorSnapshot as {
+      offer: { id: string; warehouses: string[] }
+    }
+    const versionSnapshot = graph.versions[0].snapshot as {
+      jobs: Array<{ id: string; decision: string }>
+    }
+    const vendorConfig = scope.vendorAccounts[0].nonSecretConfig as {
+      catalog: { region: string; warehouses: string[] }
+    }
+    const createdAt = graph.ticket.createdAt
+    const createdAtMs = createdAt.getTime()
+
+    expect(() => scope.sessions[0].treeState.nodes.push({} as never)).toThrow(TypeError)
+    expect(() => job.customerStory!.howWeKnow[0].sourceEventIds.push(uuid(999))).toThrow(TypeError)
+    expect(() => { lineSnapshot.offer.id = 'changed' }).toThrow(TypeError)
+    expect(() => versionSnapshot.jobs.push({ id: uuid(999), decision: 'changed' })).toThrow(TypeError)
+    expect(() => vendorConfig.catalog.warehouses.push('south')).toThrow(TypeError)
+    expect(() => { scope.cannedJobs[0].defaultLines[0].description = 'changed' }).toThrow(TypeError)
+    expect(() => createdAt.setTime(0)).toThrow(TypeError)
+
+    expect(scope.sessions[0].treeState.nodes).toEqual([])
+    expect(job.customerStory!.howWeKnow[0].sourceEventIds).toEqual([uuid(41)])
+    expect(lineSnapshot.offer).toEqual({ id: 'locked-offer', warehouses: ['north'] })
+    expect(versionSnapshot.jobs).toEqual([{ id: uuid(60), decision: 'pending' }])
+    expect(vendorConfig.catalog).toEqual({ region: 'central', warehouses: ['north'] })
+    expect(scope.cannedJobs[0].defaultLines[0].description).toBe('Oil service labor')
+    expect(createdAt.getTime()).toBe(createdAtMs)
+  })
+
+  it('requires each approved job event to be locked and bound to that exact job', async () => {
+    const base = lockRequest({
+      customerIds: [uuid(20)],
+      vehicleIds: [uuid(30)],
+      ticketIds: [uuid(52)],
+      jobIds: [uuid(62)],
+    })
+
+    await expect(lock(base)).rejects.toBeInstanceOf(ShopOsMutationConflict)
+
+    const scope = await lock(lockRequest({
+      ...base,
+      includeAllQuoteVersionsForTickets: true,
+      includeAllQuoteEventsForTickets: true,
+    }))
+    const graph = scope.tickets[0]
+    expect(graph.jobs[0].approvedApprovalEventId).toBe(uuid(91))
+    expect(graph.events.find(({ id }) => id === uuid(91))).toMatchObject({
+      ticketId: uuid(52),
+      jobId: uuid(62),
+    })
   })
 
   it('constrains explicit child locks by the already-locked composite parent IDs', async () => {
