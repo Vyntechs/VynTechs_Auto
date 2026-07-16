@@ -40,6 +40,7 @@ import {
   retireCannedJob,
 } from '@/lib/shop-os/canned-jobs'
 import type {
+  MutationAttemptCapabilityV1,
   ResolvedLockedQuickTemplateV1,
   ResolvedQuickTemplateV1,
 } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
@@ -268,7 +269,9 @@ describe('createQuickTicket', () => {
   let client: PGlite
   let close: () => Promise<void>
   let shopA: typeof shops.$inferSelect
+  let shopB: typeof shops.$inferSelect
   let actor: TicketActor
+  let crossShopActor: TicketActor
   let existingCustomer: typeof customers.$inferSelect
   let existingVehicle: typeof vehicles.$inferSelect
   let crossShopVehicle: typeof vehicles.$inferSelect
@@ -292,6 +295,7 @@ describe('createQuickTicket', () => {
       ])
       .returning()
     shopA = firstShop
+    shopB = secondShop
 
     const [profile] = await db
       .insert(profiles)
@@ -313,6 +317,14 @@ describe('createQuickTicket', () => {
       skillTier: profile.skillTier,
       membershipStatus: profile.membershipStatus,
       deactivatedAt: profile.deactivatedAt,
+    }
+    crossShopActor = {
+      profileId: crossShopProfile.id,
+      shopId: crossShopProfile.shopId,
+      role: crossShopProfile.role,
+      skillTier: crossShopProfile.skillTier,
+      membershipStatus: crossShopProfile.membershipStatus,
+      deactivatedAt: crossShopProfile.deactivatedAt,
     }
 
     const [customerA, customerB] = await db
@@ -418,11 +430,15 @@ describe('createQuickTicket', () => {
 
   function cannedLockRequest(
     cannedJobIds: readonly string[],
-  ): MutationLockRequestV1 {
-    return {
+    authority: Readonly<{ shopId: string; actorProfileId: string }> = {
       shopId: shopA.id,
       actorProfileId: actor.profileId,
-      profileIds: [actor.profileId],
+    },
+  ): MutationLockRequestV1 {
+    return {
+      shopId: authority.shopId,
+      actorProfileId: authority.actorProfileId,
+      profileIds: [authority.actorProfileId],
       lockShop: cannedJobIds.length > 0,
       customerIds: [],
       vehicleIds: [],
@@ -612,6 +628,46 @@ describe('createQuickTicket', () => {
       },
     )
 
+    it('rejects a same-attempt globally identified template moved to an equal-tax shop', async () => {
+      await db.update(shops).set({ taxRateBps: 825 }).where(eq(shops.id, shopB.id))
+
+      await expect(runBoundedShopOsMutationV1(db, {
+        discover: async (tx, attempt) => {
+          const preflight = await preflightStrictCannedJobV1(tx, attempt.capability, {
+            shopId: shopA.id,
+            cannedJobId: cannedJob.cannedJob.id,
+            expectedFingerprint: cannedJob.cannedJob.fingerprint,
+            expectedTaxRateBps: 825,
+          })
+          if (!preflight.ok) throw new Error('template preflight failed')
+          await tx.update(cannedJobs)
+            .set({ shopId: shopB.id })
+            .where(eq(cannedJobs.id, cannedJob.cannedJob.id))
+          return {
+            lockRequest: cannedLockRequest(preflight.cannedJobIds, {
+              shopId: shopB.id,
+              actorProfileId: crossShopActor.profileId,
+            }),
+            payload: preflight.template,
+          }
+        },
+        executeLocked: async (tx, scope, template) => {
+          expect(scope.request.shopId).toBe(shopB.id)
+          expect(scope.actor.shopId).toBe(shopB.id)
+          expect(scope.shop?.id).toBe(shopB.id)
+          expect(scope.cannedJobs[0]?.shopId).toBe(shopB.id)
+          expect(() => resolveStrictCannedJobInLockedScopeV1(tx, scope, template))
+            .toThrow('resolved_quick_template_invalid')
+          throw new Error('rollback_cross_shop_template_move')
+        },
+      })).rejects.toThrow('rollback_cross_shop_template_move')
+
+      const [persisted] = await db.select({ shopId: cannedJobs.shopId })
+        .from(cannedJobs)
+        .where(eq(cannedJobs.id, cannedJob.cannedJob.id))
+      expect(persisted?.shopId).toBe(shopA.id)
+    })
+
     it('rejects forged, wrong-ID, and prior-attempt handles before consumption', async () => {
       const baseline = await runCannedCapability({
         shopId: shopA.id,
@@ -657,6 +713,112 @@ describe('createQuickTicket', () => {
           return 'rejected'
         },
       })).resolves.toBe('rejected')
+    })
+
+    it('rejects attempt-one handles during allowlisted unique-collision recovery', async () => {
+      const queryLog: string[] = []
+      const loggingDb = drizzle(client, {
+        schema,
+        logger: { logQuery: (query) => { queryLog.push(query) } },
+      }) as TestDb
+      let activeTx: AppDb | undefined
+      const stableTx = new Proxy(Object.create(null) as AppDb, {
+        get: (_target, property) => {
+          if (!activeTx) throw new Error('stable transaction used outside an attempt')
+          const value = Reflect.get(activeTx as object, property, activeTx)
+          return typeof value === 'function' ? value.bind(activeTx) : value
+        },
+      })
+      const sameIdentityDb = Object.freeze({
+        transaction: async <T>(callback: (tx: AppDb) => Promise<T>): Promise<T> =>
+          loggingDb.transaction(async (rawTx) => {
+            if (activeTx) throw new Error('overlapping transaction attempts')
+            activeTx = rawTx as AppDb
+            try {
+              return await callback(stableTx)
+            } finally {
+              activeTx = undefined
+            }
+          }),
+      }) as unknown as TestDb
+      let primaryCapability: MutationAttemptCapabilityV1 | undefined
+      let primaryResolved: ResolvedQuickTemplateV1 | undefined
+      let primaryLocked: ResolvedLockedQuickTemplateV1 | undefined
+      const attempts: Array<Readonly<{ ordinal: number; purpose: string }>> = []
+
+      const result = await runBoundedShopOsMutationV1<'recovered', ResolvedQuickTemplateV1>(
+        sameIdentityDb,
+        {
+          discover: async (tx, attempt) => {
+            attempts.push({ ordinal: attempt.ordinal, purpose: attempt.purpose })
+            const preflight = await preflightStrictCannedJobV1(tx, attempt.capability, {
+              shopId: shopA.id,
+              cannedJobId: cannedJob.cannedJob.id,
+              expectedFingerprint: cannedJob.cannedJob.fingerprint,
+              expectedTaxRateBps: 825,
+            })
+            if (!preflight.ok) throw new Error('template preflight failed')
+            return {
+              lockRequest: cannedLockRequest(preflight.cannedJobIds),
+              payload: preflight.template,
+            }
+          },
+          executeLocked: async (tx, scope, template, attempt) => {
+            expect(attempt).toMatchObject({ ordinal: 1, purpose: 'primary' })
+            primaryCapability = attempt.capability
+            primaryResolved = template
+            primaryLocked = resolveStrictCannedJobInLockedScopeV1(tx, scope, template)
+            throw Object.assign(new Error('forced sessions collision'), {
+              code: '23505',
+              constraint: 'sessions_pkey',
+            })
+          },
+          uniqueCollisionRecovery: {
+            allowedConstraints: ['sessions_pkey'],
+            executeLocked: async (tx, scope, freshResolved, attempt, constraint) => {
+              expect(attempt).toMatchObject({
+                ordinal: 2,
+                purpose: 'unique_collision_recovery',
+              })
+              expect(constraint).toBe('sessions_pkey')
+              expect(attempt.capability).not.toBe(primaryCapability)
+              expect(tx).toBe(stableTx)
+
+              const beforeStaleHandles = queryLog.length
+              expect(() => resolveStrictCannedJobInLockedScopeV1(
+                tx,
+                scope,
+                primaryResolved!,
+              )).toThrow('resolved_quick_template_invalid')
+              expect(() => consumeResolvedLockedQuickTemplateForCreationV1(
+                tx,
+                scope,
+                primaryLocked!,
+              )).toThrow('resolved_quick_template_invalid')
+              expect(queryLog).toHaveLength(beforeStaleHandles)
+
+              const freshLocked = resolveStrictCannedJobInLockedScopeV1(
+                tx,
+                scope,
+                freshResolved,
+              )
+              const fresh = consumeResolvedLockedQuickTemplateForCreationV1(
+                tx,
+                scope,
+                freshLocked,
+              )
+              expect(fresh.cannedJobId).toBe(cannedJob.cannedJob.id)
+              return { kind: 'recovered', value: 'recovered' }
+            },
+          },
+        },
+      )
+
+      expect(result).toBe('recovered')
+      expect(attempts).toEqual([
+        { ordinal: 1, purpose: 'primary' },
+        { ordinal: 2, purpose: 'unique_collision_recovery' },
+      ])
     })
 
     it('resolves and consumes locked template handles without issuing SQL', async () => {

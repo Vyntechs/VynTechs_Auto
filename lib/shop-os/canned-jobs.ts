@@ -108,6 +108,7 @@ type ResolvedQuickTemplatePayload = Readonly<{
 type ResolvedQuickTemplateState = Readonly<{
   tx: AppDb
   capability: MutationAttemptCapabilityV1
+  shopId: string
   payload: ResolvedQuickTemplatePayload
 }>
 
@@ -525,6 +526,7 @@ export async function preflightStrictCannedJobV1(
   resolvedQuickTemplateStates.set(handle, Object.freeze({
     tx,
     capability: attempt,
+    shopId: normalized.shopId,
     payload: quickTemplatePayload(cannedJob, shop.taxRateBps),
   }))
   return Object.freeze({
@@ -546,8 +548,9 @@ export function resolveStrictCannedJobInLockedScopeV1(
   }
   const expected = state.payload
   if (
-    scope.request.shopId !== scope.actor.shopId ||
-    scope.request.shopId !== scope.shop?.id ||
+    scope.request.shopId !== state.shopId ||
+    scope.actor.shopId !== state.shopId ||
+    scope.shop?.id !== state.shopId ||
     scope.request.lockShop !== true ||
     scope.request.cannedJobIds.length !== 1 ||
     scope.request.cannedJobIds[0] !== expected.cannedJobId ||
@@ -556,7 +559,7 @@ export function resolveStrictCannedJobInLockedScopeV1(
   const row = scope.cannedJobs[0]!
   if (
     row.id !== expected.cannedJobId ||
-    row.shopId !== scope.actor.shopId ||
+    row.shopId !== state.shopId ||
     row.retiredAt !== null ||
     scope.shop.taxRateBps !== expected.taxRateBps
   ) return invalidResolvedQuickTemplate()
