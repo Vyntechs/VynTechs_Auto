@@ -34,6 +34,7 @@ import {
 } from './attempt-capability'
 import { ShopOsMutationConflict } from './conflicts'
 import { buildContinuitySignatureV1 } from './continuity-signature'
+import { peekMutationReceiptV1 } from './receipts'
 
 export const REPOSITORY_LOCK_CLASSES_V1 = [
   'profiles',
@@ -549,23 +550,12 @@ export async function lockMutationScopeV1(
 
   let receiptPeek: LockedMutationScopeV1['receiptPeek'] = Object.freeze({ kind: 'none' })
   if (baseRequest.receiptRequestKey !== null) {
-    const [peekedReceipt] = await tx.select({
-      id: ticketMutationReceipts.id,
-      actorProfileId: ticketMutationReceipts.actorProfileId,
-      resultTicketId: ticketMutationReceipts.resultTicketId,
-    }).from(ticketMutationReceipts).where(and(
-      eq(ticketMutationReceipts.shopId, baseRequest.shopId),
-      eq(ticketMutationReceipts.requestKey, baseRequest.receiptRequestKey),
-    )).limit(1)
-    receiptPeek = !peekedReceipt
-      ? Object.freeze({ kind: 'none' })
-      : peekedReceipt.actorProfileId === actor.id
-        ? Object.freeze({
-          kind: 'owned',
-          receiptId: peekedReceipt.id,
-          resultTicketId: peekedReceipt.resultTicketId,
-        })
-        : Object.freeze({ kind: 'occupied' })
+    receiptPeek = await peekMutationReceiptV1(
+      tx,
+      attempt,
+      actor,
+      baseRequest.receiptRequestKey,
+    )
   }
   let receiptConditionalInsertState: LockedMutationScopeV1['receiptConditionalInsertState'] =
     'not_applicable'

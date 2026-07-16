@@ -338,6 +338,16 @@ export function createCanonicalTargetBindingFingerprintV1(
   candidates: CanonicalMutationEnvelopeV1['candidates'],
   keyring: MutationFingerprintKeyringV1,
 ): Readonly<{ keyVersion: number; digest: string }> {
+  return signCanonicalMutationPayloadV1(
+    keyring,
+    canonicalTargetBindingPayloadV1(target, candidates),
+  )
+}
+
+function canonicalTargetBindingPayloadV1(
+  target: CanonicalMutationEnvelopeV1['target'],
+  candidates: CanonicalMutationEnvelopeV1['candidates'],
+): string {
   let canonicalPayload: string
   try {
     if (typeof target !== 'object' || target === null || Array.isArray(target)) {
@@ -351,5 +361,29 @@ export function createCanonicalTargetBindingFingerprintV1(
   } catch {
     return invalidCanonicalMutationEnvelope()
   }
-  return signCanonicalMutationPayloadV1(keyring, canonicalPayload)
+  return canonicalPayload
+}
+
+export function verifyCanonicalTargetBindingFingerprintV1(
+  target: CanonicalMutationEnvelopeV1['target'],
+  candidates: CanonicalMutationEnvelopeV1['candidates'],
+  persisted: Readonly<{ keyVersion: number; digest: string }>,
+  keyring: MutationFingerprintKeyringV1,
+): 'match' | 'mismatch' | 'verification_unavailable' {
+  const canonicalPayload = canonicalTargetBindingPayloadV1(target, candidates)
+  let persistedValue: Record<string, unknown>
+  try {
+    persistedValue = readExactDataRecord(persisted, ['keyVersion', 'digest'])
+  } catch {
+    return 'mismatch'
+  }
+  if (typeof persistedValue.keyVersion !== 'number' || typeof persistedValue.digest !== 'string') {
+    return 'mismatch'
+  }
+  return verifyCanonicalMutationPayloadV1(
+    keyring,
+    persistedValue.keyVersion,
+    canonicalPayload,
+    persistedValue.digest,
+  )
 }

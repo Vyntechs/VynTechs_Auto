@@ -75,6 +75,9 @@ describe('ShopOS continuity mutation lock order', () => {
     const source = existsSync(lockOrderPath) ? readFileSync(lockOrderPath, 'utf8') : ''
     expect(source).toContain('REPOSITORY_LOCK_CLASSES_V1')
     expect(source).toMatch(/export async function lockMutationScopeV1\s*\(/)
+    expect(source).toContain("import { peekMutationReceiptV1 } from './receipts'")
+    expect(source).toContain('await peekMutationReceiptV1(')
+    expect(source.match(/\.from\(ticketMutationReceipts\)/g)).toHaveLength(1)
   })
 
   it('defines the shared conflict and attempt-capability modules', () => {

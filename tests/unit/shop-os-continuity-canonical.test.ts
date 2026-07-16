@@ -564,6 +564,59 @@ describe('ShopOS canonical mutation fingerprints', () => {
       ).digest,
     ).not.toBe(baseline.digest)
   })
+
+  it('verifies target bindings with their stored historical key version', () => {
+    const createTargetBinding = requiredFunction<(
+      target: CanonicalMutationEnvelopeV1['target'],
+      candidates: CanonicalMutationEnvelopeV1['candidates'],
+      keyring: MutationFingerprintKeyringV1,
+    ) => Readonly<{ keyVersion: number; digest: string }>>(
+      'createCanonicalTargetBindingFingerprintV1',
+    )
+    const verifyTargetBinding = requiredFunction<(
+      target: CanonicalMutationEnvelopeV1['target'],
+      candidates: CanonicalMutationEnvelopeV1['candidates'],
+      persisted: Readonly<{ keyVersion: number; digest: string }>,
+      keyring: MutationFingerprintKeyringV1,
+    ) => 'match' | 'mismatch' | 'verification_unavailable'>(
+      'verifyCanonicalTargetBindingFingerprintV1',
+    )
+    const value = envelope()
+    const persistedV1 = createTargetBinding(
+      value.target,
+      value.candidates,
+      fingerprintKeyring(),
+    )
+    const retainedHistory = fingerprintKeyring(2, [
+      [1, KEY_V1_B64],
+      [2, KEY_V2_B64],
+    ])
+
+    expect(verifyTargetBinding(
+      value.target,
+      value.candidates,
+      persistedV1,
+      retainedHistory,
+    )).toBe('match')
+    expect(verifyTargetBinding(
+      { ...value.target, mode: 'replace' },
+      value.candidates,
+      persistedV1,
+      retainedHistory,
+    )).toBe('mismatch')
+    expect(verifyTargetBinding(
+      value.target,
+      value.candidates,
+      { ...persistedV1, digest: '0'.repeat(64) },
+      retainedHistory,
+    )).toBe('mismatch')
+    expect(verifyTargetBinding(
+      value.target,
+      value.candidates,
+      persistedV1,
+      fingerprintKeyring(2, [[2, KEY_V2_B64]]),
+    )).toBe('verification_unavailable')
+  })
 })
 
 // These assignments are compile-only guards for the Quick creation base.

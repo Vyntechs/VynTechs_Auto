@@ -50,6 +50,7 @@ export {
   parseRevisionDecimal,
   serializeRevisionDecimal,
   verifyCanonicalMutationFingerprintV1,
+  verifyCanonicalTargetBindingFingerprintV1,
 } from './canonical'
 export {
   buildContinuitySignatureV1,
@@ -84,3 +85,8 @@ export type {
   FinalizedMutationRevisionsV1,
   TicketRevisionDeltaV1,
 } from './revisions'
+export {
+  isExactReceiptRequestKeyViolation,
+  lockAndClassifyMutationReceiptV1,
+} from './receipts'
+export type { MutationReceiptExpectationV1 } from './receipts'
