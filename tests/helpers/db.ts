@@ -62,12 +62,428 @@ export async function createTestDb(): Promise<{
   await ensureMessagingRetentionAclMigration(client)
   await ensureMessagingRetentionFkIndexMigration(client)
   await ensureShopEntitlementsMigration(client)
+  await ensureRepairOrderContinuityMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+type RepairOrderContinuityMarkers = {
+  table_count: number
+  column_count: number
+  constraint_count: number
+  index_count: number
+  function_count: number
+  trigger_count: number
+  rls_count: number
+  policy_count: number
+  effective_client_privilege_count: number
+  service_allowed_privilege_count: number
+  service_unexpected_privilege_count: number
+  function_authority_count: number
+  column_digest: string
+  constraint_digest: string
+  index_digest: string
+  function_digest: string
+  trigger_digest: string
+  policy_digest: string
+}
+
+const REPAIR_ORDER_CONTINUITY_DIGESTS = {
+  columns: 'a7a4175a8645a531b85d2eb16d9153e333f157d960d4af3ddd42ee3fcbdbbbd5',
+  constraints: 'b06169130a7f030683ae7678dc88100340e924f34eb9e8c19ec1837674619f93',
+  indexes: '2a895ef2f000ab463f0418c0b763ca727cf2fa3834297414968283c46e1cfff3',
+  functions: '53d63957fe6f5a4a2aad953e925ab7d3436c1e5d8ffe9f5c79944d0e56630e5f',
+  triggers: '0b42b76cd9ddd336440a32f1ed6695c2a6570628e17de0265b6454f33970b48f',
+  policies: '3add8c2ff62f3004649dcd4cb44fd78a9ec1af8b89f4707c3198c87781cef877',
+} as const
+
+function contractDigest(value: string | null): string {
+  return createHash('sha256').update(value ?? '').digest('hex')
+}
+
+async function repairOrderContinuityMarkers(
+  client: PGlite,
+): Promise<RepairOrderContinuityMarkers> {
+  const result = await client.query<{
+    table_count: number
+    column_count: number
+    constraint_count: number
+    index_count: number
+    function_count: number
+    trigger_count: number
+    rls_count: number
+    policy_count: number
+    effective_client_privilege_count: number
+    service_allowed_privilege_count: number
+    service_unexpected_privilege_count: number
+    column_contracts: string | null
+    constraint_contracts: string | null
+    index_contracts: string | null
+    function_contracts: string | null
+    trigger_contracts: string | null
+    policy_contracts: string | null
+  }>(`
+    with expected_tables(table_name) as (values
+      ('ticket_mutation_receipts'),
+      ('ticket_mutation_receipt_jobs')
+    ), expected_columns(table_name, column_name) as (values
+      ('tickets', 'projection_revision'),
+      ('tickets', 'continuity_revision'),
+      ('tickets', 'separate_from_ticket_id'),
+      ('tickets', 'separate_reason'),
+      ('tickets', 'separate_reason_note'),
+      ('tickets', 'close_disposition'),
+      ('tickets', 'close_note'),
+      ('tickets', 'cancel_reason_code'),
+      ('ticket_jobs', 'sequence_number'),
+      ('ticket_jobs', 'work_statement'),
+      ('ticket_jobs', 'statement_source'),
+      ('ticket_jobs', 'statement_review_state'),
+      ('ticket_jobs', 'statement_confirmed_by_profile_id'),
+      ('ticket_jobs', 'statement_confirmed_at'),
+      ('ticket_jobs', 'when_started'),
+      ('ticket_jobs', 'how_often'),
+      ('ticket_jobs', 'diagnostic_authorized_cents'),
+      ('ticket_jobs', 'diagnostic_authorization_note'),
+      ('ticket_jobs', 'created_by_profile_id'),
+      ('ticket_jobs', 'creator_provenance'),
+      ('ticket_jobs', 'created_from_job_id'),
+      ('ticket_jobs', 'revision'),
+      ('ticket_jobs', 'approved_authorization_fingerprint'),
+      ('ticket_jobs', 'approved_approval_event_id'),
+      ('ticket_mutation_receipts', 'id'),
+      ('ticket_mutation_receipts', 'shop_id'),
+      ('ticket_mutation_receipts', 'request_key'),
+      ('ticket_mutation_receipts', 'mutation_schema_version'),
+      ('ticket_mutation_receipts', 'fingerprint_key_version'),
+      ('ticket_mutation_receipts', 'mutation_kind'),
+      ('ticket_mutation_receipts', 'actor_profile_id'),
+      ('ticket_mutation_receipts', 'target_ticket_id'),
+      ('ticket_mutation_receipts', 'target_binding_fingerprint'),
+      ('ticket_mutation_receipts', 'request_fingerprint'),
+      ('ticket_mutation_receipts', 'result_ticket_id'),
+      ('ticket_mutation_receipts', 'result_job_count'),
+      ('ticket_mutation_receipts', 'created_at'),
+      ('ticket_mutation_receipt_jobs', 'shop_id'),
+      ('ticket_mutation_receipt_jobs', 'receipt_id'),
+      ('ticket_mutation_receipt_jobs', 'result_ticket_id'),
+      ('ticket_mutation_receipt_jobs', 'result_job_count'),
+      ('ticket_mutation_receipt_jobs', 'ordinal'),
+      ('ticket_mutation_receipt_jobs', 'job_id')
+    ), expected_constraints(table_name, constraint_name) as (values
+      ('tickets', 'tickets_projection_revision_nonnegative'),
+      ('tickets', 'tickets_continuity_revision_nonnegative'),
+      ('tickets', 'tickets_separate_reason_valid'),
+      ('tickets', 'tickets_separate_evidence_consistent'),
+      ('tickets', 'tickets_separate_from_not_self'),
+      ('tickets', 'tickets_close_disposition_valid'),
+      ('tickets', 'tickets_cancel_reason_code_valid'),
+      ('tickets', 'tickets_canceled_reason_bounded'),
+      ('tickets', 'tickets_close_note_bounded'),
+      ('tickets', 'tickets_shop_separate_from_fk'),
+      ('ticket_jobs', 'ticket_jobs_sequence_positive'),
+      ('ticket_jobs', 'ticket_jobs_work_statement_bounded'),
+      ('ticket_jobs', 'ticket_jobs_statement_source_valid'),
+      ('ticket_jobs', 'ticket_jobs_statement_review_state_valid'),
+      ('ticket_jobs', 'ticket_jobs_statement_truth_consistent'),
+      ('ticket_jobs', 'ticket_jobs_statement_confirmation_consistent'),
+      ('ticket_jobs', 'ticket_jobs_context_bounded'),
+      ('ticket_jobs', 'ticket_jobs_diagnostic_authorization_consistent'),
+      ('ticket_jobs', 'ticket_jobs_creator_provenance_consistent'),
+      ('ticket_jobs', 'ticket_jobs_approved_fingerprint_valid'),
+      ('ticket_jobs', 'ticket_jobs_revision_nonnegative'),
+      ('ticket_jobs', 'ticket_jobs_shop_creator_fk'),
+      ('ticket_jobs', 'ticket_jobs_shop_confirmer_fk'),
+      ('ticket_jobs', 'ticket_jobs_shop_ticket_created_from_fk'),
+      ('ticket_jobs', 'ticket_jobs_approved_approval_event_fk'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_pkey'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_actor_fk'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_target_ticket_fk'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_result_ticket_fk'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_schema_version_v1'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_key_version_positive'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_kind_valid'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_target_fingerprint_valid'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_request_fingerprint_valid'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_result_count_valid'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_pk'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_receipt_ticket_fk'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_job_fk'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_ordinal_range')
+    ), expected_indexes(table_name, index_name) as (values
+      ('tickets', 'tickets_shop_vehicle_status_idx'),
+      ('tickets', 'tickets_shop_separate_from_idx'),
+      ('ticket_jobs', 'ticket_jobs_shop_ticket_sequence_uq'),
+      ('ticket_jobs', 'ticket_jobs_shop_created_by_idx'),
+      ('ticket_jobs', 'ticket_jobs_shop_confirmed_by_idx'),
+      ('ticket_jobs', 'ticket_jobs_shop_ticket_created_from_idx'),
+      ('ticket_jobs', 'ticket_jobs_shop_ticket_approval_event_idx'),
+      ('quote_events', 'quote_events_shop_ticket_job_id_uq'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_request_key_uq'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_id_uq'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_id_result_ticket_count_uq'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_result_created_idx'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_target_idx'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_shop_actor_created_idx'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_shop_receipt_job_uq'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_shop_job_idx'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_header_idx')
+    ), expected_functions(function_name) as (values
+      ('guard_ticket_terminal_shape'),
+      ('guard_ticket_immutable_identity'),
+      ('guard_ticket_job_immutable_identity'),
+      ('reject_ticket_mutation_receipt_mutation'),
+      ('enforce_ticket_mutation_receipt_complete')
+    ), expected_triggers(table_name, trigger_name, function_name) as (values
+      ('tickets', 'tickets_terminal_shape_write', 'guard_ticket_terminal_shape'),
+      ('tickets', 'tickets_immutable_identity_update', 'guard_ticket_immutable_identity'),
+      ('ticket_jobs', 'ticket_jobs_immutable_identity_update', 'guard_ticket_job_immutable_identity'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_immutable_write', 'reject_ticket_mutation_receipt_mutation'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_immutable_write', 'reject_ticket_mutation_receipt_mutation'),
+      ('ticket_mutation_receipts', 'ticket_mutation_receipts_complete_deferred', 'enforce_ticket_mutation_receipt_complete'),
+      ('ticket_mutation_receipt_jobs', 'ticket_mutation_receipt_jobs_complete_deferred', 'enforce_ticket_mutation_receipt_complete')
+    ), client_roles(role_name) as (values ('anon'), ('authenticated')),
+    table_privileges(privilege_name) as (values
+      ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+      ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+    ), service_allowed(privilege_name) as (values ('SELECT'), ('INSERT')),
+    service_unexpected(privilege_name) as (values
+      ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+    )
+    select
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relkind in ('r', 'p')) as table_count,
+      (select count(*)::int
+       from expected_columns e
+       join information_schema.columns c using (table_name, column_name)
+       where c.table_schema = 'public') as column_count,
+      (select count(*)::int
+       from expected_constraints e
+       join pg_constraint c on c.conname = e.constraint_name
+       where c.conrelid = to_regclass('public.' || e.table_name)) as constraint_count,
+      (select count(*)::int
+       from expected_indexes e
+       join pg_indexes i on i.schemaname = 'public'
+         and i.tablename = e.table_name and i.indexname = e.index_name) as index_count,
+      (select count(*)::int
+       from expected_functions e
+       join pg_proc p on p.proname = e.function_name
+       join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'public'
+       where p.pronargs = 0) as function_count,
+      (select count(*)::int
+       from expected_triggers e
+       join pg_trigger t on t.tgname = e.trigger_name
+         and t.tgrelid = to_regclass('public.' || e.table_name)
+       join pg_proc p on p.oid = t.tgfoid and p.proname = e.function_name
+       where not t.tgisinternal) as trigger_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       where c.relrowsecurity) as rls_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_policies p on p.schemaname = 'public' and p.tablename = e.table_name
+      ) as policy_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join client_roles r
+       cross join table_privileges p
+       where has_table_privilege(
+         r.role_name, c.oid, p.privilege_name
+       )) as effective_client_privilege_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join service_allowed p
+       where has_table_privilege(
+         'service_role', c.oid, p.privilege_name
+       )) as service_allowed_privilege_count,
+      (select count(*)::int
+       from expected_tables e
+       join pg_class c on c.relname = e.table_name
+       join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+       cross join service_unexpected p
+       where has_table_privilege(
+         'service_role', c.oid, p.privilege_name
+       )) as service_unexpected_privilege_count,
+      (select string_agg(
+         e.table_name || '.' || e.column_name || ':' || c.data_type || ':' || c.udt_name
+           || ':' || c.is_nullable || ':' || coalesce(c.column_default, ''),
+         E'\n' order by e.table_name, e.column_name
+       )
+       from expected_columns e
+       join information_schema.columns c using (table_name, column_name)
+       where c.table_schema = 'public') as column_contracts,
+      (select string_agg(
+         e.table_name || '.' || e.constraint_name || ':'
+           || regexp_replace(pg_get_constraintdef(c.oid), '\\s+', ' ', 'g'),
+         E'\n' order by e.table_name, e.constraint_name
+       )
+       from expected_constraints e
+       join pg_constraint c on c.conname = e.constraint_name
+       where c.conrelid = to_regclass('public.' || e.table_name)) as constraint_contracts,
+      (select string_agg(
+         e.table_name || '.' || e.index_name || ':'
+           || regexp_replace(i.indexdef, '\\s+', ' ', 'g'),
+         E'\n' order by e.table_name, e.index_name
+       )
+       from expected_indexes e
+       join pg_indexes i on i.schemaname = 'public'
+         and i.tablename = e.table_name and i.indexname = e.index_name) as index_contracts,
+      (select string_agg(
+         e.function_name || ':' || pg_get_userbyid(p.proowner) || ':'
+           || p.prorettype::regtype::text || ':' || p.prosecdef::text || ':'
+           || coalesce(array_to_string(p.proconfig, ','), '') || ':'
+           || regexp_replace(btrim(p.prosrc), '\\s+', ' ', 'g'),
+         E'\n' order by e.function_name
+       )
+       from expected_functions e
+       join pg_proc p on p.proname = e.function_name
+       join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'public'
+       where p.pronargs = 0) as function_contracts,
+      (select string_agg(
+         e.table_name || '.' || e.trigger_name || ':' || e.function_name || ':'
+           || t.tgtype::text || ':' || t.tgattr::text || ':' || t.tgdeferrable::text
+           || ':' || t.tginitdeferred::text || ':' || t.tgenabled::text || ':'
+           || regexp_replace(pg_get_triggerdef(t.oid), '\\s+', ' ', 'g'),
+         E'\n' order by e.table_name, e.trigger_name
+       )
+       from expected_triggers e
+       join pg_trigger t on t.tgname = e.trigger_name
+         and t.tgrelid = to_regclass('public.' || e.table_name)
+       join pg_proc p on p.oid = t.tgfoid and p.proname = e.function_name
+       where not t.tgisinternal) as trigger_contracts,
+      (select string_agg(
+         e.table_name || ':' || p.policyname || ':' || p.roles::text || ':'
+           || p.cmd || ':' || coalesce(p.qual, '') || ':' || coalesce(p.with_check, ''),
+         E'\n' order by e.table_name
+       )
+       from expected_tables e
+       join pg_policies p on p.schemaname = 'public' and p.tablename = e.table_name
+      ) as policy_contracts
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('repair order continuity schema inspection failed')
+
+  const authority = await client.query<{
+    authority_count: number
+  }>(`
+    with expected_functions(function_name) as (values
+      ('guard_ticket_terminal_shape'),
+      ('guard_ticket_immutable_identity'),
+      ('guard_ticket_job_immutable_identity'),
+      ('reject_ticket_mutation_receipt_mutation'),
+      ('enforce_ticket_mutation_receipt_complete')
+    )
+    select count(*)::int as authority_count
+    from expected_functions e
+    join pg_proc p on p.proname = e.function_name and p.pronargs = 0
+    join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'public'
+    join pg_roles owner_role on owner_role.oid = p.proowner
+    where owner_role.rolname = 'postgres'
+      and owner_role.rolsuper
+      and not pg_has_role('service_role', owner_role.oid, 'usage')
+      and not pg_has_role('anon', owner_role.oid, 'usage')
+      and not pg_has_role('authenticated', owner_role.oid, 'usage')
+      and not has_function_privilege('service_role', p.oid, 'execute')
+      and not has_function_privilege('anon', p.oid, 'execute')
+      and not has_function_privilege('authenticated', p.oid, 'execute')
+      and not exists (
+        select 1
+        from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+        where acl.privilege_type = 'EXECUTE' and acl.grantee <> p.proowner
+      )
+  `)
+
+  return {
+    table_count: markers.table_count,
+    column_count: markers.column_count,
+    constraint_count: markers.constraint_count,
+    index_count: markers.index_count,
+    function_count: markers.function_count,
+    trigger_count: markers.trigger_count,
+    rls_count: markers.rls_count,
+    policy_count: markers.policy_count,
+    effective_client_privilege_count: markers.effective_client_privilege_count,
+    service_allowed_privilege_count: markers.service_allowed_privilege_count,
+    service_unexpected_privilege_count: markers.service_unexpected_privilege_count,
+    function_authority_count: authority.rows[0]?.authority_count ?? 0,
+    column_digest: contractDigest(markers.column_contracts),
+    constraint_digest: contractDigest(markers.constraint_contracts),
+    index_digest: contractDigest(markers.index_contracts),
+    function_digest: contractDigest(markers.function_contracts),
+    trigger_digest: contractDigest(markers.trigger_contracts),
+    policy_digest: contractDigest(markers.policy_contracts),
+  }
+}
+
+function hasCompleteRepairOrderContinuity(
+  markers: RepairOrderContinuityMarkers,
+): boolean {
+  return markers.table_count === 2
+    && markers.column_count === 43
+    && markers.constraint_count === 39
+    && markers.index_count === 17
+    && markers.function_count === 5
+    && markers.trigger_count === 7
+    && markers.rls_count === 2
+    && markers.policy_count === 2
+    && markers.effective_client_privilege_count === 0
+    && markers.service_allowed_privilege_count === 4
+    && markers.service_unexpected_privilege_count === 0
+    && markers.function_authority_count === 5
+    && markers.column_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.columns
+    && markers.constraint_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.constraints
+    && markers.index_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.indexes
+    && markers.function_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.functions
+    && markers.trigger_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.triggers
+    && markers.policy_digest === REPAIR_ORDER_CONTINUITY_DIGESTS.policies
+}
+
+function hasAnyRepairOrderContinuityMarker(
+  markers: RepairOrderContinuityMarkers,
+): boolean {
+  return markers.table_count > 0
+    || markers.column_count > 0
+    || markers.constraint_count > 0
+    || markers.index_count > 0
+    || markers.function_count > 0
+    || markers.trigger_count > 0
+    || markers.rls_count > 0
+    || markers.policy_count > 0
+    || markers.service_allowed_privilege_count > 0
+}
+
+export async function ensureRepairOrderContinuityMigration(
+  client: PGlite,
+): Promise<void> {
+  const before = await repairOrderContinuityMarkers(client)
+  if (hasCompleteRepairOrderContinuity(before)) return
+  if (hasAnyRepairOrderContinuityMarker(before)) {
+    throw new Error('partial repair order continuity schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0037_shop_os_continuity_foundation.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await repairOrderContinuityMarkers(client)
+  if (!hasCompleteRepairOrderContinuity(after)) {
+    throw new Error('partial repair order continuity schema in ephemeral database')
   }
 }
 

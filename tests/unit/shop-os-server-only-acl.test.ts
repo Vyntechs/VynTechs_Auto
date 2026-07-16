@@ -34,6 +34,11 @@ const SERVER_ONLY_TABLES = [
 
 const LEGACY_SERVER_ONLY_TABLES = SERVER_ONLY_TABLES.slice(0, 8)
 
+const APPEND_ONLY_RECEIPT_TABLES = [
+  'ticket_mutation_receipts',
+  'ticket_mutation_receipt_jobs',
+] as const
+
 describe('Shop OS server-only table ACL hardening', () => {
   it('revokes every direct anon and authenticated table privilege without changing service CRUD', async () => {
     const migrationPath = path.join(
@@ -139,4 +144,37 @@ describe('Shop OS server-only table ACL hardening', () => {
       'vendor_accounts',
     ])
   })
+
+  it('tracks continuity receipts outside the four-CRUD service contract', async () => {
+    const { client, close } = await createTestDb()
+    closeCallbacks.push(close)
+
+    expect(SERVER_ONLY_TABLES).not.toEqual(
+      expect.arrayContaining([...APPEND_ONLY_RECEIPT_TABLES]),
+    )
+    const service = await client.query<{
+      table_name: string
+      privileges: string[]
+    }>(`
+      select table_name, array_agg(privilege_type order by privilege_type) as privileges
+      from information_schema.role_table_grants
+      where table_schema = 'public'
+        and table_name = any(array[
+          ${APPEND_ONLY_RECEIPT_TABLES.map((table) => `'${table}'`).join(', ')}
+        ])
+        and grantee = 'service_role'
+      group by table_name
+      order by table_name
+    `)
+    expect(service.rows).toEqual([
+      {
+        table_name: 'ticket_mutation_receipt_jobs',
+        privileges: ['INSERT', 'SELECT'],
+      },
+      {
+        table_name: 'ticket_mutation_receipts',
+        privileges: ['INSERT', 'SELECT'],
+      },
+    ])
+  }, 15_000)
 })

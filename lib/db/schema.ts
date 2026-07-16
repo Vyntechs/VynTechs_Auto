@@ -17,6 +17,7 @@ import {
   primaryKey,
   check,
   foreignKey,
+  type PgTableExtraConfigValue,
 } from 'drizzle-orm/pg-core'
 import type { TreeState } from '../ai/tree-engine'
 import type { Flow, WizardState } from '../flows/types'
@@ -28,6 +29,56 @@ import type { AdaptiveDiagnosticState, DiagnosticMode } from '../diagnostics/ada
 export type { TreeState }
 
 export type RiskClass = 'zero' | 'low' | 'medium' | 'high' | 'destructive'
+
+export const SEPARATE_REASONS = [
+  'warranty',
+  'comeback',
+  'different_payer',
+  'internal_work',
+  'future_or_scheduled_work',
+  'fleet_split',
+  'other',
+] as const
+export const CLOSE_DISPOSITIONS = [
+  'delivered',
+  'customer_declined',
+  'no_repair',
+  'remote_quote_not_proceeding',
+] as const
+export const CANCEL_REASON_CODES = [
+  'duplicate_created',
+  'customer_canceled_before_authorization',
+  'administrative_error',
+  'other',
+] as const
+export const STATEMENT_SOURCES = [
+  'customer_concern',
+  'customer_request',
+  'technician_found',
+  'advisor_added',
+  'shop_internal',
+  'legacy_migrated',
+] as const
+export const STATEMENT_REVIEW_STATES = ['confirmed', 'review_required'] as const
+export const CREATOR_PROVENANCE = ['direct', 'ticket_creator_backfill'] as const
+export const PART_STATUSES = [
+  'proposed',
+  'needs_order',
+  'ordered',
+  'received',
+  'installed',
+  'returned',
+] as const
+export const TICKET_MUTATION_KINDS = [
+  'create_repair_order',
+  'append_work_items',
+  'create_separate_repair_order',
+  'confirm_legacy_work_statement',
+  'deliver_repair_order',
+  'close_repair_order',
+  'cancel_repair_order',
+  'return_job_to_open_queue',
+] as const
 
 export type CustomerStory = {
   whatYouToldUs: string
@@ -264,6 +315,14 @@ export const tickets = pgTable(
     howOften: text('how_often'),
     diagnosticAuthorizedCents: bigint('diagnostic_authorized_cents', { mode: 'number' }),
     diagnosticAuthorizationNote: text('diagnostic_authorization_note'),
+    projectionRevision: bigint('projection_revision', { mode: 'bigint' }).default(0n).notNull(),
+    continuityRevision: bigint('continuity_revision', { mode: 'bigint' }).default(0n).notNull(),
+    separateFromTicketId: uuid('separate_from_ticket_id'),
+    separateReason: text('separate_reason', { enum: SEPARATE_REASONS }),
+    separateReasonNote: text('separate_reason_note'),
+    closeDisposition: text('close_disposition', { enum: CLOSE_DISPOSITIONS }),
+    closeNote: text('close_note'),
+    cancelReasonCode: text('cancel_reason_code', { enum: CANCEL_REASON_CODES }),
     status: text('status', { enum: ['open', 'closed', 'canceled'] }).default('open').notNull(),
     createdByProfileId: uuid('created_by_profile_id').notNull(),
     canceledAt: timestamp('canceled_at', { withTimezone: true }),
@@ -280,6 +339,10 @@ export const tickets = pgTable(
     uniqueIndex('tickets_shop_ticket_number_uq').on(table.shopId, table.ticketNumber),
     uniqueIndex('tickets_shop_id_id_uq').on(table.shopId, table.id),
     index('tickets_shop_status_idx').on(table.shopId, table.status),
+    index('tickets_shop_vehicle_status_idx').on(table.shopId, table.vehicleId, table.status),
+    index('tickets_shop_separate_from_idx')
+      .on(table.shopId, table.separateFromTicketId)
+      .where(sql`${table.separateFromTicketId} is not null`),
     index('tickets_customer_idx').on(table.customerId),
     index('tickets_vehicle_idx').on(table.vehicleId),
     foreignKey({
@@ -312,6 +375,11 @@ export const tickets = pgTable(
       columns: [table.shopId, table.closedByProfileId],
       foreignColumns: [profiles.shopId, profiles.id],
     }).onDelete('restrict'),
+    foreignKey({
+      name: 'tickets_shop_separate_from_fk',
+      columns: [table.shopId, table.separateFromTicketId],
+      foreignColumns: [table.shopId, table.id],
+    }).onDelete('restrict'),
     check('tickets_number_positive', sql`${table.ticketNumber} > 0`),
     check(
       'tickets_source_valid',
@@ -329,6 +397,61 @@ export const tickets = pgTable(
     check(
       'tickets_diagnostic_authorized_cents_nonnegative',
       sql`${table.diagnosticAuthorizedCents} is null or ${table.diagnosticAuthorizedCents} >= 0`,
+    ),
+    check(
+      'tickets_projection_revision_nonnegative',
+      sql`${table.projectionRevision} >= 0`,
+    ),
+    check(
+      'tickets_continuity_revision_nonnegative',
+      sql`${table.continuityRevision} >= 0`,
+    ),
+    check(
+      'tickets_separate_reason_valid',
+      sql`${table.separateReason} is null
+        or ${table.separateReason} in (${sql.join(SEPARATE_REASONS.map((reason) => sql`${reason}`), sql`, `)})`,
+    ),
+    check(
+      'tickets_separate_evidence_consistent',
+      sql`(${table.separateFromTicketId} is null
+          and ${table.separateReason} is null
+          and ${table.separateReasonNote} is null)
+        or (${table.separateFromTicketId} is not null
+          and ${table.separateReason} is not null
+          and (${table.separateReasonNote} is null
+            or (${table.separateReasonNote} = btrim(${table.separateReasonNote})
+              and char_length(${table.separateReasonNote}) between 1 and 2000))
+          and (${table.separateReason} <> 'other' or ${table.separateReasonNote} is not null))`,
+    ),
+    check(
+      'tickets_separate_from_not_self',
+      sql`${table.separateFromTicketId} is null or ${table.separateFromTicketId} <> ${table.id}`,
+    ),
+    check(
+      'tickets_close_disposition_valid',
+      sql`${table.closeDisposition} is null
+        or ${table.closeDisposition} in (${sql.join(CLOSE_DISPOSITIONS.map((disposition) => sql`${disposition}`), sql`, `)})`,
+    ),
+    check(
+      'tickets_cancel_reason_code_valid',
+      sql`${table.cancelReasonCode} is null
+        or ${table.cancelReasonCode} in (${sql.join(CANCEL_REASON_CODES.map((reason) => sql`${reason}`), sql`, `)})`,
+    ),
+    check(
+      'tickets_canceled_reason_bounded',
+      sql`(${table.canceledReason} is null
+          or (${table.canceledReason} = btrim(${table.canceledReason})
+            and char_length(${table.canceledReason}) between 1 and 2000))
+        and (${table.cancelReasonCode} is distinct from 'other'
+          or ${table.canceledReason} is not null)`,
+    ),
+    check(
+      'tickets_close_note_bounded',
+      sql`(${table.closeNote} is null
+          or (${table.closeNote} = btrim(${table.closeNote})
+            and char_length(${table.closeNote}) between 1 and 2000))
+        and (${table.closeDisposition} is distinct from 'no_repair'
+          or ${table.closeNote} is not null)`,
     ),
   ],
 )
@@ -391,6 +514,22 @@ export const ticketJobs = pgTable(
     storyMeta: jsonb('story_meta').$type<CustomerStoryMeta>(),
     workNotes: text('work_notes'),
     approvedQuoteVersionId: uuid('approved_quote_version_id'),
+    sequenceNumber: integer('sequence_number'),
+    workStatement: text('work_statement'),
+    statementSource: text('statement_source', { enum: STATEMENT_SOURCES }),
+    statementReviewState: text('statement_review_state', { enum: STATEMENT_REVIEW_STATES }),
+    statementConfirmedByProfileId: uuid('statement_confirmed_by_profile_id'),
+    statementConfirmedAt: timestamp('statement_confirmed_at', { withTimezone: true }),
+    whenStarted: text('when_started'),
+    howOften: text('how_often'),
+    diagnosticAuthorizedCents: bigint('diagnostic_authorized_cents', { mode: 'number' }),
+    diagnosticAuthorizationNote: text('diagnostic_authorization_note'),
+    createdByProfileId: uuid('created_by_profile_id'),
+    creatorProvenance: text('creator_provenance', { enum: CREATOR_PROVENANCE }),
+    createdFromJobId: uuid('created_from_job_id'),
+    revision: bigint('revision', { mode: 'bigint' }).default(0n).notNull(),
+    approvedAuthorizationFingerprint: text('approved_authorization_fingerprint'),
+    approvedApprovalEventId: uuid('approved_approval_event_id'),
     diagnosticStartState: text('diagnostic_start_state', {
       enum: ['idle', 'initializing', 'ready', 'failed', 'ambiguous'],
     }).default('idle').notNull(),
@@ -400,7 +539,7 @@ export const ticketJobs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
+  (table): PgTableExtraConfigValue[] => [
     foreignKey({
       name: 'ticket_jobs_shop_ticket_fk',
       columns: [table.shopId, table.ticketId],
@@ -421,8 +560,36 @@ export const ticketJobs = pgTable(
       columns: [table.shopId, table.ticketId, table.approvedQuoteVersionId],
       foreignColumns: [quoteVersions.shopId, quoteVersions.ticketId, quoteVersions.id],
     }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_shop_creator_fk',
+      columns: [table.shopId, table.createdByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_shop_confirmer_fk',
+      columns: [table.shopId, table.statementConfirmedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_shop_ticket_created_from_fk',
+      columns: [table.shopId, table.ticketId, table.createdFromJobId],
+      foreignColumns: [table.shopId, table.ticketId, table.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_approved_approval_event_fk',
+      columns: [table.shopId, table.ticketId, table.id, table.approvedApprovalEventId],
+      foreignColumns: [
+        quoteEvents.shopId as AnyPgColumn,
+        quoteEvents.ticketId as AnyPgColumn,
+        quoteEvents.jobId as AnyPgColumn,
+        quoteEvents.id as AnyPgColumn,
+      ],
+    }).onDelete('restrict'),
     uniqueIndex('ticket_jobs_shop_id_uq').on(table.shopId, table.id),
     uniqueIndex('ticket_jobs_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
+    uniqueIndex('ticket_jobs_shop_ticket_sequence_uq')
+      .on(table.shopId, table.ticketId, table.sequenceNumber)
+      .where(sql`${table.sequenceNumber} is not null`),
     index('ticket_jobs_approved_quote_version_idx')
       .on(table.shopId, table.ticketId, table.approvedQuoteVersionId)
       .where(sql`${table.approvedQuoteVersionId} is not null`),
@@ -441,6 +608,18 @@ export const ticketJobs = pgTable(
       .on(table.shopId, table.requiredSkillTier, table.workStatus)
       .where(sql`${table.assignedTechId} is null`),
     index('ticket_jobs_ticket_idx').on(table.ticketId),
+    index('ticket_jobs_shop_created_by_idx')
+      .on(table.shopId, table.createdByProfileId)
+      .where(sql`${table.createdByProfileId} is not null`),
+    index('ticket_jobs_shop_confirmed_by_idx')
+      .on(table.shopId, table.statementConfirmedByProfileId)
+      .where(sql`${table.statementConfirmedByProfileId} is not null`),
+    index('ticket_jobs_shop_ticket_created_from_idx')
+      .on(table.shopId, table.ticketId, table.createdFromJobId)
+      .where(sql`${table.createdFromJobId} is not null`),
+    index('ticket_jobs_shop_ticket_approval_event_idx')
+      .on(table.shopId, table.ticketId, table.id, table.approvedApprovalEventId)
+      .where(sql`${table.approvedApprovalEventId} is not null`),
     check(
       'ticket_jobs_kind_valid',
       sql`${table.kind} in ('diagnostic', 'repair', 'maintenance')`,
@@ -470,6 +649,83 @@ export const ticketJobs = pgTable(
       sql`(${table.customerStory} is null or jsonb_typeof(${table.customerStory}) = 'object')
         and (${table.storyMeta} is null or jsonb_typeof(${table.storyMeta}) = 'object')`,
     ),
+    check(
+      'ticket_jobs_sequence_positive',
+      sql`${table.sequenceNumber} is null or ${table.sequenceNumber} > 0`,
+    ),
+    check(
+      'ticket_jobs_work_statement_bounded',
+      sql`${table.workStatement} is null
+        or (${table.workStatement} = btrim(${table.workStatement})
+          and char_length(${table.workStatement}) between 1 and 5000)`,
+    ),
+    check(
+      'ticket_jobs_statement_source_valid',
+      sql`${table.statementSource} is null
+        or ${table.statementSource} in (${sql.join(STATEMENT_SOURCES.map((source) => sql`${source}`), sql`, `)})`,
+    ),
+    check(
+      'ticket_jobs_statement_review_state_valid',
+      sql`${table.statementReviewState} is null
+        or ${table.statementReviewState} in (${sql.join(STATEMENT_REVIEW_STATES.map((state) => sql`${state}`), sql`, `)})`,
+    ),
+    check(
+      'ticket_jobs_statement_truth_consistent',
+      sql`(${table.workStatement} is null
+          and ${table.statementSource} is null
+          and ${table.statementReviewState} is null)
+        or (${table.workStatement} is not null
+          and ${table.statementSource} is not null
+          and ${table.statementReviewState} is not null)`,
+    ),
+    check(
+      'ticket_jobs_statement_confirmation_consistent',
+      sql`(${table.workStatement} is null
+          and ${table.statementSource} is null
+          and ${table.statementReviewState} is null
+          and ${table.statementConfirmedByProfileId} is null
+          and ${table.statementConfirmedAt} is null)
+        or (${table.workStatement} is not null
+          and ${table.statementSource} = 'legacy_migrated'
+          and ${table.statementReviewState} in ('confirmed', 'review_required')
+          and ${table.statementConfirmedByProfileId} is null
+          and ${table.statementConfirmedAt} is null)
+        or (${table.workStatement} is not null
+          and ${table.statementSource} <> 'legacy_migrated'
+          and ${table.statementReviewState} = 'confirmed'
+          and ((${table.statementConfirmedByProfileId} is null
+              and ${table.statementConfirmedAt} is null)
+            or (${table.statementConfirmedByProfileId} is not null
+              and ${table.statementConfirmedAt} is not null)))`,
+    ),
+    check(
+      'ticket_jobs_context_bounded',
+      sql`(${table.whenStarted} is null
+          or (${table.whenStarted} = btrim(${table.whenStarted})
+            and char_length(${table.whenStarted}) between 1 and 1000))
+        and (${table.howOften} is null
+          or (${table.howOften} = btrim(${table.howOften})
+            and char_length(${table.howOften}) between 1 and 1000))`,
+    ),
+    check(
+      'ticket_jobs_diagnostic_authorization_consistent',
+      sql`(${table.diagnosticAuthorizedCents} is null
+          or ${table.diagnosticAuthorizedCents} >= 0)
+        and (${table.diagnosticAuthorizationNote} is null
+          or (${table.diagnosticAuthorizationNote} = btrim(${table.diagnosticAuthorizationNote})
+            and char_length(${table.diagnosticAuthorizationNote}) between 1 and 2000))`,
+    ),
+    check(
+      'ticket_jobs_creator_provenance_consistent',
+      sql`(${table.createdByProfileId} is null and ${table.creatorProvenance} is null)
+        or (${table.createdByProfileId} is not null and ${table.creatorProvenance} is not null)`,
+    ),
+    check(
+      'ticket_jobs_approved_fingerprint_valid',
+      sql`${table.approvedAuthorizationFingerprint} is null
+        or ${table.approvedAuthorizationFingerprint} ~ '^v1:[0-9a-f]{64}$'`,
+    ),
+    check('ticket_jobs_revision_nonnegative', sql`${table.revision} >= 0`),
   ],
 )
 
@@ -599,9 +855,7 @@ export const jobLines = pgTable(
     vendorAccountId: uuid('vendor_account_id'),
     externalOfferId: text('external_offer_id'),
     vendorSnapshot: jsonb('vendor_snapshot').$type<Record<string, unknown>>(),
-    partStatus: text('part_status', {
-      enum: ['proposed', 'needs_order', 'ordered', 'received', 'installed', 'returned'],
-    }).default('proposed').notNull(),
+    partStatus: text('part_status', { enum: PART_STATUSES }).default('proposed').notNull(),
     orderedAt: timestamp('ordered_at', { withTimezone: true }),
     orderedByProfileId: uuid('ordered_by_profile_id'),
     receivedAt: timestamp('received_at', { withTimezone: true }),
@@ -874,7 +1128,7 @@ export const quoteEvents = pgTable(
     userAgent: text('user_agent'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
+  (table): PgTableExtraConfigValue[] => [
     foreignKey({
       name: 'quote_events_shop_ticket_fk',
       columns: [table.shopId, table.ticketId],
@@ -896,6 +1150,12 @@ export const quoteEvents = pgTable(
       foreignColumns: [profiles.shopId, profiles.id],
     }).onDelete('restrict'),
     uniqueIndex('quote_events_shop_request_key_uq').on(table.shopId, table.requestKey),
+    uniqueIndex('quote_events_shop_ticket_job_id_uq').on(
+      table.shopId,
+      table.ticketId,
+      table.jobId,
+      table.id,
+    ),
     uniqueIndex('quote_events_shop_provider_event_uq')
       .on(table.shopId, table.providerEventId)
       .where(sql`${table.providerEventId} is not null`),
@@ -935,6 +1195,96 @@ export const quoteEvents = pgTable(
     ),
   ],
 )
+
+export const ticketMutationReceipts = pgTable('ticket_mutation_receipts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull(),
+  requestKey: uuid('request_key').notNull(),
+  mutationSchemaVersion: integer('mutation_schema_version').notNull(),
+  fingerprintKeyVersion: integer('fingerprint_key_version').notNull(),
+  mutationKind: text('mutation_kind', { enum: TICKET_MUTATION_KINDS }).notNull(),
+  actorProfileId: uuid('actor_profile_id').notNull(),
+  targetTicketId: uuid('target_ticket_id'),
+  targetBindingFingerprint: text('target_binding_fingerprint').notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  resultTicketId: uuid('result_ticket_id').notNull(),
+  resultJobCount: integer('result_job_count').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('ticket_mutation_receipts_shop_request_key_uq')
+    .on(table.shopId, table.requestKey),
+  uniqueIndex('ticket_mutation_receipts_shop_id_uq')
+    .on(table.shopId, table.id),
+  uniqueIndex('ticket_mutation_receipts_shop_id_result_ticket_count_uq')
+    .on(table.shopId, table.id, table.resultTicketId, table.resultJobCount),
+  foreignKey({
+    name: 'ticket_mutation_receipts_shop_actor_fk',
+    columns: [table.shopId, table.actorProfileId],
+    foreignColumns: [profiles.shopId, profiles.id],
+  }).onDelete('restrict'),
+  foreignKey({
+    name: 'ticket_mutation_receipts_shop_target_ticket_fk',
+    columns: [table.shopId, table.targetTicketId],
+    foreignColumns: [tickets.shopId, tickets.id],
+  }).onDelete('restrict'),
+  foreignKey({
+    name: 'ticket_mutation_receipts_shop_result_ticket_fk',
+    columns: [table.shopId, table.resultTicketId],
+    foreignColumns: [tickets.shopId, tickets.id],
+  }).onDelete('restrict'),
+  index('ticket_mutation_receipts_shop_result_created_idx')
+    .on(table.shopId, table.resultTicketId, table.createdAt),
+  index('ticket_mutation_receipts_shop_target_idx')
+    .on(table.shopId, table.targetTicketId),
+  index('ticket_mutation_receipts_shop_actor_created_idx')
+    .on(table.shopId, table.actorProfileId, table.createdAt),
+  check('ticket_mutation_receipts_schema_version_v1', sql`${table.mutationSchemaVersion} = 1`),
+  check('ticket_mutation_receipts_key_version_positive', sql`${table.fingerprintKeyVersion} > 0`),
+  check('ticket_mutation_receipts_kind_valid', sql`${table.mutationKind} in (${sql.join(TICKET_MUTATION_KINDS.map((kind) => sql`${kind}`), sql`, `)})`),
+  check('ticket_mutation_receipts_target_fingerprint_valid', sql`${table.targetBindingFingerprint} ~ '^[0-9a-f]{64}$'`),
+  check('ticket_mutation_receipts_request_fingerprint_valid', sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`),
+  check('ticket_mutation_receipts_result_count_valid', sql`${table.resultJobCount} between 0 and 25`),
+])
+
+export const ticketMutationReceiptJobs = pgTable('ticket_mutation_receipt_jobs', {
+  shopId: uuid('shop_id').notNull(),
+  receiptId: uuid('receipt_id').notNull(),
+  resultTicketId: uuid('result_ticket_id').notNull(),
+  resultJobCount: integer('result_job_count').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  jobId: uuid('job_id').notNull(),
+}, (table) => [
+  primaryKey({
+    name: 'ticket_mutation_receipt_jobs_pk',
+    columns: [table.shopId, table.receiptId, table.ordinal],
+  }),
+  uniqueIndex('ticket_mutation_receipt_jobs_shop_receipt_job_uq')
+    .on(table.shopId, table.receiptId, table.jobId),
+  foreignKey({
+    name: 'ticket_mutation_receipt_jobs_receipt_ticket_fk',
+    columns: [table.shopId, table.receiptId, table.resultTicketId, table.resultJobCount],
+    foreignColumns: [
+      ticketMutationReceipts.shopId,
+      ticketMutationReceipts.id,
+      ticketMutationReceipts.resultTicketId,
+      ticketMutationReceipts.resultJobCount,
+    ],
+  }).onDelete('restrict'),
+  foreignKey({
+    name: 'ticket_mutation_receipt_jobs_job_fk',
+    columns: [table.shopId, table.resultTicketId, table.jobId],
+    foreignColumns: [ticketJobs.shopId, ticketJobs.ticketId, ticketJobs.id],
+  }).onDelete('restrict'),
+  index('ticket_mutation_receipt_jobs_shop_job_idx')
+    .on(table.shopId, table.resultTicketId, table.jobId),
+  index('ticket_mutation_receipt_jobs_header_idx')
+    .on(table.shopId, table.receiptId, table.resultTicketId, table.resultJobCount),
+  check('ticket_mutation_receipt_jobs_ordinal_range', sql`
+    ${table.ordinal} >= 0
+    and ${table.ordinal} < ${table.resultJobCount}
+    and ${table.resultJobCount} between 0 and 25
+  `),
+])
 
 export const smsLog = pgTable(
   'sms_log',
@@ -1845,6 +2195,10 @@ export type Ticket = typeof tickets.$inferSelect
 export type NewTicket = typeof tickets.$inferInsert
 export type TicketJob = typeof ticketJobs.$inferSelect
 export type NewTicketJob = typeof ticketJobs.$inferInsert
+export type TicketMutationReceipt = typeof ticketMutationReceipts.$inferSelect
+export type NewTicketMutationReceipt = typeof ticketMutationReceipts.$inferInsert
+export type TicketMutationReceiptJob = typeof ticketMutationReceiptJobs.$inferSelect
+export type NewTicketMutationReceiptJob = typeof ticketMutationReceiptJobs.$inferInsert
 
 export const retrievalCache = pgTable('retrieval_cache', {
   id: uuid('id').primaryKey().defaultRandom(),

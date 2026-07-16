@@ -492,17 +492,37 @@ describe('ticket-job assignment mutations', () => {
   })
 
   it('rejects closed tickets and every non-open job state without writes', async () => {
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    const terminalAt = new Date('2026-07-15T12:00:00Z')
+    const [closedTicket] = await db.insert(tickets).values({
+      shopId,
+      ticketNumber: 2,
+      source: 'tech_quick',
+      concern: 'Already closed',
+      createdByProfileId: actor.owner.profileId,
+      status: 'closed',
+      closedAt: terminalAt,
+      closedByProfileId: actor.owner.profileId,
+      closeDisposition: 'customer_declined',
+    }).returning()
+    const [closedJob] = await db.insert(ticketJobs).values({
+      shopId,
+      ticketId: closedTicket.id,
+      title: 'Closed ticket job',
+      kind: 'repair',
+      requiredSkillTier: 1,
+    }).returning()
     const actions: Array<[TicketActor, unknown]> = [
       [actor.tech, { action: 'claim' }],
       [actor.tech, { action: 'unclaim' }],
       [actor.owner, { action: 'reassign', assignedTechId: actor.otherTech.profileId }],
     ]
     for (const [who, action] of actions) {
-      await expect(call(who, action))
+      await expect(call(who, action, {
+        ticketId: closedTicket.id,
+        jobId: closedJob.id,
+      }))
         .resolves.toEqual({ ok: false, error: 'ticket_not_open' })
     }
-    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
 
     for (const workStatus of ['in_progress', 'blocked', 'done', 'canceled'] as const) {
       await db.update(ticketJobs).set({ workStatus }).where(eq(ticketJobs.id, jobId))
