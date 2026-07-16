@@ -307,6 +307,10 @@ describe('ShopOS repository lock coordinator', () => {
       { id: uuid(14), userId: uuid(1014), shopId: uuid(1), role: 'tech', skillTier: null },
       { id: uuid(15), userId: uuid(1015), shopId: uuid(1), role: 'owner', deactivatedAt: new Date() },
       { id: uuid(16), userId: uuid(1016), shopId: uuid(2), role: 'owner', skillTier: null },
+      { id: uuid(17), userId: uuid(1017), shopId: uuid(1), role: 'tech', skillTier: 1 },
+      { id: uuid(18), userId: uuid(1018), shopId: uuid(1), role: 'advisor', skillTier: 2 },
+      { id: uuid(19), userId: uuid(1019), shopId: uuid(1), role: 'parts', skillTier: 3 },
+      { id: uuid(23), userId: uuid(1023), shopId: uuid(1), role: 'owner', skillTier: 1 },
     ])
     await db.insert(customers).values([
       { id: uuid(20), shopId: uuid(1), name: 'Alex', phone: '555-0100' },
@@ -758,6 +762,29 @@ describe('ShopOS repository lock coordinator', () => {
         }),
       },
     }))).rejects.toBeInstanceOf(ShopOsMutationNotFound)
+  })
+
+  it.each([
+    ['tech', uuid(17)],
+    ['advisor', uuid(18)],
+    ['parts', uuid(19)],
+    ['owner', uuid(23)],
+  ])('accepts a session insertion intent for an active tiered %s', async (_role, profileId) => {
+    const sessionId = uuid(Number(profileId.slice(-4)) + 300)
+    const scope = await lock(lockRequest({
+      actorProfileId: profileId,
+      profileIds: [profileId],
+      lockShop: true,
+      insertionIntents: {
+        ...EMPTY_INTENTS,
+        sessions: [{ id: sessionId, shopId: uuid(1), techId: profileId }],
+      },
+    }))
+
+    expect(scope.actor).toMatchObject({ id: profileId, shopId: uuid(1) })
+    expect(scope.insertionIntents.sessions).toEqual([
+      { id: sessionId, shopId: uuid(1), techId: profileId },
+    ])
   })
 
   it('suppresses conditional resources for occupied receipts without exposing identifiers', async () => {

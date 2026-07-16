@@ -20,6 +20,7 @@ vi.mock('@/lib/db/queries', () => ({
 vi.mock('@/lib/sessions', () => ({
   createSessionForUser: vi.fn(),
   findCompletedTechQuickSessionForUser: vi.fn(),
+  replayCompletedTechQuickSessionForUser: vi.fn(),
 }))
 vi.mock('@/lib/retrieval/wire-into-tree', () => ({
   buildGenerateInitialTreeWithRetrieval: vi.fn(() => generateTreeMock),
@@ -46,6 +47,7 @@ import {
 import {
   createSessionForUser,
   findCompletedTechQuickSessionForUser,
+  replayCompletedTechQuickSessionForUser,
 } from '@/lib/sessions'
 
 const user = { id: '00000000-0000-4000-8000-000000000001' }
@@ -76,6 +78,7 @@ const profileMock = vi.mocked(getProfileByUserId)
 const countMock = vi.mocked(countOpenSessionsForTech)
 const openMock = vi.mocked(getOpenSessionForTech)
 const preflightMock = vi.mocked(findCompletedTechQuickSessionForUser)
+const replayMock = vi.mocked(replayCompletedTechQuickSessionForUser)
 const createMock = vi.mocked(createSessionForUser)
 
 function request(payload: unknown): Request {
@@ -93,6 +96,7 @@ describe('POST /api/sessions Shop OS wrapper', () => {
     paywallMock.mockResolvedValue(null)
     profileMock.mockResolvedValue(profile as never)
     preflightMock.mockResolvedValue({ ok: true, state: 'missing' })
+    replayMock.mockResolvedValue({ ok: true, ...ids })
     quotaMock.mockResolvedValue(null)
     countMock.mockResolvedValue(0)
     generateTreeMock.mockResolvedValue({ currentNodeId: 'root' })
@@ -143,12 +147,31 @@ describe('POST /api/sessions Shop OS wrapper', () => {
     expect(generateTreeMock).not.toHaveBeenCalled()
   })
 
-  it('returns a completed identical retry before quota, open-cap, or provider work', async () => {
-    preflightMock.mockResolvedValue({ ok: true, state: 'match', ...ids })
+  it('uses the ID-less hint only to enter locked replay before quota, open-cap, or provider work', async () => {
+    preflightMock.mockResolvedValue({ ok: true, state: 'match' })
     const response = await POST(request(body))
     expect(preflightMock).toHaveBeenCalledWith({ db: {}, userId: user.id, body })
+    expect(replayMock).toHaveBeenCalledWith({ db: {}, userId: user.id, body })
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual(ids)
+    expect(quotaMock).not.toHaveBeenCalled()
+    expect(countMock).not.toHaveBeenCalled()
+    expect(generateTreeMock).not.toHaveBeenCalled()
+    expect(createMock).not.toHaveBeenCalled()
+  })
+
+  it('returns locked replay failure without falling through to provider creation', async () => {
+    preflightMock.mockResolvedValue({ ok: true, state: 'match' })
+    replayMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      error: 'request key unavailable',
+    })
+
+    const response = await POST(request(body))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'request key unavailable' })
     expect(quotaMock).not.toHaveBeenCalled()
     expect(countMock).not.toHaveBeenCalled()
     expect(generateTreeMock).not.toHaveBeenCalled()

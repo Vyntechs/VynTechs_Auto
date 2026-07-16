@@ -589,7 +589,8 @@ export async function lockMutationScopeV1(
   for (const intent of normalized.insertionIntents.sessions) {
     const technician = lockedProfiles.find((profile) => profile.id === intent.techId)
     if (
-      !technician || technician.shopId !== normalized.shopId || technician.role !== 'tech' ||
+      !technician || technician.shopId !== normalized.shopId ||
+      !ACTOR_ROLES.has(technician.role) ||
       technician.membershipStatus !== 'active' || technician.deactivatedAt !== null ||
       technician.skillTier === null || ![1, 2, 3].includes(technician.skillTier)
     ) throw new ShopOsMutationNotFound()

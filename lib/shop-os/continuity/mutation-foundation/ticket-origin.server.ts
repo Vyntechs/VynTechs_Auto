@@ -72,7 +72,7 @@ export function resolveTrustedTicketOriginInLockedScopeV1(
   _scope: LockedMutationScopeV1,
   _origin: TrustedTicketOriginV1,
   _context: Readonly<{
-    mode: 'insert' | 'intake_insert' | 'quick_insert' | 'replay'
+    mode: 'insert' | 'intake_insert' | 'quick_insert' | 'replay' | 'tech_quick_replay'
     canonicalRequestKey: string | null
     ticketId: string
     jobs: readonly Readonly<{
@@ -136,6 +136,37 @@ export function resolveTrustedTicketOriginInLockedScopeV1(
       )
     ) return invalidOrigin()
     return 'quick_quote'
+  }
+
+  if (_context.mode === 'tech_quick_replay') {
+    let canonicalRequestKey: string
+    try {
+      canonicalRequestKey = normalizeUuid(_context.canonicalRequestKey)
+    } catch {
+      return invalidOrigin()
+    }
+    const session = _scope.sessions.filter(({ id }) => id === state.sessionId)
+    const graph = _scope.tickets.find(({ ticket }) => ticket.id === ticketId)
+    const linkedJobs = graph?.jobs.filter(({ sessionId }) => sessionId === state.sessionId) ?? []
+    if (
+      state.sessionId !== canonicalRequestKey ||
+      _scope.request.receiptRequestKey !== null ||
+      _scope.request.lockShop !== true || _scope.shop?.id !== _scope.actor.shopId ||
+      _scope.insertionIntents.sessions.length !== 0 ||
+      _scope.insertionIntents.customers.length !== 0 ||
+      _scope.insertionIntents.vehicles.length !== 0 ||
+      _scope.insertionIntents.tickets.length !== 0 ||
+      _scope.insertionIntents.jobs.length !== 0 ||
+      session.length !== 1 || session[0]?.techId !== _scope.actor.id ||
+      session[0]?.shopId !== _scope.actor.shopId ||
+      _scope.tickets.length !== 1 || !graph || linkedJobs.length !== 1 ||
+      jobs.length !== 1 || jobs[0]?.id !== linkedJobs[0]?.id ||
+      jobs[0]?.ticketId !== graph.ticket.id || jobs[0]?.sessionId !== state.sessionId ||
+      !_scope.request.sessionIds.includes(state.sessionId) ||
+      !sameIds(_scope.request.ticketIds, [graph.ticket.id]) ||
+      !sameIds(_scope.request.jobIds, [linkedJobs[0]!.id])
+    ) return invalidOrigin()
+    return 'tech_quick'
   }
 
   const sessionIntents = _scope.insertionIntents.sessions

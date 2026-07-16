@@ -18,6 +18,7 @@ import {
   insertResolvedTicketBatchInTransactionV1,
   insertResolvedTicketCreationReceiptInTransactionV1,
   readFinalizedTicketCreationResultV1,
+  readResolvedTechQuickReplayResultV1,
   resolveTicketCreationInLockedScopeV1,
   type ResolveTicketCreationInputV1,
   type TicketActor,
@@ -116,6 +117,7 @@ describe('Task 7B ticket creation kernel source boundary', () => {
       'insertResolvedTicketCreationReceiptInTransactionV1',
       'classifyResolvedTicketCreationReceiptInTransactionV1',
       'readFinalizedTicketCreationResultV1',
+      'readResolvedTechQuickReplayResultV1',
       'buildResolvedTicketCreationEnvelopeV1',
     ]) {
       expect(ticketSource).toMatch(new RegExp(`export (?:async )?function ${declaration}`))
@@ -137,6 +139,9 @@ describe('Task 7B ticket creation kernel source boundary', () => {
     expect(quickBranch).toBeGreaterThan(-1)
     expect(activationGuard).toBeGreaterThan(quickBranch)
     expect(identityConsumer).toBeGreaterThan(activationGuard)
+    expect(ticketSource).toContain("mode: 'tech_quick_replay'")
+    expect(ticketSource).not.toContain('createTechQuickTicketInTransaction')
+    expect(ticketSource).not.toContain('CreateTechQuickTicketInput')
   })
 
   it('creates opaque immutable origins and rejects malformed authority inputs synchronously', () => {
@@ -409,9 +414,27 @@ describe('Task 7B transaction-bound ticket creation kernel', () => {
         payload: undefined,
       }),
       executeLocked: async (tx, scope) => {
+        const mismatchedSessionId = kernelUuid(1091)
         expect(() => resolveTicketCreationInLockedScopeV1(tx, scope, {
           ...techInput,
-          origin: createTechQuickTicketOriginV1(kernelUuid(1091)),
+          origin: createTechQuickTicketOriginV1(mismatchedSessionId),
+        })).toThrow('trusted_ticket_origin_invalid')
+        expect(() => resolveTicketCreationInLockedScopeV1(tx, scope, {
+          ...techInput,
+          origin: createTechQuickTicketOriginV1(mismatchedSessionId),
+          jobs: [normalizedJob(techJobId, {
+            title: 'No-start diagnosis',
+            assignedTechId: techProfileId,
+            sessionId: mismatchedSessionId,
+          })],
+        })).toThrow('trusted_ticket_origin_invalid')
+        expect(() => resolveTicketCreationInLockedScopeV1(tx, scope, {
+          ...techInput,
+          jobs: [normalizedJob(techJobId, {
+            title: 'No-start diagnosis',
+            assignedTechId: techProfileId,
+            sessionId: mismatchedSessionId,
+          })],
         })).toThrow('trusted_ticket_origin_invalid')
         return resolveTicketCreationInLockedScopeV1(tx, scope, techInput)
       },
@@ -460,6 +483,154 @@ describe('Task 7B transaction-bound ticket creation kernel', () => {
     })
     expect(await db.select().from(tickets)).toEqual([])
     expect(await db.select().from(sessions)).toEqual([])
+  })
+
+  it('returns Tech Quick replay identity only through a genuine live replay handle', async () => {
+    const sessionId = kernelUuid(1036)
+    const ticketId = kernelUuid(1037)
+    const jobId = kernelUuid(1038)
+    const replayIntake = {
+      vehicleYear: 2019,
+      vehicleMake: 'Ford',
+      vehicleModel: 'F-150',
+      customerComplaint: 'Intermittent no-start',
+    }
+    await db.insert(sessions).values({
+      id: sessionId,
+      shopId,
+      techId: techProfileId,
+      intake: replayIntake,
+      treeState: { nodes: [], currentNodeId: 'root', message: 'Open' },
+    })
+    await db.insert(tickets).values({
+      id: ticketId,
+      shopId,
+      ticketNumber: 41,
+      source: 'tech_quick',
+      customerId: null,
+      vehicleId: null,
+      concern: replayIntake.customerComplaint,
+      createdByProfileId: techProfileId,
+      projectionRevision: 1n,
+      continuityRevision: 1n,
+    })
+    await db.insert(ticketJobs).values({
+      id: jobId,
+      shopId,
+      ticketId,
+      title: replayIntake.customerComplaint,
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      assignedTechId: techProfileId,
+      sessionId,
+      sequenceNumber: 1,
+      createdByProfileId: techProfileId,
+      creatorProvenance: 'direct',
+      revision: 1n,
+    })
+
+    let captured: Readonly<{
+      tx: AppDb
+      scope: LockedMutationScopeV1
+      resolved: ResolvedTicketCreationV1
+    }> | null = null
+    const result = await runBoundedShopOsMutationV1(db, {
+      discover: async () => ({
+        lockRequest: lockRequest({
+          actorProfileId: techProfileId,
+          profileIds: [techProfileId],
+          lockShop: true,
+          ticketIds: [ticketId],
+          jobIds: [jobId],
+          includeAllJobsForTickets: true,
+          includeAllLinesForJobs: true,
+          sessionIds: [sessionId],
+        }),
+        payload: undefined,
+      }),
+      executeLocked: async (tx, scope) => {
+        const resolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'tech_quick_replay',
+          origin: createTechQuickTicketOriginV1(sessionId),
+          sessionId,
+          intake: replayIntake,
+          candidateTicketIds: [ticketId],
+          candidateJobIds: [jobId],
+        })
+        captured = { tx, scope, resolved }
+        const forged = Object.freeze(Object.create(null)) as ResolvedTicketCreationV1
+        const wrongScope = Object.freeze({ ...scope }) as LockedMutationScopeV1
+        expect(() => readResolvedTechQuickReplayResultV1(tx, scope, forged)).toThrow()
+        expect(() => readResolvedTechQuickReplayResultV1(db as AppDb, scope, resolved)).toThrow()
+        expect(() => readResolvedTechQuickReplayResultV1(tx, wrongScope, resolved)).toThrow()
+        return readResolvedTechQuickReplayResultV1(tx, scope, resolved)
+      },
+    })
+    expect(result).toEqual({ id: sessionId, ticketId, jobId })
+    expect(Object.isFrozen(result)).toBe(true)
+    expect(captured).not.toBeNull()
+    const stale = captured as unknown as {
+      tx: AppDb
+      scope: LockedMutationScopeV1
+      resolved: ResolvedTicketCreationV1
+    }
+    expect(() => readResolvedTechQuickReplayResultV1(
+      stale.tx,
+      stale.scope,
+      stale.resolved,
+    )).toThrow()
+
+    await db.update(profiles).set({ skillTier: null })
+      .where(eq(profiles.id, techProfileId))
+    await expect(runBoundedShopOsMutationV1(db, {
+      discover: async () => ({
+        lockRequest: lockRequest({
+          actorProfileId: techProfileId,
+          profileIds: [techProfileId],
+          lockShop: true,
+          ticketIds: [ticketId],
+          jobIds: [jobId],
+          includeAllJobsForTickets: true,
+          includeAllLinesForJobs: true,
+          sessionIds: [sessionId],
+        }),
+        payload: undefined,
+      }),
+      executeLocked: async (tx, scope) => resolveTicketCreationInLockedScopeV1(tx, scope, {
+        mode: 'tech_quick_replay',
+        origin: createTechQuickTicketOriginV1(sessionId),
+        sessionId,
+        intake: replayIntake,
+        candidateTicketIds: [ticketId],
+        candidateJobIds: [jobId],
+      }),
+    })).rejects.toThrow('ticket_creation_kernel_invalid')
+
+    const counterTicketId = kernelUuid(1039)
+    const counterJobId = kernelUuid(1040)
+    await runBoundedShopOsMutationV1(db, {
+      discover: async () => ({
+        lockRequest: lockRequest({
+          lockShop: true,
+          customerIds: [customerId],
+          vehicleIds: [vehicleId],
+          includeAllJobsForTickets: true,
+          includeAllLinesForJobs: true,
+          insertionIntents: ticketInsertionIntents(counterTicketId, [counterJobId]),
+        }),
+        payload: undefined,
+      }),
+      executeLocked: async (tx, scope) => {
+        const nonReplay = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'insert',
+          origin: createCounterTicketOriginV1(),
+          ticket: normalizedTicket(counterTicketId),
+          jobs: [normalizedJob(counterJobId)],
+          seededLinesByJobIndex: new Map(),
+        })
+        expect(() => readResolvedTechQuickReplayResultV1(tx, scope, nonReplay)).toThrow()
+      },
+    })
   })
 
   it('resolves materialized-intake and manual Quick insert modes in the same live scope', async () => {

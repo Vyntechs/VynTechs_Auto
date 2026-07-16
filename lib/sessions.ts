@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
 import type { AmbientConditions } from './types'
 import {
@@ -22,11 +23,29 @@ import type {
   DeclineLanguageInput,
 } from './gating/decline-language'
 import type { Artifact, NewArtifact, OutcomePayload as StoredOutcomePayload } from './db/schema'
-import { sessions, sessionEvents, ticketJobs, tickets } from './db/schema'
 import {
-  createTechQuickTicketInTransaction,
-  type CreateTechQuickTicketInput,
+  jobLines,
+  quoteEvents,
+  quoteVersions,
+  sessions,
+  sessionEvents,
+  ticketJobs,
+  tickets,
+  vehicles,
+} from './db/schema'
+import {
+  finalizeResolvedTicketCreationInTransactionV1,
+  insertResolvedTicketBatchInTransactionV1,
+  isTicketCreationKernelInvalidV1,
+  readFinalizedTicketCreationResultV1,
+  readResolvedTechQuickReplayResultV1,
+  resolveTicketCreationInLockedScopeV1,
 } from './tickets'
+import { createTechQuickTicketOriginV1 } from './shop-os/continuity/mutation-foundation/ticket-origin.server'
+import { ShopOsMutationNotFound } from './shop-os/continuity/mutation-foundation/contracts'
+import { ShopOsMutationConflict } from './shop-os/continuity/mutation-foundation/conflicts'
+import type { MutationLockRequestV1 } from './shop-os/continuity/mutation-foundation/lock-order'
+import { runBoundedShopOsMutationV1 } from './shop-os/continuity/mutation-foundation/transaction-runner'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
@@ -64,138 +83,576 @@ export type CreateSessionResult =
 
 const createSessionBodySchema = intakeSchema.extend({ requestKey: z.uuid() }).strict()
 
-export type CreateSessionWrapper = (
-  tx: AppDb,
-  input: CreateTechQuickTicketInput,
-) => Promise<{ ticketId: string; jobId: string }>
-
-type ValidatedSessionCreation = {
-  profileId: string
-  shopId: string
-  skillTier: 1 | 2 | 3
+type OwnedTechQuickRequest = Readonly<{
+  userId: string
   requestKey: string
   intake: IntakePayload
+  treeState: TreeState | null
+}>
+
+type TechQuickActorSnapshot = Readonly<{
+  id: string
+  shopId: string | null
+  role: string
+  skillTier: number | null
+  membershipStatus: string
+  deactivatedAt: Date | null
+}>
+
+type ActiveTechQuickActor = Readonly<{
+  id: string
+  shopId: string
+  role: 'tech' | 'advisor' | 'parts' | 'owner'
+  skillTier: 1 | 2 | 3
+  membershipStatus: 'active'
+  deactivatedAt: null
+}>
+
+type TechQuickDiscovery =
+  | Readonly<{ kind: 'insert'; ticketId: string; jobId: string }>
+  | Readonly<{
+      kind: 'replay'
+      candidateTicketIds: readonly string[]
+      candidateJobIds: readonly string[]
+    }>
+  | Readonly<{ kind: 'missing' }>
+  | Readonly<{ kind: 'occupied' }>
+
+class TechQuickRequestUnavailable extends Error {
+  constructor() {
+    super('tech_quick_request_unavailable')
+    this.name = 'TechQuickRequestUnavailable'
+  }
 }
 
-async function validateSessionCreationRequest(opts: {
-  db: AppDb
-  userId: string
-  body: unknown
-}): Promise<
-  | { ok: true; value: ValidatedSessionCreation }
-  | { ok: false; status: 400; error: string }
-> {
-  const profile = await getProfileByUserId(opts.db, opts.userId)
-  if (!profile) return { ok: false, status: 400, error: 'no profile' }
-  if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
-  if (
-    !isShopRole(profile.role) ||
-    profile.membershipStatus !== 'active' ||
-    profile.deactivatedAt ||
-    profile.skillTier === null ||
-    ![1, 2, 3].includes(profile.skillTier)
-  ) {
-    return { ok: false, status: 400, error: 'inactive wrenching profile' }
-  }
+const EMPTY_INSERTION_INTENTS = Object.freeze({
+  sessions: Object.freeze([]),
+  customers: Object.freeze([]),
+  vehicles: Object.freeze([]),
+  tickets: Object.freeze([]),
+  jobs: Object.freeze([]),
+})
 
-  const parsed = createSessionBodySchema.safeParse(opts.body)
-  if (!parsed.success) {
-    return { ok: false, status: 400, error: parsed.error.message }
+function canonicalUuid(value: unknown): string | null {
+  const parsed = z.uuid().safeParse(value)
+  return parsed.success ? parsed.data.toLowerCase() : null
+}
+
+function ownTechQuickRequest(
+  userId: unknown,
+  body: unknown,
+  treeState?: TreeState,
+): { ok: true; value: OwnedTechQuickRequest } | { ok: false; error: string } {
+  const ownedUserId = canonicalUuid(userId)
+  if (ownedUserId === null) return { ok: false, error: 'no profile' }
+  const parsed = createSessionBodySchema.safeParse(body)
+  if (!parsed.success) return { ok: false, error: parsed.error.message }
+  let ownedTreeState: TreeState | null = null
+  if (treeState !== undefined) {
+    try {
+      ownedTreeState = structuredClone(treeState)
+    } catch {
+      return { ok: false, error: 'invalid tree state' }
+    }
   }
-  const { requestKey, ...intake } = parsed.data
+  const { requestKey: rawRequestKey, ...intake } = parsed.data
+  const requestKey = canonicalUuid(rawRequestKey)
+  if (requestKey === null) return { ok: false, error: 'invalid request key' }
   return {
     ok: true,
-    value: {
-      profileId: profile.id,
-      shopId: profile.shopId,
-      skillTier: profile.skillTier as 1 | 2 | 3,
+    value: Object.freeze({
+      userId: ownedUserId,
       requestKey,
-      intake,
-    },
+      intake: Object.freeze(structuredClone(intake)),
+      treeState: ownedTreeState,
+    }),
   }
 }
 
-async function findCompletedSessionWrapper(
-  db: AppDb,
-  requestKey: string,
-  profileId: string,
-  shopId: string,
-  incomingIntake: IntakePayload,
-): Promise<
-  | { kind: 'match'; ticketId: string; jobId: string }
-  | { kind: 'collision' }
-  | { kind: 'missing' }
-> {
-  const [session] = await db
-    .select({
-      id: sessions.id,
-      shopId: sessions.shopId,
-      techId: sessions.techId,
-      intake: sessions.intake,
-    })
-    .from(sessions)
-    .where(eq(sessions.id, requestKey))
-    .limit(1)
-  if (!session) return { kind: 'missing' }
-  const normalizedPersistedIntake = intakeSchema.safeParse(session.intake)
+function ownTechQuickActor(
+  profile: Awaited<ReturnType<typeof getProfileByUserId>>,
+): TechQuickActorSnapshot | null {
+  if (!profile) return null
+  const id = canonicalUuid(profile.id)
+  const shopId = profile.shopId === null ? null : canonicalUuid(profile.shopId)
+  if (id === null || (profile.shopId !== null && shopId === null)) return null
+  return Object.freeze({
+    id,
+    shopId,
+    role: String(profile.role),
+    skillTier: profile.skillTier,
+    membershipStatus: String(profile.membershipStatus),
+    deactivatedAt: profile.deactivatedAt === null
+      ? null
+      : new Date(profile.deactivatedAt.getTime()),
+  })
+}
+
+function activeTechQuickActor(
+  actor: TechQuickActorSnapshot | null,
+): ActiveTechQuickActor | null {
   if (
-    session.techId !== profileId ||
-    session.shopId !== shopId ||
-    !normalizedPersistedIntake.success ||
-    JSON.stringify(normalizedPersistedIntake.data) !== JSON.stringify(incomingIntake)
-  ) {
-    return { kind: 'collision' }
+    actor === null || actor.shopId === null || !isShopRole(actor.role) ||
+    actor.membershipStatus !== 'active' || actor.deactivatedAt !== null ||
+    !Number.isInteger(actor.skillTier) || ![1, 2, 3].includes(actor.skillTier as number)
+  ) return null
+  return actor as ActiveTechQuickActor
+}
+
+function sameIntake(left: unknown, right: IntakePayload): boolean {
+  const parsed = intakeSchema.safeParse(left)
+  return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(right)
+}
+
+function canonicalJson(value: unknown): string {
+  const normalize = (member: unknown): unknown => {
+    if (Array.isArray(member)) return member.map(normalize)
+    if (typeof member !== 'object' || member === null) return member
+    const result: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(member).sort()) {
+      result[key] = normalize((member as Record<string, unknown>)[key])
+    }
+    return result
+  }
+  return JSON.stringify(normalize(value))
+}
+
+function canonicalReplayTuple(
+  ticket: typeof tickets.$inferSelect,
+  job: typeof ticketJobs.$inferSelect,
+): boolean {
+  if (
+    typeof ticket.projectionRevision !== 'bigint' || ticket.projectionRevision < 0n ||
+    typeof ticket.continuityRevision !== 'bigint' || ticket.continuityRevision < 0n ||
+    typeof job.revision !== 'bigint' || job.revision < 0n ||
+    job.createdFromJobId !== null
+  ) return false
+  const legacy = job.sequenceNumber === null &&
+    job.createdByProfileId === null && job.creatorProvenance === null
+  const migrated = job.sequenceNumber === 1 &&
+    job.createdByProfileId === ticket.createdByProfileId &&
+    job.creatorProvenance === 'ticket_creator_backfill'
+  const direct = job.sequenceNumber === 1 &&
+    job.createdByProfileId === ticket.createdByProfileId &&
+    job.creatorProvenance === 'direct' && job.revision >= 1n &&
+    ticket.projectionRevision >= 1n && ticket.continuityRevision >= 1n
+  return legacy || migrated || direct
+}
+
+async function completedTechQuickHint(
+  db: AppDb,
+  actor: ActiveTechQuickActor,
+  request: OwnedTechQuickRequest,
+): Promise<'missing' | 'match' | 'collision'> {
+  const [session] = await db.select().from(sessions)
+    .where(eq(sessions.id, request.requestKey)).limit(1)
+  if (!session) return 'missing'
+  if (
+    session.shopId !== actor.shopId || session.techId !== actor.id ||
+    !sameIntake(session.intake, request.intake)
+  ) return 'collision'
+  const linked = await db.select({ job: ticketJobs, ticket: tickets })
+    .from(ticketJobs)
+    .innerJoin(tickets, and(
+      eq(tickets.shopId, ticketJobs.shopId),
+      eq(tickets.id, ticketJobs.ticketId),
+    ))
+    .where(and(
+      eq(ticketJobs.shopId, actor.shopId),
+      eq(ticketJobs.sessionId, request.requestKey),
+    ))
+  if (linked.length !== 1) return 'collision'
+  const { job, ticket } = linked[0]!
+  if (
+    ticket.source !== 'tech_quick' || ticket.concern !== request.intake.customerComplaint ||
+    ticket.createdByProfileId !== actor.id || ticket.separateFromTicketId !== null ||
+    (ticket.customerId === null) !== (ticket.vehicleId === null) ||
+    job.assignedTechId !== actor.id || job.kind !== 'diagnostic' ||
+    job.title !== request.intake.customerComplaint ||
+    ![1, 2, 3].includes(job.requiredSkillTier) || !canonicalReplayTuple(ticket, job)
+  ) return 'collision'
+  return 'match'
+}
+
+function baseTechQuickLockRequest(
+  actor: ActiveTechQuickActor,
+): MutationLockRequestV1 {
+  return {
+    shopId: actor.shopId,
+    actorProfileId: actor.id,
+    profileIds: [actor.id],
+    lockShop: true,
+    customerIds: [],
+    vehicleIds: [],
+    ticketIds: [],
+    jobIds: [],
+    includeAllJobsForTickets: false,
+    includeAllLinesForJobs: false,
+    includeAllQuoteVersionsForTickets: false,
+    includeAllQuoteEventsForTickets: false,
+    sessionIds: [],
+    sessionEventIds: [],
+    vendorAccountIds: [],
+    cannedJobIds: [],
+    receiptRequestKey: null,
+    receiptConditionalInsert: null,
+    insertionIntents: EMPTY_INSERTION_INTENTS,
+  }
+}
+
+async function occupiedTechQuickDiscovery(
+  tx: AppDb,
+  actor: ActiveTechQuickActor,
+  occupant: typeof sessions.$inferSelect,
+): Promise<Readonly<{ lockRequest: MutationLockRequestV1; payload: TechQuickDiscovery }>> {
+  const [vehicle] = occupant.vehicleId === null ? [] : await tx.select({
+    id: vehicles.id,
+    customerId: vehicles.customerId,
+  }).from(vehicles).where(eq(vehicles.id, occupant.vehicleId)).limit(1)
+  return {
+    lockRequest: {
+      ...baseTechQuickLockRequest(actor),
+      profileIds: [...new Set([actor.id, occupant.techId])].sort(),
+      customerIds: vehicle ? [vehicle.customerId] : [],
+      vehicleIds: occupant.vehicleId === null ? [] : [occupant.vehicleId],
+      sessionIds: [occupant.id],
+    },
+    payload: { kind: 'occupied' },
+  }
+}
+
+async function discoverTechQuickMutation(
+  tx: AppDb,
+  actor: ActiveTechQuickActor,
+  request: OwnedTechQuickRequest,
+  allowInsert: boolean,
+): Promise<Readonly<{ lockRequest: MutationLockRequestV1; payload: TechQuickDiscovery }>> {
+  const [occupant] = await tx.select().from(sessions)
+    .where(eq(sessions.id, request.requestKey)).limit(1)
+  if (!occupant) {
+    if (!allowInsert) {
+      return { lockRequest: baseTechQuickLockRequest(actor), payload: { kind: 'missing' } }
+    }
+    const ticketId = randomUUID()
+    const jobId = randomUUID()
+    return {
+      lockRequest: {
+        ...baseTechQuickLockRequest(actor),
+        includeAllJobsForTickets: true,
+        includeAllLinesForJobs: true,
+        insertionIntents: {
+          ...EMPTY_INSERTION_INTENTS,
+          sessions: [{ id: request.requestKey, shopId: actor.shopId, techId: actor.id }],
+          tickets: [ticketId],
+          jobs: [{ id: jobId, ticketId }],
+        },
+      },
+      payload: { kind: 'insert', ticketId, jobId },
+    }
+  }
+  if (occupant.shopId !== actor.shopId) {
+    return { lockRequest: baseTechQuickLockRequest(actor), payload: { kind: 'occupied' } }
   }
 
-  const [job] = await db
-    .select({
-      id: ticketJobs.id,
-      ticketId: ticketJobs.ticketId,
-      jobShopId: ticketJobs.shopId,
-      sessionId: ticketJobs.sessionId,
-      assignedTechId: ticketJobs.assignedTechId,
-      title: ticketJobs.title,
-      kind: ticketJobs.kind,
-      requiredSkillTier: ticketJobs.requiredSkillTier,
-      ticketShopId: tickets.shopId,
-      source: tickets.source,
-      customerId: tickets.customerId,
-      vehicleId: tickets.vehicleId,
-      concern: tickets.concern,
-      createdByProfileId: tickets.createdByProfileId,
-    })
-    .from(ticketJobs)
-    .innerJoin(tickets, eq(tickets.id, ticketJobs.ticketId))
-    .where(
-      and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.sessionId, requestKey),
-        eq(ticketJobs.assignedTechId, profileId),
-      ),
-    )
-    .limit(1)
-  if (
-    !job ||
-    job.jobShopId !== shopId ||
-    job.ticketShopId !== shopId ||
-    job.sessionId !== requestKey ||
-    job.assignedTechId !== profileId ||
-    job.kind !== 'diagnostic' ||
-    ![1, 2, 3].includes(job.requiredSkillTier) ||
-    job.title !== incomingIntake.customerComplaint ||
-    job.source !== 'tech_quick' ||
-    job.customerId !== null ||
-    job.vehicleId !== null ||
-    job.concern !== incomingIntake.customerComplaint ||
-    job.createdByProfileId !== profileId
-  ) {
-    return { kind: 'collision' }
+  const linkedJobs = await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, actor.shopId),
+    eq(ticketJobs.sessionId, request.requestKey),
+  ))
+  const candidateJobIds = [...new Set(linkedJobs.map(({ id }) => id))].sort()
+  const candidateTicketIds = [...new Set(linkedJobs.map(({ ticketId }) => ticketId))].sort()
+  if (candidateJobIds.length === 0 || candidateTicketIds.length === 0) {
+    return occupiedTechQuickDiscovery(tx, actor, occupant)
   }
-  return { kind: 'match', ticketId: job.ticketId, jobId: job.id }
+  const candidateTickets = candidateTicketIds.length === 0 ? [] : await tx.select()
+    .from(tickets).where(and(
+      eq(tickets.shopId, actor.shopId),
+      inArray(tickets.id, candidateTicketIds),
+    ))
+  const completeJobs = candidateTicketIds.length === 0 ? [] : await tx.select()
+    .from(ticketJobs).where(and(
+      eq(ticketJobs.shopId, actor.shopId),
+      inArray(ticketJobs.ticketId, candidateTicketIds),
+    ))
+  const completeJobIds = completeJobs.map(({ id }) => id)
+  const completeLines = completeJobIds.length === 0 ? [] : await tx.select()
+    .from(jobLines).where(and(
+      eq(jobLines.shopId, actor.shopId),
+      inArray(jobLines.jobId, completeJobIds),
+    ))
+  const sessionIds = [...new Set([
+    request.requestKey,
+    ...completeJobs.flatMap(({ sessionId }) => sessionId === null ? [] : [sessionId]),
+  ])].sort()
+  const replaySessions = await tx.select().from(sessions).where(and(
+    eq(sessions.shopId, actor.shopId),
+    inArray(sessions.id, sessionIds),
+  ))
+  const vehicleIds = [...new Set([
+    ...candidateTickets.flatMap(({ vehicleId }) => vehicleId === null ? [] : [vehicleId]),
+    ...replaySessions.flatMap(({ vehicleId }) => vehicleId === null ? [] : [vehicleId]),
+  ])].sort()
+  const replayVehicles = vehicleIds.length === 0 ? [] : await tx.select().from(vehicles)
+    .where(inArray(vehicles.id, vehicleIds))
+  const customerIds = [...new Set([
+    ...candidateTickets.flatMap(({ customerId }) => customerId === null ? [] : [customerId]),
+    ...replayVehicles.map(({ customerId }) => customerId),
+  ])].sort()
+  const quoteClosure = completeJobs.some((job) =>
+    job.approvedQuoteVersionId !== null || job.approvedApprovalEventId !== null)
+  const versions = !quoteClosure || candidateTicketIds.length === 0 ? [] : await tx.select()
+    .from(quoteVersions).where(and(
+      eq(quoteVersions.shopId, actor.shopId),
+      inArray(quoteVersions.ticketId, candidateTicketIds),
+    ))
+  const events = !quoteClosure || candidateTicketIds.length === 0 ? [] : await tx.select()
+    .from(quoteEvents).where(and(
+      eq(quoteEvents.shopId, actor.shopId),
+      inArray(quoteEvents.ticketId, candidateTicketIds),
+    ))
+  const candidateTicketIdSet = new Set(candidateTicketIds)
+  const completeJobIdSet = new Set(completeJobIds)
+  const jobById = new Map(completeJobs.map((job) => [job.id, job] as const))
+  const versionById = new Map(versions.map((version) => [version.id, version] as const))
+  const eventById = new Map(events.map((event) => [event.id, event] as const))
+  const incompleteReferenceClosure =
+    candidateTickets.length !== candidateTicketIds.length ||
+    !candidateJobIds.every((id) => completeJobIdSet.has(id)) ||
+    replaySessions.length !== sessionIds.length ||
+    replayVehicles.length !== vehicleIds.length ||
+    candidateTickets.some((ticket) =>
+      ticket.separateFromTicketId !== null &&
+      !candidateTicketIdSet.has(ticket.separateFromTicketId)) ||
+    completeJobs.some((job) => {
+      if (
+        job.createdFromJobId !== null &&
+        !completeJobIdSet.has(job.createdFromJobId)
+      ) return true
+      if (job.approvedQuoteVersionId !== null) {
+        const version = versionById.get(job.approvedQuoteVersionId)
+        if (!version || version.ticketId !== job.ticketId) return true
+      }
+      if (job.approvedApprovalEventId !== null) {
+        const event = eventById.get(job.approvedApprovalEventId)
+        if (!event || event.ticketId !== job.ticketId || event.jobId !== job.id) return true
+      }
+      return false
+    }) ||
+    events.some((event) => {
+      const eventJob = event.jobId === null ? null : jobById.get(event.jobId)
+      const eventVersion = event.quoteVersionId === null
+        ? null
+        : versionById.get(event.quoteVersionId)
+      return !candidateTicketIdSet.has(event.ticketId) ||
+        (event.jobId !== null && (!eventJob || eventJob.ticketId !== event.ticketId)) ||
+        (event.quoteVersionId !== null && (
+          !eventVersion || eventVersion.ticketId !== event.ticketId
+        ))
+    })
+  if (incompleteReferenceClosure) {
+    return occupiedTechQuickDiscovery(tx, actor, occupant)
+  }
+  const profileIds = [...new Set([
+    actor.id,
+    ...candidateTickets.flatMap((ticket) => [
+      ticket.createdByProfileId,
+      ticket.canceledByProfileId,
+      ticket.deliveredByProfileId,
+      ticket.closedByProfileId,
+    ].filter((id): id is string => id !== null)),
+    ...completeJobs.flatMap((job) => [
+      job.assignedTechId,
+      job.createdByProfileId,
+      job.statementConfirmedByProfileId,
+    ].filter((id): id is string => id !== null)),
+    ...completeLines.flatMap((line) => [
+      line.orderedByProfileId,
+      line.receivedByProfileId,
+    ].filter((id): id is string => id !== null)),
+    ...replaySessions.map(({ techId }) => techId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.flatMap(({ actorProfileId }) => actorProfileId === null ? [] : [actorProfileId]),
+  ])].sort()
+  const vendorAccountIds = [...new Set(completeLines.flatMap(({ vendorAccountId }) =>
+    vendorAccountId === null ? [] : [vendorAccountId]))].sort()
+  return {
+    lockRequest: {
+      ...baseTechQuickLockRequest(actor),
+      profileIds,
+      customerIds,
+      vehicleIds,
+      ticketIds: candidateTicketIds,
+      jobIds: candidateJobIds,
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: quoteClosure,
+      includeAllQuoteEventsForTickets: quoteClosure,
+      sessionIds,
+      vendorAccountIds,
+    },
+    payload: { kind: 'replay', candidateTicketIds, candidateJobIds },
+  }
+}
+
+function sameLockedActorIdentity(
+  actor: ActiveTechQuickActor,
+  scopeActor: Readonly<{ id: string; shopId: string; role: string; skillTier: number | null }>,
+): boolean {
+  return scopeActor.id === actor.id && scopeActor.shopId === actor.shopId
+}
+
+async function runTechQuickMutation(
+  db: AppDb,
+  actor: ActiveTechQuickActor,
+  request: OwnedTechQuickRequest,
+  allowInsert: boolean,
+): Promise<Readonly<{ id: string; ticketId: string; jobId: string }>> {
+  const origin = createTechQuickTicketOriginV1(request.requestKey)
+  const executeLocked = async (
+    tx: AppDb,
+    scope: Parameters<typeof resolveTicketCreationInLockedScopeV1>[1],
+    discovery: TechQuickDiscovery,
+  ): Promise<Readonly<{ id: string; ticketId: string; jobId: string }>> => {
+    if (!sameLockedActorIdentity(actor, scope.actor)) throw new TechQuickRequestUnavailable()
+    const skillTier = scope.actor.skillTier
+    if (
+      !isShopRole(scope.actor.role) || skillTier === null ||
+      ![1, 2, 3].includes(skillTier)
+    ) throw new TechQuickRequestUnavailable()
+    if (discovery.kind === 'missing' || discovery.kind === 'occupied') {
+      throw new TechQuickRequestUnavailable()
+    }
+    if (discovery.kind === 'replay') {
+      try {
+        const resolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'tech_quick_replay',
+          origin,
+          sessionId: request.requestKey,
+          intake: request.intake,
+          candidateTicketIds: discovery.candidateTicketIds,
+          candidateJobIds: discovery.candidateJobIds,
+        })
+        return readResolvedTechQuickReplayResultV1(tx, scope, resolved)
+      } catch (error) {
+        if (isTicketCreationKernelInvalidV1(error)) {
+          throw new TechQuickRequestUnavailable()
+        }
+        throw error
+      }
+    }
+    if (!allowInsert || request.treeState === null) throw new ShopOsMutationNotFound()
+    const resolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+      mode: 'insert',
+      origin,
+      ticket: {
+        id: discovery.ticketId,
+        customerId: null,
+        vehicleId: null,
+        concern: request.intake.customerComplaint,
+        whenStarted: null,
+        howOften: null,
+        diagnosticAuthorizedCents: null,
+        diagnosticAuthorizationNote: null,
+      },
+      jobs: [{
+        id: discovery.jobId,
+        title: request.intake.customerComplaint,
+        kind: 'diagnostic',
+        requiredSkillTier: skillTier as 1 | 2 | 3,
+        assignedTechId: scope.actor.id,
+        sessionId: request.requestKey,
+        createdFromJobId: null,
+      }],
+      seededLinesByJobIndex: new Map(),
+    })
+    const [createdSession] = await tx.insert(sessions).values({
+      id: request.requestKey,
+      shopId: scope.actor.shopId,
+      techId: scope.actor.id,
+      intake: request.intake,
+      treeState: request.treeState,
+    }).returning()
+    if (
+      !createdSession || createdSession.id !== request.requestKey ||
+      createdSession.shopId !== scope.actor.shopId ||
+      createdSession.techId !== scope.actor.id || createdSession.vehicleId !== null ||
+      createdSession.status !== 'open' || !sameIntake(createdSession.intake, request.intake) ||
+      canonicalJson(createdSession.treeState) !== canonicalJson(request.treeState)
+    ) throw new ShopOsMutationConflict()
+    const batch = await insertResolvedTicketBatchInTransactionV1(tx, scope, resolved)
+    const finalized = await finalizeResolvedTicketCreationInTransactionV1(
+      tx,
+      scope,
+      resolved,
+      [{
+        ticketId: discovery.ticketId,
+        createdTicket: true,
+        createdJobIds: [discovery.jobId],
+        existingChangedJobIds: [],
+        actorVisibleTicketFieldsChanged: true,
+      }],
+    )
+    const result = readFinalizedTicketCreationResultV1(tx, scope, finalized)
+    if (
+      createdSession.id !== request.requestKey || batch.ticketId !== discovery.ticketId ||
+      batch.jobIds.length !== 1 || batch.jobIds[0] !== discovery.jobId ||
+      result.ticketId !== discovery.ticketId || result.jobIds.length !== 1 ||
+      result.jobIds[0] !== discovery.jobId
+    ) throw new ShopOsMutationConflict()
+    return Object.freeze({
+      id: createdSession.id,
+      ticketId: result.ticketId,
+      jobId: result.jobIds[0]!,
+    })
+  }
+
+  try {
+    return await runBoundedShopOsMutationV1<
+      Readonly<{ id: string; ticketId: string; jobId: string }>,
+      TechQuickDiscovery
+    >(db, {
+      discover: async (tx) => {
+        const discovered = await discoverTechQuickMutation(tx, actor, request, allowInsert)
+        return discovered
+      },
+      executeLocked: async (tx, scope, discovery) =>
+        executeLocked(tx, scope, discovery),
+      uniqueCollisionRecovery: allowInsert ? {
+        allowedConstraints: ['sessions_pkey'],
+        executeLocked: async (tx, scope, discovery, _attempt, constraint) => {
+          if (
+            constraint !== 'sessions_pkey' ||
+            (discovery.kind !== 'replay' && discovery.kind !== 'occupied')
+          ) {
+            return { kind: 'unresolved' as const }
+          }
+          return {
+            kind: 'recovered' as const,
+            value: await executeLocked(tx, scope, discovery),
+          }
+        },
+      } : undefined,
+    })
+  } catch (error) {
+    if (
+      error instanceof TechQuickRequestUnavailable ||
+      error instanceof ShopOsMutationNotFound
+    ) {
+      throw new TechQuickRequestUnavailable()
+    }
+    throw error
+  }
+}
+
+async function authorizeTechQuickRequest(
+  db: AppDb,
+  request: OwnedTechQuickRequest,
+): Promise<ActiveTechQuickActor | null> {
+  const ownedActor = ownTechQuickActor(await getProfileByUserId(db, request.userId))
+  return activeTechQuickActor(ownedActor)
 }
 
 export type FindCompletedTechQuickSessionResult =
-  | { ok: true; state: 'match'; id: string; ticketId: string; jobId: string }
+  | { ok: true; state: 'match' }
   | { ok: true; state: 'missing' }
   | { ok: false; status: 400; error: string }
 
@@ -204,26 +661,36 @@ export async function findCompletedTechQuickSessionForUser(opts: {
   userId: string
   body: unknown
 }): Promise<FindCompletedTechQuickSessionResult> {
-  const validated = await validateSessionCreationRequest(opts)
-  if (!validated.ok) return validated
-  const { profileId, shopId, requestKey, intake } = validated.value
-  const existing = await findCompletedSessionWrapper(
-    opts.db,
-    requestKey,
-    profileId,
-    shopId,
-    intake,
-  )
-  if (existing.kind === 'missing') return { ok: true, state: 'missing' }
-  if (existing.kind === 'collision') {
+  const db = opts.db
+  const owned = ownTechQuickRequest(opts.userId, opts.body)
+  if (!owned.ok) return { ok: false, status: 400, error: owned.error }
+  const actor = await authorizeTechQuickRequest(db, owned.value)
+  if (!actor) return { ok: false, status: 400, error: 'inactive wrenching profile' }
+  const state = await completedTechQuickHint(db, actor, owned.value)
+  if (state === 'missing') return { ok: true, state: 'missing' }
+  if (state === 'collision') {
     return { ok: false, status: 400, error: 'request key unavailable' }
   }
-  return {
-    ok: true,
-    state: 'match',
-    id: requestKey,
-    ticketId: existing.ticketId,
-    jobId: existing.jobId,
+  return { ok: true, state: 'match' }
+}
+
+export async function replayCompletedTechQuickSessionForUser(opts: {
+  db: AppDb
+  userId: string
+  body: unknown
+}): Promise<CreateSessionResult> {
+  const db = opts.db
+  const owned = ownTechQuickRequest(opts.userId, opts.body)
+  if (!owned.ok) return { ok: false, status: 400, error: owned.error }
+  const actor = await authorizeTechQuickRequest(db, owned.value)
+  if (!actor) return { ok: false, status: 400, error: 'inactive wrenching profile' }
+  try {
+    const result = await runTechQuickMutation(db, actor, owned.value, false)
+    return { ok: true, ...result }
+  } catch (error) {
+    return error instanceof TechQuickRequestUnavailable
+      ? { ok: false, status: 400, error: 'request key unavailable' }
+      : { ok: false, status: 500, error: 'session create failed' }
   }
 }
 
@@ -232,69 +699,17 @@ export async function createSessionForUser(opts: {
   userId: string
   body: unknown
   treeState: TreeState
-  createWrapper?: CreateSessionWrapper
 }): Promise<CreateSessionResult> {
-  const validated = await validateSessionCreationRequest(opts)
-  if (!validated.ok) return validated
-  const { profileId, shopId, skillTier, requestKey, intake } = validated.value
-  const existing = await findCompletedSessionWrapper(
-    opts.db,
-    requestKey,
-    profileId,
-    shopId,
-    intake,
-  )
-  if (existing.kind === 'match') {
-    return {
-      ok: true,
-      id: requestKey,
-      ticketId: existing.ticketId,
-      jobId: existing.jobId,
-    }
-  }
-  if (existing.kind === 'collision') {
-    return { ok: false, status: 400, error: 'request key unavailable' }
-  }
-
-  const createWrapper = opts.createWrapper ?? createTechQuickTicketInTransaction
+  const db = opts.db
+  const owned = ownTechQuickRequest(opts.userId, opts.body, opts.treeState)
+  if (!owned.ok) return { ok: false, status: 400, error: owned.error }
+  const actor = await authorizeTechQuickRequest(db, owned.value)
+  if (!actor) return { ok: false, status: 400, error: 'inactive wrenching profile' }
   try {
-    return await opts.db.transaction(async (tx) => {
-      const [session] = await tx
-        .insert(sessions)
-        .values({
-          id: requestKey,
-          shopId,
-          techId: profileId,
-          intake,
-          treeState: opts.treeState,
-        })
-        .returning()
-      const wrapper = await createWrapper(tx as AppDb, {
-        shopId,
-        profileId,
-        skillTier,
-        sessionId: session.id,
-        concern: intake.customerComplaint,
-      })
-      return { ok: true, id: session.id, ...wrapper }
-    })
-  } catch {
-    const retry = await findCompletedSessionWrapper(
-      opts.db,
-      requestKey,
-      profileId,
-      shopId,
-      intake,
-    )
-    if (retry.kind === 'match') {
-      return {
-        ok: true,
-        id: requestKey,
-        ticketId: retry.ticketId,
-        jobId: retry.jobId,
-      }
-    }
-    return retry.kind === 'collision'
+    const result = await runTechQuickMutation(db, actor, owned.value, true)
+    return { ok: true, ...result }
+  } catch (error) {
+    return error instanceof TechQuickRequestUnavailable
       ? { ok: false, status: 400, error: 'request key unavailable' }
       : { ok: false, status: 500, error: 'session create failed' }
   }

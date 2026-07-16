@@ -3,6 +3,7 @@ import { db } from '@/lib/db/client'
 import {
   createSessionForUser,
   findCompletedTechQuickSessionForUser,
+  replayCompletedTechQuickSessionForUser,
 } from '@/lib/sessions'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { entitlementReject } from '@/lib/auth-access'
@@ -86,10 +87,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: preflight.error }, { status: preflight.status })
   }
   if (preflight.state === 'match') {
+    const replay = await replayCompletedTechQuickSessionForUser({
+      db,
+      userId: user.id,
+      body: parsed.data,
+    })
+    if (!replay.ok) {
+      return NextResponse.json({ error: replay.error }, { status: replay.status })
+    }
     return NextResponse.json({
-      id: preflight.id,
-      ticketId: preflight.ticketId,
-      jobId: preflight.jobId,
+      id: replay.id,
+      ticketId: replay.ticketId,
+      jobId: replay.jobId,
     })
   }
 

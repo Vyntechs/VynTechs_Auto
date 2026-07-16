@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { intakeSchema, type IntakePayload } from '@/lib/types'
 import type { AppDb } from '@/lib/db/queries'
 import {
   customers,
@@ -404,107 +405,6 @@ const createTicketBodySchema = z
 
 type TicketJobBody = z.infer<typeof ticketJobBodySchema>
 type CreateTicketBody = z.infer<typeof createTicketBodySchema>
-
-type TransactionTicketJob = {
-  title: string
-  kind: 'diagnostic' | 'repair' | 'maintenance'
-  requiredSkillTier: 1 | 2 | 3
-  assignedTechId: string | null
-  sessionId?: string | null
-}
-
-type TransactionTicketInput = {
-  ticketId?: string
-  shopId: string
-  source: 'counter' | 'tech_quick' | 'quick_quote'
-  customerId: string | null
-  vehicleId: string | null
-  concern: string
-  whenStarted?: string | null
-  howOften?: string | null
-  diagnosticAuthorizedCents?: number | null
-  diagnosticAuthorizationNote?: string | null
-  createdByProfileId: string
-  jobs: TransactionTicketJob[]
-}
-
-async function insertTicketInTransaction(db: AppDb, input: TransactionTicketInput) {
-  const [sequence] = await db
-    .update(shops)
-    .set({ nextTicketNumber: sql`${shops.nextTicketNumber} + 1` })
-    .where(eq(shops.id, input.shopId))
-    .returning()
-  if (!sequence) return null
-
-  const [ticket] = await db
-    .insert(tickets)
-    .values({
-      id: input.ticketId,
-      shopId: input.shopId,
-      ticketNumber: sequence.nextTicketNumber - 1,
-      source: input.source,
-      customerId: input.customerId,
-      vehicleId: input.vehicleId,
-      concern: input.concern,
-      whenStarted: input.whenStarted,
-      howOften: input.howOften,
-      diagnosticAuthorizedCents: input.diagnosticAuthorizedCents,
-      diagnosticAuthorizationNote: input.diagnosticAuthorizationNote,
-      createdByProfileId: input.createdByProfileId,
-    })
-    .returning()
-
-  const jobs = await db
-    .insert(ticketJobs)
-    .values(
-      input.jobs.map((job) => ({
-        shopId: input.shopId,
-        ticketId: ticket.id,
-        title: job.title,
-        kind: job.kind,
-        requiredSkillTier: job.requiredSkillTier,
-        assignedTechId: job.assignedTechId,
-        sessionId: job.sessionId,
-      })),
-    )
-    .returning()
-
-  return { ticketId: ticket.id, jobIds: jobs.map((job) => job.id) }
-}
-
-export type CreateTechQuickTicketInput = {
-  shopId: string
-  profileId: string
-  skillTier: 1 | 2 | 3
-  sessionId: string
-  concern: string
-}
-
-/** Internal orchestration seam. The caller must supply an open transaction. */
-export async function createTechQuickTicketInTransaction(
-  tx: AppDb,
-  input: CreateTechQuickTicketInput,
-): Promise<{ ticketId: string; jobId: string }> {
-  const created = await insertTicketInTransaction(tx, {
-    shopId: input.shopId,
-    source: 'tech_quick',
-    customerId: null,
-    vehicleId: null,
-    concern: input.concern,
-    createdByProfileId: input.profileId,
-    jobs: [
-      {
-        title: input.concern,
-        kind: 'diagnostic',
-        requiredSkillTier: input.skillTier,
-        assignedTechId: input.profileId,
-        sessionId: input.sessionId,
-      },
-    ],
-  })
-  if (!created) throw new Error('tech_quick_shop_not_found')
-  return { ticketId: created.ticketId, jobId: created.jobIds[0] }
-}
 
 function actorGate(actor: TicketActor): { ok: false; error: TicketDomainError } | null {
   if (!actor.shopId) return { ok: false, error: 'no_shop' }
@@ -1474,6 +1374,14 @@ export type ResolveTicketCreationInputV1 =
       resultTicketId: string
       receipt: CanonicalQuickReceiptRequestV1
     }>
+  | Readonly<{
+      mode: 'tech_quick_replay'
+      origin: TrustedTicketOriginV1
+      sessionId: string
+      intake: IntakePayload
+      candidateTicketIds: readonly string[]
+      candidateJobIds: readonly string[]
+    }>
 
 type OwnedQuickReceiptV1 = ReturnType<
   typeof consumeCanonicalQuickReceiptRequestForCreationV1
@@ -1496,6 +1404,11 @@ type ResolvedTicketCreationStateV1 = {
   createdRows: CreatedMutationRowsV1
   receipt: OwnedQuickReceiptV1 | null
   replayTicketId: string | null
+  techQuickReplayResult: Readonly<{
+    session: typeof sessions.$inferSelect
+    ticket: typeof tickets.$inferSelect
+    job: typeof ticketJobs.$inferSelect
+  }> | null
   phase: 'resolved' | 'inserting' | 'inserted' | 'finalizing' | 'finalized'
   batch?: CreatedTicketBatchV1
   insertedLineIds?: readonly string[]
@@ -1529,8 +1442,21 @@ const KERNEL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const KERNEL_JOB_KINDS = new Set(['diagnostic', 'repair', 'maintenance'])
 const KERNEL_LINE_KINDS = new Set(['part', 'labor', 'fee'])
 
+class TicketCreationKernelInvalid extends Error {
+  constructor() {
+    super('ticket_creation_kernel_invalid')
+    this.name = 'TicketCreationKernelInvalid'
+  }
+}
+
+export function isTicketCreationKernelInvalidV1(
+  error: unknown,
+): boolean {
+  return error instanceof TicketCreationKernelInvalid
+}
+
 function invalidTicketCreationKernel(): never {
-  throw new Error('ticket_creation_kernel_invalid')
+  throw new TicketCreationKernelInvalid()
 }
 
 function kernelUuid(value: unknown): string {
@@ -1969,6 +1895,48 @@ function exactTicketCreationLockFootprint(
   ) return invalidTicketCreationKernel()
 }
 
+function noInsertionIntents(scope: LockedMutationScopeV1): boolean {
+  return scope.insertionIntents.sessions.length === 0 &&
+    scope.insertionIntents.customers.length === 0 &&
+    scope.insertionIntents.vehicles.length === 0 &&
+    scope.insertionIntents.tickets.length === 0 &&
+    scope.insertionIntents.jobs.length === 0
+}
+
+function exactTechQuickReplayLockFootprint(
+  scope: LockedMutationScopeV1,
+  sessionId: string,
+  candidateTicketIds: readonly string[],
+  candidateJobIds: readonly string[],
+): void {
+  if (
+    scope.request.lockShop !== true || scope.shop?.id !== scope.actor.shopId ||
+    scope.request.receiptRequestKey !== null ||
+    scope.request.receiptConditionalInsert !== null ||
+    scope.receiptPeek.kind !== 'none' ||
+    scope.receiptConditionalInsertState !== 'not_applicable' ||
+    scope.request.includeAllJobsForTickets !== true ||
+    scope.request.includeAllLinesForJobs !== true ||
+    scope.request.sessionEventIds.length !== 0 || scope.sessionEvents.length !== 0 ||
+    scope.request.cannedJobIds.length !== 0 || scope.cannedJobs.length !== 0 ||
+    !scope.request.sessionIds.includes(sessionId) ||
+    !sameIds(scope.request.ticketIds, candidateTicketIds) ||
+    !sameIds(scope.request.jobIds, candidateJobIds) ||
+    !sameIds(scope.request.profileIds, scope.profiles.map(({ id }) => id)) ||
+    !sameIds(scope.request.vendorAccountIds, scope.vendorAccounts.map(({ id }) => id)) ||
+    !noInsertionIntents(scope)
+  ) return invalidTicketCreationKernel()
+}
+
+function nonnegativeBigint(value: unknown): value is bigint {
+  return typeof value === 'bigint' && value >= 0n
+}
+
+function sameNormalizedIntake(left: unknown, right: IntakePayload): boolean {
+  const parsed = intakeSchema.safeParse(left)
+  return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(right)
+}
+
 function assertActivatedQuickInsertScope(scope: LockedMutationScopeV1): void {
   if (
     scope.request.receiptRequestKey === null ||
@@ -2138,11 +2106,120 @@ export function resolveTicketCreationInLockedScopeV1(
   const modeDescriptor = Object.getOwnPropertyDescriptor(input, 'mode')
   if (
     !modeDescriptor?.enumerable || !('value' in modeDescriptor) ||
-    !['insert', 'intake_insert', 'quick_insert', 'replay'].includes(
+    !['insert', 'intake_insert', 'quick_insert', 'replay', 'tech_quick_replay'].includes(
       modeDescriptor.value as string,
     )
   ) return invalidTicketCreationKernel()
   const mode = modeDescriptor.value as ResolveTicketCreationInputV1['mode']
+
+  if (mode === 'tech_quick_replay') {
+    const record = exactOwnRecord(input, [
+      'mode', 'origin', 'sessionId', 'intake', 'candidateTicketIds', 'candidateJobIds',
+    ])
+    if (record.mode !== 'tech_quick_replay') return invalidTicketCreationKernel()
+    const sessionId = kernelUuid(record.sessionId)
+    const parsedIntake = intakeSchema.safeParse(record.intake)
+    if (!parsedIntake.success) return invalidTicketCreationKernel()
+    const candidateTicketIds = denseArray(record.candidateTicketIds, 0, 25)
+      .map(kernelUuid).sort()
+    const candidateJobIds = denseArray(record.candidateJobIds, 0, 25)
+      .map(kernelUuid).sort()
+    if (
+      new Set(candidateTicketIds).size !== candidateTicketIds.length ||
+      new Set(candidateJobIds).size !== candidateJobIds.length
+    ) return invalidTicketCreationKernel()
+    exactTechQuickReplayLockFootprint(
+      scope,
+      sessionId,
+      candidateTicketIds,
+      candidateJobIds,
+    )
+    if (
+      scope.actor.skillTier === null ||
+      ![1, 2, 3].includes(scope.actor.skillTier)
+    ) return invalidTicketCreationKernel()
+
+    const matchingSessions = scope.sessions.filter(({ id }) => id === sessionId)
+    const linked = scope.tickets.flatMap((graph) => graph.jobs
+      .filter((job) => job.sessionId === sessionId)
+      .map((job) => ({ graph, job })))
+    if (
+      matchingSessions.length !== 1 || linked.length !== 1 || scope.tickets.length !== 1
+    ) return invalidTicketCreationKernel()
+    const session = matchingSessions[0]!
+    const { graph, job } = linked[0]!
+    const ticket = graph.ticket
+    if (
+      session.shopId !== scope.actor.shopId || session.techId !== scope.actor.id ||
+      !sameNormalizedIntake(session.intake, parsedIntake.data) ||
+      ticket.shopId !== scope.actor.shopId || ticket.source !== 'tech_quick' ||
+      ticket.concern !== parsedIntake.data.customerComplaint ||
+      ticket.createdByProfileId !== scope.actor.id ||
+      ticket.separateFromTicketId !== null ||
+      !candidateTicketIds.includes(ticket.id) || !candidateJobIds.includes(job.id) ||
+      job.shopId !== scope.actor.shopId || job.ticketId !== ticket.id ||
+      job.sessionId !== session.id || job.assignedTechId !== scope.actor.id ||
+      job.kind !== 'diagnostic' || job.title !== parsedIntake.data.customerComplaint ||
+      !Number.isInteger(job.requiredSkillTier) ||
+      ![1, 2, 3].includes(job.requiredSkillTier) ||
+      job.createdFromJobId !== null ||
+      !nonnegativeBigint(ticket.projectionRevision) ||
+      !nonnegativeBigint(ticket.continuityRevision) ||
+      !nonnegativeBigint(job.revision)
+    ) return invalidTicketCreationKernel()
+
+    if ((ticket.customerId === null) !== (ticket.vehicleId === null)) {
+      return invalidTicketCreationKernel()
+    }
+    if (ticket.customerId !== null && ticket.vehicleId !== null) {
+      const customer = scope.customers.find(({ id }) => id === ticket.customerId)
+      const vehicle = scope.vehicles.find(({ id }) => id === ticket.vehicleId)
+      if (
+        !customer || customer.shopId !== scope.actor.shopId ||
+        !vehicle || vehicle.customerId !== customer.id
+      ) return invalidTicketCreationKernel()
+    }
+
+    const legacy = job.sequenceNumber === null &&
+      job.createdByProfileId === null && job.creatorProvenance === null
+    const migrated = job.sequenceNumber === 1 &&
+      job.createdByProfileId === ticket.createdByProfileId &&
+      job.createdByProfileId === scope.actor.id &&
+      job.creatorProvenance === 'ticket_creator_backfill'
+    const direct = job.sequenceNumber === 1 &&
+      job.createdByProfileId === scope.actor.id &&
+      job.creatorProvenance === 'direct' &&
+      job.revision >= 1n && ticket.projectionRevision >= 1n &&
+      ticket.continuityRevision >= 1n
+    if (!legacy && !migrated && !direct) return invalidTicketCreationKernel()
+
+    const origin = resolveTrustedTicketOriginInLockedScopeV1(
+      tx,
+      scope,
+      record.origin as TrustedTicketOriginV1,
+      {
+        mode: 'tech_quick_replay',
+        canonicalRequestKey: session.id,
+        ticketId: ticket.id,
+        jobs: [{ id: job.id, ticketId: ticket.id, sessionId: session.id }],
+      },
+    )
+    return createResolvedTicketCreationHandle({
+      tx,
+      scope,
+      capability,
+      mode: 'tech_quick_replay',
+      origin,
+      ticket: null,
+      jobs: Object.freeze([]),
+      seededLines: Object.freeze([]),
+      createdRows: cloneCreatedRows({ sessionIds: [], customerIds: [], vehicleIds: [] }),
+      receipt: null,
+      replayTicketId: null,
+      techQuickReplayResult: Object.freeze({ session, ticket, job }),
+      phase: 'resolved',
+    })
+  }
 
   if (mode === 'replay') {
     const record = exactOwnRecord(input, ['mode', 'origin', 'resultTicketId', 'receipt'])
@@ -2203,6 +2280,7 @@ export function resolveTicketCreationInLockedScopeV1(
       createdRows: cloneCreatedRows({ sessionIds: [], customerIds: [], vehicleIds: [] }),
       receipt,
       replayTicketId,
+      techQuickReplayResult: null,
       phase: 'resolved',
     })
   }
@@ -2341,6 +2419,7 @@ export function resolveTicketCreationInLockedScopeV1(
       createdRows: cloneCreatedRows(identity.createdRows),
       receipt,
       replayTicketId: null,
+      techQuickReplayResult: null,
       phase: 'resolved',
     })
   }
@@ -2396,6 +2475,7 @@ export function resolveTicketCreationInLockedScopeV1(
       }),
       receipt: null,
       replayTicketId: null,
+      techQuickReplayResult: null,
       phase: 'resolved',
     })
   }
@@ -2452,6 +2532,7 @@ export function resolveTicketCreationInLockedScopeV1(
     createdRows: cloneCreatedRows(identity.createdRows),
     receipt: null,
     replayTicketId: null,
+    techQuickReplayResult: null,
     phase: 'resolved',
   })
 }
@@ -2463,7 +2544,8 @@ export async function insertResolvedTicketBatchInTransactionV1(
 ): Promise<CreatedTicketBatchV1> {
   const state = resolvedTicketCreationStateFor(tx, scope, resolved)
   if (
-    state.mode === 'replay' || state.ticket === null || state.phase !== 'resolved'
+    (state.mode === 'replay' || state.mode === 'tech_quick_replay') ||
+    state.ticket === null || state.phase !== 'resolved'
   ) return invalidTicketCreationKernel()
   state.phase = 'inserting'
 
@@ -2723,7 +2805,7 @@ export async function finalizeResolvedTicketCreationInTransactionV1(
 ): Promise<FinalizedTicketCreationV1> {
   const state = resolvedTicketCreationStateFor(tx, scope, resolved)
   if (
-    state.mode === 'replay' || state.ticket === null ||
+    (state.mode === 'replay' || state.mode === 'tech_quick_replay') || state.ticket === null ||
     state.phase !== 'inserted' || !state.batch
   ) return invalidTicketCreationKernel()
   const [rawDelta] = denseArray(deltas, 1, 1)
@@ -2911,6 +2993,25 @@ export function readFinalizedTicketCreationResultV1(
   return Object.freeze({
     ticketId: finalizedState.batch.ticketId,
     jobIds: Object.freeze([...finalizedState.batch.jobIds]),
+  })
+}
+
+export function readResolvedTechQuickReplayResultV1(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  resolved: ResolvedTicketCreationV1,
+): Readonly<{ id: string; ticketId: string; jobId: string }> {
+  const state = resolvedTicketCreationStateFor(tx, scope, resolved)
+  const result = state.techQuickReplayResult
+  if (
+    state.mode !== 'tech_quick_replay' || state.origin !== 'tech_quick' ||
+    state.phase !== 'resolved' || state.ticket !== null || state.jobs.length !== 0 ||
+    state.receipt !== null || state.replayTicketId !== null || result === null
+  ) return invalidTicketCreationKernel()
+  return Object.freeze({
+    id: result.session.id,
+    ticketId: result.ticket.id,
+    jobId: result.job.id,
   })
 }
 
