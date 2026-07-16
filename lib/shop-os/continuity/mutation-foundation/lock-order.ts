@@ -414,12 +414,22 @@ function immutableSnapshot<T>(value: T, ancestors = new WeakSet<object>()): T {
   ancestors.add(value)
   try {
     if (Array.isArray(value)) {
-      const keys = Object.keys(value)
+      const keys = Object.getOwnPropertyNames(value)
       if (
-        keys.length !== value.length ||
-        keys.some((key, index) => key !== String(index))
+        keys.length !== value.length + 1 ||
+        keys[value.length] !== 'length'
       ) return invalidLockedValue()
-      return Object.freeze(value.map((item) => immutableSnapshot(item, ancestors))) as T
+      const snapshot: unknown[] = []
+      for (let index = 0; index < value.length; index += 1) {
+        const key = String(index)
+        if (keys[index] !== key) return invalidLockedValue()
+        const descriptor = Object.getOwnPropertyDescriptor(value, key)
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+          return invalidLockedValue()
+        }
+        snapshot.push(immutableSnapshot(descriptor.value, ancestors))
+      }
+      return Object.freeze(snapshot) as T
     }
 
     const snapshot = Object.create(prototype) as Record<string, unknown>
