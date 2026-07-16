@@ -435,6 +435,7 @@ export async function insertMutationReceiptPrimitiveV1(
   const expectation = normalizeExpectation(scope, input)
   const resultTicketId = normalizeUuid(input.resultTicketId)
   const resultJobIds = normalizeResultJobIds(input.resultJobIds)
+  const keyring = input.keyring
   await validateResultIdentity(
     tx,
     scope,
@@ -448,12 +449,12 @@ export async function insertMutationReceiptPrimitiveV1(
   try {
     requestFingerprint = createCanonicalMutationFingerprintV1(
       expectation.envelope,
-      input.keyring,
+      keyring,
     )
     targetBindingFingerprint = createCanonicalTargetBindingFingerprintV1(
       expectation.envelope.target,
       expectation.envelope.candidates,
-      input.keyring,
+      keyring,
     )
   } catch {
     return receiptConflict()

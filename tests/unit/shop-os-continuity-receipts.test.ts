@@ -905,6 +905,61 @@ describe('Shop OS immutable receipt insertion and replay', () => {
     expect(replay).toEqual({ kind: 'replay', ticketId: resultTicketId, jobIds: [] })
   })
 
+  it('owns the caller-supplied keyring before the first database await', async () => {
+    const insertReceipt = requiredReceiptFunction<(
+      tx: AppDb,
+      scope: LockedMutationScopeV1,
+      input: ReceiptExpectation & Readonly<{
+        keyring: MutationFingerprintKeyringV1
+        resultTicketId: string
+        resultJobIds: readonly string[]
+      }>,
+    ) => Promise<ReceiptIdentity>>('insertMutationReceiptPrimitiveV1')
+    const requestKey = uuid(451)
+    const resultTicketId = uuid(551)
+    const expectation = createExpectation(requestKey)
+    const v1Keyring = testKeyring(1, [1])
+    const v2Keyring = testKeyring(2, [2])
+    const retainedV1Keyring = testKeyring(2, [1, 2])
+    const mutableInput: ReceiptExpectation & {
+      keyring: MutationFingerprintKeyringV1
+      resultTicketId: string
+      resultJobIds: readonly string[]
+    } = {
+      ...expectation,
+      keyring: v1Keyring,
+      resultTicketId,
+      resultJobIds: [],
+    }
+
+    await withScope(preparedCreationRequest(requestKey, resultTicketId), async (tx, scope) => {
+      await tx.insert(tickets).values({
+        id: resultTicketId,
+        shopId: uuid(1),
+        ticketNumber: 551,
+        source: 'quick_quote',
+        customerId: uuid(20),
+        vehicleId: uuid(30),
+        concern: 'Brake noise',
+        createdByProfileId: uuid(10),
+      })
+      const inserting = insertReceipt(tx, scope, mutableInput)
+      mutableInput.keyring = v2Keyring
+      await inserting
+    })
+
+    const [persisted] = await db.select().from(ticketMutationReceipts).where(eq(
+      ticketMutationReceipts.requestKey,
+      requestKey,
+    ))
+    expect(persisted?.fingerprintKeyVersion).toBe(1)
+    expect(await classifyReceipt(requestKey, expectation, retainedV1Keyring)).toEqual({
+      kind: 'replay',
+      ticketId: resultTicketId,
+      jobIds: [],
+    })
+  })
+
   it('permits a zero-result receipt on a ticket that already has unrelated jobs', async () => {
     const insertReceipt = requiredReceiptFunction<(
       tx: AppDb,
