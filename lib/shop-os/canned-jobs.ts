@@ -15,7 +15,6 @@ import {
 } from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
 import {
   ShopOsMutationNotFound,
-  type MutationAttemptContextV1,
   type MutationAttemptCapabilityV1,
   type ResolvedLockedQuickTemplateV1,
   type ResolvedQuickTemplateV1,
@@ -160,6 +159,7 @@ type ApplyResult = { ok: true; changed: boolean; job: SafeAppliedCannedJob } | F
 export type ApplyCannedJobDependencies = {
   afterTicketLock?: () => Promise<void>
   afterJobInsert?: () => Promise<void>
+  afterPreflight?: (tx: AppDb) => Promise<void>
   afterDiscovery?: () => Promise<void>
   afterWrite?: () => Promise<void>
   afterFinalization?: () => Promise<void>
@@ -908,8 +908,9 @@ type CannedApplyDiscovery = Readonly<{
   separateChainIds: readonly string[]
   closureFingerprint: string | null
   replay: boolean
-  template: ResolvedQuickTemplateV1 | null
-  stableFailure: Failure | null
+  requestedCannedJobId: string
+  expectedFingerprint: string
+  expectedTaxRateBps: number | null
 }>
 
 function cannedApplyActorOnlyRequest(
@@ -941,7 +942,6 @@ function cannedApplyActorOnlyRequest(
 
 async function discoverCannedApplyMutation(
   tx: AppDb,
-  attempt: MutationAttemptContextV1,
   input: Readonly<{
     shopId: string
     actorProfileId: string
@@ -950,6 +950,7 @@ async function discoverCannedApplyMutation(
     cannedJobId: string
     expectedFingerprint: string
     expectedTaxRateBps: number | null
+    afterPreflight?: (tx: AppDb) => Promise<void>
   }>,
 ): Promise<Readonly<{
   lockRequest: MutationLockRequestV1
@@ -969,7 +970,10 @@ async function discoverCannedApplyMutation(
     lockRequest: cannedApplyActorOnlyRequest(input.shopId, input.actorProfileId),
     payload: Object.freeze({
       kind: 'not_found', jobId, separateChainIds: Object.freeze([]),
-      closureFingerprint: null, replay: false, template: null, stableFailure: null,
+      closureFingerprint: null, replay: false,
+      requestedCannedJobId: input.cannedJobId,
+      expectedFingerprint: input.expectedFingerprint,
+      expectedTaxRateBps: input.expectedTaxRateBps,
     }),
   })
 
@@ -1062,20 +1066,13 @@ async function discoverCannedApplyMutation(
     inArray(profiles.id, profileIds),
   )).orderBy(profiles.id)
 
-  const templateResult = replay ? null : await preflightStrictCannedJobV1(
-    tx,
-    attempt.capability,
-    {
-      shopId: input.shopId,
-      cannedJobId: input.cannedJobId,
-      expectedFingerprint: input.expectedFingerprint,
-      expectedTaxRateBps: input.expectedTaxRateBps,
-    },
-  )
-  const template = templateResult?.ok ? templateResult.template : null
-  const stableFailure = templateResult === null || templateResult.ok
-    ? null
-    : templateResult.error === 'not_found' ? notFound() : conflict()
+  if (!replay) {
+    await tx.select({ id: cannedJobs.id }).from(cannedJobs).where(and(
+      eq(cannedJobs.shopId, input.shopId),
+      eq(cannedJobs.id, input.cannedJobId),
+    )).limit(1)
+    await input.afterPreflight?.(tx)
+  }
   const lockShop = !replay
   const [shop] = lockShop
     ? await tx.select().from(shops).where(eq(shops.id, input.shopId)).limit(1)
@@ -1093,7 +1090,7 @@ async function discoverCannedApplyMutation(
     sessions: cannedApplyRowsById(sessionRows),
     vendors: cannedApplyRowsById(vendorRows),
   })
-  const createsJob = template !== null
+  const createsJob = !replay
   const insertionIntents = createsJob
     ? Object.freeze({
         ...emptyCannedApplyInsertionIntents(),
@@ -1118,7 +1115,7 @@ async function discoverCannedApplyMutation(
       sessionIds,
       sessionEventIds: Object.freeze([]),
       vendorAccountIds,
-      cannedJobIds: templateResult?.ok ? templateResult.cannedJobIds : Object.freeze([]),
+      cannedJobIds: replay ? Object.freeze([]) : Object.freeze([input.cannedJobId]),
       receiptRequestKey: null,
       receiptConditionalInsert: null,
       insertionIntents,
@@ -1129,8 +1126,9 @@ async function discoverCannedApplyMutation(
       separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
       closureFingerprint,
       replay,
-      template,
-      stableFailure,
+      requestedCannedJobId: input.cannedJobId,
+      expectedFingerprint: input.expectedFingerprint,
+      expectedTaxRateBps: input.expectedTaxRateBps,
     }),
   })
 }
@@ -1219,7 +1217,7 @@ export async function applyCannedJobToTicket(
 
   try {
     return await runBoundedShopOsMutationV1<ApplyResult, CannedApplyDiscovery>(db, {
-      discover: async (tx, attempt) => discoverCannedApplyMutation(tx, attempt, {
+      discover: async (tx) => discoverCannedApplyMutation(tx, {
         shopId: persistedActor.shopId,
         actorProfileId: persistedActor.id,
         ticketId: ticketId.data,
@@ -1227,6 +1225,7 @@ export async function applyCannedJobToTicket(
         cannedJobId: cannedJobId.data,
         expectedFingerprint: fingerprint.data,
         expectedTaxRateBps: taxRate.data,
+        afterPreflight: dependencies.afterPreflight,
       }),
       executeLocked: async (tx, scope, discovery) => {
         assertLiveLockedMutationScopeV1(tx, scope)
@@ -1239,7 +1238,7 @@ export async function applyCannedJobToTicket(
         if (existing) {
           const existingLines = graph.lines.filter(({ jobId }) => jobId === existing.id)
           if (
-            !discovery.replay || discovery.template !== null ||
+            !discovery.replay || scope.request.cannedJobIds.length !== 0 ||
             existing.createdByProfileId !== scope.actor.id ||
             existing.creatorProvenance !== 'direct' || existing.createdFromJobId !== null ||
             existingLines.some((line) => !isBuilderVisibleAppliedLine(line))
@@ -1249,29 +1248,27 @@ export async function applyCannedJobToTicket(
           return { ok: true, changed: false, job: safe }
         }
         if (discovery.replay) throw new ShopOsMutationConflict()
-        if (discovery.stableFailure) throw new AbortCannedApply(discovery.stableFailure)
-        if (!discovery.template || !scope.shop) throw new ShopOsMutationConflict()
+        if (!scope.shop) throw new ShopOsMutationConflict()
 
         const activeVersions = graph.versions.filter(({ supersededAt }) => supersededAt === null)
         if (activeVersions.length > 1) throw new AbortCannedApply(conflict())
-        let lockedTemplate: ResolvedLockedQuickTemplateV1
-        try {
-          lockedTemplate = resolveStrictCannedJobInLockedScopeV1(
-            tx,
-            scope,
-            discovery.template,
-          )
-        } catch (error) {
-          if (error instanceof Error && error.message === 'resolved_quick_template_invalid') {
-            throw new ShopOsMutationConflict()
-          }
-          throw error
+        if (
+          scope.request.cannedJobIds.length !== 1 || scope.cannedJobs.length !== 1 ||
+          scope.request.cannedJobIds[0] !== discovery.requestedCannedJobId ||
+          scope.cannedJobs[0]?.id !== discovery.requestedCannedJobId
+        ) throw new ShopOsMutationNotFound()
+        const templateRow = scope.cannedJobs[0]!
+        if (templateRow.retiredAt !== null) throw new ShopOsMutationNotFound()
+        if (
+          (scope.shop.taxRateBps !== null && (
+            !Number.isInteger(scope.shop.taxRateBps) ||
+            scope.shop.taxRateBps < 0 || scope.shop.taxRateBps > 10_000
+          )) || scope.shop.taxRateBps !== discovery.expectedTaxRateBps
+        ) throw new AbortCannedApply(conflict())
+        const template = projectRow(templateRow, scope.shop.taxRateBps)
+        if (!template || template.fingerprint !== discovery.expectedFingerprint) {
+          throw new AbortCannedApply(conflict())
         }
-        const template = consumeResolvedLockedQuickTemplateForCreationV1(
-          tx,
-          scope,
-          lockedTemplate,
-        )
         const reservations = reserveJobSequencesForInsertionV1(
           tx,
           scope,

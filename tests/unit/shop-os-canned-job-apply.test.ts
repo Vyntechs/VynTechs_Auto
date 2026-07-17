@@ -301,6 +301,24 @@ describe('Shop OS existing-ticket canned job application', () => {
     expect(await db.select().from(jobLines)).toHaveLength(0)
   })
 
+  it('classifies template availability from the locked row after failed-preflight drift', async () => {
+    await db.update(cannedJobs).set({ retiredAt: new Date('2026-07-15T12:00:00Z') })
+      .where(eq(cannedJobs.id, cannedJob.cannedJob.id))
+    await expect(apply({}, {
+      afterPreflight: async (tx: TestDb) => {
+        await tx.update(cannedJobs).set({ retiredAt: null })
+          .where(eq(cannedJobs.id, cannedJob.cannedJob.id))
+      },
+    })).resolves.toMatchObject({ ok: true, changed: true })
+
+    await expect(apply({ clientKey: uuid(61) }, {
+      afterPreflight: async (tx: TestDb) => {
+        await tx.update(cannedJobs).set({ retiredAt: new Date('2026-07-16T12:00:00Z') })
+          .where(eq(cannedJobs.id, cannedJob.cannedJob.id))
+      },
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+  })
+
   it('accepts an exact null tax context without inventing a total', async () => {
     await db.update(shops).set({ taxRateBps: null }).where(eq(shops.id, shopId))
     await expect(apply({ expectedTaxRateBps: null })).resolves.toMatchObject({ ok: true, changed: true })
