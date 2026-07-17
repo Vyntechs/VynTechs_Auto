@@ -11,12 +11,17 @@ vi.mock('@/lib/supabase-server', () => ({
 // db mock to a chainable no-op so the non-persistence cases don't throw; the
 // happy-path test swaps in a spy to assert what we persisted.
 const setSpy = vi.fn(() => ({ where: vi.fn(async () => undefined) }))
+const updateSpy = vi.fn()
 vi.mock('@/lib/db/client', () => ({
-  db: { update: vi.fn(() => ({ set: setSpy })) },
+  db: { update: vi.fn(() => {
+    updateSpy()
+    return { set: setSpy }
+  }) },
 }))
 // Paywall runs against a real DB in production; with the stubbed db here it
 // would throw, so we stub it. Default = allowed (null). One test overrides it.
-vi.mock('@/lib/auth-access', () => ({
+vi.mock('@/lib/auth-access', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/auth-access')>()),
   entitlementReject: vi.fn(async () => null),
 }))
 vi.mock('@/lib/sessions', () => ({
@@ -31,6 +36,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { entitlementReject } from '@/lib/auth-access'
 import { getSessionForUser } from '@/lib/sessions'
 import { getFlowVersionById } from '@/lib/flows/lookup'
+import { isDiagnosticsGatedRoute } from '@/lib/auth-access'
 import type { WizardState } from '@/lib/flows/types'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
@@ -121,6 +127,9 @@ describe('POST /api/sessions/[id]/wizard-state', () => {
   })
 
   it('returns the paywall 403 and does not proceed when access is denied', async () => {
+    expect(
+      isDiagnosticsGatedRoute(`/api/sessions/${SESSION_ID}/wizard-state`),
+    ).toBe(true)
     paywallMock.mockResolvedValue(
       NextResponse.json({ error: 'deactivated' }, { status: 403 }),
     )
@@ -130,6 +139,7 @@ describe('POST /api/sessions/[id]/wizard-state', () => {
     // A deactivated user must not be able to drive the wizard.
     expect(getSessionMock).not.toHaveBeenCalled()
     expect(getFlowMock).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
     expect(setSpy).not.toHaveBeenCalled()
   })
 
@@ -226,6 +236,9 @@ describe('POST /api/sessions/[id]/wizard-state', () => {
     expect(await res.json()).toEqual({ ok: true })
     expect(setSpy).toHaveBeenCalledTimes(1)
     expect(setSpy).toHaveBeenCalledWith({ wizardState: body })
+    expect(paywallMock.mock.invocationCallOrder[0]).toBeLessThan(
+      updateSpy.mock.invocationCallOrder[0],
+    )
   })
 
   it('returns 200 on first save when the session has no prior wizardState (null)', async () => {
