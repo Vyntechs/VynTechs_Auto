@@ -24,10 +24,7 @@ import {
   type GenerateCustomerStoryFn,
   type GeneratedEvidenceSelection,
 } from '@/lib/ai/customer-story'
-import {
-  invalidateActiveQuoteVersion,
-  invalidateActiveQuoteVersionDeltaV1,
-} from '@/lib/shop-os/quotes'
+import { invalidateActiveQuoteVersionDeltaV1 } from '@/lib/shop-os/quotes'
 import {
   CUSTOMER_STORY_WAIVER,
   customerStoryReviewTextSchema,
@@ -116,7 +113,8 @@ export type CustomerStoryGenerationDependencies = {
 
 export type CustomerStoryReviewDependencies = {
   afterLocks?: () => Promise<void>
-  captureLockSql?: (statements: string[]) => void
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
 export type CustomerStoryWorkspaceDependencies = {
@@ -828,15 +826,6 @@ function providerFailure(error: unknown): Failure {
     : fail('provider_failed')
 }
 
-function lockUnavailable(error: unknown): boolean {
-  let current: unknown = error
-  for (let depth = 0; current && depth < 5; depth += 1) {
-    if (typeof current === 'object' && 'code' in current && current.code === '55P03') return true
-    current = typeof current === 'object' && 'cause' in current ? current.cause : null
-  }
-  return false
-}
-
 async function lockedGenerationContext(
   tx: AppDb,
   scope: LockedMutationScopeV1,
@@ -1044,7 +1033,7 @@ export async function generateAndSaveCustomerStory(
 
 type ReviewInput = z.infer<typeof reviewInputSchema>
 type ReviewContext = {
-  actor: Pick<typeof profiles.$inferSelect, 'id' | 'shopId' | 'role' | 'membershipStatus' | 'deactivatedAt'>
+  actor: Pick<typeof profiles.$inferSelect, 'id' | 'shopId' | 'role' | 'skillTier' | 'membershipStatus' | 'deactivatedAt'>
   ticket: typeof tickets.$inferSelect
   targetJob: typeof ticketJobs.$inferSelect
   jobs: Array<typeof ticketJobs.$inferSelect>
@@ -1093,76 +1082,54 @@ function reviewRequestFingerprint(input: ReviewInput, binding: ReviewBinding): s
   })
 }
 
-async function loadReviewContext(db: AppDb, input: ReviewInput): Promise<{ ok: true; context: ReviewContext } | { ok: false; failure: Failure }> {
-  const [actor] = await db.select({
-    id: profiles.id, shopId: profiles.shopId, role: profiles.role,
-    membershipStatus: profiles.membershipStatus, deactivatedAt: profiles.deactivatedAt,
-  }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1)
-  if (!actor?.shopId) return { ok: false, failure: fail('not_found') }
-
-  const [ticket] = await db.select().from(tickets).where(and(
-    eq(tickets.id, input.ticketId), eq(tickets.shopId, actor.shopId),
-  )).limit(1)
-  const [targetJob] = await db.select().from(ticketJobs).where(and(
-    eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, actor.shopId),
-  )).limit(1)
-  if (!ticket || !targetJob || !targetJob.sessionId) return { ok: false, failure: fail('not_found') }
-  const [session] = await db.select().from(sessions).where(and(
-    eq(sessions.id, targetJob.sessionId), eq(sessions.shopId, actor.shopId),
-  )).limit(1)
-  if (!session) return { ok: false, failure: fail('not_found') }
-  if (actor.membershipStatus !== 'active' || actor.deactivatedAt || !['tech', 'advisor', 'owner'].includes(actor.role)) {
-    return { ok: false, failure: fail('forbidden') }
-  }
-  if (
-    ticket.status !== 'open' || targetJob.kind !== 'diagnostic' ||
-    !['open', 'in_progress', 'blocked'].includes(targetJob.workStatus) || session.status !== 'open'
-  ) return { ok: false, failure: fail('state_conflict', false) }
-
-  const [jobs, versions, wizardEvents, now] = await Promise.all([
-    db.select().from(ticketJobs).where(and(
-      eq(ticketJobs.shopId, actor.shopId), eq(ticketJobs.ticketId, ticket.id),
-    )).orderBy(ticketJobs.id),
-    db.select().from(quoteVersions).where(and(
-      eq(quoteVersions.shopId, actor.shopId), eq(quoteVersions.ticketId, ticket.id),
-    )).orderBy(quoteVersions.id),
-    db.select().from(sessionEvents).where(and(
-      eq(sessionEvents.sessionId, session.id), eq(sessionEvents.eventType, 'wizard_lock_in'),
-    )).orderBy(sessionEvents.id),
-    databaseNow(db),
-  ])
-  if (versions.filter((version) => version.supersededAt === null).length > 1) {
-    return { ok: false, failure: fail('conflict', false) }
-  }
-  return { ok: true, context: { actor, ticket, targetJob, jobs, versions, session, wizardEvents, now } }
-}
-
-async function lockReviewContext(
-  db: AppDb,
-  input: ReviewInput,
-  sessionId: string,
-  shopId: string,
-  dependencies: CustomerStoryReviewDependencies,
-): Promise<void> {
-  const ticketQuery = db.select().from(tickets).where(and(eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId))).limit(1).for('update', { noWait: true })
-  const jobsQuery = db.select().from(ticketJobs).where(and(eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, shopId))).orderBy(ticketJobs.id).for('update', { noWait: true })
-  const versionsQuery = db.select().from(quoteVersions).where(and(eq(quoteVersions.ticketId, input.ticketId), eq(quoteVersions.shopId, shopId))).orderBy(quoteVersions.id).for('update', { noWait: true })
-  const sessionQuery = db.select().from(sessions).where(and(eq(sessions.id, sessionId), eq(sessions.shopId, shopId))).limit(1).for('update', { noWait: true })
-  const actorQuery = db.select().from(profiles).where(and(eq(profiles.id, input.actor.profileId), eq(profiles.shopId, shopId))).limit(1).for('update', { noWait: true })
-  dependencies.captureLockSql?.(
-    [ticketQuery, jobsQuery, versionsQuery, sessionQuery, actorQuery].map((query) => query.toSQL().sql),
-  )
-  await ticketQuery
-  await jobsQuery
-  await versionsQuery
-  await sessionQuery
-  await actorQuery
-}
-
 class AbortReview extends Error {
   constructor(readonly failure: Failure) {
     super('abort_customer_story_review')
   }
+}
+
+async function lockedReviewContext(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  discovery: StoryMutationDiscovery,
+  input: ReviewInput,
+): Promise<Readonly<{
+  actor: typeof profiles.$inferSelect
+  ticket: typeof tickets.$inferSelect
+  targetJob: typeof ticketJobs.$inferSelect
+  jobs: readonly (typeof ticketJobs.$inferSelect)[]
+  versions: readonly (typeof quoteVersions.$inferSelect)[]
+  session: typeof sessions.$inferSelect | null
+  sessionEvents: readonly SelectedEvent[]
+  now: Date
+}>> {
+  const resolved = resolveStoryMutationScope(
+    tx, scope, discovery, input.ticketId, input.jobId,
+  )
+  const actor = scope.profiles.find(({ id }) => id === scope.actor.id)
+  if (!actor) throw new ShopOsMutationConflict()
+  if (!canWriteGeneratedStory(actor, resolved.targetJob)) {
+    throw new ShopOsMutationConflict()
+  }
+  if (
+    resolved.graph.ticket.status !== 'open' ||
+    resolved.targetJob.kind !== 'diagnostic' ||
+    !['open', 'in_progress', 'blocked'].includes(resolved.targetJob.workStatus) ||
+    (resolved.targetSession !== null && resolved.targetSession.status !== 'open')
+  ) throw new AbortReview(fail('state_conflict', false))
+  if (resolved.graph.versions.filter(({ supersededAt }) => supersededAt === null).length > 1) {
+    throw new AbortReview(fail('conflict', false))
+  }
+  return Object.freeze({
+    actor,
+    ticket: resolved.graph.ticket,
+    targetJob: resolved.targetJob,
+    jobs: Object.freeze([...resolved.graph.jobs]),
+    versions: Object.freeze([...resolved.graph.versions]),
+    session: resolved.targetSession,
+    sessionEvents: Object.freeze([...resolved.targetSessionEvents]),
+    now: await databaseNow(tx),
+  })
 }
 
 function validateReviewBinding(
@@ -1252,34 +1219,53 @@ export async function saveReviewedCustomerStory(
   const parsed = reviewInputSchema.safeParse(rawInput)
   if (!parsed.success) return fail('invalid_input')
   const input = parsed.data
-  const [preflightActor] = await db.select({ shopId: profiles.shopId }).from(profiles)
+  const [preflightActor] = await db.select().from(profiles)
     .where(eq(profiles.id, input.actor.profileId)).limit(1)
   if (!preflightActor?.shopId) return fail('not_found')
   const preflightShopId = preflightActor.shopId
-  const [preflightJob] = await db.select({ sessionId: ticketJobs.sessionId }).from(ticketJobs).where(and(
+  const [preflightTicket] = await db.select().from(tickets).where(and(
+    eq(tickets.id, input.ticketId), eq(tickets.shopId, preflightShopId),
+  )).limit(1)
+  const [preflightJob] = await db.select().from(ticketJobs).where(and(
     eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
     eq(ticketJobs.shopId, preflightShopId),
   )).limit(1)
-  if (!preflightJob) return fail('not_found')
-  // Sessionless diagnostic job → manual findings (the Record-findings path
-  // for shops without the diagnostics add-on). Writes the exact story shape
-  // the session-bound paths write; downstream never knows which path filled
-  // it. Everything with a session keeps the existing session-bound flow.
-  if (!preflightJob.sessionId) {
-    return saveManualFindingsStory(db, input, preflightShopId, dependencies)
+  if (!preflightTicket || !preflightJob) return fail('not_found')
+  if (preflightJob.kind !== 'diagnostic') {
+    return preflightJob.sessionId === null ? fail('not_found') : fail('state_conflict', false)
   }
-  try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      await lockReviewContext(
-        transactionDb, input, preflightJob.sessionId!, preflightShopId, dependencies,
-      )
-      await dependencies.afterLocks?.()
-      const loaded = await loadReviewContext(transactionDb, input)
-      if (!loaded.ok) throw new AbortReview(loaded.failure)
-      const context = loaded.context
-      if (context.session.id !== preflightJob.sessionId) throw new AbortReview(fail('conflict', true))
+  if (
+    preflightActor.membershipStatus !== 'active' || preflightActor.deactivatedAt ||
+    !['tech', 'advisor', 'owner'].includes(preflightActor.role) ||
+    !canWriteGeneratedStory(preflightActor, preflightJob)
+  ) return fail('forbidden')
+  if (
+    preflightTicket.status !== 'open' ||
+    !['open', 'in_progress', 'blocked'].includes(preflightJob.workStatus)
+  ) return fail('state_conflict', false)
+  if (preflightJob.sessionId !== null) {
+    const [preflightSession] = await db.select().from(sessions).where(and(
+      eq(sessions.id, preflightJob.sessionId), eq(sessions.shopId, preflightShopId),
+    )).limit(1)
+    if (!preflightSession) return fail('not_found')
+    if (preflightSession.status !== 'open') return fail('state_conflict', false)
+  }
 
+  try {
+    return await runBoundedShopOsMutationV1<CustomerStoryReviewResult, StoryMutationDiscovery>(db, {
+      discover: async (tx) => discoverStoryMutation(tx, {
+        shopId: preflightShopId,
+        actorProfileId: input.actor.profileId,
+        ticketId: input.ticketId,
+        jobId: input.jobId,
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+      assertLiveLockedMutationScopeV1(tx, scope)
+      await dependencies.afterLocks?.()
+      const context = await lockedReviewContext(tx, scope, discovery, input)
+      if (context.targetJob.sessionId !== preflightJob.sessionId) {
+        throw new ShopOsMutationConflict()
+      }
       const rawMeta = context.targetJob.storyMeta
       const persistedMeta = rawMeta === null ? null : safePersistedMeta(rawMeta)
       const persistedStory = context.targetJob.customerStory === null ? null : safeStory(context.targetJob.customerStory)
@@ -1289,9 +1275,54 @@ export async function saveReviewedCustomerStory(
         (persistedMeta === null) !== (persistedStory === null)
       ) throw new AbortReview(fail('conflict', false))
 
-      const validated = validateReviewBinding(context, persistedStory, persistedMeta)
-      if (!validated.ok) throw new AbortReview(validated.failure)
-      const reviewableStory = validated.source === 'ai' && persistedStory
+      let source: 'ai' | 'manual'
+      let binding: ReviewBinding
+      if (context.session !== null) {
+        const reviewContext: ReviewContext = {
+          actor: context.actor,
+          ticket: context.ticket,
+          targetJob: context.targetJob,
+          jobs: [...context.jobs],
+          versions: [...context.versions],
+          session: context.session,
+          wizardEvents: context.sessionEvents.filter(({ eventType }) =>
+            eventType === 'wizard_lock_in'),
+          now: context.now,
+        }
+        const validated = validateReviewBinding(reviewContext, persistedStory, persistedMeta)
+        if (!validated.ok) throw new AbortReview(validated.failure)
+        const targetEventIds = new Set(context.sessionEvents.map(({ id }) => id))
+        if (persistedStory?.howWeKnow.some((claim) =>
+          claim.sourceArtifactIds.length === 0 &&
+          (claim.sourceEventIds.length === 0 ||
+            claim.sourceEventIds.some((id) => !targetEventIds.has(id))))) {
+          throw new AbortReview(fail('conflict', false))
+        }
+        source = validated.source
+        binding = validated.binding
+      } else {
+        const concern = customerStoryReviewTextSchema.safeParse(context.ticket.concern)
+        if (!concern.success || concern.data !== context.ticket.concern) {
+          throw new AbortReview(fail('state_conflict', false))
+        }
+        if (persistedMeta && persistedStory && (
+          persistedMeta.source !== 'manual' || persistedMeta.sessionId !== undefined ||
+          persistedMeta.reviewStatus !== 'reviewed' || persistedMeta.storyRevision === undefined ||
+          persistedMeta.storyRevision < 1 || !persistedMeta.reviewClientKey ||
+          !persistedMeta.reviewRequestFingerprint || !persistedMeta.reviewedByProfileId ||
+          !persistedMeta.reviewedAt ||
+          persistedStory.whatYouToldUs !== context.ticket.concern ||
+          persistedStory.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
+          persistedStory.howWeKnow.length > 0
+        )) throw new AbortReview(fail('conflict', false))
+        source = 'manual'
+        binding = {
+          source: 'manual', sessionId: null, concern: context.ticket.concern,
+          waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
+        }
+      }
+
+      const reviewableStory = source === 'ai' && persistedStory
         ? {
             ...persistedStory,
             howWeKnow: persistedStory.howWeKnow.filter(
@@ -1299,9 +1330,9 @@ export async function saveReviewedCustomerStory(
             ),
           }
         : persistedStory
-      const requestBinding = validated.source === 'ai' && reviewableStory
-        ? { ...validated.binding, proof: reviewableStory.howWeKnow }
-        : validated.binding
+      const requestBinding = source === 'ai' && reviewableStory
+        ? { ...binding, proof: reviewableStory.howWeKnow }
+        : binding
       const request = reviewRequestFingerprint(input, requestBinding)
 
       if (persistedMeta?.reviewClientKey === input.clientKey) {
@@ -1317,13 +1348,13 @@ export async function saveReviewedCustomerStory(
       const revision = persistedRevision(persistedMeta)
       if (revision !== input.expectedStoryRevision) throw new AbortReview(fail('conflict', false))
       let nextStory: CustomerStory
-      if (validated.source === 'ai' && reviewableStory) {
+      if (source === 'ai' && reviewableStory) {
         nextStory = {
           ...reviewableStory,
           whatWeFound: input.whatWeFound,
           whatWeRecommend: input.whatWeRecommend,
         }
-      } else if (validated.source === 'manual') {
+      } else if (source === 'manual') {
         nextStory = {
           whatYouToldUs: context.ticket.concern,
           whatWeFound: input.whatWeFound,
@@ -1344,7 +1375,7 @@ export async function saveReviewedCustomerStory(
         reviewedByProfileId: context.actor.id,
         reviewedAt,
       }
-      const storyMeta: CustomerStoryMeta = validated.source === 'ai'
+      const storyMeta: CustomerStoryMeta = source === 'ai'
         ? {
             ...persistedMeta!,
             source: 'ai',
@@ -1356,14 +1387,14 @@ export async function saveReviewedCustomerStory(
           }
         : {
             source: 'manual',
-            sessionId: context.session.id,
+            ...(context.session === null ? {} : { sessionId: context.session.id }),
             lastEditedByProfileId: context.actor.id,
             lastEditedAt: reviewedAt,
             storyRevision: nextRevision,
             reviewStatus: 'reviewed',
             ...reviewAudit,
           }
-      await transactionDb.update(ticketJobs).set({
+      await tx.update(ticketJobs).set({
         customerStory: nextStory,
         storyMeta,
         updatedAt: context.now,
@@ -1371,191 +1402,36 @@ export async function saveReviewedCustomerStory(
         eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
         eq(ticketJobs.shopId, context.actor.shopId!),
       ))
+      let changedJobIds = [context.targetJob.id]
       if (contentChanged) {
-        const invalidation = await invalidateActiveQuoteVersion(transactionDb, {
+        const invalidation = await invalidateActiveQuoteVersionDeltaV1(tx, {
           shopId: context.actor.shopId!, ticketId: input.ticketId,
           jobIds: context.jobs.map((job) => job.id),
           activeVersions: context.versions.filter((version) => version.supersededAt === null),
+          scope,
         })
-        if (invalidation) throw new AbortReview(invalidation as Failure)
+        if ('ok' in invalidation) throw new AbortReview(invalidation)
+        changedJobIds = [...new Set([...changedJobIds, ...invalidation.changedJobIds])]
       }
+      await dependencies.afterWrite?.()
+      await finalizeMutationRevisionsV1(tx, scope, {
+        sessionIds: [], customerIds: [], vehicleIds: [],
+      }, [{
+        ticketId: input.ticketId,
+        createdTicket: false,
+        createdJobIds: [],
+        existingChangedJobIds: changedJobIds,
+        actorVisibleTicketFieldsChanged: true,
+      }])
+      await dependencies.afterFinalization?.()
       return { ok: true as const, changed: contentChanged, story: nextStory, storyMeta, storyRevision: nextRevision }
+      },
     })
   } catch (error) {
     if (error instanceof AbortReview) return error.failure
-    if (lockUnavailable(error)) return fail('conflict', true)
-    throw error
-  }
-}
-
-async function lockManualFindingsContext(
-  db: AppDb,
-  input: ReviewInput,
-  shopId: string,
-  dependencies: CustomerStoryReviewDependencies,
-): Promise<void> {
-  const ticketQuery = db.select().from(tickets).where(and(eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId))).limit(1).for('update', { noWait: true })
-  const jobsQuery = db.select().from(ticketJobs).where(and(eq(ticketJobs.ticketId, input.ticketId), eq(ticketJobs.shopId, shopId))).orderBy(ticketJobs.id).for('update', { noWait: true })
-  const versionsQuery = db.select().from(quoteVersions).where(and(eq(quoteVersions.ticketId, input.ticketId), eq(quoteVersions.shopId, shopId))).orderBy(quoteVersions.id).for('update', { noWait: true })
-  const actorQuery = db.select().from(profiles).where(and(eq(profiles.id, input.actor.profileId), eq(profiles.shopId, shopId))).limit(1).for('update', { noWait: true })
-  dependencies.captureLockSql?.(
-    [ticketQuery, jobsQuery, versionsQuery, actorQuery].map((query) => query.toSQL().sql),
-  )
-  await ticketQuery
-  await jobsQuery
-  await versionsQuery
-  await actorQuery
-}
-
-// The sessionless manual review path: a diagnostic job with NO linked
-// session (shop without the diagnostics add-on) gets its customer story
-// filled by the tech via the same PUT contract the session-bound manual
-// path uses. The persisted shape is identical to every other reviewed
-// manual story except that storyMeta carries no sessionId — downstream
-// (quote versions, approval, invoice) already consumes reviewed manual
-// stories and never learns which path wrote them.
-async function saveManualFindingsStory(
-  db: AppDb,
-  input: ReviewInput,
-  shopId: string,
-  dependencies: CustomerStoryReviewDependencies,
-): Promise<CustomerStoryReviewResult> {
-  try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      await lockManualFindingsContext(transactionDb, input, shopId, dependencies)
-      await dependencies.afterLocks?.()
-
-      const [actor] = await transactionDb.select({
-        id: profiles.id, shopId: profiles.shopId, role: profiles.role,
-        membershipStatus: profiles.membershipStatus, deactivatedAt: profiles.deactivatedAt,
-      }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1)
-      if (!actor?.shopId || actor.shopId !== shopId) throw new AbortReview(fail('not_found'))
-
-      const [ticket] = await transactionDb.select().from(tickets).where(and(
-        eq(tickets.id, input.ticketId), eq(tickets.shopId, shopId),
-      )).limit(1)
-      const [targetJob] = await transactionDb.select().from(ticketJobs).where(and(
-        eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
-        eq(ticketJobs.shopId, shopId),
-      )).limit(1)
-      if (!ticket || !targetJob || targetJob.kind !== 'diagnostic') {
-        throw new AbortReview(fail('not_found'))
-      }
-      // A session was linked between preflight and lock — this job now
-      // belongs to the session-bound path. Retryable so the client rereads.
-      if (targetJob.sessionId) throw new AbortReview(fail('conflict', true))
-      if (actor.membershipStatus !== 'active' || actor.deactivatedAt || !['tech', 'advisor', 'owner'].includes(actor.role)) {
-        throw new AbortReview(fail('forbidden'))
-      }
-      if (
-        ticket.status !== 'open' ||
-        !['open', 'in_progress', 'blocked'].includes(targetJob.workStatus)
-      ) throw new AbortReview(fail('state_conflict', false))
-      const concern = customerStoryReviewTextSchema.safeParse(ticket.concern)
-      if (!concern.success || concern.data !== ticket.concern) {
-        throw new AbortReview(fail('state_conflict', false))
-      }
-
-      const [jobs, versions, now] = await Promise.all([
-        transactionDb.select().from(ticketJobs).where(and(
-          eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, ticket.id),
-        )).orderBy(ticketJobs.id),
-        transactionDb.select().from(quoteVersions).where(and(
-          eq(quoteVersions.shopId, shopId), eq(quoteVersions.ticketId, ticket.id),
-        )).orderBy(quoteVersions.id),
-        databaseNow(transactionDb),
-      ])
-      if (versions.filter((version) => version.supersededAt === null).length > 1) {
-        throw new AbortReview(fail('conflict', false))
-      }
-
-      const rawMeta = targetJob.storyMeta
-      const persistedMeta = rawMeta === null ? null : safePersistedMeta(rawMeta)
-      const persistedStory = targetJob.customerStory === null ? null : safeStory(targetJob.customerStory)
-      if (
-        (rawMeta !== null && !persistedMeta) ||
-        (targetJob.customerStory !== null && !persistedStory) ||
-        (persistedMeta === null) !== (persistedStory === null)
-      ) throw new AbortReview(fail('conflict', false))
-
-      if (persistedMeta && persistedStory) {
-        // Only a previously saved sessionless manual finding may be
-        // re-reviewed here. Session-bound metadata on a sessionless job is
-        // drifted state — fail closed.
-        if (
-          persistedMeta.source !== 'manual' || persistedMeta.sessionId !== undefined ||
-          persistedMeta.reviewStatus !== 'reviewed' || persistedMeta.storyRevision === undefined ||
-          persistedMeta.storyRevision < 1 || !persistedMeta.reviewClientKey ||
-          !persistedMeta.reviewRequestFingerprint || !persistedMeta.reviewedByProfileId ||
-          !persistedMeta.reviewedAt ||
-          persistedStory.whatYouToldUs !== ticket.concern ||
-          persistedStory.whatItMeansIfWaived !== CUSTOMER_STORY_WAIVER ||
-          persistedStory.howWeKnow.length > 0
-        ) throw new AbortReview(fail('conflict', false))
-      }
-
-      const binding: ReviewBinding = {
-        source: 'manual', sessionId: null, concern: ticket.concern,
-        waiver: CUSTOMER_STORY_WAIVER, proof: [], generation: null,
-      }
-      const request = reviewRequestFingerprint(input, binding)
-
-      if (persistedMeta?.reviewClientKey === input.clientKey) {
-        if (persistedMeta.reviewedByProfileId !== actor.id || persistedMeta.reviewRequestFingerprint !== request || !persistedStory) {
-          throw new AbortReview(fail('conflict', false))
-        }
-        return {
-          ok: true as const, changed: false, story: persistedStory, storyMeta: persistedMeta,
-          storyRevision: persistedRevision(persistedMeta),
-        }
-      }
-
-      const revision = persistedRevision(persistedMeta)
-      if (revision !== input.expectedStoryRevision) throw new AbortReview(fail('conflict', false))
-
-      const nextStory: CustomerStory = {
-        whatYouToldUs: ticket.concern,
-        whatWeFound: input.whatWeFound,
-        howWeKnow: [],
-        whatItMeansIfWaived: CUSTOMER_STORY_WAIVER,
-        whatWeRecommend: input.whatWeRecommend,
-      }
-      const contentChanged = persistedStory === null || fingerprint(persistedStory) !== fingerprint(nextStory)
-      const nextRevision = revision + 1
-      const reviewedAt = now.toISOString()
-      const storyMeta: CustomerStoryMeta = {
-        source: 'manual',
-        lastEditedByProfileId: actor.id,
-        lastEditedAt: reviewedAt,
-        storyRevision: nextRevision,
-        reviewStatus: 'reviewed',
-        reviewClientKey: input.clientKey,
-        reviewRequestFingerprint: request,
-        reviewedByProfileId: actor.id,
-        reviewedAt,
-      }
-      await transactionDb.update(ticketJobs).set({
-        customerStory: nextStory,
-        storyMeta,
-        updatedAt: now,
-      }).where(and(
-        eq(ticketJobs.id, input.jobId), eq(ticketJobs.ticketId, input.ticketId),
-        eq(ticketJobs.shopId, shopId),
-      ))
-      if (contentChanged) {
-        const invalidation = await invalidateActiveQuoteVersion(transactionDb, {
-          shopId, ticketId: input.ticketId,
-          jobIds: jobs.map((job) => job.id),
-          activeVersions: versions.filter((version) => version.supersededAt === null),
-        })
-        if (invalidation) throw new AbortReview(invalidation as Failure)
-      }
-      return { ok: true as const, changed: contentChanged, story: nextStory, storyMeta, storyRevision: nextRevision }
-    })
-  } catch (error) {
-    if (error instanceof AbortReview) return error.failure
-    if (lockUnavailable(error)) return fail('conflict', true)
+    if (error instanceof ShopOsMutationNotFound || error instanceof ShopOsMutationConflict) {
+      return fail('conflict', true)
+    }
     throw error
   }
 }

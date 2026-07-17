@@ -50,6 +50,7 @@ async function seedDiagnosticTicket(db: TestDb) {
     title: 'Diagnose no-start',
     kind: 'diagnostic',
     requiredSkillTier: 2,
+    assignedTechId: profile.id,
   }).returning()
   return { shop, profile, ticket, job }
 }
@@ -112,6 +113,27 @@ describe('manual findings — sessionless diagnostic story path', () => {
     expect(meta?.reviewStatus).toBe('reviewed')
   })
 
+  it('bumps job and projection once for a physical manual save and never on replay', async () => {
+    const seed = await seedDiagnosticTicket(db)
+    const input = reviewInput(seed)
+    const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, seed.job.id)))[0]
+    const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, seed.ticket.id)))[0]
+
+    expect(await saveReviewedCustomerStory(db, input)).toMatchObject({ ok: true, changed: true })
+    const afterSaveJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, seed.job.id)))[0]
+    const afterSaveTicket = (await db.select().from(tickets).where(eq(tickets.id, seed.ticket.id)))[0]
+    expect(afterSaveJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterSaveTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterSaveTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+
+    expect(await saveReviewedCustomerStory(db, input)).toMatchObject({ ok: true, changed: false })
+    const afterReplayJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, seed.job.id)))[0]
+    const afterReplayTicket = (await db.select().from(tickets).where(eq(tickets.id, seed.ticket.id)))[0]
+    expect(afterReplayJob.revision).toBe(afterSaveJob.revision)
+    expect(afterReplayTicket.projectionRevision).toBe(afterSaveTicket.projectionRevision)
+    expect(afterReplayTicket.continuityRevision).toBe(afterSaveTicket.continuityRevision)
+  })
+
   it('is idempotent for the same clientKey and CAS-guarded for stale revisions', async () => {
     const seed = await seedDiagnosticTicket(db)
     const clientKey = crypto.randomUUID()
@@ -143,6 +165,44 @@ describe('manual findings — sessionless diagnostic story path', () => {
     if (!reEdit.ok) throw new Error('expected ok')
     expect(reEdit.storyRevision).toBe(2)
   })
+
+  it('rejects unassigned, under-tier, and terminal technician writes', async () => {
+    const seed = await seedDiagnosticTicket(db)
+    await db.update(ticketJobs).set({ assignedTechId: null }).where(eq(ticketJobs.id, seed.job.id))
+    expect(await saveReviewedCustomerStory(db, reviewInput(seed)))
+      .toEqual({ ok: false, error: 'forbidden' })
+
+    await db.update(ticketJobs).set({ assignedTechId: seed.profile.id, requiredSkillTier: 3 })
+      .where(eq(ticketJobs.id, seed.job.id))
+    expect(await saveReviewedCustomerStory(db, reviewInput(seed)))
+      .toEqual({ ok: false, error: 'forbidden' })
+
+    await db.update(ticketJobs).set({ requiredSkillTier: 2, workStatus: 'done' })
+      .where(eq(ticketJobs.id, seed.job.id))
+    expect(await saveReviewedCustomerStory(db, reviewInput(seed)))
+      .toEqual({ ok: false, error: 'state_conflict', retryable: false })
+  })
+
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back manual story and revisions when %s fails',
+    async (seam) => {
+      const seed = await seedDiagnosticTicket(db)
+      const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, seed.job.id)))[0]
+      const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, seed.ticket.id)))[0]
+
+      await expect(saveReviewedCustomerStory(db, reviewInput(seed), {
+        [seam]: async () => { throw new Error(`forced manual ${seam} rollback`) },
+      })).rejects.toThrow(`forced manual ${seam} rollback`)
+
+      const afterJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, seed.job.id)))[0]
+      const afterTicket = (await db.select().from(tickets).where(eq(tickets.id, seed.ticket.id)))[0]
+      expect(afterJob.customerStory).toBeNull()
+      expect(afterJob.storyMeta).toBeNull()
+      expect(afterJob.revision).toBe(beforeJob.revision)
+      expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision)
+      expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    },
+  )
 
   it('rejects non-diagnostic sessionless jobs as not_found (unchanged behavior)', async () => {
     const seed = await seedDiagnosticTicket(db)

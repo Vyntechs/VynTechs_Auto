@@ -1,4 +1,6 @@
 import { eq } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as customerStories from '@/lib/shop-os/customer-stories'
@@ -26,7 +28,8 @@ type ReviewFn = (
   input: unknown,
   dependencies?: {
     afterLocks?: () => Promise<void>
-    captureLockSql?: (statements: string[]) => void
+    afterWrite?: () => Promise<void>
+    afterFinalization?: () => Promise<void>
   },
 ) => Promise<{
   ok: boolean
@@ -132,6 +135,14 @@ describe('Shop OS reviewed customer stories', () => {
       customerStory: story, storyMeta: meta,
     }).returning()
     jobId = job.id
+    await db.insert(sessionEvents).values({
+      id: uuid(11),
+      sessionId,
+      nodeId: 'root',
+      eventType: 'observation',
+      observationText: 'Charging voltage dropped to 11.8 volts under load.',
+      createdAt: new Date('2026-07-11T11:59:00.000Z'),
+    })
   })
 
   afterEach(async () => {
@@ -147,6 +158,22 @@ describe('Shop OS reviewed customer stories', () => {
       whatWeRecommend: 'Replace the alternator and verify charging output.',
       ...overrides,
     }, dependencies)
+
+  it('routes reviewed and manual saves through one coordinator and finalizer', async () => {
+    const source = await readFile(
+      path.join(process.cwd(), 'lib/shop-os/customer-stories.ts'),
+      'utf8',
+    )
+    const reviewed = source.slice(source.indexOf('export async function saveReviewedCustomerStory'))
+
+    expect(reviewed).toContain('runBoundedShopOsMutationV1')
+    expect(reviewed).toContain('finalizeMutationRevisionsV1')
+    expect(reviewed).toContain('invalidateActiveQuoteVersionDeltaV1')
+    expect(reviewed.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(reviewed).not.toContain('invalidateActiveQuoteVersion(')
+    expect(reviewed).not.toContain('.transaction(')
+    expect(reviewed).not.toContain(".for('update'")
+  })
 
   it('reviews an AI story while preserving server-owned concern, waiver, and sourced proof', async () => {
     const result = await save({
@@ -184,6 +211,25 @@ describe('Shop OS reviewed customer stories', () => {
         storyRevision: 2,
       },
     })
+  })
+
+  it('bumps job and projection once for a physical review and never on replay', async () => {
+    const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+
+    expect(await save()).toMatchObject({ ok: true, changed: true })
+    const afterSaveJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterSaveTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterSaveJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterSaveTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterSaveTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+
+    expect(await save()).toMatchObject({ ok: true, changed: false })
+    const afterReplayJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterReplayTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterReplayJob.revision).toBe(afterSaveJob.revision)
+    expect(afterReplayTicket.projectionRevision).toBe(afterSaveTicket.projectionRevision)
+    expect(afterReplayTicket.continuityRevision).toBe(afterSaveTicket.continuityRevision)
   })
 
   it('replaces legacy media-backed proof with a quoteable text-only reviewed story', async () => {
@@ -330,6 +376,62 @@ describe('Shop OS reviewed customer stories', () => {
       .toMatchObject({ ok: true, storyMeta: { reviewedByProfileId: ownerId }, storyRevision: 3 })
   })
 
+  it('requires an assigned, sufficiently skilled technician while preserving advisor and owner authority', async () => {
+    await db.update(ticketJobs).set({ assignedTechId: advisorId }).where(eq(ticketJobs.id, jobId))
+    expect(await save()).toEqual({ ok: false, error: 'forbidden' })
+
+    await db.update(ticketJobs).set({ assignedTechId: techId, requiredSkillTier: 3 })
+      .where(eq(ticketJobs.id, jobId))
+    expect(await save()).toEqual({ ok: false, error: 'forbidden' })
+    expect(await save({ actor: { profileId: advisorId } })).toMatchObject({ ok: true })
+  })
+
+  it('allows an active advisor to review history created by a now-inactive technician', async () => {
+    await db.update(profiles).set({
+      deactivatedAt: new Date('2026-07-11T12:02:00.000Z'),
+    }).where(eq(profiles.id, techId))
+
+    expect(await save({ actor: { profileId: advisorId } })).toMatchObject({
+      ok: true,
+      storyMeta: { reviewedByProfileId: advisorId },
+    })
+  })
+
+  it('rejects text proof whose event reference is outside the locked target-session closure', async () => {
+    await db.update(ticketJobs).set({
+      customerStory: {
+        ...story,
+        howWeKnow: [{
+          claim: 'Unbound measurement.',
+          sourceEventIds: [uuid(99)],
+          sourceArtifactIds: [],
+        }],
+      },
+    }).where(eq(ticketJobs.id, jobId))
+
+    expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back reviewed story and revisions when %s fails',
+    async (seam) => {
+      const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+
+      await expect(save({}, {
+        [seam]: async () => { throw new Error(`forced review ${seam} rollback`) },
+      })).rejects.toThrow(`forced review ${seam} rollback`)
+
+      const afterJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const afterTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+      expect(afterJob.customerStory).toEqual(beforeJob.customerStory)
+      expect(afterJob.storyMeta).toEqual(beforeJob.storyMeta)
+      expect(afterJob.revision).toBe(beforeJob.revision)
+      expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision)
+      expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    },
+  )
+
   it('invalidates an active version only when public story content changes', async () => {
     const reviewedMeta: CustomerStoryMeta = {
       ...meta,
@@ -349,9 +451,20 @@ describe('Shop OS reviewed customer stories', () => {
     const [version] = await db.insert(quoteVersions).values({
       id: uuid(30), shopId, ticketId, versionNumber: 1, snapshot, createdByProfileId: ownerId,
     }).returning()
+    await db.update(ticketJobs).set({
+      approvalState: 'quote_ready',
+      approvedQuoteVersionId: version.id,
+    }).where(eq(ticketJobs.id, jobId))
+    const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
     const first = await save()
     expect(first).toMatchObject({ ok: true, changed: true })
     expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id)))[0].supersededAt).not.toBeNull()
+    const afterFirstJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterFirstTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterFirstJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterFirstTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterFirstTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
 
     if (!first.ok) return
     const [version2] = await db.insert(quoteVersions).values({
@@ -364,6 +477,11 @@ describe('Shop OS reviewed customer stories', () => {
     }).returning()
     expect(await save({ clientKey: uuid(32), expectedStoryRevision: 2 })).toMatchObject({ ok: true, changed: false, storyRevision: 3 })
     expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version2.id)))[0].supersededAt).toBeNull()
+    const afterEqualJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterEqualTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterEqualJob.revision).toBe(afterFirstJob.revision + 1n)
+    expect(afterEqualTicket.projectionRevision).toBe(afterFirstTicket.projectionRevision + 1n)
+    expect(afterEqualTicket.continuityRevision).toBe(afterFirstTicket.continuityRevision)
   })
 
   it('fails closed for state, role, tenant, corrupt metadata, and contention', async () => {
@@ -399,15 +517,4 @@ describe('Shop OS reviewed customer stories', () => {
     expect(await save()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
   })
 
-  it('uses ticket, stable jobs, stable versions, session, actor NOWAIT lock order', async () => {
-    const statements: string[] = []
-    expect(await save({}, { captureLockSql: (rows) => statements.push(...rows) })).toMatchObject({ ok: true })
-    expect(statements.map((statement) => statement.replace(/\s+/g, ' '))).toEqual([
-      expect.stringMatching(/from "tickets".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
-      expect.stringMatching(/from "ticket_jobs".*"ticket_id" = \$1.*"shop_id" = \$2.*order by "ticket_jobs"\."id".*for update nowait/i),
-      expect.stringMatching(/from "quote_versions".*"ticket_id" = \$1.*"shop_id" = \$2.*order by "quote_versions"\."id".*for update nowait/i),
-      expect.stringMatching(/from "sessions".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
-      expect.stringMatching(/from "profiles".*"id" = \$1.*"shop_id" = \$2.*for update nowait/i),
-    ])
-  })
 })
