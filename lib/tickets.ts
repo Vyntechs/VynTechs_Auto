@@ -7,6 +7,8 @@ import {
   customers,
   jobLines,
   profiles,
+  quoteEvents,
+  quoteVersions,
   sessions,
   shops,
   ticketJobs,
@@ -364,15 +366,12 @@ const ticketJobBodySchema = z
     title: z.string().trim().min(1).max(200),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
     requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-    assignedTechId: z.uuid().nullable().optional(),
+    assignedTechId: canonicalUuid.nullable().optional(),
     confirmBelowTier: z.boolean().optional(),
   })
   .strict()
 
 const createTicketJobBodySchema = ticketJobBodySchema
-  .extend({
-    assignedTechId: canonicalUuid.nullable().optional(),
-  })
   .strict()
 
 const assignmentBodySchema = z.discriminatedUnion('action', [
@@ -858,55 +857,448 @@ export async function getTicketDetail(
   return ticket ? { ok: true, ticket } : { ok: false, error: 'not_found' }
 }
 
-export async function addTicketJob(
-  db: AppDb,
-  input: { actor: TicketActor; ticketId: unknown; body: unknown },
-): Promise<
+type AddTicketJobResult =
   | { ok: true; ticket: TicketDetail }
   | {
       ok: false
       error: TicketDomainError
       warning?: AssignmentTierWarning
+      retryable?: boolean
     }
-> {
-  const denied = actorGate(input.actor)
-  if (denied) return denied
 
-  const parsedTicketId = z.uuid().safeParse(input.ticketId)
-  const parsedBody = ticketJobBodySchema.safeParse(input.body)
-  if (!parsedTicketId.success || !parsedBody.success) {
-    return { ok: false, error: 'invalid_input' }
+type AddTicketJobFailure = Exclude<AddTicketJobResult, { ok: true }>
+
+type AddTicketJobDiscovery =
+  | Readonly<{ kind: 'not_found'; jobId: string }>
+  | Readonly<{
+      kind: 'ready'
+      jobId: string
+      separateChainIds: readonly string[]
+    }>
+
+type OwnedAddTicketJobBody = Readonly<{
+  title: string
+  kind: 'diagnostic' | 'repair' | 'maintenance'
+  requiredSkillTier: 1 | 2 | 3
+  assignedTechId: string | null
+  confirmBelowTier: boolean
+}>
+
+class AddTicketJobRollback extends Error {
+  constructor(readonly result: AddTicketJobFailure) {
+    super('add_ticket_job_rollback')
+  }
+}
+
+function ownedUuidList(values: readonly (string | null | undefined)[]): readonly string[] {
+  return Object.freeze([...new Set(values.filter(
+    (value): value is string => typeof value === 'string',
+  ))].sort())
+}
+
+function emptyMutationInsertionIntents(): MutationLockRequestV1['insertionIntents'] {
+  return Object.freeze({
+    sessions: Object.freeze([]),
+    customers: Object.freeze([]),
+    vehicles: Object.freeze([]),
+    tickets: Object.freeze([]),
+    jobs: Object.freeze([]),
+  })
+}
+
+function resolveLockedAddTicketJobTarget(
+  scope: LockedMutationScopeV1,
+  ticketId: string,
+  expectedChainIds: readonly string[],
+): LockedMutationScopeV1['tickets'][number] {
+  if (
+    !Array.isArray(expectedChainIds) || expectedChainIds.length < 1 ||
+    expectedChainIds.length > 64 || expectedChainIds[0] !== ticketId ||
+    expectedChainIds.some((id) => typeof id !== 'string') ||
+    new Set(expectedChainIds).size !== expectedChainIds.length
+  ) throw new ShopOsMutationConflict()
+  const graphById = new Map(scope.tickets.map((graph) =>
+    [graph.ticket.id, graph] as const))
+  if (
+    graphById.size !== scope.tickets.length ||
+    scope.tickets.length !== expectedChainIds.length ||
+    scope.tickets.some(({ ticket }) => !expectedChainIds.includes(ticket.id))
+  ) throw new ShopOsMutationConflict()
+
+  for (let index = 0; index < expectedChainIds.length; index += 1) {
+    const currentId = expectedChainIds[index]!
+    const graph = graphById.get(currentId)
+    const expectedParentId = expectedChainIds[index + 1] ?? null
+    if (!graph || graph.ticket.separateFromTicketId !== expectedParentId) {
+      throw new ShopOsMutationConflict()
+    }
+  }
+  return graphById.get(ticketId)!
+}
+
+async function discoverAddTicketJobMutation(
+  tx: AppDb,
+  actor: TicketActor & { shopId: string },
+  ticketId: string,
+  proposedAssigneeId: string | null,
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: AddTicketJobDiscovery
+}>> {
+  const jobId = randomUUID()
+  const [target] = await tx.select().from(tickets).where(and(
+    eq(tickets.shopId, actor.shopId),
+    eq(tickets.id, ticketId),
+  )).limit(1)
+
+  if (!target) {
+    return Object.freeze({
+      lockRequest: Object.freeze({
+        shopId: actor.shopId,
+        actorProfileId: actor.profileId,
+        profileIds: Object.freeze([actor.profileId]),
+        lockShop: false,
+        customerIds: Object.freeze([]),
+        vehicleIds: Object.freeze([]),
+        ticketIds: Object.freeze([]),
+        jobIds: Object.freeze([]),
+        includeAllJobsForTickets: false,
+        includeAllLinesForJobs: false,
+        includeAllQuoteVersionsForTickets: false,
+        includeAllQuoteEventsForTickets: false,
+        sessionIds: Object.freeze([]),
+        sessionEventIds: Object.freeze([]),
+        vendorAccountIds: Object.freeze([]),
+        cannedJobIds: Object.freeze([]),
+        receiptRequestKey: null,
+        receiptConditionalInsert: null,
+        insertionIntents: emptyMutationInsertionIntents(),
+      }),
+      payload: Object.freeze({ kind: 'not_found', jobId }),
+    })
   }
 
-  const shopId = input.actor.shopId as string
-  return db.transaction(async (tx) => {
-    const [lockedTicket] = await tx
-      .select({ id: tickets.id, status: tickets.status })
-      .from(tickets)
-      .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data)))
-      .limit(1)
-      .for('update')
-    if (!lockedTicket) return { ok: false, error: 'not_found' as const }
-    if (lockedTicket.status !== 'open') {
-      return { ok: false, error: 'ticket_not_open' as const }
+  const ticketRows = [target]
+  const seenTicketIds = new Set([target.id])
+  let parentId = target.separateFromTicketId
+  while (parentId !== null) {
+    if (ticketRows.length >= 64 || seenTicketIds.has(parentId)) {
+      throw new ShopOsMutationConflict()
     }
+    const [parent] = await tx.select().from(tickets).where(and(
+      eq(tickets.shopId, actor.shopId),
+      eq(tickets.id, parentId),
+    )).limit(1)
+    if (!parent) throw new ShopOsMutationConflict()
+    ticketRows.push(parent)
+    seenTicketIds.add(parent.id)
+    parentId = parent.separateFromTicketId
+  }
 
-    const assignment = await validateAssignment(tx as AppDb, input.actor, parsedBody.data)
-    if (!assignment.ok) return assignment
+  const ticketIds = ownedUuidList(ticketRows.map(({ id }) => id))
+  const jobs = await tx.select({
+    id: ticketJobs.id,
+    assignedTechId: ticketJobs.assignedTechId,
+    sessionId: ticketJobs.sessionId,
+    createdByProfileId: ticketJobs.createdByProfileId,
+    statementConfirmedByProfileId: ticketJobs.statementConfirmedByProfileId,
+    createdFromJobId: ticketJobs.createdFromJobId,
+    approvedQuoteVersionId: ticketJobs.approvedQuoteVersionId,
+    approvedApprovalEventId: ticketJobs.approvedApprovalEventId,
+  }).from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, actor.shopId),
+    inArray(ticketJobs.ticketId, ticketIds),
+  )).orderBy(ticketJobs.id)
+  const jobIds = ownedUuidList(jobs.map(({ id }) => id))
+  const lines = jobIds.length === 0
+    ? []
+    : await tx.select({
+        orderedByProfileId: jobLines.orderedByProfileId,
+        receivedByProfileId: jobLines.receivedByProfileId,
+        vendorAccountId: jobLines.vendorAccountId,
+      }).from(jobLines).where(and(
+        eq(jobLines.shopId, actor.shopId),
+        inArray(jobLines.jobId, jobIds),
+      )).orderBy(jobLines.id)
+  const sessionIds = ownedUuidList(jobs.map(({ sessionId }) => sessionId))
+  const sessionRows = sessionIds.length === 0
+    ? []
+    : await tx.select({
+        id: sessions.id,
+        techId: sessions.techId,
+        vehicleId: sessions.vehicleId,
+      }).from(sessions).where(and(
+        eq(sessions.shopId, actor.shopId),
+        inArray(sessions.id, sessionIds),
+      )).orderBy(sessions.id)
+  const sessionVehicleIds = ownedUuidList(sessionRows.map(({ vehicleId }) => vehicleId))
+  const sessionVehicleRows = sessionVehicleIds.length === 0
+    ? []
+    : await tx.select({
+        id: vehicles.id,
+        customerId: vehicles.customerId,
+      }).from(vehicles).innerJoin(
+        customers,
+        eq(customers.id, vehicles.customerId),
+      ).where(and(
+        eq(customers.shopId, actor.shopId),
+        inArray(vehicles.id, sessionVehicleIds),
+      )).orderBy(vehicles.id)
 
-    await tx.insert(ticketJobs).values({
-      shopId,
-      ticketId: parsedTicketId.data,
-      title: parsedBody.data.title,
-      kind: parsedBody.data.kind,
-      requiredSkillTier: parsedBody.data.requiredSkillTier,
-      assignedTechId: assignment.assignedTechId,
-    })
+  const requiresQuoteClosure = jobs.some((job) =>
+    job.approvedQuoteVersionId !== null || job.approvedApprovalEventId !== null)
+  const versions = requiresQuoteClosure
+    ? await tx.select({
+        id: quoteVersions.id,
+        createdByProfileId: quoteVersions.createdByProfileId,
+      }).from(quoteVersions).where(and(
+        eq(quoteVersions.shopId, actor.shopId),
+        inArray(quoteVersions.ticketId, ticketIds),
+      )).orderBy(quoteVersions.id)
+    : []
+  const events = requiresQuoteClosure
+    ? await tx.select({
+        id: quoteEvents.id,
+        actorProfileId: quoteEvents.actorProfileId,
+      }).from(quoteEvents).where(and(
+        eq(quoteEvents.shopId, actor.shopId),
+        inArray(quoteEvents.ticketId, ticketIds),
+      )).orderBy(quoteEvents.id)
+    : []
 
-    const detail = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
-    if (!detail) throw new Error('updated_ticket_not_found')
-    return { ok: true, ticket: detail }
+  const profileIds = ownedUuidList([
+    actor.profileId,
+    proposedAssigneeId,
+    ...ticketRows.flatMap((ticket) => [
+      ticket.createdByProfileId,
+      ticket.canceledByProfileId,
+      ticket.deliveredByProfileId,
+      ticket.closedByProfileId,
+    ]),
+    ...jobs.flatMap((job) => [
+      job.assignedTechId,
+      job.createdByProfileId,
+      job.statementConfirmedByProfileId,
+    ]),
+    ...lines.flatMap((line) => [
+      line.orderedByProfileId,
+      line.receivedByProfileId,
+    ]),
+    ...sessionRows.map(({ techId }) => techId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.map(({ actorProfileId }) => actorProfileId),
+  ])
+  const customerIds = ownedUuidList([
+    ...ticketRows.map(({ customerId }) => customerId),
+    ...sessionVehicleRows.map(({ customerId }) => customerId),
+  ])
+  const vehicleIds = ownedUuidList([
+    ...ticketRows.map(({ vehicleId }) => vehicleId),
+    ...sessionVehicleIds,
+  ])
+  const vendorAccountIds = ownedUuidList(lines.map(({ vendorAccountId }) =>
+    vendorAccountId))
+
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: actor.shopId,
+      actorProfileId: actor.profileId,
+      profileIds,
+      lockShop: true,
+      customerIds,
+      vehicleIds,
+      ticketIds,
+      jobIds,
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: requiresQuoteClosure,
+      includeAllQuoteEventsForTickets: requiresQuoteClosure,
+      sessionIds,
+      sessionEventIds: Object.freeze([]),
+      vendorAccountIds,
+      cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: Object.freeze({
+        ...emptyMutationInsertionIntents(),
+        jobs: Object.freeze([Object.freeze({ id: jobId, ticketId })]),
+      }),
+    }),
+    payload: Object.freeze({
+      kind: 'ready',
+      jobId,
+      separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
+    }),
   })
+}
+
+export async function addTicketJob(
+  db: AppDb,
+  input: { actor: TicketActor; ticketId: unknown; body: unknown },
+  dependencies: Readonly<{
+    afterInsert?: () => Promise<void>
+    afterFinalization?: () => Promise<void>
+  }> = {},
+): Promise<AddTicketJobResult> {
+  const callerActor: TicketActor = {
+    profileId: input.actor.profileId,
+    shopId: input.actor.shopId,
+    role: input.actor.role,
+    skillTier: input.actor.skillTier,
+    membershipStatus: input.actor.membershipStatus,
+    deactivatedAt: input.actor.deactivatedAt === null
+      ? null
+      : new Date(input.actor.deactivatedAt.getTime()),
+  }
+  const denied = actorGate(callerActor)
+  if (denied) return denied
+
+  const parsedActor = z.object({
+    profileId: canonicalUuid,
+    shopId: canonicalUuid,
+  }).strict().safeParse({
+    profileId: callerActor.profileId,
+    shopId: callerActor.shopId,
+  })
+  const parsedTicketId = canonicalUuid.safeParse(input.ticketId)
+  const parsedBody = ticketJobBodySchema.safeParse(input.body)
+  if (!parsedActor.success || !parsedTicketId.success || !parsedBody.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+  const actor = Object.freeze({
+    ...callerActor,
+    profileId: parsedActor.data.profileId,
+    shopId: parsedActor.data.shopId,
+  }) as TicketActor & { shopId: string }
+  const ticketId = parsedTicketId.data
+  const body: OwnedAddTicketJobBody = Object.freeze({
+    title: parsedBody.data.title,
+    kind: parsedBody.data.kind,
+    requiredSkillTier: parsedBody.data.requiredSkillTier,
+    assignedTechId: parsedBody.data.assignedTechId ?? null,
+    confirmBelowTier: parsedBody.data.confirmBelowTier ?? false,
+  })
+  const seams = Object.freeze({
+    afterInsert: dependencies.afterInsert,
+    afterFinalization: dependencies.afterFinalization,
+  })
+
+  try {
+    return await runBoundedShopOsMutationV1<AddTicketJobResult, AddTicketJobDiscovery>(db, {
+      discover: async (tx) => discoverAddTicketJobMutation(
+        tx,
+        actor,
+        ticketId,
+        body.assignedTechId,
+      ),
+      executeLocked: async (tx, scope, discovery) => {
+        assertLiveLockedMutationScopeV1(tx, scope)
+        if (discovery.kind === 'not_found') {
+          throw new AddTicketJobRollback({ ok: false, error: 'not_found' })
+        }
+        const graph = resolveLockedAddTicketJobTarget(
+          scope,
+          ticketId,
+          discovery.separateChainIds,
+        )
+        if (!canCreateTickets(scope.actor.role)) {
+          throw new AddTicketJobRollback({ ok: false, error: 'forbidden' })
+        }
+        if (graph.ticket.status !== 'open') {
+          throw new AddTicketJobRollback({ ok: false, error: 'ticket_not_open' })
+        }
+        const assignment = resolveGenericTicketAssignments(scope, [body])
+        if (!assignment.ok) throw new AddTicketJobRollback(assignment)
+        const reservations = reserveJobSequencesForInsertionV1(
+          tx,
+          scope,
+          ticketId,
+          [discovery.jobId],
+        )
+        const [reservation] = reservations
+        if (
+          reservations.length !== 1 || reservation?.jobId !== discovery.jobId ||
+          !Number.isSafeInteger(reservation.sequenceNumber)
+        ) throw new ShopOsMutationConflict()
+
+        const [inserted] = await tx.insert(ticketJobs).values({
+          id: discovery.jobId,
+          shopId: scope.actor.shopId,
+          ticketId,
+          title: body.title,
+          kind: body.kind,
+          requiredSkillTier: body.requiredSkillTier,
+          assignedTechId: assignment.assignedTechIds[0]!,
+          sessionId: null,
+          sequenceNumber: reservation.sequenceNumber,
+          createdByProfileId: scope.actor.id,
+          creatorProvenance: 'direct',
+          createdFromJobId: null,
+          revision: 1n,
+        }).returning()
+        if (
+          !inserted || inserted.id !== discovery.jobId ||
+          inserted.shopId !== scope.actor.shopId || inserted.ticketId !== ticketId ||
+          inserted.title !== body.title || inserted.kind !== body.kind ||
+          inserted.requiredSkillTier !== body.requiredSkillTier ||
+          inserted.assignedTechId !== assignment.assignedTechIds[0] ||
+          inserted.sequenceNumber !== reservation.sequenceNumber ||
+          inserted.revision !== 1n || inserted.createdByProfileId !== scope.actor.id ||
+          inserted.creatorProvenance !== 'direct' || inserted.createdFromJobId !== null ||
+          inserted.sessionId !== null || inserted.claimedAt !== null ||
+          inserted.workStatus !== 'open' || inserted.approvalState !== 'pending_quote' ||
+          inserted.workStatement !== null ||
+          inserted.approvedQuoteVersionId !== null ||
+          inserted.approvedAuthorizationFingerprint !== null ||
+          inserted.approvedApprovalEventId !== null ||
+          inserted.diagnosticStartState !== 'idle' ||
+          inserted.diagnosticStartAttemptKey !== null ||
+          inserted.diagnosticStartLeaseUntil !== null ||
+          inserted.diagnosticStartErrorCode !== null
+        ) throw new ShopOsMutationConflict()
+        await seams.afterInsert?.()
+
+        const finalized = await finalizeMutationRevisionsV1(
+          tx,
+          scope,
+          { sessionIds: [], customerIds: [], vehicleIds: [] },
+          [{
+            ticketId,
+            createdTicket: false,
+            createdJobIds: [discovery.jobId],
+            existingChangedJobIds: [],
+            actorVisibleTicketFieldsChanged: false,
+          }],
+        )
+        const [finalizedTicket] = finalized.tickets
+        const [finalizedJob] = finalized.jobs
+        if (
+          finalized.tickets.length !== 1 || finalizedTicket?.id !== ticketId ||
+          finalizedTicket.projectionRevision !==
+            (graph.ticket.projectionRevision + 1n).toString() ||
+          finalizedTicket.continuityRevision !==
+            (graph.ticket.continuityRevision + 1n).toString() ||
+          finalizedTicket.continuityChanged !== true ||
+          finalized.jobs.length !== 1 || finalizedJob?.id !== discovery.jobId ||
+          finalizedJob.revision !== '1'
+        ) throw new ShopOsMutationConflict()
+        await seams.afterFinalization?.()
+
+        const detail = await loadTicketDetail(tx, scope.actor.shopId, ticketId)
+        if (!detail) throw new Error('add_ticket_job_detail_missing')
+        return { ok: true, ticket: detail }
+      },
+    })
+  } catch (error) {
+    if (error instanceof AddTicketJobRollback) return error.result
+    if (error instanceof ShopOsMutationNotFound) {
+      return { ok: false, error: 'not_found' }
+    }
+    if (error instanceof ShopOsMutationConflict) {
+      return { ok: false, error: 'conflict', retryable: true }
+    }
+    throw error
+  }
 }
 
 export type SafeTicketAssignee = NonNullable<TicketDetail['jobs'][number]['assignedTech']>

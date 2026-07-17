@@ -290,4 +290,23 @@ describe('ticket HTTP access and contracts', () => {
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({ error: 'ticket_not_open' })
   })
+
+  it('forwards only retryable add-job conflicts in the exact 409 JSON', async () => {
+    addTicketJobMock.mockResolvedValue({
+      ok: false,
+      error: 'conflict',
+      retryable: true,
+    })
+
+    const response = await addTicketJobRoute(
+      jsonRequest(`/api/tickets/${TICKET_ID}/jobs`, {}),
+      params(),
+    )
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: 'conflict',
+      retryable: true,
+    })
+  })
 })

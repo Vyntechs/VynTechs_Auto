@@ -38,7 +38,9 @@ export async function POST(
     body,
   })
   if (!result.ok) {
-    const error = result.warning
+    const error = result.retryable === true
+      ? { error: result.error, retryable: true as const }
+      : result.warning
       ? { error: result.error, warning: result.warning }
       : { error: result.error }
     return NextResponse.json(error, { status: ticketDomainStatus(result, 201) })
