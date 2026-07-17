@@ -1,4 +1,6 @@
 import { and, eq } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   generateAndSaveCustomerStory,
@@ -107,6 +109,24 @@ describe('Shop OS customer story domain', () => {
     await close()
   })
 
+  it('routes generation through the shared coordinator and one revision finalizer', async () => {
+    const source = await readFile(
+      path.join(process.cwd(), 'lib/shop-os/customer-stories.ts'),
+      'utf8',
+    )
+    const generation = source.slice(
+      source.indexOf('export async function generateAndSaveCustomerStory'),
+      source.indexOf('type ReviewInput'),
+    )
+
+    expect(generation).toContain('runBoundedShopOsMutationV1')
+    expect(generation).toContain('finalizeMutationRevisionsV1')
+    expect(generation).toContain('invalidateActiveQuoteVersionDeltaV1')
+    expect(generation).not.toContain('invalidateActiveQuoteVersion(')
+    expect(generation).not.toContain('.transaction(')
+    expect(generation).not.toContain(".for('update'")
+  })
+
   const generate = (
     overrides: Partial<Parameters<typeof generateAndSaveCustomerStory>[1]> = {},
     provider: GenerateCustomerStoryFn = vi.fn(async () => ({ selections: [{
@@ -118,22 +138,6 @@ describe('Shop OS customer story domain', () => {
     actor, ticketId, jobId, clientKey: uuid(100), expectedStoryRevision: 0,
     sourceEventIds: [eventId], sourceArtifactIds: [], ...overrides,
   }, { generateCustomerStory: provider, ...dependencyOverrides })
-
-  it('captures generated PGlite SQL in the pinned NOWAIT lock order', async () => {
-    const statements: string[] = []
-    expect(await generate({}, vi.fn(async () => ({ selections: [] })), {
-      captureLockSql: (sqlStatements: string[]) => statements.push(...sqlStatements),
-    })).toMatchObject({ ok: true })
-    expect(statements).toHaveLength(6)
-    expect(statements.map((statement) => statement.replace(/\s+/g, ' '))).toEqual([
-      expect.stringMatching(/from "tickets".*where "tickets"\."id" = \$1.*for update nowait/i),
-      expect.stringMatching(/from "ticket_jobs".*where "ticket_jobs"\."ticket_id" = \$1.*order by "ticket_jobs"\."id".*for update nowait/i),
-      expect.stringMatching(/from "quote_versions".*where "quote_versions"\."ticket_id" = \$1.*order by "quote_versions"\."id".*for update nowait/i),
-      expect.stringMatching(/from "sessions".*where "sessions"\."id" = \$1.*for update nowait/i),
-      expect.stringMatching(/from "session_events".*where "session_events"\."id" in \(\$1\).*order by "session_events"\."id".*for update nowait/i),
-      expect.stringMatching(/from "profiles".*where "profiles"\."id" = \$1.*for update nowait/i),
-    ])
-  })
 
   it('assembles canonical fields and sends only bounded selected evidence to the provider', async () => {
     const provider = vi.fn(async (_input: CustomerStoryGenerationInput) => ({ selections: [] }))
@@ -262,6 +266,32 @@ describe('Shop OS customer story domain', () => {
     expect(await generate({ actor: { profileId: ownerId }, clientKey: uuid(121), expectedStoryRevision: 1 })).toMatchObject({ ok: true, changed: false, storyRevision: 1 })
   })
 
+  it.each(['done', 'canceled'] as const)(
+    'rejects a %s diagnostic job before provider work',
+    async (workStatus) => {
+      await db.update(ticketJobs).set({ workStatus }).where(eq(ticketJobs.id, jobId))
+      const provider = vi.fn(async () => ({ selections: [] }))
+
+      expect(await generate({}, provider)).toEqual({
+        ok: false,
+        error: 'state_conflict',
+        retryable: false,
+      })
+      expect(provider).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['assignment', { assignedTechId: uuid(12) }],
+    ['tier', { requiredSkillTier: 3 }],
+  ] as const)('rejects technician %s loss before provider work', async (_label, update) => {
+    await db.update(ticketJobs).set(update).where(eq(ticketJobs.id, jobId))
+    const provider = vi.fn(async () => ({ selections: [] }))
+
+    expect(await generate({}, provider)).toEqual({ ok: false, error: 'forbidden', retryable: false })
+    expect(provider).not.toHaveBeenCalled()
+  })
+
   it('returns same-key exact retries before revision/provider checks and conflicts on changed reuse', async () => {
     const provider = vi.fn(async () => ({ selections: [] }))
     const first = await generate({}, provider)
@@ -271,6 +301,28 @@ describe('Shop OS customer story domain', () => {
     expect(provider).toHaveBeenCalledTimes(1)
     expect(await generate({ sourceEventIds: [] }, provider)).toEqual({ ok: false, error: 'conflict', retryable: false })
     expect(await generate({ actor: { profileId: uuid(3) } }, provider)).toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it('bumps job and projection once for a physical generation save and never on exact replay', async () => {
+    const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    const provider = vi.fn(async () => ({ selections: [] }))
+
+    expect(await generate({}, provider)).toMatchObject({ ok: true, changed: true })
+    const afterSaveJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterSaveTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterSaveJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterSaveTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterSaveTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+
+    expect(await generate({ expectedStoryRevision: 999 }, provider))
+      .toMatchObject({ ok: true, changed: false })
+    const afterReplayJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const afterReplayTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterReplayJob.revision).toBe(afterSaveJob.revision)
+    expect(afterReplayTicket.projectionRevision).toBe(afterSaveTicket.projectionRevision)
+    expect(afterReplayTicket.continuityRevision).toBe(afterSaveTicket.continuityRevision)
+    expect(provider).toHaveBeenCalledTimes(1)
   })
 
   it('rotates retry identity for identical public stories and increments only changed stories', async () => {
@@ -319,6 +371,22 @@ describe('Shop OS customer story domain', () => {
     expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory).toBeNull()
   })
 
+  it.each([
+    ['assignment', async () => {
+      await db.update(ticketJobs).set({ assignedTechId: advisorId }).where(eq(ticketJobs.id, jobId))
+    }],
+    ['tier', async () => {
+      await db.update(ticketJobs).set({ requiredSkillTier: 3 }).where(eq(ticketJobs.id, jobId))
+    }],
+  ] as const)('detects technician %s drift during provider work', async (_label, drift) => {
+    const result = await generate({}, vi.fn(async () => ({ selections: [] })), {
+      beforeFinalTransaction: drift,
+    })
+
+    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory).toBeNull()
+  })
+
   it('detects selected evidence and quote-version CAS drift after provider work', async () => {
     const evidenceDrift = await generate({}, vi.fn(async () => ({ selections: [] })), {
       beforeFinalTransaction: async () => {
@@ -347,6 +415,26 @@ describe('Shop OS customer story domain', () => {
     expect(job.customerStory).toBeNull()
   })
 
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back story and revisions when %s fails',
+    async (seam) => {
+      const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+
+      await expect(generate({}, vi.fn(async () => ({ selections: [] })), {
+        [seam]: async () => { throw new Error(`forced ${seam} rollback`) },
+      })).rejects.toThrow(`forced ${seam} rollback`)
+
+      const afterJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const afterTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+      expect(afterJob.customerStory).toBeNull()
+      expect(afterJob.storyMeta).toBeNull()
+      expect(afterJob.revision).toBe(beforeJob.revision)
+      expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision)
+      expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    },
+  )
+
   it('invalidates one active quote atomically and rolls back duplicate-active anomalies', async () => {
     const snapshot = () => ({
       schemaVersion: 1,
@@ -362,11 +450,24 @@ describe('Shop OS customer story domain', () => {
       id: uuid(30), shopId, ticketId, versionNumber: 1, snapshot: snapshot(), createdByProfileId: uuid(3),
     }).returning()
     await db.update(ticketJobs).set({ approvalState: 'quote_ready', approvedQuoteVersionId: version.id }).where(eq(ticketJobs.id, jobId))
+    const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+    const beforeExcludedJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, excludedJob.id)))[0]
+    const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
     expect(await generate()).toMatchObject({ ok: true, changed: true })
     expect((await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id)))[0].supersededAt).not.toBeNull()
     const projectedJobs = await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))
-    expect(projectedJobs.find((job) => job.id === jobId)).toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
-    expect(projectedJobs.find((job) => job.id === excludedJob.id)).toMatchObject({ approvalState: 'quote_ready' })
+    expect(projectedJobs.find((job) => job.id === jobId)).toMatchObject({
+      approvalState: 'pending_quote',
+      approvedQuoteVersionId: null,
+      revision: beforeJob.revision + 1n,
+    })
+    expect(projectedJobs.find((job) => job.id === excludedJob.id)).toMatchObject({
+      approvalState: 'quote_ready',
+      revision: beforeExcludedJob.revision,
+    })
+    const afterTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
 
     await db.update(ticketJobs).set({ customerStory: null, storyMeta: null }).where(eq(ticketJobs.id, jobId))
     await db.insert(quoteVersions).values([
