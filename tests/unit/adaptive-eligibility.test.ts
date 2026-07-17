@@ -194,7 +194,13 @@ describe('adaptive diagnostic eligibility', () => {
       await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, ids.jobId))
     }],
     ['terminal ticket', async (db: TestDb, ids: { ticketId: string }) => {
-      await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ids.ticketId))
+      await db.update(tickets).set({
+        status: 'closed',
+        closedAt: new Date('2026-07-11T12:05:00.000Z'),
+        closedByProfileId: actor.profileId,
+        closeDisposition: 'no_repair',
+        closeNote: 'Fixture terminal-state proof.',
+      }).where(eq(tickets.id, ids.ticketId))
     }],
   ])('rejects a %s', async (_name, mutate) => {
     await mutate(db, { sessionId, jobId, ticketId })
@@ -289,7 +295,13 @@ describe('adaptive diagnostic eligibility', () => {
       await db.update(ticketJobs).set({ workStatus: 'canceled' }).where(eq(ticketJobs.id, ctx.jobId))
     }, paid],
     ['closed ticket', async (db: TestDb, ctx: { ticketId: string }) => {
-      await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ctx.ticketId))
+      await db.update(tickets).set({
+        status: 'closed',
+        closedAt: new Date('2026-07-11T12:05:00.000Z'),
+        closedByProfileId: actor.profileId,
+        closeDisposition: 'no_repair',
+        closeNote: 'Fixture terminal-state proof.',
+      }).where(eq(tickets.id, ctx.ticketId))
     }, paid],
     ['stale revision', async (db: TestDb, ctx: { sessionId: string }) => {
       await db.update(sessions).set({ adaptiveRevision: 1 }).where(eq(sessions.id, ctx.sessionId))
