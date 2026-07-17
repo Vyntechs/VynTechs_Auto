@@ -202,19 +202,6 @@ describe('Shop OS approved simple work', () => {
   })
 
   it('uses real ticket/session truth while preserving completed closed history', async () => {
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
-      .resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, jobId))
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
-      ok: true, workspace: { workStatus: 'done' },
-    })
-    await db.update(ticketJobs).set({ workStatus: 'open' }).where(eq(ticketJobs.id, jobId))
-    await db.update(tickets).set({ status: 'canceled' }).where(eq(tickets.id, ticketId))
-    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
-      .resolves.toEqual({ ok: false, error: 'not_found' })
-
-    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
     const [session] = await db.insert(sessions).values({
       id: uuid(90), shopId, techId,
       intake: { vehicleYear: 2020, vehicleMake: 'Jeep', vehicleModel: 'Wrangler', customerComplaint: 'Test' },
@@ -223,6 +210,52 @@ describe('Shop OS approved simple work', () => {
     await db.execute(sql`alter table ticket_jobs drop constraint ticket_jobs_session_only_for_diagnostic`)
     await db.update(ticketJobs).set({ sessionId: session.id }).where(eq(ticketJobs.id, jobId))
     await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(ticketJobs).set({ sessionId: null }).where(eq(ticketJobs.id, jobId))
+
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-11T12:05:00.000Z'),
+      closedByProfileId: advisorId,
+      closeDisposition: 'no_repair',
+      closeNote: 'Fixture terminal-state proof.',
+    }).where(eq(tickets.id, ticketId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, jobId))
+    await expect(getSimpleWorkWorkspace(db, { actor, ticketId, jobId })).resolves.toMatchObject({
+      ok: true, workspace: { workStatus: 'done' },
+    })
+
+    const canceledTicketId = uuid(21)
+    const canceledJobId = uuid(31)
+    await db.insert(tickets).values({
+      id: canceledTicketId,
+      shopId,
+      ticketNumber: 2,
+      source: 'counter',
+      customerId: uuid(10),
+      vehicleId: uuid(11),
+      concern: 'Canceled fixture',
+      createdByProfileId: advisorId,
+      status: 'canceled',
+      canceledAt: new Date('2026-07-11T12:06:00.000Z'),
+      canceledByProfileId: advisorId,
+      cancelReasonCode: 'customer_canceled_before_authorization',
+    })
+    await db.insert(ticketJobs).values({
+      id: canceledJobId,
+      shopId,
+      ticketId: canceledTicketId,
+      title: 'Canceled simple work',
+      kind: 'maintenance',
+      requiredSkillTier: 2,
+      assignedTechId: techId,
+      workStatus: 'open',
+    })
+    await expect(getSimpleWorkWorkspace(db, {
+      actor, ticketId: canceledTicketId, jobId: canceledJobId,
+    }))
       .resolves.toEqual({ ok: false, error: 'not_found' })
   })
 })
