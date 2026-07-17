@@ -80,7 +80,7 @@ describe('createSessionForUser', () => {
     }
   })
 
-  it('returns a 400 "no profile" error when the userId has no profile', async () => {
+  it('returns the generic inactive-wrenching-profile error when the userId has no profile', async () => {
     const userId = crypto.randomUUID()
     const result = await createSessionForUser({
       db,
@@ -91,11 +91,11 @@ describe('createSessionForUser', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.status).toBe(400)
-      expect(result.error).toBe('no profile')
+      expect(result.error).toBe('inactive wrenching profile')
     }
   })
 
-  it('returns a 400 "no shop" error when the user has a profile but no shop', async () => {
+  it('returns the generic inactive-wrenching-profile error when the profile has no shop', async () => {
     const userId = crypto.randomUUID()
     await createProfile(db, { userId })
     const result = await createSessionForUser({
@@ -105,7 +105,10 @@ describe('createSessionForUser', () => {
       treeState: stubTree,
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toBe('no shop')
+    if (!result.ok) {
+      expect(result.status).toBe(400)
+      expect(result.error).toBe('inactive wrenching profile')
+    }
   })
 
   it('returns a 400 error when the intake body fails validation', async () => {

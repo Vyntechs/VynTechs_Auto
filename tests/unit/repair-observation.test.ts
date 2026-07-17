@@ -14,6 +14,7 @@ async function seedRepairingSession(db: TestDb) {
   const tech = await createProfile(db, {
     userId: crypto.randomUUID(),
     shopId: shop.id,
+    skillTier: 3,
   })
   const session = await createSession(db, {
     shopId: shop.id,
@@ -106,8 +107,11 @@ describe('submitRepairObservationForUser', () => {
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('expected error')
-    expect(result.status).toBe(502)
-    expect(result.error.toLowerCase()).toMatch(/anthropic|guidance/)
+    expect(result).toEqual({
+      ok: false,
+      status: 502,
+      error: 'repair_guidance_unavailable',
+    })
 
     const events = await db
       .select()
