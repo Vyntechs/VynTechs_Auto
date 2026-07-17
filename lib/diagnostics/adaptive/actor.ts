@@ -4,6 +4,8 @@ import { checkAccess } from '@/lib/auth-access'
 import type { AppDb } from '@/lib/db/queries'
 import { profiles, sessions, ticketJobs, tickets } from '@/lib/db/schema'
 import { isAdaptiveCanvasEnabled } from '@/lib/feature-flags'
+import { assertLiveLockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
+import type { LockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
 
 export type AdaptiveMutationActor = {
   userId: string
@@ -17,6 +19,44 @@ export type AdaptiveMutationDependencies = {
 
 export const adaptiveMutationDependencies: AdaptiveMutationDependencies = {
   hasPaidAccess: async (db, userId) => (await checkAccess(db, userId)).kind === 'allow',
+}
+
+export function authorizeAdaptiveMutationInLockedScopeV1(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  input: {
+    actor: AdaptiveMutationActor
+    sessionId: string
+    expectedRevision: number
+  },
+): { sessionId: string; jobId: string; revision: number } | null {
+  assertLiveLockedMutationScopeV1(tx, scope)
+  const actorProfile = scope.profiles.find(({ id }) => id === scope.actor.id)
+  if (
+    scope.actor.id !== input.actor.profileId ||
+    scope.actor.shopId !== input.actor.shopId ||
+    scope.actor.role !== 'tech' ||
+    typeof scope.actor.skillTier !== 'number' ||
+    !actorProfile || actorProfile.userId !== input.actor.userId ||
+    actorProfile.shopId !== scope.actor.shopId
+  ) return null
+
+  const session = scope.sessions.find(({ id }) => id === input.sessionId)
+  const linked = scope.tickets.flatMap((graph) => graph.jobs
+    .filter(({ sessionId }) => sessionId === input.sessionId)
+    .map((job) => ({ graph, job })))
+  if (!session || linked.length !== 1) return null
+  const [{ graph, job }] = linked
+  if (
+    session.shopId !== scope.actor.shopId || session.techId !== scope.actor.id ||
+    session.status !== 'open' || session.adaptiveRevision !== input.expectedRevision ||
+    graph.ticket.shopId !== scope.actor.shopId || graph.ticket.status !== 'open' ||
+    job.shopId !== scope.actor.shopId || job.ticketId !== graph.ticket.id ||
+    job.assignedTechId !== scope.actor.id || job.kind !== 'diagnostic' ||
+    !['open', 'in_progress', 'blocked'].includes(job.workStatus) ||
+    scope.actor.skillTier < job.requiredSkillTier
+  ) return null
+  return { sessionId: session.id, jobId: job.id, revision: session.adaptiveRevision }
 }
 
 function canonicalJson(value: unknown, ancestors: WeakSet<object>): string {

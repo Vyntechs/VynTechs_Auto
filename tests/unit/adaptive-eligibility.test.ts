@@ -1,9 +1,11 @@
 import { eq } from 'drizzle-orm'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adaptiveMutationDependencies,
   adaptiveRequestFingerprint,
   authorizeAdaptiveMutation,
+  authorizeAdaptiveMutationInLockedScopeV1,
   type AdaptiveMutationActor,
 } from '@/lib/diagnostics/adaptive/actor'
 import {
@@ -19,6 +21,7 @@ import {
   tickets,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
+import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -211,6 +214,55 @@ describe('adaptive diagnostic eligibility', () => {
   })
 
   const paid = { hasPaidAccess: async () => true }
+
+  const lockedAuthorize = async (profileIds: string[] = [actor.profileId]) =>
+    runBoundedShopOsMutationV1(db, {
+      discover: async () => ({
+        lockRequest: {
+          shopId: actor.shopId,
+          actorProfileId: actor.profileId,
+          profileIds,
+          lockShop: false,
+          customerIds: [], vehicleIds: [], ticketIds: [ticketId], jobIds: [jobId],
+          includeAllJobsForTickets: true,
+          includeAllLinesForJobs: true,
+          includeAllQuoteVersionsForTickets: true,
+          includeAllQuoteEventsForTickets: true,
+          sessionIds: [sessionId], sessionEventIds: [], vendorAccountIds: [], cannedJobIds: [],
+          receiptRequestKey: null,
+          receiptConditionalInsert: null,
+          insertionIntents: { sessions: [], customers: [], vehicles: [], tickets: [], jobs: [] },
+        },
+        payload: undefined,
+      }),
+      executeLocked: async (tx, scope) => authorizeAdaptiveMutationInLockedScopeV1(
+        tx, scope, { actor, sessionId, expectedRevision: 0 },
+      ),
+    })
+
+  it('keeps locked adaptive authority query-free', () => {
+    const source = readFileSync('lib/diagnostics/adaptive/actor.ts', 'utf8')
+    const predicate = source.slice(
+      source.indexOf('export function authorizeAdaptiveMutationInLockedScopeV1'),
+      source.indexOf('function canonicalJson'),
+    )
+    expect(predicate).not.toContain('.select(')
+    expect(predicate).not.toContain('.from(')
+    expect(predicate).not.toContain('await ')
+  })
+
+  it('authorizes from the live locked graph and enforces technician tier', async () => {
+    await expect(lockedAuthorize()).resolves.toEqual({ sessionId, jobId, revision: 0 })
+    await db.update(ticketJobs).set({ requiredSkillTier: 3 }).where(eq(ticketJobs.id, jobId))
+    await expect(lockedAuthorize()).resolves.toBeNull()
+  })
+
+  it('does not invalidate sound history when a non-actor referenced profile is deactivated', async () => {
+    await db.update(profiles).set({ deactivatedAt: new Date() })
+      .where(eq(profiles.id, otherActor.profileId))
+    await expect(lockedAuthorize([actor.profileId, otherActor.profileId]))
+      .resolves.toEqual({ sessionId, jobId, revision: 0 })
+  })
 
   it('authorizes a paid active current session tech and job assignee at the live revision', async () => {
     await db.update(sessions).set({ adaptiveRevision: 7 }).where(eq(sessions.id, sessionId))
