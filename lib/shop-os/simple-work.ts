@@ -426,7 +426,7 @@ function resolveSimpleWorkScope(
 }
 
 function nextTimestamp(previous: Date) {
-  return sql`greatest(clock_timestamp(), ${previous}::timestamptz + interval '1 millisecond')`
+  return sql`greatest(clock_timestamp(), ${sql.param(previous, ticketJobs.updatedAt)}::timestamptz + interval '1 millisecond')`
 }
 
 export async function mutateSimpleWork(

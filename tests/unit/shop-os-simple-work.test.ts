@@ -110,6 +110,17 @@ describe('Shop OS approved simple work', () => {
     expect(mutation).not.toContain(".for('update'")
   })
 
+  it('binds the monotonic timestamp through the PostgreSQL column encoder', () => {
+    const source = readFileSync('lib/shop-os/simple-work.ts', 'utf8')
+    const timestampHelper = source.slice(
+      source.indexOf('function nextTimestamp'),
+      source.indexOf('export async function mutateSimpleWork'),
+    )
+
+    expect(timestampHelper).toContain('sql.param(previous, ticketJobs.updatedAt)')
+    expect(timestampHelper).not.toContain('${previous}::timestamptz')
+  })
+
   it('starts exact approved assigned simple work and replays without another write', async () => {
     const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
     expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
