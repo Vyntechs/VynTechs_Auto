@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { intakeSchema, outcomeSchema } from './types'
 import type { AmbientConditions } from './types'
 import {
@@ -24,7 +24,9 @@ import type {
 } from './gating/decline-language'
 import type { Artifact, NewArtifact, OutcomePayload as StoredOutcomePayload } from './db/schema'
 import {
+  customers,
   jobLines,
+  profiles,
   quoteEvents,
   quoteVersions,
   sessions,
@@ -32,6 +34,7 @@ import {
   ticketJobs,
   tickets,
   vehicles,
+  vendorAccounts,
 } from './db/schema'
 import {
   finalizeResolvedTicketCreationInTransactionV1,
@@ -44,8 +47,13 @@ import {
 import { createTechQuickTicketOriginV1 } from './shop-os/continuity/mutation-foundation/ticket-origin.server'
 import { ShopOsMutationNotFound } from './shop-os/continuity/mutation-foundation/contracts'
 import { ShopOsMutationConflict } from './shop-os/continuity/mutation-foundation/conflicts'
-import type { MutationLockRequestV1 } from './shop-os/continuity/mutation-foundation/lock-order'
+import type {
+  LockedMutationScopeV1,
+  MutationLockRequestV1,
+} from './shop-os/continuity/mutation-foundation/lock-order'
 import { runBoundedShopOsMutationV1 } from './shop-os/continuity/mutation-foundation/transaction-runner'
+import { assertLiveLockedMutationScopeV1 } from './shop-os/continuity/mutation-foundation/attempt-capability'
+import { finalizeMutationRevisionsV1 } from './shop-os/continuity/mutation-foundation/revisions'
 import { gateProposedAction, type GateDecision } from './gating/gap-handler'
 import { HIGH_SIGNAL_KINDS } from './ai/artifact-kinds'
 import type { ProposedAction } from './ai/tree-engine'
@@ -64,7 +72,7 @@ import {
   lockDiagnosticRepairAccess,
   resolveDiagnosticRepairAccess,
 } from './shop-os/repair-authorization'
-import { isLockUnavailable } from './shop-os/quotes'
+import { isLockUnavailable, quoteSnapshotContainsJob } from './shop-os/quotes'
 type EnqueueIfNovelPatternFn = (db: AppDb, sessionId: string, maxSimilarity: number) => Promise<void>
 
 export type PromoteToCorpusFn = (
@@ -905,6 +913,398 @@ export async function advanceSession(opts: {
   return { ok: true, tree: nextTree }
 }
 
+type TicketedSessionMutationDiscovery = Readonly<{
+  kind: 'not_found' | 'ready'
+  separateChainIds: readonly string[]
+  targetJobId: string | null
+  targetSessionEventIds: readonly string[]
+  closureFingerprint: string | null
+}>
+
+type LockedTicketedRepairContext = Readonly<{
+  decision: 'approved' | 'declined'
+  ticket: typeof tickets.$inferSelect
+  job: typeof ticketJobs.$inferSelect
+  session: typeof sessions.$inferSelect
+  sessionEvents: readonly (typeof sessionEvents.$inferSelect)[]
+}>
+
+type TicketedSessionMutationSeams = Readonly<{
+  afterTicketedWrite?: () => Promise<void>
+  afterTicketedFinalization?: () => Promise<void>
+  afterObservationWrite?: () => Promise<void>
+  afterGuidanceWrite?: () => Promise<void>
+}>
+
+const EMPTY_SESSION_MUTATION_INSERTIONS = Object.freeze({
+  sessions: Object.freeze([]),
+  customers: Object.freeze([]),
+  vehicles: Object.freeze([]),
+  tickets: Object.freeze([]),
+  jobs: Object.freeze([]),
+})
+
+function sessionMutationIds(values: readonly (string | null)[]): readonly string[] {
+  return Object.freeze([...new Set(values.filter((value): value is string => value !== null))].sort())
+}
+
+function sessionMutationRowsById<T extends Readonly<{ id: string }>>(
+  rows: readonly T[],
+): readonly T[] {
+  return [...rows].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function sessionMutationFingerprint(value: unknown): string {
+  function normalize(member: unknown): unknown {
+    if (member === null || typeof member === 'string' || typeof member === 'boolean') return member
+    if (typeof member === 'number') {
+      if (!Number.isFinite(member)) throw new TypeError('invalid_session_mutation_discovery')
+      return member
+    }
+    if (typeof member === 'bigint') return { $bigint: member.toString() }
+    if (member instanceof Date) return { $date: member.toISOString() }
+    if (Array.isArray(member)) return member.map(normalize)
+    if (typeof member !== 'object') throw new TypeError('invalid_session_mutation_discovery')
+    return Object.fromEntries(Object.keys(member as Record<string, unknown>).sort()
+      .map((key) => [key, normalize((member as Record<string, unknown>)[key])]))
+  }
+  return JSON.stringify(normalize(value))
+}
+
+function emptyTicketedSessionRequest(input: {
+  shopId: string
+  actorProfileId: string
+}): Readonly<{ lockRequest: MutationLockRequestV1; payload: TicketedSessionMutationDiscovery }> {
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds: Object.freeze([input.actorProfileId]),
+      lockShop: false,
+      customerIds: Object.freeze([]),
+      vehicleIds: Object.freeze([]),
+      ticketIds: Object.freeze([]),
+      jobIds: Object.freeze([]),
+      includeAllJobsForTickets: false,
+      includeAllLinesForJobs: false,
+      includeAllQuoteVersionsForTickets: false,
+      includeAllQuoteEventsForTickets: false,
+      sessionIds: Object.freeze([]),
+      sessionEventIds: Object.freeze([]),
+      vendorAccountIds: Object.freeze([]),
+      cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: EMPTY_SESSION_MUTATION_INSERTIONS,
+    }),
+    payload: Object.freeze({
+      kind: 'not_found' as const,
+      separateChainIds: Object.freeze([]),
+      targetJobId: null,
+      targetSessionEventIds: Object.freeze([]),
+      closureFingerprint: null,
+    }),
+  })
+}
+
+async function discoverTicketedSessionMutation(
+  tx: AppDb,
+  input: { shopId: string; sessionId: string; actorProfileId: string },
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: TicketedSessionMutationDiscovery
+}>> {
+  const linkedJobs = await tx.select().from(ticketJobs)
+    .where(eq(ticketJobs.sessionId, input.sessionId)).limit(2)
+  if (linkedJobs.length !== 1 || linkedJobs[0].shopId !== input.shopId) {
+    return emptyTicketedSessionRequest(input)
+  }
+  const linkedJob = linkedJobs[0]
+  const [targetTicket] = await tx.select().from(tickets).where(and(
+    eq(tickets.shopId, input.shopId), eq(tickets.id, linkedJob.ticketId),
+  )).limit(1)
+  if (!targetTicket) return emptyTicketedSessionRequest(input)
+
+  const ticketRows = [targetTicket]
+  const seenTicketIds = new Set([targetTicket.id])
+  let parentId = targetTicket.separateFromTicketId
+  while (parentId !== null) {
+    if (ticketRows.length >= 64 || seenTicketIds.has(parentId)) {
+      throw new ShopOsMutationConflict()
+    }
+    const [parent] = await tx.select().from(tickets).where(and(
+      eq(tickets.shopId, input.shopId), eq(tickets.id, parentId),
+    )).limit(1)
+    if (!parent) throw new ShopOsMutationConflict()
+    ticketRows.push(parent)
+    seenTicketIds.add(parent.id)
+    parentId = parent.separateFromTicketId
+  }
+
+  const ticketIds = sessionMutationIds(ticketRows.map(({ id }) => id))
+  const jobs = await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, input.shopId), inArray(ticketJobs.ticketId, ticketIds),
+  )).orderBy(ticketJobs.id)
+  const targetJob = jobs.find(({ id }) => id === linkedJob.id)
+  if (!targetJob || targetJob.sessionId !== input.sessionId) {
+    return emptyTicketedSessionRequest(input)
+  }
+  const jobIds = sessionMutationIds(jobs.map(({ id }) => id))
+  const lines = jobIds.length === 0 ? [] : await tx.select().from(jobLines).where(and(
+    eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobIds),
+  )).orderBy(jobLines.id)
+  const versions = await tx.select().from(quoteVersions).where(and(
+    eq(quoteVersions.shopId, input.shopId), inArray(quoteVersions.ticketId, ticketIds),
+  )).orderBy(quoteVersions.id)
+  const events = await tx.select().from(quoteEvents).where(and(
+    eq(quoteEvents.shopId, input.shopId), inArray(quoteEvents.ticketId, ticketIds),
+  )).orderBy(quoteEvents.id)
+  const sessionIds = sessionMutationIds(jobs.map(({ sessionId }) => sessionId))
+  const sessionRows = sessionIds.length === 0 ? [] : await tx.select().from(sessions).where(and(
+    eq(sessions.shopId, input.shopId), inArray(sessions.id, sessionIds),
+  )).orderBy(sessions.id)
+  const targetEvents = await tx.select().from(sessionEvents)
+    .where(eq(sessionEvents.sessionId, input.sessionId))
+    .orderBy(asc(sessionEvents.createdAt), asc(sessionEvents.id))
+  const vehicleIds = sessionMutationIds([
+    ...ticketRows.map(({ vehicleId }) => vehicleId),
+    ...sessionRows.map(({ vehicleId }) => vehicleId),
+  ])
+  const vehicleRows = vehicleIds.length === 0 ? [] : (await tx.select({ row: vehicles })
+    .from(vehicles).innerJoin(customers, eq(customers.id, vehicles.customerId))
+    .where(and(eq(customers.shopId, input.shopId), inArray(vehicles.id, vehicleIds)))
+    .orderBy(vehicles.id)).map(({ row }) => row)
+  const customerIds = sessionMutationIds([
+    ...ticketRows.map(({ customerId }) => customerId),
+    ...vehicleRows.map(({ customerId }) => customerId),
+  ])
+  const customerRows = customerIds.length === 0 ? [] : await tx.select().from(customers)
+    .where(and(eq(customers.shopId, input.shopId), inArray(customers.id, customerIds)))
+    .orderBy(customers.id)
+  const vendorAccountIds = sessionMutationIds(lines.map(({ vendorAccountId }) => vendorAccountId))
+  const vendorRows = vendorAccountIds.length === 0 ? [] : await tx.select().from(vendorAccounts)
+    .where(and(
+      eq(vendorAccounts.shopId, input.shopId), inArray(vendorAccounts.id, vendorAccountIds),
+    )).orderBy(vendorAccounts.id)
+  const profileIds = sessionMutationIds([
+    input.actorProfileId,
+    ...ticketRows.flatMap((ticket) => [
+      ticket.createdByProfileId,
+      ticket.canceledByProfileId,
+      ticket.deliveredByProfileId,
+      ticket.closedByProfileId,
+    ]),
+    ...jobs.flatMap((job) => [
+      job.assignedTechId,
+      job.createdByProfileId,
+      job.statementConfirmedByProfileId,
+    ]),
+    ...lines.flatMap((line) => [line.orderedByProfileId, line.receivedByProfileId]),
+    ...sessionRows.map(({ techId }) => techId),
+    ...targetEvents.map(({ requestActorProfileId }) => requestActorProfileId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.map(({ actorProfileId }) => actorProfileId),
+  ])
+  const profileRows = await tx.select().from(profiles).where(and(
+    eq(profiles.shopId, input.shopId), inArray(profiles.id, profileIds),
+  )).orderBy(profiles.id)
+  const targetSessionEventIds = sessionMutationIds(targetEvents.map(({ id }) => id))
+  const closureFingerprint = sessionMutationFingerprint({
+    profiles: sessionMutationRowsById(profileRows),
+    customers: sessionMutationRowsById(customerRows),
+    vehicles: sessionMutationRowsById(vehicleRows),
+    tickets: sessionMutationRowsById(ticketRows),
+    jobs: sessionMutationRowsById(jobs),
+    lines: sessionMutationRowsById(lines),
+    versions: sessionMutationRowsById(versions),
+    events: sessionMutationRowsById(events),
+    sessions: sessionMutationRowsById(sessionRows),
+    sessionEvents: sessionMutationRowsById(targetEvents),
+    vendors: sessionMutationRowsById(vendorRows),
+  })
+
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds,
+      lockShop: false,
+      customerIds,
+      vehicleIds,
+      ticketIds,
+      jobIds,
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: true,
+      includeAllQuoteEventsForTickets: true,
+      sessionIds,
+      sessionEventIds: targetSessionEventIds,
+      vendorAccountIds,
+      cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: EMPTY_SESSION_MUTATION_INSERTIONS,
+    }),
+    payload: Object.freeze({
+      kind: 'ready' as const,
+      separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
+      targetJobId: targetJob.id,
+      targetSessionEventIds,
+      closureFingerprint,
+    }),
+  })
+}
+
+function ticketedSessionScopeFingerprint(scope: LockedMutationScopeV1): string {
+  return sessionMutationFingerprint({
+    profiles: sessionMutationRowsById(scope.profiles),
+    customers: sessionMutationRowsById(scope.customers),
+    vehicles: sessionMutationRowsById(scope.vehicles),
+    tickets: sessionMutationRowsById(scope.tickets.map(({ ticket }) => ticket)),
+    jobs: sessionMutationRowsById(scope.tickets.flatMap(({ jobs }) => jobs)),
+    lines: sessionMutationRowsById(scope.tickets.flatMap(({ lines }) => lines)),
+    versions: sessionMutationRowsById(scope.tickets.flatMap(({ versions }) => versions)),
+    events: sessionMutationRowsById(scope.tickets.flatMap(({ events }) => events)),
+    sessions: sessionMutationRowsById(scope.sessions),
+    sessionEvents: sessionMutationRowsById(scope.sessionEvents),
+    vendors: sessionMutationRowsById(scope.vendorAccounts),
+  })
+}
+
+function latestTicketedRepairDecision(
+  events: readonly (typeof quoteEvents.$inferSelect)[],
+  jobId: string,
+) {
+  return [...events]
+    .filter((event) =>
+      event.jobId === jobId && (event.kind === 'approved' || event.kind === 'declined'))
+    .sort((left, right) => {
+      const byTime = left.createdAt.getTime() - right.createdAt.getTime()
+      return byTime === 0 ? left.id.localeCompare(right.id) : byTime
+    }).at(-1) ?? null
+}
+
+async function resolveLockedTicketedRepairContext(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  discovery: TicketedSessionMutationDiscovery,
+  input: { shopId: string; sessionId: string; actorProfileId: string },
+): Promise<LockedTicketedRepairContext> {
+  assertLiveLockedMutationScopeV1(tx, scope)
+  if (discovery.kind !== 'ready' || discovery.closureFingerprint === null) {
+    throw new ShopOsMutationNotFound()
+  }
+  if (
+    scope.profiles.length !== scope.request.profileIds.length ||
+    scope.profiles.some(({ id, shopId }) =>
+      shopId !== input.shopId || !scope.request.profileIds.includes(id)) ||
+    discovery.closureFingerprint !== ticketedSessionScopeFingerprint(scope)
+  ) throw new ShopOsMutationConflict()
+
+  const graphById = new Map(scope.tickets.map((graph) => [graph.ticket.id, graph] as const))
+  if (
+    discovery.separateChainIds.length < 1 ||
+    discovery.separateChainIds.length !== scope.tickets.length ||
+    new Set(discovery.separateChainIds).size !== discovery.separateChainIds.length
+  ) throw new ShopOsMutationConflict()
+  for (let index = 0; index < discovery.separateChainIds.length; index += 1) {
+    const graph = graphById.get(discovery.separateChainIds[index]!)
+    if (!graph || graph.ticket.separateFromTicketId !==
+      (discovery.separateChainIds[index + 1] ?? null)) throw new ShopOsMutationConflict()
+  }
+
+  const graph = graphById.get(discovery.separateChainIds[0]!)
+  const job = graph?.jobs.find(({ id }) => id === discovery.targetJobId)
+  const session = scope.sessions.find(({ id }) => id === input.sessionId)
+  if (
+    !graph || !job || !session || graph.ticket.status !== 'open' ||
+    job.kind !== 'diagnostic' || job.sessionId !== session.id ||
+    job.assignedTechId !== scope.actor.id || job.workStatus !== 'in_progress' ||
+    session.status !== 'open' || session.treeState.phase !== 'repairing' ||
+    session.techId !== scope.actor.id || session.vehicleId !== graph.ticket.vehicleId ||
+    scope.actor.id !== input.actorProfileId || scope.actor.role !== 'tech' ||
+    typeof scope.actor.skillTier !== 'number' || scope.actor.skillTier < job.requiredSkillTier
+  ) throw new ShopOsMutationNotFound()
+
+  const liveEventIds = sessionMutationIds((await tx.select({ id: sessionEvents.id })
+    .from(sessionEvents)
+    .where(eq(sessionEvents.sessionId, session.id))
+    .orderBy(sessionEvents.id)).map(({ id }) => id))
+  if (
+    liveEventIds.length !== discovery.targetSessionEventIds.length ||
+    liveEventIds.some((id, index) => id !== discovery.targetSessionEventIds[index])
+  ) throw new ShopOsMutationConflict()
+
+  const decision = latestTicketedRepairDecision(graph.events, job.id)
+  if (job.approvalState === 'declined') {
+    const version = decision?.kind === 'declined'
+      ? graph.versions.find(({ id }) => id === decision.quoteVersionId)
+      : undefined
+    if (
+      job.approvedQuoteVersionId !== null || !decision || !version ||
+      version.supersededAt !== null ||
+      !quoteSnapshotContainsJob(version.snapshot, { ticketId: job.ticketId, jobId: job.id })
+    ) throw new ShopOsMutationNotFound()
+    return Object.freeze({
+      decision: 'declined' as const,
+      ticket: graph.ticket,
+      job,
+      session,
+      sessionEvents: scope.sessionEvents,
+    })
+  }
+
+  const version = job.approvalState === 'approved' && job.approvedQuoteVersionId !== null
+    ? graph.versions.find(({ id }) => id === job.approvedQuoteVersionId)
+    : undefined
+  if (
+    !version || version.supersededAt !== null || decision?.kind !== 'approved' ||
+    decision.jobId !== job.id || decision.quoteVersionId !== version.id ||
+    !quoteSnapshotContainsJob(version.snapshot, { ticketId: job.ticketId, jobId: job.id })
+  ) throw new ShopOsMutationNotFound()
+  return Object.freeze({
+    decision: 'approved' as const,
+    ticket: graph.ticket,
+    job,
+    session,
+    sessionEvents: scope.sessionEvents,
+  })
+}
+
+async function runTicketedSessionMutation<T>(
+  db: AppDb,
+  input: {
+    shopId: string
+    sessionId: string
+    actorProfileId: string
+    expectedDecision: 'approved' | 'declined'
+  },
+  execute: (
+    tx: AppDb,
+    scope: LockedMutationScopeV1,
+    context: LockedTicketedRepairContext,
+  ) => Promise<T>,
+): Promise<T> {
+  return runBoundedShopOsMutationV1<T, TicketedSessionMutationDiscovery>(db, {
+    discover: async (tx) => discoverTicketedSessionMutation(tx, input),
+    executeLocked: async (tx, scope, discovery) => {
+      const context = await resolveLockedTicketedRepairContext(tx, scope, discovery, input)
+      if (context.decision !== input.expectedDecision) throw new ShopOsMutationNotFound()
+      return execute(tx, scope, context)
+    },
+  })
+}
+
+function ticketedSessionMutationFailure(error: unknown): CloseSessionResult | null {
+  if (error instanceof ShopOsMutationNotFound) {
+    return { ok: false, status: 409, error: 'repair_not_authorized' }
+  }
+  if (error instanceof ShopOsMutationConflict || isLockUnavailable(error)) {
+    return { ok: false, status: 409, error: 'conflict', retryable: true }
+  }
+  return null
+}
+
 export type CloseSessionResult =
   | { ok: true }
   | { ok: false; status: 400 | 404 | 409; error: string; retryable?: true }
@@ -943,6 +1343,9 @@ export async function closeSessionForUser(opts: {
   /** Test-only race seams around the two ticket authorization locks. */
   beforeAuthorizationPreflight?: () => Promise<void>
   beforeTicketedCloseLock?: () => Promise<void>
+  /** Test-only rollback seams inside the ticketed close transaction. */
+  afterTicketedWrite?: TicketedSessionMutationSeams['afterTicketedWrite']
+  afterTicketedFinalization?: TicketedSessionMutationSeams['afterTicketedFinalization']
 }): Promise<CloseSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -967,16 +1370,14 @@ export async function closeSessionForUser(opts: {
     }
     try {
       await opts.beforeTicketedCloseLock?.()
-      const committed = await opts.db.transaction(async (tx) => {
-        const transactionDb = tx as AppDb
-        const locked = await lockDiagnosticRepairAccess(transactionDb, {
-          shopId: session.shopId,
-          sessionId: session.id,
-          actorProfileId: profile.id,
-        })
-        if (locked.state !== 'declined') return false
-        const rootCause = locked.lockedDiagnosis.rootCauseSummary?.trim()
-        if (!rootCause || rootCause.length < 10) return false
+      await runTicketedSessionMutation(opts.db, {
+        shopId: session.shopId,
+        sessionId: session.id,
+        actorProfileId: profile.id,
+        expectedDecision: 'declined',
+      }, async (transactionDb, scope, locked) => {
+        const rootCause = locked.session.treeState.rootCauseSummary?.trim()
+        if (!rootCause || rootCause.length < 10) throw new ShopOsMutationNotFound()
         const outcome: StoredOutcomePayload = {
           rootCause,
           actionType: 'no_fix',
@@ -987,38 +1388,48 @@ export async function closeSessionForUser(opts: {
           },
           diagMinutes: Math.max(
             0,
-            Math.floor((Date.now() - locked.lockedDiagnosis.createdAt.getTime()) / 60_000),
+            Math.floor((Date.now() - locked.session.createdAt.getTime()) / 60_000),
           ),
           repairMinutes: 0,
           ...(declinedNoRepair.data.note ? { notes: declinedNoRepair.data.note } : {}),
           closeout: { kind: 'declined_no_repair' },
         }
-        await closeSession(transactionDb, session.id, outcome)
+        await closeSession(transactionDb, locked.session.id, outcome)
         await appendSessionEvent(transactionDb, {
-          sessionId: session.id,
-          nodeId: session.treeState.currentNodeId,
+          sessionId: locked.session.id,
+          nodeId: locked.session.treeState.currentNodeId,
           eventType: 'close',
           aiResponse: {
-            shopOsCloseout: { kind: 'declined_no_repair', jobId: locked.jobId },
+            shopOsCloseout: { kind: 'declined_no_repair', jobId: locked.job.id },
           },
         })
-        await transactionDb
+        const canceled = await transactionDb
           .update(ticketJobs)
           .set({ workStatus: 'canceled', updatedAt: new Date() })
           .where(and(
-            eq(ticketJobs.shopId, session.shopId),
-            eq(ticketJobs.id, locked.jobId),
-            eq(ticketJobs.sessionId, session.id),
+            eq(ticketJobs.shopId, locked.session.shopId),
+            eq(ticketJobs.id, locked.job.id),
+            eq(ticketJobs.sessionId, locked.session.id),
+            eq(ticketJobs.workStatus, 'in_progress'),
           ))
-        return true
+          .returning()
+        if (canceled.length !== 1) throw new ShopOsMutationConflict()
+        await opts.afterTicketedWrite?.()
+        await finalizeMutationRevisionsV1(transactionDb, scope, {
+          sessionIds: [], customerIds: [], vehicleIds: [],
+        }, [{
+          ticketId: locked.ticket.id,
+          createdTicket: false,
+          createdJobIds: [],
+          existingChangedJobIds: [locked.job.id],
+          actorVisibleTicketFieldsChanged: true,
+        }])
+        await opts.afterTicketedFinalization?.()
       })
-      return committed
-        ? { ok: true }
-        : { ok: false, status: 409, error: 'repair_not_authorized' }
+      return { ok: true }
     } catch (error) {
-      if (isLockUnavailable(error)) {
-        return { ok: false, status: 409, error: 'conflict', retryable: true }
-      }
+      const failure = ticketedSessionMutationFailure(error)
+      if (failure) return failure
       throw error
     }
   }
@@ -1035,21 +1446,17 @@ export async function closeSessionForUser(opts: {
   if (repairAccess.state === 'approved') {
     try {
       await opts.beforeAuthorizationPreflight?.()
-      const authorized = await opts.db.transaction(async (tx) => {
-        const locked = await lockDiagnosticRepairAccess(tx as AppDb, {
-          shopId: session.shopId,
-          sessionId: session.id,
-          actorProfileId: profile.id,
-        })
-        return locked.state === 'approved'
+      const locked = await lockDiagnosticRepairAccess(opts.db, {
+        shopId: session.shopId,
+        sessionId: session.id,
+        actorProfileId: profile.id,
       })
-      if (!authorized) {
+      if (locked.state !== 'approved') {
         return { ok: false, status: 409, error: 'repair_not_authorized' }
       }
     } catch (error) {
-      if (isLockUnavailable(error)) {
-        return { ok: false, status: 409, error: 'conflict', retryable: true }
-      }
+      const failure = ticketedSessionMutationFailure(error)
+      if (failure) return failure
       throw error
     }
   }
@@ -1073,37 +1480,45 @@ export async function closeSessionForUser(opts: {
 
   if (repairAccess.state === 'approved') {
     try {
-      const committed = await opts.db.transaction(async (tx) => {
-        const transactionDb = tx as AppDb
-        const locked = await lockDiagnosticRepairAccess(transactionDb, {
-          shopId: session.shopId,
-          sessionId: session.id,
-          actorProfileId: profile.id,
-        })
-        if (locked.state !== 'approved') return false
-        await closeSession(transactionDb, opts.sessionId, parsed.data)
+      await opts.beforeTicketedCloseLock?.()
+      await runTicketedSessionMutation(opts.db, {
+        shopId: session.shopId,
+        sessionId: session.id,
+        actorProfileId: profile.id,
+        expectedDecision: 'approved',
+      }, async (transactionDb, scope, locked) => {
+        await closeSession(transactionDb, locked.session.id, parsed.data)
         await appendSessionEvent(transactionDb, {
-          sessionId: opts.sessionId,
-          nodeId: session.treeState.currentNodeId,
+          sessionId: locked.session.id,
+          nodeId: locked.session.treeState.currentNodeId,
           eventType: 'close',
         })
-        await transactionDb
+        const completed = await transactionDb
           .update(ticketJobs)
           .set({ workStatus: 'done', updatedAt: new Date() })
           .where(and(
-            eq(ticketJobs.shopId, session.shopId),
-            eq(ticketJobs.id, locked.jobId),
-            eq(ticketJobs.sessionId, session.id),
+            eq(ticketJobs.shopId, locked.session.shopId),
+            eq(ticketJobs.id, locked.job.id),
+            eq(ticketJobs.sessionId, locked.session.id),
+            eq(ticketJobs.workStatus, 'in_progress'),
           ))
-        return true
+          .returning()
+        if (completed.length !== 1) throw new ShopOsMutationConflict()
+        await opts.afterTicketedWrite?.()
+        await finalizeMutationRevisionsV1(transactionDb, scope, {
+          sessionIds: [], customerIds: [], vehicleIds: [],
+        }, [{
+          ticketId: locked.ticket.id,
+          createdTicket: false,
+          createdJobIds: [],
+          existingChangedJobIds: [locked.job.id],
+          actorVisibleTicketFieldsChanged: true,
+        }])
+        await opts.afterTicketedFinalization?.()
       })
-      if (!committed) {
-        return { ok: false, status: 409, error: 'repair_not_authorized' }
-      }
     } catch (error) {
-      if (isLockUnavailable(error)) {
-        return { ok: false, status: 409, error: 'conflict', retryable: true }
-      }
+      const failure = ticketedSessionMutationFailure(error)
+      if (failure) return failure
       throw error
     }
   } else {
@@ -1727,6 +2142,20 @@ export type GetRepairGuidanceFn = (
   input: RepairGuidancePromptInput,
 ) => Promise<RepairGuidanceResult>
 
+type RepairObservationStage1 = Readonly<{
+  prompt: RepairGuidancePromptInput
+  anchor: Readonly<{ id: string; createdAtMs: number }>
+}>
+
+function orderedRepairEvents(
+  events: readonly (typeof sessionEvents.$inferSelect)[],
+): readonly (typeof sessionEvents.$inferSelect)[] {
+  return [...events].sort((left, right) => {
+    const byTime = left.createdAt.getTime() - right.createdAt.getTime()
+    return byTime === 0 ? left.id.localeCompare(right.id) : byTime
+  })
+}
+
 /**
  * Tech-submitted observation during the repair phase. Persists the
  * observation as a session_event, then calls the repair-guidance AI
@@ -1745,6 +2174,9 @@ export async function submitRepairObservationForUser(opts: {
   body: unknown
   /** Injected for testability. Production wires this to lib/ai/repair-guidance#getRepairGuidance. */
   getGuidance: GetRepairGuidanceFn
+  /** Test-only rollback seams inside the two observation transactions. */
+  afterObservationWrite?: TicketedSessionMutationSeams['afterObservationWrite']
+  afterGuidanceWrite?: TicketedSessionMutationSeams['afterGuidanceWrite']
 }): Promise<SubmitRepairObservationResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
@@ -1765,63 +2197,135 @@ export async function submitRepairObservationForUser(opts: {
     return { ok: false, status: 400, error: parsed.error.message }
   }
 
-  try {
-    const committed = await opts.db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const access = await lockDiagnosticRepairAccess(transactionDb, {
-        shopId: session.shopId,
-        sessionId: session.id,
-        actorProfileId: profile.id,
+  const initialAccess = await resolveDiagnosticRepairAccess(opts.db, {
+    shopId: session.shopId,
+    sessionId: session.id,
+  })
+  if (initialAccess.state === 'legacy') {
+    try {
+      const committed = await opts.db.transaction(async (tx) => {
+        const transactionDb = tx as AppDb
+        const access = await lockDiagnosticRepairAccess(transactionDb, {
+          shopId: session.shopId,
+          sessionId: session.id,
+          actorProfileId: profile.id,
+        })
+        if (access.state !== 'legacy') return false
+        await appendSessionEvent(transactionDb, {
+          sessionId: opts.sessionId,
+          nodeId: session.treeState.currentNodeId,
+          eventType: 'repair_observation',
+          observationText: parsed.data.observation,
+        })
+        return true
       })
-      if (access.state !== 'legacy' && access.state !== 'approved') return false
-      // Persist the tech's observation FIRST so it is retained if guidance fails.
-      await appendSessionEvent(transactionDb, {
-        sessionId: opts.sessionId,
-        nodeId: session.treeState.currentNodeId,
+      if (!committed) return { ok: false, status: 409, error: 'repair_not_authorized' }
+    } catch (error) {
+      if (isLockUnavailable(error) || error instanceof ShopOsMutationConflict) {
+        return { ok: false, status: 409, error: 'conflict', retryable: true }
+      }
+      throw error
+    }
+    const allEvents = await opts.db.select().from(sessionEvents)
+      .where(eq(sessionEvents.sessionId, opts.sessionId))
+      .orderBy(asc(sessionEvents.createdAt), asc(sessionEvents.id))
+    let guidance: RepairGuidanceResult
+    try {
+      guidance = await opts.getGuidance({
+        tree: session.treeState,
+        recentEvents: allEvents.slice(0, -1),
+        observation: parsed.data.observation,
+      })
+    } catch {
+      return { ok: false, status: 502, error: 'repair_guidance_unavailable' }
+    }
+    await appendSessionEvent(opts.db, {
+      sessionId: opts.sessionId,
+      nodeId: session.treeState.currentNodeId,
+      eventType: 'repair_guidance',
+      aiResponse: { repairGuidance: guidance },
+    })
+    return { ok: true, guidance }
+  }
+  if (initialAccess.state !== 'approved') {
+    return { ok: false, status: 409, error: 'repair_not_authorized' }
+  }
+
+  let stage1: RepairObservationStage1
+  try {
+    stage1 = await runTicketedSessionMutation(opts.db, {
+      shopId: session.shopId,
+      sessionId: session.id,
+      actorProfileId: profile.id,
+      expectedDecision: 'approved',
+    }, async (tx, _scope, context) => {
+      const observationId = randomUUID()
+      const observation = await appendSessionEvent(tx, {
+        id: observationId,
+        sessionId: context.session.id,
+        nodeId: context.session.treeState.currentNodeId,
         eventType: 'repair_observation',
         observationText: parsed.data.observation,
       })
-      return true
+      await opts.afterObservationWrite?.()
+      const priorEvents = Object.freeze(orderedRepairEvents(context.sessionEvents)
+        .filter(({ id }) => id !== observationId)) as unknown as RepairGuidancePromptInput['recentEvents']
+      const prompt = Object.freeze({
+        tree: context.session.treeState,
+        recentEvents: priorEvents,
+        observation: parsed.data.observation,
+      })
+      return Object.freeze({
+        prompt,
+        anchor: Object.freeze({ id: observation.id, createdAtMs: observation.createdAt.getTime() }),
+      })
     })
-    if (!committed) {
+  } catch (error) {
+    if (error instanceof ShopOsMutationNotFound) {
       return { ok: false, status: 409, error: 'repair_not_authorized' }
     }
-  } catch (error) {
-    if (isLockUnavailable(error)) {
+    if (error instanceof ShopOsMutationConflict || isLockUnavailable(error)) {
       return { ok: false, status: 409, error: 'conflict', retryable: true }
     }
     throw error
   }
 
-  // Fetch prior repair events for AI context (the just-inserted observation is excluded).
-  const allEvents = await opts.db
-    .select()
-    .from(sessionEvents)
-    .where(eq(sessionEvents.sessionId, opts.sessionId))
-    .orderBy(sessionEvents.createdAt)
-  const priorEvents = allEvents.slice(0, -1)
-
   let guidance: RepairGuidanceResult
   try {
-    guidance = await opts.getGuidance({
-      tree: session.treeState,
-      recentEvents: priorEvents,
-      observation: parsed.data.observation,
-    })
-  } catch (err) {
-    return {
-      ok: false,
-      status: 502,
-      error: `repair-guidance failed: ${(err as Error).message}`,
-    }
+    guidance = await opts.getGuidance(stage1.prompt)
+  } catch {
+    return { ok: false, status: 502, error: 'repair_guidance_unavailable' }
   }
 
-  await appendSessionEvent(opts.db, {
-    sessionId: opts.sessionId,
-    nodeId: session.treeState.currentNodeId,
-    eventType: 'repair_guidance',
-    aiResponse: { repairGuidance: guidance },
-  })
+  try {
+    await runTicketedSessionMutation(opts.db, {
+      shopId: session.shopId,
+      sessionId: session.id,
+      actorProfileId: profile.id,
+      expectedDecision: 'approved',
+    }, async (tx, _scope, context) => {
+      const lastEvent = orderedRepairEvents(context.sessionEvents).at(-1)
+      if (
+        !lastEvent || lastEvent.id !== stage1.anchor.id ||
+        lastEvent.createdAt.getTime() !== stage1.anchor.createdAtMs
+      ) throw new ShopOsMutationConflict()
+      await appendSessionEvent(tx, {
+        sessionId: context.session.id,
+        nodeId: context.session.treeState.currentNodeId,
+        eventType: 'repair_guidance',
+        aiResponse: { repairGuidance: guidance },
+      })
+      await opts.afterGuidanceWrite?.()
+    })
+  } catch (error) {
+    if (error instanceof ShopOsMutationNotFound) {
+      return { ok: false, status: 409, error: 'repair_not_authorized' }
+    }
+    if (error instanceof ShopOsMutationConflict || isLockUnavailable(error)) {
+      return { ok: false, status: 409, error: 'conflict', retryable: true }
+    }
+    throw error
+  }
 
   return { ok: true, guidance }
 }

@@ -69,6 +69,17 @@ describe('Shop OS repair and close route mappings', () => {
     expect(await observationResponse.json()).toEqual({ error: 'repair_not_authorized' })
   })
 
+  it('preserves the stable redacted repair-guidance failure', async () => {
+    vi.mocked(submitRepairObservationForUser).mockResolvedValue({
+      ok: false, status: 502, error: 'repair_guidance_unavailable',
+    })
+
+    const response = await observationPost(request('repair-observation'), { params })
+
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({ error: 'repair_guidance_unavailable' })
+  })
+
   it('rejects unauthenticated requests before the paywall or handler', async () => {
     vi.mocked(getServerSupabase).mockResolvedValue({
       auth: { getUser: vi.fn(async () => ({ data: { user: null } })) },
