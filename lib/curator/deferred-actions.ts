@@ -1,8 +1,48 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
-import { sessions } from '@/lib/db/schema'
+import { sessions, ticketJobs } from '@/lib/db/schema'
 
 export type DeferredActionResult = { kind: 'ok' } | { kind: 'not-found' }
+
+type DeferredSessionUpdate = {
+  status: 'open' | 'closed'
+  closedAt: Date | null
+  curatorNote: string | null
+  curatorOverrideAction?: string | null
+}
+
+async function mutateDeferredSession(
+  db: AppDb,
+  sessionId: string,
+  values: DeferredSessionUpdate,
+): Promise<DeferredActionResult> {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({ id: sessions.id, status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .for('update')
+
+    if (!session || session.status !== 'deferred') return { kind: 'not-found' }
+
+    const [ticketLink] = await tx
+      .select({ id: ticketJobs.id })
+      .from(ticketJobs)
+      .where(eq(ticketJobs.sessionId, sessionId))
+      .limit(1)
+
+    if (ticketLink) return { kind: 'not-found' }
+
+    const [updated] = await tx
+      .update(sessions)
+      .set(values)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'deferred')))
+      .returning()
+
+    return updated ? { kind: 'ok' } : { kind: 'not-found' }
+  })
+}
 
 // Curator attribution (e.g., a curator_id column on sessions) was not
 // included in the Phase P spec. If audit attribution becomes a requirement,
@@ -17,25 +57,12 @@ export async function approveDeferredSession(
   sessionId: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
-  const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
-    .update(sessions)
-    .set({
-      status: 'open',
-      closedAt: null,
-      curatorNote: note,
-      curatorOverrideAction: null,
-    })
-    .where(eq(sessions.id, sessionId))
-
-  return { kind: 'ok' }
+  return mutateDeferredSession(db, sessionId, {
+    status: 'open',
+    closedAt: null,
+    curatorNote: note,
+    curatorOverrideAction: null,
+  })
 }
 
 /**
@@ -48,25 +75,12 @@ export async function overrideDeferredSession(
   overrideAction: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
-  const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
-    .update(sessions)
-    .set({
-      status: 'open',
-      closedAt: null,
-      curatorOverrideAction: overrideAction,
-      curatorNote: note,
-    })
-    .where(eq(sessions.id, sessionId))
-
-  return { kind: 'ok' }
+  return mutateDeferredSession(db, sessionId, {
+    status: 'open',
+    closedAt: null,
+    curatorOverrideAction: overrideAction,
+    curatorNote: note,
+  })
 }
 
 /**
@@ -78,22 +92,9 @@ export async function closeDeferredSession(
   sessionId: string,
   note: string | null,
 ): Promise<DeferredActionResult> {
-  const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
-    .update(sessions)
-    .set({
-      status: 'closed',
-      closedAt: new Date(),
-      curatorNote: note,
-    })
-    .where(eq(sessions.id, sessionId))
-
-  return { kind: 'ok' }
+  return mutateDeferredSession(db, sessionId, {
+    status: 'closed',
+    closedAt: new Date(),
+    curatorNote: note,
+  })
 }

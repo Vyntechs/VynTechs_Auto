@@ -67,3 +67,8 @@ Reason: A green failure-path test can be tautological when an earlier validator 
 Trigger: Successive reviews found test-only authorization combinations after production behavior was already conformant.
 Rule: Table action, state, locked drift, disclosure, revisions, and rollback before coding; require one exhaustive findings pass.
 Reason: One-gap-at-a-time reviews repeat broad verification without improving production behavior.
+
+### terminate-review-at-timebox
+Trigger: A redundant plan reviewer exceeded its fixed scope after three complete source inventories had already converged.
+Rule: Terminate an overrun reviewer; use available evidence and reserve the next review for the named convergence gate.
+Reason: Waiting longer adds latency and recreates the open-ended review loop the efficiency contract forbids.
