@@ -59,6 +59,11 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     await db.execute(sql`update quote_versions set snapshot = ${JSON.stringify(value)}::jsonb where id = ${versionId}`)
     await db.execute(sql`alter table quote_versions enable trigger all`)
   }
+  const decisionState = async () => ({
+    ticket: (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0],
+    job: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0],
+    events: await db.select().from(quoteEvents),
+  })
 
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
@@ -113,10 +118,21 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
 
   afterEach(async () => close())
 
-  it('locks ticket then stable jobs, exact version, request event, and actor with NOWAIT', () => {
+  it('uses the bounded profile-first coordinator, shop serialization, and one revision finalizer', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
-    const helper = source.slice(source.indexOf('export async function recordQuoteDecision'), source.indexOf('type NormalizedLine'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteEvents\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+    const helper = source.slice(source.indexOf('function decisionNotFound'), source.indexOf('type NormalizedLine'))
+    expect(helper).toContain('runBoundedShopOsMutationV1')
+    expect(helper).toContain('lockShop: true')
+    expect(helper).toContain('includeAllQuoteVersionsForTickets: true')
+    expect(helper).toContain('includeAllQuoteEventsForTickets: true')
+    expect(helper.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(helper).toContain('afterDiscovery')
+    expect(helper).toContain('afterWrite')
+    expect(helper).toContain('afterFinalization')
+    expect(helper).not.toContain('db.transaction')
+    expect(helper).not.toMatch(/\.for\('update'/)
+    expect(helper).not.toMatch(/revision:\s*sql/)
+    expect(helper).not.toContain('ticketMutationReceipts')
     expect(helper).not.toMatch(/approvedQuoteVersionId:\s*z\.|approvalState:\s*z\./)
   })
 
@@ -163,12 +179,45 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     await overwriteSnapshot(snapshot({ totals: { subtotalCents: 999, taxableSubtotalCents: 500, taxCents: 41, totalCents: 1_040 } }))
     await db.update(quoteVersions).set({ supersededAt: new Date() }).where(eq(quoteVersions.id, versionId))
     await db.update(ticketJobs).set({ approvalState: 'pending_quote', approvedQuoteVersionId: null }).where(eq(ticketJobs.id, jobId))
+    const beforeReplay = await decisionState()
     const retry = await decide(approvedBody(uuid(120)))
     expect(first).toMatchObject({ ok: true, changed: true, projection: { approvalState: 'approved' } })
     expect(retry).toMatchObject({
       ok: true, changed: false, event: { kind: 'approved' },
       projection: { approvalState: 'pending_quote', approvedQuoteVersionId: null },
     })
+    expect(await decisionState()).toEqual(beforeReplay)
+    const beforeDeniedReplay = await decisionState()
+    await db.update(profiles).set({ role: 'tech' }).where(eq(profiles.id, uuid(1)))
+    await expect(decide(approvedBody(uuid(120)))).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await decisionState()).toEqual(beforeDeniedReplay)
+  })
+
+  it('classifies first decisions, reversals, and new-key same-state events at bigint-safe revisions', async () => {
+    const hugeJobRevision = 9_007_199_254_740_993n
+    const hugeProjectionRevision = 9_007_199_254_741_993n
+    const hugeContinuityRevision = 9_007_199_254_742_993n
+    await db.update(ticketJobs).set({ revision: hugeJobRevision }).where(eq(ticketJobs.id, jobId))
+    await db.update(tickets).set({
+      projectionRevision: hugeProjectionRevision,
+      continuityRevision: hugeContinuityRevision,
+    }).where(eq(tickets.id, ticketId))
+
+    for (const [body, expected] of [
+      [approvedBody(uuid(122)), { job: 1n, projection: 1n, continuity: 1n }],
+      [declinedBody(uuid(123)), { job: 2n, projection: 2n, continuity: 2n }],
+      [declinedBody(uuid(124)), { job: 3n, projection: 3n, continuity: 2n }],
+    ] as const) {
+      await expect(decide(body)).resolves.toMatchObject({ ok: true, changed: true })
+      const state = await decisionState()
+      expect(state.job.revision).toBe(hugeJobRevision + expected.job)
+      expect(state.ticket.projectionRevision).toBe(hugeProjectionRevision + expected.projection)
+      expect(state.ticket.continuityRevision).toBe(hugeContinuityRevision + expected.continuity)
+    }
+
+    const beforeReplay = await decisionState()
+    await expect(decide(declinedBody(uuid(124)))).resolves.toMatchObject({ ok: true, changed: false })
+    expect(await decisionState()).toEqual(beforeReplay)
   })
 
   it('conflicts on changed or cross-actor request-key reuse', async () => {
@@ -178,18 +227,191 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     await expect(decide(approvedBody(uuid(130)), { actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
+  it('serializes request keys within a shop without coupling independent shops', async () => {
+    const sameShopTicketId = uuid(22)
+    const sameShopJobId = uuid(32)
+    const sameShopVersionId = uuid(52)
+    const otherShopTicketId = uuid(21)
+    const otherShopJobId = uuid(31)
+    const otherShopVersionId = uuid(53)
+    const requestKey = uuid(131)
+    const sameShopSnapshot = snapshot({
+      ticket: { ...snapshot().ticket, id: sameShopTicketId, number: 2 },
+      jobs: [{
+        ...snapshot().jobs[0], id: sameShopJobId,
+        lines: [{ ...snapshot().jobs[0].lines[0], id: uuid(42) }],
+      }],
+    })
+    const otherShopSnapshot = snapshot({
+      ticket: {
+        id: otherShopTicketId, number: 1, customerId: uuid(12), vehicleId: uuid(13),
+        laborRateCents: 20_000, taxRateBps: 700,
+      },
+      jobs: [{
+        ...snapshot().jobs[0], id: otherShopJobId,
+        lines: [{ ...snapshot().jobs[0].lines[0], id: uuid(43) }],
+      }],
+      totals: { subtotalCents: 500, taxableSubtotalCents: 500, taxCents: 35, totalCents: 535 },
+    })
+    await db.insert(ticketJobs).values({
+      id: sameShopJobId, shopId, ticketId: sameShopTicketId, title: 'Same-shop job',
+      kind: 'repair', requiredSkillTier: 1, approvalState: 'quote_ready',
+    })
+    await db.insert(quoteVersions).values([
+      {
+        id: sameShopVersionId, shopId, ticketId: sameShopTicketId, versionNumber: 1,
+        snapshot: sameShopSnapshot, createdByProfileId: uuid(1),
+      },
+      {
+        id: otherShopVersionId, shopId: otherShopId, ticketId: otherShopTicketId,
+        versionNumber: 1, snapshot: otherShopSnapshot, createdByProfileId: uuid(6),
+      },
+    ])
+
+    await expect(decide(approvedBody(requestKey))).resolves.toMatchObject({ ok: true, changed: true })
+    const beforeCollision = {
+      ticket: (await db.select().from(tickets).where(eq(tickets.id, sameShopTicketId)))[0],
+      job: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, sameShopJobId)))[0],
+      events: await db.select().from(quoteEvents),
+    }
+    await expect(decide({
+      ...approvedBody(requestKey), jobId: sameShopJobId, quoteVersionId: sameShopVersionId,
+    }, { ticketId: sameShopTicketId })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
+    expect({
+      ticket: (await db.select().from(tickets).where(eq(tickets.id, sameShopTicketId)))[0],
+      job: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, sameShopJobId)))[0],
+      events: await db.select().from(quoteEvents),
+    }).toEqual(beforeCollision)
+
+    await expect(decide({
+      ...approvedBody(requestKey), jobId: otherShopJobId, quoteVersionId: otherShopVersionId,
+    }, {
+      actor: { profileId: uuid(6) }, ticketId: otherShopTicketId,
+    })).resolves.toMatchObject({ ok: true, changed: true })
+    const [otherShopTicket] = await db.select().from(tickets).where(eq(tickets.id, otherShopTicketId))
+    const [otherShopJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, otherShopJobId))
+    expect(otherShopTicket).toMatchObject({ projectionRevision: 1n, continuityRevision: 1n })
+    expect(otherShopJob).toMatchObject({ revision: 1n, approvalState: 'approved' })
+    expect(await db.select().from(quoteEvents)).toHaveLength(2)
+  })
+
   it('requires an open reconciled ticket and the current exact same-ticket version/job', async () => {
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
-    await expect(decide(approvedBody(uuid(140)))).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
     await expect(decide(approvedBody(uuid(145)), { ticketId: uuid(22) })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.execute(sql`update tickets set source = 'tech_quick', customer_id = null, vehicle_id = null where id = ${ticketId}`)
-    await expect(decide(approvedBody(uuid(141)))).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.execute(sql`update tickets set source = 'counter', customer_id = ${uuid(10)}, vehicle_id = ${uuid(11)} where id = ${ticketId}`)
+    await db.insert(tickets).values({
+      id: uuid(23), shopId, ticketNumber: 3, source: 'tech_quick',
+      customerId: null, vehicleId: null, concern: 'Provisional', createdByProfileId: uuid(1),
+    })
+    await expect(decide(approvedBody(uuid(141)), { ticketId: uuid(23) })).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(quoteVersions).set({ supersededAt: new Date() }).where(eq(quoteVersions.id, versionId))
     await expect(decide(approvedBody(uuid(142)))).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(decide(approvedBody(uuid(143), { quoteVersionId: uuid(999) }))).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(decide(approvedBody(uuid(144), { jobId: uuid(999) }))).resolves.toEqual({ ok: false, error: 'not_found' })
+    const canceledAt = new Date()
+    await db.update(ticketJobs).set({ workStatus: 'canceled' }).where(eq(ticketJobs.id, jobId))
+    await db.update(tickets).set({
+      status: 'canceled', canceledAt, canceledByProfileId: uuid(1),
+      cancelReasonCode: 'administrative_error',
+    }).where(eq(tickets.id, ticketId))
+    await expect(decide(approvedBody(uuid(140)))).resolves.toEqual({ ok: false, error: 'not_found' })
+  })
+
+  it('locks complete page and offline history without broadening the private input contract', async () => {
+    await db.insert(quoteEvents).values([
+      {
+        id: uuid(60), shopId, ticketId, quoteVersionId: versionId,
+        kind: 'sent', requestKey: uuid(330),
+      },
+      {
+        id: uuid(61), shopId, ticketId, quoteVersionId: versionId,
+        kind: 'viewed', requestKey: uuid(331),
+      },
+      {
+        id: uuid(62), shopId, ticketId, jobId, quoteVersionId: versionId,
+        kind: 'approved', approvedVia: 'page', requestKey: uuid(332),
+      },
+    ])
+    await db.update(ticketJobs).set({
+      approvalState: 'approved', approvedQuoteVersionId: versionId,
+    }).where(eq(ticketJobs.id, jobId))
+
+    const beforeInvalidPage = await decisionState()
+    await expect(decide(approvedBody(uuid(333), { approvedVia: 'page' }))).resolves.toEqual({
+      ok: false, error: 'invalid_input',
+    })
+    expect(await decisionState()).toEqual(beforeInvalidPage)
+
+    await expect(decide(declinedBody(uuid(334)))).resolves.toMatchObject({
+      ok: true, changed: true, event: { kind: 'declined', approvedVia: null },
+    })
+    const after = await decisionState()
+    expect(after.events).toHaveLength(4)
+    expect(after.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: uuid(60), kind: 'sent' }),
+      expect.objectContaining({ id: uuid(61), kind: 'viewed' }),
+      expect.objectContaining({ id: uuid(62), kind: 'approved', approvedVia: 'page' }),
+      expect.objectContaining({ kind: 'declined', approvedVia: null }),
+    ]))
+    expect(after.ticket).toMatchObject({ projectionRevision: 1n, continuityRevision: 1n })
+    expect(after.job).toMatchObject({ revision: 1n, approvalState: 'declined' })
+  })
+
+  it.each(['membership', 'deactivation', 'shop', 'role'] as const)(
+    'hides locked actor %s drift and preserves the complete decision state',
+    async (drift) => {
+      actor = { profileId: uuid(2) }
+      const before = await decisionState()
+      if (drift === 'membership') {
+        await db.update(profiles).set({
+          membershipStatus: 'pending', membershipActivatedAt: null,
+        }).where(eq(profiles.id, actor.profileId))
+      } else if (drift === 'deactivation') {
+        await db.update(profiles).set({ deactivatedAt: new Date() })
+          .where(eq(profiles.id, actor.profileId))
+      } else if (drift === 'shop') {
+        await db.update(profiles).set({ shopId: otherShopId })
+          .where(eq(profiles.id, actor.profileId))
+      } else {
+        await db.update(profiles).set({ role: 'tech', skillTier: 3 })
+          .where(eq(profiles.id, actor.profileId))
+      }
+
+      const result = await decide(approvedBody(uuid(340)))
+
+      expect(result).toEqual({ ok: false, error: 'not_found' })
+      expect(result).not.toHaveProperty('event')
+      expect(await decisionState()).toEqual(before)
+    },
+  )
+
+  it('fails closed without disclosure when locked customer and vehicle ancestry drifts', async () => {
+    await db.insert(customers).values({
+      id: uuid(14), shopId, name: 'Same-shop other customer', phone: '5553333333',
+    })
+    await db.execute(sql`alter table vehicles disable trigger all`)
+    await db.update(vehicles).set({ customerId: uuid(14) }).where(eq(vehicles.id, uuid(11)))
+    await db.execute(sql`alter table vehicles enable trigger all`)
+    const before = await decisionState()
+
+    const result = await decide(approvedBody(uuid(350)))
+
+    expect(result).toEqual({ ok: false, error: 'not_found' })
+    expect(result).not.toHaveProperty('event')
+    expect(await decisionState()).toEqual(before)
+  })
+
+  it('fails closed when a historical graph profile reference becomes inactive', async () => {
+    actor = { profileId: uuid(2) }
+    await db.update(profiles).set({ deactivatedAt: new Date() })
+      .where(eq(profiles.id, uuid(1)))
+    const before = await decisionState()
+
+    const result = await decide(approvedBody(uuid(351)))
+
+    expect(result).toEqual({ ok: false, error: 'not_found' })
+    expect(result).not.toHaveProperty('event')
+    expect(await decisionState()).toEqual(before)
   })
 
   it('fails closed when more than one ticket version is current', async () => {
@@ -314,22 +536,46 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     expect(job.approvalState === 'approved' ? job.approvedQuoteVersionId : null).toBe(job.approvedQuoteVersionId)
   })
 
-  it('rolls back an inserted event when projection update fails', async () => {
+  it('rolls back the event and projection when the post-write seam fails', async () => {
+    const marker = new Error('after write')
+    const before = await decisionState()
+
     await expect(decide(approvedBody(uuid(180)), {}, {
-      afterEventInsert: async () => { throw new Error('projection failed') },
-    })).rejects.toThrow('projection failed')
-    expect(await db.select().from(quoteEvents)).toHaveLength(0)
-    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
-    expect(job.approvalState).toBe('quote_ready')
-    expect(job.approvedQuoteVersionId).toBeNull()
+      afterWrite: async () => { throw marker },
+    })).rejects.toBe(marker)
+
+    expect(await decisionState()).toEqual(before)
   })
 
-  it('classifies a post-ticket query-level 55P03 as retryable and rolls back', async () => {
-    await expect(decide(approvedBody(uuid(190)), {}, {
-      afterTicketLock: async () => { throw Object.assign(new Error('held diagnostic job'), { code: '55P03' }) },
-    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
-    expect(await db.select().from(quoteEvents)).toHaveLength(0)
+  it('rolls back the event, projection, and both revision layers after finalization', async () => {
+    const marker = new Error('after finalization')
+    const before = await decisionState()
+
+    await expect(decide(approvedBody(uuid(181)), {}, {
+      afterFinalization: async () => { throw marker },
+    })).rejects.toBe(marker)
+
+    expect(await decisionState()).toEqual(before)
   })
+
+  it.each(['55P03', '40001', '40P01'] as const)(
+    'exhausts two bounded attempts for SQLSTATE %s without leaking a partial decision',
+    async (code) => {
+      let attempts = 0
+      const before = await decisionState()
+
+      const result = await decide(approvedBody(uuid(191)), {}, {
+        afterDiscovery: async () => {
+          attempts += 1
+          throw Object.assign(new Error(code), { code })
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(attempts).toBe(2)
+      expect(await decisionState()).toEqual(before)
+    },
+  )
 
   it('keeps quote events append-only and exposes no direct projection mutation handler', async () => {
     await decide(approvedBody(uuid(200)))

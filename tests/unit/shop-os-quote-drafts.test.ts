@@ -51,6 +51,54 @@ describe('Shop OS quote draft mutations', () => {
   const create = (clientKey = uuid(100), body: unknown = partBody(), overrides = {}) =>
     createDraftLine(db, { actor, ticketId, jobId, clientKey, body, ...overrides })
 
+  type DraftSeamsV1 = {
+    afterDiscovery?: () => Promise<void>
+    afterWrite?: () => Promise<void>
+    afterFinalization?: () => Promise<void>
+  }
+  type DraftResult = Awaited<ReturnType<typeof createDraftLine>>
+  type DraftWriterV1 = (
+    sourceDb: TestDb,
+    input: Record<string, unknown>,
+    dependencies?: DraftSeamsV1,
+  ) => Promise<DraftResult>
+
+  const createWithSeams = (
+    clientKey: string,
+    body: unknown,
+    dependencies: DraftSeamsV1,
+  ) => (createDraftLine as unknown as DraftWriterV1)(
+    db,
+    { actor, ticketId, jobId, clientKey, body },
+    dependencies,
+  )
+
+  const replaceWithSeams = (
+    lineId: string,
+    body: unknown,
+    dependencies: DraftSeamsV1 = {},
+  ) => (replaceDraftLine as unknown as DraftWriterV1)(
+    db,
+    { actor, ticketId, jobId, lineId, body },
+    dependencies,
+  )
+
+  const deleteWithSeams = (
+    lineId: string,
+    dependencies: DraftSeamsV1 = {},
+  ) => (deleteDraftLine as unknown as DraftWriterV1)(
+    db,
+    { actor, ticketId, jobId, lineId },
+    dependencies,
+  )
+
+  const mutationState = async () => ({
+    ticket: (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0],
+    jobs: await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId)).orderBy(ticketJobs.id),
+    lines: await db.select().from(jobLines).orderBy(jobLines.id),
+    versions: await db.select().from(quoteVersions).where(eq(quoteVersions.ticketId, ticketId)).orderBy(quoteVersions.id),
+  })
+
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
     const [shop, otherShop] = await db.insert(shops).values([
@@ -108,10 +156,51 @@ describe('Shop OS quote draft mutations', () => {
 
   afterEach(async () => close())
 
-  it('captures the ticket-first stable NOWAIT lock contract', () => {
+  it('uses the bounded profile-first coordinator, complete reference closure, and one revision finalizer', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
-    const helper = source.slice(source.indexOf('async function lockDraftContext'), source.indexOf('async function invalidateActiveVersion'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+    const draftStart = source.indexOf('type NormalizedLine')
+    const draft = source.slice(draftStart)
+
+    expect(draftStart).toBeGreaterThan(-1)
+    expect(draft).toContain('runBoundedShopOsMutationV1')
+    expect(draft).toContain('assertLiveLockedMutationScopeV1')
+    expect(draft).toContain('finalizeMutationRevisionsV1')
+    expect(draft.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(source).toMatch(/profileIds[\s\S]*?customerIds[\s\S]*?vehicleIds[\s\S]*?ticketIds/)
+    for (const closureToken of [
+      'separateFromTicketId',
+      'createdByProfileId',
+      'assignedTechId',
+      'statementConfirmedByProfileId',
+      'orderedByProfileId',
+      'receivedByProfileId',
+      'sessionId',
+      'techId',
+      'vendorAccountId',
+      'actorProfileId',
+      'includeAllJobsForTickets',
+      'includeAllLinesForJobs',
+      'includeAllQuoteVersionsForTickets',
+      'includeAllQuoteEventsForTickets',
+    ]) expect(source).toContain(closureToken)
+    expect(draft).not.toContain('.transaction(')
+    expect(draft).not.toContain(".for('update'")
+    expect(draft).not.toMatch(/revision:\s*sql/)
+    expect(draft).not.toContain('MutationReceipt')
+  })
+
+  it('keeps the Task 9 invalidation wrapper narrow over the delta helper', () => {
+    const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
+    const deltaStart = source.indexOf('export async function invalidateActiveQuoteVersionDeltaV1')
+    const wrapperStart = source.indexOf('export async function invalidateActiveQuoteVersion(')
+    const nextType = source.indexOf('export type CreateQuoteVersionResult', wrapperStart)
+    const wrapper = source.slice(wrapperStart, nextType)
+
+    expect(deltaStart).toBeGreaterThan(-1)
+    expect(wrapperStart).toBeGreaterThan(deltaStart)
+    expect(wrapper).toContain('invalidateActiveQuoteVersionDeltaV1')
+    expect(wrapper).not.toContain('finalizeMutationRevisionsV1')
+    expect(wrapper).not.toContain('.transaction(')
   })
 
   it('allows an active tech to create a manual part on an open provisional ticket', async () => {
@@ -149,15 +238,70 @@ describe('Shop OS quote draft mutations', () => {
     }
   })
 
-  it('reauthorizes the persisted actor and hides role, tenant, ticket, and job boundaries', async () => {
-    await db.update(profiles).set({ membershipStatus: 'pending', membershipActivatedAt: null }).where(eq(profiles.id, uuid(1)))
-    await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(profiles).set({ membershipStatus: 'active', membershipActivatedAt: new Date(), deactivatedAt: new Date() }).where(eq(profiles.id, uuid(1)))
-    await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(create(uuid(101), partBody(), { actor: { profileId: uuid(3) } })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(create(uuid(102), partBody(), { actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(create(uuid(103), partBody(), { ticketId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(create(uuid(104), partBody(), { jobId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
+  it('tables actor membership, deactivation, shop, and role authority without disclosing or writing', async () => {
+    const actorDrifts: Array<{
+      label: string
+      arrange: () => Promise<unknown>
+      callActor?: QuoteActor
+    }> = [
+      {
+        label: 'membership',
+        arrange: async () => {
+          await db.update(profiles).set({
+            membershipStatus: 'pending', membershipActivatedAt: null,
+          }).where(eq(profiles.id, uuid(1)))
+        },
+      },
+      {
+        label: 'deactivation',
+        arrange: async () => {
+          await db.update(profiles).set({
+            deactivatedAt: new Date('2026-07-16T12:00:00Z'),
+          }).where(eq(profiles.id, uuid(1)))
+        },
+      },
+      {
+        label: 'shop',
+        arrange: async () => undefined,
+        callActor: { profileId: uuid(2) },
+      },
+      {
+        label: 'role',
+        arrange: async () => {
+          await db.update(profiles).set({ role: 'founder' }).where(eq(profiles.id, uuid(1)))
+        },
+      },
+    ]
+
+    for (const { label, arrange, callActor } of actorDrifts) {
+      await db.update(profiles).set({
+        shopId,
+        role: 'tech',
+        skillTier: 2,
+        membershipStatus: 'active',
+        membershipActivatedAt: new Date('2026-07-01T00:00:00Z'),
+        deactivatedAt: null,
+      }).where(eq(profiles.id, uuid(1)))
+      await arrange()
+      const before = await mutationState()
+
+      const result = await create(uuid(101), partBody(), callActor ? { actor: callActor } : {})
+
+      expect(result, label).toEqual({ ok: false, error: 'not_found' })
+      expect(result, label).not.toHaveProperty('line')
+      expect(await mutationState(), label).toEqual(before)
+    }
+  })
+
+  it('keeps locked skill tier authoritative without inventing a quote-building tier restriction', async () => {
+    await db.update(profiles).set({ skillTier: null }).where(eq(profiles.id, uuid(1)))
+    await expect(create(uuid(102))).resolves.toMatchObject({ ok: true, changed: true })
+  })
+
+  it('hides tenant, ticket, and job boundaries', async () => {
+    await expect(create(uuid(103), partBody(), { actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(create(uuid(104), partBody(), { ticketId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(create(uuid(105), partBody(), { jobId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('rejects closed tickets and canceled or done jobs while allowing provisional work', async () => {
@@ -165,8 +309,14 @@ describe('Shop OS quote draft mutations', () => {
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(ticketJobs).set({ workStatus: 'canceled' }).where(eq(ticketJobs.id, jobId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(ticketJobs).set({ workStatus: 'open' }).where(eq(ticketJobs.id, jobId))
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, jobId))
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-15T12:00:00Z'),
+      closedByProfileId: uuid(1),
+      closeDisposition: 'no_repair',
+      closeNote: 'No repair performed.',
+    }).where(eq(tickets.id, ticketId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
@@ -275,6 +425,160 @@ describe('Shop OS quote draft mutations', () => {
     expect(local.line.id).not.toBe(other.line.id)
   })
 
+  const revisionCases: Array<[
+    label: string,
+    continuityDelta: bigint,
+    prepare: () => Promise<() => Promise<DraftResult>>,
+  ]> = [
+    [
+      'part create',
+      1n,
+      async () => () => createWithSeams(uuid(601), partBody(), {}),
+    ],
+    [
+      'labor create',
+      0n,
+      async () => () => createWithSeams(uuid(602), {
+        kind: 'labor', description: 'Install pads', laborHours: '1.25', taxable: false,
+      }, {}),
+    ],
+    [
+      'part price-only replace',
+      0n,
+      async () => {
+        const created = await create(uuid(603))
+        if (!created.ok || !created.line) throw new Error('missing price-replace line')
+        return () => replaceWithSeams(
+          created.line!.id,
+          partBody({ priceCents: 13_500 }),
+        )
+      },
+    ],
+    [
+      'part-membership replace',
+      1n,
+      async () => {
+        const created = await create(uuid(604))
+        if (!created.ok || !created.line) throw new Error('missing membership-replace line')
+        return () => replaceWithSeams(created.line!.id, {
+          kind: 'labor', description: 'Install pads', laborHours: '1.25', taxable: false,
+        })
+      },
+    ],
+    [
+      'labor price-only replace',
+      0n,
+      async () => {
+        const body = {
+          kind: 'labor', description: 'Install pads', laborHours: '1.25', taxable: false,
+        }
+        const created = await create(uuid(606), body)
+        if (!created.ok || !created.line) throw new Error('missing labor price-replace line')
+        return () => replaceWithSeams(created.line!.id, { ...body, priceCents: 20_000 })
+      },
+    ],
+    [
+      'part delete',
+      1n,
+      async () => {
+        const created = await create(uuid(605))
+        if (!created.ok || !created.line) throw new Error('missing delete line')
+        return () => deleteWithSeams(created.line!.id)
+      },
+    ],
+    [
+      'labor delete',
+      0n,
+      async () => {
+        const created = await create(uuid(607), {
+          kind: 'labor', description: 'Install pads', laborHours: '1.25', taxable: false,
+        })
+        if (!created.ok || !created.line) throw new Error('missing labor delete line')
+        return () => deleteWithSeams(created.line!.id)
+      },
+    ],
+  ]
+
+  it.each(revisionCases)(
+    'finalizes %s exactly once with the classified continuity delta',
+    async (_label, continuityDelta, prepare) => {
+      const invoke = await prepare()
+      const before = await mutationState()
+
+      await expect(invoke()).resolves.toMatchObject({ ok: true, changed: true })
+
+      const after = await mutationState()
+      const beforeTarget = before.jobs.find(({ id }) => id === jobId)
+      const afterTarget = after.jobs.find(({ id }) => id === jobId)
+      expect(beforeTarget).toBeDefined()
+      expect(afterTarget?.revision).toBe(beforeTarget!.revision + 1n)
+      expect(after.ticket.projectionRevision).toBe(before.ticket.projectionRevision + 1n)
+      expect(after.ticket.continuityRevision).toBe(
+        before.ticket.continuityRevision + continuityDelta,
+      )
+    },
+  )
+
+  it('deduplicates target and approval-reset revisions while preserving pinned and excluded truth', async () => {
+    const includedJobId = uuid(610)
+    const pinnedJobId = uuid(611)
+    await db.insert(ticketJobs).values([
+      {
+        id: includedJobId, shopId, ticketId, title: 'Included sibling', kind: 'repair',
+        requiredSkillTier: 1, approvalState: 'approved',
+      },
+      {
+        id: pinnedJobId, shopId, ticketId, title: 'Pinned sibling', kind: 'repair',
+        requiredSkillTier: 1, workStatus: 'in_progress', approvalState: 'approved',
+      },
+    ])
+    await db.update(ticketJobs).set({ approvalState: 'approved' }).where(eq(ticketJobs.id, jobId))
+    await db.update(ticketJobs).set({ approvalState: 'quote_ready' }).where(eq(ticketJobs.id, excludedJobId))
+    const [version] = await db.insert(quoteVersions).values({
+      shopId,
+      ticketId,
+      versionNumber: 1,
+      snapshot: snapshot([jobId, includedJobId, pinnedJobId]),
+      createdByProfileId: uuid(1),
+    }).returning()
+    await db.update(ticketJobs).set({ approvedQuoteVersionId: version.id }).where(eq(ticketJobs.ticketId, ticketId))
+    const before = await mutationState()
+
+    await expect(create(uuid(612))).resolves.toMatchObject({ ok: true, changed: true })
+
+    const after = await mutationState()
+    const byId = new Map(after.jobs.map((job) => [job.id, job]))
+    expect(byId.get(jobId)).toMatchObject({
+      approvalState: 'pending_quote', approvedQuoteVersionId: null, revision: 1n,
+    })
+    expect(byId.get(includedJobId)).toMatchObject({
+      approvalState: 'pending_quote', approvedQuoteVersionId: null, revision: 1n,
+    })
+    expect(byId.get(pinnedJobId)).toMatchObject({
+      approvalState: 'approved', approvedQuoteVersionId: version.id, revision: 0n,
+    })
+    expect(byId.get(excludedJobId)).toMatchObject({
+      approvalState: 'quote_ready', approvedQuoteVersionId: version.id, revision: 0n,
+    })
+    expect(after.ticket.projectionRevision).toBe(before.ticket.projectionRevision + 1n)
+    expect(after.ticket.continuityRevision).toBe(before.ticket.continuityRevision + 1n)
+    expect(after.versions[0]?.supersededAt).not.toBeNull()
+  })
+
+  it('keeps exact create/replace and authorized missing-delete no-ops revisionless', async () => {
+    const created = await create(uuid(620))
+    if (!created.ok || !created.line) throw new Error('missing no-op line')
+    const before = await mutationState()
+
+    await expect(create(uuid(620))).resolves.toMatchObject({ ok: true, changed: false })
+    await expect(replaceWithSeams(created.line.id, partBody())).resolves.toMatchObject({
+      ok: true, changed: false,
+    })
+    await expect(deleteWithSeams(uuid(621))).resolves.toEqual({ ok: true, changed: false })
+
+    expect(await mutationState()).toEqual(before)
+  })
+
   it('does not invalidate a later version for an exact current-state replace no-op', async () => {
     const created = await create(uuid(130))
     if (!created.ok || !created.line) throw new Error('missing created line')
@@ -367,20 +671,64 @@ describe('Shop OS quote draft mutations', () => {
     expect(await db.select().from(jobLines)).toHaveLength(0)
   })
 
-  it('classifies a deterministic 55P03 inside the transaction as retryable and rolls back', async () => {
-    const [version] = await db.insert(quoteVersions).values({
-      shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
-    }).returning()
-    const result = await createDraftLine(
-      db,
-      { actor, ticketId, jobId, clientKey: uuid(164), body: partBody() },
-      { beforeMutation: async () => { throw Object.assign(new Error('held row'), { code: '55P03' }) } },
-    )
-    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
-    expect(await db.select().from(jobLines)).toHaveLength(0)
-    const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id))
-    expect(stored.supersededAt).toBeNull()
-  })
+  const rollbackCases = (['create', 'replace', 'delete'] as const).flatMap((action) =>
+    (['afterDiscovery', 'afterWrite', 'afterFinalization'] as const).map((seam) => [
+      action,
+      seam,
+    ] as const),
+  )
+
+  async function prepareRollbackWriter(
+    action: 'create' | 'replace' | 'delete',
+  ): Promise<(dependencies: DraftSeamsV1) => Promise<DraftResult>> {
+    if (action === 'create') {
+      return (dependencies) => createWithSeams(uuid(630), partBody(), dependencies)
+    }
+    const created = await create(uuid(631))
+    if (!created.ok || !created.line) throw new Error(`missing ${action} rollback line`)
+    if (action === 'replace') {
+      return (dependencies) => replaceWithSeams(
+        created.line!.id,
+        partBody({ description: 'Changed before rollback' }),
+        dependencies,
+      )
+    }
+    return (dependencies) => deleteWithSeams(created.line!.id, dependencies)
+  }
+
+  it.each(rollbackCases)(
+    'rolls back draft %s at the %s seam',
+    async (action, seam) => {
+      const invoke = await prepareRollbackWriter(action)
+      const before = await mutationState()
+      const marker = new Error(`${action}_${seam}`)
+
+      await expect(invoke({
+        [seam]: async () => { throw marker },
+      })).rejects.toBe(marker)
+
+      expect(await mutationState()).toEqual(before)
+    },
+  )
+
+  it.each(['55P03', '40001', '40P01'])(
+    'exhausts bounded retries for SQLSTATE %s with no draft or revision residue',
+    async (code) => {
+      const before = await mutationState()
+      let attempts = 0
+
+      const result = await createWithSeams(uuid(632), partBody(), {
+        afterWrite: async () => {
+          attempts += 1
+          throw Object.assign(new Error(`retry ${code}`), { code })
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(attempts).toBe(2)
+      expect(await mutationState()).toEqual(before)
+    },
+  )
 
   function snapshot(includedJobIds: string[]) {
     return snapshotForTicket(ticketId, includedJobIds)

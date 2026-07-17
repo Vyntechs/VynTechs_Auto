@@ -3,8 +3,8 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
-  jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
-  ticketJobs, tickets,
+  customers, jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
+  ticketJobs, tickets, vehicles, vendorAccounts,
 } from '@/lib/db/schema'
 import { resolveShopEntitlements } from '@/lib/entitlements'
 import { canBuildQuotes, canRecordCustomerApproval } from '@/lib/shop-os/capabilities'
@@ -26,6 +26,15 @@ import {
   type QuoteSnapshotV1,
 } from '@/lib/shop-os/quote-math'
 import { validateStoredManualOfferLine } from '@/lib/shop-os/parts-adapters'
+import { assertLiveLockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
+import { ShopOsMutationNotFound } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
+import { ShopOsMutationConflict } from '@/lib/shop-os/continuity/mutation-foundation/conflicts'
+import type {
+  LockedMutationScopeV1,
+  MutationLockRequestV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import { finalizeMutationRevisionsV1 } from '@/lib/shop-os/continuity/mutation-foundation/revisions'
+import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
@@ -137,6 +146,9 @@ export type QuoteDraftResult =
 
 export type QuoteDraftDependencies = {
   beforeMutation?: () => Promise<void>
+  afterDiscovery?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
 export type QuoteBuilderResult =
@@ -213,17 +225,21 @@ export type QuoteDecisionResult =
 export type QuoteDecisionDependencies = {
   afterTicketLock?: () => Promise<void>
   afterEventInsert?: () => Promise<void>
+  afterDiscovery?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
 type Failure = Extract<QuoteDraftResult, { ok: false }>
 type DraftContext = {
+  scope: LockedMutationScopeV1
   shopId: string
   ticketId: string
   jobId: string
   shopRateCents: number | null
-  jobIds: string[]
-  lineRows: Array<typeof jobLines.$inferSelect>
-  activeVersions: Array<typeof quoteVersions.$inferSelect>
+  jobIds: readonly string[]
+  lineRows: readonly (typeof jobLines.$inferSelect)[]
+  activeVersions: readonly (typeof quoteVersions.$inferSelect)[]
 }
 
 class AbortDraftMutation extends Error {
@@ -707,87 +723,354 @@ async function loadActiveActor(db: AppDb, actor: QuoteActor) {
   return profile?.shopId && canBuildQuotes(profile.role) ? profile : null
 }
 
-async function lockDraftContext(
-  db: AppDb,
-  input: { shopId: string; profileId: string; ticketId: string; jobId: string },
-): Promise<DraftContext | null> {
-  const [ticket] = await db
-    .select({ id: tickets.id, status: tickets.status })
-    .from(tickets)
-    .where(and(eq(tickets.shopId, input.shopId), eq(tickets.id, input.ticketId)))
-    .limit(1)
-    .for('update', { noWait: true })
-  if (!ticket || ticket.status !== 'open') return null
-
-  const jobRows = await db
-    .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
-    .from(ticketJobs)
-    .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
-    .orderBy(ticketJobs.id)
-    .for('update', { noWait: true })
-  const targetJob = jobRows.find((job) => job.id === input.jobId)
-  if (!targetJob || targetJob.workStatus === 'done' || targetJob.workStatus === 'canceled'
-    || isPinnedSimpleWork(targetJob)) return null
-
-  const lineRows = await db
-    .select()
-    .from(jobLines)
-    .where(and(eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobRows.map((job) => job.id))))
-    .orderBy(jobLines.id)
-    .for('update', { noWait: true })
-  const activeVersions = await db
-    .select()
-    .from(quoteVersions)
-    .where(and(
-      eq(quoteVersions.shopId, input.shopId),
-      eq(quoteVersions.ticketId, input.ticketId),
-      isNull(quoteVersions.supersededAt),
-    ))
-    .orderBy(quoteVersions.id)
-    .for('update', { noWait: true })
-
-  const [freshActor] = await db
-    .select({ id: profiles.id, role: profiles.role })
-    .from(profiles)
-    .where(and(
-      eq(profiles.id, input.profileId),
-      eq(profiles.shopId, input.shopId),
-      eq(profiles.membershipStatus, 'active'),
-      isNull(profiles.deactivatedAt),
-    ))
-    .limit(1)
-    .for('update', { noWait: true })
-  if (!freshActor || !canBuildQuotes(freshActor.role)) return null
-
-  const [shop] = await db
-    .select({ laborRateCents: shops.laborRateCents })
-    .from(shops)
-    .where(eq(shops.id, input.shopId))
-    .limit(1)
-  if (!shop) return null
-  return {
-    shopId: input.shopId,
-    ticketId: input.ticketId,
-    jobId: input.jobId,
-    shopRateCents: shop.laborRateCents,
-    jobIds: jobRows.map((job) => job.id),
-    lineRows,
-    activeVersions,
-  }
+function emptyQuoteInsertionIntents(): MutationLockRequestV1['insertionIntents'] {
+  return Object.freeze({
+    sessions: Object.freeze([]),
+    customers: Object.freeze([]),
+    vehicles: Object.freeze([]),
+    tickets: Object.freeze([]),
+    jobs: Object.freeze([]),
+  })
 }
 
-export async function invalidateActiveQuoteVersion(
+function quoteUuidList(values: readonly (string | null | undefined)[]): readonly string[] {
+  return Object.freeze([...new Set(values.filter(
+    (value): value is string => typeof value === 'string',
+  ))].sort())
+}
+
+function persistedQuoteFingerprint(value: unknown): string {
+  const normalize = (member: unknown): unknown => {
+    if (member instanceof Date) return { $date: member.toISOString() }
+    if (typeof member === 'bigint') return { $bigint: member.toString() }
+    if (
+      member === null || member === undefined || typeof member === 'string' ||
+      typeof member === 'number' || typeof member === 'boolean'
+    ) return member ?? null
+    if (Array.isArray(member)) return member.map(normalize)
+    if (typeof member !== 'object') throw new TypeError('invalid_quote_discovery_value')
+    const result: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(member).sort()) {
+      result[key] = normalize((member as Record<string, unknown>)[key])
+    }
+    return result
+  }
+  return JSON.stringify(normalize(value))
+}
+
+function rowsById<T extends { id: string }>(rows: readonly T[]): readonly T[] {
+  return [...rows].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+type CompleteQuoteDiscovery = Readonly<{
+  kind: 'ready' | 'not_found'
+  separateChainIds: readonly string[]
+  closureFingerprint: string | null
+}>
+
+async function discoverQuoteVersionMutation(
+  tx: AppDb,
+  input: { shopId: string; profileId: string; ticketId: string },
+) {
+  return discoverCompleteQuoteMutation(tx, {
+    shopId: input.shopId,
+    actorProfileId: input.profileId,
+    ticketId: input.ticketId,
+    exactJobId: null,
+    lockShop: true,
+    includeAllQuoteVersionsForTickets: true,
+    includeAllQuoteEventsForTickets: true,
+  })
+}
+
+async function discoverCompleteQuoteMutation(
+  tx: AppDb,
+  input: Readonly<{
+    shopId: string
+    actorProfileId: string
+    ticketId: string
+    exactJobId: string | null
+    lockShop: boolean
+    includeAllQuoteVersionsForTickets: true
+    includeAllQuoteEventsForTickets: true
+  }>,
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: CompleteQuoteDiscovery
+}>> {
+  const actorOnly = (): Readonly<{
+    lockRequest: MutationLockRequestV1
+    payload: CompleteQuoteDiscovery
+  }> => Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds: Object.freeze([input.actorProfileId]),
+      lockShop: false,
+      customerIds: Object.freeze([]),
+      vehicleIds: Object.freeze([]),
+      ticketIds: Object.freeze([]),
+      jobIds: Object.freeze([]),
+      includeAllJobsForTickets: false,
+      includeAllLinesForJobs: false,
+      includeAllQuoteVersionsForTickets: false,
+      includeAllQuoteEventsForTickets: false,
+      sessionIds: Object.freeze([]),
+      sessionEventIds: Object.freeze([]),
+      vendorAccountIds: Object.freeze([]),
+      cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: emptyQuoteInsertionIntents(),
+    }),
+    payload: Object.freeze({
+      kind: 'not_found', separateChainIds: Object.freeze([]), closureFingerprint: null,
+    }),
+  })
+
+  const [target] = await tx.select().from(tickets).where(and(
+    eq(tickets.shopId, input.shopId),
+    eq(tickets.id, input.ticketId),
+  )).limit(1)
+  if (!target) return actorOnly()
+  if (input.exactJobId !== null) {
+    const [pair] = await tx.select({ id: ticketJobs.id }).from(ticketJobs).where(and(
+      eq(ticketJobs.shopId, input.shopId),
+      eq(ticketJobs.ticketId, input.ticketId),
+      eq(ticketJobs.id, input.exactJobId),
+    )).limit(1)
+    if (!pair) return actorOnly()
+  }
+
+  const ticketRows = [target]
+  const seenTicketIds = new Set([target.id])
+  let parentId = target.separateFromTicketId
+  while (parentId !== null) {
+    if (ticketRows.length >= 64 || seenTicketIds.has(parentId)) {
+      throw new ShopOsMutationConflict()
+    }
+    const [parent] = await tx.select().from(tickets).where(and(
+      eq(tickets.shopId, input.shopId),
+      eq(tickets.id, parentId),
+    )).limit(1)
+    if (!parent) throw new ShopOsMutationConflict()
+    ticketRows.push(parent)
+    seenTicketIds.add(parent.id)
+    parentId = parent.separateFromTicketId
+  }
+
+  const ticketIds = quoteUuidList(ticketRows.map(({ id }) => id))
+  const jobs = await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, input.shopId),
+    inArray(ticketJobs.ticketId, ticketIds),
+  )).orderBy(ticketJobs.id)
+  const jobIds = quoteUuidList(jobs.map(({ id }) => id))
+  const lines = jobIds.length === 0 ? [] : await tx.select().from(jobLines).where(and(
+    eq(jobLines.shopId, input.shopId),
+    inArray(jobLines.jobId, jobIds),
+  )).orderBy(jobLines.id)
+  const versions = await tx.select().from(quoteVersions).where(and(
+    eq(quoteVersions.shopId, input.shopId),
+    inArray(quoteVersions.ticketId, ticketIds),
+  )).orderBy(quoteVersions.id)
+  const events = await tx.select().from(quoteEvents).where(and(
+    eq(quoteEvents.shopId, input.shopId),
+    inArray(quoteEvents.ticketId, ticketIds),
+  )).orderBy(quoteEvents.id)
+
+  const sessionIds = quoteUuidList(jobs.map(({ sessionId }) => sessionId))
+  const sessionRows = sessionIds.length === 0 ? [] : await tx.select().from(sessions).where(and(
+    eq(sessions.shopId, input.shopId),
+    inArray(sessions.id, sessionIds),
+  )).orderBy(sessions.id)
+  const vehicleIds = quoteUuidList([
+    ...ticketRows.map(({ vehicleId }) => vehicleId),
+    ...sessionRows.map(({ vehicleId }) => vehicleId),
+  ])
+  const vehicleRows = vehicleIds.length === 0 ? [] : (await tx.select({ row: vehicles })
+    .from(vehicles)
+    .innerJoin(customers, eq(customers.id, vehicles.customerId))
+    .where(and(
+      eq(customers.shopId, input.shopId),
+      inArray(vehicles.id, vehicleIds),
+    )).orderBy(vehicles.id)).map(({ row }) => row)
+  const customerIds = quoteUuidList([
+    ...ticketRows.map(({ customerId }) => customerId),
+    ...vehicleRows.map(({ customerId }) => customerId),
+  ])
+  const customerRows = customerIds.length === 0 ? [] : await tx.select().from(customers).where(and(
+    eq(customers.shopId, input.shopId),
+    inArray(customers.id, customerIds),
+  )).orderBy(customers.id)
+  const vendorAccountIds = quoteUuidList(lines.map(({ vendorAccountId }) => vendorAccountId))
+  const vendorRows = vendorAccountIds.length === 0 ? [] : await tx.select().from(vendorAccounts)
+    .where(and(
+      eq(vendorAccounts.shopId, input.shopId),
+      inArray(vendorAccounts.id, vendorAccountIds),
+    )).orderBy(vendorAccounts.id)
+  const profileIds = quoteUuidList([
+    input.actorProfileId,
+    ...ticketRows.flatMap((ticket) => [
+      ticket.createdByProfileId,
+      ticket.canceledByProfileId,
+      ticket.deliveredByProfileId,
+      ticket.closedByProfileId,
+    ]),
+    ...jobs.flatMap((job) => [
+      job.assignedTechId,
+      job.createdByProfileId,
+      job.statementConfirmedByProfileId,
+    ]),
+    ...lines.flatMap((line) => [line.orderedByProfileId, line.receivedByProfileId]),
+    ...sessionRows.map(({ techId }) => techId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.map(({ actorProfileId }) => actorProfileId),
+  ])
+  const profileRows = await tx.select().from(profiles).where(and(
+    eq(profiles.shopId, input.shopId),
+    inArray(profiles.id, profileIds),
+  )).orderBy(profiles.id)
+  const [shop] = await tx.select().from(shops).where(eq(shops.id, input.shopId)).limit(1)
+
+  const closureFingerprint = persistedQuoteFingerprint({
+    profiles: rowsById(profileRows),
+    shop: shop ?? null,
+    customers: rowsById(customerRows),
+    vehicles: rowsById(vehicleRows),
+    tickets: rowsById(ticketRows),
+    jobs: rowsById(jobs),
+    lines: rowsById(lines),
+    versions: rowsById(versions),
+    events: rowsById(events),
+    sessions: rowsById(sessionRows),
+    vendors: rowsById(vendorRows),
+  })
+
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds,
+      lockShop: input.lockShop,
+      customerIds,
+      vehicleIds,
+      ticketIds,
+      jobIds,
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: input.includeAllQuoteVersionsForTickets,
+      includeAllQuoteEventsForTickets: input.includeAllQuoteEventsForTickets,
+      sessionIds,
+      sessionEventIds: Object.freeze([]),
+      vendorAccountIds,
+      cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: emptyQuoteInsertionIntents(),
+    }),
+    payload: Object.freeze({
+      kind: 'ready',
+      separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
+      closureFingerprint,
+    }),
+  })
+}
+
+function resolveCompleteQuoteScope(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  discovery: CompleteQuoteDiscovery,
+  ticketId: string,
+  capability: 'build' | 'decision',
+): LockedMutationScopeV1['tickets'][number] {
+  assertLiveLockedMutationScopeV1(tx, scope)
+  if (discovery.kind === 'not_found') throw new ShopOsMutationNotFound()
+  if (
+    scope.profiles.length !== scope.request.profileIds.length ||
+    scope.profiles.some(({ id }) => !scope.request.profileIds.includes(id)) ||
+    (capability === 'build'
+      ? !canBuildQuotes(scope.actor.role)
+      : !canRecordCustomerApproval(scope.actor.role)) ||
+    scope.profiles.some((profile) =>
+      profile.shopId !== scope.actor.shopId ||
+      profile.membershipStatus !== 'active' || profile.deactivatedAt !== null ||
+      (profile.skillTier !== null && ![1, 2, 3].includes(profile.skillTier)))
+  ) throw new ShopOsMutationNotFound()
+
+  const graphById = new Map(scope.tickets.map((graph) => [graph.ticket.id, graph] as const))
+  if (
+    discovery.separateChainIds.length < 1 || discovery.separateChainIds[0] !== ticketId ||
+    discovery.separateChainIds.length !== scope.tickets.length ||
+    new Set(discovery.separateChainIds).size !== discovery.separateChainIds.length
+  ) throw new ShopOsMutationConflict()
+  for (let index = 0; index < discovery.separateChainIds.length; index += 1) {
+    const graph = graphById.get(discovery.separateChainIds[index]!)
+    if (!graph || graph.ticket.separateFromTicketId !==
+      (discovery.separateChainIds[index + 1] ?? null)) throw new ShopOsMutationConflict()
+  }
+
+  const lockedFingerprint = persistedQuoteFingerprint({
+    profiles: rowsById(scope.profiles),
+    shop: scope.shop,
+    customers: rowsById(scope.customers),
+    vehicles: rowsById(scope.vehicles),
+    tickets: rowsById(scope.tickets.map(({ ticket }) => ticket)),
+    jobs: rowsById(scope.tickets.flatMap(({ jobs }) => jobs)),
+    lines: rowsById(scope.tickets.flatMap(({ lines }) => lines)),
+    versions: rowsById(scope.tickets.flatMap(({ versions }) => versions)),
+    events: rowsById(scope.tickets.flatMap(({ events }) => events)),
+    sessions: rowsById(scope.sessions),
+    vendors: rowsById(scope.vendorAccounts),
+  })
+  if (lockedFingerprint !== discovery.closureFingerprint) {
+    throw new ShopOsMutationConflict()
+  }
+  const target = graphById.get(ticketId)
+  if (!target) throw new ShopOsMutationNotFound()
+  for (const graph of scope.tickets) {
+    for (const job of graph.jobs) {
+      if (job.approvedApprovalEventId === null) continue
+      const event = graph.events.find(({ id }) => id === job.approvedApprovalEventId)
+      if (!event || event.ticketId !== graph.ticket.id || event.jobId !== job.id) {
+        throw new ShopOsMutationConflict()
+      }
+    }
+  }
+  for (const graph of scope.tickets) {
+    if ((graph.ticket.customerId === null) !== (graph.ticket.vehicleId === null)) {
+      throw new ShopOsMutationNotFound()
+    }
+    if (graph.ticket.customerId !== null) {
+      const customer = scope.customers.find(({ id }) => id === graph.ticket.customerId)
+      const vehicle = scope.vehicles.find(({ id }) => id === graph.ticket.vehicleId)
+      if (!customer || !vehicle || customer.shopId !== scope.actor.shopId ||
+        vehicle.customerId !== customer.id) throw new ShopOsMutationNotFound()
+    }
+  }
+  return target
+}
+
+export type QuoteInvalidationDeltaV1 = Readonly<{
+  changedJobIds: readonly string[]
+  supersededVersionIds: readonly string[]
+}>
+
+export async function invalidateActiveQuoteVersionDeltaV1(
   db: AppDb,
   input: {
     shopId: string
     ticketId: string
-    jobIds: string[]
-    activeVersions: DraftContext['activeVersions']
+    jobIds: readonly string[]
+    activeVersions: readonly (typeof quoteVersions.$inferSelect)[]
+    scope?: LockedMutationScopeV1
   },
-): Promise<Failure | null> {
+): Promise<Failure | QuoteInvalidationDeltaV1> {
+  if (input.scope) assertLiveLockedMutationScopeV1(db, input.scope)
   if (input.activeVersions.length > 1) return conflict()
   const active = input.activeVersions[0]
-  if (!active) return null
+  if (!active) return Object.freeze({
+    changedJobIds: Object.freeze([]), supersededVersionIds: Object.freeze([]),
+  })
   const snapshot = quoteSnapshotSchema.safeParse(active.snapshot)
   if (!snapshot.success) return conflict()
   if (snapshot.data.ticket.id !== input.ticketId) return conflict()
@@ -806,16 +1089,24 @@ export async function invalidateActiveQuoteVersion(
     .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
     .returning()
   if (!superseded) return conflict(true)
+  const changedJobIds: string[] = []
   if (includedJobIds.length > 0) {
     const resetJobIds = (await db
-      .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
+      .select({
+        id: ticketJobs.id,
+        kind: ticketJobs.kind,
+        workStatus: ticketJobs.workStatus,
+        approvalState: ticketJobs.approvalState,
+        approvedQuoteVersionId: ticketJobs.approvedQuoteVersionId,
+      })
       .from(ticketJobs)
       .where(and(
         eq(ticketJobs.shopId, input.shopId),
         eq(ticketJobs.ticketId, input.ticketId),
         inArray(ticketJobs.id, includedJobIds),
       )))
-      .filter((job) => !isPinnedSimpleWork(job))
+      .filter((job) => !isPinnedSimpleWork(job)
+        && (job.approvalState !== 'pending_quote' || job.approvedQuoteVersionId !== null))
       .map((job) => job.id)
     if (resetJobIds.length > 0) await db
       .update(ticketJobs)
@@ -825,8 +1116,25 @@ export async function invalidateActiveQuoteVersion(
         eq(ticketJobs.ticketId, input.ticketId),
         inArray(ticketJobs.id, resetJobIds),
       ))
+    changedJobIds.push(...resetJobIds)
   }
-  return null
+  return Object.freeze({
+    changedJobIds: Object.freeze([...new Set(changedJobIds)].sort()),
+    supersededVersionIds: Object.freeze([active.id]),
+  })
+}
+
+export async function invalidateActiveQuoteVersion(
+  db: AppDb,
+  input: {
+    shopId: string
+    ticketId: string
+    jobIds: string[]
+    activeVersions: DraftContext['activeVersions']
+  },
+): Promise<Failure | null> {
+  const result = await invalidateActiveQuoteVersionDeltaV1(db, input)
+  return 'ok' in result ? result : null
 }
 
 export type CreateQuoteVersionResult =
@@ -843,15 +1151,18 @@ export type CreateQuoteVersionResult =
 export type CreateQuoteVersionDependencies = {
   beforeWrite?: () => Promise<void>
   afterTicketLock?: () => Promise<void>
+  afterDiscovery?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
 type VersionFailure = Extract<CreateQuoteVersionResult, { ok: false }>
 type VersionContext = {
   ticket: Pick<typeof tickets.$inferSelect, 'id' | 'ticketNumber' | 'customerId' | 'vehicleId'>
   shop: Pick<typeof shops.$inferSelect, 'id' | 'laborRateCents' | 'taxRateBps'>
-  jobs: Array<typeof ticketJobs.$inferSelect>
-  lines: Array<typeof jobLines.$inferSelect>
-  versions: Array<typeof quoteVersions.$inferSelect>
+  jobs: readonly (typeof ticketJobs.$inferSelect)[]
+  lines: readonly (typeof jobLines.$inferSelect)[]
+  versions: readonly (typeof quoteVersions.$inferSelect)[]
   actorId: string
 }
 
@@ -859,70 +1170,6 @@ class AbortVersionCreation extends Error {
   constructor(readonly failure: VersionFailure) {
     super('abort_quote_version_creation')
   }
-}
-
-async function lockVersionContext(
-  db: AppDb,
-  input: { shopId: string; profileId: string; ticketId: string },
-  dependencies: Pick<CreateQuoteVersionDependencies, 'afterTicketLock'>,
-): Promise<VersionContext | null> {
-  const [ticket] = await db
-    .select({
-      id: tickets.id,
-      ticketNumber: tickets.ticketNumber,
-      customerId: tickets.customerId,
-      vehicleId: tickets.vehicleId,
-      status: tickets.status,
-    })
-    .from(tickets)
-    .where(and(eq(tickets.shopId, input.shopId), eq(tickets.id, input.ticketId)))
-    .limit(1)
-    .for('update', { noWait: true })
-  if (!ticket || ticket.status !== 'open') return null
-  await dependencies.afterTicketLock?.()
-
-  const [shop] = await db
-    .select({ id: shops.id, laborRateCents: shops.laborRateCents, taxRateBps: shops.taxRateBps })
-    .from(shops)
-    .where(eq(shops.id, input.shopId))
-    .limit(1)
-    .for('update', { noWait: true })
-  if (!shop) return null
-
-  const jobs = await db
-    .select()
-    .from(ticketJobs)
-    .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
-    .orderBy(ticketJobs.id)
-    .for('update', { noWait: true })
-  const jobIds = jobs.map((job) => job.id)
-  const lines = jobIds.length === 0
-    ? []
-    : await db
-      .select()
-      .from(jobLines)
-      .where(and(eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobIds)))
-      .orderBy(jobLines.id)
-      .for('update', { noWait: true })
-  const versions = await db
-    .select()
-    .from(quoteVersions)
-    .where(and(eq(quoteVersions.shopId, input.shopId), eq(quoteVersions.ticketId, input.ticketId)))
-    .orderBy(quoteVersions.id)
-    .for('update', { noWait: true })
-  const [actor] = await db
-    .select({ id: profiles.id, role: profiles.role })
-    .from(profiles)
-    .where(and(
-      eq(profiles.id, input.profileId),
-      eq(profiles.shopId, input.shopId),
-      eq(profiles.membershipStatus, 'active'),
-      isNull(profiles.deactivatedAt),
-    ))
-    .limit(1)
-    .for('update', { noWait: true })
-  if (!actor || !canBuildQuotes(actor.role)) return null
-  return { ticket, shop, jobs, lines, versions, actorId: actor.id }
 }
 
 function safeUuid(value: string): string {
@@ -1302,18 +1549,50 @@ export async function createQuoteVersion(
   dependencies: CreateQuoteVersionDependencies = {},
 ): Promise<CreateQuoteVersionResult> {
   const parsedTicket = uuidSchema.safeParse(input.ticketId)
-  if (!parsedTicket.success) return { ok: false, error: 'invalid_input' }
+  const parsedActor = uuidSchema.safeParse(input.actor.profileId)
+  if (!parsedTicket.success || !parsedActor.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
   const persistedActor = await loadActiveActor(db, input.actor)
   if (!persistedActor?.shopId) return notFound()
+  const seams = Object.freeze({
+    beforeWrite: dependencies.beforeWrite,
+    afterTicketLock: dependencies.afterTicketLock,
+    afterDiscovery: dependencies.afterDiscovery,
+    afterWrite: dependencies.afterWrite,
+    afterFinalization: dependencies.afterFinalization,
+  })
   try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const context = await lockVersionContext(transactionDb, {
+    return await runBoundedShopOsMutationV1<
+      CreateQuoteVersionResult,
+      CompleteQuoteDiscovery
+    >(db, {
+      discover: async (tx) => discoverQuoteVersionMutation(tx, {
         shopId: persistedActor.shopId as string,
-        profileId: persistedActor.id,
+        profileId: parsedActor.data,
         ticketId: parsedTicket.data,
-      }, dependencies)
-      if (!context) return notFound()
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+      assertLiveLockedMutationScopeV1(tx, scope)
+      const graph = resolveCompleteQuoteScope(
+        tx, scope, discovery, parsedTicket.data, 'build',
+      )
+      if (graph.ticket.status !== 'open' || !scope.shop) {
+        throw new ShopOsMutationNotFound()
+      }
+      if (!graph.ticket.customerId || !graph.ticket.vehicleId) {
+        throw new AbortVersionCreation(conflict())
+      }
+      const context: VersionContext = {
+        ticket: graph.ticket,
+        shop: scope.shop,
+        jobs: graph.jobs,
+        lines: graph.lines,
+        versions: graph.versions,
+        actorId: scope.actor.id,
+      }
+      await seams.afterTicketLock?.()
+      await seams.afterDiscovery?.()
       const activeVersions = context.versions.filter((version) => version.supersededAt === null)
       if (activeVersions.length > 1) throw new AbortVersionCreation(conflict())
       let snapshot: QuoteSnapshotV1
@@ -1329,9 +1608,9 @@ export async function createQuoteVersion(
           return safeVersionProjection(active)
         }
       }
-      await dependencies.beforeWrite?.()
+      await seams.beforeWrite?.()
       if (active) {
-        const [superseded] = await transactionDb
+        const [superseded] = await tx
           .update(quoteVersions)
           .set({ supersededAt: new Date() })
           .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
@@ -1342,7 +1621,7 @@ export async function createQuoteVersion(
           .filter((job) => oldJobIds.includes(job.id) && !isPinnedSimpleWork(job))
           .map((job) => job.id)
         if (resetOldJobIds.length > 0) {
-          await transactionDb.update(ticketJobs).set({
+          await tx.update(ticketJobs).set({
             approvalState: 'pending_quote',
             approvedQuoteVersionId: null,
             updatedAt: new Date(),
@@ -1357,7 +1636,7 @@ export async function createQuoteVersion(
       if (!Number.isInteger(maxVersion) || maxVersion >= MAX_POSTGRES_INTEGER) {
         throw new AbortVersionCreation(conflict())
       }
-      const [created] = await transactionDb.insert(quoteVersions).values({
+      const [created] = await tx.insert(quoteVersions).values({
         shopId: context.shop.id,
         ticketId: context.ticket.id,
         versionNumber: maxVersion + 1,
@@ -1368,7 +1647,7 @@ export async function createQuoteVersion(
       const readyJobIds = context.jobs
         .filter((job) => includedJobIds.includes(job.id) && !isPinnedSimpleWork(job))
         .map((job) => job.id)
-      if (readyJobIds.length > 0) await transactionDb.update(ticketJobs).set({
+      if (readyJobIds.length > 0) await tx.update(ticketJobs).set({
         approvalState: 'quote_ready',
         approvedQuoteVersionId: null,
         updatedAt: new Date(),
@@ -1377,15 +1656,38 @@ export async function createQuoteVersion(
         eq(ticketJobs.ticketId, context.ticket.id),
         inArray(ticketJobs.id, readyJobIds),
       ))
+      await seams.afterWrite?.()
+      const changedJobIds = [...new Set([
+        ...(activeSnapshot?.jobs.map(({ id }) => id) ?? []),
+        ...snapshot.jobs.map(({ id }) => id),
+      ])].filter((id) => {
+        const job = context.jobs.find((candidate) => candidate.id === id)
+        return job !== undefined && !isPinnedSimpleWork(job)
+      }).sort()
+      await finalizeMutationRevisionsV1(
+        tx,
+        scope,
+        { sessionIds: [], customerIds: [], vehicleIds: [] },
+        [{
+          ticketId: graph.ticket.id,
+          createdTicket: false,
+          createdJobIds: [],
+          existingChangedJobIds: changedJobIds,
+          actorVisibleTicketFieldsChanged: false,
+        }],
+      )
+      await seams.afterFinalization?.()
       return {
         ok: true,
         changed: true,
         version: { id: created.id, versionNumber: created.versionNumber },
       }
+      },
     })
   } catch (error) {
     if (error instanceof AbortVersionCreation) return error.failure
-    if (isLockUnavailable(error)) return conflict(true)
+    if (error instanceof ShopOsMutationNotFound) return notFound()
+    if (error instanceof ShopOsMutationConflict) return conflict(true)
     if (isUniqueViolation(error)) return conflict(true)
     throw error
   }
@@ -1401,6 +1703,21 @@ class AbortQuoteDecision extends Error {
 
 function decisionNotFound(): DecisionFailure {
   return { ok: false, error: 'not_found' }
+}
+
+async function discoverQuoteDecisionMutation(
+  tx: AppDb,
+  input: { shopId: string; profileId: string; ticketId: string; jobId: string },
+) {
+  return discoverCompleteQuoteMutation(tx, {
+    shopId: input.shopId,
+    actorProfileId: input.profileId,
+    ticketId: input.ticketId,
+    exactJobId: input.jobId,
+    lockShop: true,
+    includeAllQuoteVersionsForTickets: true,
+    includeAllQuoteEventsForTickets: true,
+  })
 }
 
 function decisionConflict(retryable = false): DecisionFailure {
@@ -1500,108 +1817,71 @@ export async function recordQuoteDecision(
   }
 
   try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const [ticket] = await transactionDb
-        .select({
-          id: tickets.id,
-          ticketNumber: tickets.ticketNumber,
-          status: tickets.status,
-          customerId: tickets.customerId,
-          vehicleId: tickets.vehicleId,
-        })
-        .from(tickets)
-        .where(and(eq(tickets.shopId, persistedActor.shopId as string), eq(tickets.id, parsedTicket.data)))
-        .limit(1)
-        .for('update', { noWait: true })
-      if (!ticket) return decisionNotFound()
-      await dependencies.afterTicketLock?.()
+    const seams = Object.freeze({
+      afterTicketLock: dependencies.afterTicketLock,
+      afterEventInsert: dependencies.afterEventInsert,
+      afterDiscovery: dependencies.afterDiscovery,
+      afterWrite: dependencies.afterWrite,
+      afterFinalization: dependencies.afterFinalization,
+    })
+    return await runBoundedShopOsMutationV1<QuoteDecisionResult, CompleteQuoteDiscovery>(db, {
+      discover: async (tx) => discoverQuoteDecisionMutation(tx, {
+        shopId: persistedActor.shopId as string,
+        profileId: parsedActor.data,
+        ticketId: parsedTicket.data,
+        jobId: parsedDecision.data.jobId,
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+      assertLiveLockedMutationScopeV1(tx, scope)
+      const graph = resolveCompleteQuoteScope(
+        tx, scope, discovery, parsedTicket.data, 'decision',
+      )
+      const targetJob = graph.jobs.find(({ id }) => id === parsedDecision.data.jobId)
+      if (!targetJob) throw new ShopOsMutationNotFound()
+      await seams.afterTicketLock?.()
+      await seams.afterDiscovery?.()
 
-      const jobs = await transactionDb
-        .select({
-          id: ticketJobs.id,
-          kind: ticketJobs.kind,
-          workStatus: ticketJobs.workStatus,
-          approvalState: ticketJobs.approvalState,
-          approvedQuoteVersionId: ticketJobs.approvedQuoteVersionId,
-        })
-        .from(ticketJobs)
-        .where(and(
-          eq(ticketJobs.shopId, persistedActor.shopId as string),
-          eq(ticketJobs.ticketId, ticket.id),
-        ))
-        .orderBy(ticketJobs.id)
-        .for('update', { noWait: true })
-      const targetJob = jobs.find((job) => job.id === parsedDecision.data.jobId)
-
-      const versions = await transactionDb
-        .select()
-        .from(quoteVersions)
-        .where(and(
-          eq(quoteVersions.shopId, persistedActor.shopId as string),
-          eq(quoteVersions.ticketId, ticket.id),
-        ))
-        .orderBy(quoteVersions.id)
-        .for('update', { noWait: true })
-      const version = versions.find((candidate) => candidate.id === parsedDecision.data.quoteVersionId)
-
-      const [existingEvent] = await transactionDb
-        .select()
-        .from(quoteEvents)
-        .where(and(
-          eq(quoteEvents.shopId, persistedActor.shopId as string),
-          eq(quoteEvents.requestKey, parsedDecision.data.requestKey),
-        ))
-        .limit(1)
-        .for('update', { noWait: true })
-
-      const [freshActor] = await transactionDb
-        .select({ id: profiles.id, role: profiles.role })
-        .from(profiles)
-        .where(and(
-          eq(profiles.id, persistedActor.id),
-          eq(profiles.shopId, persistedActor.shopId as string),
-          eq(profiles.membershipStatus, 'active'),
-          isNull(profiles.deactivatedAt),
-        ))
-        .limit(1)
-        .for('update', { noWait: true })
-      if (!freshActor || !canRecordCustomerApproval(freshActor.role)) return decisionNotFound()
-
+      const [existingEvent] = await tx.select().from(quoteEvents).where(and(
+        eq(quoteEvents.shopId, scope.actor.shopId),
+        eq(quoteEvents.requestKey, parsedDecision.data.requestKey),
+      )).limit(1)
       if (existingEvent) {
-        if (!targetJob || !isMatchingDecisionEvent(existingEvent, parsedDecision.data, freshActor.id)) {
+        if (!isMatchingDecisionEvent(existingEvent, parsedDecision.data, scope.actor.id)) {
           throw new AbortQuoteDecision(decisionConflict())
         }
         return safeDecisionResult(existingEvent, targetJob, false)
       }
 
-      if (ticket.status !== 'open' || !ticket.customerId || !ticket.vehicleId) {
-        return decisionNotFound()
+      if (graph.ticket.status !== 'open' || !graph.ticket.customerId ||
+        !graph.ticket.vehicleId) {
+        throw new ShopOsMutationNotFound()
       }
-      const activeVersions = versions.filter((candidate) => candidate.supersededAt === null)
+      const activeVersions = graph.versions.filter((candidate) => candidate.supersededAt === null)
+      const version = graph.versions.find((candidate) =>
+        candidate.id === parsedDecision.data.quoteVersionId)
       if (!targetJob || !version || activeVersions.length !== 1 || activeVersions[0]?.id !== version.id) {
-        return decisionNotFound()
+        throw new ShopOsMutationNotFound()
       }
-      if (!snapshotContainsDecisionJob(version.snapshot, ticket, jobs, targetJob)) {
-        return decisionNotFound()
+      if (!snapshotContainsDecisionJob(version.snapshot, graph.ticket, graph.jobs, targetJob)) {
+        throw new ShopOsMutationNotFound()
       }
 
       const approvedVia = parsedDecision.data.decision === 'approved'
         ? parsedDecision.data.approvedVia
         : null
-      const [event] = await transactionDb.insert(quoteEvents).values({
-        shopId: persistedActor.shopId as string,
-        ticketId: ticket.id,
+      const [event] = await tx.insert(quoteEvents).values({
+        shopId: scope.actor.shopId,
+        ticketId: graph.ticket.id,
         jobId: targetJob.id,
         quoteVersionId: version.id,
         kind: parsedDecision.data.decision,
-        actorProfileId: freshActor.id,
+        actorProfileId: scope.actor.id,
         approvedVia,
         requestKey: parsedDecision.data.requestKey,
       }).returning()
 
-      await dependencies.afterEventInsert?.()
-      const [updatedJob] = await transactionDb
+      await seams.afterEventInsert?.()
+      const [updatedJob] = await tx
         .update(ticketJobs)
         .set({
           approvalState: parsedDecision.data.decision,
@@ -1609,17 +1889,34 @@ export async function recordQuoteDecision(
           updatedAt: new Date(),
         })
         .where(and(
-          eq(ticketJobs.shopId, persistedActor.shopId as string),
-          eq(ticketJobs.ticketId, ticket.id),
+          eq(ticketJobs.shopId, scope.actor.shopId),
+          eq(ticketJobs.ticketId, graph.ticket.id),
           eq(ticketJobs.id, targetJob.id),
+          eq(ticketJobs.revision, targetJob.revision),
         ))
         .returning()
-      if (!updatedJob) throw new AbortQuoteDecision(decisionConflict(true))
+      if (!updatedJob) throw new ShopOsMutationConflict()
+      await seams.afterWrite?.()
+      await finalizeMutationRevisionsV1(
+        tx,
+        scope,
+        { sessionIds: [], customerIds: [], vehicleIds: [] },
+        [{
+          ticketId: graph.ticket.id,
+          createdTicket: false,
+          createdJobIds: [],
+          existingChangedJobIds: [targetJob.id],
+          actorVisibleTicketFieldsChanged: false,
+        }],
+      )
+      await seams.afterFinalization?.()
       return safeDecisionResult(event, updatedJob, true)
+      },
     })
   } catch (error) {
     if (error instanceof AbortQuoteDecision) return error.failure
-    if (isLockUnavailable(error)) return decisionConflict(true)
+    if (error instanceof ShopOsMutationNotFound) return decisionNotFound()
+    if (error instanceof ShopOsMutationConflict) return decisionConflict(true)
     if (isUniqueViolation(error)) return decisionConflict(true)
     throw error
   }
@@ -1734,30 +2031,83 @@ async function runMutation(
   ticketId: unknown,
   jobId: unknown,
   dependencies: QuoteDraftDependencies,
-  mutate: (tx: AppDb, context: DraftContext) => Promise<QuoteDraftResult>,
+  mutate: (tx: AppDb, context: DraftContext) => Promise<Readonly<{
+    result: QuoteDraftResult
+    changedJobIds: readonly string[]
+  }>>,
 ): Promise<QuoteDraftResult> {
   const parsedTicket = uuidSchema.safeParse(ticketId)
   const parsedJob = uuidSchema.safeParse(jobId)
-  if (!parsedTicket.success || !parsedJob.success) return { ok: false, error: 'invalid_input' }
+  const parsedActor = uuidSchema.safeParse(actor.profileId)
+  if (!parsedTicket.success || !parsedJob.success || !parsedActor.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
   const persistedActor = await loadActiveActor(db, actor)
   if (!persistedActor?.shopId) return notFound()
+  const seams = Object.freeze({
+    beforeMutation: dependencies.beforeMutation,
+    afterDiscovery: dependencies.afterDiscovery,
+    afterWrite: dependencies.afterWrite,
+    afterFinalization: dependencies.afterFinalization,
+  })
   try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const context = await lockDraftContext(transactionDb, {
+    return await runBoundedShopOsMutationV1<QuoteDraftResult, CompleteQuoteDiscovery>(db, {
+      discover: async (tx) => discoverCompleteQuoteMutation(tx, {
         shopId: persistedActor.shopId as string,
-        profileId: persistedActor.id,
+        actorProfileId: parsedActor.data,
         ticketId: parsedTicket.data,
-        jobId: parsedJob.data,
-      })
-      if (!context) return notFound()
-      if (context.activeVersions.length > 1) throw new AbortDraftMutation(conflict())
-      await dependencies.beforeMutation?.()
-      return mutate(transactionDb, context)
+        exactJobId: parsedJob.data,
+        lockShop: true,
+        includeAllQuoteVersionsForTickets: true,
+        includeAllQuoteEventsForTickets: true,
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+        assertLiveLockedMutationScopeV1(tx, scope)
+        const graph = resolveCompleteQuoteScope(
+          tx, scope, discovery, parsedTicket.data, 'build',
+        )
+        const targetJob = graph.jobs.find(({ id }) => id === parsedJob.data)
+        if (!targetJob || graph.ticket.status !== 'open' ||
+          targetJob.workStatus === 'done' || targetJob.workStatus === 'canceled' ||
+          isPinnedSimpleWork(targetJob)) throw new ShopOsMutationNotFound()
+        if (!scope.shop) throw new ShopOsMutationNotFound()
+        const activeVersions = graph.versions.filter(({ supersededAt }) => supersededAt === null)
+        if (activeVersions.length > 1) throw new AbortDraftMutation(conflict())
+        const context: DraftContext = {
+          scope,
+          shopId: scope.actor.shopId,
+          ticketId: graph.ticket.id,
+          jobId: targetJob.id,
+          shopRateCents: scope.shop.laborRateCents,
+          jobIds: graph.jobs.map(({ id }) => id),
+          lineRows: graph.lines,
+          activeVersions,
+        }
+        await seams.afterDiscovery?.()
+        await seams.beforeMutation?.()
+        const outcome = await mutate(tx, context)
+        if (!outcome.result.ok || !outcome.result.changed) return outcome.result
+        await seams.afterWrite?.()
+        await finalizeMutationRevisionsV1(
+          tx,
+          scope,
+          { sessionIds: [], customerIds: [], vehicleIds: [] },
+          [{
+            ticketId: graph.ticket.id,
+            createdTicket: false,
+            createdJobIds: [],
+            existingChangedJobIds: [...new Set(outcome.changedJobIds)].sort(),
+            actorVisibleTicketFieldsChanged: false,
+          }],
+        )
+        await seams.afterFinalization?.()
+        return outcome.result
+      },
     })
   } catch (error) {
     if (error instanceof AbortDraftMutation) return error.failure
-    if (isLockUnavailable(error)) return conflict(true)
+    if (error instanceof ShopOsMutationNotFound) return notFound()
+    if (error instanceof ShopOsMutationConflict) return conflict(true)
     if (isUniqueViolation(error)) return conflict()
     throw error
   }
@@ -1780,16 +2130,21 @@ export async function createDraftLine(
         eq(jobLines.id, lineId),
       )).limit(1))[0]
     const desired = normalizedLine(input.body, context.shopRateCents, sameShopCollision)
-    if (!desired) return { ok: false, error: 'invalid_input' }
+    if (!desired) return {
+      result: { ok: false, error: 'invalid_input' }, changedJobIds: [],
+    }
     if (sameShopCollision) {
       if (
         sameShopCollision.jobId === context.jobId
         && isMutableManualLine(sameShopCollision)
         && sameLine(sameShopCollision, desired)
       ) {
-        return { ok: true, changed: false, line: safeManualDraftLine(sameShopCollision) }
+        return {
+          result: { ok: true, changed: false, line: safeManualDraftLine(sameShopCollision) },
+          changedJobIds: [],
+        }
       }
-      return conflict()
+      return { result: conflict(), changedJobIds: [] }
     }
     const [line] = await tx.insert(jobLines).values({
       id: lineId,
@@ -1797,36 +2152,46 @@ export async function createDraftLine(
       jobId: context.jobId,
       ...desired,
     }).returning()
-    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
+    const invalidation = await invalidateActiveQuoteVersionDeltaV1(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
+      scope: context.scope,
     })
-    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
-    return { ok: true, changed: true, line: safeManualDraftLine(line) }
+    if ('ok' in invalidation) throw new AbortDraftMutation(invalidation)
+    return {
+      result: { ok: true, changed: true, line: safeManualDraftLine(line) },
+      changedJobIds: [context.jobId, ...invalidation.changedJobIds],
+    }
   })
 }
 
 export async function replaceDraftLine(
   db: AppDb,
   input: { actor: QuoteActor; ticketId: unknown; jobId: unknown; lineId: unknown; body: unknown },
+  dependencies: QuoteDraftDependencies = {},
 ): Promise<QuoteDraftResult> {
   const parsedLineId = uuidSchema.safeParse(input.lineId)
   if (!parsedLineId.success || !manualLineSchema.safeParse(input.body).success) {
     return { ok: false, error: 'invalid_input' }
   }
-  return runMutation(db, input.actor, input.ticketId, input.jobId, {}, async (tx, context) => {
+  return runMutation(db, input.actor, input.ticketId, input.jobId, dependencies, async (tx, context) => {
     const existing = context.lineRows.find((line) =>
       line.id === parsedLineId.data
       && line.jobId === context.jobId
       && isMutableManualLine(line),
     )
-    if (!existing) return notFound()
+    if (!existing) return { result: notFound(), changedJobIds: [] }
     const desired = normalizedLine(input.body, context.shopRateCents, existing)
-    if (!desired) return { ok: false, error: 'invalid_input' }
+    if (!desired) return {
+      result: { ok: false, error: 'invalid_input' }, changedJobIds: [],
+    }
     if (sameLine(existing, desired)) {
-      return { ok: true, changed: false, line: safeManualDraftLine(existing) }
+      return {
+        result: { ok: true, changed: false, line: safeManualDraftLine(existing) },
+        changedJobIds: [],
+      }
     }
     const [line] = await tx.update(jobLines).set({ ...desired, updatedAt: new Date() }).where(and(
       eq(jobLines.shopId, context.shopId),
@@ -1834,43 +2199,56 @@ export async function replaceDraftLine(
       eq(jobLines.id, parsedLineId.data),
     )).returning()
     if (!line) throw new AbortDraftMutation(conflict(true))
-    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
+    const invalidation = await invalidateActiveQuoteVersionDeltaV1(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
+      scope: context.scope,
     })
-    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
-    return { ok: true, changed: true, line: safeManualDraftLine(line) }
+    if ('ok' in invalidation) throw new AbortDraftMutation(invalidation)
+    return {
+      result: { ok: true, changed: true, line: safeManualDraftLine(line) },
+      changedJobIds: [context.jobId, ...invalidation.changedJobIds],
+    }
   })
 }
 
 export async function deleteDraftLine(
   db: AppDb,
   input: { actor: QuoteActor; ticketId: unknown; jobId: unknown; lineId: unknown },
+  dependencies: QuoteDraftDependencies = {},
 ): Promise<QuoteDraftResult> {
   const parsedLineId = uuidSchema.safeParse(input.lineId)
   if (!parsedLineId.success) return { ok: false, error: 'invalid_input' }
-  return runMutation(db, input.actor, input.ticketId, input.jobId, {}, async (tx, context) => {
+  return runMutation(db, input.actor, input.ticketId, input.jobId, dependencies, async (tx, context) => {
     const namedLine = context.lineRows.find((line) =>
       line.id === parsedLineId.data && line.jobId === context.jobId,
     )
-    if (namedLine && !isMutableManualLine(namedLine)) return notFound()
+    if (namedLine && !isMutableManualLine(namedLine)) {
+      return { result: notFound(), changedJobIds: [] }
+    }
     const existing = namedLine
-    if (!existing) return { ok: true, changed: false }
+    if (!existing) return {
+      result: { ok: true, changed: false }, changedJobIds: [],
+    }
     const [deleted] = await tx.delete(jobLines).where(and(
       eq(jobLines.shopId, context.shopId),
       eq(jobLines.jobId, context.jobId),
       eq(jobLines.id, parsedLineId.data),
     )).returning()
     if (!deleted) throw new AbortDraftMutation(conflict(true))
-    const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
+    const invalidation = await invalidateActiveQuoteVersionDeltaV1(tx, {
       shopId: context.shopId,
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
+      scope: context.scope,
     })
-    if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
-    return { ok: true, changed: true }
+    if ('ok' in invalidation) throw new AbortDraftMutation(invalidation)
+    return {
+      result: { ok: true, changed: true },
+      changedJobIds: [context.jobId, ...invalidation.changedJobIds],
+    }
   })
 }

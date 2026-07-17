@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
@@ -11,14 +11,80 @@ import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
 const uuid = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
 
+type LockedRow = Record<string, unknown>
+
+function withLockedVersionRows(
+  sourceDb: TestDb,
+  targetSource: unknown,
+  transform: (rows: readonly LockedRow[]) => readonly LockedRow[],
+): TestDb {
+  const wrapBuilder = (builder: object, source: unknown): object => new Proxy(builder, {
+    get(target, property) {
+      const member = Reflect.get(target, property, target)
+      if (typeof member !== 'function') return member
+      if (property === 'from') {
+        return (nextSource: unknown, ...args: unknown[]) => wrapBuilder(
+          Reflect.apply(member, target, [nextSource, ...args]) as object,
+          nextSource,
+        )
+      }
+      if (property === 'for' && source === targetSource) {
+        return async (...args: unknown[]) => {
+          const rows = await Reflect.apply(member, target, args) as LockedRow[]
+          return transform(rows)
+        }
+      }
+      return (...args: unknown[]) => {
+        const result = Reflect.apply(member, target, args) as unknown
+        return typeof result === 'object' && result !== null
+          ? wrapBuilder(result, source)
+          : result
+      }
+    },
+  })
+
+  return new Proxy(sourceDb, {
+    get(target, property, receiver) {
+      if (property === 'transaction') {
+        return async (callback: (tx: TestDb) => Promise<unknown>) =>
+          target.transaction(async (rawTx) => {
+            const tx = rawTx as TestDb
+            const wrappedTx = new Proxy(tx, {
+              get(txTarget, txProperty, txReceiver) {
+                if (txProperty === 'select') {
+                  return (...args: unknown[]) => wrapBuilder(
+                    Reflect.apply(
+                      Reflect.get(txTarget, txProperty, txReceiver) as
+                        (...values: unknown[]) => unknown,
+                      txTarget,
+                      args,
+                    ) as object,
+                    null,
+                  )
+                }
+                const value = Reflect.get(txTarget, txProperty, txReceiver)
+                return typeof value === 'function' ? value.bind(txTarget) : value
+              },
+            })
+            return callback(wrappedTx)
+          })
+      }
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
 describe('Shop OS immutable quote version creation', () => {
   let db: TestDb
   let close: () => Promise<void>
   let shopId: string
+  let otherShopId: string
   let ticketId: string
   let jobId: string
   let excludedJobId: string
   let canceledJobId: string
+  let historyProfileId: string
   let actor: QuoteActor
 
   beforeEach(async () => {
@@ -28,10 +94,13 @@ describe('Shop OS immutable quote version creation', () => {
       { name: 'South', laborRateCents: 20_000, taxRateBps: 700 },
     ]).returning()
     shopId = shop.id
+    otherShopId = otherShop.id
+    historyProfileId = uuid(4)
     await db.insert(profiles).values([
       { id: uuid(1), userId: uuid(101), shopId, role: 'tech' },
       { id: uuid(2), userId: uuid(102), shopId, role: 'founder' },
       { id: uuid(3), userId: uuid(103), shopId: otherShop.id, role: 'owner' },
+      { id: historyProfileId, userId: uuid(104), shopId, role: 'advisor' },
     ])
     await db.insert(vendorAccounts).values({
       id: uuid(90), shopId, vendor: 'manual', displayName: 'Main supplier', mode: 'manual',
@@ -111,12 +180,72 @@ describe('Shop OS immutable quote version creation', () => {
   const create = (overrides: Record<string, unknown> = {}, dependencies = {}) =>
     createQuoteVersion(db, { actor, ticketId, ...overrides }, dependencies)
 
-  it('captures ticket-first stable NOWAIT locks through actor reauthorization', () => {
+  const createWithDb = (
+    sourceDb: TestDb,
+    overrides: Record<string, unknown> = {},
+    dependencies = {},
+  ) => createQuoteVersion(sourceDb, { actor, ticketId, ...overrides }, dependencies)
+
+  const mutationState = async () => ({
+    ticket: (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0],
+    jobs: await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId)).orderBy(ticketJobs.id),
+    versions: await db.select().from(quoteVersions).where(eq(quoteVersions.ticketId, ticketId)).orderBy(quoteVersions.id),
+    events: await db.select().from(quoteEvents).where(eq(quoteEvents.ticketId, ticketId)).orderBy(quoteEvents.id),
+  })
+
+  const seedCompleteDecisionHistory = async () => {
+    const first = await create()
+    if (!first.ok) throw new Error('missing first version')
+    await db.insert(quoteEvents).values([
+      {
+        id: uuid(82), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+        kind: 'approved', approvedVia: 'page', requestKey: 'page-approval-history',
+      },
+      {
+        id: uuid(83), shopId, ticketId, jobId, quoteVersionId: first.version.id,
+        kind: 'approved', actorProfileId: historyProfileId, approvedVia: 'in_person',
+        requestKey: 'offline-approval-history',
+      },
+    ])
+    await db.update(ticketJobs).set({
+      approvalState: 'approved',
+      approvedQuoteVersionId: first.version.id,
+      approvedApprovalEventId: uuid(83),
+    }).where(eq(ticketJobs.id, jobId))
+    await db.update(jobLines).set({ priceCents: 13_001 }).where(eq(jobLines.id, uuid(41)))
+    return first
+  }
+
+  it('uses one bounded profile-first complete-graph mutation and one revision finalizer', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
-    const helper = source.slice(source.indexOf('async function lockVersionContext'), source.indexOf('function buildQuoteSnapshot'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(shops\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+    const discoveryStart = source.indexOf('async function discoverQuoteVersionMutation')
+    const mutationStart = source.indexOf('export async function createQuoteVersion')
+    const nextType = source.indexOf('type DecisionFailure', mutationStart)
+    const discovery = source.slice(discoveryStart, mutationStart).replace(/\s+/g, ' ')
+    const mutation = source.slice(mutationStart, nextType).replace(/\s+/g, ' ')
+
+    expect(discoveryStart).toBeGreaterThan(-1)
+    expect(mutationStart).toBeGreaterThan(discoveryStart)
+    expect(nextType).toBeGreaterThan(mutationStart)
+    expect(mutation).toContain('runBoundedShopOsMutationV1')
+    expect(mutation).toContain('assertLiveLockedMutationScopeV1')
+    expect(mutation.match(/finalizeMutationRevisionsV1/g) ?? []).toHaveLength(1)
+    expect(mutation).toContain('await seams.afterWrite?.()')
+    expect(mutation).toContain('await seams.afterFinalization?.()')
+    expect(mutation).not.toContain('db.transaction')
+    expect(mutation).not.toMatch(/\.for\(['"]update['"]/)
+    expect(mutation).not.toMatch(/revision:\s*sql/)
+    expect(mutation).not.toContain('insertMutationReceiptV1')
+    expect(discovery).toContain('lockShop: true')
+    for (const reference of [
+      'customerId', 'vehicleId', 'separateFromTicketId', 'createdByProfileId',
+      'assignedTechId', 'statementConfirmedByProfileId', 'approvedApprovalEventId',
+      'sessionId', 'techId', 'vendorAccountId', 'orderedByProfileId',
+      'receivedByProfileId', 'actorProfileId',
+    ]) expect(discovery).toContain(reference)
+    expect(source).toContain("approvedVia: z.enum(['phone', 'in_person'])")
     expect(source).not.toMatch(/createQuoteVersion[\s\S]*?from\(['"]@\/app\/api/)
-    expect(helper).not.toContain('jobAttachments')
+    expect(discovery).not.toContain('jobAttachments')
   })
 
   it('rejects mutable media provenance while leaving legacy rows and history untouched', async () => {
@@ -202,6 +331,9 @@ describe('Shop OS immutable quote version creation', () => {
         id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee',
         description: 'Alignment check', priceCents: 5_000, taxable: false,
       })
+      const [ticketBefore] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      const [pinnedBefore] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      const [includedBefore] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, excludedJobId))
 
       const second = await create()
       expect(second).toMatchObject({ ok: true, changed: true, version: { versionNumber: 2 } })
@@ -212,6 +344,12 @@ describe('Shop OS immutable quote version creation', () => {
         approvalState: 'approved',
         approvedQuoteVersionId: first.version.id,
       })
+      const [includedAfter] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, excludedJobId))
+      const [ticketAfter] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      expect(source.revision).toBe(pinnedBefore.revision)
+      expect(includedAfter.revision).toBe(includedBefore.revision + 1n)
+      expect(ticketAfter.projectionRevision).toBe(ticketBefore.projectionRevision + 1n)
+      expect(ticketAfter.continuityRevision).toBe(ticketBefore.continuityRevision + 1n)
       const [version] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, second.version.id))
       const jobs = (version.snapshot as { jobs: Array<{ id: string }>; totals: { subtotalCents: number } }).jobs
       expect(jobs.map((job) => job.id)).toEqual([excludedJobId])
@@ -354,9 +492,70 @@ describe('Shop OS immutable quote version creation', () => {
 
   it('returns the sole identical active version unchanged', async () => {
     const first = await create()
+    const afterFirst = await mutationState()
     const second = await create()
     expect(second).toEqual({ ...first, changed: false })
     expect(await db.select().from(quoteVersions)).toHaveLength(1)
+    expect(await mutationState()).toEqual(afterFirst)
+  })
+
+  it('finalizes the first version with one job and one parent bump', async () => {
+    const [ticketBefore] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [jobBefore] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+
+    await expect(create()).resolves.toMatchObject({ ok: true, changed: true })
+
+    const [ticketAfter] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [jobAfter] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(jobAfter.revision).toBe(jobBefore.revision + 1n)
+    expect(ticketAfter.projectionRevision).toBe(ticketBefore.projectionRevision + 1n)
+    expect(ticketAfter.continuityRevision).toBe(ticketBefore.continuityRevision + 1n)
+  })
+
+  it('bumps the deduplicated old/new job union once when a version changes participation', async () => {
+    await create()
+    await db.delete(jobLines).where(eq(jobLines.jobId, jobId))
+    await db.insert(jobLines).values({
+      id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee',
+      description: 'Alignment check', priceCents: 5_000, taxable: false,
+    })
+    const before = await mutationState()
+
+    await expect(create()).resolves.toMatchObject({
+      ok: true, changed: true, version: { versionNumber: 2 },
+    })
+
+    const after = await mutationState()
+    const beforeJobs = new Map(before.jobs.map((job) => [job.id, job]))
+    const afterJobs = new Map(after.jobs.map((job) => [job.id, job]))
+    expect(afterJobs.get(jobId)).toMatchObject({
+      approvalState: 'pending_quote',
+      revision: beforeJobs.get(jobId)!.revision + 1n,
+    })
+    expect(afterJobs.get(excludedJobId)).toMatchObject({
+      approvalState: 'quote_ready',
+      revision: beforeJobs.get(excludedJobId)!.revision + 1n,
+    })
+    expect(afterJobs.get(canceledJobId)).toEqual(beforeJobs.get(canceledJobId))
+    expect(after.ticket.projectionRevision).toBe(before.ticket.projectionRevision + 1n)
+    expect(after.ticket.continuityRevision).toBe(before.ticket.continuityRevision + 1n)
+  })
+
+  it('revisions a price-only replacement without changing continuity truth', async () => {
+    await create()
+    await db.update(jobLines).set({ priceCents: 13_001 }).where(eq(jobLines.id, uuid(41)))
+    const before = await mutationState()
+
+    await expect(create()).resolves.toMatchObject({
+      ok: true, changed: true, version: { versionNumber: 2 },
+    })
+
+    const after = await mutationState()
+    const beforeJob = before.jobs.find((job) => job.id === jobId)!
+    const afterJob = after.jobs.find((job) => job.id === jobId)!
+    expect(afterJob.revision).toBe(beforeJob.revision + 1n)
+    expect(after.ticket.projectionRevision).toBe(before.ticket.projectionRevision + 1n)
+    expect(after.ticket.continuityRevision).toBe(before.ticket.continuityRevision)
   })
 
   it('orders persisted job ties by immutable ID', async () => {
@@ -404,20 +603,125 @@ describe('Shop OS immutable quote version creation', () => {
     expect(third).toMatchObject({ ok: true, version: { versionNumber: 8 } })
   })
 
+  it.each([
+    ['membership', (row: LockedRow) => ({ ...row, membershipStatus: 'pending' })],
+    ['deactivation', (row: LockedRow) => ({ ...row, deactivatedAt: new Date('2026-07-16T13:00:00Z') })],
+    ['shop', (row: LockedRow) => ({ ...row, shopId: otherShopId })],
+    ['role', (row: LockedRow) => ({ ...row, role: 'founder' })],
+    ['tier', (row: LockedRow) => ({ ...row, skillTier: 4 })],
+  ] as const)(
+    'hides locked actor %s drift behind generic not-found with no writes',
+    async (_label, change) => {
+      const before = await mutationState()
+      const raceDb = withLockedVersionRows(db, profiles, (rows) => rows.map((row) =>
+        row.id === actor.profileId ? change(row) : row))
+
+      await expect(createWithDb(raceDb)).resolves.toEqual({ ok: false, error: 'not_found' })
+      expect(await mutationState()).toEqual(before)
+    },
+  )
+
+  it('locks page and offline event history plus its historical actor before versioning', async () => {
+    await seedCompleteDecisionHistory()
+    await expect(create()).resolves.toMatchObject({
+      ok: true, changed: true, version: { versionNumber: 2 },
+    })
+    await db.update(jobLines).set({ priceCents: 13_002 }).where(eq(jobLines.id, uuid(41)))
+    const before = await mutationState()
+    const raceDb = withLockedVersionRows(db, profiles, (rows) => rows.map((row) =>
+      row.id === historyProfileId ? { ...row, id: uuid(999) } : row))
+
+    await expect(createWithDb(raceDb)).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await mutationState()).toEqual(before)
+  })
+
+  it.each([
+    {
+      label: 'shop rate/tax', source: shops,
+      change: (row: LockedRow) => row.id === shopId
+        ? { ...row, laborRateCents: 15_001, taxRateBps: 826 }
+        : row,
+    },
+    {
+      label: 'ticket ancestry', source: tickets,
+      change: (row: LockedRow) => row.id === ticketId
+        ? { ...row, separateFromTicketId: uuid(998) }
+        : row,
+    },
+    {
+      label: 'customer tenancy', source: customers,
+      change: (row: LockedRow) => row.id === uuid(10)
+        ? { ...row, shopId: otherShopId }
+        : row,
+    },
+    {
+      label: 'vehicle ancestry', source: vehicles,
+      change: (row: LockedRow) => {
+        const vehicle = row.row as LockedRow | undefined
+        return vehicle?.id === uuid(11)
+          ? { ...row, row: { ...vehicle, customerId: uuid(999) } }
+          : row
+      },
+    },
+    {
+      label: 'line parent', source: jobLines,
+      change: (row: LockedRow) => row.id === uuid(41)
+        ? { ...row, jobId: excludedJobId }
+        : row,
+    },
+    {
+      label: 'version parent', source: quoteVersions,
+      change: (row: LockedRow) => row.ticketId === ticketId
+        ? { ...row, ticketId: uuid(999) }
+        : row,
+    },
+    {
+      label: 'event version', source: quoteEvents,
+      change: (row: LockedRow) => row.id === uuid(83)
+        ? { ...row, quoteVersionId: uuid(999) }
+        : row,
+    },
+    {
+      label: 'event actor reference', source: quoteEvents,
+      change: (row: LockedRow) => row.id === uuid(83)
+        ? { ...row, actorProfileId: uuid(999) }
+        : row,
+    },
+  ])('rejects locked $label drift without partial version writes', async ({ source, change }) => {
+    await seedCompleteDecisionHistory()
+    const before = await mutationState()
+    const raceDb = withLockedVersionRows(db, source, (rows) => rows.map(change))
+
+    await expect(createWithDb(raceDb)).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: true,
+    })
+    expect(await mutationState()).toEqual(before)
+  })
+
   it('fails closed across authorization, tenant, ticket state, reconciliation, tax, and empty boundaries', async () => {
     await expect(create({ actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(create({ actor: { profileId: uuid(3) } })).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(create({ ticketId: ticketId.toUpperCase(), actor: { profileId: uuid(1).toUpperCase() } })).resolves.toMatchObject({ ok: true })
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
-    await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(tickets).set({ status: 'open', source: 'tech_quick', customerId: null, vehicleId: null }).where(eq(tickets.id, ticketId))
-    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
-    await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+    await db.insert(tickets).values({
+      id: uuid(23), shopId, ticketNumber: 3, source: 'tech_quick',
+      customerId: null, vehicleId: null, concern: 'Provisional', createdByProfileId: uuid(1),
+    })
+    await expect(create({ ticketId: uuid(23) })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await db.update(shops).set({ taxRateBps: null }).where(eq(shops.id, shopId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await db.update(shops).set({ taxRateBps: 825 }).where(eq(shops.id, shopId))
     await db.delete(jobLines)
     await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    const canceledAt = new Date()
+    await db.update(ticketJobs).set({ workStatus: 'canceled' }).where(eq(ticketJobs.ticketId, ticketId))
+    await db.update(quoteVersions).set({ supersededAt: canceledAt }).where(and(
+      eq(quoteVersions.ticketId, ticketId), isNull(quoteVersions.supersededAt),
+    ))
+    await db.update(tickets).set({
+      status: 'canceled', canceledAt, canceledByProfileId: uuid(1),
+      cancelReasonCode: 'administrative_error',
+    }).where(eq(tickets.id, ticketId))
+    await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('preserves an explicit stored labor price without a pinned rate and rejects corrupt persisted values', async () => {
@@ -511,28 +815,53 @@ describe('Shop OS immutable quote version creation', () => {
     expect(await db.select().from(quoteVersions)).toHaveLength(2)
   })
 
-  it('classifies deterministic NOWAIT contention and rolls back all writes', async () => {
-    await expect(create({}, { beforeWrite: async () => { throw Object.assign(new Error('held'), { code: '55P03' }) } }))
-      .resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
-    expect(await db.select().from(quoteVersions)).toHaveLength(0)
-    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
-    expect(job.approvalState).toBe('pending_quote')
-  })
+  it.each(['afterDiscovery', 'afterWrite', 'afterFinalization'] as const)(
+    'rolls back supersede, insert, approval, and revisions when %s fails',
+    async (seam) => {
+      await seedCompleteDecisionHistory()
+      const before = await mutationState()
+      const marker = new Error(seam)
 
-  it('classifies contention immediately after the ticket lock and before dependent locks', async () => {
-    await expect(create({}, {
-      afterTicketLock: async () => { throw Object.assign(new Error('diagnostic job held'), { code: '55P03' }) },
-    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
-    expect(await db.select().from(quoteVersions)).toHaveLength(0)
-    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
-    expect(job.approvalState).toBe('pending_quote')
-  })
+      await expect(create({}, {
+        [seam]: async () => { throw marker },
+      })).rejects.toBe(marker)
+
+      expect(await mutationState()).toEqual(before)
+    },
+  )
+
+  it.each(['55P03', '40001', '40P01'] as const)(
+    'retries and exhausts SQLSTATE %s without retaining partial writes',
+    async (code) => {
+      await seedCompleteDecisionHistory()
+      const before = await mutationState()
+      let attempts = 0
+
+      const result = await create({}, {
+        afterWrite: async () => {
+          attempts += 1
+          throw Object.assign(new Error(code), { code })
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(attempts).toBe(2)
+      expect(await mutationState()).toEqual(before)
+    },
+  )
 
   it('serializes same-ticket add-job and version creation on the ticket lock', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
     const jobSource = readFileSync(join(process.cwd(), 'lib/tickets.ts'), 'utf8')
-    expect(source).toMatch(/lockVersionContext[\s\S]*?\.from\(tickets\)[\s\S]*?for\('update'/)
-    expect(jobSource).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update'/)
+    const versionBody = source.slice(
+      source.indexOf('async function discoverQuoteVersionMutation'),
+      source.indexOf('type DecisionFailure'),
+    )
+    expect(versionBody).toContain('runBoundedShopOsMutationV1')
+    expect(versionBody).toContain('ticketIds:')
+    expect(versionBody).toContain('lockShop: true')
+    expect(jobSource).toContain('runBoundedShopOsMutationV1')
+    expect(source).not.toContain('async function lockVersionContext')
   })
 
   it('keeps immutable history enforced and exposes no handler that writes snapshots', async () => {
