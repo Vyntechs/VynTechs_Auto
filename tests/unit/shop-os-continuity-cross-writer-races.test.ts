@@ -32,13 +32,12 @@ async function readTask10Source(path: string): Promise<string> {
 }
 
 describe('ShopOS continuity cross-writer race guards', () => {
-  it('pins ordinary Vitest runs to exactly four workers', async () => {
-    const vitestSource = await readTask10Source('vitest.config.ts')
-    const workerBudgets = [
-      ...vitestSource.matchAll(/^\s*maxWorkers:\s*(\d+),?\s*$/gm),
-    ]
+  it('loads the executable Vitest default config with the bounded integration contract', async () => {
+    const configModule = await import('../../vitest.config')
+    const config = await configModule.default
 
-    expect(workerBudgets.map((match) => match[1])).toEqual(['4'])
+    expect(config.test?.maxWorkers).toBe(4)
+    expect(config.test?.include).toContain('tests/integration/**/*.test.ts')
   })
 
   it('accepts only the exact disposable loopback PostgreSQL database before connecting', () => {
@@ -73,19 +72,17 @@ describe('ShopOS continuity cross-writer race guards', () => {
   })
 
   it('requires the real PostgreSQL race suite and explicit package entrypoint', async () => {
-    const [integrationSource, packageSource, vitestSource] = await Promise.all([
+    const [integrationSource, packageSource] = await Promise.all([
       readTask10Source(
         'tests/integration/shop-os-continuity-postgres-races.test.ts',
       ),
       readTask10Source('package.json'),
-      readTask10Source('vitest.config.ts'),
     ])
 
     expect(integrationSource).toContain('REQUIRE_CONTINUITY_POSTGRES')
     expect(integrationSource).toContain('CONTINUITY_POSTGRES_URL')
     expect(integrationSource).toContain('250')
     expect(packageSource).toContain('test:continuity:postgres')
-    expect(vitestSource).toContain("'tests/integration/**/*.test.ts'")
   })
 })
 
@@ -203,10 +200,8 @@ const UNIT_CROSS_WRITER_RACE_MATRIX_V1: readonly UnitRaceMatrixEntry[] = [
     id: 'counter_quick_identity_races',
     requirement: 'Counter/Counter and Counter/Quick phone, VIN, plate, mileage, and insertion-intent identity convergence',
     proofs: [
-      { file: 'tests/unit/shop-os-counter-ticket.test.ts', title: 'retries identity drift with a fresh attempt and commits exactly one final batch' },
-      { file: 'tests/unit/shop-os-counter-ticket.test.ts', title: 'reuses the exact-phone customer then VIN vehicle without overwriting metadata' },
-      { file: 'tests/unit/shop-os-counter-ticket.test.ts', title: 'reuses the exact-phone customer then plate-only vehicle without overwriting metadata' },
-      { file: 'tests/unit/shop-os-ticket-intake-identity.test.ts', title: 'preserves null/omitted mileage, skips unchanged writes, and updates changed mileage once' },
+      { file: 'tests/integration/shop-os-continuity-postgres-races.test.ts', title: 'serializes production Counter/Counter phone, VIN, plate, mileage, and insertion-intent races' },
+      { file: 'tests/integration/shop-os-continuity-postgres-races.test.ts', title: 'serializes production Counter/Quick phone, VIN, plate, mileage, and insertion-intent races' },
     ],
   },
   {
