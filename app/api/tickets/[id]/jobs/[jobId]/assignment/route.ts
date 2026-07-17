@@ -43,7 +43,9 @@ export async function POST(
       ? { error: result.error, warning: result.warning }
       : result.error === 'assignment_conflict' && result.currentAssignee
         ? { error: result.error, currentAssignee: result.currentAssignee }
-        : { error: result.error }
+        : result.retryable === true
+          ? { error: result.error, retryable: true as const }
+          : { error: result.error }
     return NextResponse.json(error, { status: ticketDomainStatus(result, 200) })
   }
   return NextResponse.json({ ticket: result.ticket }, { status: 200 })

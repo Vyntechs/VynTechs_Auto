@@ -167,6 +167,22 @@ describe('job assignment route', () => {
     })
   })
 
+  it('forwards only the retryable marker on bounded contention exhaustion', async () => {
+    mutationMock.mockResolvedValue({
+      ok: false,
+      error: 'conflict',
+      retryable: true,
+    })
+
+    const response = await POST(request({ action: 'claim' }), params())
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: 'conflict',
+      retryable: true,
+    })
+  })
+
   it('never includes a current assignee outside an assignment conflict', async () => {
     mutationMock.mockResolvedValue({
       ok: false,
@@ -217,6 +233,7 @@ describe('job assignment route', () => {
     ['no_shop', 403],
     ['inactive_profile', 403],
     ['not_found', 404],
+    ['conflict', 409],
     ['tier_confirmation_required', 409],
     ['ticket_not_open', 409],
     ['job_not_open', 409],

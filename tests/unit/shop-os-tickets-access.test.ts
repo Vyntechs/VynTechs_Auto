@@ -111,14 +111,19 @@ describe('ticket job lock contract', () => {
     const source = await readFile(path.join(process.cwd(), 'lib/tickets.ts'), 'utf8')
     const normalized = source.replace(/\s+/g, ' ')
     const validatorStart = normalized.indexOf('function resolveLockedAddTicketJobTarget')
+    const sharedDiscoveryStart = normalized.indexOf(
+      'async function discoverExistingTicketGraphMutation',
+    )
     const discoveryStart = normalized.indexOf('async function discoverAddTicketJobMutation')
     const mutationStart = normalized.indexOf('export async function addTicketJob')
     const nextExport = normalized.indexOf('export type SafeTicketAssignee', mutationStart)
-    const validatorSource = normalized.slice(validatorStart, discoveryStart)
+    const validatorSource = normalized.slice(validatorStart, sharedDiscoveryStart)
+    const sharedDiscoverySource = normalized.slice(sharedDiscoveryStart, discoveryStart)
     const discoverySource = normalized.slice(discoveryStart, mutationStart)
     const mutationSource = normalized.slice(mutationStart, nextExport)
 
     expect(validatorStart).toBeGreaterThan(-1)
+    expect(sharedDiscoveryStart).toBeGreaterThan(validatorStart)
     expect(discoveryStart).toBeGreaterThan(-1)
     expect(mutationStart).toBeGreaterThan(-1)
     expect(nextExport).toBeGreaterThan(mutationStart)
@@ -132,23 +137,23 @@ describe('ticket job lock contract', () => {
     expect(mutationSource).not.toMatch(/sequenceNumber:\s*\d/)
     expect(discoverySource.match(/randomUUID\(\)/g) ?? []).toHaveLength(1)
     expect(discoverySource.indexOf('const jobId = randomUUID()'))
-      .toBeLessThan(discoverySource.indexOf('await tx.select()'))
+      .toBeLessThan(discoverySource.indexOf('await discoverExistingTicketGraphMutation'))
     expect(discoverySource).toContain('proposedAssigneeId')
-    expect(discoverySource).toContain('...ticketRows.map(({ customerId }) => customerId)')
-    expect(discoverySource).toContain('...ticketRows.map(({ vehicleId }) => vehicleId)')
-    expect(discoverySource).toContain('...sessionVehicleRows.map(({ customerId }) => customerId)')
-    expect(discoverySource).toContain('...sessionVehicleIds')
-    expect(discoverySource).toContain(
+    expect(discoverySource).toContain('jobInsertionIntent: Object.freeze({ id: jobId, ticketId })')
+    expect(sharedDiscoverySource).toContain('...ticketRows.map(({ customerId }) => customerId)')
+    expect(sharedDiscoverySource).toContain('...ticketRows.map(({ vehicleId }) => vehicleId)')
+    expect(sharedDiscoverySource).toContain(
+      '...sessionVehicleRows.map(({ customerId }) => customerId)',
+    )
+    expect(sharedDiscoverySource).toContain('...sessionVehicleIds')
+    expect(sharedDiscoverySource).toContain(
       'separateChainIds: Object.freeze(ticketRows.map(({ id }) => id))',
     )
-    expect(discoverySource).toContain('ticket.createdByProfileId')
-    expect(discoverySource).toContain('job.statementConfirmedByProfileId')
-    expect(discoverySource).toContain('lines.map(({ vendorAccountId }) => vendorAccountId)')
-    expect(discoverySource).toContain('sessionRows.map(({ techId }) => techId)')
-    expect(discoverySource).toContain('job.approvedApprovalEventId')
-    expect(discoverySource).toContain(
-      'jobs: Object.freeze([Object.freeze({ id: jobId, ticketId })])',
-    )
+    expect(sharedDiscoverySource).toContain('ticket.createdByProfileId')
+    expect(sharedDiscoverySource).toContain('job.statementConfirmedByProfileId')
+    expect(sharedDiscoverySource).toContain('lines.map(({ vendorAccountId }) => vendorAccountId)')
+    expect(sharedDiscoverySource).toContain('sessionRows.map(({ techId }) => techId)')
+    expect(sharedDiscoverySource).toContain('job.approvedApprovalEventId')
     expect(mutationSource).toContain('createdByProfileId: scope.actor.id')
     expect(mutationSource).toContain('resolveLockedAddTicketJobTarget(')
     expect(mutationSource).toContain('discovery.separateChainIds')

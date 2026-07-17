@@ -380,7 +380,7 @@ const assignmentBodySchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('reassign'),
-      assignedTechId: z.uuid(),
+      assignedTechId: canonicalUuid,
       confirmBelowTier: z.boolean().optional(),
     })
     .strict(),
@@ -402,7 +402,6 @@ const createTicketBodySchema = z
   })
   .strict()
 
-type TicketJobBody = z.infer<typeof ticketJobBodySchema>
 type CreateTicketBody = z.infer<typeof createTicketBodySchema>
 
 function actorGate(actor: TicketActor): { ok: false; error: TicketDomainError } | null {
@@ -536,75 +535,6 @@ async function loadTicketDetail(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
-}
-
-async function validateAssignment(
-  db: AppDb,
-  actor: TicketActor,
-  job: TicketJobBody,
-): Promise<
-  | { ok: true; assignedTechId: string | null }
-  | { ok: false; error: 'invalid_assignee' | 'not_found' }
-  | {
-      ok: false
-      error: 'tier_confirmation_required'
-      warning: AssignmentTierWarning
-    }
-> {
-  if (!job.assignedTechId) return { ok: true, assignedTechId: null }
-
-  const [assignee] = await db
-    .select({
-      id: profiles.id,
-      role: profiles.role,
-      skillTier: profiles.skillTier,
-      membershipStatus: profiles.membershipStatus,
-      deactivatedAt: profiles.deactivatedAt,
-    })
-    .from(profiles)
-    .where(
-      and(
-        eq(profiles.id, job.assignedTechId),
-        eq(profiles.shopId, actor.shopId as string),
-      ),
-    )
-    .limit(1)
-
-  if (!assignee) {
-    return { ok: false, error: 'not_found' }
-  }
-
-  if (
-    assignee.membershipStatus !== 'active' ||
-    assignee.deactivatedAt ||
-    !canCreateTickets(assignee.role) ||
-    assignee.skillTier === null ||
-    ![1, 2, 3].includes(assignee.skillTier)
-  ) {
-    return { ok: false, error: 'invalid_assignee' }
-  }
-
-  const assignedSkillTier = assignee.skillTier as 1 | 2 | 3
-  if (assignee.id === actor.profileId) {
-    return assignedSkillTier >= job.requiredSkillTier
-      ? { ok: true, assignedTechId: assignee.id }
-      : { ok: false, error: 'invalid_assignee' }
-  }
-
-  if (!canAssignWork(actor.role)) return { ok: false, error: 'invalid_assignee' }
-  if (assignedSkillTier < job.requiredSkillTier && !job.confirmBelowTier) {
-    return {
-      ok: false,
-      error: 'tier_confirmation_required',
-      warning: {
-        code: 'below_required_tier',
-        assignedTechId: assignee.id,
-        assignedSkillTier,
-        requiredSkillTier: job.requiredSkillTier,
-      },
-    }
-  }
-  return { ok: true, assignedTechId: assignee.id }
 }
 
 type CreateTicketFailure = Exclude<CreateTicketResult, { ok: true }>
@@ -876,6 +806,20 @@ type AddTicketJobDiscovery =
       separateChainIds: readonly string[]
     }>
 
+type ExistingTicketGraphDiscovery =
+  | Readonly<{ kind: 'not_found' }>
+  | Readonly<{
+      kind: 'ready'
+      separateChainIds: readonly string[]
+    }>
+
+type ExistingTicketGraphDiscoveryOptions = Readonly<{
+  exactJobId: string | null
+  extraProfileIds: readonly string[]
+  lockShop: boolean
+  jobInsertionIntent: Readonly<{ id: string; ticketId: string }> | null
+}>
+
 type OwnedAddTicketJobBody = Readonly<{
   title: string
   kind: 'diagnostic' | 'repair' | 'maintenance'
@@ -936,22 +880,29 @@ function resolveLockedAddTicketJobTarget(
   return graphById.get(ticketId)!
 }
 
-async function discoverAddTicketJobMutation(
+async function discoverExistingTicketGraphMutation(
   tx: AppDb,
   actor: TicketActor & { shopId: string },
   ticketId: string,
-  proposedAssigneeId: string | null,
+  options: ExistingTicketGraphDiscoveryOptions,
 ): Promise<Readonly<{
   lockRequest: MutationLockRequestV1
-  payload: AddTicketJobDiscovery
+  payload: ExistingTicketGraphDiscovery
 }>> {
-  const jobId = randomUUID()
   const [target] = await tx.select().from(tickets).where(and(
     eq(tickets.shopId, actor.shopId),
     eq(tickets.id, ticketId),
   )).limit(1)
 
-  if (!target) {
+  const exactPairExists = target !== undefined && options.exactJobId !== null
+    ? (await tx.select({ id: ticketJobs.id }).from(ticketJobs).where(and(
+        eq(ticketJobs.shopId, actor.shopId),
+        eq(ticketJobs.ticketId, ticketId),
+        eq(ticketJobs.id, options.exactJobId),
+      )).limit(1)).length === 1
+    : target !== undefined
+
+  if (!target || !exactPairExists) {
     return Object.freeze({
       lockRequest: Object.freeze({
         shopId: actor.shopId,
@@ -974,7 +925,7 @@ async function discoverAddTicketJobMutation(
         receiptConditionalInsert: null,
         insertionIntents: emptyMutationInsertionIntents(),
       }),
-      payload: Object.freeze({ kind: 'not_found', jobId }),
+      payload: Object.freeze({ kind: 'not_found' }),
     })
   }
 
@@ -1068,7 +1019,7 @@ async function discoverAddTicketJobMutation(
 
   const profileIds = ownedUuidList([
     actor.profileId,
-    proposedAssigneeId,
+    ...options.extraProfileIds,
     ...ticketRows.flatMap((ticket) => [
       ticket.createdByProfileId,
       ticket.canceledByProfileId,
@@ -1104,7 +1055,7 @@ async function discoverAddTicketJobMutation(
       shopId: actor.shopId,
       actorProfileId: actor.profileId,
       profileIds,
-      lockShop: true,
+      lockShop: options.lockShop,
       customerIds,
       vehicleIds,
       ticketIds,
@@ -1119,16 +1070,52 @@ async function discoverAddTicketJobMutation(
       cannedJobIds: Object.freeze([]),
       receiptRequestKey: null,
       receiptConditionalInsert: null,
-      insertionIntents: Object.freeze({
-        ...emptyMutationInsertionIntents(),
-        jobs: Object.freeze([Object.freeze({ id: jobId, ticketId })]),
-      }),
+      insertionIntents: options.jobInsertionIntent === null
+        ? emptyMutationInsertionIntents()
+        : Object.freeze({
+            ...emptyMutationInsertionIntents(),
+            jobs: Object.freeze([Object.freeze(options.jobInsertionIntent)]),
+          }),
     }),
     payload: Object.freeze({
       kind: 'ready',
-      jobId,
       separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
     }),
+  })
+}
+
+async function discoverAddTicketJobMutation(
+  tx: AppDb,
+  actor: TicketActor & { shopId: string },
+  ticketId: string,
+  proposedAssigneeId: string | null,
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: AddTicketJobDiscovery
+}>> {
+  const jobId = randomUUID()
+  const discovered = await discoverExistingTicketGraphMutation(
+    tx,
+    actor,
+    ticketId,
+    Object.freeze({
+      exactJobId: null,
+      extraProfileIds: Object.freeze(
+        proposedAssigneeId === null ? [] : [proposedAssigneeId],
+      ),
+      lockShop: true,
+      jobInsertionIntent: Object.freeze({ id: jobId, ticketId }),
+    }),
+  )
+  return Object.freeze({
+    lockRequest: discovered.lockRequest,
+    payload: discovered.payload.kind === 'not_found'
+      ? Object.freeze({ kind: 'not_found', jobId })
+      : Object.freeze({
+          kind: 'ready',
+          jobId,
+          separateChainIds: discovered.payload.separateChainIds,
+        }),
   })
 }
 
@@ -1310,386 +1297,74 @@ export type TicketJobAssignmentResult =
       error: TicketDomainError
       warning?: AssignmentTierWarning
       currentAssignee?: SafeTicketAssignee
+      retryable?: boolean
     }
 
 export type TicketJobAssignmentDependencies = {
-  beforeReassignUpdate?: () => Promise<void>
+  afterDiscovery?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
-type AssignmentContext = {
-  ticketStatus: string
-  workStatus: string
-  hasLiveDiagnosticStartLease: boolean
-  requiredSkillTier: number
-  assignedTechId: string | null
-  assignedTechFullName: string | null
-  assignedTechRole: string | null
-  assignedTechSkillTier: number | null
+type OwnedTicketJobAssignmentBody =
+  | Readonly<{ action: 'claim' }>
+  | Readonly<{ action: 'unclaim' }>
+  | Readonly<{
+      action: 'reassign'
+      assignedTechId: string
+      confirmBelowTier: boolean
+    }>
+
+type TicketJobAssignmentDiscovery = ExistingTicketGraphDiscovery
+type TicketJobAssignmentFailure = Exclude<TicketJobAssignmentResult, { ok: true }>
+
+class TicketJobAssignmentRollback extends Error {
+  constructor(readonly result: TicketJobAssignmentFailure) {
+    super('ticket_job_assignment_rollback')
+  }
 }
 
-async function loadAssignmentContext(
-  db: AppDb,
-  shopId: string,
-  ticketId: string,
-  jobId: string,
-): Promise<AssignmentContext | null> {
-  const [context] = await db
-    .select({
-      ticketStatus: tickets.status,
-      workStatus: ticketJobs.workStatus,
-      hasLiveDiagnosticStartLease: sql<boolean>`
-        ${ticketJobs.diagnosticStartState} = 'initializing'
-        and ${ticketJobs.diagnosticStartLeaseUntil} > now()
-      `,
-      requiredSkillTier: ticketJobs.requiredSkillTier,
-      assignedTechId: ticketJobs.assignedTechId,
-      assignedTechFullName: profiles.fullName,
-      assignedTechRole: profiles.role,
-      assignedTechSkillTier: profiles.skillTier,
-    })
-    .from(ticketJobs)
-    .innerJoin(
-      tickets,
-      and(
-        eq(tickets.shopId, ticketJobs.shopId),
-        eq(tickets.id, ticketJobs.ticketId),
-      ),
-    )
-    .leftJoin(profiles, eq(profiles.id, ticketJobs.assignedTechId))
-    .where(
-      and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.ticketId, ticketId),
-        eq(ticketJobs.id, jobId),
-      ),
-    )
-    .limit(1)
-  return context ?? null
-}
-
-function safeCurrentAssignee(
-  context: AssignmentContext,
+function safeLockedAssignee(
+  scope: LockedMutationScopeV1,
+  assignedTechId: string | null,
 ): SafeTicketAssignee | null {
-  if (!context.assignedTechId || !context.assignedTechRole) return null
+  if (assignedTechId === null) return null
+  const profile = scope.profiles.find(({ id }) => id === assignedTechId)
+  if (!profile) throw new ShopOsMutationConflict()
   return {
-    id: context.assignedTechId,
-    fullName: context.assignedTechFullName,
-    role: context.assignedTechRole,
-    skillTier: context.assignedTechSkillTier,
+    id: profile.id,
+    fullName: profile.fullName,
+    role: profile.role,
+    skillTier: profile.skillTier,
   }
 }
 
-async function persistedActorError(
-  db: AppDb,
-  actor: TicketActor,
-): Promise<{ ok: false; error: TicketDomainError } | null> {
-  const [profile] = await db
-    .select({
-      role: profiles.role,
-      membershipStatus: profiles.membershipStatus,
-      deactivatedAt: profiles.deactivatedAt,
-    })
-    .from(profiles)
-    .where(
-      and(
-        eq(profiles.shopId, actor.shopId as string),
-        eq(profiles.id, actor.profileId),
-      ),
-    )
-    .limit(1)
-  if (!profile || !canCreateTickets(profile.role)) return { ok: false, error: 'forbidden' }
-  if (profile.membershipStatus !== 'active' || profile.deactivatedAt) {
-    return { ok: false, error: 'inactive_profile' }
-  }
-  return null
-}
-
-async function persistedClaimActorError(
-  db: AppDb,
-  actor: TicketActor,
-  requiredSkillTier: number,
-): Promise<{ ok: false; error: TicketDomainError } | null> {
-  const [profile] = await db
-    .select({
-      role: profiles.role,
-      skillTier: profiles.skillTier,
-      membershipStatus: profiles.membershipStatus,
-      deactivatedAt: profiles.deactivatedAt,
-    })
-    .from(profiles)
-    .where(
-      and(
-        eq(profiles.shopId, actor.shopId as string),
-        eq(profiles.id, actor.profileId),
-      ),
-    )
-    .limit(1)
-  if (!profile || !canCreateTickets(profile.role)) return { ok: false, error: 'forbidden' }
-  if (profile.membershipStatus !== 'active' || profile.deactivatedAt) {
-    return { ok: false, error: 'inactive_profile' }
-  }
-  if (
-    profile.skillTier === null ||
-    ![1, 2, 3].includes(profile.skillTier) ||
-    profile.skillTier < requiredSkillTier
-  ) {
-    return { ok: false, error: 'invalid_assignee' }
-  }
-  return null
-}
-
-function assignmentStateError(
-  context: AssignmentContext | null,
-): { ok: false; error: TicketDomainError } | null {
-  if (!context) return { ok: false, error: 'not_found' }
-  if (context.ticketStatus !== 'open') return { ok: false, error: 'ticket_not_open' }
-  if (context.workStatus !== 'open') return { ok: false, error: 'job_not_open' }
-  if (context.hasLiveDiagnosticStartLease) {
-    return { ok: false, error: 'job_not_open' }
-  }
-  return null
-}
-
-async function updatedAssignmentTicket(
-  db: AppDb,
-  shopId: string,
-  ticketId: string,
-): Promise<TicketJobAssignmentResult> {
-  const ticket = await loadTicketDetail(db, shopId, ticketId)
-  if (!ticket) throw new Error('updated_ticket_not_found')
-  return { ok: true, ticket }
-}
-
-async function claimTicketJob(
-  db: AppDb,
-  actor: TicketActor,
-  shopId: string,
+async function discoverTicketJobAssignmentMutation(
+  tx: AppDb,
+  actor: TicketActor & { shopId: string },
   ticketId: string,
   jobId: string,
-): Promise<TicketJobAssignmentResult> {
-  const [claimed] = await db
-    .update(ticketJobs)
-    .set({
-      assignedTechId: actor.profileId,
-      claimedAt: sql`now()`,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.ticketId, ticketId),
-        eq(ticketJobs.id, jobId),
-        eq(ticketJobs.workStatus, 'open'),
-        isNull(ticketJobs.assignedTechId),
-        sql`exists (
-          select 1 from ${tickets}
-          where ${tickets.shopId} = ${ticketJobs.shopId}
-            and ${tickets.id} = ${ticketJobs.ticketId}
-            and ${tickets.status} = 'open'
-        )`,
-        sql`exists (
-          select 1 from ${profiles}
-          where ${profiles.shopId} = ${ticketJobs.shopId}
-            and ${profiles.id} = ${actor.profileId}
-            and ${profiles.membershipStatus} = 'active'
-            and ${profiles.deactivatedAt} is null
-            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
-            and ${profiles.skillTier} between 1 and 3
-            and ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}
-        )`,
-      ),
-    )
-    .returning()
-
-  if (claimed) return updatedAssignmentTicket(db, shopId, ticketId)
-
-  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
-  const stateError = assignmentStateError(context)
-  if (stateError) return stateError
-  const actorError = await persistedClaimActorError(
-    db,
+  body: OwnedTicketJobAssignmentBody,
+  afterDiscovery: (() => Promise<void>) | undefined,
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: TicketJobAssignmentDiscovery
+}>> {
+  const discovered = await discoverExistingTicketGraphMutation(
+    tx,
     actor,
-    (context as AssignmentContext).requiredSkillTier,
-  )
-  if (actorError) return actorError
-  const assignee = safeCurrentAssignee(context as AssignmentContext)
-  if (assignee) {
-    return { ok: false, error: 'assignment_conflict', currentAssignee: assignee }
-  }
-  return { ok: false, error: 'invalid_assignee' }
-}
-
-async function unclaimTicketJob(
-  db: AppDb,
-  actor: TicketActor,
-  shopId: string,
-  ticketId: string,
-  jobId: string,
-): Promise<TicketJobAssignmentResult> {
-  const [unclaimed] = await db
-    .update(ticketJobs)
-    .set({ assignedTechId: null, claimedAt: null, updatedAt: sql`now()` })
-    .where(
-      and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.ticketId, ticketId),
-        eq(ticketJobs.id, jobId),
-        eq(ticketJobs.workStatus, 'open'),
-        or(
-          ne(ticketJobs.diagnosticStartState, 'initializing'),
-          isNull(ticketJobs.diagnosticStartLeaseUntil),
-          lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`),
-        ),
-        sql`exists (
-          select 1 from ${tickets}
-          where ${tickets.shopId} = ${ticketJobs.shopId}
-            and ${tickets.id} = ${ticketJobs.ticketId}
-            and ${tickets.status} = 'open'
-        )`,
-        sql`exists (
-          select 1 from ${profiles}
-          where ${profiles.shopId} = ${ticketJobs.shopId}
-            and ${profiles.id} = ${actor.profileId}
-            and ${profiles.membershipStatus} = 'active'
-            and ${profiles.deactivatedAt} is null
-            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
-        )`,
-        or(
-          eq(ticketJobs.assignedTechId, actor.profileId),
-          sql`exists (
-            select 1 from ${profiles}
-            where ${profiles.shopId} = ${ticketJobs.shopId}
-              and ${profiles.id} = ${actor.profileId}
-              and ${profiles.role} in ('advisor', 'owner')
-          )`,
-        ),
+    ticketId,
+    Object.freeze({
+      exactJobId: jobId,
+      extraProfileIds: Object.freeze(
+        body.action === 'reassign' ? [body.assignedTechId] : [],
       ),
-    )
-    .returning()
-
-  if (unclaimed) return updatedAssignmentTicket(db, shopId, ticketId)
-  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
-  const stateError = assignmentStateError(context)
-  if (stateError) return stateError
-  const actorError = await persistedActorError(db, actor)
-  if (actorError) return actorError
-  return { ok: false, error: 'forbidden' }
-}
-
-async function reassignTicketJob(
-  db: AppDb,
-  actor: TicketActor,
-  shopId: string,
-  ticketId: string,
-  jobId: string,
-  body: { assignedTechId: string; confirmBelowTier?: boolean },
-  dependencies: TicketJobAssignmentDependencies,
-): Promise<TicketJobAssignmentResult> {
-  const actorError = await persistedActorError(db, actor)
-  if (actorError) return actorError
-
-  const [persistedActor] = await db
-    .select({ role: profiles.role })
-    .from(profiles)
-    .where(and(eq(profiles.shopId, shopId), eq(profiles.id, actor.profileId)))
-    .limit(1)
-  if (!persistedActor || !canAssignWork(persistedActor.role)) {
-    return { ok: false, error: 'forbidden' }
-  }
-
-  const context = await loadAssignmentContext(db, shopId, ticketId, jobId)
-  const stateError = assignmentStateError(context)
-  if (stateError) return stateError
-
-  const assignment = await validateAssignment(db, { ...actor, role: persistedActor.role }, {
-    title: 'assignment',
-    kind: 'repair',
-    requiredSkillTier: (context as AssignmentContext).requiredSkillTier as 1 | 2 | 3,
-    assignedTechId: body.assignedTechId,
-    confirmBelowTier: body.confirmBelowTier,
-  })
-  if (!assignment.ok) return assignment
-
-  await dependencies.beforeReassignUpdate?.()
-
-  const [reassigned] = await db
-    .update(ticketJobs)
-    .set({
-      assignedTechId: assignment.assignedTechId,
-      claimedAt: null,
-      updatedAt: sql`now()`,
-    })
-    .where(
-      and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.ticketId, ticketId),
-        eq(ticketJobs.id, jobId),
-        eq(ticketJobs.workStatus, 'open'),
-        or(
-          ne(ticketJobs.diagnosticStartState, 'initializing'),
-          isNull(ticketJobs.diagnosticStartLeaseUntil),
-          lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`),
-        ),
-        sql`exists (
-          select 1 from ${tickets}
-          where ${tickets.shopId} = ${ticketJobs.shopId}
-            and ${tickets.id} = ${ticketJobs.ticketId}
-            and ${tickets.status} = 'open'
-        )`,
-        sql`exists (
-          select 1 from ${profiles}
-          where ${profiles.shopId} = ${ticketJobs.shopId}
-            and ${profiles.id} = ${actor.profileId}
-            and ${profiles.membershipStatus} = 'active'
-            and ${profiles.deactivatedAt} is null
-            and ${profiles.role} in ('advisor', 'owner')
-        )`,
-        sql`exists (
-          select 1 from ${profiles}
-          where ${profiles.shopId} = ${ticketJobs.shopId}
-            and ${profiles.id} = ${assignment.assignedTechId as string}
-            and ${profiles.membershipStatus} = 'active'
-            and ${profiles.deactivatedAt} is null
-            and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
-            and ${profiles.skillTier} between 1 and 3
-            and (
-              ${body.confirmBelowTier === true}
-              or ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}
-            )
-        )`,
-      ),
-    )
-    .returning()
-  if (reassigned) return updatedAssignmentTicket(db, shopId, ticketId)
-
-  const currentContext = await loadAssignmentContext(db, shopId, ticketId, jobId)
-  const currentStateError = assignmentStateError(currentContext)
-  if (currentStateError) return currentStateError
-
-  const currentActorError = await persistedActorError(db, actor)
-  if (currentActorError) return currentActorError
-  const [currentActor] = await db
-    .select({ role: profiles.role })
-    .from(profiles)
-    .where(and(eq(profiles.shopId, shopId), eq(profiles.id, actor.profileId)))
-    .limit(1)
-  if (!currentActor || !canAssignWork(currentActor.role)) {
-    return { ok: false, error: 'forbidden' }
-  }
-
-  const currentAssignment = await validateAssignment(
-    db,
-    { ...actor, role: currentActor.role },
-    {
-      title: 'assignment',
-      kind: 'repair',
-      requiredSkillTier: (currentContext as AssignmentContext).requiredSkillTier as 1 | 2 | 3,
-      assignedTechId: body.assignedTechId,
-      confirmBelowTier: body.confirmBelowTier,
-    },
+      lockShop: false,
+      jobInsertionIntent: null,
+    }),
   )
-  if (!currentAssignment.ok) return currentAssignment
-  return { ok: false, error: 'not_found' }
+  await afterDiscovery?.()
+  return discovered
 }
 
 export async function mutateTicketJobAssignment(
@@ -1697,44 +1372,316 @@ export async function mutateTicketJobAssignment(
   input: { actor: TicketActor; ticketId: unknown; jobId: unknown; body: unknown },
   dependencies: TicketJobAssignmentDependencies = {},
 ): Promise<TicketJobAssignmentResult> {
-  const denied = actorGate(input.actor)
+  const callerActor: TicketActor = {
+    profileId: input.actor.profileId,
+    shopId: input.actor.shopId,
+    role: input.actor.role,
+    skillTier: input.actor.skillTier,
+    membershipStatus: input.actor.membershipStatus,
+    deactivatedAt: input.actor.deactivatedAt === null
+      ? null
+      : new Date(input.actor.deactivatedAt.getTime()),
+  }
+  const denied = actorGate(callerActor)
   if (denied) return denied
 
-  const parsedTicketId = z.uuid().safeParse(input.ticketId)
-  const parsedJobId = z.uuid().safeParse(input.jobId)
+  const parsedActor = z.object({
+    profileId: canonicalUuid,
+    shopId: canonicalUuid,
+  }).strict().safeParse({
+    profileId: callerActor.profileId,
+    shopId: callerActor.shopId,
+  })
+  const parsedTicketId = canonicalUuid.safeParse(input.ticketId)
+  const parsedJobId = canonicalUuid.safeParse(input.jobId)
   const parsedBody = assignmentBodySchema.safeParse(input.body)
-  if (!parsedTicketId.success || !parsedJobId.success || !parsedBody.success) {
+  if (
+    !parsedActor.success || !parsedTicketId.success ||
+    !parsedJobId.success || !parsedBody.success
+  ) {
     return { ok: false, error: 'invalid_input' }
   }
 
-  const shopId = input.actor.shopId as string
-  if (parsedBody.data.action === 'claim') {
-    return claimTicketJob(
-      db,
-      input.actor,
-      shopId,
-      parsedTicketId.data,
-      parsedJobId.data,
-    )
+  const actor = Object.freeze({
+    ...callerActor,
+    profileId: parsedActor.data.profileId,
+    shopId: parsedActor.data.shopId,
+  }) as TicketActor & { shopId: string }
+  const ticketId = parsedTicketId.data
+  const jobId = parsedJobId.data
+  const body: OwnedTicketJobAssignmentBody = parsedBody.data.action === 'reassign'
+    ? Object.freeze({
+        action: 'reassign',
+        assignedTechId: parsedBody.data.assignedTechId,
+        confirmBelowTier: parsedBody.data.confirmBelowTier ?? false,
+      })
+    : Object.freeze({ action: parsedBody.data.action })
+  const seams = Object.freeze({
+    afterDiscovery: dependencies.afterDiscovery,
+    afterWrite: dependencies.afterWrite,
+    afterFinalization: dependencies.afterFinalization,
+  })
+
+  try {
+    return await runBoundedShopOsMutationV1<
+      TicketJobAssignmentResult,
+      TicketJobAssignmentDiscovery
+    >(db, {
+      discover: async (tx) => discoverTicketJobAssignmentMutation(
+        tx,
+        actor,
+        ticketId,
+        jobId,
+        body,
+        seams.afterDiscovery,
+      ),
+      executeLocked: async (tx, scope, discovery) => {
+        assertLiveLockedMutationScopeV1(tx, scope)
+        if (discovery.kind === 'not_found') {
+          throw new TicketJobAssignmentRollback({ ok: false, error: 'not_found' })
+        }
+        const graph = resolveLockedAddTicketJobTarget(
+          scope,
+          ticketId,
+          discovery.separateChainIds,
+        )
+        const job = graph.jobs.find((candidate) =>
+          candidate.id === jobId && candidate.ticketId === ticketId)
+        if (!job) {
+          throw new TicketJobAssignmentRollback({ ok: false, error: 'not_found' })
+        }
+
+        const [clock] = await tx.select({ now: sql<Date>`now()` })
+          .from(ticketJobs)
+          .where(and(
+            eq(ticketJobs.shopId, scope.actor.shopId),
+            eq(ticketJobs.ticketId, ticketId),
+            eq(ticketJobs.id, jobId),
+          ))
+          .limit(1)
+        const databaseNow = clock?.now instanceof Date
+          ? clock.now.getTime()
+          : new Date(clock?.now as unknown as string).getTime()
+        if (!Number.isFinite(databaseNow)) throw new ShopOsMutationConflict()
+        const hasLiveDiagnosticStartLease =
+          job.diagnosticStartState === 'initializing' &&
+          job.diagnosticStartLeaseUntil !== null &&
+          job.diagnosticStartLeaseUntil.getTime() > databaseNow
+
+        if (body.action === 'reassign' && !canAssignWork(scope.actor.role)) {
+          throw new TicketJobAssignmentRollback({ ok: false, error: 'forbidden' })
+        }
+        if (graph.ticket.status !== 'open') {
+          throw new TicketJobAssignmentRollback({ ok: false, error: 'ticket_not_open' })
+        }
+        if (job.workStatus !== 'open' || hasLiveDiagnosticStartLease) {
+          throw new TicketJobAssignmentRollback({ ok: false, error: 'job_not_open' })
+        }
+
+        let nextAssignedTechId: string | null
+        if (body.action === 'claim') {
+          if (
+            scope.actor.skillTier === null ||
+            scope.actor.skillTier < job.requiredSkillTier
+          ) {
+            throw new TicketJobAssignmentRollback({
+              ok: false,
+              error: 'invalid_assignee',
+            })
+          }
+          const currentAssignee = safeLockedAssignee(scope, job.assignedTechId)
+          if (currentAssignee) {
+            throw new TicketJobAssignmentRollback({
+              ok: false,
+              error: 'assignment_conflict',
+              currentAssignee,
+            })
+          }
+          nextAssignedTechId = scope.actor.id
+        } else if (body.action === 'unclaim') {
+          if (
+            job.assignedTechId !== scope.actor.id &&
+            !canAssignWork(scope.actor.role)
+          ) {
+            throw new TicketJobAssignmentRollback({ ok: false, error: 'forbidden' })
+          }
+          nextAssignedTechId = null
+        } else {
+          const target = scope.profiles.find(({ id }) => id === body.assignedTechId)
+          if (!target) {
+            throw new TicketJobAssignmentRollback({ ok: false, error: 'not_found' })
+          }
+          if (
+            target.shopId !== scope.actor.shopId ||
+            target.membershipStatus !== 'active' || target.deactivatedAt !== null ||
+            !canCreateTickets(target.role) || target.skillTier === null ||
+            ![1, 2, 3].includes(target.skillTier)
+          ) {
+            throw new TicketJobAssignmentRollback({
+              ok: false,
+              error: 'invalid_assignee',
+            })
+          }
+          const targetTier = target.skillTier as 1 | 2 | 3
+          if (target.id === scope.actor.id && targetTier < job.requiredSkillTier) {
+            throw new TicketJobAssignmentRollback({
+              ok: false,
+              error: 'invalid_assignee',
+            })
+          }
+          if (
+            target.id !== scope.actor.id && targetTier < job.requiredSkillTier &&
+            !body.confirmBelowTier
+          ) {
+            throw new TicketJobAssignmentRollback({
+              ok: false,
+              error: 'tier_confirmation_required',
+              warning: {
+                code: 'below_required_tier',
+                assignedTechId: target.id,
+                assignedSkillTier: targetTier,
+                requiredSkillTier: job.requiredSkillTier as 1 | 2 | 3,
+              },
+            })
+          }
+          nextAssignedTechId = target.id
+        }
+
+        const priorAssignmentPredicate = job.assignedTechId === null
+          ? isNull(ticketJobs.assignedTechId)
+          : eq(ticketJobs.assignedTechId, job.assignedTechId)
+        const lockedLeasePredicate = job.diagnosticStartLeaseUntil === null
+          ? isNull(ticketJobs.diagnosticStartLeaseUntil)
+          : eq(ticketJobs.diagnosticStartLeaseUntil, job.diagnosticStartLeaseUntil)
+        const actorPolicy = body.action === 'claim'
+          ? sql`exists (
+              select 1 from ${profiles}
+              where ${profiles.shopId} = ${ticketJobs.shopId}
+                and ${profiles.id} = ${scope.actor.id}
+                and ${profiles.membershipStatus} = 'active'
+                and ${profiles.deactivatedAt} is null
+                and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+                and ${profiles.skillTier} between 1 and 3
+                and ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}
+            )`
+          : body.action === 'unclaim'
+            ? sql`exists (
+                select 1 from ${profiles}
+                where ${profiles.shopId} = ${ticketJobs.shopId}
+                  and ${profiles.id} = ${scope.actor.id}
+                  and ${profiles.membershipStatus} = 'active'
+                  and ${profiles.deactivatedAt} is null
+                  and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+                  and (
+                    ${ticketJobs.assignedTechId} = ${scope.actor.id}
+                    or ${profiles.role} in ('advisor', 'owner')
+                  )
+              )`
+            : sql`exists (
+                select 1 from ${profiles}
+                where ${profiles.shopId} = ${ticketJobs.shopId}
+                  and ${profiles.id} = ${scope.actor.id}
+                  and ${profiles.membershipStatus} = 'active'
+                  and ${profiles.deactivatedAt} is null
+                  and ${profiles.role} in ('advisor', 'owner')
+              )`
+        const targetPolicy = body.action !== 'reassign'
+          ? sql`true`
+          : sql`exists (
+              select 1 from ${profiles}
+              where ${profiles.shopId} = ${ticketJobs.shopId}
+                and ${profiles.id} = ${nextAssignedTechId as string}
+                and ${profiles.membershipStatus} = 'active'
+                and ${profiles.deactivatedAt} is null
+                and ${profiles.role} in ('tech', 'advisor', 'parts', 'owner')
+                and ${profiles.skillTier} between 1 and 3
+                and (
+                  (${profiles.id} = ${scope.actor.id}
+                    and ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier})
+                  or (${profiles.id} <> ${scope.actor.id}
+                    and (${body.confirmBelowTier} or
+                      ${profiles.skillTier} >= ${ticketJobs.requiredSkillTier}))
+                )
+            )`
+
+        const [updated] = await tx.update(ticketJobs).set({
+          assignedTechId: nextAssignedTechId,
+          claimedAt: body.action === 'claim' ? sql`now()` : null,
+          updatedAt: sql`now()`,
+        }).where(and(
+          eq(ticketJobs.shopId, scope.actor.shopId),
+          eq(ticketJobs.ticketId, ticketId),
+          eq(ticketJobs.id, jobId),
+          eq(ticketJobs.revision, job.revision),
+          eq(ticketJobs.requiredSkillTier, job.requiredSkillTier),
+          eq(ticketJobs.workStatus, 'open'),
+          eq(ticketJobs.diagnosticStartState, job.diagnosticStartState),
+          lockedLeasePredicate,
+          priorAssignmentPredicate,
+          or(
+            ne(ticketJobs.diagnosticStartState, 'initializing'),
+            isNull(ticketJobs.diagnosticStartLeaseUntil),
+            lte(ticketJobs.diagnosticStartLeaseUntil, sql`now()`),
+          ),
+          sql`exists (
+            select 1 from ${tickets}
+            where ${tickets.shopId} = ${ticketJobs.shopId}
+              and ${tickets.id} = ${ticketJobs.ticketId}
+              and ${tickets.status} = 'open'
+          )`,
+          actorPolicy,
+          targetPolicy,
+        )).returning()
+        if (
+          !updated || updated.id !== jobId || updated.ticketId !== ticketId ||
+          updated.shopId !== scope.actor.shopId ||
+          updated.assignedTechId !== nextAssignedTechId ||
+          updated.revision !== job.revision ||
+          (body.action === 'claim' ? updated.claimedAt === null : updated.claimedAt !== null)
+        ) throw new ShopOsMutationConflict()
+        await seams.afterWrite?.()
+
+        const finalized = await finalizeMutationRevisionsV1(
+          tx,
+          scope,
+          { sessionIds: [], customerIds: [], vehicleIds: [] },
+          [{
+            ticketId,
+            createdTicket: false,
+            createdJobIds: [],
+            existingChangedJobIds: [jobId],
+            actorVisibleTicketFieldsChanged: false,
+          }],
+        )
+        const [finalizedTicket] = finalized.tickets
+        const [finalizedJob] = finalized.jobs
+        if (
+          finalized.tickets.length !== 1 || finalizedTicket?.id !== ticketId ||
+          finalizedTicket.projectionRevision !==
+            (graph.ticket.projectionRevision + 1n).toString() ||
+          finalizedTicket.continuityRevision !==
+            graph.ticket.continuityRevision.toString() ||
+          finalizedTicket.continuityChanged !== false ||
+          finalized.jobs.length !== 1 || finalizedJob?.id !== jobId ||
+          finalizedJob.revision !== (job.revision + 1n).toString()
+        ) throw new ShopOsMutationConflict()
+        await seams.afterFinalization?.()
+
+        const detail = await loadTicketDetail(tx, scope.actor.shopId, ticketId)
+        if (!detail) throw new Error('updated_ticket_not_found')
+        return { ok: true, ticket: detail }
+      },
+    })
+  } catch (error) {
+    if (error instanceof TicketJobAssignmentRollback) return error.result
+    if (error instanceof ShopOsMutationNotFound) {
+      return { ok: false, error: 'not_found' }
+    }
+    if (error instanceof ShopOsMutationConflict) {
+      return { ok: false, error: 'conflict', retryable: true }
+    }
+    throw error
   }
-  if (parsedBody.data.action === 'unclaim') {
-    return unclaimTicketJob(
-      db,
-      input.actor,
-      shopId,
-      parsedTicketId.data,
-      parsedJobId.data,
-    )
-  }
-  return reassignTicketJob(
-    db,
-    input.actor,
-    shopId,
-    parsedTicketId.data,
-    parsedJobId.data,
-    parsedBody.data,
-    dependencies,
-  )
 }
 
 export type ResolveTicketCreationInputV1 =
