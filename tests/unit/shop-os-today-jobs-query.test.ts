@@ -282,6 +282,10 @@ describe('Today ticket jobs read model', () => {
         concern: 'Closed ticket',
         status: 'closed',
         createdByProfileId: actorProfileId,
+        closedAt: new Date('2026-07-10T12:00:00.000Z'),
+        closedByProfileId: actorProfileId,
+        closeDisposition: 'no_repair',
+        closeNote: 'Fixture terminal-state proof.',
       })
       .returning()
     await db.insert(ticketJobs).values({

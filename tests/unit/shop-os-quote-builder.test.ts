@@ -436,7 +436,13 @@ describe('Shop OS quote builder read model', () => {
     await expect(getQuoteBuilder(db, { actor, ticketId: 'bad' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
     await expect(getQuoteBuilder(db, { actor, ticketId: uuid(999) })).resolves.toEqual({ ok: false, error: 'not_found' })
     await expect(getQuoteBuilder(db, { actor, ticketId: uuid(21) })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-12T12:00:00.000Z'),
+      closedByProfileId: actor.profileId,
+      closeDisposition: 'no_repair',
+      closeNote: 'Fixture terminal-state proof.',
+    }).where(eq(tickets.id, ticketId))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 })
