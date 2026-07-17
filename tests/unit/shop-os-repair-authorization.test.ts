@@ -420,6 +420,14 @@ describe('Shop OS diagnostic repair authorization', () => {
     expect(await locked()).toEqual({ state: 'unavailable' })
   })
 
+  it('requires the current repair actor to remain a technician even with a sufficient tier', async () => {
+    await setApproved()
+    await db.update(profiles).set({ role: 'advisor', skillTier: 3 })
+      .where(eq(profiles.id, techId))
+
+    expect(await locked()).toEqual({ state: 'unavailable' })
+  })
+
   it('locks inactive historical profile and vendor references without requiring historical activity', async () => {
     await setApproved()
     const vendorAccountId = uuid(80)

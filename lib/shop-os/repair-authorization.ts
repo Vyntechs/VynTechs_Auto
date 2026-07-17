@@ -564,6 +564,7 @@ function classifyLockedDiagnosticRepairAccess(
   if (
     !session || session.status !== 'open' || session.treeState.phase !== 'repairing' ||
     session.techId !== scope.actor.id || scope.actor.id !== input.actorProfileId ||
+    scope.actor.role !== 'tech' ||
     typeof scope.actor.skillTier !== 'number'
   ) return { state: 'unavailable' }
   if (discovery.kind === 'legacy') return { state: 'legacy' }
