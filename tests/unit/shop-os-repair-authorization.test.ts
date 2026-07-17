@@ -1,22 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
-import { createSession } from '@/lib/db/queries'
+import { createSession, type AppDb } from '@/lib/db/queries'
 import {
   customers,
+  jobLines,
   profiles,
   quoteEvents,
   quoteVersions,
+  sessionEvents,
   sessions,
   shops,
   ticketJobs,
   tickets,
+  vendorAccounts,
   vehicles,
 } from '@/lib/db/schema'
+import { ShopOsMutationConflict } from '@/lib/shop-os/continuity/mutation-foundation/conflicts'
 import {
   lockDiagnosticRepairAccess,
   resolveDiagnosticRepairAccess,
 } from '@/lib/shop-os/repair-authorization'
+
+const repairAuthorizationSource = await readFile(
+  path.join(process.cwd(), 'lib/shop-os/repair-authorization.ts'),
+  'utf8',
+)
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -30,6 +41,7 @@ describe('Shop OS diagnostic repair authorization', () => {
   let sessionId: string
   let jobId: string
   let versionId: string
+  const ancestorTicketId = uuid(19)
   const techId = uuid(1)
   const techUserId = uuid(101)
   const advisorId = uuid(2)
@@ -108,6 +120,29 @@ describe('Shop OS diagnostic repair authorization', () => {
     }
   }
 
+  function locked(
+    dependencies: Readonly<{
+      afterDiscovery?: (tx: AppDb) => Promise<void>
+    }> = {},
+  ) {
+    return lockDiagnosticRepairAccess(db, {
+      shopId,
+      sessionId,
+      actorProfileId: techId,
+    }, dependencies)
+  }
+
+  async function closeTicket(tx: AppDb, id: string) {
+    await tx.update(tickets).set({
+      status: 'closed',
+      deliveredAt: new Date('2026-07-17T12:00:00.000Z'),
+      deliveredByProfileId: advisorId,
+      closedAt: new Date('2026-07-17T12:01:00.000Z'),
+      closedByProfileId: advisorId,
+      closeDisposition: 'delivered',
+    }).where(eq(tickets.id, id))
+  }
+
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
     const [shop, otherShop] = await db.insert(shops).values([
@@ -128,16 +163,30 @@ describe('Shop OS diagnostic repair authorization', () => {
       id: uuid(11), customerId: uuid(10), year: 2018, make: 'Ford', model: 'F-250',
     })
     ticketId = uuid(20)
-    await db.insert(tickets).values({
-      id: ticketId,
-      shopId,
-      ticketNumber: 1,
-      source: 'counter',
-      customerId: uuid(10),
-      vehicleId: uuid(11),
-      concern: 'Low rail pressure under load',
-      createdByProfileId: advisorId,
-    })
+    await db.insert(tickets).values([
+      {
+        id: ancestorTicketId,
+        shopId,
+        ticketNumber: 2,
+        source: 'counter',
+        customerId: uuid(10),
+        vehicleId: uuid(11),
+        concern: 'Original visit',
+        createdByProfileId: advisorId,
+      },
+      {
+        id: ticketId,
+        shopId,
+        ticketNumber: 1,
+        source: 'counter',
+        customerId: uuid(10),
+        vehicleId: uuid(11),
+        concern: 'Low rail pressure under load',
+        separateFromTicketId: ancestorTicketId,
+        separateReason: 'comeback',
+        createdByProfileId: advisorId,
+      },
+    ])
     const session = await createSession(db, {
       id: uuid(30),
       shopId,
@@ -303,5 +352,249 @@ describe('Shop OS diagnostic repair authorization', () => {
     await db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, techId))
     expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId }))
       .toEqual({ state: 'unavailable' })
+  })
+
+  it('keeps the read projection ordering and approval-state semantics unchanged', async () => {
+    for (const approvalState of ['pending_quote', 'quote_ready', 'sent'] as const) {
+      await db.update(ticketJobs).set({ approvalState }).where(eq(ticketJobs.id, jobId))
+      expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId })).toEqual({
+        state: 'awaiting_approval', ticketId, jobId,
+      })
+    }
+
+    const tiedAt = new Date('2026-07-17T12:00:00.000Z')
+    await db.update(ticketJobs).set({
+      approvalState: 'declined', approvedQuoteVersionId: null,
+    }).where(eq(ticketJobs.id, jobId))
+    await db.insert(quoteEvents).values([
+      {
+        id: uuid(63), shopId, ticketId, jobId, quoteVersionId: versionId,
+        kind: 'approved', actorProfileId: advisorId, approvedVia: 'phone',
+        requestKey: uuid(73), createdAt: tiedAt,
+      },
+      {
+        id: uuid(64), shopId, ticketId, jobId, quoteVersionId: versionId,
+        kind: 'declined', actorProfileId: advisorId, approvedVia: null,
+        requestKey: uuid(74), createdAt: tiedAt,
+      },
+    ])
+    expect(await resolveDiagnosticRepairAccess(db, { shopId, sessionId })).toEqual({
+      state: 'declined', ticketId, jobId,
+    })
+  })
+
+  it('uses only the bounded shared coordinator and a query-free locked classifier', () => {
+    const lockStart = repairAuthorizationSource.indexOf(
+      'export async function lockDiagnosticRepairAccess',
+    )
+    expect(lockStart).toBeGreaterThan(-1)
+    const lockBody = repairAuthorizationSource.slice(lockStart)
+    expect(lockBody).toContain('runBoundedShopOsMutationV1')
+    expect(lockBody).not.toContain(".for('update'")
+    expect(lockBody).not.toContain('.transaction(')
+    expect(repairAuthorizationSource.indexOf('profileIds:'))
+      .toBeLessThan(repairAuthorizationSource.indexOf('ticketIds:'))
+
+    const classifierStart = repairAuthorizationSource.indexOf(
+      'function classifyLockedDiagnosticRepairAccess',
+    )
+    expect(classifierStart).toBeGreaterThan(-1)
+    const classifierBody = repairAuthorizationSource.slice(
+      classifierStart,
+      repairAuthorizationSource.indexOf('\n}\n', classifierStart) + 3,
+    )
+    expect(classifierBody).not.toContain('.select(')
+    expect(classifierBody).not.toContain('await ')
+  })
+
+  it('requires current actor tier and exact ticket-session vehicle binding under lock', async () => {
+    await setApproved()
+    await db.update(profiles).set({ skillTier: 2 }).where(eq(profiles.id, techId))
+    expect(await locked()).toEqual({ state: 'unavailable' })
+
+    await db.update(profiles).set({ skillTier: 3 }).where(eq(profiles.id, techId))
+    await db.insert(vehicles).values({
+      id: uuid(12), customerId: uuid(10), year: 2019, make: 'Ford', model: 'F-250',
+    })
+    await db.update(sessions).set({ vehicleId: uuid(12) }).where(eq(sessions.id, sessionId))
+    expect(await locked()).toEqual({ state: 'unavailable' })
+  })
+
+  it('locks inactive historical profile and vendor references without requiring historical activity', async () => {
+    await setApproved()
+    const vendorAccountId = uuid(80)
+    await db.insert(vendorAccounts).values({
+      id: vendorAccountId,
+      shopId,
+      vendor: 'manual_vendor',
+      displayName: 'Manual vendor',
+      mode: 'manual',
+    })
+    await db.insert(jobLines).values({
+      id: uuid(81), shopId, jobId, kind: 'part', description: 'Fuel filter',
+      quantity: 1, priceCents: 8_000, taxable: true, vendorAccountId,
+      orderedByProfileId: advisorId, source: 'manual',
+    })
+    await db.update(profiles).set({ deactivatedAt: new Date() })
+      .where(eq(profiles.id, advisorId))
+
+    expect(await locked()).toEqual({
+      state: 'approved', ticketId, jobId, quoteVersionId: versionId,
+    })
+  })
+
+  const driftCases: readonly Readonly<{
+    name: string
+    drift: (tx: AppDb) => Promise<void>
+  }>[] = [
+    {
+      name: 'approval',
+      drift: async (tx) => {
+        await tx.update(ticketJobs).set({
+          approvalState: 'quote_ready', approvedQuoteVersionId: null,
+        }).where(eq(ticketJobs.id, jobId))
+      },
+    },
+    {
+      name: 'approved version',
+      drift: async (tx) => {
+        await tx.update(quoteVersions).set({ supersededAt: new Date() })
+          .where(eq(quoteVersions.id, versionId))
+      },
+    },
+    {
+      name: 'approval event',
+      drift: async (tx) => {
+        await tx.insert(quoteEvents).values({
+          id: uuid(65), shopId, ticketId, jobId, quoteVersionId: versionId,
+          kind: 'declined', actorProfileId: advisorId, approvedVia: null,
+          requestKey: uuid(75), createdAt: new Date('2026-07-17T13:00:00.000Z'),
+        })
+      },
+    },
+    {
+      name: 'actor authority',
+      drift: async (tx) => {
+        await tx.update(profiles).set({ skillTier: 2 }).where(eq(profiles.id, techId))
+      },
+    },
+    {
+      name: 'assignment',
+      drift: async (tx) => {
+        await tx.update(ticketJobs).set({ assignedTechId: advisorId })
+          .where(eq(ticketJobs.id, jobId))
+      },
+    },
+    {
+      name: 'ticket lifecycle',
+      drift: async (tx) => closeTicket(tx, ticketId),
+    },
+    {
+      name: 'job lifecycle',
+      drift: async (tx) => {
+        await tx.update(ticketJobs).set({ workStatus: 'canceled' })
+          .where(eq(ticketJobs.id, jobId))
+      },
+    },
+    {
+      name: 'target session lifecycle',
+      drift: async (tx) => {
+        await tx.update(sessions).set({ status: 'deferred' })
+          .where(eq(sessions.id, sessionId))
+      },
+    },
+    {
+      name: 'separate-ticket ancestry',
+      drift: async (tx) => closeTicket(tx, ancestorTicketId),
+    },
+    {
+      name: 'target-session event closure',
+      drift: async (tx) => {
+        await tx.insert(sessionEvents).values({
+          id: uuid(90), sessionId, nodeId: 'root', eventType: 'repair_observation',
+          observationText: 'Concurrent event',
+        })
+      },
+    },
+  ]
+
+  it.each(driftCases)('retries and fails generically on $name drift after discovery', async ({ drift }) => {
+    await setApproved()
+    let attempts = 0
+    await expect(locked({
+      afterDiscovery: async (tx) => {
+        attempts += 1
+        await drift(tx)
+      },
+    })).rejects.toEqual(expect.objectContaining({
+      name: 'ShopOsMutationConflict',
+      code: 'mutation_conflict',
+      message: 'shop_os_mutation_conflict',
+    }))
+    expect(attempts).toBe(2)
+  })
+
+  it('includes every linked session in closure while locking events only for the target session', async () => {
+    await setApproved()
+    const siblingSession = await createSession(db, {
+      id: uuid(32), shopId, techId, vehicleId: uuid(11),
+      intake: {
+        vehicleYear: 2018, vehicleMake: 'Ford', vehicleModel: 'F-250',
+        customerComplaint: 'Sibling diagnostic',
+      },
+      treeState: {
+        nodes: [{ id: 'root', label: 'Inspect', status: 'pending' }],
+        currentNodeId: 'root', message: 'Inspect', phase: 'diagnosing', done: false,
+      },
+    })
+    await db.insert(ticketJobs).values({
+      id: uuid(33), shopId, ticketId, title: 'Sibling diagnostic', kind: 'diagnostic',
+      requiredSkillTier: 2, assignedTechId: techId, sessionId: siblingSession.id,
+      workStatus: 'in_progress', approvalState: 'pending_quote',
+    })
+
+    await expect(locked({
+      afterDiscovery: async (tx) => {
+        await tx.update(sessions).set({ status: 'deferred' })
+          .where(eq(sessions.id, siblingSession.id))
+      },
+    })).rejects.toBeInstanceOf(ShopOsMutationConflict)
+  })
+
+  it('keeps ticketless observation authorization profile-first with complete session-event closure', async () => {
+    await db.delete(ticketJobs).where(eq(ticketJobs.id, jobId))
+    await db.insert(sessionEvents).values({
+      id: uuid(91), sessionId, nodeId: 'root', eventType: 'repair_observation',
+      observationText: 'Existing event', requestKey: uuid(92),
+      requestActorProfileId: advisorId, requestFingerprint: 'historical',
+    })
+    await db.update(profiles).set({ deactivatedAt: new Date() })
+      .where(eq(profiles.id, advisorId))
+    expect(await locked()).toEqual({ state: 'legacy' })
+
+    await expect(locked({
+      afterDiscovery: async (tx) => {
+        await tx.insert(sessionEvents).values({
+          id: uuid(93), sessionId, nodeId: 'root', eventType: 'repair_observation',
+          observationText: 'Concurrent legacy event',
+        })
+      },
+    })).rejects.toBeInstanceOf(ShopOsMutationConflict)
+  })
+
+  it('normalizes retryable lock failures and semantic failures into stable generic envelopes', async () => {
+    await setApproved()
+    await expect(locked({
+      afterDiscovery: async () => {
+        throw Object.assign(new Error('private lock details'), { code: '55P03' })
+      },
+    })).rejects.toEqual(expect.objectContaining({
+      name: 'ShopOsMutationConflict',
+      code: 'mutation_conflict',
+      message: 'shop_os_mutation_conflict',
+    }))
+
+    await db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, techId))
+    expect(await locked()).toEqual({ state: 'unavailable' })
   })
 })
