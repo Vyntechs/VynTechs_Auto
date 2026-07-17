@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
+import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import {
   customers, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets, vehicles,
@@ -82,8 +83,19 @@ describe('Shop OS found-concern escalation', () => {
     requestKey, concern: '  steering clunk under load  ', requiredSkillTier: 2, ...overrides,
   })
 
+  it('routes escalation through one coordinator, allocator, and finalizer', () => {
+    const source = readFileSync('lib/shop-os/simple-work.ts', 'utf8')
+    const escalation = source.slice(source.indexOf('export async function createWorkEscalation'))
+    expect(escalation).toContain('runBoundedShopOsMutationV1')
+    expect(escalation).toContain('reserveJobSequencesForInsertionV1')
+    expect(escalation.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(escalation).not.toContain('.transaction(')
+    expect(escalation).not.toContain(".for('update'")
+  })
+
   it('creates one honest unassigned diagnostic and replays the exact request', async () => {
-    const sourceBefore = await db.select().from(ticketJobs).where(eq(ticketJobs.id, sourceJobId))
+    const [sourceBefore] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, sourceJobId))
+    const [ticketBefore] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
     const first = await createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() })
     expect(first).toMatchObject({
       ok: true, changed: true,
@@ -101,10 +113,42 @@ describe('Shop OS found-concern escalation', () => {
       diagnosticStartAttemptKey: null, diagnosticStartLeaseUntil: null, diagnosticStartErrorCode: null,
       approvedQuoteVersionId: null,
     })
-    expect(await db.select().from(ticketJobs).where(eq(ticketJobs.id, sourceJobId))).toEqual(sourceBefore)
+    const [created] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, first.ok ? first.job.id : uuid(999)))
+    expect(created).toMatchObject({
+      sequenceNumber: 3,
+      workStatement: 'steering clunk under load',
+      statementSource: 'technician_found',
+      statementReviewState: 'confirmed',
+      statementConfirmedByProfileId: techId,
+      createdByProfileId: techId,
+      creatorProvenance: 'direct',
+      createdFromJobId: sourceJobId,
+      revision: 1n,
+    })
+    expect(created.statementConfirmedAt).toBeInstanceOf(Date)
+    expect(await db.select().from(ticketJobs).where(eq(ticketJobs.id, sourceJobId))).toEqual([sourceBefore])
+    const [ticketAfter] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    expect(ticketAfter.projectionRevision).toBe(ticketBefore.projectionRevision + 1n)
+    expect(ticketAfter.continuityRevision).toBe(ticketBefore.continuityRevision + 1n)
     expect(await db.select().from(quoteVersions)).toHaveLength(1)
     expect(await db.select().from(quoteEvents)).toHaveLength(2)
   })
+
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back the child and parent revisions when %s fails',
+    async (seam) => {
+      const [ticketBefore] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      await expect(createWorkEscalation(
+        db,
+        { actor, ticketId, sourceJobId, body: body() },
+        { [seam]: async () => { throw new Error(`forced escalation ${seam} rollback`) } },
+      )).rejects.toThrow(`forced escalation ${seam} rollback`)
+      expect(await db.select().from(ticketJobs)).toHaveLength(2)
+      const [ticketAfter] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      expect(ticketAfter.projectionRevision).toBe(ticketBefore.projectionRevision)
+      expect(ticketAfter.continuityRevision).toBe(ticketBefore.continuityRevision)
+    },
+  )
 
   it('binds retry identity to source and actor and fails a changed collision closed', async () => {
     const first = await createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() })
@@ -116,6 +160,23 @@ describe('Shop OS found-concern escalation', () => {
     await db.update(ticketJobs).set({ title: 'Changed collision' }).where(eq(ticketJobs.id, first.job.id))
     await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
       .resolves.toEqual({ ok: false, error: 'conflict' })
+  })
+
+  it('allocates after a populated contiguous sequence without rewriting existing jobs', async () => {
+    await db.update(ticketJobs).set({ sequenceNumber: 1 }).where(eq(ticketJobs.id, sourceJobId))
+    await db.update(ticketJobs).set({ sequenceNumber: 2 }).where(eq(ticketJobs.id, otherSourceJobId))
+    const sourceBefore = await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))
+
+    const result = await createWorkEscalation(db, {
+      actor, ticketId, sourceJobId, body: body({ requestKey: uuid(81) }),
+    })
+    expect(result).toMatchObject({ ok: true, changed: true })
+    if (!result.ok) throw new Error('missing escalation')
+    const [created] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, result.job.id))
+    expect(created.sequenceNumber).toBe(3)
+    const existingAfter = (await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId)))
+      .filter(({ id }) => id !== result.job.id)
+    expect(existingAfter).toEqual(sourceBefore)
   })
 
   it('rejects invalid, reassigned, closed, and stale-approval sources without creating work', async () => {
@@ -130,6 +191,10 @@ describe('Shop OS found-concern escalation', () => {
     await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
       .resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(profiles).set({ deactivatedAt: null }).where(eq(profiles.id, techId))
+    await db.update(ticketJobs).set({ requiredSkillTier: 3 }).where(eq(ticketJobs.id, sourceJobId))
+    await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(ticketJobs).set({ requiredSkillTier: 2 }).where(eq(ticketJobs.id, sourceJobId))
     await db.update(ticketJobs).set({ assignedTechId: otherTechId }).where(eq(ticketJobs.id, sourceJobId))
     await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
       .resolves.toEqual({ ok: false, error: 'not_found' })

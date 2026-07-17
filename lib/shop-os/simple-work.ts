@@ -26,7 +26,10 @@ import type {
   LockedMutationScopeV1,
   MutationLockRequestV1,
 } from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
-import { finalizeMutationRevisionsV1 } from '@/lib/shop-os/continuity/mutation-foundation/revisions'
+import {
+  finalizeMutationRevisionsV1,
+  reserveJobSequencesForInsertionV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/revisions'
 import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
 export type SimpleWorkActor = { profileId: string; shopId: string }
@@ -178,6 +181,8 @@ type SimpleWorkDiscovery = Readonly<{
   kind: 'ready' | 'not_found'
   separateChainIds: readonly string[]
   closureFingerprint: string | null
+  insertionState: 'none' | 'create' | 'existing' | 'collision'
+  insertionJobId: string | null
 }>
 
 function simpleUuidList(values: readonly (string | null | undefined)[]): readonly string[] {
@@ -213,7 +218,13 @@ function simplePersistedFingerprint(value: unknown): string {
 
 async function discoverSimpleWorkMutation(
   tx: AppDb,
-  input: Readonly<{ shopId: string; actorProfileId: string; ticketId: string; jobId: string }>,
+  input: Readonly<{
+    shopId: string
+    actorProfileId: string
+    ticketId: string
+    jobId: string
+    insertionJobId: string | null
+  }>,
 ): Promise<Readonly<{ lockRequest: MutationLockRequestV1; payload: SimpleWorkDiscovery }>> {
   const actorOnly = () => Object.freeze({
     lockRequest: Object.freeze({
@@ -234,6 +245,8 @@ async function discoverSimpleWorkMutation(
       kind: 'not_found' as const,
       separateChainIds: Object.freeze([]),
       closureFingerprint: null,
+      insertionState: 'none' as const,
+      insertionJobId: input.insertionJobId,
     }),
   })
   const [target] = await tx.select().from(tickets).where(and(
@@ -314,6 +327,20 @@ async function discoverSimpleWorkMutation(
   const profileRows = await tx.select().from(profiles).where(and(
     eq(profiles.shopId, input.shopId), inArray(profiles.id, profileIds),
   )).orderBy(profiles.id)
+  const existingInsertion = input.insertionJobId === null
+    ? null
+    : jobs.find(({ id }) => id === input.insertionJobId) ?? null
+  const [foreignInsertion] = input.insertionJobId === null || existingInsertion !== null
+    ? []
+    : await tx.select({ id: ticketJobs.id, ticketId: ticketJobs.ticketId })
+      .from(ticketJobs).where(eq(ticketJobs.id, input.insertionJobId)).limit(1)
+  const insertionState = input.insertionJobId === null
+    ? 'none' as const
+    : existingInsertion !== null
+      ? 'existing' as const
+      : foreignInsertion
+        ? 'collision' as const
+        : 'create' as const
   const closureFingerprint = simplePersistedFingerprint({
     profiles: simpleRowsById(profileRows), customers: simpleRowsById(customerRows),
     vehicles: simpleRowsById(vehicleRows), tickets: simpleRowsById(ticketRows),
@@ -324,17 +351,25 @@ async function discoverSimpleWorkMutation(
   return Object.freeze({
     lockRequest: Object.freeze({
       shopId: input.shopId, actorProfileId: input.actorProfileId, profileIds,
-      lockShop: false, customerIds, vehicleIds, ticketIds, jobIds,
+      lockShop: insertionState === 'create', customerIds, vehicleIds, ticketIds, jobIds,
       includeAllJobsForTickets: true, includeAllLinesForJobs: true,
       includeAllQuoteVersionsForTickets: true, includeAllQuoteEventsForTickets: true,
       sessionIds, sessionEventIds: Object.freeze([]), vendorAccountIds,
       cannedJobIds: Object.freeze([]), receiptRequestKey: null,
-      receiptConditionalInsert: null, insertionIntents: simpleEmptyInsertionIntents(),
+      receiptConditionalInsert: null,
+      insertionIntents: insertionState === 'create'
+        ? Object.freeze({
+            ...simpleEmptyInsertionIntents(),
+            jobs: Object.freeze([{ id: input.insertionJobId!, ticketId: input.ticketId }]),
+          })
+        : simpleEmptyInsertionIntents(),
     }),
     payload: Object.freeze({
       kind: 'ready' as const,
       separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
       closureFingerprint,
+      insertionState,
+      insertionJobId: input.insertionJobId,
     }),
   })
 }
@@ -413,6 +448,7 @@ export async function mutateSimpleWork(
         actorProfileId: parsedActor.data.profileId,
         ticketId: parsedTicket.data,
         jobId: parsedJob.data,
+        insertionJobId: null,
       }),
       executeLocked: async (tx, scope, discovery) => {
       const context = resolveSimpleWorkScope(
@@ -592,6 +628,12 @@ export type WorkEscalationResult =
   | { ok: true; changed: boolean; job: SafeEscalatedJob }
   | SimpleWorkFailure
 
+export type WorkEscalationDependencies = Readonly<{
+  afterLocks?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
+}>
+
 const escalationBodySchema = z.strictObject({
   requestKey: uuidSchema,
   concern: z.string().trim().min(5).max(500),
@@ -615,14 +657,28 @@ function safeEscalatedJob(job: typeof ticketJobs.$inferSelect): SafeEscalatedJob
 
 function exactEscalation(
   job: typeof ticketJobs.$inferSelect,
-  expected: { id: string; shopId: string; ticketId: string; title: string; requiredSkillTier: number },
+  expected: {
+    id: string
+    shopId: string
+    ticketId: string
+    title: string
+    concern: string
+    requiredSkillTier: number
+    actorProfileId: string
+    sourceJobId: string
+  },
 ): SafeEscalatedJob | null {
   if (job.id !== expected.id || job.shopId !== expected.shopId || job.ticketId !== expected.ticketId
     || job.title !== expected.title || job.requiredSkillTier !== expected.requiredSkillTier
     || job.claimedAt !== null || job.customerStory !== null || job.storyMeta !== null || job.workNotes !== null
     || job.approvedQuoteVersionId !== null || job.diagnosticStartState !== 'idle'
     || job.diagnosticStartAttemptKey !== null || job.diagnosticStartLeaseUntil !== null
-    || job.diagnosticStartErrorCode !== null) return null
+    || job.diagnosticStartErrorCode !== null || job.sequenceNumber === null || job.revision !== 1n
+    || job.workStatement !== expected.concern || job.statementSource !== 'technician_found'
+    || job.statementReviewState !== 'confirmed'
+    || job.statementConfirmedByProfileId !== expected.actorProfileId
+    || job.statementConfirmedAt === null || job.createdByProfileId !== expected.actorProfileId
+    || job.creatorProvenance !== 'direct' || job.createdFromJobId !== expected.sourceJobId) return null
   return safeEscalatedJob(job)
 }
 
@@ -634,6 +690,7 @@ export async function createWorkEscalation(
     sourceJobId: unknown
     body: unknown
   },
+  dependencies: WorkEscalationDependencies = {},
 ): Promise<WorkEscalationResult> {
   const parsedActor = z.strictObject({ profileId: uuidSchema, shopId: uuidSchema }).safeParse(input.actor)
   const parsedTicket = uuidSchema.safeParse(input.ticketId)
@@ -655,31 +712,44 @@ export async function createWorkEscalation(
     shopId: parsedActor.data.shopId,
     ticketId: parsedTicket.data,
     title,
+    concern: parsedBody.data.concern,
     requiredSkillTier: parsedBody.data.requiredSkillTier,
+    actorProfileId: parsedActor.data.profileId,
+    sourceJobId: parsedSource.data,
   }
 
   try {
-    return await db.transaction(async (tx) => {
-      const transactionDb = tx as AppDb
-      const context = await lockContext(transactionDb, {
-        actor: parsedActor.data,
+    return await runBoundedShopOsMutationV1<WorkEscalationResult, SimpleWorkDiscovery>(db, {
+      discover: async (tx) => discoverSimpleWorkMutation(tx, {
+        shopId: parsedActor.data.shopId,
+        actorProfileId: parsedActor.data.profileId,
         ticketId: parsedTicket.data,
         jobId: parsedSource.data,
-      })
-      if (!context) return failure('not_found')
-      const [existing] = await transactionDb.select().from(ticketJobs)
-        .where(eq(ticketJobs.id, jobId)).limit(1)
-      if (existing) {
+        insertionJobId: jobId,
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+      const context = resolveSimpleWorkScope(
+        tx, scope, discovery, parsedTicket.data, parsedSource.data,
+      )
+      await dependencies.afterLocks?.()
+      if (discovery.insertionState === 'collision') return failure('conflict')
+      if (discovery.insertionState === 'existing') {
+        const existing = scope.tickets.flatMap(({ jobs }) => jobs)
+          .find(({ id }) => id === jobId)
+        if (!existing) throw new ShopOsMutationConflict()
         const projected = exactEscalation(existing, expected)
         return projected
           ? { ok: true, changed: false, job: projected }
           : failure('conflict')
       }
+      if (discovery.insertionState !== 'create') throw new ShopOsMutationConflict()
       if (context.ticket.status !== 'open' || context.job.workStatus !== 'in_progress') {
         return failure('not_ready')
       }
       if (!hasPinnedApproval(context, false)) return failure('not_authorized')
-      const [created] = await transactionDb.insert(ticketJobs).values({
+      const [reservation] = reserveJobSequencesForInsertionV1(tx, scope, parsedTicket.data, [jobId])
+      if (!reservation || reservation.jobId !== jobId) throw new ShopOsMutationConflict()
+      const [created] = await tx.insert(ticketJobs).values({
         id: jobId,
         shopId: parsedActor.data.shopId,
         ticketId: parsedTicket.data,
@@ -694,13 +764,36 @@ export async function createWorkEscalation(
         storyMeta: null,
         workNotes: null,
         approvedQuoteVersionId: null,
+        sequenceNumber: reservation.sequenceNumber,
+        workStatement: parsedBody.data.concern,
+        statementSource: 'technician_found',
+        statementReviewState: 'confirmed',
+        statementConfirmedByProfileId: parsedActor.data.profileId,
+        statementConfirmedAt: sql`clock_timestamp()`,
+        createdByProfileId: parsedActor.data.profileId,
+        creatorProvenance: 'direct',
+        createdFromJobId: parsedSource.data,
+        revision: 1n,
       }).returning()
-      const projected = safeEscalatedJob(created)
+      const projected = created ? exactEscalation(created, expected) : null
       if (!projected) throw new TypeError('created escalation shape is invalid')
+      await dependencies.afterWrite?.()
+      await finalizeMutationRevisionsV1(tx, scope, {
+        sessionIds: [], customerIds: [], vehicleIds: [],
+      }, [{
+        ticketId: parsedTicket.data,
+        createdTicket: false,
+        createdJobIds: [jobId],
+        existingChangedJobIds: [],
+        actorVisibleTicketFieldsChanged: true,
+      }])
+      await dependencies.afterFinalization?.()
       return { ok: true, changed: true, job: projected }
+      },
     })
   } catch (error) {
-    if (isLockUnavailable(error)
+    if (error instanceof ShopOsMutationNotFound) return failure('not_found')
+    if (error instanceof ShopOsMutationConflict
       || (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505')) {
       return failure('conflict', true)
     }
