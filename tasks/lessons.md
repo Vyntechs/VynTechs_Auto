@@ -62,3 +62,8 @@ Reason: Lock completeness requires validating outgoing references, not merely lo
 Trigger: An overflow test passed through an earlier suffix rejection without exercising the overflow guard.
 Rule: Temporarily disable the named guard and prove its test fails before claiming branch-specific coverage.
 Reason: A green failure-path test can be tautological when an earlier validator dominates the intended branch.
+
+### consolidate-proof-matrix-before-review
+Trigger: Successive reviews found test-only authorization combinations after production behavior was already conformant.
+Rule: Table action, state, locked drift, disclosure, revisions, and rollback before coding; require one exhaustive findings pass.
+Reason: One-gap-at-a-time reviews repeat broad verification without improving production behavior.
