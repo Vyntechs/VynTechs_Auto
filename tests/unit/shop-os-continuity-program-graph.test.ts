@@ -164,6 +164,150 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     }))
   })
 
+  it('resolves destructured and aliased object bindings to an object-held execute target', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/app/destructured.ts': `
+        declare const db: { execute(statement: unknown): void }
+        const held = { run: db.execute, execute: db.execute }
+        const heldAlias = held
+        const { run } = held
+        const { execute: aliased } = heldAlias
+        export function direct(statement: unknown) { run(statement) }
+        export function renamed(statement: unknown) { aliased(statement) }
+      `,
+    })
+
+    expect(graph.mutations()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ owner: '/virtual/app/destructured.ts#direct', operation: 'unknown-sql' }),
+      expect.objectContaining({ owner: '/virtual/app/destructured.ts#renamed', operation: 'unknown-sql' }),
+    ]))
+  })
+
+  it('resolves bind aliases and fails closed on arbitrary callable factories', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      ...files,
+      '/virtual/app/bound.ts': `
+        import { winningWriter } from '../writer'
+        declare const db: { execute(statement: unknown): void }
+        declare function wrap<T extends (...args: any[]) => any>(value: T): T
+        const run = db.execute.bind(db)
+        const held = winningWriter.bind(null)
+        const unsafe = wrap(winningWriter)
+        export function boundSql(statement: unknown) { run(statement) }
+        export function boundWriter() { held() }
+        export function factoryWriter() { unsafe() }
+      `,
+    })
+
+    expect(graph.mutations()).toContainEqual(expect.objectContaining({
+      owner: '/virtual/app/bound.ts#boundSql', operation: 'unknown-sql',
+    }))
+    expect(graph.transitiveCallees('/virtual/app/bound.ts#boundWriter'))
+      .toContain('/virtual/writer.ts#winningWriter')
+    expect(() => graph.assertNoUnresolvedDynamicCalls())
+      .toThrow('/virtual/app/bound.ts#factoryWriter')
+  })
+
+  it('requires the route gate to dominate its reachable writer', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      ...files,
+      '/virtual/conditional-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        declare const allowed: boolean
+        export async function POST() {
+          if (allowed) gate()
+          await writer()
+        }
+      `,
+      '/virtual/logical-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        declare const allowed: boolean
+        export async function POST() {
+          const denied = allowed && gate()
+          await writer()
+        }
+      `,
+      '/virtual/callback-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          Promise.resolve().then(() => gate())
+          await writer()
+        }
+      `,
+      '/virtual/try-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          try { gate() } finally {}
+          await writer()
+        }
+      `,
+      '/virtual/loop-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        declare const allowed: boolean
+        export async function POST() {
+          while (allowed) { gate(); break }
+          await writer()
+        }
+      `,
+      '/virtual/ternary-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        declare const allowed: boolean
+        export async function POST() {
+          allowed ? gate() : undefined
+          await writer()
+        }
+      `,
+      '/virtual/catch-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          try { throw new Error('deny') } catch { gate() }
+          await writer()
+        }
+      `,
+      '/virtual/finally-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          try {} finally { gate() }
+          await writer()
+        }
+      `,
+      '/virtual/helper-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          function maybeGate() { gate() }
+          await writer()
+        }
+      `,
+    })
+    const gate = '/virtual/gate.ts#entitlementReject'
+    const writer = '/virtual/writer.ts#winningWriter'
+
+    expect(graph.gateDominatesWriter('/virtual/route.ts#POST', gate, writer)).toBe(true)
+    for (const route of [
+      'conditional-route',
+      'logical-route',
+      'callback-route',
+      'try-route',
+      'loop-route',
+      'ternary-route',
+      'catch-route',
+      'finally-route',
+      'helper-route',
+    ]) {
+      expect(graph.gateDominatesWriter(`/virtual/${route}.ts#POST`, gate, writer), route)
+        .toBe(false)
+    }
+  })
+
   it('fails closed for dynamic SQL in an unregistered application file', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/app/unregistered.ts': `

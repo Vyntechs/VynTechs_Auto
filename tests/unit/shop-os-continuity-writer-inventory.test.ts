@@ -345,6 +345,8 @@ describe('ShopOS gated writer entrance inventory', () => {
         .replace(/\[[^/]+\]/g, 'test')
       expect(isDiagnosticsGatedRoute(pathname), `${routeId} actual diagnostics gate`).toBe(true)
       expect(programGraph.callOrder(routeId, [gateId, writerId]), `${routeId} gate order`).toEqual([0, 1])
+      expect(programGraph.gateDominatesWriter(routeId, gateId, writerId), `${routeId} gate dominance`)
+        .toBe(true)
     }
     const wizardRoute = 'app/api/sessions/[id]/wizard-state/route.ts#POST'
     expect(isDiagnosticsGatedRoute('/api/sessions/test/wizard-state')).toBe(true)

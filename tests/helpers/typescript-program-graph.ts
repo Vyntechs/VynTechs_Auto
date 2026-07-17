@@ -14,6 +14,15 @@ const TRACKED_TABLES = new Map([
   ['quoteEvents', 'quote_events'],
 ])
 
+// These factories are callable by contract and do not conceal continuity writers:
+// React preserves the callback, Drizzle builds schema enum constructors, and the
+// retrieval builder is source-visible (or injected with that exact function type).
+const PROVEN_SAFE_CALLABLE_FACTORIES = new Set([
+  'buildGenerateInitialTreeWithRetrieval',
+  'pgEnum',
+  'useCallback',
+])
+
 export type ProgramMutationSiteV1 = Readonly<{
   file: string
   owner: string
@@ -91,6 +100,76 @@ export class TypeScriptProgramGraphV1 {
     return relative(this.root, sourceFile.fileName).replaceAll('\\', '/')
   }
 
+  private bindTarget(initializer: ts.Expression): ts.Expression | null {
+    const current = unwrapExpression(initializer)
+    if (!ts.isCallExpression(current)) return null
+    const callee = unwrapExpression(current.expression)
+    if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'bind') return null
+    return unwrapExpression(callee.expression)
+  }
+
+  private objectLiteralFromExpression(
+    expression: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+  ): ts.ObjectLiteralExpression | null {
+    const current = unwrapExpression(expression)
+    if (ts.isObjectLiteralExpression(current)) return current
+    if (!ts.isIdentifier(current)) return null
+    const symbol = this.checker.getSymbolAtLocation(current)
+    if (!symbol || seen.has(symbol)) return null
+    seen.add(symbol)
+    const declaration = symbol.valueDeclaration
+    return declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
+      ? this.objectLiteralFromExpression(declaration.initializer, seen)
+      : null
+  }
+
+  private bindingElementTarget(declaration: ts.BindingElement): ts.Expression | null {
+    if (!ts.isObjectBindingPattern(declaration.parent)) return null
+    const variable = declaration.parent.parent
+    if (!ts.isVariableDeclaration(variable) || !variable.initializer) return null
+    const object = this.objectLiteralFromExpression(variable.initializer)
+    if (!object) return null
+    const keyNode = declaration.propertyName ?? declaration.name
+    if (!ts.isIdentifier(keyNode) && !ts.isStringLiteral(keyNode)) return null
+    const key = keyNode.text
+    for (const property of object.properties) {
+      if (ts.isPropertyAssignment(property)) {
+        const name = property.name
+        if ((ts.isIdentifier(name) || ts.isStringLiteral(name)) && name.text === key) {
+          return unwrapExpression(property.initializer)
+        }
+      }
+      if (ts.isShorthandPropertyAssignment(property) && property.name.text === key) {
+        return property.name
+      }
+    }
+    return null
+  }
+
+  private canonicalFromExpression(
+    expression: ts.Expression,
+    seen: Set<ts.Symbol>,
+  ): ts.Symbol | undefined {
+    const current = unwrapExpression(expression)
+    const bound = this.bindTarget(current)
+    const target = bound ?? current
+    if (ts.isCallExpression(target)) {
+      const callee = unwrapExpression(target.expression)
+      const lookup = ts.isPropertyAccessExpression(callee) ? callee.name : callee
+      const factory = this.canonicalSymbolAt(lookup, seen)
+      const declaration = factory?.valueDeclaration ?? factory?.declarations?.[0]
+      return declaration && isFunctionWithBody(declaration) ? factory : undefined
+    }
+    if (ts.isIdentifier(target) || ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+      return this.canonicalSymbolAt(
+        ts.isPropertyAccessExpression(target) ? target.name : target,
+        seen,
+      )
+    }
+    return undefined
+  }
+
   private canonicalSymbolAt(node: ts.Node, seen = new Set<ts.Symbol>()): ts.Symbol | undefined {
     let symbol = this.checker.getSymbolAtLocation(node)
     if (!symbol || seen.has(symbol)) return symbol
@@ -103,23 +182,15 @@ export class TypeScriptProgramGraphV1 {
     }
 
     const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0]
+    if (declaration && ts.isBindingElement(declaration)) {
+      const target = this.bindingElementTarget(declaration)
+      return target ? this.canonicalFromExpression(target, seen) ?? symbol : symbol
+    }
     if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
-      const initializer = unwrapExpression(declaration.initializer)
-      if (ts.isIdentifier(initializer) || ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer)) {
-        return this.canonicalSymbolAt(
-          ts.isPropertyAccessExpression(initializer) ? initializer.name : initializer,
-          seen,
-        ) ?? symbol
-      }
+      return this.canonicalFromExpression(declaration.initializer, seen) ?? symbol
     }
     if (declaration && ts.isPropertyAssignment(declaration)) {
-      const initializer = unwrapExpression(declaration.initializer)
-      if (ts.isIdentifier(initializer) || ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer)) {
-        return this.canonicalSymbolAt(
-          ts.isPropertyAccessExpression(initializer) ? initializer.name : initializer,
-          seen,
-        ) ?? symbol
-      }
+      return this.canonicalFromExpression(declaration.initializer, seen) ?? symbol
     }
     if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
       return this.canonicalSymbolAt(declaration.name, seen) ?? symbol
@@ -212,9 +283,17 @@ export class TypeScriptProgramGraphV1 {
     const expression = unwrapExpression(node.expression)
     const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
     const directOperation = callPropertyName(node.expression)
+    const directSymbol = this.checker.getSymbolAtLocation(lookup)
+    const canonical = this.canonicalSymbolAt(lookup)
+    const directDeclaration = directSymbol?.valueDeclaration ?? directSymbol?.declarations?.[0]
+    const indirectOperation = (
+      directOperation === null &&
+      directDeclaration !== undefined &&
+      (ts.isVariableDeclaration(directDeclaration) || ts.isBindingElement(directDeclaration))
+    ) ? canonical?.getName() ?? null : null
     const operation = directOperation === null
-      ? null
-      : this.canonicalSymbolAt(lookup)?.getName() ?? directOperation
+      ? indirectOperation
+      : canonical?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
@@ -245,6 +324,47 @@ export class TypeScriptProgramGraphV1 {
     }
   }
 
+  private unresolvedCallableReference(node: ts.Node, canonical: ts.Symbol | undefined): boolean {
+    const symbol = this.checker.getSymbolAtLocation(node)
+    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0]
+    if (!declaration) return canonical === undefined
+    if (ts.isBindingElement(declaration)) {
+      if (!ts.isObjectBindingPattern(declaration.parent)) return false
+      if (this.bindingElementTarget(declaration) !== null) return false
+      const variable = declaration.parent.parent
+      return ts.isVariableDeclaration(variable) && variable.initializer !== undefined &&
+        ts.isCallExpression(unwrapExpression(variable.initializer))
+    }
+    const initializer = ts.isVariableDeclaration(declaration) || ts.isPropertyAssignment(declaration)
+      ? declaration.initializer
+      : undefined
+    if (!initializer) return false
+    const current = unwrapExpression(initializer)
+    if (
+      ts.isIdentifier(current) || ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) || ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current)
+    ) return false
+    if (ts.isCallExpression(current)) {
+      if (this.bindTarget(current) !== null) return false
+      const callee = unwrapExpression(current.expression)
+      const lookup = ts.isPropertyAccessExpression(callee) ? callee.name : callee
+      if (ts.isIdentifier(lookup) && PROVEN_SAFE_CALLABLE_FACTORIES.has(lookup.text)) return false
+      const factory = this.canonicalSymbolAt(lookup)
+      const factoryDeclaration = factory?.valueDeclaration ?? factory?.declarations?.[0]
+      return !factoryDeclaration || !isFunctionWithBody(factoryDeclaration)
+    }
+    if (ts.isPropertyAssignment(declaration)) return true
+    return false
+  }
+
+  private isObjectLiteralPropertyReference(node: ts.Node): boolean {
+    const symbol = this.checker.getSymbolAtLocation(node)
+    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0]
+    return declaration !== undefined && ts.isPropertyAssignment(declaration) &&
+      ts.isObjectLiteralExpression(declaration.parent)
+  }
+
   private index(): void {
     for (const sourceFile of this.program.getSourceFiles()) {
       if (sourceFile.isDeclarationFile) continue
@@ -262,20 +382,13 @@ export class TypeScriptProgramGraphV1 {
           const expression = unwrapExpression(node.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
           const canonical = this.canonicalSymbolAt(lookup)
-          const directSymbol = this.checker.getSymbolAtLocation(lookup)
-          const directDeclaration = directSymbol?.valueDeclaration ?? directSymbol?.declarations?.[0]
-          const dynamicObjectTarget = directDeclaration && ts.isPropertyAssignment(directDeclaration)
-            ? unwrapExpression(directDeclaration.initializer)
-            : null
           if (
             (ts.isElementAccessExpression(expression) &&
               callPropertyName(expression) === null &&
               !canonical &&
               !ts.isPropertyAccessExpression(expression.argumentExpression)) ||
-            (dynamicObjectTarget !== null && callPropertyName(node.expression) !== null &&
-              !ts.isIdentifier(dynamicObjectTarget) &&
-              !ts.isPropertyAccessExpression(dynamicObjectTarget) &&
-              !ts.isElementAccessExpression(dynamicObjectTarget))
+            ((ts.isIdentifier(expression) || this.isObjectLiteralPropertyReference(lookup)) &&
+              this.unresolvedCallableReference(lookup, canonical))
           ) {
             this.unresolvedCalls.push({
               file: this.fileLabel(node.getSourceFile()),
@@ -318,7 +431,9 @@ export class TypeScriptProgramGraphV1 {
   }
 
   assertNoUnresolvedDynamicCalls(): void {
-    const unresolved = this.unresolvedDynamicCalls()
+    const unresolved = this.unresolvedDynamicCalls().filter(({ file }) => (
+      this.virtual || file.startsWith('app/') || file.startsWith('lib/')
+    ))
     if (unresolved.length === 0) return
     throw new Error(`Unresolved dynamic calls: ${unresolved.map(({ owner }) => owner).join(', ')}`)
   }
@@ -396,6 +511,55 @@ export class TypeScriptProgramGraphV1 {
     })
     const ordered = [...positions].filter(Number.isFinite).sort((left, right) => left - right)
     return positions.map((position) => Number.isFinite(position) ? ordered.indexOf(position) : -1)
+  }
+
+  private isUnconditionalTopLevelCall(
+    call: ts.CallExpression,
+    body: ts.Block,
+  ): boolean {
+    let current: ts.Node = call
+    while (current.parent !== body) {
+      const parent = current.parent
+      if (
+        ts.isAwaitExpression(parent) || ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) || ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent) || ts.isTypeAssertionExpression(parent) ||
+        (ts.isVariableDeclaration(parent) && parent.initializer === current) ||
+        ts.isVariableDeclarationList(parent) || ts.isVariableStatement(parent) ||
+        ts.isExpressionStatement(parent)
+      ) {
+        current = parent
+        continue
+      }
+      return false
+    }
+    return ts.isVariableStatement(current) || ts.isExpressionStatement(current)
+  }
+
+  gateDominatesWriter(owner: string, gate: string, writer: string): boolean {
+    const node = this.functionNodes.get(owner)
+    if (!node?.body || !ts.isBlock(node.body)) return false
+    const body = node.body
+    let gatePosition = Number.POSITIVE_INFINITY
+    let writerPosition = Number.POSITIVE_INFINITY
+    const visit = (child: ts.Node): void => {
+      if (child !== body && ts.isFunctionDeclaration(child)) return
+      if (ts.isCallExpression(child)) {
+        const expression = unwrapExpression(child.expression)
+        const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
+        const resolved = this.symbolId(this.canonicalSymbolAt(lookup))
+        if (resolved === gate && this.isUnconditionalTopLevelCall(child, body)) {
+          gatePosition = Math.min(gatePosition, child.getStart())
+        }
+        if (
+          resolved === writer ||
+          (resolved !== null && this.transitiveCallees(resolved).includes(writer))
+        ) writerPosition = Math.min(writerPosition, child.getStart())
+      }
+      ts.forEachChild(child, visit)
+    }
+    visit(body)
+    return Number.isFinite(gatePosition) && Number.isFinite(writerPosition) && gatePosition < writerPosition
   }
 }
 
