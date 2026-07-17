@@ -50,8 +50,15 @@ describe('Shop OS manual offer mutations', () => {
     ...overrides,
   })
 
-  const capture = (overrides: Record<string, unknown> = {}, inputOverrides = {}) =>
-    captureManualOffer(db, { actor, ticketId, jobId, body: body(overrides), ...inputOverrides })
+  const capture = (
+    overrides: Record<string, unknown> = {},
+    inputOverrides = {},
+    dependencies = {},
+  ) => captureManualOffer(
+    db,
+    { actor, ticketId, jobId, body: body(overrides), ...inputOverrides },
+    dependencies,
+  )
 
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
@@ -123,6 +130,50 @@ describe('Shop OS manual offer mutations', () => {
     expect(serialized).not.toContain('secretRef')
   })
 
+  it('allocates sort from only the fully locked target lines and finalizes capture once', async () => {
+    await db.insert(jobLines).values([
+      {
+        id: uuid(70), shopId, jobId, kind: 'fee', description: 'Target fee', sort: 5,
+        priceCents: 100, taxable: false, source: 'manual',
+      },
+      {
+        id: uuid(71), shopId, jobId: uuid(41), kind: 'fee', description: 'Sibling maximum',
+        sort: 2_147_483_647, priceCents: 100, taxable: false, source: 'manual',
+      },
+    ])
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+
+    const result = await capture()
+
+    expect(result).toMatchObject({ ok: true, changed: true })
+    const [line] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(100)))
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(line.sort).toBe(6)
+    expect(afterJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
+  })
+
+  it('refuses target-line sort overflow without line or revision residue', async () => {
+    await db.insert(jobLines).values({
+      id: uuid(72), shopId, jobId, kind: 'fee', description: 'Target maximum',
+      sort: 2_147_483_647, priceCents: 100, taxable: false, source: 'manual',
+    })
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+
+    await expect(capture()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(afterJob.revision).toBe(beforeJob.revision)
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    expect(await db.select().from(jobLines).where(eq(jobLines.id, uuid(100)))).toHaveLength(0)
+  })
+
   it('authorizes before exact replay and replays before current account state or quote invalidation', async () => {
     const first = await capture()
     await db.update(vendorAccounts).set({ displayName: 'Renamed', enabled: false }).where(eq(vendorAccounts.id, accountId))
@@ -171,8 +222,21 @@ describe('Shop OS manual offer mutations', () => {
       expect(result.ok).toBe(expected)
     }
     await db.update(ticketJobs).set({ kind: 'repair', workStatus: 'open' }).where(eq(ticketJobs.id, jobId))
-    await db.update(tickets).set({ customerId: null, vehicleId: null, source: 'tech_quick' }).where(eq(tickets.id, ticketId))
-    await expect(capture({ clientKey: uuid(300) })).resolves.toEqual({ ok: false, error: 'not_found' })
+    const provisionalTicketId = uuid(31)
+    const provisionalJobId = uuid(42)
+    await db.insert(tickets).values({
+      id: provisionalTicketId, shopId, ticketNumber: 2, source: 'tech_quick',
+      customerId: null, vehicleId: null, concern: 'Provisional work',
+      createdByProfileId: uuid(1),
+    })
+    await db.insert(ticketJobs).values({
+      id: provisionalJobId, shopId, ticketId: provisionalTicketId,
+      title: 'Provisional repair', kind: 'repair', requiredSkillTier: 1,
+    })
+    await expect(capture({ clientKey: uuid(300) }, {
+      ticketId: provisionalTicketId,
+      jobId: provisionalJobId,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('rejects hostile inputs while canonicalizing equivalent decimal quantities for replay', async () => {
@@ -204,11 +268,26 @@ describe('Shop OS manual offer mutations', () => {
 
   it('removes only proposed unordered vendor offers and makes missing retries unchanged', async () => {
     await capture()
+    await db.update(vendorAccounts).set({ displayName: 'Renamed', enabled: false })
+      .where(eq(vendorAccounts.id, accountId))
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
     await expect(removeManualOffer(db, { actor, ticketId, jobId, lineId: uuid(100) }))
       .resolves.toEqual({ ok: true, changed: true })
+    const [afterDeleteTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterDeleteJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(afterDeleteJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterDeleteTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterDeleteTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
     await expect(removeManualOffer(db, { actor, ticketId, jobId, lineId: uuid(100) }))
       .resolves.toEqual({ ok: true, changed: false })
+    const [afterNoopTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterNoopJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(afterNoopJob.revision).toBe(afterDeleteJob.revision)
+    expect(afterNoopTicket.projectionRevision).toBe(afterDeleteTicket.projectionRevision)
+    expect(afterNoopTicket.continuityRevision).toBe(afterDeleteTicket.continuityRevision)
 
+    await db.update(vendorAccounts).set({ enabled: true }).where(eq(vendorAccounts.id, accountId))
     await capture({ clientKey: uuid(101) })
     await db.update(jobLines).set({ partStatus: 'ordered', orderedAt: new Date(), orderedByProfileId: uuid(1) })
       .where(eq(jobLines.id, uuid(101)))
@@ -226,8 +305,82 @@ describe('Shop OS manual offer mutations', () => {
 
   it('captures the complete sorted lock order in source', async () => {
     const source = await readFile(join(process.cwd(), 'lib/shop-os/parts-offers.ts'), 'utf8')
-    expect(source).toMatch(/from\(tickets\)[\s\S]*?for\('update'[\s\S]*?from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?for\('update'[\s\S]*?from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?for\('update'[\s\S]*?from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?for\('update'[\s\S]*?from\(profiles\)[\s\S]*?for\('update'[\s\S]*?from\(vendorAccounts\)[\s\S]*?for\('update'/)
+    const captureSource = source.slice(
+      source.indexOf('export async function captureManualOffer'),
+      source.indexOf('export async function removeManualOffer'),
+    )
+    const removeSource = source.slice(source.indexOf('export async function removeManualOffer'))
+    for (const writer of [captureSource, removeSource]) {
+      expect(writer).toContain('runBoundedShopOsMutationV1')
+      expect(writer).toContain('assertLiveLockedMutationScopeV1')
+      expect(writer.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+      expect(writer).toContain('afterDiscovery')
+      expect(writer).toContain('afterWrite')
+      expect(writer).toContain('afterFinalization')
+      expect(writer).not.toContain('.transaction(')
+      expect(writer).not.toContain(".for('update'")
+      expect(writer).not.toMatch(/revision:\s*sql/)
+    }
+    for (const closureToken of [
+      'separateFromTicketId', 'createdByProfileId', 'assignedTechId',
+      'statementConfirmedByProfileId', 'orderedByProfileId', 'receivedByProfileId',
+      'sessionId', 'techId', 'vendorAccountId', 'actorProfileId',
+      'includeAllJobsForTickets', 'includeAllLinesForJobs',
+      'includeAllQuoteVersionsForTickets', 'includeAllQuoteEventsForTickets',
+    ]) expect(source).toContain(closureToken)
   })
+
+  it.each(['afterDiscovery', 'afterWrite', 'afterFinalization'] as const)(
+    'rolls capture back completely at %s',
+    async (seam) => {
+      const beforeTickets = await db.select().from(tickets)
+      const beforeJobs = await db.select().from(ticketJobs)
+      const beforeLines = await db.select().from(jobLines)
+
+      await expect(capture({}, {}, {
+        [seam]: async () => { throw new Error(`capture-${seam}`) },
+      })).rejects.toThrow(`capture-${seam}`)
+
+      expect(await db.select().from(tickets)).toEqual(beforeTickets)
+      expect(await db.select().from(ticketJobs)).toEqual(beforeJobs)
+      expect(await db.select().from(jobLines)).toEqual(beforeLines)
+    },
+  )
+
+  it.each(['afterDiscovery', 'afterWrite', 'afterFinalization'] as const)(
+    'rolls removal back completely at %s',
+    async (seam) => {
+      await capture()
+      const beforeTickets = await db.select().from(tickets)
+      const beforeJobs = await db.select().from(ticketJobs)
+      const beforeLines = await db.select().from(jobLines)
+
+      await expect(removeManualOffer(
+        db,
+        { actor, ticketId, jobId, lineId: uuid(100) },
+        { [seam]: async () => { throw new Error(`remove-${seam}`) } },
+      )).rejects.toThrow(`remove-${seam}`)
+
+      expect(await db.select().from(tickets)).toEqual(beforeTickets)
+      expect(await db.select().from(ticketJobs)).toEqual(beforeJobs)
+      expect(await db.select().from(jobLines)).toEqual(beforeLines)
+    },
+  )
+
+  it.each(['55P03', '40001', '40P01'])(
+    'exhausts bounded capture retries for SQLSTATE %s without residue',
+    async (code) => {
+      let attempts = 0
+      await expect(capture({}, {}, {
+        afterWrite: async () => {
+          attempts += 1
+          throw Object.assign(new Error(code), { code })
+        },
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(attempts).toBe(2)
+      expect(await db.select().from(jobLines)).toHaveLength(0)
+    },
+  )
 
   function snapshot() {
     return {
