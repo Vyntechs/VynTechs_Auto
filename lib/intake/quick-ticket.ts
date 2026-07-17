@@ -46,6 +46,7 @@ import {
 const uuidSchema = z.string().uuid().transform((value) => value.toLowerCase())
 
 export type QuickTicketDependencies = {
+  afterDiscovery?: () => Promise<void>
   afterCustomer?: () => Promise<void>
   afterVehicle?: () => Promise<void>
   afterMileage?: () => Promise<void>
@@ -359,6 +360,7 @@ export async function createQuickTicket(
           ),
           templatePromise,
         ])
+        await dependencies.afterDiscovery?.()
 
         let stableFailure: QuickTicketFailure | null = null
         if (legacyRows.length > 0) {

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import type { Sql, TransactionSql } from 'postgres'
 import {
@@ -80,6 +80,79 @@ const postgresMutationKeyring = createMutationFingerprintKeyringV1({
   SHOP_OS_MUTATION_HMAC_KEYS_B64: `1:${Buffer.alloc(32, 17).toString('base64')}`,
 })
 
+async function seedSharedPostgresRaceParents(
+  db: PostgresContinuityHarness['dbA'],
+): Promise<void> {
+  await db.insert(shops).values({
+    id: uuid(1),
+    name: 'Postgres Shared Race Shop',
+    laborRateCents: 15_000,
+    taxRateBps: 825,
+  })
+  await db.insert(profiles).values([
+    { id: uuid(2), userId: uuid(102), shopId: uuid(1), role: 'advisor' },
+    { id: uuid(3), userId: uuid(103), shopId: uuid(1), role: 'tech', skillTier: 2 },
+  ])
+  await db.insert(customers).values({
+    id: uuid(4),
+    shopId: uuid(1),
+    name: 'Postgres Shared Customer',
+    phone: '5552000000',
+  })
+  await db.insert(vehicles).values({
+    id: uuid(5),
+    customerId: uuid(4),
+    year: 2021,
+    make: 'Ford',
+    model: 'F-150',
+  })
+  await db.insert(tickets).values({
+    id: uuid(6),
+    shopId: uuid(1),
+    ticketNumber: 1,
+    source: 'counter',
+    customerId: uuid(4),
+    vehicleId: uuid(5),
+    concern: 'Shared race parent',
+    createdByProfileId: uuid(2),
+  })
+}
+
+async function waitForBlockedPostgresLockOrSettlement(
+  observer: Sql,
+  contender: PromiseLike<unknown>,
+  label: string,
+): Promise<'blocked' | 'settled'> {
+  let settled = false
+  void contender.then(
+    () => { settled = true },
+    () => { settled = true },
+  )
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    if (settled) return 'settled'
+    const [row] = await observer<{ blocked: number }[]>`
+      select count(*)::int as blocked
+      from pg_stat_activity
+      where datname = current_database()
+        and pid <> pg_backend_pid()
+        and wait_event_type = 'Lock'
+    `
+    if ((row?.blocked ?? 0) > 0) return 'blocked'
+    await new Promise((resolvePoll) => setTimeout(resolvePoll, 10))
+  }
+  throw new Error(`${label} did not reach a PostgreSQL lock wait`)
+}
+
+async function assertConflictThenRetry<T extends { ok: boolean }>(
+  firstAttempt: T,
+  retry: () => Promise<T>,
+): Promise<T> {
+  if (firstAttempt.ok) return firstAttempt
+  expect(firstAttempt).toMatchObject({ ok: false, error: 'conflict', retryable: true })
+  return retry()
+}
+
 describe('continuity PostgreSQL integration configuration', () => {
   it('fails closed when PostgreSQL is required or a configured URL is unsafe', () => {
     if (requirePostgres) expect(postgresUrl).toBeTruthy()
@@ -90,13 +163,13 @@ describe('continuity PostgreSQL integration configuration', () => {
 describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
   let harness: PostgresContinuityHarness
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     harness = await createPostgresContinuityDb(postgresUrl)
   }, 120_000)
 
-  afterAll(async () => {
+  afterEach(async () => {
     await harness?.cleanup()
-  })
+  }, 30_000)
 
   it('uses two independent clients and every source migration through 0037', () => {
     expect(harness.clientA).not.toBe(harness.clientB)
@@ -236,9 +309,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       }),
     ])
 
-    const decision = racedDecision.ok
-      ? racedDecision
-      : await recordQuoteDecision(dbB, {
+    const decision = await assertConflictThenRetry(racedDecision, () =>
+      recordQuoteDecision(dbB, {
           actor: { profileId: advisorId },
           ticketId,
           body: {
@@ -248,7 +320,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
             decision: 'approved',
             approvedVia: 'phone',
           },
-        })
+        }))
     expect(assignment).toMatchObject({ ok: true })
     if (!racedDecision.ok) {
       expect(racedDecision).toEqual({ ok: false, error: 'conflict', retryable: true })
@@ -266,7 +338,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
   }, 20_000)
 
   it('proves a real 250ms row-lock timeout without deadlock', async () => {
-    const { clientA, clientB } = harness
+    const { clientA, clientB, dbA } = harness
+    await seedSharedPostgresRaceParents(dbA)
     const ticketId = uuid(6)
     let release!: () => void
     let locked!: () => void
@@ -299,6 +372,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
 
   it('serializes curator mutation versus the session foreign-key link in both orderings', async () => {
     const { clientA, clientB, dbA, dbB } = harness
+    await seedSharedPostgresRaceParents(dbA)
     const shopId = uuid(1)
     const techId = uuid(3)
     const advisorId = uuid(2)
@@ -371,7 +445,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     })
     await linkWrittenPromise
     const linkedCurator = approveDeferredSession(dbB, sessionLinkFirst, 'late curator')
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, linkedCurator, 'race contender')
     releaseLink()
     await linkFirst
     await expect(linkedCurator).resolves.toEqual({ kind: 'not-found' })
@@ -395,7 +469,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       update ticket_jobs set session_id = ${sessionCuratorFirst}::uuid
       where id = ${curatorFirstJobId}::uuid
     `
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, lateLink, 'race contender')
     releaseCurator()
     await Promise.all([curatorFirst, lateLink])
     const [mutatedThenLinked] = await dbA.select().from(sessions).where(eq(sessions.id, sessionCuratorFirst))
@@ -405,7 +479,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
   }, 20_000)
 
   it('classifies real sessions_pkey and receipt request-key uniqueness winners', async () => {
-    const { clientA, clientB } = harness
+    const { clientA, clientB, dbA } = harness
+    await seedSharedPostgresRaceParents(dbA)
     const shopId = uuid(1)
     const techId = uuid(3)
     const sessionId = uuid(40)
@@ -439,7 +514,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       values (${sessionId}::uuid, ${techId}::uuid, ${shopId}::uuid,
         ${sessionJson}::jsonb, ${treeJson}::jsonb)
     `.then(() => null, (error: unknown) => error)
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, sessionLoser, 'race contender')
     releaseSession()
     await sessionWinner
     expect(await sessionLoser).toMatchObject({ code: '23505', constraint_name: 'sessions_pkey' })
@@ -473,7 +548,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     await receiptInsertedPromise
     const receiptLoser = insertReceipt(clientB, uuid(52), 'c'.repeat(64))
       .then(() => null, (error: unknown) => error)
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, receiptLoser, 'race contender')
     releaseReceipt()
     await receiptWinner
     expect(await receiptLoser).toMatchObject({
@@ -608,16 +683,20 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       },
     }
     let shopLocked!: () => void
-    let mutationStarted!: () => void
+    let discoveryReached!: () => void
+    let driftCommitted!: () => void
+    let driftDiscoveries = 0
     const shopLockedPromise = new Promise<void>((resolveLocked) => { shopLocked = resolveLocked })
-    const mutationStartedPromise = new Promise<void>((resolveStarted) => {
-      mutationStarted = resolveStarted
+    const discoveryReachedPromise = new Promise<void>((resolveReached) => {
+      discoveryReached = resolveReached
+    })
+    const driftCommittedPromise = new Promise<void>((resolveCommitted) => {
+      driftCommitted = resolveCommitted
     })
     const drift = clientA.begin(async (tx) => {
       await tx`select id from shops where id = ${shopId}::uuid for update`
       shopLocked()
-      await mutationStartedPromise
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+      await discoveryReachedPromise
       await tx`update shops set tax_rate_bps = 900 where id = ${shopId}::uuid`
       await tx`
         update canned_jobs set retired_at = now()
@@ -632,23 +711,23 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
         values (${vehicleId}::uuid, ${customerId}::uuid, 2018, 'Ford', 'F-150',
           '3.5L EcoBoost', '1FTEW1EP5JFC10210', 84000, 'PG210')
       `
-    })
+    }).then(() => { driftCommitted() })
     await shopLockedPromise
-    const quick = (async () => {
-      mutationStarted()
-      return createQuickTicket(dbB, { actor, body }, {
-        loadMutationKeyring: () => postgresMutationKeyring,
-      })
-    })()
+    const quick = createQuickTicket(dbB, { actor, body }, {
+      afterDiscovery: async () => {
+        driftDiscoveries += 1
+        discoveryReached()
+        await driftCommittedPromise
+      },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })
     const settled = await Promise.allSettled([drift, quick])
     for (const result of settled) {
       if (result.status === 'rejected') throw result.reason
     }
     if (settled[1].status !== 'fulfilled') throw new Error('Quick drift did not settle')
-    expect([
-      { ok: false, error: 'not_found' },
-      { ok: false, error: 'conflict', retryable: true },
-    ]).toContainEqual(settled[1].value)
+    expect(driftDiscoveries).toBe(2)
+    expect(settled[1].value).toEqual({ ok: false, error: 'conflict' })
     expect(await dbA.select().from(tickets).where(eq(tickets.shopId, shopId))).toEqual([])
     expect(await dbA.select().from(ticketJobs).where(eq(ticketJobs.shopId, shopId))).toEqual([])
     expect((await dbA.select().from(shops).where(eq(shops.id, shopId)))[0].nextTicketNumber)
@@ -692,16 +771,20 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       quote: { mode: 'manual' as const, kind: 'repair' as const, description: 'Inspect concern' },
     }
     let shopLocked!: () => void
-    let mutationStarted!: () => void
+    let discoveryReached!: () => void
+    let identityCommitted!: () => void
+    let identityDiscoveries = 0
     const shopLockedPromise = new Promise<void>((resolveLocked) => { shopLocked = resolveLocked })
-    const mutationStartedPromise = new Promise<void>((resolveStarted) => {
-      mutationStarted = resolveStarted
+    const discoveryReachedPromise = new Promise<void>((resolveReached) => {
+      discoveryReached = resolveReached
+    })
+    const identityCommittedPromise = new Promise<void>((resolveCommitted) => {
+      identityCommitted = resolveCommitted
     })
     const appearingIdentity = clientA.begin(async (tx) => {
       await tx`select id from shops where id = ${shopId}::uuid for update`
       shopLocked()
-      await mutationStartedPromise
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+      await discoveryReachedPromise
       await tx`
         insert into customers (id, shop_id, name, phone)
         values (${customerId}::uuid, ${shopId}::uuid, 'Identity Winner', '555-0220')
@@ -711,29 +794,38 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
         values (${vehicleId}::uuid, ${customerId}::uuid, 2020, 'Honda', 'Civic',
           '2HGFC2F59LH102220', 42000, 'PG220')
       `
-    })
+    }).then(() => { identityCommitted() })
     await shopLockedPromise
-    const quick = (async () => {
-      mutationStarted()
-      return createQuickTicket(dbB, { actor, body }, {
-        loadMutationKeyring: () => postgresMutationKeyring,
-      })
-    })()
+    const quick = createQuickTicket(dbB, { actor, body }, {
+      afterDiscovery: async () => {
+        identityDiscoveries += 1
+        discoveryReached()
+        await identityCommittedPromise
+      },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })
     const settled = await Promise.allSettled([appearingIdentity, quick])
     for (const result of settled) {
       if (result.status === 'rejected') throw result.reason
     }
     if (settled[1].status !== 'fulfilled') throw new Error('identity race did not settle')
-    expect(settled[1].value).toEqual({ ok: false, error: 'conflict', retryable: true })
-    expect(await dbA.select().from(tickets).where(eq(tickets.shopId, shopId))).toEqual([])
-    expect((await dbA.select().from(shops).where(eq(shops.id, shopId)))[0].nextTicketNumber)
-      .toBe(1)
+    expect(identityDiscoveries).toBe(2)
+    expect(settled[1].value).toMatchObject({
+      ok: true,
+      ticket: { customer: { id: customerId }, vehicle: { id: vehicleId } },
+    })
+    if (!settled[1].value.ok) throw new Error('identity race did not transparently restart')
+    const createdTicketId = settled[1].value.ticket.id
     const retried = await createQuickTicket(dbB, { actor, body }, {
       loadMutationKeyring: () => postgresMutationKeyring,
     })
     expect(retried).toMatchObject({
       ok: true,
-      ticket: { customer: { id: customerId }, vehicle: { id: vehicleId } },
+      ticket: {
+        id: createdTicketId,
+        customer: { id: customerId },
+        vehicle: { id: vehicleId },
+      },
     })
     expect(await dbA.select().from(customers).where(eq(customers.shopId, shopId)))
       .toEqual([expect.objectContaining({ id: customerId })])
@@ -1363,8 +1455,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     const version = (db: PostgresContinuityHarness['dbA']) =>
       createQuoteVersion(db, { actor: { profileId }, ticketId })
     const raced = await Promise.all([add(dbA), version(dbB)])
-    const added = raced[0].ok ? raced[0] : await add(dbA)
-    const quoted = raced[1].ok ? raced[1] : await version(dbB)
+    const added = await assertConflictThenRetry(raced[0], () => add(dbA))
+    const quoted = await assertConflictThenRetry(raced[1], () => version(dbB))
     expect(added).toMatchObject({ ok: true })
     expect(quoted).toMatchObject({ ok: true })
     const jobs = await dbA.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))
@@ -1551,16 +1643,16 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       saveReviewedCustomerStory(db, secondReviewInput)
     const replace = (db: PostgresContinuityHarness['dbA']) => replaceDraftLine(db, lineInput)
     const raced = await Promise.all([review(dbA), replace(dbB)])
-    expect(raced[0].ok ? raced[0] : raced[0]).toSatisfy((result) =>
+    expect(raced[0]).toSatisfy((result) =>
       result.ok || (
         result.error === 'conflict' && result.retryable === true
       ))
-    expect(raced[1].ok ? raced[1] : raced[1]).toSatisfy((result) =>
+    expect(raced[1]).toSatisfy((result) =>
       result.ok || (
         result.error === 'conflict' && result.retryable === true
       ))
-    const reviewed = raced[0].ok ? raced[0] : await review(dbA)
-    const replaced = raced[1].ok ? raced[1] : await replace(dbB)
+    const reviewed = await assertConflictThenRetry(raced[0], () => review(dbA))
+    const replaced = await assertConflictThenRetry(raced[1], () => replace(dbB))
     expect(reviewed).toMatchObject({ ok: true })
     expect(replaced).toMatchObject({ ok: true })
     const [storedJob] = await dbA.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
@@ -1692,13 +1784,12 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       jobId: siblingJobId,
       body: { action: 'reassign', assignedTechId: siblingTechId, confirmBelowTier: false },
     })
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, assigned, 'race contender')
     releaseFinalize()
     const [finalizeResult, assignmentResult] = await Promise.all([finalized, assigned])
     expect(finalizeResult).toEqual({ ok: true, state: 'ready', sessionId })
-    const completedAssignment = assignmentResult.ok
-      ? assignmentResult
-      : await mutateTicketJobAssignment(dbB, {
+    const completedAssignment = await assertConflictThenRetry(assignmentResult, () =>
+      mutateTicketJobAssignment(dbB, {
           actor: {
             profileId: ownerId,
             shopId,
@@ -1714,7 +1805,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
             assignedTechId: siblingTechId,
             confirmBelowTier: false,
           },
-        })
+        }))
     if (!assignmentResult.ok) {
       expect(assignmentResult).toEqual({ ok: false, error: 'conflict', retryable: true })
     }
@@ -1976,11 +2067,11 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       validateSpecificity: async () => ({ ok: true }),
     })
     const closed = close()
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, closed, 'race contender')
     releaseComplete()
     const [completeResult, racedCloseResult] = await Promise.all([completed, closed])
     expect(completeResult).toMatchObject({ ok: true, changed: true })
-    const closeResult = racedCloseResult.ok ? racedCloseResult : await close()
+    const closeResult = await assertConflictThenRetry(racedCloseResult, close)
     if (!racedCloseResult.ok) {
       expect(racedCloseResult).toEqual({
         ok: false,
@@ -2099,13 +2190,11 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     await captureLockedPromise
     const createVersion = () => createQuoteVersion(dbB, { actor: { profileId }, ticketId })
     const firstVersion = createVersion()
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, firstVersion, 'race contender')
     releaseCapture()
     const [captureResult, racedFirstVersion] = await Promise.all([captured, firstVersion])
     expect(captureResult).toMatchObject({ ok: true, changed: true, line: { id: offerLineId } })
-    const firstVersionResult = racedFirstVersion.ok
-      ? racedFirstVersion
-      : await createVersion()
+    const firstVersionResult = await assertConflictThenRetry(racedFirstVersion, createVersion)
     if (!racedFirstVersion.ok) {
       expect(racedFirstVersion).toEqual({ ok: false, error: 'conflict', retryable: true })
     }
@@ -2129,13 +2218,11 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     })
     await removeLockedPromise
     const secondVersion = createVersion()
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50))
+    await waitForBlockedPostgresLockOrSettlement(harness.observer, secondVersion, 'race contender')
     releaseRemove()
     const [removeResult, racedSecondVersion] = await Promise.all([removed, secondVersion])
     expect(removeResult).toEqual({ ok: true, changed: true })
-    const secondVersionResult = racedSecondVersion.ok
-      ? racedSecondVersion
-      : await createVersion()
+    const secondVersionResult = await assertConflictThenRetry(racedSecondVersion, createVersion)
     if (!racedSecondVersion.ok) {
       expect(racedSecondVersion).toEqual({ ok: false, error: 'conflict', retryable: true })
     }
@@ -2240,8 +2327,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
         body: { action: 'reassign', assignedTechId: firstOwnerId, confirmBelowTier: false },
       })
     const [racedFirst, racedSecond] = await Promise.all([assignFirst(), assignSecond()])
-    const first = racedFirst.ok ? racedFirst : await assignFirst()
-    const second = racedSecond.ok ? racedSecond : await assignSecond()
+    const first = await assertConflictThenRetry(racedFirst, assignFirst)
+    const second = await assertConflictThenRetry(racedSecond, assignSecond)
     for (const raced of [racedFirst, racedSecond]) {
       if (!raced.ok) expect(raced).toEqual({ ok: false, error: 'conflict', retryable: true })
     }
@@ -2259,6 +2346,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
 
   it('serializes production adaptive mode with assignment and ticket-linked session close, including exact replay and rollback', async () => {
     const { dbA, dbB } = harness
+    await seedSharedPostgresRaceParents(dbA)
     const priorFlag = process.env.SHOP_OS_ADAPTIVE_CANVAS_ENABLED
     process.env.SHOP_OS_ADAPTIVE_CANVAS_ENABLED = 'true'
     const shopId = uuid(1)
@@ -2476,9 +2564,8 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
         first,
         { ok: false, status: 409, error: 'not_eligible' },
       ]).toContainEqual(assignmentReplay)
-      const completedAssignment = assignmentResult.ok
-        ? assignmentResult
-        : await mutateTicketJobAssignment(dbB, {
+      const completedAssignment = await assertConflictThenRetry(assignmentResult, () =>
+        mutateTicketJobAssignment(dbB, {
             actor: {
               profileId: advisorId,
               shopId,
@@ -2494,7 +2581,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
               assignedTechId: siblingTechId,
               confirmBelowTier: false,
             },
-          })
+          }))
       if (!assignmentResult.ok) {
         expect(assignmentResult).toEqual({ ok: false, error: 'conflict', retryable: true })
       }
@@ -2566,6 +2653,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
 
   it('reserves append order independently of transaction timestamps and accepts a null-only legacy prefix', async () => {
     const { clientA, clientB, dbA } = harness
+    await seedSharedPostgresRaceParents(dbA)
     const ticketId = uuid(6)
     const shopId = uuid(1)
     const actorId = uuid(2)
@@ -2578,6 +2666,17 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
         kind: 'repair',
         requiredSkillTier: 1,
         sequenceNumber: null,
+        createdAt: new Date('2026-07-17T12:00:01Z'),
+      },
+      {
+        id: uuid(24),
+        shopId,
+        ticketId,
+        title: 'Earlier legacy prefix with larger UUID',
+        kind: 'repair',
+        requiredSkillTier: 1,
+        sequenceNumber: null,
+        createdAt: new Date('2026-07-17T12:00:00Z'),
       },
       {
         id: uuid(21),
@@ -2607,7 +2706,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
           (id, shop_id, ticket_id, title, kind, required_skill_tier,
            sequence_number, created_by_profile_id, creator_provenance)
         values
-          (${uuid(23)}::uuid, ${shopId}::uuid, ${ticketId}::uuid, 'A append',
+           (${uuid(22)}::uuid, ${shopId}::uuid, ${ticketId}::uuid, 'A append',
            'repair', 1, ${row!.next}, ${actorId}::uuid, 'direct')
       `
       return { at: clock!.at, sequence: row!.next }
@@ -2625,7 +2724,7 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
           (id, shop_id, ticket_id, title, kind, required_skill_tier,
            sequence_number, created_by_profile_id, creator_provenance)
         values
-          (${uuid(22)}::uuid, ${shopId}::uuid, ${ticketId}::uuid, 'B append',
+           (${uuid(23)}::uuid, ${shopId}::uuid, ${ticketId}::uuid, 'B append',
            'repair', 1, ${row!.next}, ${actorId}::uuid, 'direct')
       `
       return { at: clock!.at, sequence: row!.next }
@@ -2654,7 +2753,9 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       order by sequence_number
     `
     expect(rows.map(({ sequenceNumber }) => sequenceNumber)).toEqual([1, 2, 3, 4, 5])
-    expect(rows.find(({ id }) => id === uuid(22))?.sequenceNumber).toBe(4)
-    expect(rows.find(({ id }) => id === uuid(23))?.sequenceNumber).toBe(5)
+    expect(rows.find(({ id }) => id === uuid(24))?.sequenceNumber).toBe(1)
+    expect(rows.find(({ id }) => id === uuid(20))?.sequenceNumber).toBe(2)
+    expect(rows.find(({ id }) => id === uuid(23))?.sequenceNumber).toBe(4)
+    expect(rows.find(({ id }) => id === uuid(22))?.sequenceNumber).toBe(5)
   }, 20_000)
 })

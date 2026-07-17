@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import postgres, { type Sql } from 'postgres'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import * as schema from '@/lib/db/schema'
@@ -9,8 +10,10 @@ export type PostgresContinuityDb = PostgresJsDatabase<typeof schema>
 export type PostgresContinuityHarness = Readonly<{
   clientA: Sql
   clientB: Sql
+  observer: Sql
   dbA: PostgresContinuityDb
   dbB: PostgresContinuityDb
+  databaseName: string
   migrationFiles: readonly string[]
   cleanup: () => Promise<void>
 }>
@@ -52,7 +55,7 @@ async function sourceMigrationFiles(): Promise<string[]> {
   return files
 }
 
-async function bootstrapSupabaseCompatibility(client: Sql): Promise<void> {
+async function bootstrapClusterRoles(client: Sql): Promise<void> {
   await client.unsafe(`
     do $$ begin
       if not exists (select 1 from pg_roles where rolname = 'anon') then
@@ -65,6 +68,11 @@ async function bootstrapSupabaseCompatibility(client: Sql): Promise<void> {
         create role service_role nologin;
       end if;
     end $$;
+  `)
+}
+
+async function bootstrapSupabaseCompatibility(client: Sql): Promise<void> {
+  await client.unsafe(`
     create extension if not exists vector;
     create schema if not exists auth;
     create or replace function auth.uid()
@@ -87,29 +95,60 @@ async function applySourceMigrations(
 export async function createPostgresContinuityDb(
   rawUrl = process.env.CONTINUITY_POSTGRES_URL,
 ): Promise<PostgresContinuityHarness> {
-  const url = assertContinuityPostgresUrlV1(rawUrl).toString()
+  const baseUrl = assertContinuityPostgresUrlV1(rawUrl)
+  const databaseName = `continuity_test_${process.pid}_${randomUUID().replaceAll('-', '')}`
+  const derivedUrl = new URL(baseUrl)
+  derivedUrl.pathname = `/${databaseName}`
   const migrationFiles = await sourceMigrationFiles()
-  const admin = postgres(url, { max: 1, prepare: false })
+  const baseAdmin = postgres(baseUrl.toString(), { max: 1, prepare: false })
+  let databaseCreated = false
+  let migrationAdmin: Sql | null = null
   try {
-    await bootstrapSupabaseCompatibility(admin)
-    await applySourceMigrations(admin, migrationFiles)
-  } finally {
-    await admin.end({ timeout: 5 })
+    await bootstrapClusterRoles(baseAdmin)
+    await baseAdmin.unsafe(`create database "${databaseName}"`)
+    databaseCreated = true
+    migrationAdmin = postgres(derivedUrl.toString(), { max: 1, prepare: false })
+    await bootstrapSupabaseCompatibility(migrationAdmin)
+    await applySourceMigrations(migrationAdmin, migrationFiles)
+    await migrationAdmin.end({ timeout: 5 })
+    migrationAdmin = null
+  } catch (error) {
+    await migrationAdmin?.end({ timeout: 5 }).catch(() => undefined)
+    if (databaseCreated) {
+      await baseAdmin.unsafe(`drop database if exists "${databaseName}" with (force)`)
+        .catch(() => undefined)
+    }
+    await baseAdmin.end({ timeout: 5 })
+    throw error
   }
 
-  const clientA = postgres(url, { max: 1, prepare: false })
-  const clientB = postgres(url, { max: 1, prepare: false })
+  const clientA = postgres(derivedUrl.toString(), { max: 1, prepare: false })
+  const clientB = postgres(derivedUrl.toString(), { max: 1, prepare: false })
+  const observer = postgres(derivedUrl.toString(), { max: 1, prepare: false })
+  let cleaned = false
   return Object.freeze({
     clientA,
     clientB,
+    observer,
     dbA: drizzle(clientA, { schema }),
     dbB: drizzle(clientB, { schema }),
+    databaseName,
     migrationFiles: Object.freeze([...migrationFiles]),
     cleanup: async () => {
+      if (cleaned) return
+      cleaned = true
       await Promise.all([
         clientA.end({ timeout: 5 }),
         clientB.end({ timeout: 5 }),
+        observer.end({ timeout: 5 }),
       ])
+      await baseAdmin`
+        select pg_terminate_backend(pid)
+        from pg_stat_activity
+        where datname = ${databaseName} and pid <> pg_backend_pid()
+      `
+      await baseAdmin.unsafe(`drop database if exists "${databaseName}"`)
+      await baseAdmin.end({ timeout: 5 })
     },
   })
 }
