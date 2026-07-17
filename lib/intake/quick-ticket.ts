@@ -46,12 +46,14 @@ import {
 const uuidSchema = z.string().uuid().transform((value) => value.toLowerCase())
 
 export type QuickTicketDependencies = {
+  hintReceiptPresence?: typeof hintMutationReceiptPresenceV1
   afterDiscovery?: () => Promise<void>
   afterCustomer?: () => Promise<void>
   afterVehicle?: () => Promise<void>
   afterMileage?: () => Promise<void>
   afterTicket?: () => Promise<void>
   afterLines?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
   loadMutationKeyring?: () => MutationFingerprintKeyringV1
 }
 
@@ -274,7 +276,10 @@ export async function createQuickTicket(
     afterMileage: dependencies.afterMileage,
     afterTicket: dependencies.afterTicket,
     afterLines: dependencies.afterLines,
+    afterFinalization: dependencies.afterFinalization,
   })
+  const hintReceiptPresence = dependencies.hintReceiptPresence ??
+    hintMutationReceiptPresenceV1
   const loadMutationKeyring = dependencies.loadMutationKeyring ??
     loadMutationFingerprintKeyringFromProcessV1
   let keyring: MutationFingerprintKeyringV1
@@ -326,7 +331,7 @@ export async function createQuickTicket(
           .limit(1)
         if (!persistedProfile?.shopId) throw new ShopOsMutationNotFound()
         const shopId = persistedProfile.shopId
-        const hint = await hintMutationReceiptPresenceV1(tx, attempt.capability, {
+        const hint = await hintReceiptPresence(tx, attempt.capability, {
           shopId,
           requestKey: body.clientKey,
         })
@@ -488,6 +493,7 @@ export async function createQuickTicket(
             actorVisibleTicketFieldsChanged: true,
           }],
         )
+        await callbacks.afterFinalization?.()
         const safe = await insertResolvedTicketCreationReceiptInTransactionV1(
           tx,
           scope,

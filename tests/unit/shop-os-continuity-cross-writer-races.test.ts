@@ -94,6 +94,16 @@ describe('ShopOS continuity cross-writer race guards', () => {
     expect(integrationSource).toContain('afterDiscovery: async () =>')
     expect(integrationSource).not.toMatch(/setTimeout\([^,]+,\s*(?:50|100)\)/)
     expect(integrationSource).not.toMatch(/\.ok\s*\?[\s\S]{0,80}:\s*await/)
+    for (const requiredProductionCase of [
+      'proves production canned, escalation, and idempotent PostgreSQL contracts',
+      'proves origin, receipt hint, and opaque recovery boundaries on PostgreSQL',
+      'proves PostgreSQL rollback and retryable SQLSTATE boundaries',
+      'proves bigint multi-job and Packet B production append cardinality',
+    ]) expect(integrationSource).toContain(requiredProductionCase)
+    for (const requiredProductionCall of [
+      'applyCannedJobToTicket(',
+      'createWorkEscalation(',
+    ]) expect(integrationSource).toContain(requiredProductionCall)
     expect(packageSource).toContain('test:continuity:postgres')
   })
 })

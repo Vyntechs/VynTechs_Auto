@@ -16,6 +16,7 @@ import {
   sessionEvents,
   sessions,
   shops,
+  ticketMutationReceipts,
   ticketJobs,
   tickets,
   vendorAccounts,
@@ -23,7 +24,11 @@ import {
 } from '@/lib/db/schema'
 import {
   addTicketJob,
+  finalizeResolvedTicketCreationInTransactionV1,
+  insertResolvedTicketBatchInTransactionV1,
   mutateTicketJobAssignment,
+  readFinalizedTicketCreationResultV1,
+  resolveTicketCreationInLockedScopeV1,
   type TicketActor,
 } from '@/lib/tickets'
 import { recordQuoteDecision } from '@/lib/shop-os/quotes'
@@ -36,14 +41,24 @@ import { createSessionForUser } from '@/lib/sessions'
 import type { AdaptiveCoverage, AdaptiveDiagnosticState } from '@/lib/diagnostics/adaptive/contracts'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
 import { createQuickTicket } from '@/lib/intake/quick-ticket'
-import { createCannedJob } from '@/lib/shop-os/canned-jobs'
+import { applyCannedJobToTicket, createCannedJob } from '@/lib/shop-os/canned-jobs'
 import { createMutationFingerprintKeyringV1 } from '@/lib/shop-os/continuity/mutation-foundation/keyring'
+import {
+  insertMutationReceiptPrimitiveV1,
+  lockAndClassifyMutationReceiptV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/receipts'
+import type { CanonicalMutationEnvelopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
+import {
+  runBoundedShopOsMutationV1,
+  type MutationLockRequestV1,
+} from '@/lib/shop-os/continuity/mutation-foundation'
+import { createCounterTicketOriginV1 } from '@/lib/shop-os/continuity/mutation-foundation/ticket-origin.server'
 import { saveReviewedCustomerStory } from '@/lib/shop-os/customer-stories'
 import {
   acquireDiagnosticStart,
   finalizeDiagnosticStart,
 } from '@/lib/shop-os/diagnostic-start'
-import { mutateSimpleWork } from '@/lib/shop-os/simple-work'
+import { createWorkEscalation, mutateSimpleWork } from '@/lib/shop-os/simple-work'
 import { captureManualOffer, removeManualOffer } from '@/lib/shop-os/parts-offers'
 
 const postgresUrl = process.env.CONTINUITY_POSTGRES_URL
@@ -79,6 +94,10 @@ const postgresMutationKeyring = createMutationFingerprintKeyringV1({
   SHOP_OS_MUTATION_HMAC_ACTIVE_VERSION: '1',
   SHOP_OS_MUTATION_HMAC_KEYS_B64: `1:${Buffer.alloc(32, 17).toString('base64')}`,
 })
+
+type ResolvedTicketCreationHandle = ReturnType<
+  typeof resolveTicketCreationInLockedScopeV1
+>
 
 async function seedSharedPostgresRaceParents(
   db: PostgresContinuityHarness['dbA'],
@@ -116,6 +135,170 @@ async function seedSharedPostgresRaceParents(
     concern: 'Shared race parent',
     createdByProfileId: uuid(2),
   })
+}
+
+async function seedApprovedProductionFixture(
+  db: PostgresContinuityHarness['dbA'],
+  seed: number,
+) {
+  const ids = {
+    shopId: uuid(seed),
+    advisorId: uuid(seed + 1),
+    techId: uuid(seed + 2),
+    customerId: uuid(seed + 3),
+    vehicleId: uuid(seed + 4),
+    ticketId: uuid(seed + 5),
+    legacyJobId: uuid(seed + 6),
+    legacyEarlierJobId: uuid(seed + 12),
+    sourceJobId: uuid(seed + 7),
+    quoteVersionId: uuid(seed + 8),
+  }
+  await db.insert(shops).values({
+    id: ids.shopId,
+    name: `Production fixture ${seed}`,
+    laborRateCents: 15_000,
+    taxRateBps: 825,
+  })
+  await db.insert(profiles).values([
+    {
+      id: ids.advisorId,
+      userId: uuid(seed + 101),
+      shopId: ids.shopId,
+      role: 'owner',
+      skillTier: 3,
+    },
+    {
+      id: ids.techId,
+      userId: uuid(seed + 102),
+      shopId: ids.shopId,
+      role: 'tech',
+      skillTier: 2,
+    },
+  ])
+  await db.insert(customers).values({
+    id: ids.customerId,
+    shopId: ids.shopId,
+    name: `Fixture customer ${seed}`,
+    phone: `555${seed.toString().padStart(7, '0').slice(-7)}`,
+  })
+  await db.insert(vehicles).values({
+    id: ids.vehicleId,
+    customerId: ids.customerId,
+    year: 2020,
+    make: 'Ford',
+    model: 'F-150',
+    mileage: 40_000,
+  })
+  await db.insert(tickets).values({
+    id: ids.ticketId,
+    shopId: ids.shopId,
+    ticketNumber: 1,
+    source: 'counter',
+    customerId: ids.customerId,
+    vehicleId: ids.vehicleId,
+    concern: 'Approved production fixture',
+    createdByProfileId: ids.advisorId,
+  })
+  await db.update(shops).set({ nextTicketNumber: 2 }).where(eq(shops.id, ids.shopId))
+  await db.insert(ticketJobs).values([
+    {
+      id: ids.legacyJobId,
+      shopId: ids.shopId,
+      ticketId: ids.ticketId,
+      title: 'Legacy prefix',
+      kind: 'repair',
+      requiredSkillTier: 1,
+      sequenceNumber: null,
+      createdAt: new Date('2026-07-17T12:00:01Z'),
+    },
+    {
+      id: ids.sourceJobId,
+      shopId: ids.shopId,
+      ticketId: ids.ticketId,
+      title: 'Approved source work',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      assignedTechId: ids.techId,
+      sequenceNumber: 3,
+      workStatus: 'in_progress',
+      approvalState: 'quote_ready',
+    },
+    {
+      id: ids.legacyEarlierJobId,
+      shopId: ids.shopId,
+      ticketId: ids.ticketId,
+      title: 'Earlier legacy prefix with larger UUID',
+      kind: 'maintenance',
+      requiredSkillTier: 1,
+      sequenceNumber: null,
+      createdAt: new Date('2026-07-17T12:00:00Z'),
+    },
+  ])
+  await db.insert(quoteVersions).values({
+    id: ids.quoteVersionId,
+    shopId: ids.shopId,
+    ticketId: ids.ticketId,
+    versionNumber: 1,
+    createdByProfileId: ids.advisorId,
+    snapshot: {
+      schemaVersion: 1,
+      ticket: {
+        id: ids.ticketId,
+        number: 1,
+        customerId: ids.customerId,
+        vehicleId: ids.vehicleId,
+        laborRateCents: 15_000,
+        taxRateBps: 825,
+      },
+      jobs: [{
+        id: ids.sourceJobId,
+        title: 'Approved source work',
+        kind: 'repair',
+        customerStory: null,
+        storyMeta: null,
+        lines: [{
+          id: uuid(seed + 9),
+          kind: 'fee',
+          description: 'Approved fixture line',
+          quantity: '1',
+          priceCents: 10_000,
+          taxable: false,
+          partNumber: null,
+          brand: null,
+          coreChargeCents: null,
+          fitment: null,
+          laborHours: null,
+          laborRateCents: null,
+          source: 'manual',
+          vendorContext: null,
+        }],
+        attachments: [],
+        totals: { subtotalCents: 10_000, taxableSubtotalCents: 0 },
+      }],
+      totals: {
+        subtotalCents: 10_000,
+        taxableSubtotalCents: 0,
+        taxCents: 0,
+        totalCents: 10_000,
+      },
+    },
+  })
+  await db.update(ticketJobs).set({
+    approvalState: 'approved',
+    approvedQuoteVersionId: ids.quoteVersionId,
+  }).where(eq(ticketJobs.id, ids.sourceJobId))
+  await db.insert(quoteEvents).values({
+    id: uuid(seed + 10),
+    shopId: ids.shopId,
+    ticketId: ids.ticketId,
+    jobId: ids.sourceJobId,
+    quoteVersionId: ids.quoteVersionId,
+    kind: 'approved',
+    actorProfileId: ids.advisorId,
+    approvedVia: 'phone',
+    requestKey: uuid(seed + 11),
+  })
+  return ids
 }
 
 async function waitForBlockedPostgresLockOrSettlement(
@@ -326,6 +509,23 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
       expect(racedDecision).toEqual({ ok: false, error: 'conflict', retryable: true })
     }
     expect(decision).toMatchObject({ ok: true, changed: true })
+    const exactDecisionReplay = await recordQuoteDecision(dbB, {
+      actor: { profileId: advisorId },
+      ticketId,
+      body: {
+        requestKey: uuid(10),
+        jobId,
+        quoteVersionId,
+        decision: 'approved',
+        approvedVia: 'phone',
+      },
+    })
+    expect(exactDecisionReplay).toMatchObject({
+      ok: true,
+      changed: false,
+      event: decision.ok ? decision.event : {},
+      projection: decision.ok ? decision.projection : {},
+    })
     const [ticket] = await dbA.select().from(tickets).where(eq(tickets.id, ticketId))
     const [job] = await dbA.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
     expect(job).toMatchObject({
@@ -1788,6 +1988,20 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     releaseFinalize()
     const [finalizeResult, assignmentResult] = await Promise.all([finalized, assigned])
     expect(finalizeResult).toEqual({ ok: true, state: 'ready', sessionId })
+    const finalizeReplay = await finalizeDiagnosticStart(dbA, {
+      actor: diagnosticActor,
+      ticketId,
+      jobId: diagnosticJobId,
+      attemptKey,
+      sessionId,
+      context: acquired.context,
+      treeState: {
+        nodes: [{ id: 'root', label: 'Verify the concern', status: 'active' }],
+        currentNodeId: 'root',
+        message: 'Begin with a visual inspection.',
+      },
+    })
+    expect(finalizeReplay).toEqual(finalizeResult)
     const completedAssignment = await assertConflictThenRetry(assignmentResult, () =>
       mutateTicketJobAssignment(dbB, {
           actor: {
@@ -2651,7 +2865,618 @@ describe.skipIf(!postgresUrl)('ShopOS continuity real PostgreSQL races', () => {
     }
   }, 30_000)
 
-  it('reserves append order independently of transaction timestamps and accepts a null-only legacy prefix', async () => {
+  it('proves production canned, escalation, and idempotent PostgreSQL contracts', async () => {
+    const { dbA } = harness
+    const ids = await seedApprovedProductionFixture(dbA, 3_000)
+    const unsafeRevision = 9_007_199_254_740_993n
+    await dbA.update(tickets).set({
+      projectionRevision: unsafeRevision,
+      continuityRevision: unsafeRevision,
+    }).where(eq(tickets.id, ids.ticketId))
+
+    const actor: TicketActor = {
+      profileId: ids.advisorId,
+      shopId: ids.shopId,
+      role: 'owner',
+      skillTier: 3,
+      membershipStatus: 'active',
+      deactivatedAt: null,
+    }
+    const generic = await addTicketJob(dbA, {
+      actor,
+      ticketId: ids.ticketId,
+      body: {
+        title: 'Generic append',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+      },
+    })
+    expect(generic).toMatchObject({ ok: true })
+
+    const template = await createCannedJob(dbA, {
+      actor: { profileId: ids.advisorId },
+      clientKey: uuid(3_020),
+      body: {
+        title: 'Canned append',
+        kind: 'repair',
+        defaultRequiredSkillTier: 2,
+        sort: 1,
+        lines: [{
+          kind: 'fee',
+          description: 'Canned inspection',
+          sort: 1,
+          priceCents: 500,
+          taxable: true,
+        }],
+      },
+    })
+    if (!template.ok) throw new Error('PostgreSQL canned apply fixture failed')
+    const cannedInput = {
+      actor: { profileId: ids.advisorId },
+      ticketId: ids.ticketId,
+      clientKey: uuid(3_021),
+      cannedJobId: template.cannedJob.id,
+      expectedFingerprint: template.cannedJob.fingerprint,
+      expectedTaxRateBps: 825,
+    }
+    const cannedFirst = await applyCannedJobToTicket(dbA, cannedInput)
+    const cannedReplay = await applyCannedJobToTicket(dbA, cannedInput)
+    expect(cannedFirst).toMatchObject({ ok: true, changed: true })
+    expect(cannedReplay).toMatchObject({
+      ok: true,
+      changed: false,
+      job: cannedFirst.ok ? { id: cannedFirst.job.id } : {},
+    })
+
+    const escalationInput = {
+      actor: { profileId: ids.techId, shopId: ids.shopId },
+      ticketId: ids.ticketId,
+      sourceJobId: ids.sourceJobId,
+      body: {
+        requestKey: uuid(3_022),
+        concern: 'steering clunk under load',
+        requiredSkillTier: 2,
+      },
+    }
+    const escalationFirst = await createWorkEscalation(dbA, escalationInput)
+    const escalationReplay = await createWorkEscalation(dbA, escalationInput)
+    expect(escalationFirst).toMatchObject({ ok: true, changed: true })
+    expect(escalationReplay).toMatchObject({
+      ok: true,
+      changed: false,
+      job: escalationFirst.ok ? { id: escalationFirst.job.id } : {},
+    })
+
+    const appended = await dbA.select().from(ticketJobs)
+      .where(eq(ticketJobs.ticketId, ids.ticketId))
+    expect(appended.filter(({ sequenceNumber }) => sequenceNumber !== null)
+      .map(({ sequenceNumber }) => sequenceNumber).sort()).toEqual([3, 4, 5, 6])
+    const [afterAppends] = await dbA.select().from(tickets).where(eq(tickets.id, ids.ticketId))
+    expect(afterAppends.projectionRevision).toBe(unsafeRevision + 3n)
+    expect(afterAppends.continuityRevision).toBe(unsafeRevision + 3n)
+    if (!generic.ok || !cannedFirst.ok || !escalationFirst.ok) {
+      throw new Error('production append failed')
+    }
+    const genericJob = appended.find(({ title }) => title === 'Generic append')
+    if (!genericJob) throw new Error('generic append missing')
+    for (const jobId of [genericJob.id, cannedFirst.job.id, escalationFirst.job.id]) {
+      const [stored] = await dbA.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      expect(stored.revision).toBe(1n)
+    }
+
+    await harness.clientA`
+      with legacy as (
+        select id, row_number() over (order by created_at, id)::int as sequence_number
+        from ticket_jobs
+        where ticket_id = ${ids.ticketId}::uuid and sequence_number is null
+      )
+      update ticket_jobs target
+      set sequence_number = legacy.sequence_number
+      from legacy where target.id = legacy.id
+    `
+    const ordered = await dbA.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ids.ticketId))
+    expect(ordered.map(({ sequenceNumber }) => sequenceNumber).sort()).toEqual([1, 2, 3, 4, 5, 6])
+    expect(ordered.find(({ id }) => id === ids.legacyEarlierJobId)?.sequenceNumber).toBe(1)
+    expect(ordered.find(({ id }) => id === ids.legacyJobId)?.sequenceNumber).toBe(2)
+
+    const multi = await createCounterTicket(dbA, {
+      actor,
+      body: {
+        vehicleMode: 'existing',
+        existingVehicleId: ids.vehicleId,
+        mileage: 40_100,
+        concern: 'Two-job production cardinality',
+        requestedService: { kind: 'maintenance', description: 'Rotate tires' },
+        assignedTechId: null,
+      },
+    })
+    expect(multi).toMatchObject({ ok: true, ticket: { jobs: [{}, {}] } })
+    if (!multi.ok) throw new Error('multi-job Counter creation failed')
+    const [multiTicket] = await dbA.select().from(tickets).where(eq(tickets.id, multi.ticket.id))
+    const multiJobs = await dbA.select().from(ticketJobs).where(eq(ticketJobs.ticketId, multi.ticket.id))
+    expect(multiTicket).toMatchObject({ projectionRevision: 1n, continuityRevision: 1n })
+    expect(multiJobs).toHaveLength(2)
+    expect(multiJobs.map(({ revision }) => revision)).toEqual([1n, 1n])
+    expect(multiJobs.map(({ sequenceNumber }) => sequenceNumber).sort()).toEqual([1, 2])
+  }, 30_000)
+
+  it('proves origin, receipt hint, and opaque recovery boundaries on PostgreSQL', async () => {
+    const { dbA, dbB } = harness
+    const ids = await seedApprovedProductionFixture(dbA, 3_100)
+    const actor: TicketActor = {
+      profileId: ids.advisorId,
+      shopId: ids.shopId,
+      role: 'owner',
+      skillTier: 3,
+      membershipStatus: 'active',
+      deactivatedAt: null,
+    }
+    const quickBody = (clientKey: string) => ({
+      vehicleMode: 'existing' as const,
+      existingVehicleId: ids.vehicleId,
+      mileage: 40_200,
+      clientKey,
+      quote: {
+        mode: 'manual' as const,
+        kind: 'maintenance' as const,
+        description: 'Constant origin-bound concern',
+      },
+    })
+
+    let hintCalls = 0
+    const stalePositiveKey = uuid(3_120)
+    const stalePositive = await createQuickTicket(dbA, {
+      actor,
+      body: quickBody(stalePositiveKey),
+    }, {
+      hintReceiptPresence: async () => {
+        hintCalls += 1
+        return hintCalls === 1 ? 'present' : 'absent'
+      },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })
+    expect(stalePositive).toMatchObject({ ok: true })
+    expect(hintCalls).toBe(2)
+    expect(await dbA.select().from(ticketMutationReceipts)
+      .where(eq(ticketMutationReceipts.requestKey, stalePositiveKey))).toHaveLength(1)
+
+    if (!stalePositive.ok) throw new Error('stale-positive Quick did not recover')
+    const beforeForcedAbsent = {
+      tickets: await dbA.select().from(tickets),
+      jobs: await dbA.select().from(ticketJobs),
+      receipts: await dbA.select().from(ticketMutationReceipts),
+      shop: (await dbA.select().from(shops).where(eq(shops.id, ids.shopId)))[0],
+    }
+    const replayCallbacks = {
+      customer: 0,
+      vehicle: 0,
+      mileage: 0,
+      ticket: 0,
+      lines: 0,
+      finalized: 0,
+    }
+    const forcedAbsentReplay = await createQuickTicket(dbB, {
+      actor,
+      body: quickBody(stalePositiveKey),
+    }, {
+      hintReceiptPresence: async () => 'absent',
+      afterCustomer: async () => { replayCallbacks.customer += 1 },
+      afterVehicle: async () => { replayCallbacks.vehicle += 1 },
+      afterMileage: async () => { replayCallbacks.mileage += 1 },
+      afterTicket: async () => { replayCallbacks.ticket += 1 },
+      afterLines: async () => { replayCallbacks.lines += 1 },
+      afterFinalization: async () => { replayCallbacks.finalized += 1 },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })
+    expect(forcedAbsentReplay).toEqual(stalePositive)
+    expect(replayCallbacks).toEqual({
+      customer: 0,
+      vehicle: 0,
+      mileage: 0,
+      ticket: 0,
+      lines: 0,
+      finalized: 0,
+    })
+    expect(await dbA.select().from(tickets)).toEqual(beforeForcedAbsent.tickets)
+    expect(await dbA.select().from(ticketJobs)).toEqual(beforeForcedAbsent.jobs)
+    expect(await dbA.select().from(ticketMutationReceipts)).toEqual(beforeForcedAbsent.receipts)
+    expect((await dbA.select().from(shops).where(eq(shops.id, ids.shopId)))[0])
+      .toEqual(beforeForcedAbsent.shop)
+
+    const sharedKey = uuid(3_121)
+    const quick = await createQuickTicket(dbA, { actor, body: quickBody(sharedKey) }, {
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })
+    const changedQuick = await createQuickTicket(dbB, {
+      actor,
+      body: { ...quickBody(sharedKey), quote: { ...quickBody(sharedKey).quote, description: 'Changed' } },
+    }, { loadMutationKeyring: () => postgresMutationKeyring })
+    expect(quick).toMatchObject({ ok: true })
+    expect(changedQuick).toEqual({ ok: false, error: 'conflict' })
+    expect(JSON.stringify(changedQuick)).not.toContain(quick.ok ? quick.ticket.id : 'unreachable')
+
+    const counter = await createCounterTicket(dbA, {
+      actor,
+      body: {
+        vehicleMode: 'existing',
+        existingVehicleId: ids.vehicleId,
+        mileage: 40_200,
+        concern: 'Constant origin-bound concern',
+        assignedTechId: null,
+      },
+    })
+    const tech = await createSessionForUser({
+      db: dbB,
+      userId: uuid(3_202),
+      body: {
+        vehicleYear: 2020,
+        vehicleMake: 'Ford',
+        vehicleModel: 'F-150',
+        customerComplaint: 'Constant origin-bound concern',
+        requestKey: sharedKey,
+      },
+      treeState: {
+        nodes: [{ id: 'root', label: 'Verify', status: 'active' }],
+        currentNodeId: 'root',
+        message: 'Begin.',
+      },
+    })
+    expect(counter).toMatchObject({ ok: true, ticket: { source: 'counter' } })
+    expect(tech).toMatchObject({ ok: true, id: sharedKey })
+    const originTickets = await dbA.select().from(tickets).where(eq(tickets.shopId, ids.shopId))
+    expect(new Set(originTickets.map(({ source }) => source)))
+      .toEqual(new Set(['counter', 'quick_quote', 'tech_quick']))
+    expect(await dbA.select().from(ticketMutationReceipts)
+      .where(eq(ticketMutationReceipts.requestKey, sharedKey))).toHaveLength(1)
+
+    const origins = ['counter', 'quick_quote', 'tech_quick'] as const
+    const receiptRequest = (
+      requestKey: string,
+      conditional: MutationLockRequestV1['receiptConditionalInsert'],
+    ): MutationLockRequestV1 => ({
+      shopId: ids.shopId,
+      actorProfileId: ids.advisorId,
+      profileIds: [ids.advisorId],
+      lockShop: false,
+      customerIds: [],
+      vehicleIds: [],
+      ticketIds: [],
+      jobIds: [],
+      includeAllJobsForTickets: false,
+      includeAllLinesForJobs: false,
+      includeAllQuoteVersionsForTickets: false,
+      includeAllQuoteEventsForTickets: false,
+      sessionIds: [],
+      sessionEventIds: [],
+      vendorAccountIds: [],
+      cannedJobIds: [],
+      receiptRequestKey: requestKey,
+      receiptConditionalInsert: conditional,
+      insertionIntents: { sessions: [], customers: [], vehicles: [], tickets: [], jobs: [] },
+    })
+    const originExpectation = (
+      requestKey: string,
+      operationOrigin: typeof origins[number],
+    ) => ({
+      requestKey,
+      mutationKind: 'create_repair_order' as const,
+      mutationSchemaVersion: 1 as const,
+      targetTicketId: null,
+      envelope: {
+        schemaVersion: 1 as const,
+        mutationKind: 'create_repair_order' as const,
+        operationOrigin,
+        actorProfileId: ids.advisorId,
+        target: { mode: 'quick_create' as const },
+        candidates: [],
+        payload: { concern: 'Constant origin-bound concern' },
+      } satisfies CanonicalMutationEnvelopeV1,
+    })
+    for (const [index, origin] of origins.entries()) {
+      const requestKey = uuid(3_140 + index)
+      const resultTicketId = uuid(3_150 + index)
+      const expectation = originExpectation(requestKey, origin)
+      const prepared: MutationLockRequestV1['receiptConditionalInsert'] = {
+        kind: 'prepared',
+        extension: {
+          lockShop: true,
+          customerIds: [ids.customerId],
+          vehicleIds: [ids.vehicleId],
+          ticketIds: [],
+          jobIds: [],
+          includeAllJobsForTickets: false,
+          includeAllLinesForJobs: false,
+          includeAllQuoteVersionsForTickets: false,
+          includeAllQuoteEventsForTickets: false,
+          sessionIds: [],
+          sessionEventIds: [],
+          vendorAccountIds: [],
+          cannedJobIds: [],
+          insertionIntents: {
+            sessions: [], customers: [], vehicles: [], tickets: [resultTicketId], jobs: [],
+          },
+        },
+      }
+      await runBoundedShopOsMutationV1(dbA, {
+        discover: async () => ({
+          lockRequest: receiptRequest(requestKey, prepared),
+          payload: undefined,
+        }),
+        executeLocked: async (tx, scope) => {
+          await tx.insert(tickets).values({
+            id: resultTicketId,
+            shopId: ids.shopId,
+            ticketNumber: 90 + index,
+            source: origin,
+            customerId: ids.customerId,
+            vehicleId: ids.vehicleId,
+            concern: 'Constant origin-bound concern',
+            createdByProfileId: ids.advisorId,
+          })
+          return insertMutationReceiptPrimitiveV1(tx, scope, {
+            ...expectation,
+            keyring: postgresMutationKeyring,
+            resultTicketId,
+            resultJobIds: [],
+          })
+        },
+      })
+      for (const candidateOrigin of origins) {
+        const classified = await runBoundedShopOsMutationV1(dbB, {
+          discover: async () => ({
+            lockRequest: receiptRequest(requestKey, { kind: 'unavailable' }),
+            payload: undefined,
+          }),
+          executeLocked: (tx, scope) => lockAndClassifyMutationReceiptV1(
+            tx,
+            scope,
+            originExpectation(requestKey, candidateOrigin),
+            postgresMutationKeyring,
+          ),
+        })
+        if (candidateOrigin === origin) {
+          expect(classified).toEqual({
+            kind: 'replay', ticketId: resultTicketId, jobIds: [],
+          })
+        } else {
+          expect(classified).toEqual({ kind: 'conflict' })
+          expect(JSON.stringify(classified)).not.toContain(resultTicketId)
+        }
+      }
+    }
+
+    const recoveryTicketId = uuid(3_130)
+    const recoveryJobId = uuid(3_131)
+    const emptyIntents = {
+      sessions: [], customers: [], vehicles: [], tickets: [], jobs: [],
+    }
+    const recoveryRequest: MutationLockRequestV1 = {
+      shopId: ids.shopId,
+      actorProfileId: ids.advisorId,
+      profileIds: [ids.advisorId],
+      lockShop: true,
+      customerIds: [ids.customerId],
+      vehicleIds: [ids.vehicleId],
+      ticketIds: [],
+      jobIds: [],
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: false,
+      includeAllQuoteEventsForTickets: false,
+      sessionIds: [],
+      sessionEventIds: [],
+      vendorAccountIds: [],
+      cannedJobIds: [],
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents: {
+        ...emptyIntents,
+        tickets: [recoveryTicketId],
+        jobs: [{ id: recoveryJobId, ticketId: recoveryTicketId }],
+      },
+    }
+    let primaryResolved: ResolvedTicketCreationHandle | undefined
+    let primaryFinalized:
+      | Parameters<typeof readFinalizedTicketCreationResultV1>[2]
+      | undefined
+    const beforeRecovery = {
+      tickets: await dbA.select().from(tickets),
+      jobs: await dbA.select().from(ticketJobs),
+      shop: (await dbA.select().from(shops).where(eq(shops.id, ids.shopId)))[0],
+    }
+    const recovered = await runBoundedShopOsMutationV1(dbA, {
+      discover: async () => ({ lockRequest: recoveryRequest, payload: undefined }),
+      executeLocked: async (tx, scope) => {
+        primaryResolved = resolveTicketCreationInLockedScopeV1(tx, scope, {
+          mode: 'insert',
+          origin: createCounterTicketOriginV1(),
+          ticket: {
+            id: recoveryTicketId,
+            customerId: ids.customerId,
+            vehicleId: ids.vehicleId,
+            concern: 'Opaque recovery boundary',
+            whenStarted: null,
+            howOften: null,
+            diagnosticAuthorizedCents: null,
+            diagnosticAuthorizationNote: null,
+          },
+          jobs: [{
+            id: recoveryJobId,
+            title: 'Opaque recovery job',
+            kind: 'diagnostic',
+            requiredSkillTier: 2,
+            assignedTechId: null,
+            sessionId: null,
+            createdFromJobId: null,
+          }],
+          seededLinesByJobIndex: new Map(),
+        })
+        await insertResolvedTicketBatchInTransactionV1(tx, scope, primaryResolved)
+        primaryFinalized = await finalizeResolvedTicketCreationInTransactionV1(
+          tx,
+          scope,
+          primaryResolved,
+          [{
+            ticketId: recoveryTicketId,
+            createdTicket: true,
+            createdJobIds: [recoveryJobId],
+            existingChangedJobIds: [],
+            actorVisibleTicketFieldsChanged: true,
+          }],
+        )
+        throw Object.assign(new Error('force fresh PostgreSQL recovery transaction'), {
+          code: '23505',
+          constraint: 'sessions_pkey',
+        })
+      },
+      uniqueCollisionRecovery: {
+        allowedConstraints: ['sessions_pkey'],
+        executeLocked: async (tx, scope) => {
+          await expect(insertResolvedTicketBatchInTransactionV1(
+            tx,
+            scope,
+            primaryResolved!,
+          )).rejects.toThrow('ticket_creation_kernel_invalid')
+          expect(() => readFinalizedTicketCreationResultV1(
+            tx,
+            scope,
+            primaryFinalized!,
+          )).toThrow('ticket_creation_kernel_invalid')
+          expect(() => readFinalizedTicketCreationResultV1(
+            tx,
+            scope,
+            Object.freeze(Object.create(null)),
+          )).toThrow('ticket_creation_kernel_invalid')
+          await expect(insertResolvedTicketBatchInTransactionV1(
+            tx,
+            scope,
+            Object.freeze(Object.create(null)) as ResolvedTicketCreationHandle,
+          )).rejects.toThrow('ticket_creation_kernel_invalid')
+          return { kind: 'recovered' as const, value: 'opaque-refused' as const }
+        },
+      },
+    })
+    expect(recovered).toBe('opaque-refused')
+    expect(await dbA.select().from(tickets)).toEqual(beforeRecovery.tickets)
+    expect(await dbA.select().from(ticketJobs)).toEqual(beforeRecovery.jobs)
+    expect((await dbA.select().from(shops).where(eq(shops.id, ids.shopId)))[0])
+      .toEqual(beforeRecovery.shop)
+  }, 30_000)
+
+  it('proves PostgreSQL rollback and retryable SQLSTATE boundaries', async () => {
+    const { clientA, dbA } = harness
+    const ids = await seedApprovedProductionFixture(dbA, 3_200)
+    const actor: TicketActor = {
+      profileId: ids.advisorId,
+      shopId: ids.shopId,
+      role: 'owner',
+      skillTier: 3,
+      membershipStatus: 'active',
+      deactivatedAt: null,
+    }
+    const state = async () => ({
+      tickets: await dbA.select().from(tickets),
+      jobs: await dbA.select().from(ticketJobs),
+      lines: await dbA.select().from(jobLines),
+      receipts: await dbA.select().from(ticketMutationReceipts),
+      shop: (await dbA.select().from(shops).where(eq(shops.id, ids.shopId)))[0],
+      vehicle: (await dbA.select().from(vehicles).where(eq(vehicles.id, ids.vehicleId)))[0],
+    })
+    const quickBody = (clientKey: string) => ({
+      vehicleMode: 'existing' as const,
+      existingVehicleId: ids.vehicleId,
+      mileage: 40_300,
+      clientKey,
+      quote: {
+        mode: 'manual' as const,
+        kind: 'maintenance' as const,
+        description: 'Rollback boundary',
+      },
+    })
+
+    const beforeRowWrite = await state()
+    const rowWriteMarker = new Error('forced PostgreSQL row-write rollback')
+    await expect(createQuickTicket(dbA, {
+      actor,
+      body: quickBody(uuid(3_220)),
+    }, {
+      afterTicket: async () => { throw rowWriteMarker },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })).rejects.toBe(rowWriteMarker)
+    expect(await state()).toEqual(beforeRowWrite)
+
+    const template = await createCannedJob(dbA, {
+      actor: { profileId: ids.advisorId },
+      clientKey: uuid(3_221),
+      body: {
+        title: 'Rollback canned',
+        kind: 'repair',
+        defaultRequiredSkillTier: 2,
+        sort: 1,
+        lines: [{
+          kind: 'fee', description: 'Rollback line', sort: 1, priceCents: 500, taxable: true,
+        }],
+      },
+    })
+    if (!template.ok) throw new Error('rollback canned fixture failed')
+    const beforeFinalization = await state()
+    const finalizationMarker = new Error('forced PostgreSQL finalization rollback')
+    await expect(applyCannedJobToTicket(dbA, {
+      actor: { profileId: ids.advisorId },
+      ticketId: ids.ticketId,
+      clientKey: uuid(3_222),
+      cannedJobId: template.cannedJob.id,
+      expectedFingerprint: template.cannedJob.fingerprint,
+      expectedTaxRateBps: 825,
+    }, {
+      afterFinalization: async () => { throw finalizationMarker },
+    })).rejects.toBe(finalizationMarker)
+    expect(await state()).toEqual(beforeFinalization)
+
+    const beforeReceipt = await state()
+    const preReceiptMarker = new Error('forced PostgreSQL pre-receipt rollback')
+    await expect(createQuickTicket(dbA, {
+      actor,
+      body: quickBody(uuid(3_223)),
+    }, {
+      afterFinalization: async () => { throw preReceiptMarker },
+      loadMutationKeyring: () => postgresMutationKeyring,
+    })).rejects.toBe(preReceiptMarker)
+    expect(await state()).toEqual(beforeReceipt)
+
+    for (const [index, code] of ['40001', '40P01'].entries()) {
+      const functionName = `task10_raise_${code}`
+      const sequenceName = `task10_attempts_${code}`
+      await clientA.unsafe(`create sequence ${sequenceName}`)
+      await clientA.unsafe(`
+        create function ${functionName}() returns trigger language plpgsql as $$
+        begin
+          perform nextval('${sequenceName}');
+          raise exception 'forced ${code}' using errcode = '${code}';
+        end $$
+      `)
+      await clientA.unsafe(`
+        create trigger ${functionName}_trigger before insert on tickets
+        for each row execute function ${functionName}()
+      `)
+      const beforeSqlstate = await state()
+      const result = await createQuickTicket(dbA, {
+        actor,
+        body: quickBody(uuid(3_230 + index)),
+      }, { loadMutationKeyring: () => postgresMutationKeyring })
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+      const attempts = await clientA.unsafe(
+        `select last_value::text as "lastValue" from ${sequenceName}`,
+      )
+      expect(attempts[0]?.lastValue).toBe('2')
+      expect(await state()).toEqual(beforeSqlstate)
+      await clientA.unsafe(`drop trigger ${functionName}_trigger on tickets`)
+      await clientA.unsafe(`drop function ${functionName}()`)
+      await clientA.unsafe(`drop sequence ${sequenceName}`)
+    }
+  }, 30_000)
+
+  it('proves bigint multi-job and Packet B production append cardinality', async () => {
     const { clientA, clientB, dbA } = harness
     await seedSharedPostgresRaceParents(dbA)
     const ticketId = uuid(6)

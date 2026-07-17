@@ -1027,10 +1027,10 @@ deployment. As of this design:
 | Truth | Production state | Safe dependency now |
 | --- | --- | --- |
 | Tickets, jobs, job lines, immutable quote versions/events | deployed | Packets A-G may consume only their verified columns |
-| Messaging consent/sends/log migrations `0033`-`0035` | not applied | No production query; Packet H waits |
+| Messaging consent/sends/log migrations | `0033`/`0034` applied and verified; `0035` absent | Consume only verified `0033`/`0034` truth; Packet H still waits for `0035` and its other dependencies |
 | Parts-order schema/handlers from Rows 38/41 | not shipped | Base lifecycle uses `job_lines.partStatus`; Packet H waits |
 | Advisor response inbox Rows 36/37 | not shipped | Base recovery uses direct RO/history; Packet F owns role-home exceptions |
-| Continuity fields/receipts/revisions | not applied | No declaration/read/write may deploy before the continuity DDL gate |
+| Continuity fields/receipts/revisions (`0037`) | absent | No declaration/read/write may deploy before the continuity DDL gate |
 
 Code must never query an unavailable table or column. Build-time schema
 declarations are not proof of production availability.

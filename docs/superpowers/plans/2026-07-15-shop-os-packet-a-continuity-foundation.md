@@ -3321,7 +3321,7 @@ Return a gate packet containing:
 - exact Supabase migration name `shop_os_repair_order_continuity_foundation`;
 - additive objects/constraints/indexes/policies/triggers summary;
 - local preservation, security, race, test, typecheck, build, and independent-review proof;
-- read-only live preflight showing `0037` is absent and migrations `0033`–`0035` remain unavailable without reading customer content;
+- read-only live preflight showing `0033`/`0034` applied and verified while `0035` and `0037` remain absent, without reading customer content;
 - exact post-apply verification and rollback/stop conditions.
 - the two required mutation-HMAC environment variable names and proof that no
   values are committed, with configuration explicitly deferred to the separate
