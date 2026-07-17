@@ -97,11 +97,70 @@ describe('Shop OS approved simple work', () => {
 
   afterEach(async () => close())
 
+  it('routes start, note, and complete through the shared coordinator and one finalizer', () => {
+    const source = readFileSync('lib/shop-os/simple-work.ts', 'utf8')
+    const mutation = source.slice(
+      source.indexOf('export async function mutateSimpleWork'),
+      source.indexOf('export async function getSimpleWorkWorkspace'),
+    )
+    expect(mutation).toContain('runBoundedShopOsMutationV1')
+    expect(mutation).toContain('finalizeMutationRevisionsV1')
+    expect(mutation.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(mutation).not.toContain('.transaction(')
+    expect(mutation).not.toContain(".for('update'")
+  })
+
   it('starts exact approved assigned simple work and replays without another write', async () => {
     const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
     expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
     const second = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
     expect(second).toMatchObject({ ok: true, changed: false, work: { status: 'in_progress' } })
+  })
+
+  it('applies the exact revision classification for start, note, complete, and replay', async () => {
+    const readState = async () => ({
+      job: (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0],
+      ticket: (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0],
+    })
+    const initial = await readState()
+
+    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
+    expect(started).toMatchObject({ ok: true, changed: true })
+    if (!started.ok) throw new Error('start failed')
+    const afterStart = await readState()
+    expect(afterStart.job.revision).toBe(initial.job.revision + 1n)
+    expect(afterStart.ticket.projectionRevision).toBe(initial.ticket.projectionRevision + 1n)
+    expect(afterStart.ticket.continuityRevision).toBe(initial.ticket.continuityRevision + 1n)
+
+    const noted = await mutateSimpleWork(db, {
+      actor, ticketId, jobId,
+      body: { action: 'save_note', note: 'Installed and torqued.', expectedUpdatedAt: started.work.updatedAt },
+    })
+    expect(noted).toMatchObject({ ok: true, changed: true })
+    if (!noted.ok) throw new Error('note failed')
+    const afterNote = await readState()
+    expect(afterNote.job.revision).toBe(afterStart.job.revision + 1n)
+    expect(afterNote.ticket.projectionRevision).toBe(afterStart.ticket.projectionRevision + 1n)
+    expect(afterNote.ticket.continuityRevision).toBe(afterStart.ticket.continuityRevision)
+
+    const completed = await mutateSimpleWork(db, {
+      actor, ticketId, jobId,
+      body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+    })
+    expect(completed).toMatchObject({ ok: true, changed: true })
+    const afterComplete = await readState()
+    expect(afterComplete.job.revision).toBe(afterNote.job.revision + 1n)
+    expect(afterComplete.ticket.projectionRevision).toBe(afterNote.ticket.projectionRevision + 1n)
+    expect(afterComplete.ticket.continuityRevision).toBe(afterNote.ticket.continuityRevision + 1n)
+
+    expect(await mutateSimpleWork(db, {
+      actor, ticketId, jobId,
+      body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+    })).toMatchObject({ ok: true, changed: false })
+    const afterReplay = await readState()
+    expect(afterReplay.job.revision).toBe(afterComplete.job.revision)
+    expect(afterReplay.ticket.projectionRevision).toBe(afterComplete.ticket.projectionRevision)
+    expect(afterReplay.ticket.continuityRevision).toBe(afterComplete.ticket.continuityRevision)
   })
 
   it('fails closed for stale assignment, inactive actor, missing event, or snapshot kind drift', async () => {
@@ -113,6 +172,10 @@ describe('Shop OS approved simple work', () => {
     await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } }))
       .resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(profiles).set({ deactivatedAt: null }).where(eq(profiles.id, techId))
+    await db.update(ticketJobs).set({ requiredSkillTier: 3 }).where(eq(ticketJobs.id, jobId))
+    await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } }))
+      .resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(ticketJobs).set({ requiredSkillTier: 2 }).where(eq(ticketJobs.id, jobId))
     await db.insert(quoteEvents).values({
       id: uuid(61), shopId, ticketId, jobId, quoteVersionId: versionId,
       kind: 'declined', actorProfileId: advisorId, approvedVia: null, requestKey: uuid(71),
@@ -127,6 +190,27 @@ describe('Shop OS approved simple work', () => {
     await expect(mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } }))
       .resolves.toEqual({ ok: false, error: 'not_authorized' })
   })
+
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back domain state and revisions when %s fails',
+    async (seam) => {
+      const beforeJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const beforeTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+
+      await expect(mutateSimpleWork(
+        db,
+        { actor, ticketId, jobId, body: { action: 'start' } },
+        { [seam]: async () => { throw new Error(`forced simple-work ${seam} rollback`) } },
+      )).rejects.toThrow(`forced simple-work ${seam} rollback`)
+
+      const afterJob = (await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0]
+      const afterTicket = (await db.select().from(tickets).where(eq(tickets.id, ticketId)))[0]
+      expect(afterJob.workStatus).toBe(beforeJob.workStatus)
+      expect(afterJob.revision).toBe(beforeJob.revision)
+      expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision)
+      expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    },
+  )
 
   it('uses optimistic note writes and treats an exact delayed replay as a no-op', async () => {
     const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })

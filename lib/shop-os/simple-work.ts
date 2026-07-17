@@ -3,17 +3,31 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
+  customers,
+  jobLines,
   profiles,
   quoteEvents,
   quoteVersions,
+  sessions,
   ticketJobs,
   tickets,
+  vehicles,
+  vendorAccounts,
 } from '@/lib/db/schema'
 import { isShopRole } from '@/lib/shop-os/capabilities'
 import {
   isLockUnavailable,
   quoteSnapshotContainsExactJob,
 } from '@/lib/shop-os/quotes'
+import { assertLiveLockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
+import { ShopOsMutationNotFound } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
+import { ShopOsMutationConflict } from '@/lib/shop-os/continuity/mutation-foundation/conflicts'
+import type {
+  LockedMutationScopeV1,
+  MutationLockRequestV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import { finalizeMutationRevisionsV1 } from '@/lib/shop-os/continuity/mutation-foundation/revisions'
+import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
 export type SimpleWorkActor = { profileId: string; shopId: string }
 export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict'
@@ -28,6 +42,12 @@ type WorkProjection = {
 export type SimpleWorkMutationResult =
   | { ok: true; changed: boolean; work: WorkProjection }
   | SimpleWorkFailure
+
+export type SimpleWorkMutationDependencies = Readonly<{
+  afterLocks?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
+}>
 
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const actionSchema = z.discriminatedUnion('action', [
@@ -154,6 +174,222 @@ async function lockContext(
   return { ticket, job, versions, decisions }
 }
 
+type SimpleWorkDiscovery = Readonly<{
+  kind: 'ready' | 'not_found'
+  separateChainIds: readonly string[]
+  closureFingerprint: string | null
+}>
+
+function simpleUuidList(values: readonly (string | null | undefined)[]): readonly string[] {
+  return Object.freeze([...new Set(values.filter((value): value is string =>
+    typeof value === 'string'))].sort())
+}
+
+function simpleRowsById<T extends { id: string }>(rows: readonly T[]): readonly T[] {
+  return [...rows].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function simpleEmptyInsertionIntents() {
+  return Object.freeze({
+    sessions: Object.freeze([]), customers: Object.freeze([]),
+    vehicles: Object.freeze([]), tickets: Object.freeze([]), jobs: Object.freeze([]),
+  })
+}
+
+function simplePersistedFingerprint(value: unknown): string {
+  const normalize = (member: unknown): unknown => {
+    if (member instanceof Date) return { $date: member.toISOString() }
+    if (typeof member === 'bigint') return { $bigint: member.toString() }
+    if (member === null || member === undefined || ['string', 'number', 'boolean'].includes(typeof member)) {
+      return member ?? null
+    }
+    if (Array.isArray(member)) return member.map(normalize)
+    if (typeof member !== 'object') throw new TypeError('invalid_simple_work_discovery_value')
+    return Object.fromEntries(Object.keys(member as Record<string, unknown>).sort()
+      .map((key) => [key, normalize((member as Record<string, unknown>)[key])]))
+  }
+  return JSON.stringify(normalize(value))
+}
+
+async function discoverSimpleWorkMutation(
+  tx: AppDb,
+  input: Readonly<{ shopId: string; actorProfileId: string; ticketId: string; jobId: string }>,
+): Promise<Readonly<{ lockRequest: MutationLockRequestV1; payload: SimpleWorkDiscovery }>> {
+  const actorOnly = () => Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds: Object.freeze([input.actorProfileId]),
+      lockShop: false,
+      customerIds: Object.freeze([]), vehicleIds: Object.freeze([]),
+      ticketIds: Object.freeze([]), jobIds: Object.freeze([]),
+      includeAllJobsForTickets: false, includeAllLinesForJobs: false,
+      includeAllQuoteVersionsForTickets: false, includeAllQuoteEventsForTickets: false,
+      sessionIds: Object.freeze([]), sessionEventIds: Object.freeze([]),
+      vendorAccountIds: Object.freeze([]), cannedJobIds: Object.freeze([]),
+      receiptRequestKey: null, receiptConditionalInsert: null,
+      insertionIntents: simpleEmptyInsertionIntents(),
+    }),
+    payload: Object.freeze({
+      kind: 'not_found' as const,
+      separateChainIds: Object.freeze([]),
+      closureFingerprint: null,
+    }),
+  })
+  const [target] = await tx.select().from(tickets).where(and(
+    eq(tickets.shopId, input.shopId), eq(tickets.id, input.ticketId),
+  )).limit(1)
+  const [targetJob] = target ? await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId),
+    eq(ticketJobs.id, input.jobId),
+  )).limit(1) : []
+  if (!target || !targetJob) return actorOnly()
+
+  const ticketRows = [target]
+  const seenTicketIds = new Set([target.id])
+  let parentId = target.separateFromTicketId
+  while (parentId !== null) {
+    if (ticketRows.length >= 64 || seenTicketIds.has(parentId)) {
+      throw new ShopOsMutationConflict()
+    }
+    const [parent] = await tx.select().from(tickets).where(and(
+      eq(tickets.shopId, input.shopId), eq(tickets.id, parentId),
+    )).limit(1)
+    if (!parent) throw new ShopOsMutationConflict()
+    ticketRows.push(parent)
+    seenTicketIds.add(parent.id)
+    parentId = parent.separateFromTicketId
+  }
+  const ticketIds = simpleUuidList(ticketRows.map(({ id }) => id))
+  const jobs = await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, input.shopId), inArray(ticketJobs.ticketId, ticketIds),
+  )).orderBy(ticketJobs.id)
+  const jobIds = simpleUuidList(jobs.map(({ id }) => id))
+  const lines = jobIds.length === 0 ? [] : await tx.select().from(jobLines).where(and(
+    eq(jobLines.shopId, input.shopId), inArray(jobLines.jobId, jobIds),
+  )).orderBy(jobLines.id)
+  const versions = await tx.select().from(quoteVersions).where(and(
+    eq(quoteVersions.shopId, input.shopId), inArray(quoteVersions.ticketId, ticketIds),
+  )).orderBy(quoteVersions.id)
+  const events = await tx.select().from(quoteEvents).where(and(
+    eq(quoteEvents.shopId, input.shopId), inArray(quoteEvents.ticketId, ticketIds),
+  )).orderBy(quoteEvents.id)
+  const sessionIds = simpleUuidList(jobs.map(({ sessionId }) => sessionId))
+  const sessionRows = sessionIds.length === 0 ? [] : await tx.select().from(sessions).where(and(
+    eq(sessions.shopId, input.shopId), inArray(sessions.id, sessionIds),
+  )).orderBy(sessions.id)
+  const vehicleIds = simpleUuidList([
+    ...ticketRows.map(({ vehicleId }) => vehicleId),
+    ...sessionRows.map(({ vehicleId }) => vehicleId),
+  ])
+  const vehicleRows = vehicleIds.length === 0 ? [] : (await tx.select({ row: vehicles })
+    .from(vehicles).innerJoin(customers, eq(customers.id, vehicles.customerId))
+    .where(and(eq(customers.shopId, input.shopId), inArray(vehicles.id, vehicleIds)))
+    .orderBy(vehicles.id)).map(({ row }) => row)
+  const customerIds = simpleUuidList([
+    ...ticketRows.map(({ customerId }) => customerId),
+    ...vehicleRows.map(({ customerId }) => customerId),
+  ])
+  const customerRows = customerIds.length === 0 ? [] : await tx.select().from(customers).where(and(
+    eq(customers.shopId, input.shopId), inArray(customers.id, customerIds),
+  )).orderBy(customers.id)
+  const vendorAccountIds = simpleUuidList(lines.map(({ vendorAccountId }) => vendorAccountId))
+  const vendorRows = vendorAccountIds.length === 0 ? [] : await tx.select().from(vendorAccounts)
+    .where(and(eq(vendorAccounts.shopId, input.shopId), inArray(vendorAccounts.id, vendorAccountIds)))
+    .orderBy(vendorAccounts.id)
+  const profileIds = simpleUuidList([
+    input.actorProfileId,
+    ...ticketRows.flatMap((ticket) => [
+      ticket.createdByProfileId, ticket.canceledByProfileId,
+      ticket.deliveredByProfileId, ticket.closedByProfileId,
+    ]),
+    ...jobs.flatMap((job) => [
+      job.assignedTechId, job.createdByProfileId, job.statementConfirmedByProfileId,
+    ]),
+    ...lines.flatMap((line) => [line.orderedByProfileId, line.receivedByProfileId]),
+    ...sessionRows.map(({ techId }) => techId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.map(({ actorProfileId }) => actorProfileId),
+  ])
+  const profileRows = await tx.select().from(profiles).where(and(
+    eq(profiles.shopId, input.shopId), inArray(profiles.id, profileIds),
+  )).orderBy(profiles.id)
+  const closureFingerprint = simplePersistedFingerprint({
+    profiles: simpleRowsById(profileRows), customers: simpleRowsById(customerRows),
+    vehicles: simpleRowsById(vehicleRows), tickets: simpleRowsById(ticketRows),
+    jobs: simpleRowsById(jobs), lines: simpleRowsById(lines),
+    versions: simpleRowsById(versions), events: simpleRowsById(events),
+    sessions: simpleRowsById(sessionRows), vendors: simpleRowsById(vendorRows),
+  })
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId, actorProfileId: input.actorProfileId, profileIds,
+      lockShop: false, customerIds, vehicleIds, ticketIds, jobIds,
+      includeAllJobsForTickets: true, includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: true, includeAllQuoteEventsForTickets: true,
+      sessionIds, sessionEventIds: Object.freeze([]), vendorAccountIds,
+      cannedJobIds: Object.freeze([]), receiptRequestKey: null,
+      receiptConditionalInsert: null, insertionIntents: simpleEmptyInsertionIntents(),
+    }),
+    payload: Object.freeze({
+      kind: 'ready' as const,
+      separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
+      closureFingerprint,
+    }),
+  })
+}
+
+function resolveSimpleWorkScope(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  discovery: SimpleWorkDiscovery,
+  ticketId: string,
+  jobId: string,
+): LockedContext {
+  assertLiveLockedMutationScopeV1(tx, scope)
+  if (discovery.kind === 'not_found') throw new ShopOsMutationNotFound()
+  if (
+    !isShopRole(scope.actor.role) || scope.profiles.length !== scope.request.profileIds.length ||
+    scope.profiles.some(({ id, shopId }) =>
+      shopId !== scope.actor.shopId || !scope.request.profileIds.includes(id))
+  ) throw new ShopOsMutationNotFound()
+  const graphById = new Map(scope.tickets.map((graph) => [graph.ticket.id, graph] as const))
+  if (
+    discovery.separateChainIds.length < 1 || discovery.separateChainIds[0] !== ticketId ||
+    discovery.separateChainIds.length !== scope.tickets.length ||
+    new Set(discovery.separateChainIds).size !== discovery.separateChainIds.length
+  ) throw new ShopOsMutationConflict()
+  for (let index = 0; index < discovery.separateChainIds.length; index += 1) {
+    const graph = graphById.get(discovery.separateChainIds[index]!)
+    if (!graph || graph.ticket.separateFromTicketId !==
+      (discovery.separateChainIds[index + 1] ?? null)) throw new ShopOsMutationConflict()
+  }
+  const lockedFingerprint = simplePersistedFingerprint({
+    profiles: simpleRowsById(scope.profiles), customers: simpleRowsById(scope.customers),
+    vehicles: simpleRowsById(scope.vehicles),
+    tickets: simpleRowsById(scope.tickets.map(({ ticket }) => ticket)),
+    jobs: simpleRowsById(scope.tickets.flatMap(({ jobs }) => jobs)),
+    lines: simpleRowsById(scope.tickets.flatMap(({ lines }) => lines)),
+    versions: simpleRowsById(scope.tickets.flatMap(({ versions }) => versions)),
+    events: simpleRowsById(scope.tickets.flatMap(({ events }) => events)),
+    sessions: simpleRowsById(scope.sessions), vendors: simpleRowsById(scope.vendorAccounts),
+  })
+  if (lockedFingerprint !== discovery.closureFingerprint) throw new ShopOsMutationConflict()
+  const graph = graphById.get(ticketId)
+  const job = graph?.jobs.find(({ id }) => id === jobId)
+  if (!graph || !job || job.assignedTechId !== scope.actor.id ||
+    typeof scope.actor.skillTier !== 'number' || scope.actor.skillTier < job.requiredSkillTier ||
+    (job.kind !== 'repair' && job.kind !== 'maintenance') || job.sessionId !== null) {
+    throw new ShopOsMutationNotFound()
+  }
+  const decisions = graph.events.filter((event) =>
+    event.jobId === job.id && (event.kind === 'approved' || event.kind === 'declined'))
+    .map(({ id, kind, jobId: eventJobId, quoteVersionId, createdAt }) => ({
+      id, kind, jobId: eventJobId, quoteVersionId, createdAt,
+    }))
+  return { ticket: graph.ticket, job, versions: [...graph.versions], decisions }
+}
+
 function nextTimestamp(previous: Date) {
   return sql`greatest(clock_timestamp(), ${previous}::timestamptz + interval '1 millisecond')`
 }
@@ -161,6 +397,7 @@ function nextTimestamp(previous: Date) {
 export async function mutateSimpleWork(
   db: AppDb,
   input: { actor: SimpleWorkActor; ticketId: unknown; jobId: unknown; body: unknown },
+  dependencies: SimpleWorkMutationDependencies = {},
 ): Promise<SimpleWorkMutationResult> {
   const parsedActor = z.strictObject({ profileId: uuidSchema, shopId: uuidSchema }).safeParse(input.actor)
   const parsedTicket = uuidSchema.safeParse(input.ticketId)
@@ -170,13 +407,18 @@ export async function mutateSimpleWork(
     return failure('invalid_input')
   }
   try {
-    return await db.transaction(async (tx) => {
-      const context = await lockContext(tx as AppDb, {
-        actor: parsedActor.data,
+    return await runBoundedShopOsMutationV1<SimpleWorkMutationResult, SimpleWorkDiscovery>(db, {
+      discover: async (tx) => discoverSimpleWorkMutation(tx, {
+        shopId: parsedActor.data.shopId,
+        actorProfileId: parsedActor.data.profileId,
         ticketId: parsedTicket.data,
         jobId: parsedJob.data,
-      })
-      if (!context) return failure('not_found')
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+      const context = resolveSimpleWorkScope(
+        tx, scope, discovery, parsedTicket.data, parsedJob.data,
+      )
+      await dependencies.afterLocks?.()
       const { job } = context
       const action = parsedAction.data
 
@@ -185,6 +427,7 @@ export async function mutateSimpleWork(
       }
       if (context.ticket.status !== 'open') return failure('not_found')
 
+      let updated: typeof ticketJobs.$inferSelect | undefined
       if (action.action === 'start') {
         if (job.workStatus === 'in_progress') {
           return hasPinnedApproval(context, false)
@@ -193,7 +436,7 @@ export async function mutateSimpleWork(
         }
         if (job.workStatus !== 'open') return failure('not_ready')
         if (!hasPinnedApproval(context, true)) return failure('not_authorized')
-        const [updated] = await (tx as AppDb)
+        ;[updated] = await tx
           .update(ticketJobs)
           .set({ workStatus: 'in_progress', updatedAt: nextTimestamp(job.updatedAt) })
           .where(and(
@@ -202,55 +445,57 @@ export async function mutateSimpleWork(
             eq(ticketJobs.workStatus, 'open'),
           ))
           .returning()
-        return updated
-          ? { ok: true, changed: true, work: safeWork(updated) }
-          : failure('conflict', true)
-      }
-
-      if (job.workStatus !== 'in_progress') return failure('not_ready')
-      if (!hasPinnedApproval(context, false)) return failure('not_authorized')
-
-      if (action.action === 'save_note') {
-        if (job.workNotes === action.note) {
-          return { ok: true, changed: false, work: safeWork(job) }
+      } else {
+        if (job.workStatus !== 'in_progress') return failure('not_ready')
+        if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+        if (action.action === 'save_note') {
+          if (job.workNotes === action.note) {
+            return { ok: true, changed: false, work: safeWork(job) }
+          }
+          if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
+            return failure('conflict', true)
+          }
+          ;[updated] = await tx
+            .update(ticketJobs)
+            .set({ workNotes: action.note, updatedAt: nextTimestamp(job.updatedAt) })
+            .where(and(
+              eq(ticketJobs.shopId, parsedActor.data.shopId),
+              eq(ticketJobs.id, job.id),
+              eq(ticketJobs.updatedAt, job.updatedAt),
+            ))
+            .returning()
+        } else {
+          if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
+            return failure('conflict', true)
+          }
+          if (!job.workNotes?.trim()) return failure('not_ready')
+          ;[updated] = await tx
+            .update(ticketJobs)
+            .set({ workStatus: 'done', updatedAt: nextTimestamp(job.updatedAt) })
+            .where(and(
+              eq(ticketJobs.shopId, parsedActor.data.shopId),
+              eq(ticketJobs.id, job.id),
+              eq(ticketJobs.workStatus, 'in_progress'),
+              eq(ticketJobs.updatedAt, job.updatedAt),
+            ))
+            .returning()
         }
-        if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
-          return failure('conflict', true)
-        }
-        const [updated] = await (tx as AppDb)
-          .update(ticketJobs)
-          .set({ workNotes: action.note, updatedAt: nextTimestamp(job.updatedAt) })
-          .where(and(
-            eq(ticketJobs.shopId, parsedActor.data.shopId),
-            eq(ticketJobs.id, job.id),
-            eq(ticketJobs.updatedAt, job.updatedAt),
-          ))
-          .returning()
-        return updated
-          ? { ok: true, changed: true, work: safeWork(updated) }
-          : failure('conflict', true)
       }
-
-      if (job.updatedAt.getTime() !== new Date(action.expectedUpdatedAt).getTime()) {
-        return failure('conflict', true)
-      }
-      if (!job.workNotes?.trim()) return failure('not_ready')
-      const [updated] = await (tx as AppDb)
-        .update(ticketJobs)
-        .set({ workStatus: 'done', updatedAt: nextTimestamp(job.updatedAt) })
-        .where(and(
-          eq(ticketJobs.shopId, parsedActor.data.shopId),
-          eq(ticketJobs.id, job.id),
-          eq(ticketJobs.workStatus, 'in_progress'),
-          eq(ticketJobs.updatedAt, job.updatedAt),
-        ))
-        .returning()
-      return updated
-        ? { ok: true, changed: true, work: safeWork(updated) }
-        : failure('conflict', true)
+      if (!updated) throw new ShopOsMutationConflict()
+      await dependencies.afterWrite?.()
+      await finalizeMutationRevisionsV1(tx, scope, {
+        sessionIds: [], customerIds: [], vehicleIds: [],
+      }, [{
+        ticketId: parsedTicket.data, createdTicket: false, createdJobIds: [],
+        existingChangedJobIds: [job.id], actorVisibleTicketFieldsChanged: true,
+      }])
+      await dependencies.afterFinalization?.()
+      return { ok: true, changed: true, work: safeWork(updated) }
+      },
     })
   } catch (error) {
-    if (isLockUnavailable(error)) return failure('conflict', true)
+    if (error instanceof ShopOsMutationNotFound) return failure('not_found')
+    if (error instanceof ShopOsMutationConflict) return failure('conflict', true)
     throw error
   }
 }
