@@ -104,6 +104,9 @@ const IDs = {
   terminal: '60000000-0000-0000-0000-000000000005',
   separate: '60000000-0000-0000-0000-000000000006',
   canceledTerminal: '60000000-0000-0000-0000-000000000007',
+  legacyCanceledWhitespace: '60000000-0000-0000-0000-000000000008',
+  legacyCanceledEmpty: '60000000-0000-0000-0000-000000000009',
+  legacyCanceledLong: '60000000-0000-0000-0000-000000000010',
   jobA: '70000000-0000-0000-0000-000000000001',
   jobA2: '70000000-0000-0000-0000-000000000002',
   jobB: '70000000-0000-0000-0000-000000000003',
@@ -651,6 +654,75 @@ describe('Shop OS continuity source schema guards', () => {
         cancel_reason_code: null,
         close_disposition: null,
       })
+    } finally {
+      await client.close()
+    }
+  }, 30_000)
+
+  it('keeps pre-0037 canceled tickets with legacy reason shapes updateable for unrelated revision writes', async () => {
+    const client = await createPreContinuityDb()
+    try {
+      const longLegacyReason = `x${'y'.repeat(2_000)}`
+      await client.exec(`
+        insert into shops (id, name) values ('${IDs.shopA}', 'Legacy shop');
+        insert into profiles (id, user_id, shop_id, full_name)
+          values ('${IDs.profileA}', '${IDs.userA}', '${IDs.shopA}', 'Legacy owner');
+        insert into tickets
+          (id, shop_id, ticket_number, source, concern, status, created_by_profile_id)
+        values
+          ('${IDs.legacyCanceledWhitespace}', '${IDs.shopA}', 43, 'tech_quick',
+           'Whitespace legacy cancellation', 'canceled', '${IDs.profileA}'),
+          ('${IDs.legacyCanceledEmpty}', '${IDs.shopA}', 44, 'tech_quick',
+           'Empty legacy cancellation', 'canceled', '${IDs.profileA}'),
+          ('${IDs.legacyCanceledLong}', '${IDs.shopA}', 45, 'tech_quick',
+           'Long legacy cancellation', 'canceled', '${IDs.profileA}');
+        update tickets
+        set canceled_at = '2026-07-02T12:00:00Z',
+            canceled_by_profile_id = '${IDs.profileA}',
+            canceled_reason = case id
+              when '${IDs.legacyCanceledWhitespace}' then ' legacy cancellation '
+              when '${IDs.legacyCanceledEmpty}' then ''
+              else '${longLegacyReason}'
+            end
+        where id in (
+          '${IDs.legacyCanceledWhitespace}',
+          '${IDs.legacyCanceledEmpty}',
+          '${IDs.legacyCanceledLong}'
+        );
+      `)
+
+      const migration = await readOptional(MIGRATION_PATH)
+      expect(migration, 'source migration 0037 must exist').not.toBe('')
+      if (!migration) return
+      await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+      for (const ticketId of [
+        IDs.legacyCanceledWhitespace,
+        IDs.legacyCanceledEmpty,
+        IDs.legacyCanceledLong,
+      ]) {
+        await expect(client.exec(`
+          update tickets
+          set projection_revision = projection_revision + 1
+          where id = '${ticketId}'
+        `)).resolves.toBeDefined()
+      }
+
+      const result = await client.query<{ id: string; projection_revision: number }>(`
+        select id, projection_revision
+        from tickets
+        where id in (
+          '${IDs.legacyCanceledWhitespace}',
+          '${IDs.legacyCanceledEmpty}',
+          '${IDs.legacyCanceledLong}'
+        )
+        order by ticket_number
+      `)
+      expect(result.rows).toEqual([
+        { id: IDs.legacyCanceledWhitespace, projection_revision: 1 },
+        { id: IDs.legacyCanceledEmpty, projection_revision: 1 },
+        { id: IDs.legacyCanceledLong, projection_revision: 1 },
+      ])
     } finally {
       await client.close()
     }

@@ -17,7 +17,6 @@ export type {
   CloseDisposition,
   ContinuitySignatureV1,
   CreatedTicketBatchV1,
-  FinalizedTicketCreationV1,
   LockedActiveActorV1,
   LockedTicketGraphV1,
   MaterializedTicketIntakeIdentityV1,

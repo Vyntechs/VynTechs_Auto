@@ -35,7 +35,7 @@ export function authorizeAdaptiveMutationInLockedScopeV1(
   if (
     scope.actor.id !== input.actor.profileId ||
     scope.actor.shopId !== input.actor.shopId ||
-    scope.actor.role !== 'tech' ||
+    !['tech', 'advisor', 'parts', 'owner'].includes(scope.actor.role) ||
     typeof scope.actor.skillTier !== 'number' ||
     !actorProfile || actorProfile.userId !== input.actor.userId ||
     actorProfile.shopId !== scope.actor.shopId
@@ -168,6 +168,7 @@ export async function authorizeAdaptiveMutation(
       eq(profiles.userId, input.actor.userId),
       eq(profiles.membershipStatus, 'active'),
       isNotNull(profiles.membershipActivatedAt),
+      isNotNull(profiles.skillTier),
       isNull(profiles.deactivatedAt),
       inArray(profiles.role, ['tech', 'advisor', 'parts', 'owner']),
     ))

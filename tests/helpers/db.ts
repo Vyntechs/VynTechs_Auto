@@ -95,7 +95,7 @@ type RepairOrderContinuityMarkers = {
 
 const REPAIR_ORDER_CONTINUITY_DIGESTS = {
   columns: 'a7a4175a8645a531b85d2eb16d9153e333f157d960d4af3ddd42ee3fcbdbbbd5',
-  constraints: 'b06169130a7f030683ae7678dc88100340e924f34eb9e8c19ec1837674619f93',
+  constraints: '086c0e672c03132f7b70145a841fe27a81bc54dd1006ec89bf4f8ab580accf93',
   indexes: '2a895ef2f000ab463f0418c0b763ca727cf2fa3834297414968283c46e1cfff3',
   functions: '53d63957fe6f5a4a2aad953e925ab7d3436c1e5d8ffe9f5c79944d0e56630e5f',
   triggers: '0b42b76cd9ddd336440a32f1ed6695c2a6570628e17de0265b6454f33970b48f',

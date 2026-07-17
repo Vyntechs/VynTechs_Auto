@@ -257,6 +257,45 @@ describe('adaptive diagnostic eligibility', () => {
     await expect(lockedAuthorize()).resolves.toBeNull()
   })
 
+  it.each(['tech', 'advisor', 'parts', 'owner'] as const)(
+    'preserves adaptive authorization for an active non-null-tier %s',
+    async (role) => {
+      await db.update(profiles).set({ role }).where(eq(profiles.id, actor.profileId))
+
+      await expect(authorizeAdaptiveMutation(db, {
+        actor,
+        sessionId,
+        expectedRevision: 0,
+      }, paid)).resolves.toEqual({ sessionId, jobId, revision: 0 })
+      await expect(lockedAuthorize()).resolves.toEqual({ sessionId, jobId, revision: 0 })
+    },
+  )
+
+  it('refuses an otherwise active actor whose skill tier is null', async () => {
+    await db.update(profiles).set({ skillTier: null }).where(eq(profiles.id, actor.profileId))
+
+    await expect(authorizeAdaptiveMutation(db, {
+      actor,
+      sessionId,
+      expectedRevision: 0,
+    }, paid)).resolves.toBeNull()
+    await expect(lockedAuthorize()).resolves.toBeNull()
+  })
+
+  it.each([
+    ['inactive actor', { deactivatedAt: new Date('2026-07-11T12:10:00Z') }],
+    ['unsupported actor role', { role: 'customer' }],
+  ])('refuses an %s before locked adaptive authorization', async (_name, patch) => {
+    await db.update(profiles).set(patch).where(eq(profiles.id, actor.profileId))
+
+    await expect(authorizeAdaptiveMutation(db, {
+      actor,
+      sessionId,
+      expectedRevision: 0,
+    }, paid)).resolves.toBeNull()
+    await expect(lockedAuthorize()).rejects.toThrow()
+  })
+
   it('does not invalidate sound history when a non-actor referenced profile is deactivated', async () => {
     await db.update(profiles).set({ deactivatedAt: new Date() })
       .where(eq(profiles.id, otherActor.profileId))

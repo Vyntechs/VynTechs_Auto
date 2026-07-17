@@ -439,11 +439,12 @@ export const tickets = pgTable(
     ),
     check(
       'tickets_canceled_reason_bounded',
-      sql`(${table.canceledReason} is null
-          or (${table.canceledReason} = btrim(${table.canceledReason})
-            and char_length(${table.canceledReason}) between 1 and 2000))
-        and (${table.cancelReasonCode} is distinct from 'other'
-          or ${table.canceledReason} is not null)`,
+      sql`${table.cancelReasonCode} is null
+        or ((${table.canceledReason} is null
+            or (${table.canceledReason} = btrim(${table.canceledReason})
+              and char_length(${table.canceledReason}) between 1 and 2000))
+          and (${table.cancelReasonCode} is distinct from 'other'
+            or ${table.canceledReason} is not null))`,
     ),
     check(
       'tickets_close_note_bounded',

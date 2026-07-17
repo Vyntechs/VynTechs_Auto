@@ -359,6 +359,7 @@ describe('ShopOS continuity writer source inventory', () => {
     expect(barrel).not.toMatch(/from ['"]\.\/keyring(?:\.server)?['"]/)
     expect(barrel).not.toMatch(/from ['"]\.\/ticket-origin\.server['"]/)
     expect(barrel).not.toMatch(/createMutationAttemptCapabilityV1|bindLockedMutationScopeToAttemptV1|insertMutationReceiptPrimitiveV1/)
+    expect(barrel).not.toContain('FinalizedTicketCreationV1')
 
     const allFiles = [...(await applicationSources('lib')), ...(await applicationSources('app'))]
     const all = await Promise.all(allFiles.map(async (file) => ({ file, text: await source(file) })))

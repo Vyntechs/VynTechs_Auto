@@ -90,14 +90,17 @@ alter table public.tickets
     ) not valid,
   add constraint tickets_canceled_reason_bounded
     check (
-      (
-        canceled_reason is null
-        or (
-          canceled_reason = btrim(canceled_reason)
-          and char_length(canceled_reason) between 1 and 2000
+      cancel_reason_code is null
+      or (
+        (
+          canceled_reason is null
+          or (
+            canceled_reason = btrim(canceled_reason)
+            and char_length(canceled_reason) between 1 and 2000
+          )
         )
+        and (cancel_reason_code is distinct from 'other' or canceled_reason is not null)
       )
-      and (cancel_reason_code is distinct from 'other' or canceled_reason is not null)
     ) not valid,
   add constraint tickets_close_note_bounded
     check (
