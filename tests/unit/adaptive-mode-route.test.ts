@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -92,8 +93,8 @@ describe('updateAdaptiveModeForUser', () => {
     ]).returning()
     otherShopId = otherShop.id
     const [tech, otherTech] = await db.insert(profiles).values([
-      { id: uuid(10), userId: uuid(20), shopId: shop.id, fullName: 'Taylor', role: 'tech' },
-      { id: uuid(11), userId: uuid(21), shopId: shop.id, fullName: 'Terry', role: 'tech' },
+      { id: uuid(10), userId: uuid(20), shopId: shop.id, fullName: 'Taylor', role: 'tech', skillTier: 2 },
+      { id: uuid(11), userId: uuid(21), shopId: shop.id, fullName: 'Terry', role: 'tech', skillTier: 2 },
     ]).returning()
     actor = { userId: tech.userId, profileId: tech.id, shopId: shop.id }
     otherActor = { userId: otherTech.userId, profileId: otherTech.id, shopId: shop.id }
@@ -222,13 +223,18 @@ describe('updateAdaptiveModeForUser', () => {
     ])
   })
 
-  it('returns the canonical result for the same actor, request key, and fingerprint', async () => {
+  it('Task 9F RED: returns the exact canonical replay with zero ticket or job revisions', async () => {
     const input = { db, actor, sessionId, requestKey: uuid(90), expectedRevision: 0, body: requestBody() }
     const first = await updateAdaptiveModeForUser(input)
     const replay = await updateAdaptiveModeForUser(input)
 
     expect(replay).toEqual(first)
     expect(await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))).toHaveLength(1)
+    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, job.ticketId))
+    expect(job.revision).toBe(0n)
+    expect(ticket.projectionRevision).toBe(0n)
+    expect(ticket.continuityRevision).toBe(0n)
   })
 
   it('returns the immutable original response when replayed after a later mutation', async () => {
@@ -278,7 +284,7 @@ describe('updateAdaptiveModeForUser', () => {
     })
   })
 
-  it('locks the session and authorizes the current actor before replay lookup', async () => {
+  it('Task 9F RED: locks profiles before the session and request-key events before replay classification', async () => {
     const input = {
       db,
       actor,
@@ -301,15 +307,16 @@ describe('updateAdaptiveModeForUser', () => {
       session.options.logger = previousLogger
     }
 
-    const authorizationIndex = queries.findIndex((query) => (
-      query.includes('inner join "ticket_jobs"')
-      && query.includes('inner join "profiles"')
-    ))
-    const replayIndex = queries.findIndex((query) => query.includes('from "session_events"'))
+    const profileLockIndex = queries.findIndex((query) =>
+      /from "profiles".*for update/i.test(query))
+    const sessionLockIndex = queries.findIndex((query) =>
+      /from "sessions".*for update/i.test(query))
+    const eventLockIndex = queries.findIndex((query) =>
+      /from "session_events".*for update/i.test(query))
 
-    expect(queries[0]).toMatch(/from "sessions".*for update/i)
-    expect(authorizationIndex).toBeGreaterThan(0)
-    expect(replayIndex).toBeGreaterThan(authorizationIndex)
+    expect(profileLockIndex).toBeGreaterThan(-1)
+    expect(sessionLockIndex).toBeGreaterThan(profileLockIndex)
+    expect(eventLockIndex).toBeGreaterThan(sessionLockIndex)
   })
 
   it('rejects an authorized new actor reusing the prior actor request key', async () => {
@@ -339,7 +346,7 @@ describe('updateAdaptiveModeForUser', () => {
     })
   })
 
-  it('rejects changed mode, changed revision, and cross-actor reuse of a request key', async () => {
+  it('Task 9F RED: rejects changed and cross-actor request-key occupation after authority', async () => {
     await updateAdaptiveModeForUser({ db, actor, sessionId, requestKey: uuid(90), expectedRevision: 0, body: requestBody() })
 
     for (const input of [
@@ -358,9 +365,22 @@ describe('updateAdaptiveModeForUser', () => {
     ['unpaid actor', async () => db.update(stripeCustomers).set({ subscriptionStatus: 'unpaid' })],
     ['other technician', async () => undefined],
     ['other shop', async () => undefined],
+    ['pending membership', async () => db.update(profiles).set({
+      membershipStatus: 'pending',
+      membershipActivatedAt: null,
+    }).where(eq(profiles.id, actor.profileId))],
     ['deactivated actor', async () => db.update(profiles).set({ deactivatedAt: new Date() }).where(eq(profiles.id, actor.profileId))],
     ['reassigned job', async () => db.update(ticketJobs).set({ assignedTechId: otherActor.profileId }).where(eq(ticketJobs.id, jobId))],
-  ])('uniformly rejects %s', async (kind, mutate) => {
+    ['terminal session', async () => db.update(sessions).set({ status: 'deferred' }).where(eq(sessions.id, sessionId))],
+    ['terminal job', async () => db.update(ticketJobs).set({ workStatus: 'canceled' }).where(eq(ticketJobs.id, jobId))],
+    ['closed ticket', async () => db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-17T12:00:00.000Z'),
+      closedByProfileId: actor.profileId,
+      closeDisposition: 'no_repair',
+      closeNote: 'Fixture terminal-state proof.',
+    })],
+  ])('Task 9F RED: uniformly rejects %s authority or lifecycle loss', async (kind, mutate) => {
     await mutate()
     const inputActor = kind === 'other technician'
       ? otherActor
@@ -372,12 +392,181 @@ describe('updateAdaptiveModeForUser', () => {
     })).resolves.toEqual({ ok: false, status: 409, error: 'not_eligible' })
   })
 
-  it('rejects stale revisions without writing an event', async () => {
+  it('Task 9F RED: rejects adaptive revision drift without writing an event', async () => {
     await db.update(sessions).set({ adaptiveRevision: 1 }).where(eq(sessions.id, sessionId))
     await expect(updateAdaptiveModeForUser({
       db, actor, sessionId, requestKey: uuid(90), expectedRevision: 0, body: requestBody(),
     })).resolves.toEqual({ ok: false, status: 409, error: 'not_eligible' })
     expect(await db.select().from(sessionEvents)).toHaveLength(0)
+  })
+
+  it('Task 9F RED: reruns the release flag before paid access on every fresh attempt', async () => {
+    const hasPaidAccess = vi.fn(async () => true)
+    let discoveries = 0
+
+    const result = await updateAdaptiveModeForUser({
+      db,
+      actor,
+      sessionId,
+      requestKey: uuid(90),
+      expectedRevision: 0,
+      body: requestBody(),
+      dependencies: {
+        hasPaidAccess,
+        afterDiscovery: async () => {
+          discoveries += 1
+          if (discoveries === 1) {
+            vi.stubEnv('SHOP_OS_ADAPTIVE_CANVAS_ENABLED', 'false')
+            throw Object.assign(new Error('retry discovery'), { code: '40001' })
+          }
+        },
+      },
+    })
+
+    expect(result).toEqual({ ok: false, status: 409, error: 'not_eligible' })
+    expect(discoveries).toBe(1)
+    expect(hasPaidAccess).toHaveBeenCalledTimes(1)
+    expect(await db.select().from(sessionEvents)).toHaveLength(0)
+  })
+
+  it('Task 9F RED: reruns injected paid access before every fresh discovery attempt', async () => {
+    const hasPaidAccess = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+    let discoveries = 0
+
+    const result = await updateAdaptiveModeForUser({
+      db,
+      actor,
+      sessionId,
+      requestKey: uuid(90),
+      expectedRevision: 0,
+      body: requestBody(),
+      dependencies: {
+        hasPaidAccess,
+        afterDiscovery: async () => {
+          discoveries += 1
+          if (discoveries === 1) {
+            throw Object.assign(new Error('retry discovery'), { code: '40001' })
+          }
+        },
+      },
+    })
+
+    expect(result).toEqual({ ok: false, status: 409, error: 'not_eligible' })
+    expect(discoveries).toBe(1)
+    expect(hasPaidAccess).toHaveBeenCalledTimes(2)
+    expect(await db.select().from(sessionEvents)).toHaveLength(0)
+  })
+
+  it('Task 9F RED: retries a conditional session collision from fresh discovery without leaking its event', async () => {
+    const hasPaidAccess = vi.fn(async () => true)
+    let insertions = 0
+
+    const result = await updateAdaptiveModeForUser({
+      db,
+      actor,
+      sessionId,
+      requestKey: uuid(90),
+      expectedRevision: 0,
+      body: requestBody(),
+      dependencies: {
+        hasPaidAccess,
+        afterEventInsert: async (tx) => {
+          insertions += 1
+          if (insertions === 1) {
+            await tx.update(sessions).set({ adaptiveRevision: 1 })
+              .where(eq(sessions.id, sessionId))
+          }
+        },
+      },
+    })
+
+    expect(result).toMatchObject({ ok: true, revision: 1, state: { mode: 'guided' } })
+    expect(hasPaidAccess).toHaveBeenCalledTimes(2)
+    expect(insertions).toBe(2)
+    expect(await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))).toHaveLength(1)
+  })
+
+  it('Task 9F RED: serializes same-key and distinct-key same-session race shapes', async () => {
+    const exactInput = {
+      db, actor, sessionId, requestKey: uuid(90), expectedRevision: 0, body: requestBody(),
+    }
+    const exact = await Promise.all([
+      updateAdaptiveModeForUser(exactInput),
+      updateAdaptiveModeForUser(exactInput),
+    ])
+    expect(exact[0]).toEqual(exact[1])
+    expect(exact[0]).toMatchObject({ ok: true, revision: 1 })
+    expect(await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))).toHaveLength(1)
+
+    await db.delete(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))
+    await db.update(sessions).set({
+      adaptiveDiagnosticState: state(proofClosedCoverage, 'manual'),
+      adaptiveRevision: 0,
+    }).where(eq(sessions.id, sessionId))
+    const distinct = await Promise.all([
+      updateAdaptiveModeForUser({
+        db, actor, sessionId, requestKey: uuid(91), expectedRevision: 0,
+        body: requestBody({ requestKey: uuid(91) }),
+      }),
+      updateAdaptiveModeForUser({
+        db, actor, sessionId, requestKey: uuid(92), expectedRevision: 0,
+        body: requestBody({ requestKey: uuid(92), mode: 'manual' }),
+      }),
+    ])
+    expect(distinct.filter((result) => result.ok)).toHaveLength(1)
+    expect(distinct.filter((result) => !result.ok)).toEqual([
+      { ok: false, status: 409, error: 'not_eligible' },
+    ])
+    expect(await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))).toHaveLength(1)
+  })
+
+  it('Task 9F RED: rolls back the new event when the conditional session stage fails', async () => {
+    const marker = new Error('forced adaptive rollback')
+
+    await expect(updateAdaptiveModeForUser({
+      db,
+      actor,
+      sessionId,
+      requestKey: uuid(90),
+      expectedRevision: 0,
+      body: requestBody(),
+      dependencies: {
+        hasPaidAccess: async () => true,
+        afterEventInsert: async () => { throw marker },
+      },
+    })).rejects.toBe(marker)
+
+    expect(await db.select().from(sessionEvents)).toHaveLength(0)
+    const [stored] = await db.select().from(sessions).where(eq(sessions.id, sessionId))
+    expect(stored.adaptiveRevision).toBe(0)
+    expect(stored.adaptiveDiagnosticState).toEqual(state(proofClosedCoverage, 'manual'))
+  })
+
+  it('Task 9F RED: uses the bounded profile-first closure and no revision finalizer', () => {
+    const source = readFileSync('lib/diagnostics/adaptive/state.ts', 'utf8')
+    const mutation = source.slice(source.indexOf('async function discoverAdaptiveMutation'))
+    expect(mutation).toContain('runBoundedShopOsMutationV1')
+    expect(mutation).toContain('authorizeAdaptiveMutationInLockedScopeV1')
+    expect(mutation).toContain('includeAllJobsForTickets: true')
+    expect(mutation).toContain('includeAllLinesForJobs: true')
+    expect(mutation).toContain('includeAllQuoteVersionsForTickets: true')
+    expect(mutation).toContain('includeAllQuoteEventsForTickets: true')
+    expect(mutation).toContain('sessionEventIds')
+    expect(mutation).not.toContain('opts.db.transaction(')
+    expect(mutation).not.toContain('finalizeMutationRevisionsV1')
+
+    const precondition = mutation.indexOf('isAdaptiveCanvasEnabled()')
+    const paid = mutation.indexOf('dependencies.hasPaidAccess')
+    const discovery = mutation.indexOf('.select(')
+    const insert = mutation.indexOf('.insert(sessionEvents)')
+    const update = mutation.indexOf('.update(sessions)')
+    expect(precondition).toBeGreaterThan(-1)
+    expect(paid).toBeGreaterThan(precondition)
+    expect(discovery).toBeGreaterThan(paid)
+    expect(insert).toBeGreaterThan(discovery)
+    expect(update).toBeGreaterThan(insert)
   })
 })
 
