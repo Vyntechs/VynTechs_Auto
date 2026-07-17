@@ -86,12 +86,127 @@ describe('Shop OS existing-ticket canned job application', () => {
       ...overrides,
     }, dependencies)
 
-  it('uses ticket-first NOWAIT locking through current actor reauthorization', () => {
+  it('uses one bounded profile-first coordinator, shared sequence reservation, and revision finalizer', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/canned-jobs.ts'), 'utf8')
     const helper = source.slice(source.indexOf('export async function applyCannedJobToTicket'))
-    expect(helper).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?orderBy\(ticketJobs\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(jobLines\)[\s\S]*?orderBy\(jobLines\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(quoteVersions\)[\s\S]*?orderBy\(quoteVersions\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?loadActor\(tx, input\.actor, 'list', 'nowait'\)/)
-    expect(source).toMatch(/lock === 'nowait'[\s\S]*?\.for\('update', \{ noWait: true \}\)/)
+    expect(helper).toContain('runBoundedShopOsMutationV1')
+    expect(helper).toContain('assertLiveLockedMutationScopeV1')
+    expect(helper.match(/reserveJobSequencesForInsertionV1/g)).toHaveLength(1)
+    expect(helper.match(/finalizeMutationRevisionsV1/g)).toHaveLength(1)
+    expect(helper).toContain('cannedJobLineInsertValues')
+    expect(helper).toContain('afterDiscovery')
+    expect(helper).toContain('afterWrite')
+    expect(helper).toContain('afterFinalization')
+    expect(helper).not.toContain('.transaction(')
+    expect(helper).not.toContain(".for('update'")
+    expect(helper).not.toMatch(/Math\.max\([\s\S]*?sequenceNumber/)
+    expect(helper).not.toMatch(/revision:\s*sql/)
+    for (const closureToken of [
+      'separateFromTicketId',
+      'createdByProfileId',
+      'assignedTechId',
+      'statementConfirmedByProfileId',
+      'orderedByProfileId',
+      'receivedByProfileId',
+      'sessionId',
+      'techId',
+      'vendorAccountId',
+      'actorProfileId',
+      'includeAllJobsForTickets',
+      'includeAllLinesForJobs',
+      'includeAllQuoteVersionsForTickets',
+      'includeAllQuoteEventsForTickets',
+    ]) expect(source).toContain(closureToken)
   })
+
+  it('reserves after a legacy-null plus populated sequence suffix and finalizes the new job once', async () => {
+    await db.insert(ticketJobs).values([
+      {
+        id: uuid(90), shopId, ticketId, title: 'Legacy', kind: 'repair',
+        requiredSkillTier: 1, sequenceNumber: null,
+      },
+      {
+        id: uuid(91), shopId, ticketId, title: 'Second', kind: 'repair',
+        requiredSkillTier: 1, sequenceNumber: 2,
+      },
+      {
+        id: uuid(92), shopId, ticketId, title: 'Third', kind: 'maintenance',
+        requiredSkillTier: 1, sequenceNumber: 3,
+      },
+    ])
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+
+    const result = await apply()
+
+    expect(result).toMatchObject({ ok: true, changed: true })
+    if (!result.ok) throw new Error('apply failed')
+    const [created] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, result.job.id))
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    expect(created).toMatchObject({
+      sequenceNumber: 4,
+      revision: 1n,
+      createdByProfileId: uuid(2),
+      creatorProvenance: 'direct',
+      createdFromJobId: null,
+    })
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
+  })
+
+  it('refuses corrupt or overflowing sequence state without inserting or bumping', async () => {
+    await db.insert(ticketJobs).values({
+      id: uuid(93), shopId, ticketId, title: 'Broken suffix', kind: 'repair',
+      requiredSkillTier: 1, sequenceNumber: 2_147_483_647,
+    })
+    const [before] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+
+    await expect(apply()).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+
+    const [after] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    expect(after.projectionRevision).toBe(before.projectionRevision)
+    expect(after.continuityRevision).toBe(before.continuityRevision)
+    expect(await db.select().from(ticketJobs)).toHaveLength(1)
+  })
+
+  it.each(['afterDiscovery', 'afterWrite', 'afterFinalization'] as const)(
+    'rolls back all canned, quote, and revision writes at %s',
+    async (seam) => {
+      const beforeTickets = await db.select().from(tickets)
+      const beforeJobs = await db.select().from(ticketJobs)
+      const beforeLines = await db.select().from(jobLines)
+      const dependencies = {
+        [seam]: async () => { throw new Error(`rollback-${seam}`) },
+      }
+
+      await expect(apply({}, dependencies)).rejects.toThrow(`rollback-${seam}`)
+
+      expect(await db.select().from(tickets)).toEqual(beforeTickets)
+      expect(await db.select().from(ticketJobs)).toEqual(beforeJobs)
+      expect(await db.select().from(jobLines)).toEqual(beforeLines)
+    },
+  )
+
+  it.each(['55P03', '40001', '40P01'])(
+    'exhausts bounded retries for SQLSTATE %s without canned or revision residue',
+    async (code) => {
+      let attempts = 0
+      const [before] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+
+      await expect(apply({}, {
+        afterWrite: async () => {
+          attempts += 1
+          throw Object.assign(new Error(code), { code })
+        },
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+
+      expect(attempts).toBe(2)
+      const [after] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      expect(after.projectionRevision).toBe(before.projectionRevision)
+      expect(after.continuityRevision).toBe(before.continuityRevision)
+      expect(await db.select().from(ticketJobs)).toHaveLength(0)
+      expect(await db.select().from(jobLines)).toHaveLength(0)
+    },
+  )
 
   it('copies every template line exactly into one safe unassigned manual job', async () => {
     const result = await apply()
@@ -193,9 +308,6 @@ describe('Shop OS existing-ticket canned job application', () => {
 
   it('fails closed for invalid, closed, cross-shop, inactive, retired, and corrupt template state', async () => {
     await expect(apply({ ticketId: 'bad' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
-    await expect(apply()).resolves.toEqual({ ok: false, error: 'not_found' })
-    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
     await expect(apply({ actor: { profileId: uuid(3) } })).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(profiles).set({ membershipStatus: 'pending', membershipActivatedAt: null }).where(eq(profiles.id, uuid(2)))
     await expect(apply()).resolves.toEqual({ ok: false, error: 'not_found' })
@@ -204,6 +316,14 @@ describe('Shop OS existing-ticket canned job application', () => {
     await expect(apply()).resolves.toEqual({ ok: false, error: 'not_found' })
     await db.update(cannedJobs).set({ retiredAt: null, defaultLines: [{ bad: true }] as never }).where(eq(cannedJobs.id, cannedJob.cannedJob.id))
     await expect(apply()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-15T12:00:00Z'),
+      closedByProfileId: uuid(1),
+      closeDisposition: 'no_repair',
+      closeNote: 'No repair performed.',
+    }).where(eq(tickets.id, ticketId))
+    await expect(apply()).resolves.toEqual({ ok: false, error: 'not_found' })
     expect(await db.select().from(ticketJobs)).toHaveLength(0)
   })
 
@@ -242,12 +362,25 @@ describe('Shop OS existing-ticket canned job application', () => {
     if (!version.ok) throw new Error('version fixture failed')
     await db.update(ticketJobs).set({ approvalState: 'approved', approvedQuoteVersionId: version.version.id })
       .where(eq(ticketJobs.id, uuid(30)))
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, uuid(30)))
     const applied = await apply()
     expect(applied).toMatchObject({ ok: true, changed: true })
     const [oldVersion] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.version.id))
     expect(oldVersion.supersededAt).not.toBeNull()
     const [oldJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, uuid(30)))
-    expect(oldJob).toMatchObject({ approvalState: 'pending_quote', approvedQuoteVersionId: null })
+    expect(oldJob).toMatchObject({
+      approvalState: 'pending_quote', approvedQuoteVersionId: null,
+      revision: beforeJob.revision + 1n,
+    })
+    const [createdJob] = await db.select().from(ticketJobs).where(eq(
+      ticketJobs.id,
+      applied.ok ? applied.job.id : uuid(999),
+    ))
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    expect(createdJob.revision).toBe(1n)
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
     const builder = await getQuoteBuilder(db, { actor, ticketId })
     expect(builder).toMatchObject({ ok: true, builder: { jobs: [{ id: uuid(30) }, { id: applied.ok ? applied.job.id : '' }] } })
     if (!builder.ok) throw new Error('builder failed')

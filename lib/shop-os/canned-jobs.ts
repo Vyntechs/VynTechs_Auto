@@ -2,20 +2,34 @@ import { createHash } from 'node:crypto'
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { cannedJobs, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
+import {
+  cannedJobs, customers, jobLines, profiles, quoteEvents, quoteVersions, sessions, shops,
+  ticketJobs, tickets, vehicles, vendorAccounts,
+} from '@/lib/db/schema'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, formatScaledDecimal, parseScaledDecimal, stableStringify } from '@/lib/shop-os/quote-math'
-import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+import { invalidateActiveQuoteVersionDeltaV1 } from '@/lib/shop-os/quotes'
 import {
   assertLiveLockedMutationScopeV1,
   assertLiveMutationAttemptV1,
 } from '@/lib/shop-os/continuity/mutation-foundation/attempt-capability'
-import type {
-  MutationAttemptCapabilityV1,
-  ResolvedLockedQuickTemplateV1,
-  ResolvedQuickTemplateV1,
+import {
+  ShopOsMutationNotFound,
+  type MutationAttemptContextV1,
+  type MutationAttemptCapabilityV1,
+  type ResolvedLockedQuickTemplateV1,
+  type ResolvedQuickTemplateV1,
 } from '@/lib/shop-os/continuity/mutation-foundation/contracts'
-import type { LockedMutationScopeV1 } from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import { ShopOsMutationConflict } from '@/lib/shop-os/continuity/mutation-foundation/conflicts'
+import type {
+  LockedMutationScopeV1,
+  MutationLockRequestV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/lock-order'
+import {
+  finalizeMutationRevisionsV1,
+  reserveJobSequencesForInsertionV1,
+} from '@/lib/shop-os/continuity/mutation-foundation/revisions'
+import { runBoundedShopOsMutationV1 } from '@/lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_TEMPLATE_BYTES = 16 * 1024
@@ -146,6 +160,9 @@ type ApplyResult = { ok: true; changed: boolean; job: SafeAppliedCannedJob } | F
 export type ApplyCannedJobDependencies = {
   afterTicketLock?: () => Promise<void>
   afterJobInsert?: () => Promise<void>
+  afterDiscovery?: () => Promise<void>
+  afterWrite?: () => Promise<void>
+  afterFinalization?: () => Promise<void>
 }
 
 export function cannedJobActorFromProfile(
@@ -846,6 +863,329 @@ export async function retireCannedJob(
   })
 }
 
+function emptyCannedApplyInsertionIntents(): MutationLockRequestV1['insertionIntents'] {
+  return Object.freeze({
+    sessions: Object.freeze([]),
+    customers: Object.freeze([]),
+    vehicles: Object.freeze([]),
+    tickets: Object.freeze([]),
+    jobs: Object.freeze([]),
+  })
+}
+
+function cannedApplyUuidList(values: readonly (string | null | undefined)[]): readonly string[] {
+  return Object.freeze([...new Set(values.filter(
+    (value): value is string => typeof value === 'string',
+  ))].sort())
+}
+
+function cannedApplyFingerprint(value: unknown): string {
+  const normalize = (member: unknown): unknown => {
+    if (member instanceof Date) return { $date: member.toISOString() }
+    if (typeof member === 'bigint') return { $bigint: member.toString() }
+    if (
+      member === null || member === undefined || typeof member === 'string' ||
+      typeof member === 'number' || typeof member === 'boolean'
+    ) return member ?? null
+    if (Array.isArray(member)) return member.map(normalize)
+    if (typeof member !== 'object') throw new TypeError('invalid_canned_discovery_value')
+    const result: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(member).sort()) {
+      result[key] = normalize((member as Record<string, unknown>)[key])
+    }
+    return result
+  }
+  return JSON.stringify(normalize(value))
+}
+
+function cannedApplyRowsById<T extends { id: string }>(rows: readonly T[]): readonly T[] {
+  return [...rows].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+type CannedApplyDiscovery = Readonly<{
+  kind: 'not_found' | 'ready'
+  jobId: string
+  separateChainIds: readonly string[]
+  closureFingerprint: string | null
+  replay: boolean
+  template: ResolvedQuickTemplateV1 | null
+  stableFailure: Failure | null
+}>
+
+function cannedApplyActorOnlyRequest(
+  shopId: string,
+  actorProfileId: string,
+): MutationLockRequestV1 {
+  return Object.freeze({
+    shopId,
+    actorProfileId,
+    profileIds: Object.freeze([actorProfileId]),
+    lockShop: false,
+    customerIds: Object.freeze([]),
+    vehicleIds: Object.freeze([]),
+    ticketIds: Object.freeze([]),
+    jobIds: Object.freeze([]),
+    includeAllJobsForTickets: false,
+    includeAllLinesForJobs: false,
+    includeAllQuoteVersionsForTickets: false,
+    includeAllQuoteEventsForTickets: false,
+    sessionIds: Object.freeze([]),
+    sessionEventIds: Object.freeze([]),
+    vendorAccountIds: Object.freeze([]),
+    cannedJobIds: Object.freeze([]),
+    receiptRequestKey: null,
+    receiptConditionalInsert: null,
+    insertionIntents: emptyCannedApplyInsertionIntents(),
+  })
+}
+
+async function discoverCannedApplyMutation(
+  tx: AppDb,
+  attempt: MutationAttemptContextV1,
+  input: Readonly<{
+    shopId: string
+    actorProfileId: string
+    ticketId: string
+    clientKey: string
+    cannedJobId: string
+    expectedFingerprint: string
+    expectedTaxRateBps: number | null
+  }>,
+): Promise<Readonly<{
+  lockRequest: MutationLockRequestV1
+  payload: CannedApplyDiscovery
+}>> {
+  const jobId = persistedAppliedJobId(
+    input.shopId,
+    input.ticketId,
+    input.actorProfileId,
+    input.clientKey,
+  )
+  const [target] = await tx.select().from(tickets).where(and(
+    eq(tickets.shopId, input.shopId),
+    eq(tickets.id, input.ticketId),
+  )).limit(1)
+  if (!target) return Object.freeze({
+    lockRequest: cannedApplyActorOnlyRequest(input.shopId, input.actorProfileId),
+    payload: Object.freeze({
+      kind: 'not_found', jobId, separateChainIds: Object.freeze([]),
+      closureFingerprint: null, replay: false, template: null, stableFailure: null,
+    }),
+  })
+
+  const ticketRows = [target]
+  const seenTicketIds = new Set([target.id])
+  let parentId = target.separateFromTicketId
+  while (parentId !== null) {
+    if (ticketRows.length >= 64 || seenTicketIds.has(parentId)) {
+      throw new ShopOsMutationConflict()
+    }
+    const [parent] = await tx.select().from(tickets).where(and(
+      eq(tickets.shopId, input.shopId),
+      eq(tickets.id, parentId),
+    )).limit(1)
+    if (!parent) throw new ShopOsMutationConflict()
+    ticketRows.push(parent)
+    seenTicketIds.add(parent.id)
+    parentId = parent.separateFromTicketId
+  }
+
+  const ticketIds = cannedApplyUuidList(ticketRows.map(({ id }) => id))
+  const jobs = await tx.select().from(ticketJobs).where(and(
+    eq(ticketJobs.shopId, input.shopId),
+    inArray(ticketJobs.ticketId, ticketIds),
+  )).orderBy(ticketJobs.id)
+  const replay = jobs.some(({ id }) => id === jobId)
+  const jobIds = cannedApplyUuidList(jobs.map(({ id }) => id))
+  const lines = jobIds.length === 0 ? [] : await tx.select().from(jobLines).where(and(
+    eq(jobLines.shopId, input.shopId),
+    inArray(jobLines.jobId, jobIds),
+  )).orderBy(jobLines.id)
+  const versions = await tx.select().from(quoteVersions).where(and(
+    eq(quoteVersions.shopId, input.shopId),
+    inArray(quoteVersions.ticketId, ticketIds),
+  )).orderBy(quoteVersions.id)
+  const events = await tx.select().from(quoteEvents).where(and(
+    eq(quoteEvents.shopId, input.shopId),
+    inArray(quoteEvents.ticketId, ticketIds),
+  )).orderBy(quoteEvents.id)
+  const sessionIds = cannedApplyUuidList(jobs.map(({ sessionId }) => sessionId))
+  const sessionRows = sessionIds.length === 0 ? [] : await tx.select().from(sessions).where(and(
+    eq(sessions.shopId, input.shopId),
+    inArray(sessions.id, sessionIds),
+  )).orderBy(sessions.id)
+  const vehicleIds = cannedApplyUuidList([
+    ...ticketRows.map(({ vehicleId }) => vehicleId),
+    ...sessionRows.map(({ vehicleId }) => vehicleId),
+  ])
+  const vehicleRows = vehicleIds.length === 0 ? [] : (await tx.select({ row: vehicles })
+    .from(vehicles)
+    .innerJoin(customers, eq(customers.id, vehicles.customerId))
+    .where(and(
+      eq(customers.shopId, input.shopId),
+      inArray(vehicles.id, vehicleIds),
+    )).orderBy(vehicles.id)).map(({ row }) => row)
+  const customerIds = cannedApplyUuidList([
+    ...ticketRows.map(({ customerId }) => customerId),
+    ...vehicleRows.map(({ customerId }) => customerId),
+  ])
+  const customerRows = customerIds.length === 0 ? [] : await tx.select().from(customers).where(and(
+    eq(customers.shopId, input.shopId),
+    inArray(customers.id, customerIds),
+  )).orderBy(customers.id)
+  const vendorAccountIds = cannedApplyUuidList(lines.map(({ vendorAccountId }) => vendorAccountId))
+  const vendorRows = vendorAccountIds.length === 0 ? [] : await tx.select().from(vendorAccounts)
+    .where(and(
+      eq(vendorAccounts.shopId, input.shopId),
+      inArray(vendorAccounts.id, vendorAccountIds),
+    )).orderBy(vendorAccounts.id)
+  const profileIds = cannedApplyUuidList([
+    input.actorProfileId,
+    ...ticketRows.flatMap((ticket) => [
+      ticket.createdByProfileId,
+      ticket.canceledByProfileId,
+      ticket.deliveredByProfileId,
+      ticket.closedByProfileId,
+    ]),
+    ...jobs.flatMap((job) => [
+      job.assignedTechId,
+      job.createdByProfileId,
+      job.statementConfirmedByProfileId,
+    ]),
+    ...lines.flatMap((line) => [line.orderedByProfileId, line.receivedByProfileId]),
+    ...sessionRows.map(({ techId }) => techId),
+    ...versions.map(({ createdByProfileId }) => createdByProfileId),
+    ...events.map(({ actorProfileId }) => actorProfileId),
+  ])
+  const profileRows = await tx.select().from(profiles).where(and(
+    eq(profiles.shopId, input.shopId),
+    inArray(profiles.id, profileIds),
+  )).orderBy(profiles.id)
+
+  const templateResult = replay ? null : await preflightStrictCannedJobV1(
+    tx,
+    attempt.capability,
+    {
+      shopId: input.shopId,
+      cannedJobId: input.cannedJobId,
+      expectedFingerprint: input.expectedFingerprint,
+      expectedTaxRateBps: input.expectedTaxRateBps,
+    },
+  )
+  const template = templateResult?.ok ? templateResult.template : null
+  const stableFailure = templateResult === null || templateResult.ok
+    ? null
+    : templateResult.error === 'not_found' ? notFound() : conflict()
+  const lockShop = !replay
+  const [shop] = lockShop
+    ? await tx.select().from(shops).where(eq(shops.id, input.shopId)).limit(1)
+    : [undefined]
+  const closureFingerprint = cannedApplyFingerprint({
+    profiles: cannedApplyRowsById(profileRows),
+    shop: shop ?? null,
+    customers: cannedApplyRowsById(customerRows),
+    vehicles: cannedApplyRowsById(vehicleRows),
+    tickets: cannedApplyRowsById(ticketRows),
+    jobs: cannedApplyRowsById(jobs),
+    lines: cannedApplyRowsById(lines),
+    versions: cannedApplyRowsById(versions),
+    events: cannedApplyRowsById(events),
+    sessions: cannedApplyRowsById(sessionRows),
+    vendors: cannedApplyRowsById(vendorRows),
+  })
+  const createsJob = template !== null
+  const insertionIntents = createsJob
+    ? Object.freeze({
+        ...emptyCannedApplyInsertionIntents(),
+        jobs: Object.freeze([Object.freeze({ id: jobId, ticketId: input.ticketId })]),
+      })
+    : emptyCannedApplyInsertionIntents()
+
+  return Object.freeze({
+    lockRequest: Object.freeze({
+      shopId: input.shopId,
+      actorProfileId: input.actorProfileId,
+      profileIds,
+      lockShop,
+      customerIds,
+      vehicleIds,
+      ticketIds,
+      jobIds,
+      includeAllJobsForTickets: true,
+      includeAllLinesForJobs: true,
+      includeAllQuoteVersionsForTickets: true,
+      includeAllQuoteEventsForTickets: true,
+      sessionIds,
+      sessionEventIds: Object.freeze([]),
+      vendorAccountIds,
+      cannedJobIds: templateResult?.ok ? templateResult.cannedJobIds : Object.freeze([]),
+      receiptRequestKey: null,
+      receiptConditionalInsert: null,
+      insertionIntents,
+    }),
+    payload: Object.freeze({
+      kind: 'ready',
+      jobId,
+      separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
+      closureFingerprint,
+      replay,
+      template,
+      stableFailure,
+    }),
+  })
+}
+
+function resolveCannedApplyScope(
+  tx: AppDb,
+  scope: LockedMutationScopeV1,
+  discovery: CannedApplyDiscovery,
+  ticketId: string,
+): LockedMutationScopeV1['tickets'][number] {
+  assertLiveLockedMutationScopeV1(tx, scope)
+  if (discovery.kind === 'not_found') throw new ShopOsMutationNotFound()
+  if (
+    !canBuildQuotes(scope.actor.role) ||
+    scope.profiles.length !== scope.request.profileIds.length ||
+    scope.profiles.some(({ id }) => !scope.request.profileIds.includes(id)) ||
+    scope.profiles.some((profile) =>
+      profile.shopId !== scope.actor.shopId ||
+      profile.membershipStatus !== 'active' || profile.deactivatedAt !== null ||
+      (profile.skillTier !== null && ![1, 2, 3].includes(profile.skillTier)))
+  ) throw new ShopOsMutationNotFound()
+
+  const graphById = new Map(scope.tickets.map((graph) => [graph.ticket.id, graph] as const))
+  if (
+    discovery.separateChainIds.length < 1 || discovery.separateChainIds[0] !== ticketId ||
+    discovery.separateChainIds.length !== scope.tickets.length ||
+    new Set(discovery.separateChainIds).size !== discovery.separateChainIds.length
+  ) throw new ShopOsMutationConflict()
+  for (let index = 0; index < discovery.separateChainIds.length; index += 1) {
+    const graph = graphById.get(discovery.separateChainIds[index]!)
+    if (!graph || graph.ticket.separateFromTicketId !==
+      (discovery.separateChainIds[index + 1] ?? null)) throw new ShopOsMutationConflict()
+  }
+  const lockedFingerprint = cannedApplyFingerprint({
+    profiles: cannedApplyRowsById(scope.profiles),
+    shop: scope.shop,
+    customers: cannedApplyRowsById(scope.customers),
+    vehicles: cannedApplyRowsById(scope.vehicles),
+    tickets: cannedApplyRowsById(scope.tickets.map(({ ticket }) => ticket)),
+    jobs: cannedApplyRowsById(scope.tickets.flatMap(({ jobs }) => jobs)),
+    lines: cannedApplyRowsById(scope.tickets.flatMap(({ lines }) => lines)),
+    versions: cannedApplyRowsById(scope.tickets.flatMap(({ versions }) => versions)),
+    events: cannedApplyRowsById(scope.tickets.flatMap(({ events }) => events)),
+    sessions: cannedApplyRowsById(scope.sessions),
+    vendors: cannedApplyRowsById(scope.vendorAccounts),
+  })
+  if (lockedFingerprint !== discovery.closureFingerprint) throw new ShopOsMutationConflict()
+  const target = graphById.get(ticketId)
+  if (!target) throw new ShopOsMutationNotFound()
+  if ((target.ticket.customerId === null) !== (target.ticket.vehicleId === null)) {
+    throw new ShopOsMutationNotFound()
+  }
+  return target
+}
+
 export async function applyCannedJobToTicket(
   db: AppDb,
   input: {
@@ -869,128 +1209,142 @@ export async function applyCannedJobToTicket(
   }
   const persistedActor = await loadActor(db, input.actor, 'list')
   if (!persistedActor) return notFound()
+  const seams = Object.freeze({
+    afterTicketLock: dependencies.afterTicketLock,
+    afterJobInsert: dependencies.afterJobInsert,
+    afterDiscovery: dependencies.afterDiscovery,
+    afterWrite: dependencies.afterWrite,
+    afterFinalization: dependencies.afterFinalization,
+  })
 
   try {
-    return await db.transaction(async (tx) => {
-      const [ticket] = await tx.select({ id: tickets.id }).from(tickets).where(and(
-        eq(tickets.shopId, persistedActor.shopId),
-        eq(tickets.id, ticketId.data),
-        eq(tickets.status, 'open'),
-      )).limit(1).for('update', { noWait: true })
-      if (!ticket) return notFound()
-      await dependencies.afterTicketLock?.()
+    return await runBoundedShopOsMutationV1<ApplyResult, CannedApplyDiscovery>(db, {
+      discover: async (tx, attempt) => discoverCannedApplyMutation(tx, attempt, {
+        shopId: persistedActor.shopId,
+        actorProfileId: persistedActor.id,
+        ticketId: ticketId.data,
+        clientKey: clientKey.data,
+        cannedJobId: cannedJobId.data,
+        expectedFingerprint: fingerprint.data,
+        expectedTaxRateBps: taxRate.data,
+      }),
+      executeLocked: async (tx, scope, discovery) => {
+        assertLiveLockedMutationScopeV1(tx, scope)
+        const graph = resolveCannedApplyScope(tx, scope, discovery, ticketId.data)
+        if (graph.ticket.status !== 'open') throw new ShopOsMutationNotFound()
+        await seams.afterTicketLock?.()
+        await seams.afterDiscovery?.()
 
-      const jobRows = await tx.select().from(ticketJobs).where(and(
-        eq(ticketJobs.shopId, persistedActor.shopId),
-        eq(ticketJobs.ticketId, ticketId.data),
-      )).orderBy(ticketJobs.id).for('update', { noWait: true })
-      const lineRows = jobRows.length === 0
-        ? []
-        : await tx.select().from(jobLines).where(and(
-          eq(jobLines.shopId, persistedActor.shopId),
-          inArray(jobLines.jobId, jobRows.map((job) => job.id)),
-        )).orderBy(jobLines.id).for('update', { noWait: true })
-      const activeVersions = await tx.select().from(quoteVersions).where(and(
-        eq(quoteVersions.shopId, persistedActor.shopId),
-        eq(quoteVersions.ticketId, ticketId.data),
-        isNull(quoteVersions.supersededAt),
-      )).orderBy(quoteVersions.id).for('update', { noWait: true })
-      const currentActor = await loadActor(tx, input.actor, 'list', 'nowait')
-      if (!currentActor || currentActor.id !== persistedActor.id || currentActor.shopId !== persistedActor.shopId) {
-        return notFound()
-      }
-      const jobId = persistedAppliedJobId(
-        currentActor.shopId,
-        ticketId.data,
-        currentActor.id,
-        clientKey.data,
-      )
-      const existing = jobRows.find((job) => job.id === jobId)
-      if (existing) {
-        const existingLines = lineRows.filter((line) => line.jobId === existing.id)
-        if (existingLines.some((line) => !isBuilderVisibleAppliedLine(line))) {
-          throw new AbortCannedApply(conflict())
+        const existing = graph.jobs.find(({ id }) => id === discovery.jobId)
+        if (existing) {
+          const existingLines = graph.lines.filter(({ jobId }) => jobId === existing.id)
+          if (
+            !discovery.replay || discovery.template !== null ||
+            existing.createdByProfileId !== scope.actor.id ||
+            existing.creatorProvenance !== 'direct' || existing.createdFromJobId !== null ||
+            existingLines.some((line) => !isBuilderVisibleAppliedLine(line))
+          ) throw new AbortCannedApply(conflict())
+          const safe = projectAppliedJob(existing, existingLines.length)
+          if (!safe) throw new AbortCannedApply(conflict())
+          return { ok: true, changed: false, job: safe }
         }
-        const safe = projectAppliedJob(
-          existing,
-          existingLines.length,
+        if (discovery.replay) throw new ShopOsMutationConflict()
+        if (discovery.stableFailure) throw new AbortCannedApply(discovery.stableFailure)
+        if (!discovery.template || !scope.shop) throw new ShopOsMutationConflict()
+
+        const activeVersions = graph.versions.filter(({ supersededAt }) => supersededAt === null)
+        if (activeVersions.length > 1) throw new AbortCannedApply(conflict())
+        let lockedTemplate: ResolvedLockedQuickTemplateV1
+        try {
+          lockedTemplate = resolveStrictCannedJobInLockedScopeV1(
+            tx,
+            scope,
+            discovery.template,
+          )
+        } catch (error) {
+          if (error instanceof Error && error.message === 'resolved_quick_template_invalid') {
+            throw new ShopOsMutationConflict()
+          }
+          throw error
+        }
+        const template = consumeResolvedLockedQuickTemplateForCreationV1(
+          tx,
+          scope,
+          lockedTemplate,
         )
+        const reservations = reserveJobSequencesForInsertionV1(
+          tx,
+          scope,
+          graph.ticket.id,
+          [discovery.jobId],
+        )
+        const [reservation] = reservations
+        if (
+          reservations.length !== 1 || reservation?.jobId !== discovery.jobId ||
+          !Number.isSafeInteger(reservation.sequenceNumber)
+        ) throw new ShopOsMutationConflict()
+
+        const [createdJob] = await tx.insert(ticketJobs).values({
+          id: discovery.jobId,
+          shopId: scope.actor.shopId,
+          ticketId: graph.ticket.id,
+          title: template.title,
+          kind: template.kind,
+          requiredSkillTier: template.defaultRequiredSkillTier,
+          assignedTechId: null,
+          sessionId: null,
+          sequenceNumber: reservation.sequenceNumber,
+          createdByProfileId: scope.actor.id,
+          creatorProvenance: 'direct',
+          createdFromJobId: null,
+          revision: 1n,
+          workStatus: 'open',
+          approvalState: 'pending_quote',
+        }).returning()
+        if (
+          !createdJob || createdJob.id !== discovery.jobId ||
+          createdJob.shopId !== scope.actor.shopId || createdJob.ticketId !== graph.ticket.id ||
+          createdJob.sequenceNumber !== reservation.sequenceNumber || createdJob.revision !== 1n ||
+          createdJob.createdByProfileId !== scope.actor.id ||
+          createdJob.creatorProvenance !== 'direct' || createdJob.createdFromJobId !== null
+        ) throw new ShopOsMutationConflict()
+        await seams.afterJobInsert?.()
+        await tx.insert(jobLines).values(cannedJobLineInsertValues(
+          scope.actor.shopId,
+          discovery.jobId,
+          [...template.lines],
+        ))
+        const invalidation = await invalidateActiveQuoteVersionDeltaV1(tx, {
+          shopId: scope.actor.shopId,
+          ticketId: graph.ticket.id,
+          jobIds: graph.jobs.map(({ id }) => id),
+          activeVersions,
+          scope,
+        })
+        if ('ok' in invalidation) throw new AbortCannedApply(invalidation)
+        await seams.afterWrite?.()
+        await finalizeMutationRevisionsV1(
+          tx,
+          scope,
+          { sessionIds: [], customerIds: [], vehicleIds: [] },
+          [{
+            ticketId: graph.ticket.id,
+            createdTicket: false,
+            createdJobIds: [discovery.jobId],
+            existingChangedJobIds: invalidation.changedJobIds,
+            actorVisibleTicketFieldsChanged: false,
+          }],
+        )
+        await seams.afterFinalization?.()
+        const safe = projectAppliedJob(createdJob, template.lines.length)
         if (!safe) throw new AbortCannedApply(conflict())
-        return { ok: true, changed: false, job: safe }
-      }
-      if (activeVersions.length > 1) throw new AbortCannedApply(conflict())
-
-      const [shop] = await tx.select({ taxRateBps: shops.taxRateBps }).from(shops)
-        .where(eq(shops.id, currentActor.shopId)).limit(1).for('update', { noWait: true })
-      if (
-        !shop
-        || (shop.taxRateBps !== null && (!Number.isInteger(shop.taxRateBps) || shop.taxRateBps < 0 || shop.taxRateBps > 10_000))
-      ) throw new AbortCannedApply(conflict())
-      if (shop.taxRateBps !== taxRate.data) throw new AbortCannedApply(conflict())
-
-      const [templateRow] = await tx.select().from(cannedJobs).where(and(
-        eq(cannedJobs.shopId, currentActor.shopId),
-        eq(cannedJobs.id, cannedJobId.data),
-        isNull(cannedJobs.retiredAt),
-      )).limit(1).for('update', { noWait: true })
-      if (!templateRow) return notFound()
-      const template = projectRow(templateRow, shop.taxRateBps)
-      if (!template) throw new AbortCannedApply(conflict())
-      if (template.fingerprint !== fingerprint.data) throw new AbortCannedApply(conflict())
-
-      const [createdJob] = await tx.insert(ticketJobs).values({
-        id: jobId,
-        shopId: currentActor.shopId,
-        ticketId: ticketId.data,
-        title: template.title,
-        kind: template.kind,
-        requiredSkillTier: template.defaultRequiredSkillTier,
-        assignedTechId: null,
-        workStatus: 'open',
-        approvalState: 'pending_quote',
-      }).returning()
-      await dependencies.afterJobInsert?.()
-      await tx.insert(jobLines).values(template.lines.map((line, index) => ({
-        id: persistedAppliedLineId(jobId, index),
-        shopId: currentActor.shopId,
-        jobId,
-        kind: line.kind,
-        description: line.description,
-        sort: line.sort,
-        quantity: line.kind === 'part' ? Number(line.quantity) : 1,
-        priceCents: line.priceCents,
-        taxable: line.taxable,
-        partNumber: line.kind === 'part' ? line.partNumber ?? null : null,
-        brand: line.kind === 'part' ? line.brand ?? null : null,
-        unitCostCents: null,
-        coreChargeCents: null,
-        fitment: null,
-        vendorAccountId: null,
-        externalOfferId: null,
-        vendorSnapshot: null,
-        partStatus: 'proposed' as const,
-        orderedAt: null,
-        orderedByProfileId: null,
-        receivedAt: null,
-        receivedByProfileId: null,
-        laborHours: line.kind === 'labor' ? Number(line.hours) : null,
-        laborRateCents: line.kind === 'labor' ? line.laborRateCents ?? null : null,
-        source: 'manual' as const,
-      })))
-      const invalidationFailure = await invalidateActiveQuoteVersion(tx, {
-        shopId: currentActor.shopId,
-        ticketId: ticketId.data,
-        jobIds: jobRows.map((job) => job.id),
-        activeVersions,
-      })
-      if (invalidationFailure) throw new AbortCannedApply(invalidationFailure)
-      const safe = projectAppliedJob(createdJob, template.lines.length)
-      if (!safe) throw new AbortCannedApply(conflict())
-      return { ok: true, changed: true, job: safe }
+        return { ok: true, changed: true, job: safe }
+      },
     })
   } catch (error) {
     if (error instanceof AbortCannedApply) return error.failure
-    if (errorCode(error, new Set(['55P03', '40001', '40P01']))) return retryableConflict()
+    if (error instanceof ShopOsMutationNotFound) return notFound()
+    if (error instanceof ShopOsMutationConflict) return retryableConflict()
     if (errorCode(error, new Set(['23505']))) return conflict()
     throw error
   }
