@@ -121,6 +121,55 @@ describe('Shop OS approved simple work', () => {
     expect(timestampHelper).not.toContain('${previous}::timestamptz')
   })
 
+  it('stores strictly monotonic work tokens at millisecond precision', async () => {
+    await db.execute(sql`
+      update ${ticketJobs}
+      set updated_at = '2030-07-17T12:00:00.020627Z'::timestamptz
+      where ${ticketJobs.id} = ${jobId}::uuid
+    `)
+    await db.execute(sql`
+      create function public.clock_timestamp() returns timestamptz
+      language sql immutable
+      as $$ select '2030-07-17T12:00:00.021627Z'::timestamptz $$
+    `)
+    await db.execute(sql`set search_path = public, pg_catalog`)
+
+    const started = await mutateSimpleWork(db, {
+      actor, ticketId, jobId, body: { action: 'start' },
+    })
+    expect(started).toMatchObject({
+      ok: true,
+      changed: true,
+      work: { status: 'in_progress', updatedAt: '2030-07-17T12:00:00.022Z' },
+    })
+    if (!started.ok) throw new Error('start failed')
+
+    const stored = await db.execute<{
+      millisecondAligned: boolean
+      strictlyNewer: boolean
+    }>(sql`
+      select
+        ${ticketJobs.updatedAt} = date_trunc('milliseconds', ${ticketJobs.updatedAt})
+          as "millisecondAligned",
+        ${ticketJobs.updatedAt} > '2030-07-17T12:00:00.020627Z'::timestamptz
+          as "strictlyNewer"
+      from ${ticketJobs}
+      where ${ticketJobs.id} = ${jobId}::uuid
+    `)
+    expect(stored.rows).toEqual([{ millisecondAligned: true, strictlyNewer: true }])
+
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'save_note',
+        note: 'Millisecond-safe token.',
+        expectedUpdatedAt: started.work.updatedAt,
+      },
+    })).resolves.toMatchObject({ ok: true, changed: true })
+  })
+
   it('starts exact approved assigned simple work and replays without another write', async () => {
     const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
     expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
