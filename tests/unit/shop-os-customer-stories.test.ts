@@ -191,7 +191,7 @@ describe('Shop OS customer story domain', () => {
     expect(await generate()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
     await db.update(sessions).set({ treeState: lockedTree({ proposedAction: { description: 'Replace alternator.', confidence: 1.01 } }) }).where(eq(sessions.id, sessionId))
     expect(await generate()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
-    await db.update(tickets).set({ concern: 'x'.repeat(5_001) }).where(eq(tickets.id, ticketId))
+    await db.update(sessions).set({ treeState: lockedTree({ rootCauseSummary: 'x'.repeat(5_001) }) }).where(eq(sessions.id, sessionId))
     expect(await generate()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
   })
 

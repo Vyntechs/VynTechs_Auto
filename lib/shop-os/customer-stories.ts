@@ -173,6 +173,7 @@ export function customerStoryErrorBody(result: Failure): { error: CustomerStoryE
 
 function stableValue(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'bigint') return { __shopOsBigIntV1: value.toString() }
   if (Array.isArray(value)) return value.map(stableValue)
   if (!value || typeof value !== 'object') {
     if (typeof value === 'number' && !Number.isFinite(value)) throw new TypeError('non-finite value')

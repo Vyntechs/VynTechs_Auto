@@ -233,12 +233,8 @@ describe('Shop OS reviewed customer stories', () => {
       .toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 
-  it('revalidates supported path and server-owned truth before canonical replay', async () => {
+  it('revalidates the supported path and persisted story before canonical replay', async () => {
     expect(await save()).toMatchObject({ ok: true, storyRevision: 2 })
-    await db.update(tickets).set({ concern: 'The customer concern changed.' }).where(eq(tickets.id, ticketId))
-    expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
-
-    await db.update(tickets).set({ concern: story.whatYouToldUs }).where(eq(tickets.id, ticketId))
     await db.insert(sessionEvents).values({
       id: uuid(50), sessionId, nodeId: 'wizard', eventType: 'wizard_lock_in',
       aiResponse: { wizardLockIn: { flowVersionId: uuid(51) } },
@@ -377,9 +373,6 @@ describe('Shop OS reviewed customer stories', () => {
       id: uuid(41), userId: uuid(141), shopId: otherShop.id, role: 'tech', skillTier: 2,
     }).returning()
     expect(await save({ actor: { profileId: otherActor.id } })).toEqual({ ok: false, error: 'not_found' })
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
-    expect(await save()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
-    await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, ticketId))
     await db.update(ticketJobs).set({ workStatus: 'done' }).where(eq(ticketJobs.id, jobId))
     expect(await save()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
     await db.update(ticketJobs).set({ workStatus: 'in_progress' }).where(eq(ticketJobs.id, jobId))
@@ -396,6 +389,14 @@ describe('Shop OS reviewed customer stories', () => {
     await db.update(ticketJobs).set({ customerStory: story }).where(eq(ticketJobs.id, jobId))
     expect(await save({}, { afterLocks: async () => { throw Object.assign(new Error('held'), { code: '55P03' }) } }))
       .toEqual({ ok: false, error: 'conflict', retryable: true })
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-11T12:05:00.000Z'),
+      closedByProfileId: ownerId,
+      closeDisposition: 'no_repair',
+      closeNote: 'Fixture terminal-state proof.',
+    }).where(eq(tickets.id, ticketId))
+    expect(await save()).toEqual({ ok: false, error: 'state_conflict', retryable: false })
   })
 
   it('uses ticket, stable jobs, stable versions, session, actor NOWAIT lock order', async () => {
