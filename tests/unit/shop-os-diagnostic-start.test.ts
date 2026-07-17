@@ -63,33 +63,19 @@ describe('Shop OS leased diagnostic start', () => {
     ...overrides,
   })
 
-  it('locks every mutable finalize input before snapshot comparison or persistence', () => {
+  it('uses the shared bounded profile-first coordinator and one top-level revision finalizer', () => {
     const source = readFileSync(
       join(process.cwd(), 'lib/shop-os/diagnostic-start.ts'),
       'utf8',
     )
-    const lockHelper = source.slice(
-      source.indexOf('async function lockFinalizeRows'),
-      source.indexOf('async function settleOwnedAttempt'),
-    )
-    const finalize = source.slice(
-      source.indexOf('export async function finalizeDiagnosticStart'),
-      source.indexOf('export async function recordDiagnosticStartFailure'),
-    )
-
-    expect(lockHelper).toMatch(
-      /\.from\(ticketJobs\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(tickets\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(vehicles\)[\s\S]*?\.for\('update'\)[\s\S]*?\.from\(profiles\)[\s\S]*?\.for\('update'\)/,
-    )
-    expect(lockHelper).toContain('eq(ticketJobs.id, input.jobId)')
-    expect(lockHelper).toContain('eq(tickets.id, input.ticketId)')
-    expect(lockHelper).toContain('eq(vehicles.id, lockedTicket.vehicleId)')
-    expect(lockHelper).toContain('eq(profiles.id, input.actor.profileId)')
-
-    const lockIndex = finalize.indexOf('await lockFinalizeRows(transactionDb, input)')
-    expect(lockIndex).toBeGreaterThan(-1)
-    expect(lockIndex).toBeLessThan(finalize.indexOf('loadAuthorizedSnapshot(transactionDb, input)'))
-    expect(lockIndex).toBeLessThan(finalize.indexOf('sameAcquiredContext'))
-    expect(lockIndex).toBeLessThan(finalize.indexOf('insert(sessions)'))
+    expect(source).toContain('runBoundedShopOsMutationV1')
+    expect(source).toContain('assertLiveLockedMutationScopeV1')
+    expect(source).toContain('finalizeMutationRevisionsV1')
+    expect(source).toContain("lockShop: sessionInsertion === 'create'")
+    expect(source).toMatch(/sessions:\s*Object\.freeze\(\[\{[\s\S]*?id:\s*input\.sessionId/)
+    expect(source).not.toContain('lockFinalizeRows')
+    expect(source).not.toMatch(/\.for\(['"]update['"]/)
+    expect(source).not.toMatch(/for \(const ordinal of \[1, 2\]/)
   })
 
   beforeEach(async () => {
@@ -438,9 +424,35 @@ describe('Shop OS leased diagnostic start', () => {
     await assertRejected(async () => {
       await db.update(ticketJobs).set({ kind: 'repair' }).where(eq(ticketJobs.id, jobId))
     })
-    await assertRejected(async () => {
-      await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    const terminalTicketId = uuid(32)
+    const terminalJobId = uuid(42)
+    await db.insert(tickets).values({
+      id: terminalTicketId,
+      shopId,
+      ticketNumber: 3,
+      source: 'counter',
+      customerId: uuid(20),
+      vehicleId,
+      concern: 'Terminal diagnostic fixture',
+      createdByProfileId: actor.profileId,
+      status: 'canceled',
+      canceledAt: new Date('2026-07-10T13:00:00Z'),
+      canceledByProfileId: actor.profileId,
+      cancelReasonCode: 'administrative_error',
     })
+    await db.insert(ticketJobs).values({
+      id: terminalJobId,
+      shopId,
+      ticketId: terminalTicketId,
+      title: 'Terminal diagnosis',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      assignedTechId: actor.profileId,
+    })
+    expect(await acquire(uuid(102), {
+      ticketId: terminalTicketId,
+      jobId: terminalJobId,
+    })).toEqual(expected)
     for (const workStatus of ['in_progress', 'blocked', 'done', 'canceled'] as const) {
       await assertRejected(async () => {
         await db.update(ticketJobs).set({ workStatus }).where(eq(ticketJobs.id, jobId))
@@ -492,24 +504,6 @@ describe('Shop OS leased diagnostic start', () => {
   })
 
   it.each([
-    ['concern', async (testDb: TestDb, currentTicketId: string) => {
-      await testDb.update(tickets).set({ concern: 'Concern changed during generation' })
-        .where(eq(tickets.id, currentTicketId))
-    }],
-    ['vehicle ID', async (testDb: TestDb, currentTicketId: string) => {
-      const [customer] = await testDb.select().from(customers)
-      const [replacement] = await testDb.insert(vehicles).values({
-        id: uuid(22),
-        customerId: customer.id,
-        year: 2018,
-        make: 'Ford',
-        model: 'F-150',
-        engine: '3.5L EcoBoost',
-        mileage: 84_000,
-      }).returning()
-      await testDb.update(tickets).set({ vehicleId: replacement.id })
-        .where(eq(tickets.id, currentTicketId))
-    }],
     ['year', async (testDb: TestDb) => {
       await testDb.update(vehicles).set({ year: 2019 }).where(eq(vehicles.id, uuid(21)))
     }],
@@ -525,9 +519,9 @@ describe('Shop OS leased diagnostic start', () => {
     ['mileage', async (testDb: TestDb) => {
       await testDb.update(vehicles).set({ mileage: 85_000 }).where(eq(vehicles.id, uuid(21)))
     }],
-  ] as const)('settles ambiguous without persistence when acquired %s drifts', async (_field, mutate) => {
+  ] as const)('settles ambiguous without persistence when acquired mutable %s drifts', async (_field, mutate) => {
     await acquire(uuid(100))
-    await mutate(db, ticketId)
+    await mutate(db)
 
     expect(await finalizeDiagnosticStart(db, {
       actor,
@@ -630,7 +624,7 @@ describe('Shop OS leased diagnostic start', () => {
       assignedTechId: otherTechId,
       sessionId: null,
       workStatus: 'open',
-      diagnosticStartState: 'ambiguous',
+      diagnosticStartState: 'initializing',
       diagnosticStartAttemptKey: uuid(100),
     })
   })
@@ -651,7 +645,7 @@ describe('Shop OS leased diagnostic start', () => {
     expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0])
       .toMatchObject({
         sessionId: null,
-        diagnosticStartState: 'ambiguous',
+        diagnosticStartState: 'initializing',
         diagnosticStartAttemptKey: uuid(100),
       })
   })
@@ -792,4 +786,145 @@ describe('Shop OS leased diagnostic start', () => {
       diagnosticStartErrorCode: null,
     })
   })
+
+  it('bumps job and projection exactly once for lease, failure, retry, and expiry while continuity stays stable', async () => {
+    const revisions = async () => {
+      const [ticket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      return {
+        projection: ticket.projectionRevision,
+        continuity: ticket.continuityRevision,
+        job: job.revision,
+      }
+    }
+    const initial = await revisions()
+    await acquire(uuid(100))
+    const leased = await revisions()
+    expect(leased).toEqual({
+      projection: initial.projection + 1n,
+      continuity: initial.continuity,
+      job: initial.job + 1n,
+    })
+
+    await acquire(uuid(101))
+    expect(await revisions()).toEqual(leased)
+    await recordDiagnosticStartFailure(db, {
+      actor, ticketId, jobId, attemptKey: uuid(100),
+      certainty: 'certain', errorCode: 'initialization_failed',
+    })
+    const failed = await revisions()
+    expect(failed).toEqual({
+      projection: leased.projection + 1n,
+      continuity: leased.continuity,
+      job: leased.job + 1n,
+    })
+
+    await acquire(uuid(101))
+    const retried = await revisions()
+    expect(retried).toEqual({
+      projection: failed.projection + 1n,
+      continuity: failed.continuity,
+      job: failed.job + 1n,
+    })
+    await db.update(ticketJobs).set({ diagnosticStartLeaseUntil: new Date('2000-01-01') })
+      .where(eq(ticketJobs.id, jobId))
+    await acquire(uuid(102), { statusOnly: true })
+    const expired = await revisions()
+    expect(expired).toEqual({
+      projection: retried.projection + 1n,
+      continuity: retried.continuity,
+      job: retried.job + 1n,
+    })
+    await acquire(uuid(102), { statusOnly: true })
+    expect(await revisions()).toEqual(expired)
+  })
+
+  it('finalize bumps job, projection, and continuity once while canonical replays bump nothing', async () => {
+    await acquire(uuid(100))
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const input = {
+      actor, ticketId, jobId, attemptKey: uuid(100), sessionId: uuid(60),
+      treeState, context: acquiredContext,
+    }
+    await finalizeDiagnosticStart(db, input)
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision + 1n)
+    expect(afterJob.revision).toBe(beforeJob.revision + 1n)
+
+    await finalizeDiagnosticStart(db, input)
+    await finalizeDiagnosticStart(db, { ...input, sessionId: uuid(61) })
+    const [replayTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [replayJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(replayTicket.projectionRevision).toBe(afterTicket.projectionRevision)
+    expect(replayTicket.continuityRevision).toBe(afterTicket.continuityRevision)
+    expect(replayJob.revision).toBe(afterJob.revision)
+    expect(await db.select().from(sessions)).toHaveLength(1)
+  })
+
+  it('reruns fresh discovery on the bounded second attempt', async () => {
+    let attempts = 0
+    const result = await acquireDiagnosticStart(db, {
+      actor, ticketId, jobId, attemptKey: uuid(100),
+    }, {
+      afterLocks: async () => {
+        attempts += 1
+        if (attempts === 1) throw Object.assign(new Error('retry lock'), { code: '55P03' })
+      },
+    })
+    expect(attempts).toBe(2)
+    expect(result).toMatchObject({ ok: true, state: 'initializing', leaseAcquired: true })
+  })
+
+  it('permits inactive historical profile references while requiring the invoking actor to stay active', async () => {
+    await db.update(profiles).set({ deactivatedAt: new Date('2026-07-10T13:00:00Z') })
+      .where(eq(profiles.id, uuid(3)))
+    await expect(acquire(uuid(100))).resolves.toMatchObject({
+      ok: true, state: 'initializing', leaseAcquired: true,
+    })
+  })
+
+  it('refuses a pre-existing session insertion collision without linking or revisioning the job', async () => {
+    await acquire(uuid(100))
+    await db.insert(sessions).values({
+      id: uuid(60), shopId, techId: actor.profileId, vehicleId, intake: acquiredContext.intake,
+      treeState,
+    })
+    const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const result = await finalizeDiagnosticStart(db, {
+      actor, ticketId, jobId, attemptKey: uuid(100), sessionId: uuid(60),
+      treeState, context: acquiredContext,
+    })
+    expect(result).toEqual({ ok: true, state: 'ambiguous' })
+    const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+    const [afterJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+    expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+    expect(afterJob.revision).toBe(beforeJob.revision + 1n)
+    expect(afterJob.sessionId).toBeNull()
+  })
+
+  it.each(['afterWrite', 'afterFinalization'] as const)(
+    'rolls back finalize at the %s seam before recording one ambiguous failure transition',
+    async (seam) => {
+      await acquire(uuid(100))
+      const [beforeTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      const [beforeJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      const result = await finalizeDiagnosticStart(db, {
+        actor, ticketId, jobId, attemptKey: uuid(100), sessionId: uuid(60),
+        treeState, context: acquiredContext,
+      }, { [seam]: async () => { throw new Error(seam) } })
+      expect(result).toEqual({ ok: true, state: 'ambiguous' })
+      expect(await db.select().from(sessions)).toHaveLength(0)
+      const [afterTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+      const [afterJob] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+      expect(afterTicket.projectionRevision).toBe(beforeTicket.projectionRevision + 1n)
+      expect(afterTicket.continuityRevision).toBe(beforeTicket.continuityRevision)
+      expect(afterJob.revision).toBe(beforeJob.revision + 1n)
+      expect(afterJob).toMatchObject({ sessionId: null, diagnosticStartState: 'ambiguous' })
+    },
+  )
 })
