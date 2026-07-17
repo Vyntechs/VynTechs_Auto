@@ -27,7 +27,7 @@ type ReviewFn = (
   db: TestDb,
   input: unknown,
   dependencies?: {
-    afterLocks?: () => Promise<void>
+    afterLocks?: (tx: TestDb) => Promise<void>
     afterWrite?: () => Promise<void>
     afterFinalization?: () => Promise<void>
   },
@@ -410,6 +410,21 @@ describe('Shop OS reviewed customer stories', () => {
     }).where(eq(ticketJobs.id, jobId))
 
     expect(await save()).toEqual({ ok: false, error: 'conflict', retryable: false })
+  })
+
+  it('rejects a wizard event inserted after discovery before locked review executes', async () => {
+    const result = await save({}, {
+      afterLocks: async (tx) => {
+        await tx.insert(sessionEvents).values({
+          id: uuid(98), sessionId, nodeId: 'wizard', eventType: 'wizard_lock_in',
+          aiResponse: { wizardLockIn: { flowVersionId: uuid(97) } },
+        })
+      },
+    })
+
+    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory)
+      .toEqual(story)
   })
 
   it.each(['afterWrite', 'afterFinalization'] as const)(

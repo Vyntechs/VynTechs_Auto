@@ -106,13 +106,13 @@ export type CustomerStoryGenerationResult =
 export type CustomerStoryGenerationDependencies = {
   generateCustomerStory: GenerateCustomerStoryFn
   beforeFinalTransaction?: () => Promise<void>
-  afterLocks?: () => Promise<void>
+  afterLocks?: (tx: AppDb) => Promise<void>
   afterWrite?: () => Promise<void>
   afterFinalization?: () => Promise<void>
 }
 
 export type CustomerStoryReviewDependencies = {
-  afterLocks?: () => Promise<void>
+  afterLocks?: (tx: AppDb) => Promise<void>
   afterWrite?: () => Promise<void>
   afterFinalization?: () => Promise<void>
 }
@@ -350,6 +350,7 @@ type StoryMutationDiscovery = Readonly<{
   kind: 'ready' | 'not_found'
   separateChainIds: readonly string[]
   targetSessionId: string | null
+  targetSessionEventIds: readonly string[]
   closureFingerprint: string | null
 }>
 
@@ -442,6 +443,7 @@ async function discoverStoryMutation(
       kind: 'not_found',
       separateChainIds: Object.freeze([]),
       targetSessionId: null,
+      targetSessionEventIds: Object.freeze([]),
       closureFingerprint: null,
     }),
   })
@@ -489,7 +491,7 @@ async function discoverStoryMutation(
   const targetSessionEvents = targetJob.sessionId === null ? [] : await tx.select()
     .from(sessionEvents)
     .where(eq(sessionEvents.sessionId, targetJob.sessionId))
-    .orderBy(sessionEvents.id)
+    .orderBy(sessionEvents.createdAt, sessionEvents.id)
   const vehicleIds = storyUuidList([
     ...ticketRows.map(({ vehicleId }) => vehicleId),
     ...sessionRows.map(({ vehicleId }) => vehicleId),
@@ -578,23 +580,24 @@ async function discoverStoryMutation(
       kind: 'ready',
       separateChainIds: Object.freeze(ticketRows.map(({ id }) => id)),
       targetSessionId: targetJob.sessionId,
+      targetSessionEventIds: Object.freeze(targetSessionEvents.map(({ id }) => id)),
       closureFingerprint,
     }),
   })
 }
 
-function resolveStoryMutationScope(
+async function resolveStoryMutationScope(
   tx: AppDb,
   scope: LockedMutationScopeV1,
   discovery: StoryMutationDiscovery,
   ticketId: string,
   jobId: string,
-): Readonly<{
+): Promise<Readonly<{
   graph: LockedMutationScopeV1['tickets'][number]
   targetJob: LockedMutationScopeV1['tickets'][number]['jobs'][number]
   targetSession: (typeof sessions.$inferSelect) | null
   targetSessionEvents: readonly SelectedEvent[]
-}> {
+}>> {
   assertLiveLockedMutationScopeV1(tx, scope)
   if (discovery.kind === 'not_found') throw new ShopOsMutationNotFound()
   if (
@@ -615,6 +618,17 @@ function resolveStoryMutationScope(
     if (!graph || graph.ticket.separateFromTicketId !==
       (discovery.separateChainIds[index + 1] ?? null)) throw new ShopOsMutationConflict()
   }
+
+  const currentTargetSessionEventIds = discovery.targetSessionId === null
+    ? []
+    : (await tx.select({ id: sessionEvents.id }).from(sessionEvents)
+        .where(eq(sessionEvents.sessionId, discovery.targetSessionId))
+        .orderBy(sessionEvents.createdAt, sessionEvents.id))
+      .map(({ id }) => id)
+  if (
+    currentTargetSessionEventIds.length !== discovery.targetSessionEventIds.length ||
+    currentTargetSessionEventIds.some((id, index) => id !== discovery.targetSessionEventIds[index])
+  ) throw new ShopOsMutationConflict()
 
   const lockedFingerprint = storyClosureFingerprint({
     profiles: storyRowsById(scope.profiles),
@@ -832,7 +846,7 @@ async function lockedGenerationContext(
   discovery: StoryMutationDiscovery,
   input: GenerationInput,
 ): Promise<Context> {
-  const resolved = resolveStoryMutationScope(
+  const resolved = await resolveStoryMutationScope(
     tx, scope, discovery, input.ticketId, input.jobId,
   )
   const { graph, targetJob, targetSession, targetSessionEvents } = resolved
@@ -965,7 +979,7 @@ export async function generateAndSaveCustomerStory(
       }),
       executeLocked: async (tx, scope, discovery) => {
       assertLiveLockedMutationScopeV1(tx, scope)
-      await dependencies.afterLocks?.()
+      await dependencies.afterLocks?.(tx)
       const context = await lockedGenerationContext(tx, scope, discovery, input)
       if (
         discovery.closureFingerprint !== initialClosureFingerprint ||
@@ -1103,7 +1117,7 @@ async function lockedReviewContext(
   sessionEvents: readonly SelectedEvent[]
   now: Date
 }>> {
-  const resolved = resolveStoryMutationScope(
+  const resolved = await resolveStoryMutationScope(
     tx, scope, discovery, input.ticketId, input.jobId,
   )
   const actor = scope.profiles.find(({ id }) => id === scope.actor.id)
@@ -1261,7 +1275,7 @@ export async function saveReviewedCustomerStory(
       }),
       executeLocked: async (tx, scope, discovery) => {
       assertLiveLockedMutationScopeV1(tx, scope)
-      await dependencies.afterLocks?.()
+      await dependencies.afterLocks?.(tx)
       const context = await lockedReviewContext(tx, scope, discovery, input)
       if (context.targetJob.sessionId !== preflightJob.sessionId) {
         throw new ShopOsMutationConflict()

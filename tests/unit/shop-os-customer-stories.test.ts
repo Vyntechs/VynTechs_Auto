@@ -406,6 +406,21 @@ describe('Shop OS customer story domain', () => {
     expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory).toBeNull()
   })
 
+  it('rejects a wizard event inserted after discovery before locked generation executes', async () => {
+    const result = await generate({}, vi.fn(async () => ({ selections: [] })), {
+      afterLocks: async (tx: TestDb) => {
+        await tx.insert(sessionEvents).values({
+          id: uuid(1091), sessionId, nodeId: 'wizard', eventType: 'wizard_lock_in',
+          aiResponse: { wizardLockIn: { flowVersionId: uuid(1092) } },
+        })
+      },
+    })
+
+    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].customerStory)
+      .toBeNull()
+  })
+
   it('classifies NOWAIT contention as retryable and rolls back', async () => {
     const result = await generate({}, vi.fn(async () => ({ selections: [] })), {
       afterLocks: async () => { throw Object.assign(new Error('held row'), { code: '55P03' }) },
