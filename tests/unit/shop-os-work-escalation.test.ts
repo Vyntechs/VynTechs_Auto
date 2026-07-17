@@ -138,7 +138,13 @@ describe('Shop OS found-concern escalation', () => {
     await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
       .resolves.toEqual({ ok: false, error: 'not_authorized' })
     await db.update(ticketJobs).set({ approvalState: 'approved', approvedQuoteVersionId: versionId }).where(eq(ticketJobs.id, sourceJobId))
-    await db.update(tickets).set({ status: 'closed' }).where(eq(tickets.id, ticketId))
+    await db.update(tickets).set({
+      status: 'closed',
+      closedAt: new Date('2026-07-11T12:05:00.000Z'),
+      closedByProfileId: advisorId,
+      closeDisposition: 'no_repair',
+      closeNote: 'Fixture terminal-state proof.',
+    }).where(eq(tickets.id, ticketId))
     await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
       .resolves.toEqual({ ok: false, error: 'not_ready' })
     expect(await db.select().from(ticketJobs)).toHaveLength(2)
