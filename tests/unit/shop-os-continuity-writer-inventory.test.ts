@@ -2,6 +2,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { resolve, relative } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { createTypeScriptProgramGraphV1 } from '@/tests/helpers/typescript-program-graph'
+import { isDiagnosticsGatedRoute } from '@/lib/auth-access'
 import {
   CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1,
   CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1,
@@ -12,28 +14,7 @@ import {
 } from '@/lib/shop-os/continuity/mutation-foundation/writer-inventory'
 
 const root = process.cwd()
-const trackedTables = new Set([
-  'customers',
-  'vehicles',
-  'sessions',
-  'sessionEvents',
-  'tickets',
-  'ticketJobs',
-  'jobLines',
-  'quoteVersions',
-  'quoteEvents',
-])
-const trackedSqlTables = new Map([
-  ['customers', 'customers'],
-  ['vehicles', 'vehicles'],
-  ['sessions', 'sessions'],
-  ['session_events', 'sessionEvents'],
-  ['tickets', 'tickets'],
-  ['ticket_jobs', 'ticketJobs'],
-  ['job_lines', 'jobLines'],
-  ['quote_versions', 'quoteVersions'],
-  ['quote_events', 'quoteEvents'],
-])
+const programGraph = createTypeScriptProgramGraphV1()
 
 async function source(path: string): Promise<string> {
   return readFile(resolve(root, path), 'utf8')
@@ -51,82 +32,6 @@ async function applicationSources(directory: string): Promise<string[]> {
   return children.flat().sort()
 }
 
-function topLevelFunctionName(node: ts.Node): string {
-  let current: ts.Node | undefined = node
-  while (current && !ts.isSourceFile(current.parent)) current = current.parent
-  if (!current) return '<module>'
-  if (ts.isFunctionDeclaration(current)) return current.name?.text ?? '<anonymous>'
-  if (ts.isVariableStatement(current)) {
-    const declaration = current.declarationList.declarations.find(
-      (candidate) => candidate.initializer && node.pos >= candidate.pos && node.end <= candidate.end,
-    )
-    if (declaration && ts.isIdentifier(declaration.name)) return declaration.name.text
-  }
-  return '<module>'
-}
-
-type MutationSite = Readonly<{
-  file: string
-  functionName: string
-  operation: string
-  table: string
-}>
-
-function collectMutationSites(file: string, text: string): MutationSite[] {
-  const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
-  const schemaAliases = new Map<string, string>()
-  for (const statement of parsed.statements) {
-    if (!ts.isImportDeclaration(statement)) continue
-    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
-    const modulePath = statement.moduleSpecifier.text
-    if (!(modulePath.endsWith('/db/schema') || (file === 'lib/db/queries.ts' && modulePath === './schema'))) continue
-    for (const specifier of statement.importClause?.namedBindings &&
-      ts.isNamedImports(statement.importClause.namedBindings)
-      ? statement.importClause.namedBindings.elements
-      : []) {
-      const imported = specifier.propertyName?.text ?? specifier.name.text
-      if (trackedTables.has(imported)) schemaAliases.set(specifier.name.text, imported)
-    }
-  }
-
-  const sites: MutationSite[] = []
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const operation = node.expression.name.text
-      if (['insert', 'update', 'delete'].includes(operation)) {
-        const target = node.arguments[0]
-        const table = target && ts.isIdentifier(target)
-          ? schemaAliases.get(target.text)
-          : undefined
-        if (table) {
-          sites.push({ file, functionName: topLevelFunctionName(node), operation, table })
-        }
-      }
-      if (operation === 'execute') {
-        const argument = node.arguments[0]
-        const raw = argument?.getText(parsed) ?? ''
-        for (const [sqlName, table] of trackedSqlTables) {
-          const mutation = new RegExp(
-            `\\b(insert\\s+into|update|delete\\s+from)\\s+(?:public\\.)?"?${sqlName}"?\\b`,
-            'i',
-          ).exec(raw)
-          if (mutation) {
-            sites.push({
-              file,
-              functionName: topLevelFunctionName(node),
-              operation: mutation[1]!.toLowerCase().replace(/\s+/g, '-'),
-              table,
-            })
-          }
-        }
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(parsed)
-  return sites
-}
-
 function exportedFunctionNames(text: string): Set<string> {
   const parsed = ts.createSourceFile('source.ts', text, ts.ScriptTarget.Latest, true)
   const names = new Set<string>()
@@ -138,79 +43,6 @@ function exportedFunctionNames(text: string): Set<string> {
   }
   return names
 }
-
-function topLevelFunctionSource(text: string, name: string): string {
-  const parsed = ts.createSourceFile('source.ts', text, ts.ScriptTarget.Latest, true)
-  for (const statement of parsed.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) {
-      return statement.getText(parsed)
-    }
-    if (!ts.isVariableStatement(statement)) continue
-    const declaration = statement.declarationList.declarations.find(
-      (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === name,
-    )
-    if (declaration) return declaration.getText(parsed)
-  }
-  return ''
-}
-
-const expectedMutationSites = [
-  'app/api/sessions/[id]/wizard-state/route.ts#POST:update:sessions',
-  'lib/curator/deferred-actions.ts#mutateDeferredSession:update:sessions',
-  'lib/db/queries.ts#appendSessionEvent:insert:sessionEvents',
-  'lib/db/queries.ts#closeSession:update:sessions',
-  'lib/db/queries.ts#createSession:insert:sessions',
-  'lib/db/queries.ts#setSessionTerminalStatus:update:sessions',
-  'lib/db/queries.ts#updateSessionIntake:update:sessions',
-  'lib/db/queries.ts#updateSessionMaxCorpusSimilarity:update:sessions',
-  'lib/db/queries.ts#updateSessionTreeState:update:sessions',
-  'lib/diagnostics/adaptive/state.ts#updateAdaptiveModeForUser:insert:sessionEvents',
-  'lib/diagnostics/adaptive/state.ts#updateAdaptiveModeForUser:update:sessions',
-  'lib/intake/customers.ts#upsertCustomer:insert:customers',
-  'lib/intake/session.ts#createSessionFromIntake:insert:sessions',
-  'lib/intake/session.ts#createSessionFromIntake:update:vehicles',
-  'lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1:insert:customers',
-  'lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1:insert:vehicles',
-  'lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1:update:vehicles',
-  'lib/intake/vehicles.ts#upsertVehicle:insert:vehicles',
-  'lib/sessions.ts#closeSessionForUser:update:ticketJobs',
-  'lib/sessions.ts#lockDiagnosisFromWizard:update:sessions',
-  'lib/sessions.ts#runTechQuickMutation:insert:sessions',
-  'lib/sessions.ts#closeSessionForUser:update:ticketJobs',
-  'lib/shop-os/canned-jobs.ts#applyCannedJobToTicket:insert:jobLines',
-  'lib/shop-os/canned-jobs.ts#applyCannedJobToTicket:insert:ticketJobs',
-  'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1:update:ticketJobs',
-  'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1:update:tickets',
-  'lib/shop-os/customer-stories.ts#generateAndSaveCustomerStory:update:ticketJobs',
-  'lib/shop-os/customer-stories.ts#saveReviewedCustomerStory:update:ticketJobs',
-  'lib/shop-os/diagnostic-start.ts#acquireDiagnosticStart:update:ticketJobs',
-  'lib/shop-os/diagnostic-start.ts#finalizeDiagnosticStart:insert:sessions',
-  'lib/shop-os/diagnostic-start.ts#finalizeDiagnosticStart:update:ticketJobs',
-  'lib/shop-os/diagnostic-start.ts#settleDiagnosticStart:update:ticketJobs',
-  'lib/shop-os/diagnostic-start.ts#updateExpiredLease:update:ticketJobs',
-  'lib/shop-os/parts-offers.ts#captureManualOffer:insert:jobLines',
-  'lib/shop-os/parts-offers.ts#removeManualOffer:delete:jobLines',
-  'lib/shop-os/quotes.ts#createDraftLine:insert:jobLines',
-  'lib/shop-os/quotes.ts#createQuoteVersion:insert:quoteVersions',
-  'lib/shop-os/quotes.ts#createQuoteVersion:update:quoteVersions',
-  'lib/shop-os/quotes.ts#createQuoteVersion:update:ticketJobs',
-  'lib/shop-os/quotes.ts#createQuoteVersion:update:ticketJobs',
-  'lib/shop-os/quotes.ts#deleteDraftLine:delete:jobLines',
-  'lib/shop-os/quotes.ts#invalidateActiveQuoteVersionDeltaV1:update:quoteVersions',
-  'lib/shop-os/quotes.ts#invalidateActiveQuoteVersionDeltaV1:update:ticketJobs',
-  'lib/shop-os/quotes.ts#recordQuoteDecision:insert:quoteEvents',
-  'lib/shop-os/quotes.ts#recordQuoteDecision:update:ticketJobs',
-  'lib/shop-os/quotes.ts#replaceDraftLine:update:jobLines',
-  'lib/shop-os/simple-work.ts#createWorkEscalation:insert:ticketJobs',
-  'lib/shop-os/simple-work.ts#mutateSimpleWork:update:ticketJobs',
-  'lib/shop-os/simple-work.ts#mutateSimpleWork:update:ticketJobs',
-  'lib/shop-os/simple-work.ts#mutateSimpleWork:update:ticketJobs',
-  'lib/tickets.ts#addTicketJob:insert:ticketJobs',
-  'lib/tickets.ts#insertResolvedTicketBatchInTransactionV1:insert:jobLines',
-  'lib/tickets.ts#insertResolvedTicketBatchInTransactionV1:insert:ticketJobs',
-  'lib/tickets.ts#insertResolvedTicketBatchInTransactionV1:insert:tickets',
-  'lib/tickets.ts#mutateTicketJobAssignment:update:ticketJobs',
-] as const
 
 describe('ShopOS continuity writer manifest', () => {
   it('encodes the exact winning writer, creation-helper, and lock-only families', () => {
@@ -269,19 +101,32 @@ describe('ShopOS continuity writer manifest', () => {
 })
 
 describe('ShopOS continuity writer source inventory', () => {
-  it('classifies every tracked Drizzle or raw-SQL application mutation by exact file and function', async () => {
-    const files = [
-      ...(await applicationSources('lib')),
-      ...(await applicationSources('app/api')),
+  it('assigns every semantic tracked-table mutation to a registered transitive writer root', () => {
+    const roots = [
+      ...CONTINUITY_WRITER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_REGISTERED_CREATION_HELPER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_LOCK_ONLY_INVENTORY_V1.flatMap((entry) =>
+        ('transactions' in entry ? entry.transactions : []).map((name) => `${entry.file}#${name}`)),
+      ...CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_NESTED_SESSION_HELPER_INVENTORY_V1.map(({ file, helper }) => `${file}#${helper}`),
+      'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1',
     ]
-    const sites = (await Promise.all(files.map(async (file) =>
-      collectMutationSites(file, await source(file)),
-    ))).flat()
-    const keys = sites.map((site) =>
-      `${site.file}#${site.functionName}:${site.operation}:${site.table}`,
-    ).sort()
+    const registeredFiles = new Set(roots.map((rootId) => rootId.split('#')[0]))
+    const unknownInRegisteredFiles = programGraph.mutations().filter((site) =>
+      site.operation === 'unknown-sql' && registeredFiles.has(site.file))
+    expect(unknownInRegisteredFiles, 'dynamic SQL in a registered writer must be classified or refused')
+      .toEqual([])
 
-    expect(keys).toEqual([...expectedMutationSites].sort())
+    for (const site of programGraph.mutations().filter(({ operation }) => operation !== 'unknown-sql')) {
+      const owners = roots.filter((rootId) =>
+        rootId === site.owner || programGraph.transitiveCallees(rootId).includes(site.owner))
+      expect(owners.length, `${site.file}:${site.position} ${site.operation}:${site.table}`).toBeGreaterThan(0)
+    }
   })
 
   it('keeps every named top-level writer exported from its registered file', async () => {
@@ -296,29 +141,36 @@ describe('ShopOS continuity writer source inventory', () => {
     }
   })
 
-  it('requires winning files to own one bounded scope and the correct finalization contract', async () => {
-    const runnerSource = await source(
-      'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts',
-    )
-    expect(runnerSource).toContain('lockMutationScopeV1')
+  it('requires each named winning writer to reach the coordinator and finalizer transitively', async () => {
+    const coordinator = 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runBoundedShopOsMutationV1'
+    const revisionFinalizer = 'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1'
+    const creationFinalizer = 'lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1'
     for (const family of CONTINUITY_WRITER_INVENTORY_V1) {
-      const text = await source(family.file)
-      expect(text, `${family.file} bounded coordinator`).toContain('runBoundedShopOsMutationV1')
-      expect(
-        text.includes('finalizeMutationRevisionsV1') ||
-          text.includes('finalizeResolvedTicketCreationInTransactionV1'),
-        `${family.file} sole revision finalizer`,
-      ).toBe(true)
+      for (const mutation of family.mutations) {
+        const rootId = `${family.file}#${mutation}`
+        const closure = programGraph.transitiveCallees(rootId)
+        expect(closure, `${rootId} bounded coordinator`).toContain(coordinator)
+        expect(
+          closure.includes(revisionFinalizer) || closure.includes(creationFinalizer),
+          `${rootId} revision finalizer`,
+        ).toBe(true)
+      }
     }
 
     for (const family of CONTINUITY_LOCK_ONLY_INVENTORY_V1) {
-      const text = await source(family.file)
-      expect(text, `${family.file} bounded coordinator`).toContain('runBoundedShopOsMutationV1')
       const transactions = 'transactions' in family ? family.transactions : []
       for (const transaction of transactions) {
-        const body = topLevelFunctionSource(text, transaction)
-        expect(body, `${family.file}#${transaction} exists`).not.toBe('')
-        expect(body, `${family.file}#${transaction} is lock-only`).not.toContain('finalizeMutationRevisionsV1')
+        const rootId = `${family.file}#${transaction}`
+        const closure = programGraph.transitiveCallees(rootId)
+        expect(closure, `${rootId} bounded coordinator`).toContain(coordinator)
+        if (rootId === 'lib/sessions.ts#replayCompletedTechQuickSessionForUser') {
+          expect(await source('lib/sessions.ts')).toMatch(
+            /replayCompletedTechQuickSessionForUser[\s\S]*?runTechQuickMutation\(db, actor, owned\.value, false\)/,
+          )
+          continue
+        }
+        expect(closure, `${rootId} is lock-only`).not.toContain(revisionFinalizer)
+        expect(closure, `${rootId} is lock-only`).not.toContain(creationFinalizer)
       }
     }
   })
@@ -345,6 +197,23 @@ describe('ShopOS continuity writer source inventory', () => {
     }
     expect(counterSource).toContain("mode: 'intake_insert'")
     expect(quickSource).toContain("mode: 'quick_insert'")
+
+    const reservation = 'lib/shop-os/continuity/mutation-foundation/revisions.ts#reserveJobSequencesForInsertionV1'
+    for (const rootId of [
+      'lib/tickets.ts#addTicketJob',
+      'lib/shop-os/canned-jobs.ts#applyCannedJobToTicket',
+      'lib/shop-os/simple-work.ts#createWorkEscalation',
+    ]) expect(programGraph.transitiveCallees(rootId), `${rootId} sequence reservation`).toContain(reservation)
+
+    const quickClosure = programGraph.transitiveCallees('lib/intake/quick-ticket.ts#createQuickTicket')
+    for (const bridge of [
+      'lib/shop-os/continuity/mutation-foundation/ticket-origin.server.ts#createQuickTicketOriginV1',
+      'lib/intake/ticket-identity.ts#preflightTicketIntakeIdentityV1',
+      'lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1',
+      'lib/shop-os/canned-jobs.ts#preflightStrictCannedJobV1',
+      'lib/shop-os/canned-jobs.ts#resolveStrictCannedJobInLockedScopeV1',
+      'lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1',
+    ]) expect(quickClosure, `Quick bridge ${bridge}`).toContain(bridge)
   })
 
   it('guards capability, receipt, keyring, and ticket-origin private seams by exact source ownership', async () => {
@@ -361,89 +230,127 @@ describe('ShopOS continuity writer source inventory', () => {
     expect(barrel).not.toMatch(/createMutationAttemptCapabilityV1|bindLockedMutationScopeToAttemptV1|insertMutationReceiptPrimitiveV1/)
     expect(barrel).not.toContain('FinalizedTicketCreationV1')
 
-    const allFiles = [...(await applicationSources('lib')), ...(await applicationSources('app'))]
-    const all = await Promise.all(allFiles.map(async (file) => ({ file, text: await source(file) })))
-    const importers = (name: string) => all
-      .filter(({ text }) => new RegExp(`\\b${name}\\b`).test(text))
-      .map(({ file }) => file)
-      .sort()
-    expect(importers('createMutationAttemptCapabilityV1')).toEqual([
-      'lib/shop-os/continuity/mutation-foundation/attempt-capability.ts',
-      'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts',
+    const privateSeams = [
+      'lib/shop-os/continuity/mutation-foundation/attempt-capability.ts#createMutationAttemptCapabilityV1',
+      'lib/shop-os/continuity/mutation-foundation/attempt-capability.ts#bindLockedMutationScopeToAttemptV1',
+      'lib/shop-os/continuity/mutation-foundation/receipts.ts#peekMutationReceiptV1',
+      'lib/shop-os/continuity/mutation-foundation/receipts.ts#insertMutationReceiptPrimitiveV1',
+    ]
+    for (const seam of privateSeams) {
+      expect(programGraph.exportersOf(seam), `${seam} exporter`).toEqual([seam.split('#')[0]])
+    }
+    const capabilityCallers = programGraph.directCallers(privateSeams[0]!)
+    expect(capabilityCallers).toHaveLength(2)
+    expect(capabilityCallers.every((caller) =>
+      caller.startsWith('lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#'))).toBe(true)
+    expect(programGraph.directCallers(privateSeams[1]!)).toEqual([
+      'lib/shop-os/continuity/mutation-foundation/lock-order.ts#lockMutationScopeV1',
     ])
-    expect(importers('bindLockedMutationScopeToAttemptV1')).toEqual([
-      'lib/shop-os/continuity/mutation-foundation/attempt-capability.ts',
-      'lib/shop-os/continuity/mutation-foundation/lock-order.ts',
+    expect(programGraph.directCallers(privateSeams[2]!)).toEqual([
+      'lib/shop-os/continuity/mutation-foundation/lock-order.ts#lockMutationScopeV1',
     ])
-    expect(importers('peekMutationReceiptV1')).toEqual([
-      'lib/shop-os/continuity/mutation-foundation/lock-order.ts',
-      'lib/shop-os/continuity/mutation-foundation/receipts.ts',
+    expect(programGraph.directCallers(privateSeams[3]!)).toEqual([
+      'lib/tickets.ts#insertResolvedTicketCreationReceiptInTransactionV1',
     ])
+  })
+
+  it('enforces exact nested-helper callers through aliases and local wrappers', () => {
+    for (const entry of CONTINUITY_NESTED_SESSION_HELPER_INVENTORY_V1) {
+      const helperId = `${entry.file}#${entry.helper}`
+      for (const allowed of entry.allowedCallers) {
+        expect(programGraph.transitiveCallees(allowed), `${allowed} reaches ${helperId}`).toContain(helperId)
+      }
+      for (const directCaller of programGraph.directCallers(helperId)) {
+        const registeredOwner = entry.allowedCallers.some((allowed) =>
+          allowed === directCaller || programGraph.transitiveCallees(allowed).includes(directCaller))
+        expect(registeredOwner, `${helperId} unregistered caller ${directCaller}`).toBe(true)
+      }
+    }
+  })
+
+  it('keeps curator session-only mutations behind the shared transaction shape', () => {
+    const curator = CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1[2]
+    const shared = 'lib/curator/deferred-actions.ts#mutateDeferredSession'
+    for (const mutation of curator.mutations) {
+      const rootId = `${curator.file}#${mutation}`
+      const closure = programGraph.transitiveCallees(rootId)
+      expect(closure, `${rootId} shared curator transaction`).toContain(shared)
+      const reachableMutations = programGraph.mutations().filter((site) =>
+        site.owner === rootId || closure.includes(site.owner))
+      expect([...new Set(reachableMutations.map(({ table }) => table))]).toEqual(['sessions'])
+    }
   })
 })
 
 describe('ShopOS gated writer entrance inventory', () => {
-  it('matches every registered diagnostics library writer to its complete app caller set', async () => {
+  it('matches every registered diagnostics library writer to its complete semantic app caller set', () => {
     const expected = new Map<string, string[]>([
-      ['createSessionForUser', ['app/api/sessions/route.ts#POST']],
-      ['closeSessionForUser', ['app/api/sessions/[id]/close/route.ts#POST']],
-      ['replayCompletedTechQuickSessionForUser', ['app/api/sessions/route.ts#POST']],
-      ['submitRepairObservationForUser', ['app/api/sessions/[id]/repair-observation/route.ts#POST']],
-      ['updateAdaptiveModeForUser', ['app/api/sessions/[id]/adaptive/mode/route.ts#POST']],
-      ['createSessionFromIntake', ['app/api/intake/submit/route.ts#POST']],
-      ['advanceSession', ['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#POST']],
-      ['captureArtifact', []],
-      ['recordAmbientConditions', ['app/api/sessions/[id]/ambient/route.ts#POST']],
-      ['releaseGateForUser', ['app/api/sessions/[id]/release-gate/route.ts#POST']],
-      ['declineOrDeferSessionForUser', ['app/api/sessions/[id]/decline-or-defer/route.ts#POST']],
-      ['abandonSessionForUser', ['app/api/sessions/[id]/abandon/route.ts#POST']],
-      ['lockDiagnosisForUser', ['app/api/sessions/[id]/lock-diagnosis/route.ts#POST']],
-      ['lockDiagnosisFromWizard', ['app/api/sessions/[id]/lock-in-diagnosis/route.ts#POST']],
-      ['buildUpdateTreeWithRetrieval', ['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#POST', 'app/api/sessions/[id]/ambient/route.ts#POST']],
+      ['lib/sessions.ts#createSessionForUser', ['app/api/sessions/route.ts#POST']],
+      ['lib/sessions.ts#closeSessionForUser', ['app/api/sessions/[id]/close/route.ts#POST']],
+      ['lib/sessions.ts#replayCompletedTechQuickSessionForUser', ['app/api/sessions/route.ts#POST']],
+      ['lib/sessions.ts#submitRepairObservationForUser', ['app/api/sessions/[id]/repair-observation/route.ts#POST']],
+      ['lib/diagnostics/adaptive/state.ts#updateAdaptiveModeForUser', ['app/api/sessions/[id]/adaptive/mode/route.ts#POST']],
+      ['lib/intake/session.ts#createSessionFromIntake', ['app/api/intake/submit/route.ts#POST']],
+      ['lib/sessions.ts#advanceSession', ['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#POST']],
+      ['lib/sessions.ts#captureArtifact', []],
+      ['lib/sessions.ts#recordAmbientConditions', ['app/api/sessions/[id]/ambient/route.ts#POST']],
+      ['lib/sessions.ts#releaseGateForUser', ['app/api/sessions/[id]/release-gate/route.ts#POST']],
+      ['lib/sessions.ts#declineOrDeferSessionForUser', ['app/api/sessions/[id]/decline-or-defer/route.ts#POST']],
+      ['lib/sessions.ts#abandonSessionForUser', ['app/api/sessions/[id]/abandon/route.ts#POST']],
+      ['lib/sessions.ts#lockDiagnosisForUser', ['app/api/sessions/[id]/lock-diagnosis/route.ts#POST']],
+      ['lib/sessions.ts#lockDiagnosisFromWizard', ['app/api/sessions/[id]/lock-in-diagnosis/route.ts#POST']],
+      ['lib/retrieval/wire-into-tree.ts#buildUpdateTreeWithRetrieval', ['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#POST', 'app/api/sessions/[id]/ambient/route.ts#POST']],
     ])
-    const appFiles = await applicationSources('app')
-    for (const [writer, callers] of expected) {
-      const actual: string[] = []
-      for (const file of appFiles) {
-        const text = await source(file)
-        if (!new RegExp(`\\b${writer}\\b`).test(text)) continue
-        if (!new RegExp(`\\b${writer}\\s*\\(`).test(text)) continue
-        actual.push(`${file}#POST`)
-      }
-      expect(actual.sort(), writer).toEqual([...callers].sort())
+    for (const [writerId, callers] of expected) {
+      const actual = programGraph.transitiveCallers(writerId)
+        .filter((caller) => caller.startsWith('app/') && caller.endsWith('#POST'))
+      expect(actual, writerId).toEqual([...callers].sort())
     }
   })
 
-  it('keeps every diagnostics entrypoint release-gated and entitlement-refused before its writer call', async () => {
+  it('keeps every diagnostics entrypoint in the actual route gate and calls entitlement before its writer', async () => {
     const authSource = await source('lib/auth-access.ts')
     expect(authSource).toContain("'/api/sessions'")
     expect(authSource).not.toContain('DIAGNOSTICS_ENABLED = true')
-    const registeredRoutes = new Set<string>()
+    const entrances: Array<{ routeId: string; writerId: string }> = []
     for (const family of CONTINUITY_WRITER_INVENTORY_V1) {
       if (!('allowedEntrypointsByMutation' in family)) continue
-      for (const routes of Object.values(family.allowedEntrypointsByMutation)) routes.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
+      for (const [mutation, routes] of Object.entries(family.allowedEntrypointsByMutation)) {
+        routes.forEach((routeId) => entrances.push({ routeId, writerId: `${family.file}#${mutation}` }))
+      }
     }
     for (const family of CONTINUITY_LOCK_ONLY_INVENTORY_V1) {
-      if ('allowedEntrypointsByTransaction' in family) for (const routes of Object.values(family.allowedEntrypointsByTransaction)) routes.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
-      if ('allowedEntrypoints' in family) family.allowedEntrypoints.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
+      if ('allowedEntrypointsByTransaction' in family) {
+        for (const [transaction, routes] of Object.entries(family.allowedEntrypointsByTransaction)) {
+          routes.forEach((routeId) => entrances.push({ routeId, writerId: `${family.file}#${transaction}` }))
+        }
+      }
+      if ('allowedEntrypoints' in family) family.allowedEntrypoints.forEach((routeId) =>
+        entrances.push({ routeId, writerId: `${family.file}#${family.transactions[0]}` }))
     }
-    CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1[0].allowedEntrypoints.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
+    const dormant = CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1[0]
+    dormant.allowedEntrypoints.forEach((routeId) =>
+      entrances.push({ routeId, writerId: `${dormant.file}#${dormant.mutations[0]}` }))
     const gatedSessions = CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1[0]
-    if ('allowedEntrypointsByMutation' in gatedSessions) for (const routes of Object.values(gatedSessions.allowedEntrypointsByMutation)) routes.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
-    const retrieval = CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1[1]
-    if ('allowedCallers' in retrieval) retrieval.allowedCallers.forEach((route) => registeredRoutes.add(route.split('#')[0]!))
-    registeredRoutes.add('app/api/sessions/[id]/wizard-state/route.ts')
-
-    for (const route of registeredRoutes) {
-      const text = await source(route)
-      const gate = text.indexOf('entitlementReject(')
-      expect(gate, `${route} entitlement gate`).toBeGreaterThan(-1)
-      const registeredWriters = [...new Set([...CONTINUITY_WRITER_INVENTORY_V1.flatMap((entry) => [...entry.mutations]), ...CONTINUITY_LOCK_ONLY_INVENTORY_V1.flatMap((entry) => 'transactions' in entry ? [...entry.transactions] : []), ...CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1.flatMap((entry) => [...entry.mutations]), ...CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1.flatMap((entry) => 'mutations' in entry ? [...entry.mutations].filter((mutation) => mutation !== 'POST') : [])])]
-      const firstWriter = registeredWriters
-        .map((writer) => text.indexOf(`${writer}(`))
-        .filter((position) => position > -1)
-        .sort((left, right) => left - right)[0]
-      if (firstWriter !== undefined) expect(gate, `${route} gate order`).toBeLessThan(firstWriter)
+    if ('allowedEntrypointsByMutation' in gatedSessions) {
+      for (const [mutation, routes] of Object.entries(gatedSessions.allowedEntrypointsByMutation)) {
+        routes.forEach((routeId) => entrances.push({ routeId, writerId: `${gatedSessions.file}#${mutation}` }))
+      }
     }
+    const retrieval = CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1[1]
+    if ('allowedCallers' in retrieval) retrieval.allowedCallers.forEach((routeId) =>
+      entrances.push({ routeId, writerId: `${retrieval.file}#${retrieval.mutations[0]}` }))
+
+    const gateId = 'lib/auth-access.ts#entitlementReject'
+    for (const { routeId, writerId } of entrances) {
+      const routeFile = routeId.split('#')[0]!
+      const pathname = `/${routeFile.replace(/^app\//, '').replace(/\/route\.ts$/, '')}`
+        .replace(/\[[^/]+\]/g, 'test')
+      expect(isDiagnosticsGatedRoute(pathname), `${routeId} actual diagnostics gate`).toBe(true)
+      expect(programGraph.callOrder(routeId, [gateId, writerId]), `${routeId} gate order`).toEqual([0, 1])
+    }
+    const wizardRoute = 'app/api/sessions/[id]/wizard-state/route.ts#POST'
+    expect(isDiagnosticsGatedRoute('/api/sessions/test/wizard-state')).toBe(true)
+    expect(programGraph.callOrder(wizardRoute, [gateId])).toEqual([0])
   })
 })
