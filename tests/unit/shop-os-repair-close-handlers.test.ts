@@ -476,6 +476,26 @@ describe('Shop OS ticket-backed repair and close handlers', () => {
     expect(await revisions()).toEqual({ job: 0n, projection: 0n, continuity: 0n })
   })
 
+  it('redacts an approved-close specificity provider exception without mutations or logs', async () => {
+    await decide('approved')
+    const secret = 'provider prompt, user content, and secret token'
+    const validateSpecificity = vi.fn(async () => { throw new Error(secret) })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    expect(await closeTicketed(performedOutcome, validateSpecificity)).toEqual({
+      ok: false, status: 500, error: 'session close failed',
+    })
+    expect(validateSpecificity).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(secret)
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret)
+    expect((await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0].status).toBe('open')
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId)))[0].workStatus)
+      .toBe('in_progress')
+    expect(await db.select().from(sessionEvents)).toHaveLength(0)
+    expect(await revisions()).toEqual({ job: 0n, projection: 0n, continuity: 0n })
+  })
+
   it.each([
     ['actor role', async () => db.update(profiles).set({ role: 'advisor' }).where(eq(profiles.id, techId))],
     ['actor tier', async () => db.update(profiles).set({ skillTier: 2 }).where(eq(profiles.id, techId))],

@@ -1307,7 +1307,7 @@ function ticketedSessionMutationFailure(error: unknown): CloseSessionResult | nu
 
 export type CloseSessionResult =
   | { ok: true }
-  | { ok: false; status: 400 | 404 | 409; error: string; retryable?: true }
+  | { ok: false; status: 400 | 404 | 409 | 500; error: string; retryable?: true }
   | { ok: false; status: 422; error: 'specificity_required'; feedback: string }
 
 const declinedNoRepairSchema = z.object({
@@ -1464,10 +1464,15 @@ export async function closeSessionForUser(opts: {
   // Override path: tech retried after one rejection. Skip the validator entirely;
   // the override metadata is persisted on the outcome row for admin review.
   if (!parsed.data.override) {
-    const validation = await opts.validateSpecificity({
-      rootCause: parsed.data.rootCause,
-      notes: parsed.data.notes,
-    })
+    let validation: ValidatorResult
+    try {
+      validation = await opts.validateSpecificity({
+        rootCause: parsed.data.rootCause,
+        notes: parsed.data.notes,
+      })
+    } catch {
+      return { ok: false, status: 500, error: 'session close failed' }
+    }
     if (!validation.ok) {
       return {
         ok: false,
