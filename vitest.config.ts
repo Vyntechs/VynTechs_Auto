@@ -7,10 +7,12 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     globals: true,
+    maxWorkers: 4,
     setupFiles: ['./tests/setup.ts'],
     include: [
       'tests/unit/**/*.test.ts',
       'tests/unit/**/*.test.tsx',
+      'tests/integration/**/*.test.ts',
       'lib/**/*.test.ts',
       'components/**/*.test.ts',
       'components/**/*.test.tsx',
