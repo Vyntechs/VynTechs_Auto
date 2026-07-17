@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
@@ -94,6 +94,9 @@ describe('ShopOS continuity cross-writer race guards', () => {
     expect(integrationSource).toContain('afterDiscovery: async () =>')
     expect(integrationSource).not.toMatch(/setTimeout\([^,]+,\s*(?:50|100)\)/)
     expect(integrationSource).not.toMatch(/\.ok\s*\?[\s\S]{0,80}:\s*await/)
+    expect(integrationSource).not.toContain('assertConflictThenRetry')
+    expect(integrationSource).not.toContain('waitForBlockedPostgresLockOrSettlement')
+    expect(integrationSource).toContain('waitForExactPostgresLock')
     for (const requiredProductionCase of [
       'proves production canned, escalation, and idempotent PostgreSQL contracts',
       'proves origin, receipt hint, and opaque recovery boundaries on PostgreSQL',
@@ -117,6 +120,35 @@ type UnitRaceMatrixEntry = Readonly<{
   requirement: string
   owners: readonly ExecutableRaceOwner[]
 }>
+type ExecutedRaceOwner = ExecutableRaceOwner & Readonly<{ status: string }>
+
+function collectExecutableUnitOwnersV1(
+  matrix: readonly UnitRaceMatrixEntry[],
+): readonly ExecutableRaceOwner[] {
+  const unique = new Map<string, ExecutableRaceOwner>()
+  for (const { owners } of matrix) {
+    for (const owner of owners) {
+      if (owner.file.startsWith('tests/integration/')) continue
+      unique.set(`${owner.file}\u0000${owner.title}`, owner)
+    }
+  }
+  return [...unique.values()]
+}
+
+function assertExecutableUnitOwnersV1(
+  owners: readonly ExecutableRaceOwner[],
+  assertions: readonly ExecutedRaceOwner[],
+): void {
+  for (const owner of owners) {
+    const matches = assertions.filter((assertion) =>
+      assertion.file === owner.file && assertion.title === owner.title)
+    if (matches.length !== 1 || matches[0]?.status !== 'passed') {
+      throw new Error(
+        `${owner.file} :: ${owner.title} expected one passed execution; got ${matches.map(({ status }) => status).join(', ') || 'missing'}`,
+      )
+    }
+  }
+}
 
 const UNIT_CROSS_WRITER_RACE_MATRIX_V1: readonly UnitRaceMatrixEntry[] = [
   {
@@ -242,7 +274,9 @@ const UNIT_CROSS_WRITER_RACE_MATRIX_V1: readonly UnitRaceMatrixEntry[] = [
     owners: [
       { file: 'tests/unit/shop-os-continuity-revisions.test.ts', title: 'rolls back domain and revision writes across every finalization failure seam' },
       { file: 'tests/unit/shop-os-continuity-receipts.test.ts', title: 'rolls back domain and finalized revisions when failure occurs before receipt insertion' },
-      { file: 'tests/unit/shop-os-quote-decisions.test.ts', title: "it.each(['55P03', '40001', '40P01'] as const)" },
+      { file: 'tests/unit/shop-os-quote-decisions.test.ts', title: 'exhausts two bounded attempts for SQLSTATE 55P03 without leaking a partial decision' },
+      { file: 'tests/unit/shop-os-quote-decisions.test.ts', title: 'exhausts two bounded attempts for SQLSTATE 40001 without leaking a partial decision' },
+      { file: 'tests/unit/shop-os-quote-decisions.test.ts', title: 'exhausts two bounded attempts for SQLSTATE 40P01 without leaking a partial decision' },
     ],
   },
   {
@@ -316,18 +350,37 @@ describe('ShopOS continuity unit cross-writer race matrix', () => {
     ])
     for (const entry of UNIT_CROSS_WRITER_RACE_MATRIX_V1) {
       expect(entry.owners.length, `${entry.id} has owner`).toBeGreaterThan(0)
-      expect(entry.owners[0]?.title.trim().length, `${entry.id} owner title`).toBeGreaterThan(0)
+      for (const owner of entry.owners) {
+        expect(owner.file.trim().length, `${entry.id} owner file`).toBeGreaterThan(0)
+        expect(owner.title.trim().length, `${entry.id} owner title`).toBeGreaterThan(0)
+      }
     }
   })
 
+  it('rejects a skipped or missing secondary matrix owner', () => {
+    const owners = collectExecutableUnitOwnersV1([{
+      id: 'adversarial_secondary',
+      requirement: 'every declared owner executes',
+      owners: [
+        { file: 'tests/unit/a.test.ts', title: 'primary owner' },
+        { file: 'tests/unit/b.test.ts', title: 'secondary owner' },
+      ],
+    }])
+
+    expect(() => assertExecutableUnitOwnersV1(owners, [
+      { file: 'tests/unit/a.test.ts', title: 'primary owner', status: 'passed' },
+      { file: 'tests/unit/b.test.ts', title: 'secondary owner', status: 'skipped' },
+    ])).toThrow('secondary owner')
+    expect(() => assertExecutableUnitOwnersV1(owners, [
+      { file: 'tests/unit/a.test.ts', title: 'primary owner', status: 'passed' },
+    ])).toThrow('secondary owner')
+  })
+
   it('executes every mandatory unit owner and rejects skipped, todo, missing, or failing ownership', () => {
-    const localFile = 'tests/unit/shop-os-continuity-cross-writer-races.test.ts'
-    const owners = UNIT_CROSS_WRITER_RACE_MATRIX_V1
-      .map(({ id, owners }) => ({ id, owner: owners[0]! }))
-      .filter(({ owner }) => owner.file !== localFile && !owner.file.startsWith('tests/integration/'))
-    const files = [...new Set(owners.map(({ owner }) => owner.file))]
+    const owners = collectExecutableUnitOwnersV1(UNIT_CROSS_WRITER_RACE_MATRIX_V1)
+    const files = [...new Set(owners.map(({ file }) => file))]
     const titlePattern = owners
-      .map(({ owner }) => owner.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .map(({ title }) => title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|')
     const vitestCli = resolve(process.cwd(), 'node_modules/vitest/vitest.mjs')
     const result = spawnSync(
@@ -345,15 +398,17 @@ describe('ShopOS continuity unit cross-writer race matrix', () => {
     expect(result.status, result.stderr || result.stdout).toBe(0)
     const report = JSON.parse(result.stdout) as {
       testResults: Array<{
+        name: string
         assertionResults: Array<{ title: string; status: string }>
       }>
     }
-    const assertions = report.testResults.flatMap(({ assertionResults }) => assertionResults)
-    for (const { id, owner } of owners) {
-      const matches = assertions.filter(({ title }) => title === owner.title)
-      expect(matches, `${id} unique executed owner`).toHaveLength(1)
-      expect(matches[0]?.status, `${id} owner status`).toBe('passed')
-    }
+    const assertions = report.testResults.flatMap(({ name, assertionResults }) =>
+      assertionResults.map(({ title, status }) => ({
+        file: relative(root, name).replaceAll('\\', '/'),
+        title,
+        status,
+      })))
+    expect(() => assertExecutableUnitOwnersV1(owners, assertions)).not.toThrow()
   }, 125_000)
 
   it('serializes assignment versus quote decision on one ticket without losing either revision', async () => {

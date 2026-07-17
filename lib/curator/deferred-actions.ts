@@ -11,10 +11,15 @@ type DeferredSessionUpdate = {
   curatorOverrideAction?: string | null
 }
 
+export type DeferredActionDependencies = Readonly<{
+  afterSessionLock?: () => Promise<void>
+}>
+
 async function mutateDeferredSession(
   db: AppDb,
   sessionId: string,
   values: DeferredSessionUpdate,
+  dependencies: DeferredActionDependencies = {},
 ): Promise<DeferredActionResult> {
   return db.transaction(async (tx) => {
     const [session] = await tx
@@ -25,6 +30,7 @@ async function mutateDeferredSession(
       .for('update')
 
     if (!session || session.status !== 'deferred') return { kind: 'not-found' }
+    await dependencies.afterSessionLock?.()
 
     const [ticketLink] = await tx
       .select({ id: ticketJobs.id })
@@ -56,13 +62,14 @@ export async function approveDeferredSession(
   db: AppDb,
   sessionId: string,
   note: string | null,
+  dependencies: DeferredActionDependencies = {},
 ): Promise<DeferredActionResult> {
   return mutateDeferredSession(db, sessionId, {
     status: 'open',
     closedAt: null,
     curatorNote: note,
     curatorOverrideAction: null,
-  })
+  }, dependencies)
 }
 
 /**
@@ -74,13 +81,14 @@ export async function overrideDeferredSession(
   sessionId: string,
   overrideAction: string,
   note: string | null,
+  dependencies: DeferredActionDependencies = {},
 ): Promise<DeferredActionResult> {
   return mutateDeferredSession(db, sessionId, {
     status: 'open',
     closedAt: null,
     curatorOverrideAction: overrideAction,
     curatorNote: note,
-  })
+  }, dependencies)
 }
 
 /**
@@ -91,10 +99,11 @@ export async function closeDeferredSession(
   db: AppDb,
   sessionId: string,
   note: string | null,
+  dependencies: DeferredActionDependencies = {},
 ): Promise<DeferredActionResult> {
   return mutateDeferredSession(db, sessionId, {
     status: 'closed',
     closedAt: new Date(),
     curatorNote: note,
-  })
+  }, dependencies)
 }

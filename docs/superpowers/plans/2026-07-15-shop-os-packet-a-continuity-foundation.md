@@ -1610,6 +1610,12 @@ Expected: all named tests and TypeScript PASS.
 
 ### Task 7: Retrofit ticket creation, Counter, Quick Ticket, add-job, and assignment atomically
 
+**Implementation correction — preserve the approved route envelopes.** Task
+7G/7H already approve the exact retryable-conflict responses for add-job and
+assignment. This task routes those existing envelopes through the shared
+classifier; it does not introduce a new route contract. The focused add-job,
+assignment, and route regressions remain the executable compatibility proof.
+
 **Files:**
 - Modify: `app/api/sessions/route.ts`
 - Modify: `lib/tickets.ts`

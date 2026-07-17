@@ -33,9 +33,13 @@ const files = {
       db.execute(rawUpdate)
     }
     const leafAlias = leafWriter
+    const registry = { run: leafAlias }
     export function winningWriter() {
       coordinate(() => leafAlias())
       finalize()
+    }
+    export function objectHeldWriter() {
+      registry.run()
     }
     export function bypassSibling() {
       db['insert'](schema.ticketJobs)
@@ -53,6 +57,23 @@ const files = {
     import { entitlementReject as gate } from './gate'
     export async function POST() {
       gate()
+      await writer()
+    }
+  `,
+  '/virtual/nested-route.ts': `
+    import { routedWriter as writer } from './writer-barrel'
+    import { entitlementReject as gate } from './gate'
+    export async function POST() {
+      function neverCalled() { gate() }
+      await writer()
+    }
+  `,
+  '/virtual/reachable-route.ts': `
+    import { routedWriter as writer } from './writer-barrel'
+    import { entitlementReject as gate } from './gate'
+    export async function POST() {
+      function check() { gate() }
+      check()
       await writer()
     }
   `,
@@ -83,6 +104,8 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       .not.toContain('/virtual/foundation.ts#finalizeMutationRevisionsV1')
     expect(graph.directCallers('/virtual/writer.ts#winningWriter'))
       .toContain('/virtual/route.ts#POST')
+    expect(graph.transitiveCallees('/virtual/writer.ts#objectHeldWriter'))
+      .toContain('/virtual/writer.ts#leafWriter')
   })
 
   it('finds private-seam re-exports and proves the real gate call precedes the routed writer alias', () => {
@@ -94,5 +117,62 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       '/virtual/gate.ts#entitlementReject',
       '/virtual/writer.ts#winningWriter',
     ])).toEqual([0, 1])
+  })
+
+  it('does not treat an uncalled nested function as a reachable gate', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1(files)
+
+    expect(graph.transitiveCallees('/virtual/nested-route.ts#POST'))
+      .not.toContain('/virtual/gate.ts#entitlementReject')
+    expect(graph.callOrder('/virtual/nested-route.ts#POST', [
+      '/virtual/gate.ts#entitlementReject',
+      '/virtual/writer.ts#winningWriter',
+    ])).toEqual([-1, 0])
+  })
+
+  it('keeps a called nested gate reachable and fails closed on dynamic object wrappers', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      ...files,
+      '/virtual/dynamic-wrapper.ts': `
+        import { winningWriter, bypassSibling } from './writer'
+        declare const choose: () => boolean
+        const unresolved = { run: choose() ? winningWriter : bypassSibling }
+        export function unsafe() { unresolved.run() }
+      `,
+    })
+
+    expect(graph.callOrder('/virtual/reachable-route.ts#POST', [
+      '/virtual/gate.ts#entitlementReject',
+      '/virtual/writer.ts#winningWriter',
+    ])).toEqual([0, 1])
+    expect(() => graph.assertNoUnresolvedDynamicCalls())
+      .toThrow('/virtual/dynamic-wrapper.ts#unsafe')
+  })
+
+  it('classifies dynamic SQL hidden behind an object-held execute alias', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/app/rogue.ts': `
+        declare const db: { execute(statement: unknown): void }
+        const held = { run: db.execute }
+        export function bypass(statement: unknown) { held.run(statement) }
+      `,
+    })
+
+    expect(graph.mutations()).toContainEqual(expect.objectContaining({
+      owner: '/virtual/app/rogue.ts#bypass',
+      operation: 'unknown-sql',
+    }))
+  })
+
+  it('fails closed for dynamic SQL in an unregistered application file', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/app/unregistered.ts': `
+        declare const db: { execute(statement: unknown): void }
+        export function bypass(statement: unknown) { db.execute(statement) }
+      `,
+    })
+
+    expect(() => graph.assertNoUnknownSql())
+      .toThrow('/virtual/app/unregistered.ts#bypass')
   })
 })

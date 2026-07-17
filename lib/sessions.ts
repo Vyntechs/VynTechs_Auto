@@ -508,11 +508,17 @@ function sameLockedActorIdentity(
   return scopeActor.id === actor.id && scopeActor.shopId === actor.shopId
 }
 
+export type TechQuickMutationDependencies = Readonly<{
+  afterDiscovery?: () => Promise<void>
+  beforeSessionInsert?: () => Promise<void>
+}>
+
 async function runTechQuickMutation(
   db: AppDb,
   actor: ActiveTechQuickActor,
   request: OwnedTechQuickRequest,
   allowInsert: boolean,
+  dependencies: TechQuickMutationDependencies = {},
 ): Promise<Readonly<{ id: string; ticketId: string; jobId: string }>> {
   const origin = createTechQuickTicketOriginV1(request.requestKey)
   const executeLocked = async (
@@ -572,6 +578,7 @@ async function runTechQuickMutation(
       }],
       seededLinesByJobIndex: new Map(),
     })
+    await dependencies.beforeSessionInsert?.()
     const [createdSession] = await tx.insert(sessions).values({
       id: request.requestKey,
       shopId: scope.actor.shopId,
@@ -620,6 +627,7 @@ async function runTechQuickMutation(
     >(db, {
       discover: async (tx) => {
         const discovered = await discoverTechQuickMutation(tx, actor, request, allowInsert)
+        await dependencies.afterDiscovery?.()
         return discovered
       },
       executeLocked: async (tx, scope, discovery) =>
@@ -707,6 +715,7 @@ export async function createSessionForUser(opts: {
   userId: string
   body: unknown
   treeState: TreeState
+  dependencies?: TechQuickMutationDependencies
 }): Promise<CreateSessionResult> {
   const db = opts.db
   const owned = ownTechQuickRequest(opts.userId, opts.body, opts.treeState)
@@ -714,7 +723,7 @@ export async function createSessionForUser(opts: {
   const actor = await authorizeTechQuickRequest(db, owned.value)
   if (!actor) return { ok: false, status: 400, error: 'inactive wrenching profile' }
   try {
-    const result = await runTechQuickMutation(db, actor, owned.value, true)
+    const result = await runTechQuickMutation(db, actor, owned.value, true, opts.dependencies)
     return { ok: true, ...result }
   } catch (error) {
     return error instanceof TechQuickRequestUnavailable

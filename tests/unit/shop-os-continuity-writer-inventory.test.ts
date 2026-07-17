@@ -116,11 +116,8 @@ describe('ShopOS continuity writer source inventory', () => {
       ...CONTINUITY_NESTED_SESSION_HELPER_INVENTORY_V1.map(({ file, helper }) => `${file}#${helper}`),
       'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1',
     ]
-    const registeredFiles = new Set(roots.map((rootId) => rootId.split('#')[0]))
-    const unknownInRegisteredFiles = programGraph.mutations().filter((site) =>
-      site.operation === 'unknown-sql' && registeredFiles.has(site.file))
-    expect(unknownInRegisteredFiles, 'dynamic SQL in a registered writer must be classified or refused')
-      .toEqual([])
+    expect(() => programGraph.assertNoUnknownSql()).not.toThrow()
+    expect(() => programGraph.assertNoUnresolvedDynamicCalls()).not.toThrow()
 
     for (const site of programGraph.mutations().filter(({ operation }) => operation !== 'unknown-sql')) {
       const owners = roots.filter((rootId) =>

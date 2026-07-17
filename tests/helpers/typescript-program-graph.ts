@@ -22,6 +22,12 @@ export type ProgramMutationSiteV1 = Readonly<{
   position: number
 }>
 
+export type ProgramUnresolvedDynamicCallV1 = Readonly<{
+  file: string
+  owner: string
+  position: number
+}>
+
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node
   while (
@@ -70,6 +76,7 @@ export class TypeScriptProgramGraphV1 {
   private readonly directEdges = new Map<string, Set<string>>()
   private readonly reverseEdges = new Map<string, Set<string>>()
   private readonly mutationSites: ProgramMutationSiteV1[] = []
+  private readonly unresolvedCalls: ProgramUnresolvedDynamicCallV1[] = []
 
   constructor(program: ts.Program, options: Readonly<{ root: string; virtual?: boolean }>) {
     this.program = program
@@ -104,6 +111,18 @@ export class TypeScriptProgramGraphV1 {
           seen,
         ) ?? symbol
       }
+    }
+    if (declaration && ts.isPropertyAssignment(declaration)) {
+      const initializer = unwrapExpression(declaration.initializer)
+      if (ts.isIdentifier(initializer) || ts.isPropertyAccessExpression(initializer) || ts.isElementAccessExpression(initializer)) {
+        return this.canonicalSymbolAt(
+          ts.isPropertyAccessExpression(initializer) ? initializer.name : initializer,
+          seen,
+        ) ?? symbol
+      }
+    }
+    if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
+      return this.canonicalSymbolAt(declaration.name, seen) ?? symbol
     }
     return symbol
   }
@@ -190,7 +209,12 @@ export class TypeScriptProgramGraphV1 {
   }
 
   private collectMutation(node: ts.CallExpression): void {
-    const operation = callPropertyName(node.expression)
+    const expression = unwrapExpression(node.expression)
+    const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
+    const directOperation = callPropertyName(node.expression)
+    const operation = directOperation === null
+      ? null
+      : this.canonicalSymbolAt(lookup)?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
@@ -228,14 +252,38 @@ export class TypeScriptProgramGraphV1 {
         if (isFunctionWithBody(node)) {
           const id = this.functionId(node)
           this.functionNodes.set(id, node)
-          const lexicalOwner = this.ownerId(node.parent)
-          if (!lexicalOwner.endsWith('#<module>')) this.addEdge(lexicalOwner, id)
+          if (!ts.isFunctionDeclaration(node)) {
+            const lexicalOwner = this.ownerId(node.parent)
+            if (!lexicalOwner.endsWith('#<module>')) this.addEdge(lexicalOwner, id)
+          }
         }
         if (ts.isCallExpression(node)) {
           const caller = this.ownerId(node)
           const expression = unwrapExpression(node.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-          const callee = this.symbolId(this.canonicalSymbolAt(lookup))
+          const canonical = this.canonicalSymbolAt(lookup)
+          const directSymbol = this.checker.getSymbolAtLocation(lookup)
+          const directDeclaration = directSymbol?.valueDeclaration ?? directSymbol?.declarations?.[0]
+          const dynamicObjectTarget = directDeclaration && ts.isPropertyAssignment(directDeclaration)
+            ? unwrapExpression(directDeclaration.initializer)
+            : null
+          if (
+            (ts.isElementAccessExpression(expression) &&
+              callPropertyName(expression) === null &&
+              !canonical &&
+              !ts.isPropertyAccessExpression(expression.argumentExpression)) ||
+            (dynamicObjectTarget !== null && callPropertyName(node.expression) !== null &&
+              !ts.isIdentifier(dynamicObjectTarget) &&
+              !ts.isPropertyAccessExpression(dynamicObjectTarget) &&
+              !ts.isElementAccessExpression(dynamicObjectTarget))
+          ) {
+            this.unresolvedCalls.push({
+              file: this.fileLabel(node.getSourceFile()),
+              owner: caller,
+              position: node.getStart(),
+            })
+          }
+          const callee = this.symbolId(canonical)
           if (callee) this.addEdge(caller, callee)
           for (const argument of node.arguments) {
             const unwrapped = unwrapExpression(argument)
@@ -255,6 +303,24 @@ export class TypeScriptProgramGraphV1 {
     return [...this.mutationSites].sort((left, right) => (
       left.file.localeCompare(right.file) || left.position - right.position
     ))
+  }
+
+  assertNoUnknownSql(): void {
+    const unknown = this.mutations().filter(({ operation }) => operation === 'unknown-sql')
+    if (unknown.length === 0) return
+    throw new Error(`Unclassified dynamic SQL: ${unknown.map(({ owner }) => owner).join(', ')}`)
+  }
+
+  unresolvedDynamicCalls(): readonly ProgramUnresolvedDynamicCallV1[] {
+    return [...this.unresolvedCalls].sort((left, right) => (
+      left.file.localeCompare(right.file) || left.position - right.position
+    ))
+  }
+
+  assertNoUnresolvedDynamicCalls(): void {
+    const unresolved = this.unresolvedDynamicCalls()
+    if (unresolved.length === 0) return
+    throw new Error(`Unresolved dynamic calls: ${unresolved.map(({ owner }) => owner).join(', ')}`)
   }
 
   transitiveCallees(owner: string): readonly string[] {
@@ -313,6 +379,7 @@ export class TypeScriptProgramGraphV1 {
     const positions = callees.map((callee) => {
       let earliest = Number.POSITIVE_INFINITY
       const visit = (child: ts.Node): void => {
+        if (child !== node.body && ts.isFunctionDeclaration(child)) return
         if (ts.isCallExpression(child)) {
           const expression = unwrapExpression(child.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression

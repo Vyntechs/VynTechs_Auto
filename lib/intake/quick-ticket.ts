@@ -336,6 +336,7 @@ export async function createQuickTicket(
           requestKey: body.clientKey,
         })
         if (hint === 'present' || attempt.purpose === 'unique_collision_recovery') {
+          await dependencies.afterDiscovery?.()
           return {
             lockRequest: baseLockRequest(shopId, actor.profileId, body.clientKey, {
               kind: 'unavailable',
