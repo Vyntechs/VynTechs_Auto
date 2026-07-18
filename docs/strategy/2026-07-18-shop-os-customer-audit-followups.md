@@ -23,6 +23,7 @@ console was out of scope.
 | Tax & labor rate settings | `f213567` | Owners can finally set sales-tax and labor rate in **Settings → Shop**; quotes can produce a correct total. Completes the earlier Build-Quote "configure a tax rate in shop settings" prompt, which pointed at a screen that did not exist. |
 | Honest case-close record | `65f435f` | Verification no longer pre-asserts a clean fix (boxes start off; tech must state whether symptoms resolved before closing); the fabricated per-phase "diag/repair min" is collapsed to the one true number — how long the case was open. Also drops the inaccurate "all fields required" eyebrow. |
 | Vehicle history with recoverable work | `47c3496` | Vehicle-history screen now lists a vehicle's past repair orders, and leads with **Recommended — not done yet** (jobs the customer declined, `ticketJobs.approvalState = 'declined'`), each linking to its ticket. Read-only. |
+| Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
 
 All three: TypeScript clean, targeted tests green, production build passes. Not
 driven through a live authenticated session (QA-credential gate).
@@ -73,8 +74,6 @@ driven through a live authenticated session (QA-credential gate).
   `lib/db/queries.ts:82`.
 - **Invite never captures a name** → roster of "Unnamed teammate".
   `components/vt/team-section.tsx:135`, `lib/shop-os/team.ts:119`.
-- **No supplier/vendor setup in Settings** (only creatable mid-sourcing).
-  `app/api/shop/vendor-accounts/*`.
 - **Two "add a part" doors with opposite behavior**; "Source part" forces a
   supplier cost. One door + a "sourced" toggle; make cost optional.
   `components/screens/manual-quote-builder.tsx:842-895`,
@@ -211,9 +210,18 @@ excluded from re-quoting (`lib/shop-os/quotes.ts:336,779,1333`).
 
 ### Build order (founder direction, plain)
 
-1. **Suppliers + markup rule in Settings (management side).** Mirrors the
-   shipped RatesSection pattern; unlocks principle 1 and makes automatic
-   cost→price possible. Additive, low risk.
+1. **Suppliers + markup rule in Settings (management side).** Suppliers half
+   shipped as `5943c0f` (Settings → Shop → Suppliers). Still open: a shop-level
+   **parts markup rule** (new storage) so supplier cost → customer price is
+   automatic and techs/advisors never invent retail.
+   **Founder integration path (researched 2026-07-18):** for real in-app
+   supplier catalogs, the practical first deal is the **PartsTech partner API**
+   (one integration → 30k+ supplier locations incl. O'Reilly First Call,
+   AutoZone Pro, Advance Pro, NAPA; shops link their own supplier accounts).
+   Direct O'Reilly punchout/ordering integration: email
+   `integrations@oreillyauto.com` / First Call support 1-800-934-2451; shops
+   ordering through an approved system earn a 2% statement discount (+2% early
+   pay). `vendorAccounts.mode` already reserves `api`/`punchout` for this.
 2. **The big one — the tech job page becomes the one page:** parts picker
    (supplier from the shop's list + description + qty, zero money), labor
    hours, "found something" creating a repair job, start/finish stamps. This
