@@ -89,13 +89,12 @@ function actorDenied(actor: TicketActor): QuickTicketFailure | null {
 
 function deterministicTicketId(shopId: string, profileId: string, clientKey: string): string {
   const hash = createHash('sha256')
-  const append = hash.update.bind(hash)
-  append('shop-os-quick-quote-ticket-v2\0')
-  append(shopId)
-  append('\0')
-  append(profileId)
-  append('\0')
-  append(clientKey)
+  hash.update('shop-os-quick-quote-ticket-v2\0')
+  hash.update(shopId)
+  hash.update('\0')
+  hash.update(profileId)
+  hash.update('\0')
+  hash.update(clientKey)
   const bytes = hash.digest().subarray(0, 16)
   bytes[6] = (bytes[6] & 0x0f) | 0x80
   bytes[8] = (bytes[8] & 0x3f) | 0x80

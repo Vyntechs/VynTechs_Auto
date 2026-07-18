@@ -2,12 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { createVirtualTypeScriptProgramGraphV1 } from '@/tests/helpers/typescript-program-graph'
 
 const files = {
+  '/virtual/drizzle-orm/pg-core/db.ts': `
+    export interface PgDatabase {
+      insert(table: unknown): void
+      update(table: unknown): void
+      delete(table: unknown): void
+      execute(statement: unknown): void
+    }
+  `,
   '/virtual/schema.ts': `
     export const tickets = { name: 'tickets' }
     export const ticketJobs = { name: 'ticket_jobs' }
   `,
   '/virtual/db.ts': `
-    export const db: any = {}
+    import type { PgDatabase } from './drizzle-orm/pg-core/db'
+    export declare const db: PgDatabase
     export const sql: any = (parts: TemplateStringsArray, ...values: unknown[]) => ({ parts, values })
   `,
   '/virtual/foundation.ts': `
@@ -255,12 +264,16 @@ describe('ShopOS continuity TypeScript Program graph', () => {
   it('forbids first-class tracked mutation methods while preserving direct sink enumeration', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
-      '/virtual/app/sinks.ts': `
-        import { tickets } from '../schema'
-        declare const db: {
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase {
           execute(statement: string): void
           update(table: unknown): void
         }
+      `,
+      '/virtual/app/sinks.ts': `
+        import { tickets } from '../schema'
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        declare const db: PgDatabase
         export function direct() {
           db.execute('update tickets set concern = concern')
           db.update(tickets)
@@ -287,7 +300,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       ]))
   })
 
-  it('classifies and forbids alias-only tracked mutation methods without a seeded direct sink call', () => {
+  it('forbids alias-only mutation-shaped methods without requiring a seeded direct sink call', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
       '/virtual/app/aliases.ts': `
@@ -303,33 +316,26 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       `,
     })
 
-    expect(graph.mutations()).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        owner: '/virtual/app/aliases.ts#updateAlias',
-        operation: 'update',
-        table: 'tickets',
-      }),
-      expect.objectContaining({
-        owner: '/virtual/app/aliases.ts#executeAlias',
-        operation: 'raw-update',
-        table: 'tickets',
-      }),
-    ]))
+    expect(graph.mutations()).toEqual([])
     expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner)).toEqual([
       '/virtual/app/aliases.ts#updateAlias',
       '/virtual/app/aliases.ts#executeAlias',
+      '/virtual/app/aliases.ts#unrelated',
     ])
   })
 
   it('fails closed when a recognized direct mutation receives an unresolved table', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
-      '/virtual/app/unresolved-table.ts': `
-        declare const db: {
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase {
           insert(table: unknown): void
           update(table: unknown): void
           delete(table: unknown): void
         }
-        export function bypass(table: unknown) {
+      `,
+      '/virtual/app/unresolved-table.ts': `
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        export function bypass(db: PgDatabase, table: unknown) {
           db.insert(table)
           db.update(table)
           db.delete(table)
@@ -357,7 +363,54 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     expect(() => graph.assertNoUnknownSql()).toThrow('Unclassified dynamic SQL')
   })
 
-  it('classifies and rejects a destructured tracked mutation method call', () => {
+  it('forbids mutation-shaped first-class references syntactically and permits a direct cache update', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/syntactic-sinks.ts': `
+        import { tickets } from '../schema'
+        declare const destructuredApi: { execute(statement: unknown): void }
+        declare const computedApi: { delete(value: unknown): void }
+        declare const sqlApi: { execute(statement: unknown): void }
+        declare const trackedApi: { update(table: unknown): void }
+        declare const unknownApi: { update(table: unknown): void }
+        declare const cache: { update(value: unknown): void }
+        export function destructured() { const { execute } = destructuredApi; return execute }
+        export function computedDestructured() { const { ['delete']: remove } = computedApi; return remove }
+        export function knownSql() {
+          const execute = sqlApi.execute
+          execute('update tickets set concern = concern')
+        }
+        export function knownTable() { const update = trackedApi.update; update(tickets) }
+        export function unknownTable(table: unknown) { const update = unknownApi.update; update(table) }
+        export function directCache() { cache.update(tickets) }
+      `,
+    })
+
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner)).toEqual([
+      '/virtual/app/syntactic-sinks.ts#destructured',
+      '/virtual/app/syntactic-sinks.ts#computedDestructured',
+      '/virtual/app/syntactic-sinks.ts#knownSql',
+      '/virtual/app/syntactic-sinks.ts#knownTable',
+      '/virtual/app/syntactic-sinks.ts#unknownTable',
+    ])
+  })
+
+  it('permits an exact direct non-Drizzle cache update with a tracked-table-shaped value', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/cache.ts': `
+        import { tickets } from '../schema'
+        declare const cache: { update(value: unknown): void }
+        export function directCache() { cache.update(tickets) }
+      `,
+    })
+
+    expect(graph.mutationSinkReferenceViolations()).toEqual([])
+    expect(graph.mutations().filter(({ owner }) =>
+      owner === '/virtual/app/cache.ts#directCache')).toEqual([])
+  })
+
+  it('rejects a destructured tracked mutation method call syntactically', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
       '/virtual/app/destructured.ts': `
@@ -371,18 +424,11 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       `,
     })
 
-    expect(graph.mutations()).toEqual([
-      expect.objectContaining({
-        owner: '/virtual/app/destructured.ts#bypass',
-        operation: 'update',
-        table: 'tickets',
-      }),
-    ])
     expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner))
       .toEqual(['/virtual/app/destructured.ts#bypass'])
   })
 
-  it('classifies a tracked-table method alias without treating unrelated update APIs as writes', () => {
+  it('rejects a tracked-table method alias without treating unrelated direct update APIs as writes', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
       '/virtual/app/wrapper.ts': `
@@ -394,15 +440,9 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       `,
     })
 
-    expect(graph.mutations()).toEqual([
-      expect.objectContaining({
-        owner: '/virtual/app/wrapper.ts#bypass',
-        operation: 'update',
-        table: 'tickets',
-      }),
-    ])
+    expect(graph.mutations()).toEqual([])
     expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner))
-      .toEqual(['/virtual/app/wrapper.ts#bypass'])
+      .toEqual(['/virtual/app/wrapper.ts#bypass', '/virtual/app/wrapper.ts#unrelated'])
   })
 
   it('trusts only an exact registered direct Drizzle transaction receiver', () => {
@@ -441,6 +481,56 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       expect(closure, writer)
         .not.toContain(`/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#${writer}`)
     }
+  })
+
+  it('rejects a registered Drizzle transaction receiver mutated anywhere in its owner', () => {
+    const mutationCases = [
+      ['parameter assignment', 'db = replacement'],
+      ['compound assignment', 'db ||= replacement'],
+      ['increment', 'db++'],
+      ['destructuring assignment', '[db] = [replacement]'],
+      ['Proxy replacement', 'db = new Proxy(db, {})'],
+      ['transaction override', 'db.transaction = (callback) => callback()'],
+      ['Object.assign override', 'Object.assign(db, { transaction: (callback: () => void) => callback() })'],
+      ['Object.defineProperty override', "Object.defineProperty(db, 'transaction', { value: (callback: () => void) => callback() })"],
+    ] as const
+
+    for (const [label, mutation] of mutationCases) {
+      const graph = createVirtualTypeScriptProgramGraphV1({
+        '/virtual/drizzle-orm/pg-core/db.ts': `
+          export interface PgDatabase { transaction<T>(callback: () => T): T }
+        `,
+        '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts': `
+          import type { PgDatabase } from '../../../../drizzle-orm/pg-core/db'
+          declare const replacement: PgDatabase
+          declare function writer(): void
+          export function runPrimaryAttempt(db: PgDatabase) {
+            ${mutation}
+            db.transaction(() => writer())
+          }
+        `,
+      })
+      const owner = '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt'
+      expect(graph.transitiveCallees(owner), label)
+        .not.toContain('/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#writer')
+    }
+
+    const propertyGraph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase { transaction<T>(callback: () => T): T }
+      `,
+      '/virtual/lib/sessions.ts': `
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        declare const replacement: PgDatabase
+        declare function writer(): void
+        export function submitRepairObservationForUser(opts: { db: PgDatabase }) {
+          opts.db = replacement
+          opts.db.transaction(() => writer())
+        }
+      `,
+    })
+    expect(propertyGraph.transitiveCallees('/virtual/lib/sessions.ts#submitRepairObservationForUser'))
+      .not.toContain('/virtual/lib/sessions.ts#writer')
   })
 
   it('does not attach dead, returned, array, promise, or provider callbacks to their lexical owner', () => {
@@ -498,9 +588,13 @@ describe('ShopOS continuity TypeScript Program graph', () => {
   it('rejects a returned mutation callback even after coordinator and finalizer calls', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase { update(table: unknown): void; execute(statement: string): void }
+      `,
       '/virtual/app/returned.ts': `
         import { tickets } from '../schema'
-        declare const db: { update(table: unknown): void; execute(statement: string): void }
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        declare const db: PgDatabase
         declare function coordinator(): void
         declare function finalizer(): void
         export function writer() {
@@ -630,7 +724,13 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const sessions = { name: 'sessions' }`,
       '/virtual/gate.ts': `export function entitlementReject(): { denied: true } | null { return null }`,
-      '/virtual/db.ts': `export const db: any = {}`,
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase { update(table: unknown): void }
+      `,
+      '/virtual/db.ts': `
+        import type { PgDatabase } from './drizzle-orm/pg-core/db'
+        export declare const db: PgDatabase
+      `,
       '/virtual/guarded.ts': `
         import { sessions } from './schema'
         import { db } from './db'
@@ -684,8 +784,12 @@ describe('ShopOS continuity TypeScript Program graph', () => {
 
   it('fails closed for dynamic SQL in an unregistered application file', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase { execute(statement: unknown): void }
+      `,
       '/virtual/app/unregistered.ts': `
-        declare const db: { execute(statement: unknown): void }
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        declare const db: PgDatabase
         export function bypass(statement: unknown) { db.execute(statement) }
       `,
     })

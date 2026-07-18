@@ -276,6 +276,79 @@ export class TypeScriptProgramGraphV1 {
     return parent ? { path: `${parent.path}.${current.name.text}`, root: parent.root } : null
   }
 
+  private assignmentTargetWritesReceiver(target: ts.Node, receiver: string): boolean {
+    if (ts.isParenthesizedExpression(target)) {
+      return this.assignmentTargetWritesReceiver(target.expression, receiver)
+    }
+    if (ts.isIdentifier(target) || ts.isPropertyAccessExpression(target)) {
+      const path = this.directReceiverPath(target)
+      return path !== null && (
+        path.path === receiver ||
+        path.path.startsWith(`${receiver}.`) ||
+        receiver.startsWith(`${path.path}.`)
+      )
+    }
+    if (ts.isElementAccessExpression(target)) {
+      const base = this.directReceiverPath(target.expression)
+      return base !== null && (
+        base.path === receiver ||
+        base.path.startsWith(`${receiver}.`) ||
+        receiver.startsWith(`${base.path}.`)
+      )
+    }
+    if (ts.isArrayLiteralExpression(target)) {
+      return target.elements.some((element) => this.assignmentTargetWritesReceiver(element, receiver))
+    }
+    if (ts.isObjectLiteralExpression(target)) {
+      return target.properties.some((property) => {
+        if (ts.isShorthandPropertyAssignment(property)) {
+          return this.assignmentTargetWritesReceiver(property.name, receiver)
+        }
+        if (ts.isPropertyAssignment(property)) {
+          return this.assignmentTargetWritesReceiver(property.initializer, receiver)
+        }
+        if (ts.isSpreadAssignment(property)) {
+          return this.assignmentTargetWritesReceiver(property.expression, receiver)
+        }
+        return false
+      })
+    }
+    return false
+  }
+
+  private receiverIsImmutableWithinOwner(owner: string, receiver: string): boolean {
+    const ownerNode = this.functionNodes.get(owner)
+    if (!ownerNode?.body) return false
+    let mutable = false
+    const visit = (node: ts.Node): void => {
+      if (mutable || (node !== ownerNode.body && isFunctionWithBody(node))) return
+      if (ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+        this.assignmentTargetWritesReceiver(node.left, receiver)) {
+        mutable = true
+        return
+      }
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) &&
+        this.assignmentTargetWritesReceiver(node.operand, receiver)) {
+        mutable = true
+        return
+      }
+      if (ts.isCallExpression(node)) {
+        const callee = this.directReceiverPath(node.expression)
+        if ((callee?.path === 'Object.assign' || callee?.path === 'Object.defineProperty') &&
+          node.arguments[0] && this.assignmentTargetWritesReceiver(node.arguments[0], receiver)) {
+          mutable = true
+          return
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(ownerNode.body)
+    return !mutable
+  }
+
   private isRegisteredDrizzleTransaction(
     call: ts.CallExpression | ts.NewExpression,
     caller: string,
@@ -296,7 +369,10 @@ export class TypeScriptProgramGraphV1 {
     if (!registered) return false
     const root = this.aliasedSymbolAt(receiver.root)
     const declaration = root?.valueDeclaration ?? root?.declarations?.[0]
-    return declaration !== undefined && ts.isParameter(declaration) && this.ownerId(declaration) === caller
+    return declaration !== undefined &&
+      ts.isParameter(declaration) &&
+      this.ownerId(declaration) === caller &&
+      this.receiverIsImmutableWithinOwner(caller, receiver.path)
   }
 
   private executorContract(
@@ -503,33 +579,54 @@ export class TypeScriptProgramGraphV1 {
     if (!nameNode ||
       (!ts.isIdentifier(nameNode) && !ts.isStringLiteral(nameNode) && !ts.isNoSubstitutionTemplateLiteral(nameNode)) ||
       !['insert', 'update', 'delete', 'execute'].includes(nameNode.text)) return
-    const symbol = this.aliasedSymbolAt(nameNode)
+    const symbol = ts.isElementAccessExpression(node)
+      ? this.checker.getTypeAtLocation(node.expression).getProperty(nameNode.text)
+      : this.aliasedSymbolAt(nameNode)
     if (!symbol) return
     const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
       declaration.getSourceFile().fileName.replaceAll('\\', '/'))
     const declaredByDrizzle = declarationFiles.some((file) => file.includes('/drizzle-orm/'))
-    const receiver = node.expression
-    const receiverMethods = new Set(this.checker.getTypeAtLocation(receiver).getProperties().map(({ name }) => name))
-    const mutationShape = ['insert', 'update', 'delete', 'execute']
-      .filter((method) => receiverMethods.has(method))
-    if (!declaredByDrizzle && mutationShape.length < 2) return
+    if (!declaredByDrizzle) return
     this.mutationSinkSymbols.add(symbol)
+  }
+
+  private mutationShapedReferenceName(node: ts.Node): string | null {
+    if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+      return node.text
+    }
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      ts.isElementAccessExpression(node.parent) && node.parent.argumentExpression === node) {
+      return node.text
+    }
+    if ((ts.isIdentifier(node) || ts.isStringLiteral(node)) && ts.isBindingElement(node.parent) &&
+      ts.isObjectBindingPattern(node.parent.parent)) {
+      const property = node.parent.propertyName ?? node.parent.name
+      return property === node ? node.text : null
+    }
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      ts.isComputedPropertyName(node.parent) && node.parent.expression === node &&
+      ts.isBindingElement(node.parent.parent) && ts.isObjectBindingPattern(node.parent.parent.parent)) {
+      return node.text
+    }
+    return null
   }
 
   mutationSinkReferenceViolations(): readonly ProgramSymbolReferenceViolationV1[] {
     const violations: ProgramSymbolReferenceViolationV1[] = []
     for (const sourceFile of this.program.getSourceFiles()) {
       if (sourceFile.isDeclarationFile) continue
-      const recordedBindings = new Set<ts.BindingElement>()
       for (const node of this.symbolReferenceNodes(sourceFile)) {
-        const binding = ts.isBindingElement(node.parent) ? node.parent : undefined
+        const name = this.mutationShapedReferenceName(node)
+        if (!name || !['insert', 'update', 'delete', 'execute'].includes(name)) continue
+        const binding = ts.isBindingElement(node.parent)
+          ? node.parent
+          : ts.isComputedPropertyName(node.parent) && ts.isBindingElement(node.parent.parent)
+            ? node.parent.parent
+            : undefined
         const symbol = binding ? this.destructuredPropertySymbol(binding) : this.aliasedSymbolAt(node)
-        if (!symbol || !this.mutationSinkSymbols.has(symbol) || this.isDeclarationOrPlumbingReference(node)) continue
-        if (binding && recordedBindings.has(binding)) continue
-        if (binding) recordedBindings.add(binding)
-        if (!binding && this.isExactDirectCalleeReference(node)) continue
+        if (this.isDeclarationOrPlumbingReference(node) || (!binding && this.isExactDirectCalleeReference(node))) continue
         violations.push({
-          symbol: this.symbolId(symbol) ?? symbol.getName(),
+          symbol: this.symbolId(symbol) ?? symbol?.getName() ?? name,
           file: this.fileLabel(sourceFile),
           owner: this.ownerId(node),
           reason: 'first-class-value',
@@ -592,17 +689,21 @@ export class TypeScriptProgramGraphV1 {
     const expression = unwrapExpression(node.expression)
     const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
     const directOperation = callPropertyName(node.expression)
-    const canonical = this.canonicalSymbolAt(lookup)
+    const canonical = ts.isElementAccessExpression(expression) && expression.argumentExpression &&
+      (ts.isStringLiteral(expression.argumentExpression) ||
+        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression))
+      ? this.checker.getTypeAtLocation(expression.expression).getProperty(expression.argumentExpression.text)
+      : this.canonicalSymbolAt(lookup)
     const operation = canonical?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
     if (['insert', 'update', 'delete'].includes(operation)) {
+      if (!canonical || !this.mutationSinkSymbols.has(canonical)) return
       const target = node.arguments[0] && this.schemaTableFromExpression(node.arguments[0])
       if (target?.sql) {
-        if (canonical) this.mutationSinkSymbols.add(canonical)
         this.mutationSites.push({ file, owner, operation, table: target.logical, position: node.getStart() })
-      } else if (!target && canonical && this.mutationSinkSymbols.has(canonical)) {
+      } else if (!target) {
         this.mutationSites.push({
           file,
           owner,
@@ -614,8 +715,7 @@ export class TypeScriptProgramGraphV1 {
       return
     }
     if (operation !== 'execute' || !node.arguments[0]) return
-    if (directOperation === null && (!canonical || !this.mutationSinkSymbols.has(canonical))) return
-    if (canonical) this.mutationSinkSymbols.add(canonical)
+    if (!canonical || !this.mutationSinkSymbols.has(canonical)) return
     const sql = this.staticString(node.arguments[0])
     if (sql === null) {
       this.mutationSites.push({ file, owner, operation: 'unknown-sql', table: '<unknown>', position: node.getStart() })

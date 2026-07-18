@@ -63,6 +63,11 @@ Trigger: An overflow test passed through an earlier suffix rejection without exe
 Rule: Temporarily disable the named guard and prove its test fails before claiming branch-specific coverage.
 Reason: A green failure-path test can be tautological when an earlier validator dominates the intended branch.
 
+### static-method-types-do-not-prove-receiver-provenance
+Trigger: Drizzle transaction trust followed a static method symbol through mutable Proxy and override receivers.
+Rule: Require exact callsite registration plus syntactic receiver immutability; prohibit first-class mutation-shaped method references independent of inferred receiver type.
+Reason: Structural typing preserves trusted symbols across mutable aliases and wrappers that can change runtime behavior.
+
 ### consolidate-proof-matrix-before-review
 Trigger: Successive reviews found test-only authorization combinations after production behavior was already conformant.
 Rule: Table action, state, locked drift, disclosure, revisions, and rollback before coding; require one exhaustive findings pass.

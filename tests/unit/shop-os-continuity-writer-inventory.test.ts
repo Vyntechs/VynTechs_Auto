@@ -34,7 +34,7 @@ const CONTINUITY_DIRECT_REFERENCE_POLICY_V1 = new Map<string, ReadonlySet<string
   ['lib/intake/customers.ts#upsertCustomer', new Set(['lib/intake/session.ts#createSessionFromIntake/<callback>@2203'])],
   ['lib/intake/quick-ticket.ts#createQuickTicket', new Set(['app/api/tickets/quick/route.ts#POST'])],
   ['lib/intake/session.ts#createSessionFromIntake', new Set(['app/api/intake/submit/route.ts#POST'])],
-  ['lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13937'])],
+  ['lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13927'])],
   ['lib/intake/vehicles.ts#upsertVehicle', new Set(['lib/intake/session.ts#createSessionFromIntake/<callback>@2203'])],
   ['lib/retrieval/wire-into-tree.ts#buildUpdateTreeWithRetrieval', new Set(['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#POST/start@4143', 'app/api/sessions/[id]/ambient/route.ts#POST'])],
   ['lib/sessions.ts#abandonSessionForUser', new Set(['app/api/sessions/[id]/abandon/route.ts#POST'])],
@@ -84,11 +84,11 @@ const CONTINUITY_DIRECT_REFERENCE_POLICY_V1 = new Map<string, ReadonlySet<string
   ['lib/shop-os/simple-work.ts#mutateSimpleWork', new Set(['app/api/tickets/[id]/jobs/[jobId]/work/route.ts#POST'])],
   ['lib/tickets.ts#addTicketJob', new Set(['app/api/tickets/[id]/jobs/route.ts#POST'])],
   ['lib/tickets.ts#createTicket', new Set(['app/api/tickets/route.ts#POST'])],
-  ['lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13937', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
-  ['lib/tickets.ts#insertResolvedTicketBatchInTransactionV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13937', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
-  ['lib/tickets.ts#insertResolvedTicketCreationReceiptInTransactionV1', new Set(['lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13937'])],
+  ['lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13927', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
+  ['lib/tickets.ts#insertResolvedTicketBatchInTransactionV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13927', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
+  ['lib/tickets.ts#insertResolvedTicketCreationReceiptInTransactionV1', new Set(['lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13927'])],
   ['lib/tickets.ts#mutateTicketJobAssignment', new Set(['app/api/tickets/[id]/jobs/[jobId]/assignment/route.ts#POST'])],
-  ['lib/tickets.ts#resolveTicketCreationInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13937', 'lib/intake/quick-ticket.ts#createQuickTicket/replay@9319', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
+  ['lib/tickets.ts#resolveTicketCreationInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#createCounterTicket/<callback>@10330', 'lib/intake/quick-ticket.ts#createQuickTicket/<callback>@13927', 'lib/intake/quick-ticket.ts#createQuickTicket/replay@9309', 'lib/sessions.ts#runTechQuickMutation/executeLocked@19497', 'lib/tickets.ts#createTicket/<callback>@21081'])],
 ])
 
 
