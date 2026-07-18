@@ -56,7 +56,7 @@ describe('quote preparation readiness', () => {
       builder: blocked,
       totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
     })).toEqual({ kind: 'blocked', reasons: [
-      'Add customer and vehicle.', 'Configure a tax rate.', 'Add at least one quote line.',
+      'Add customer and vehicle.', 'Configure a tax rate in shop settings.', 'Add at least one quote line.',
       'Review stored quote amounts.', 'Finish or cancel the open line editor.',
       'Finish the open confirmation.', 'Wait for the current quote update.',
     ] })

@@ -84,6 +84,7 @@ export function ManualQuoteBuilder({
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
   const editorFirstInputRef = useRef<HTMLInputElement>(null)
+  const editorFocusKeyRef = useRef<string | null>(null)
   const recoveryRefreshRef = useRef<HTMLButtonElement>(null)
   const cannedSelectRef = useRef<HTMLSelectElement>(null)
   const cannedUnavailableRef = useRef<HTMLDivElement>(null)
@@ -137,6 +138,25 @@ export function ManualQuoteBuilder({
       queueMicrotask(() => recoveryRefreshRef.current?.focus())
     }
   }, [error, pendingSourcedRemoval])
+  useEffect(() => {
+    // When a line editor opens (not on every keystroke), bring it into view and
+    // focus its first field. On mobile the editor renders far below the tapped
+    // Add button, so without this the tap looks inert; focusing also un-pins the
+    // fixed Prepare bar so it can't cover the editor's actions.
+    if (!editor) {
+      editorFocusKeyRef.current = null
+      return
+    }
+    const key = `${editor.mode}:${editor.jobId}:${editor.kind}:${editor.line?.id ?? 'new'}`
+    if (editorFocusKeyRef.current === key) return
+    editorFocusKeyRef.current = key
+    const input = editorFirstInputRef.current
+    if (!input) return
+    queueMicrotask(() => {
+      input.focus()
+      try { input.scrollIntoView({ block: 'center' }) } catch { /* layout-less env */ }
+    })
+  }, [editor])
 
   const lines = current.jobs.flatMap((job) => job.lines)
   const sourcingJob = sourcingJobId

@@ -386,7 +386,7 @@ export function getQuotePreparationState(input: {
   }
   const reasons: string[] = []
   if (!input.builder.ticket.reconciled) reasons.push('Add customer and vehicle.')
-  if (input.builder.configuration.taxRateBps === null) reasons.push('Configure a tax rate.')
+  if (input.builder.configuration.taxRateBps === null) reasons.push('Configure a tax rate in shop settings.')
   if (!input.builder.jobs.some((job) => job.lines.length > 0)) {
     reasons.push('Add at least one quote line.')
   }
