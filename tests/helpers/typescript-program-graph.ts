@@ -30,6 +30,29 @@ export type ProgramSymbolReferenceViolationV1 = Readonly<{
   position: number
 }>
 
+type SynchronousExecutorContractV1 = Readonly<{
+  symbol: string
+  callbackArguments?: readonly number[]
+  callbackProperties?: Readonly<Record<number, readonly string[]>>
+}>
+
+const SYNCHRONOUS_EXECUTOR_CONTRACTS_V1: readonly SynchronousExecutorContractV1[] = [
+  {
+    symbol: 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runBoundedShopOsMutationV1',
+    callbackProperties: {
+      1: ['discover', 'executeLocked', 'uniqueCollisionRecovery.executeLocked'],
+    },
+  },
+  {
+    symbol: 'lib/sessions.ts#runTicketedSessionMutation',
+    callbackArguments: [2],
+  },
+  {
+    symbol: 'lib/shop-os/quotes.ts#runMutation',
+    callbackArguments: [5],
+  },
+]
+
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node
   while (
@@ -81,6 +104,9 @@ export class TypeScriptProgramGraphV1 {
   private readonly reverseEdges = new Map<string, Set<string>>()
   private readonly mutationSites: ProgramMutationSiteV1[] = []
   private readonly mutationSinkSymbols = new Set<ts.Symbol>()
+  private readonly synchronousCallbackParents = new Map<string, string>()
+  private readonly inlineCallbackOwners = new Set<string>()
+  private readonly referenceNodes = new Map<ts.SourceFile, readonly ts.Node[]>()
 
   constructor(program: ts.Program, options: Readonly<{ root: string; virtual?: boolean }>) {
     this.program = program
@@ -153,14 +179,42 @@ export class TypeScriptProgramGraphV1 {
       ts.isVariableDeclaration(candidate)
     )) ?? symbol.declarations?.[0]
     if (!declaration) return null
+    if (isFunctionWithBody(declaration)) return this.functionId(declaration)
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      declaration.initializer &&
+      isFunctionWithBody(unwrapExpression(declaration.initializer))
+    ) return this.functionId(unwrapExpression(declaration.initializer) as ts.FunctionLikeDeclaration)
+    if (
+      ts.isPropertyAssignment(declaration) &&
+      isFunctionWithBody(unwrapExpression(declaration.initializer))
+    ) return this.functionId(unwrapExpression(declaration.initializer) as ts.FunctionLikeDeclaration)
     const file = this.fileLabel(declaration.getSourceFile())
     const name = symbol.getName()
     return `${file}#${name}`
   }
 
   private functionId(node: ts.FunctionLikeDeclaration): string {
-    const name = functionName(node) ?? `<callback@${node.getStart()}>`
-    return `${this.fileLabel(node.getSourceFile())}#${name}`
+    const file = this.fileLabel(node.getSourceFile())
+    const name = functionName(node)
+    let enclosing: ts.Node | undefined = node.parent
+    while (enclosing && !ts.isSourceFile(enclosing) && !isFunctionWithBody(enclosing)) {
+      enclosing = enclosing.parent
+    }
+    const topLevelDeclaration = ts.isSourceFile(enclosing) && (
+      ts.isFunctionDeclaration(node) ||
+      ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+        ts.isVariableDeclaration(node.parent) &&
+        ts.isVariableDeclarationList(node.parent.parent) &&
+        ts.isVariableStatement(node.parent.parent.parent) &&
+        ts.isSourceFile(node.parent.parent.parent.parent))
+    )
+    if (topLevelDeclaration && name) return `${file}#${name}`
+    const segment = `${name ?? '<callback>'}@${node.getStart()}`
+    if (enclosing && isFunctionWithBody(enclosing)) {
+      return `${this.functionId(enclosing)}/${segment}`
+    }
+    return `${file}#<module>/${segment}`
   }
 
   private ownerId(node: ts.Node): string {
@@ -180,6 +234,87 @@ export class TypeScriptProgramGraphV1 {
     const incoming = this.reverseEdges.get(callee) ?? new Set<string>()
     incoming.add(caller)
     this.reverseEdges.set(callee, incoming)
+  }
+
+  private executorContract(symbol: ts.Symbol | undefined): SynchronousExecutorContractV1 | undefined {
+    const id = this.symbolId(symbol)?.replace(/^\/virtual\//, '')
+    if (!id || !symbol) return undefined
+    const registered = SYNCHRONOUS_EXECUTOR_CONTRACTS_V1.find((contract) => contract.symbol === id)
+    if (registered) return registered
+    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
+      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
+    if (symbol.getName() === 'transaction' &&
+      declarationFiles.some((file) => file.includes('/drizzle-orm/pg-core/db.'))) {
+      return { symbol: id, callbackArguments: [0] }
+    }
+    if (symbol.getName() === 'ReadableStream' &&
+      declarationFiles.some((file) => file.endsWith('/lib.dom.d.ts'))) {
+      return { symbol: id, callbackProperties: { 0: ['start'] } }
+    }
+    return undefined
+  }
+
+  private propertyCallbacks(expression: ts.Expression, path: readonly string[]): readonly ts.FunctionLikeDeclaration[] {
+    const current = unwrapExpression(expression)
+    if (ts.isConditionalExpression(current)) {
+      return [
+        ...this.propertyCallbacks(current.whenTrue, path),
+        ...this.propertyCallbacks(current.whenFalse, path),
+      ]
+    }
+    if (!ts.isObjectLiteralExpression(current) || path.length === 0) return []
+    const [head, ...tail] = path
+    const property = current.properties.find((candidate) => {
+      if (!('name' in candidate) || !candidate.name) return false
+      return (ts.isIdentifier(candidate.name) || ts.isStringLiteral(candidate.name)) && candidate.name.text === head
+    })
+    if (!property) return []
+    if (ts.isMethodDeclaration(property)) return tail.length === 0 ? [property] : []
+    if (!ts.isPropertyAssignment(property)) return []
+    if (tail.length > 0) return this.propertyCallbacks(property.initializer, tail)
+    const callback = unwrapExpression(property.initializer)
+    return isFunctionWithBody(callback) ? [callback] : []
+  }
+
+  private synchronousExecutorCallbacks(
+    call: ts.CallExpression | ts.NewExpression,
+    executor: ts.Symbol | undefined,
+  ): readonly ts.FunctionLikeDeclaration[] {
+    if (ts.isCallExpression(call)) {
+      const immediate = unwrapExpression(call.expression)
+      if (isFunctionWithBody(immediate)) return [immediate]
+    }
+    const contract = this.executorContract(executor)
+    if (!contract) return []
+    const callbacks: ts.FunctionLikeDeclaration[] = []
+    const argumentsList = call.arguments ?? []
+    for (const index of contract.callbackArguments ?? []) {
+      const argument = argumentsList[index] && unwrapExpression(argumentsList[index]!)
+      if (argument && isFunctionWithBody(argument)) callbacks.push(argument)
+    }
+    for (const [indexText, paths] of Object.entries(contract.callbackProperties ?? {})) {
+      const argument = argumentsList[Number(indexText)]
+      if (!argument) continue
+      for (const path of paths) callbacks.push(...this.propertyCallbacks(argument, path.split('.')))
+    }
+    return callbacks
+  }
+
+  private attachSynchronousExecutorCallbacks(
+    call: ts.CallExpression | ts.NewExpression,
+    caller: string,
+    executor: ts.Symbol | undefined,
+  ): void {
+    const callbacks = this.synchronousExecutorCallbacks(call, executor)
+    for (const callback of callbacks) {
+      const callbackId = this.functionId(callback)
+      const existing = this.synchronousCallbackParents.get(callbackId)
+      if (existing && existing !== caller) {
+        throw new Error(`Synchronous callback owner collision: ${callbackId}`)
+      }
+      this.synchronousCallbackParents.set(callbackId, caller)
+      this.addEdge(caller, callbackId)
+    }
   }
 
   private isDeclarationOrPlumbingReference(node: ts.Node): boolean {
@@ -228,10 +363,14 @@ export class TypeScriptProgramGraphV1 {
       node.parent.argumentExpression === node
     ) expression = node.parent
     const parent = expression.parent
-    return (ts.isCallExpression(parent) || ts.isNewExpression(parent)) && parent.expression === expression
+    if (!(ts.isCallExpression(parent) || ts.isNewExpression(parent)) || parent.expression !== expression) return false
+    const consumer = parent.parent
+    return !((ts.isCallExpression(consumer) || ts.isNewExpression(consumer)) && consumer.expression === parent)
   }
 
   private symbolReferenceNodes(sourceFile: ts.SourceFile): readonly ts.Node[] {
+    const cached = this.referenceNodes.get(sourceFile)
+    if (cached) return cached
     const references: ts.Node[] = []
     const visit = (node: ts.Node): void => {
       if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -240,6 +379,7 @@ export class TypeScriptProgramGraphV1 {
       ts.forEachChild(node, visit)
     }
     visit(sourceFile)
+    this.referenceNodes.set(sourceFile, references)
     return references
   }
 
@@ -267,7 +407,9 @@ export class TypeScriptProgramGraphV1 {
         if (binding) recordedBindings.add(binding)
         const owner = this.ownerId(node)
         const direct = this.isExactDirectCalleeReference(node)
-        if (direct && policy.get(symbolName)!.has(owner)) continue
+        const escapedCallback = this.inlineCallbackOwners.has(owner) &&
+          !this.synchronousCallbackParents.has(owner)
+        if (direct && policy.get(symbolName)!.has(owner) && !escapedCallback) continue
         violations.push({
           symbol: symbolName,
           file: this.fileLabel(sourceFile),
@@ -287,6 +429,24 @@ export class TypeScriptProgramGraphV1 {
     const property = node.propertyName ?? node.name
     if (!ts.isIdentifier(property) && !ts.isStringLiteral(property) && !ts.isNumericLiteral(property)) return undefined
     return this.checker.getTypeAtLocation(declaration.initializer).getProperty(property.text)
+  }
+
+  private registerPotentialMutationSink(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): void {
+    const nameNode = ts.isPropertyAccessExpression(node) ? node.name : node.argumentExpression
+    if (!nameNode ||
+      (!ts.isIdentifier(nameNode) && !ts.isStringLiteral(nameNode) && !ts.isNoSubstitutionTemplateLiteral(nameNode)) ||
+      !['insert', 'update', 'delete', 'execute'].includes(nameNode.text)) return
+    const symbol = this.aliasedSymbolAt(nameNode)
+    if (!symbol) return
+    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
+      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
+    const declaredByDrizzle = declarationFiles.some((file) => file.includes('/drizzle-orm/'))
+    const receiver = node.expression
+    const receiverMethods = new Set(this.checker.getTypeAtLocation(receiver).getProperties().map(({ name }) => name))
+    const mutationShape = ['insert', 'update', 'delete', 'execute']
+      .filter((method) => receiverMethods.has(method))
+    if (!declaredByDrizzle && mutationShape.length < 2) return
+    this.mutationSinkSymbols.add(symbol)
   }
 
   mutationSinkReferenceViolations(): readonly ProgramSymbolReferenceViolationV1[] {
@@ -400,32 +560,41 @@ export class TypeScriptProgramGraphV1 {
   private index(): void {
     for (const sourceFile of this.program.getSourceFiles()) {
       if (sourceFile.isDeclarationFile) continue
-      const visit = (node: ts.Node): void => {
+      const register = (node: ts.Node): void => {
         if (isFunctionWithBody(node)) {
           const id = this.functionId(node)
+          const existing = this.functionNodes.get(id)
+          if (existing && existing !== node) throw new Error(`Duplicate function identity: ${id}`)
           this.functionNodes.set(id, node)
-          if (!ts.isFunctionDeclaration(node)) {
-            const lexicalOwner = this.ownerId(node.parent)
-            if (!lexicalOwner.endsWith('#<module>')) this.addEdge(lexicalOwner, id)
-          }
+          if (
+            ((ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && functionName(node) === null) ||
+            (ts.isMethodDeclaration(node) && ts.isObjectLiteralExpression(node.parent))
+          ) this.inlineCallbackOwners.add(id)
         }
-        if (ts.isCallExpression(node)) {
+        if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+          this.registerPotentialMutationSink(node)
+        }
+        ts.forEachChild(node, register)
+      }
+      register(sourceFile)
+    }
+
+    for (const sourceFile of this.program.getSourceFiles()) {
+      if (sourceFile.isDeclarationFile) continue
+      const connect = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
           const caller = this.ownerId(node)
           const expression = unwrapExpression(node.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-          const callee = this.symbolId(this.aliasedSymbolAt(lookup))
+          const executor = this.aliasedSymbolAt(lookup)
+          const callee = this.symbolId(executor)
           if (callee) this.addEdge(caller, callee)
-          for (const argument of node.arguments) {
-            const unwrapped = unwrapExpression(argument)
-            if (ts.isArrowFunction(unwrapped) || ts.isFunctionExpression(unwrapped)) {
-              this.addEdge(caller, this.functionId(unwrapped))
-            }
-          }
-          this.collectMutation(node)
+          this.attachSynchronousExecutorCallbacks(node, caller, executor)
+          if (ts.isCallExpression(node)) this.collectMutation(node)
         }
-        ts.forEachChild(node, visit)
+        ts.forEachChild(node, connect)
       }
-      visit(sourceFile)
+      connect(sourceFile)
     }
   }
 
@@ -433,6 +602,22 @@ export class TypeScriptProgramGraphV1 {
     return [...this.mutationSites].sort((left, right) => (
       left.file.localeCompare(right.file) || left.position - right.position
     ))
+  }
+
+  mutationOwnershipViolations(
+    approvedOwners: ReadonlySet<string>,
+  ): readonly ProgramMutationSiteV1[] {
+    return this.mutations().filter(({ owner }) => {
+      if (approvedOwners.has(owner)) return false
+      const seen = new Set<string>()
+      let current = owner
+      while (this.synchronousCallbackParents.has(current) && !seen.has(current)) {
+        seen.add(current)
+        current = this.synchronousCallbackParents.get(current)!
+        if (approvedOwners.has(current)) return false
+      }
+      return true
+    })
   }
 
   assertNoUnknownSql(): void {
@@ -491,21 +676,30 @@ export class TypeScriptProgramGraphV1 {
     return [...exporters].sort()
   }
 
+  private invocationReaches(
+    invocation: ts.CallExpression | ts.NewExpression,
+    target: string,
+  ): boolean {
+    const expression = unwrapExpression(invocation.expression)
+    const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
+    const executor = this.aliasedSymbolAt(lookup)
+    const resolved = this.symbolId(executor)
+    if (resolved === target || (resolved !== null && this.transitiveCallees(resolved).includes(target))) return true
+    return this.synchronousExecutorCallbacks(invocation, executor).some((callback) => {
+      const callbackId = this.functionId(callback)
+      return callbackId === target || this.transitiveCallees(callbackId).includes(target)
+    })
+  }
+
   callOrder(owner: string, callees: readonly string[]): readonly number[] {
     const node = this.functionNodes.get(owner)
     if (!node) return callees.map(() => -1)
     const positions = callees.map((callee) => {
       let earliest = Number.POSITIVE_INFINITY
       const visit = (child: ts.Node): void => {
-        if (child !== node.body && ts.isFunctionDeclaration(child)) return
-        if (ts.isCallExpression(child)) {
-          const expression = unwrapExpression(child.expression)
-          const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-          const resolved = this.symbolId(this.aliasedSymbolAt(lookup))
-          if (
-            resolved === callee ||
-            (resolved !== null && this.transitiveCallees(resolved).includes(callee))
-          ) earliest = Math.min(earliest, child.getStart())
+        if (child !== node.body && isFunctionWithBody(child)) return
+        if (ts.isCallExpression(child) || ts.isNewExpression(child)) {
+          if (this.invocationReaches(child, callee)) earliest = Math.min(earliest, child.getStart())
         }
         ts.forEachChild(child, visit)
       }
@@ -574,17 +768,17 @@ export class TypeScriptProgramGraphV1 {
   private gateControlsTargets(
     owner: string,
     gate: string,
-    isTarget: (call: ts.CallExpression) => boolean,
+    isTarget: (call: ts.CallExpression | ts.NewExpression) => boolean,
   ): boolean {
     const node = this.functionNodes.get(owner)
     if (!node?.body || !ts.isBlock(node.body)) return false
     const body = node.body
     const guardIndexes = this.refusalGuardIndexes(body, gate)
     if (guardIndexes.length === 0) return false
-    const targets: ts.CallExpression[] = []
+    const targets: Array<ts.CallExpression | ts.NewExpression> = []
     const visit = (child: ts.Node): void => {
-      if (child !== body && ts.isFunctionDeclaration(child)) return
-      if (ts.isCallExpression(child) && isTarget(child)) targets.push(child)
+      if (child !== body && isFunctionWithBody(child)) return
+      if ((ts.isCallExpression(child) || ts.isNewExpression(child)) && isTarget(child)) targets.push(child)
       ts.forEachChild(child, visit)
     }
     visit(body)
@@ -595,13 +789,7 @@ export class TypeScriptProgramGraphV1 {
   }
 
   gateDominatesWriter(owner: string, gate: string, writer: string): boolean {
-    return this.gateControlsTargets(owner, gate, (call) => {
-      const expression = unwrapExpression(call.expression)
-      const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-      const resolved = this.symbolId(this.aliasedSymbolAt(lookup))
-      return resolved === writer ||
-        (resolved !== null && this.transitiveCallees(resolved).includes(writer))
-    })
+    return this.gateControlsTargets(owner, gate, (call) => this.invocationReaches(call, writer))
   }
 
   gateControlsMutations(owner: string, gate: string): boolean {

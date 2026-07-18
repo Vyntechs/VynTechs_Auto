@@ -11,9 +11,14 @@ const files = {
     export const sql: any = (parts: TemplateStringsArray, ...values: unknown[]) => ({ parts, values })
   `,
   '/virtual/foundation.ts': `
-    export function runBoundedShopOsMutationV1(callback: () => void) { callback() }
     export function finalizeMutationRevisionsV1() {}
     export function insertMutationReceiptPrimitiveV1() {}
+  `,
+  '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts': `
+    export function runBoundedShopOsMutationV1(
+      callback: () => void,
+      config: { discover(): unknown; executeLocked(): unknown },
+    ) { callback(); config.discover(); config.executeLocked() }
   `,
   '/virtual/foundation-barrel.ts': `
     export { insertMutationReceiptPrimitiveV1 as leakedReceipt } from './foundation'
@@ -22,9 +27,9 @@ const files = {
     import * as schema from './schema'
     import { db, sql } from './db'
     import {
-      runBoundedShopOsMutationV1 as coordinate,
       finalizeMutationRevisionsV1 as finalize,
     } from './foundation'
+    import { runBoundedShopOsMutationV1 as coordinate } from './lib/shop-os/continuity/mutation-foundation/transaction-runner'
 
     const ticketTable = schema.tickets
     const rawUpdate = sql\`update public.tickets set concern = 'safe'\`
@@ -33,7 +38,7 @@ const files = {
       db.execute(rawUpdate)
     }
     export function winningWriter() {
-      coordinate(() => leafWriter())
+      coordinate(() => undefined, { discover: () => undefined, executeLocked: () => leafWriter() })
       finalize()
     }
     export function bypassSibling() {
@@ -92,7 +97,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     const winning = '/virtual/writer.ts#winningWriter'
 
     expect(graph.transitiveCallees(winning)).toEqual(expect.arrayContaining([
-      '/virtual/foundation.ts#runBoundedShopOsMutationV1',
+      '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runBoundedShopOsMutationV1',
       '/virtual/foundation.ts#finalizeMutationRevisionsV1',
       '/virtual/writer.ts#leafWriter',
     ]))
@@ -133,6 +138,46 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     ])).toEqual([0, 1])
   })
 
+  it('keeps an exported POST distinct from a nested guarded POST with the same name', () => {
+    const writer = '/virtual/writer.ts#writer'
+    const gate = '/virtual/gate.ts#gate'
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export function writer() {}`,
+      '/virtual/gate.ts': `export function gate(): { denied: true } | null { return null }`,
+      '/virtual/route.ts': `
+        import { writer } from './writer'
+        import { gate } from './gate'
+        export async function POST() { writer() }
+        export async function wrapper() {
+          async function POST() {
+            const denied = await gate()
+            if (denied) return denied
+            writer()
+          }
+          return POST()
+        }
+      `,
+    })
+
+    const callers = graph.directCallers(writer)
+    const nested = callers.find((owner) => owner !== '/virtual/route.ts#POST')
+    expect(callers).toHaveLength(2)
+    expect(nested).toMatch(/^\/virtual\/route\.ts#wrapper\/POST@\d+$/)
+    expect(graph.gateDominatesWriter('/virtual/route.ts#POST', gate, writer)).toBe(false)
+    expect(graph.symbolReferenceViolations(new Map([
+      [writer, new Set([nested!])],
+    ])).map(({ owner }) => owner)).toEqual(['/virtual/route.ts#POST'])
+  })
+
+  it('fails closed instead of overwriting a duplicate stable top-level identity', () => {
+    expect(() => createVirtualTypeScriptProgramGraphV1({
+      '/virtual/duplicate.ts': `
+        export function POST() { return 1 }
+        export function POST() { return 2 }
+      `,
+    })).toThrow('Duplicate function identity: /virtual/duplicate.ts#POST')
+  })
+
   it('forbids every first-class writer reference and permits only an approved direct lexical call', () => {
     const writer = '/virtual/writer.ts#writer'
     const policy = new Map([[writer, new Set(['/virtual/case.ts#approved'])]])
@@ -141,6 +186,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
         export function rejected() { const held = identity(writer); held() }`],
       ['returned writer', `export function rejected() { return writer }`],
       ['assigned alias', `export function rejected() { const held = writer; held() }`],
+      ['parenthesized alias', `export function rejected() { const held = (writer); held() }`],
       ['array storage', `export function rejected() { return [writer] }`],
       ['cast alias', `export function rejected() { const held = writer as () => void; held() }`],
       ['returned closure', `export function rejected() { return () => writer() }`],
@@ -157,6 +203,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       ['dead nested arrow', `export function rejected() { const dead = () => writer(); return dead }`],
       ['React useCallback', `import { useCallback } from 'react'
         export function rejected() { return useCallback(writer, []) }`],
+      ['returned invocation', `export function rejected() { writer()() }`],
     ] as const
 
     for (const [label, body] of cases) {
@@ -177,6 +224,14 @@ describe('ShopOS continuity TypeScript Program graph', () => {
         export function approved() { writer() }`,
     })
     expect(approved.symbolReferenceViolations(policy)).toEqual([])
+
+    const returnedInvocation = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export function writer() { return () => undefined }`,
+      '/virtual/case.ts': `import { writer } from './writer'
+        export function approved() { writer()() }`,
+    })
+    expect(returnedInvocation.symbolReferenceViolations(policy).map(({ owner }) => owner))
+      .toEqual(['/virtual/case.ts#approved'])
 
     const destructured = createVirtualTypeScriptProgramGraphV1({
       '/virtual/writer.ts': `export function writer() {}`,
@@ -230,6 +285,103 @@ describe('ShopOS continuity TypeScript Program graph', () => {
         '/virtual/app/sinks.ts#returned',
         '/virtual/app/sinks.ts#passed',
       ]))
+  })
+
+  it('forbids alias-only tracked mutation methods without a seeded direct sink call', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/aliases.ts': `
+        import { tickets } from '../schema'
+        declare const db: {
+          execute(statement: string): void
+          update(table: unknown): void
+        }
+        declare const cache: { update(value: unknown): void }
+        export function updateAlias() { const update = db.update; update(tickets) }
+        export function executeAlias() { const execute = db.execute; execute('update tickets set concern = concern') }
+        export function unrelated() { const update = cache.update; return update }
+      `,
+    })
+
+    expect(graph.mutations()).toEqual([])
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner)).toEqual([
+      '/virtual/app/aliases.ts#updateAlias',
+      '/virtual/app/aliases.ts#executeAlias',
+    ])
+  })
+
+  it('does not attach dead, returned, array, promise, or provider callbacks to their lexical owner', () => {
+    const writer = '/virtual/writer.ts#writer'
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export function writer() {}`,
+      '/virtual/case.ts': `
+        import { writer } from './writer'
+        declare function provider(callback: () => void): void
+        export function approved() {
+          const dead = [() => writer()]
+          dead.map((callback) => callback())
+          Promise.resolve().then(() => writer())
+          provider(() => writer())
+          return () => writer()
+        }
+      `,
+    })
+
+    expect(graph.transitiveCallees('/virtual/case.ts#approved')).not.toContain(writer)
+    expect(graph.symbolReferenceViolations(new Map([
+      [writer, new Set(['/virtual/case.ts#approved'])],
+    ])).map(({ owner }) => owner)).toHaveLength(4)
+  })
+
+  it('attaches only the exact synchronous mutation executor callback contract', () => {
+    const writer = '/virtual/writer.ts#writer'
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts': `
+        export function runBoundedShopOsMutationV1(
+          _db: unknown,
+          config: { discover(): unknown; executeLocked(): unknown },
+        ) { config.discover(); return config.executeLocked() }
+      `,
+      '/virtual/writer.ts': `
+        import { runBoundedShopOsMutationV1 } from './lib/shop-os/continuity/mutation-foundation/transaction-runner'
+        export function writer() {}
+        export function approved() {
+          return runBoundedShopOsMutationV1({}, {
+            discover: () => null,
+            executeLocked: () => writer(),
+          })
+        }
+      `,
+    })
+
+    const callbackOwner = graph.directCallers(writer)[0]!
+    expect(callbackOwner).toMatch(/^\/virtual\/writer\.ts#approved\/<callback>@\d+$/)
+    expect(graph.transitiveCallees('/virtual/writer.ts#approved')).toContain(writer)
+    expect(graph.symbolReferenceViolations(new Map([
+      [writer, new Set([callbackOwner])],
+    ]))).toEqual([])
+  })
+
+  it('rejects a returned mutation callback even after coordinator and finalizer calls', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/returned.ts': `
+        import { tickets } from '../schema'
+        declare const db: { update(table: unknown): void; execute(statement: string): void }
+        declare function coordinator(): void
+        declare function finalizer(): void
+        export function writer() {
+          coordinator()
+          finalizer()
+          return () => db.update(tickets)
+        }
+      `,
+    })
+
+    const mutation = graph.mutations()[0]!
+    expect(graph.transitiveCallees('/virtual/app/returned.ts#writer')).not.toContain(mutation.owner)
+    expect(graph.mutationOwnershipViolations(new Set(['/virtual/app/returned.ts#writer'])))
+      .toEqual([mutation])
   })
 
   it('requires the route gate to dominate its reachable writer', () => {
