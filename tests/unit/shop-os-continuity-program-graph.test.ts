@@ -250,7 +250,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     expect(constructed.symbolReferenceViolations(new Map([
       ['/virtual/writer.ts#Writer', new Set(['/virtual/case.ts#approved'])],
     ]))).toEqual([])
-  })
+  }, 20_000)
 
   it('forbids first-class tracked mutation methods while preserving direct sink enumeration', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
@@ -287,7 +287,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       ]))
   })
 
-  it('forbids alias-only tracked mutation methods without a seeded direct sink call', () => {
+  it('classifies and forbids alias-only tracked mutation methods without a seeded direct sink call', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
       '/virtual/app/aliases.ts': `
@@ -303,11 +303,144 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       `,
     })
 
-    expect(graph.mutations()).toEqual([])
+    expect(graph.mutations()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        owner: '/virtual/app/aliases.ts#updateAlias',
+        operation: 'update',
+        table: 'tickets',
+      }),
+      expect.objectContaining({
+        owner: '/virtual/app/aliases.ts#executeAlias',
+        operation: 'raw-update',
+        table: 'tickets',
+      }),
+    ]))
     expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner)).toEqual([
       '/virtual/app/aliases.ts#updateAlias',
       '/virtual/app/aliases.ts#executeAlias',
     ])
+  })
+
+  it('fails closed when a recognized direct mutation receives an unresolved table', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/app/unresolved-table.ts': `
+        declare const db: {
+          insert(table: unknown): void
+          update(table: unknown): void
+          delete(table: unknown): void
+        }
+        export function bypass(table: unknown) {
+          db.insert(table)
+          db.update(table)
+          db.delete(table)
+        }
+      `,
+    })
+
+    expect(graph.mutations()).toEqual([
+      expect.objectContaining({
+        owner: '/virtual/app/unresolved-table.ts#bypass',
+        operation: 'unknown-sql',
+        table: '<unknown>',
+      }),
+      expect.objectContaining({
+        owner: '/virtual/app/unresolved-table.ts#bypass',
+        operation: 'unknown-sql',
+        table: '<unknown>',
+      }),
+      expect.objectContaining({
+        owner: '/virtual/app/unresolved-table.ts#bypass',
+        operation: 'unknown-sql',
+        table: '<unknown>',
+      }),
+    ])
+    expect(() => graph.assertNoUnknownSql()).toThrow('Unclassified dynamic SQL')
+  })
+
+  it('classifies and rejects a destructured tracked mutation method call', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/destructured.ts': `
+        import { tickets } from '../schema'
+        declare const db: {
+          insert(table: unknown): void
+          update(table: unknown): void
+          delete(table: unknown): void
+        }
+        export function bypass() { const { update } = db; update(tickets) }
+      `,
+    })
+
+    expect(graph.mutations()).toEqual([
+      expect.objectContaining({
+        owner: '/virtual/app/destructured.ts#bypass',
+        operation: 'update',
+        table: 'tickets',
+      }),
+    ])
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner))
+      .toEqual(['/virtual/app/destructured.ts#bypass'])
+  })
+
+  it('classifies a tracked-table method alias without treating unrelated update APIs as writes', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/wrapper.ts': `
+        import { tickets } from '../schema'
+        declare const wrapper: { update(table: unknown): void }
+        declare const cache: { update(value: unknown): void }
+        export function bypass() { const update = wrapper.update; update(tickets) }
+        export function unrelated() { const update = cache.update; update('display') }
+      `,
+    })
+
+    expect(graph.mutations()).toEqual([
+      expect.objectContaining({
+        owner: '/virtual/app/wrapper.ts#bypass',
+        operation: 'update',
+        table: 'tickets',
+      }),
+    ])
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner))
+      .toEqual(['/virtual/app/wrapper.ts#bypass'])
+  })
+
+  it('trusts only an exact registered direct Drizzle transaction receiver', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase {
+          transaction<T>(callback: () => T): T
+        }
+      `,
+      '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts': `
+        import type { PgDatabase } from '../../../../drizzle-orm/pg-core/db'
+        declare function directWriter(): void
+        declare function proxyWriter(): void
+        declare function aliasWriter(): void
+        declare function wrapperWriter(): void
+        declare function overrideWriter(): void
+
+        export function runPrimaryAttempt(db: PgDatabase) {
+          db.transaction(() => directWriter())
+          const proxied = new Proxy(db, {})
+          proxied.transaction(() => proxyWriter())
+          const alias = db
+          alias.transaction(() => aliasWriter())
+          const wrapper: PgDatabase = { transaction: (callback) => callback() }
+          wrapper.transaction(() => wrapperWriter())
+          const overridden = { ...db, transaction: (callback: () => void) => callback() }
+          overridden.transaction(() => overrideWriter())
+        }
+      `,
+    })
+    const owner = '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt'
+    const closure = graph.transitiveCallees(owner)
+
+    expect(closure).toContain('/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#directWriter')
+    for (const writer of ['proxyWriter', 'aliasWriter', 'wrapperWriter', 'overrideWriter']) {
+      expect(closure, writer)
+        .not.toContain(`/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#${writer}`)
+    }
   })
 
   it('does not attach dead, returned, array, promise, or provider callbacks to their lexical owner', () => {

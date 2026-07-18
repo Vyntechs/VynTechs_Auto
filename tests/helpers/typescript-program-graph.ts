@@ -53,6 +53,34 @@ const SYNCHRONOUS_EXECUTOR_CONTRACTS_V1: readonly SynchronousExecutorContractV1[
   },
 ]
 
+type SynchronousDrizzleTransactionCallsiteV1 = Readonly<{
+  owner: string
+  receiver: string
+}>
+
+const SYNCHRONOUS_DRIZZLE_TRANSACTION_CALLS_V1: readonly SynchronousDrizzleTransactionCallsiteV1[] = [
+  {
+    owner: 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt',
+    receiver: 'db',
+  },
+  {
+    owner: 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runRecoveryAttempt',
+    receiver: 'db',
+  },
+  {
+    owner: 'lib/intake/session.ts#createSessionFromIntake',
+    receiver: 'db',
+  },
+  {
+    owner: 'lib/sessions.ts#submitRepairObservationForUser',
+    receiver: 'opts.db',
+  },
+  {
+    owner: 'lib/curator/deferred-actions.ts#mutateDeferredSession',
+    receiver: 'db',
+  },
+]
+
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node
   while (
@@ -165,6 +193,10 @@ export class TypeScriptProgramGraphV1 {
     if (declaration && ts.isPropertyAssignment(declaration)) {
       return this.canonicalFromExpression(declaration.initializer, seen) ?? symbol
     }
+    if (declaration && ts.isBindingElement(declaration)) {
+      const property = this.destructuredPropertySymbol(declaration)
+      return property && !seen.has(property) ? property : symbol
+    }
     if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
       return this.canonicalSymbolAt(declaration.name, seen) ?? symbol
     }
@@ -236,17 +268,51 @@ export class TypeScriptProgramGraphV1 {
     this.reverseEdges.set(callee, incoming)
   }
 
-  private executorContract(symbol: ts.Symbol | undefined): SynchronousExecutorContractV1 | undefined {
+  private directReceiverPath(expression: ts.Expression): Readonly<{ path: string; root: ts.Identifier }> | null {
+    const current = unwrapExpression(expression)
+    if (ts.isIdentifier(current)) return { path: current.text, root: current }
+    if (!ts.isPropertyAccessExpression(current)) return null
+    const parent = this.directReceiverPath(current.expression)
+    return parent ? { path: `${parent.path}.${current.name.text}`, root: parent.root } : null
+  }
+
+  private isRegisteredDrizzleTransaction(
+    call: ts.CallExpression | ts.NewExpression,
+    caller: string,
+    symbol: ts.Symbol,
+  ): boolean {
+    if (!ts.isCallExpression(call)) return false
+    const expression = unwrapExpression(call.expression)
+    if (!ts.isPropertyAccessExpression(expression) || expression.name.text !== 'transaction') return false
+    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
+      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
+    if (symbol.getName() !== 'transaction' ||
+      !declarationFiles.some((file) => file.includes('/drizzle-orm/pg-core/db.'))) return false
+    const receiver = this.directReceiverPath(expression.expression)
+    if (!receiver) return false
+    const normalizedCaller = caller.replace(/^\/virtual\//, '')
+    const registered = SYNCHRONOUS_DRIZZLE_TRANSACTION_CALLS_V1.some((contract) =>
+      contract.owner === normalizedCaller && contract.receiver === receiver.path)
+    if (!registered) return false
+    const root = this.aliasedSymbolAt(receiver.root)
+    const declaration = root?.valueDeclaration ?? root?.declarations?.[0]
+    return declaration !== undefined && ts.isParameter(declaration) && this.ownerId(declaration) === caller
+  }
+
+  private executorContract(
+    call: ts.CallExpression | ts.NewExpression,
+    caller: string,
+    symbol: ts.Symbol | undefined,
+  ): SynchronousExecutorContractV1 | undefined {
     const id = this.symbolId(symbol)?.replace(/^\/virtual\//, '')
     if (!id || !symbol) return undefined
     const registered = SYNCHRONOUS_EXECUTOR_CONTRACTS_V1.find((contract) => contract.symbol === id)
     if (registered) return registered
-    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
-      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
-    if (symbol.getName() === 'transaction' &&
-      declarationFiles.some((file) => file.includes('/drizzle-orm/pg-core/db.'))) {
+    if (this.isRegisteredDrizzleTransaction(call, caller, symbol)) {
       return { symbol: id, callbackArguments: [0] }
     }
+    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
+      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
     if (symbol.getName() === 'ReadableStream' &&
       declarationFiles.some((file) => file.endsWith('/lib.dom.d.ts'))) {
       return { symbol: id, callbackProperties: { 0: ['start'] } }
@@ -278,13 +344,14 @@ export class TypeScriptProgramGraphV1 {
 
   private synchronousExecutorCallbacks(
     call: ts.CallExpression | ts.NewExpression,
+    caller: string,
     executor: ts.Symbol | undefined,
   ): readonly ts.FunctionLikeDeclaration[] {
     if (ts.isCallExpression(call)) {
       const immediate = unwrapExpression(call.expression)
       if (isFunctionWithBody(immediate)) return [immediate]
     }
-    const contract = this.executorContract(executor)
+    const contract = this.executorContract(call, caller, executor)
     if (!contract) return []
     const callbacks: ts.FunctionLikeDeclaration[] = []
     const argumentsList = call.arguments ?? []
@@ -305,7 +372,7 @@ export class TypeScriptProgramGraphV1 {
     caller: string,
     executor: ts.Symbol | undefined,
   ): void {
-    const callbacks = this.synchronousExecutorCallbacks(call, executor)
+    const callbacks = this.synchronousExecutorCallbacks(call, caller, executor)
     for (const callback of callbacks) {
       const callbackId = this.functionId(callback)
       const existing = this.synchronousCallbackParents.get(callbackId)
@@ -473,7 +540,7 @@ export class TypeScriptProgramGraphV1 {
     return this.sortedReferenceViolations(violations)
   }
 
-  private tableFromExpression(node: ts.Expression): { logical: string; sql: string } | null {
+  private schemaTableFromExpression(node: ts.Expression): { logical: string; sql: string | null } | null {
     const unwrapped = unwrapExpression(node)
     const lookup = ts.isPropertyAccessExpression(unwrapped) ? unwrapped.name : unwrapped
     const symbol = this.canonicalSymbolAt(lookup)
@@ -481,10 +548,14 @@ export class TypeScriptProgramGraphV1 {
     const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0]
     if (!declaration) return null
     const logical = symbol.getName()
-    const sql = TRACKED_TABLES.get(logical)
     const file = this.fileLabel(declaration.getSourceFile())
-    if (!sql || !file.endsWith('schema.ts')) return null
-    return { logical, sql }
+    if (!file.endsWith('schema.ts')) return null
+    return { logical, sql: TRACKED_TABLES.get(logical) ?? null }
+  }
+
+  private tableFromExpression(node: ts.Expression): { logical: string; sql: string } | null {
+    const table = this.schemaTableFromExpression(node)
+    return table?.sql ? { logical: table.logical, sql: table.sql } : null
   }
 
   private staticString(node: ts.Expression, seen = new Set<ts.Node>()): string | null {
@@ -522,19 +593,28 @@ export class TypeScriptProgramGraphV1 {
     const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
     const directOperation = callPropertyName(node.expression)
     const canonical = this.canonicalSymbolAt(lookup)
-    const operation = directOperation === null ? null : canonical?.getName() ?? directOperation
+    const operation = canonical?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
     if (['insert', 'update', 'delete'].includes(operation)) {
-      const target = node.arguments[0] && this.tableFromExpression(node.arguments[0])
-      if (target) {
+      const target = node.arguments[0] && this.schemaTableFromExpression(node.arguments[0])
+      if (target?.sql) {
         if (canonical) this.mutationSinkSymbols.add(canonical)
         this.mutationSites.push({ file, owner, operation, table: target.logical, position: node.getStart() })
+      } else if (!target && canonical && this.mutationSinkSymbols.has(canonical)) {
+        this.mutationSites.push({
+          file,
+          owner,
+          operation: 'unknown-sql',
+          table: '<unknown>',
+          position: node.getStart(),
+        })
       }
       return
     }
     if (operation !== 'execute' || !node.arguments[0]) return
+    if (directOperation === null && (!canonical || !this.mutationSinkSymbols.has(canonical))) return
     if (canonical) this.mutationSinkSymbols.add(canonical)
     const sql = this.staticString(node.arguments[0])
     if (sql === null) {
@@ -685,7 +765,7 @@ export class TypeScriptProgramGraphV1 {
     const executor = this.aliasedSymbolAt(lookup)
     const resolved = this.symbolId(executor)
     if (resolved === target || (resolved !== null && this.transitiveCallees(resolved).includes(target))) return true
-    return this.synchronousExecutorCallbacks(invocation, executor).some((callback) => {
+    return this.synchronousExecutorCallbacks(invocation, this.ownerId(invocation), executor).some((callback) => {
       const callbackId = this.functionId(callback)
       return callbackId === target || this.transitiveCallees(callbackId).includes(target)
     })
