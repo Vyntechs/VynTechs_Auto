@@ -110,9 +110,9 @@ export function ClosedCaseSummary({ session }: Props) {
                 {outcome.verification.codesCleared && ' · codes cleared'}
                 {outcome.verification.testDrive && ' · test drive'}
               </dd>
-              <dt style={{ color: 'var(--vt-fg-3)' }}>Time</dt>
+              <dt style={{ color: 'var(--vt-fg-3)' }}>Case open</dt>
               <dd style={{ margin: 0 }}>
-                diag {outcome.diagMinutes} min · repair {outcome.repairMinutes} min
+                {outcome.diagMinutes} min
               </dd>
             </dl>
           </Module>

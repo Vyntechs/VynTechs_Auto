@@ -42,6 +42,14 @@ function fillSpecificRootCause() {
   })
 }
 
+// Verification no longer defaults to "resolved"; a close now requires the tech
+// to pick a result, so wired-submit tests must choose one first.
+function chooseResolved(opt: 'yes' | 'partial' | 'no' = 'yes') {
+  fireEvent.click(
+    screen.getByRole('switch', { name: new RegExp(`resolved: ${opt}`, 'i') }),
+  )
+}
+
 describe('OutcomeCapture (wired)', () => {
   it('disables submit when no sessionId is provided (design-preview mode)', () => {
     render(<OutcomeCapture {...baseProps} />)
@@ -76,6 +84,9 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/oem/i), {
       target: { value: 'BL3Z-9C915-A' },
     })
+    fireEvent.click(screen.getByRole('switch', { name: /codes cleared/i }))
+    fireEvent.click(screen.getByRole('switch', { name: /test drive/i }))
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
@@ -113,6 +124,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() =>
@@ -136,6 +148,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -158,6 +171,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/action type/i), {
       target: { value: 'no_fix' },
     })
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
@@ -193,6 +207,7 @@ describe('OutcomeCapture (wired)', () => {
       target: { value: 'Vacuum line' },
     })
 
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
     await waitFor(() =>
       expect(screen.getByText(/Add the bolt location/i)).toBeInTheDocument(),
@@ -227,6 +242,7 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
+    chooseResolved('yes')
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
@@ -264,14 +280,43 @@ describe('OutcomeCapture (wired)', () => {
     fireEvent.change(screen.getByLabelText(/part name/i), {
       target: { value: 'Vacuum line' },
     })
-    // toggle "test drive" off
+    chooseResolved('yes')
+    // verification starts unchecked; toggle "test drive" on
     fireEvent.click(screen.getByRole('switch', { name: /test drive/i }))
     fireEvent.click(screen.getByRole('button', { name: /send & close/i }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalled())
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
     const body = JSON.parse(init.body as string)
-    expect(body.verification.testDrive).toBe(false)
-    expect(body.verification.codesCleared).toBe(true)
+    expect(body.verification.testDrive).toBe(true)
+    expect(body.verification.codesCleared).toBe(false)
+  })
+
+  it('does not pre-assert verification — every chip starts off', () => {
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    expect(screen.getByRole('switch', { name: /codes cleared/i })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+    expect(screen.getByRole('switch', { name: /test drive/i })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+    for (const opt of ['yes', 'partial', 'no']) {
+      expect(
+        screen.getByRole('switch', { name: new RegExp(`resolved: ${opt}`, 'i') }),
+      ).toHaveAttribute('aria-checked', 'false')
+    }
+  })
+
+  it('keeps submit disabled until the tech states whether symptoms resolved', () => {
+    render(<OutcomeCapture {...baseProps} sessionId="sess-abc" />)
+    fillSpecificRootCause()
+    fireEvent.change(screen.getByLabelText(/part name/i), {
+      target: { value: 'Vacuum line' },
+    })
+    expect(screen.getByRole('button', { name: /send & close/i })).toBeDisabled()
+    chooseResolved('partial')
+    expect(screen.getByRole('button', { name: /send & close/i })).toBeEnabled()
   })
 })
