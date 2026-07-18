@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import ts from 'typescript'
@@ -56,28 +57,37 @@ const SYNCHRONOUS_EXECUTOR_CONTRACTS_V1: readonly SynchronousExecutorContractV1[
 type SynchronousDrizzleTransactionCallsiteV1 = Readonly<{
   owner: string
   receiver: string
+  fingerprint: string
 }>
 
+// Intentionally brittle: any source edit inside one of these five reviewed
+// functions must fail closed until its complete normalized source is reviewed
+// and this pinned fingerprint is explicitly updated.
 const SYNCHRONOUS_DRIZZLE_TRANSACTION_CALLS_V1: readonly SynchronousDrizzleTransactionCallsiteV1[] = [
   {
     owner: 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt',
     receiver: 'db',
+    fingerprint: 'fd7b4b0a577e2ee8686f4ca63812bd159d32611875d575f056834b03bf65fad6',
   },
   {
     owner: 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runRecoveryAttempt',
     receiver: 'db',
+    fingerprint: '7ec5d00c17508f67318d49f0da438a51c77451f2e1593b54305a19083bc55e79',
   },
   {
     owner: 'lib/intake/session.ts#createSessionFromIntake',
     receiver: 'db',
+    fingerprint: '6f4837067d565767c5c329f03f47300b441c8c173d53e335d1f4a4be9ed7a0d7',
   },
   {
     owner: 'lib/sessions.ts#submitRepairObservationForUser',
     receiver: 'opts.db',
+    fingerprint: '47cf18411b86d2eb2e9810c7079080ea7f88db1ad2b1433f5f38a563a5ebecc4',
   },
   {
     owner: 'lib/curator/deferred-actions.ts#mutateDeferredSession',
     receiver: 'db',
+    fingerprint: 'fe063c97d8b03f502a8ee8b66d0c60364e8dc086d6b4f1ef777c50c2e94fc65a',
   },
 ]
 
@@ -135,6 +145,7 @@ export class TypeScriptProgramGraphV1 {
   private readonly synchronousCallbackParents = new Map<string, string>()
   private readonly inlineCallbackOwners = new Set<string>()
   private readonly referenceNodes = new Map<ts.SourceFile, readonly ts.Node[]>()
+  private readonly elementAccessNodes = new Map<ts.SourceFile, readonly ts.ElementAccessExpression[]>()
 
   constructor(program: ts.Program, options: Readonly<{ root: string; virtual?: boolean }>) {
     this.program = program
@@ -349,6 +360,13 @@ export class TypeScriptProgramGraphV1 {
     return !mutable
   }
 
+  private ownerSourceFingerprint(owner: string): string | null {
+    const node = this.functionNodes.get(owner)
+    if (!node) return null
+    const normalized = node.getText(node.getSourceFile()).replaceAll('\r\n', '\n')
+    return createHash('sha256').update(normalized).digest('hex')
+  }
+
   private isRegisteredDrizzleTransaction(
     call: ts.CallExpression | ts.NewExpression,
     caller: string,
@@ -364,7 +382,7 @@ export class TypeScriptProgramGraphV1 {
     const receiver = this.directReceiverPath(expression.expression)
     if (!receiver) return false
     const normalizedCaller = caller.replace(/^\/virtual\//, '')
-    const registered = SYNCHRONOUS_DRIZZLE_TRANSACTION_CALLS_V1.some((contract) =>
+    const registered = SYNCHRONOUS_DRIZZLE_TRANSACTION_CALLS_V1.find((contract) =>
       contract.owner === normalizedCaller && contract.receiver === receiver.path)
     if (!registered) return false
     const root = this.aliasedSymbolAt(receiver.root)
@@ -372,6 +390,7 @@ export class TypeScriptProgramGraphV1 {
     return declaration !== undefined &&
       ts.isParameter(declaration) &&
       this.ownerId(declaration) === caller &&
+      this.ownerSourceFingerprint(caller) === registered.fingerprint &&
       this.receiverIsImmutableWithinOwner(caller, receiver.path)
   }
 
@@ -526,6 +545,44 @@ export class TypeScriptProgramGraphV1 {
     return references
   }
 
+  private computedElementAccessNodes(sourceFile: ts.SourceFile): readonly ts.ElementAccessExpression[] {
+    const cached = this.elementAccessNodes.get(sourceFile)
+    if (cached) return cached
+    const accesses: ts.ElementAccessExpression[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isElementAccessExpression(node)) accesses.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+    this.elementAccessNodes.set(sourceFile, accesses)
+    return accesses
+  }
+
+  private staticElementKey(expression: ts.Expression, seen = new Set<ts.Symbol>()): string | null {
+    const current = unwrapExpression(expression)
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) return current.text
+    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = this.staticElementKey(current.left, seen)
+      const right = this.staticElementKey(current.right, seen)
+      return left === null || right === null ? null : left + right
+    }
+    if (!ts.isIdentifier(current)) return null
+    const symbol = this.checker.getSymbolAtLocation(current)
+    if (!symbol || seen.has(symbol)) return null
+    seen.add(symbol)
+    const declaration = symbol.valueDeclaration
+    if (!declaration || !ts.isVariableDeclaration(declaration) || !declaration.initializer ||
+      !ts.isVariableDeclarationList(declaration.parent) ||
+      !(declaration.parent.flags & ts.NodeFlags.Const)) return null
+    return this.staticElementKey(declaration.initializer, seen)
+  }
+
+  private isResolvedDrizzleMutationSymbol(symbol: ts.Symbol | undefined): symbol is ts.Symbol {
+    if (!symbol || !['insert', 'update', 'delete', 'execute'].includes(symbol.getName())) return false
+    return (symbol.declarations ?? []).some((declaration) =>
+      declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/drizzle-orm/'))
+  }
+
   private sortedReferenceViolations(
     violations: ProgramSymbolReferenceViolationV1[],
   ): readonly ProgramSymbolReferenceViolationV1[] {
@@ -561,6 +618,27 @@ export class TypeScriptProgramGraphV1 {
           position: node.getStart(),
         })
       }
+      for (const access of this.computedElementAccessNodes(sourceFile)) {
+        const argument = access.argumentExpression
+        if (!argument || ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) continue
+        const key = this.staticElementKey(argument)
+        const receiverType = this.checker.getTypeAtLocation(access.expression)
+        const properties = key === null ? receiverType.getProperties() : [receiverType.getProperty(key)]
+        for (const property of properties) {
+          const symbolName = this.symbolId(property)
+          if (!symbolName || !policy.has(symbolName)) continue
+          const owner = this.ownerId(access)
+          const direct = key !== null && this.isExactDirectCalleeReference(access)
+          if (direct && policy.get(symbolName)!.has(owner)) continue
+          violations.push({
+            symbol: symbolName,
+            file: this.fileLabel(sourceFile),
+            owner,
+            reason: direct ? 'unapproved-direct-caller' : 'first-class-value',
+            position: access.getStart(),
+          })
+        }
+      }
     }
     return this.sortedReferenceViolations(violations)
   }
@@ -583,10 +661,7 @@ export class TypeScriptProgramGraphV1 {
       ? this.checker.getTypeAtLocation(node.expression).getProperty(nameNode.text)
       : this.aliasedSymbolAt(nameNode)
     if (!symbol) return
-    const declarationFiles = (symbol.declarations ?? []).map((declaration) =>
-      declaration.getSourceFile().fileName.replaceAll('\\', '/'))
-    const declaredByDrizzle = declarationFiles.some((file) => file.includes('/drizzle-orm/'))
-    if (!declaredByDrizzle) return
+    if (!this.isResolvedDrizzleMutationSymbol(symbol)) return
     this.mutationSinkSymbols.add(symbol)
   }
 
@@ -631,6 +706,25 @@ export class TypeScriptProgramGraphV1 {
           owner: this.ownerId(node),
           reason: 'first-class-value',
           position: node.getStart(),
+        })
+      }
+      for (const access of this.computedElementAccessNodes(sourceFile)) {
+        const argument = access.argumentExpression
+        if (!argument || ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) continue
+        const key = this.staticElementKey(argument)
+        if (key !== null && !['insert', 'update', 'delete', 'execute'].includes(key)) continue
+        if (key !== null && this.isExactDirectCalleeReference(access)) continue
+        const receiverType = this.checker.getTypeAtLocation(access.expression)
+        const property = key === null
+          ? receiverType.getProperties().find((candidate) => this.isResolvedDrizzleMutationSymbol(candidate))
+          : receiverType.getProperty(key)
+        if (key === null && !property) continue
+        violations.push({
+          symbol: this.symbolId(property) ?? property?.getName() ?? key ?? '<dynamic-mutation-method>',
+          file: this.fileLabel(sourceFile),
+          owner: this.ownerId(access),
+          reason: 'first-class-value',
+          position: access.getStart(),
         })
       }
     }
@@ -688,18 +782,19 @@ export class TypeScriptProgramGraphV1 {
   private collectMutation(node: ts.CallExpression): void {
     const expression = unwrapExpression(node.expression)
     const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-    const directOperation = callPropertyName(node.expression)
+    const directOperation = ts.isElementAccessExpression(expression) && expression.argumentExpression
+      ? this.staticElementKey(expression.argumentExpression)
+      : callPropertyName(node.expression)
     const canonical = ts.isElementAccessExpression(expression) && expression.argumentExpression &&
-      (ts.isStringLiteral(expression.argumentExpression) ||
-        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression))
-      ? this.checker.getTypeAtLocation(expression.expression).getProperty(expression.argumentExpression.text)
+      directOperation !== null
+      ? this.checker.getTypeAtLocation(expression.expression).getProperty(directOperation)
       : this.canonicalSymbolAt(lookup)
     const operation = canonical?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
     if (['insert', 'update', 'delete'].includes(operation)) {
-      if (!canonical || !this.mutationSinkSymbols.has(canonical)) return
+      if (!this.isResolvedDrizzleMutationSymbol(canonical)) return
       const target = node.arguments[0] && this.schemaTableFromExpression(node.arguments[0])
       if (target?.sql) {
         this.mutationSites.push({ file, owner, operation, table: target.logical, position: node.getStart() })
@@ -715,7 +810,7 @@ export class TypeScriptProgramGraphV1 {
       return
     }
     if (operation !== 'execute' || !node.arguments[0]) return
-    if (!canonical || !this.mutationSinkSymbols.has(canonical)) return
+    if (!this.isResolvedDrizzleMutationSymbol(canonical)) return
     const sql = this.staticString(node.arguments[0])
     if (sql === null) {
       this.mutationSites.push({ file, owner, operation: 'unknown-sql', table: '<unknown>', position: node.getStart() })

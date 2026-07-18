@@ -410,6 +410,84 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       owner === '/virtual/app/cache.ts#directCache')).toEqual([])
   })
 
+  it('fails closed on dynamic protected element access while preserving ordinary computed access', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/drizzle-orm/pg-core/db.ts': `
+        export interface PgDatabase {
+          update(table: unknown): void
+          execute(statement: unknown): void
+        }
+      `,
+      '/virtual/writers.ts': `
+        export function writer() {}
+        export function other() {}
+      `,
+      '/virtual/app/dynamic.ts': `
+        import { tickets } from '../schema'
+        import type { PgDatabase } from '../drizzle-orm/pg-core/db'
+        import * as writers from '../writers'
+        declare const db: PgDatabase
+        declare const dbKey: keyof PgDatabase
+        declare const writerKey: keyof typeof writers
+        declare const ordinary: { read(): void; write(): void }
+        declare const ordinaryKey: keyof typeof ordinary
+        declare const values: string[]
+        declare const index: number
+        const constKey = 'update' as const
+        const prefix = 'up' as const
+        export function constKeyAlias() { return db[constKey] }
+        export function keyofAccess() { return db[dbKey] }
+        export function castAccess() { return db['update' as keyof PgDatabase] }
+        export function concatenatedAccess() { return db[prefix + 'date'] }
+        export function directDynamic() { db[dbKey](tickets) }
+        export function aliasDynamic() { const methods = db; return methods[dbKey] }
+        export function protectedWriterDynamic() { return writers[writerKey] }
+        export function protectedWriterConst() { const key = 'writer' as const; return writers[key] }
+        export function staticDirect() { db[constKey](tickets) }
+        export function safeOrdinary() { return ordinary[ordinaryKey] }
+        export function safeArray() { return values[index] }
+      `,
+    })
+
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner)).toEqual([
+      '/virtual/app/dynamic.ts#constKeyAlias',
+      '/virtual/app/dynamic.ts#keyofAccess',
+      '/virtual/app/dynamic.ts#castAccess',
+      '/virtual/app/dynamic.ts#concatenatedAccess',
+      '/virtual/app/dynamic.ts#directDynamic',
+      '/virtual/app/dynamic.ts#aliasDynamic',
+    ])
+    expect(graph.symbolReferenceViolations(new Map([
+      ['/virtual/writers.ts#writer', new Set<string>()],
+    ])).map(({ owner }) => owner)).toEqual([
+      '/virtual/app/dynamic.ts#protectedWriterDynamic',
+      '/virtual/app/dynamic.ts#protectedWriterConst',
+    ])
+    expect(graph.mutations()).toEqual([
+      expect.objectContaining({ owner: '/virtual/app/dynamic.ts#staticDirect', operation: 'update' }),
+    ])
+  })
+
+  it('fails closed on const and unknown computed access to a protected writer namespace', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writers.ts': `export function writer() {}; export function other() {}`,
+      '/virtual/app/dynamic-writer.ts': `
+        import * as writers from '../writers'
+        declare const writerKey: keyof typeof writers
+        export function unknownKey() { return writers[writerKey] }
+        export function constKey() { const key = 'writer' as const; return writers[key] }
+      `,
+    })
+
+    expect(graph.symbolReferenceViolations(new Map([
+      ['/virtual/writers.ts#writer', new Set<string>()],
+    ])).map(({ owner }) => owner)).toEqual([
+      '/virtual/app/dynamic-writer.ts#unknownKey',
+      '/virtual/app/dynamic-writer.ts#constKey',
+    ])
+  })
+
   it('rejects a destructured tracked mutation method call syntactically', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
@@ -445,7 +523,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       .toEqual(['/virtual/app/wrapper.ts#bypass', '/virtual/app/wrapper.ts#unrelated'])
   })
 
-  it('trusts only an exact registered direct Drizzle transaction receiver', () => {
+  it('rejects a structurally matching transaction owner without its pinned source fingerprint', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       '/virtual/drizzle-orm/pg-core/db.ts': `
         export interface PgDatabase {
@@ -476,8 +554,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     const owner = '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt'
     const closure = graph.transitiveCallees(owner)
 
-    expect(closure).toContain('/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#directWriter')
-    for (const writer of ['proxyWriter', 'aliasWriter', 'wrapperWriter', 'overrideWriter']) {
+    for (const writer of ['directWriter', 'proxyWriter', 'aliasWriter', 'wrapperWriter', 'overrideWriter']) {
       expect(closure, writer)
         .not.toContain(`/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#${writer}`)
     }
@@ -531,6 +608,37 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     })
     expect(propertyGraph.transitiveCallees('/virtual/lib/sessions.ts#submitRepairObservationForUser'))
       .not.toContain('/virtual/lib/sessions.ts#writer')
+  })
+
+  it('fails closed on every unpinned registered transaction-owner source edit', () => {
+    const edits = [
+      ['nested helper', 'function replaceLater() { db = new Proxy(db, {}) }; void replaceLater'],
+      ['Reflect mutation', "Reflect.set(db, 'transaction', replacement.transaction)"],
+      ['prototype mutation', 'Object.setPrototypeOf(db, replacement)'],
+      ['delete mutation', 'delete db.transaction'],
+      ['for-of replacement', 'for (db of [replacement]) { break }'],
+      ['benign unreviewed edit', 'const reviewMarker = true; void reviewMarker'],
+    ] as const
+
+    for (const [label, edit] of edits) {
+      const graph = createVirtualTypeScriptProgramGraphV1({
+        '/virtual/drizzle-orm/pg-core/db.ts': `
+          export interface PgDatabase { transaction<T>(callback: () => T): T }
+        `,
+        '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts': `
+          import type { PgDatabase } from '../../../../drizzle-orm/pg-core/db'
+          declare const replacement: PgDatabase
+          declare function writer(): void
+          export function runPrimaryAttempt(db: PgDatabase) {
+            ${edit}
+            db.transaction(() => writer())
+          }
+        `,
+      })
+      const owner = '/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runPrimaryAttempt'
+      expect(graph.transitiveCallees(owner), label)
+        .not.toContain('/virtual/lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#writer')
+    }
   })
 
   it('does not attach dead, returned, array, promise, or provider callbacks to their lexical owner', () => {
