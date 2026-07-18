@@ -114,3 +114,110 @@ Live honest-money quote tape ("Total — unavailable", never a fake $0); the
 immutable prepared quote + authorization record; the standing "AI guess — not
 verified" banner; last-owner guardrails; concurrency-aware job claims; the
 one-slot entitlement degradation; plain-English skill-tier labels.
+
+---
+
+## Founder bench direction — technician parts & labor (2026-07-18)
+
+Founder walkthrough of the PR #175 preview set this direction for the
+technician seat. Principles (founder's words, condensed):
+
+1. **Management sets up suppliers, not techs.** The shop's supplier list
+   (O'Reilly First Call, RepairLink, Tri-State, 4M Auto Warehouse, …) is
+   configured by management ahead of time.
+2. **Techs never touch money.** No supplier cost, no markup, no customer price
+   in the tech flow — they only pick the parts they need.
+3. **Techs enter labor time only** (hours; the shop labor rate does the
+   pricing).
+4. **One page.** The tech's job page is where everything happens — parts,
+   labor, notes, completion. No navigating away to finish a task.
+
+### Verified current state (2026-07-18 sweep — three read-only agents)
+
+- **Supplier setup in Settings: absent.** Vendors are created only mid-sourcing
+  and only by owner/founder (`canManageIntegrations`,
+  `lib/shop-os/capabilities.ts:29-50`); everyone else dead-ends on "An owner
+  needs to add a supplier" (`components/screens/manual-part-sourcing.tsx:484`).
+  `vendorAccounts` already supports `manual | api | punchout` modes
+  (`lib/db/schema.ts:518-580`) — bones ready for real supplier integrations
+  later; UI only ever creates `manual`.
+- **Markup automation: absent repo-wide.** Supplier cost (`unitCostCents`) and
+  customer price (`priceCents`) are independent hand-typed fields; the sourcing
+  panel requires BOTH (`manual-part-sourcing.tsx:678-682`); no markup/margin
+  logic exists anywhere.
+- **Tech money exposure — inverted vs principle 2.** Any role incl. `tech` can
+  author priced quote lines (`canBuildQuotes` gate,
+  `app/(app)/tickets/[id]/quote/page.tsx:33`, re-checked in
+  `lib/shop-os/quotes.ts:760`); adding a part **requires typing the customer
+  retail price** (`manual-quote-builder.tsx:1556-1558`) with no cost or margin
+  context on screen.
+- **Tech work screen violates principle 4.**
+  `components/screens/simple-work-workspace.tsx` offers Start / Save note /
+  Complete / "Found another concern" only — no parts, no labor entry, no money,
+  no link to add parts. A parts action = hop out to the ticket, then into the
+  quote builder (today → work → ticket → quote; 4–5 routes per job).
+- **Labor.** Quote-line `laborHours` × shop rate auto-prices when a rate is set
+  (mechanism live now that PR #175 ships rate settings) — principle 3 works at
+  the quote. **Actual** wrench time is captured nowhere: `ticketJobs` has no
+  started/finished stamps; transitions only bump `updatedAt`
+  (`lib/shop-os/simple-work.ts:196-247`); only `claimedAt` exists.
+- **The "one line" the founder saw.** The builder's edit form stacks fields
+  one-per-row (fine). Density lives in the read-only line rows
+  (`manual-quote-builder.tsx:820-898` — kind · qty · description · price on one
+  lead row) and the sourcing panel's 2-per-row cost grid
+  (`manual-part-sourcing.module.css:220-225`, quantity + supplier cost side by
+  side above 800px). End customers never see itemized parts — approval surfaces
+  show job subtotals + tax + total only (`lib/shop-os/quotes.ts:184-185`),
+  which protects margin; **keep** that.
+
+### New gaps confirmed by the sweep
+
+- **High — Getting paid is absent.** No invoice / paid state / balance /
+  deposit on the repair spine; `tickets.closedAt/deliveredAt/canceledAt`
+  columns exist but **nothing writes them** — a shop cannot ring a customer out
+  or even close/deliver a ticket. (Every money hit in the repo is SaaS
+  subscription billing, not repair-order money.)
+- **High — Mid-job discovery is a detour.** Adding a repair job to an open
+  ticket exists in the domain (`lib/tickets.ts:872`,
+  `POST app/api/tickets/[id]/jobs/route.ts:35`) but the only in-UI button mints
+  a `diagnostic` job — dead engine in prod — via escalation
+  (`lib/shop-os/simple-work.ts:384-452`). Needs a plain "found something →
+  repair job to quote" move from the work screen.
+- **Med — Approval-channel honesty.** Approvals record staff-witnessed
+  `phone | in_person` only (`lib/shop-os/quotes.ts:81`) — fine — but the
+  counter confirm screen claims "The customer has been notified by text" while
+  send is unwired (`counter-work-order-confirm.tsx:57-65`; `quote_sends` /
+  `sms_log` have no production writers). The screen must stop claiming a text
+  was sent. (Same disease as the fake-green trust cues.)
+- **Med — Actual job time.** Stamp started/finished on the work transitions the
+  tech already taps; quoted hours vs actual time is the shop's job-costing
+  truth.
+- **Med — Work history loses people.** Reassign overwrites `assignedTechId`
+  with no history (`lib/tickets.ts:1198,1314`); a closed RO shows the current
+  assignee only. No comeback/warranty linkage between tickets (repair spine has
+  no rework-of field; the only "comeback" domain is diagnostic corpus quality).
+- **Low — Parts lifecycle scaffolding unused.** `partStatus`
+  (`proposed|needs_order|ordered|received|installed|returned`) +
+  `coreChargeCents` + ordered/received stamps exist in schema
+  (`lib/db/schema.ts:596-608`) but the live path writes only `'proposed'`
+  (`lib/shop-os/quotes.ts:1653`). No backorder/ETA, customer-supplied parts, or
+  sublet notions anywhere.
+
+### What checked out production-grade (keep)
+
+Quote versioning: append-only versions with supersede, affected jobs reset to
+`pending_quote` on edit, and jobs already `in_progress`/`done` are pinned and
+excluded from re-quoting (`lib/shop-os/quotes.ts:336,779,1333`).
+
+### Build order (founder direction, plain)
+
+1. **Suppliers + markup rule in Settings (management side).** Mirrors the
+   shipped RatesSection pattern; unlocks principle 1 and makes automatic
+   cost→price possible. Additive, low risk.
+2. **The big one — the tech job page becomes the one page:** parts picker
+   (supplier from the shop's list + description + qty, zero money), labor
+   hours, "found something" creating a repair job, start/finish stamps. This
+   changes a technician surface — sequence against the driver-state gates
+   before building.
+3. **Real supplier catalog hookups** (`api`/`punchout` modes) are a later
+   business-deal lane. Do not fake them in the UI before they exist.
