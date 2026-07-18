@@ -22,32 +22,13 @@ export type ProgramMutationSiteV1 = Readonly<{
   position: number
 }>
 
-export type ProgramUnresolvedDynamicCallV1 = Readonly<{
+export type ProgramSymbolReferenceViolationV1 = Readonly<{
+  symbol: string
   file: string
   owner: string
-  reference: string
+  reason: 'first-class-value' | 'unapproved-direct-caller'
   position: number
 }>
-
-type CallableResolutionV1 = Readonly<{
-  symbols: ReadonlySet<ts.Symbol>
-  callbacks: ReadonlySet<string>
-  unresolved: boolean
-}>
-
-function emptyCallableResolution(unresolved = false): CallableResolutionV1 {
-  return { symbols: new Set(), callbacks: new Set(), unresolved }
-}
-
-function mergeCallableResolutions(
-  resolutions: readonly CallableResolutionV1[],
-): CallableResolutionV1 {
-  return {
-    symbols: new Set(resolutions.flatMap(({ symbols }) => [...symbols])),
-    callbacks: new Set(resolutions.flatMap(({ callbacks }) => [...callbacks])),
-    unresolved: resolutions.some(({ unresolved }) => unresolved),
-  }
-}
 
 function unwrapExpression(node: ts.Expression): ts.Expression {
   let current = node
@@ -99,7 +80,7 @@ export class TypeScriptProgramGraphV1 {
   private readonly directEdges = new Map<string, Set<string>>()
   private readonly reverseEdges = new Map<string, Set<string>>()
   private readonly mutationSites: ProgramMutationSiteV1[] = []
-  private readonly unresolvedCalls: ProgramUnresolvedDynamicCallV1[] = []
+  private readonly mutationSinkSymbols = new Set<ts.Symbol>()
 
   constructor(program: ts.Program, options: Readonly<{ root: string; virtual?: boolean }>) {
     this.program = program
@@ -114,53 +95,6 @@ export class TypeScriptProgramGraphV1 {
     return relative(this.root, sourceFile.fileName).replaceAll('\\', '/')
   }
 
-  private bindTarget(initializer: ts.Expression): ts.Expression | null {
-    const current = unwrapExpression(initializer)
-    if (!ts.isCallExpression(current)) return null
-    const callee = unwrapExpression(current.expression)
-    if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'bind') return null
-    return unwrapExpression(callee.expression)
-  }
-
-  private objectLiteralFromExpression(
-    expression: ts.Expression,
-    seen = new Set<ts.Symbol>(),
-  ): ts.ObjectLiteralExpression | null {
-    const current = unwrapExpression(expression)
-    if (ts.isObjectLiteralExpression(current)) return current
-    if (!ts.isIdentifier(current)) return null
-    const symbol = this.checker.getSymbolAtLocation(current)
-    if (!symbol || seen.has(symbol)) return null
-    seen.add(symbol)
-    const declaration = symbol.valueDeclaration
-    return declaration && ts.isVariableDeclaration(declaration) && declaration.initializer
-      ? this.objectLiteralFromExpression(declaration.initializer, seen)
-      : null
-  }
-
-  private bindingElementTarget(declaration: ts.BindingElement): ts.Expression | null {
-    if (!ts.isObjectBindingPattern(declaration.parent)) return null
-    const variable = declaration.parent.parent
-    if (!ts.isVariableDeclaration(variable) || !variable.initializer) return null
-    const object = this.objectLiteralFromExpression(variable.initializer)
-    if (!object) return null
-    const keyNode = declaration.propertyName ?? declaration.name
-    if (!ts.isIdentifier(keyNode) && !ts.isStringLiteral(keyNode)) return null
-    const key = keyNode.text
-    for (const property of object.properties) {
-      if (ts.isPropertyAssignment(property)) {
-        const name = property.name
-        if ((ts.isIdentifier(name) || ts.isStringLiteral(name)) && name.text === key) {
-          return unwrapExpression(property.initializer)
-        }
-      }
-      if (ts.isShorthandPropertyAssignment(property) && property.name.text === key) {
-        return property.name
-      }
-    }
-    return null
-  }
-
   private aliasedSymbolAt(node: ts.Node): ts.Symbol | undefined {
     let symbol = this.checker.getSymbolAtLocation(node)
     const seen = new Set<ts.Symbol>()
@@ -173,153 +107,14 @@ export class TypeScriptProgramGraphV1 {
     return symbol
   }
 
-  private importIdentity(node: ts.Node): { module: string; imported: string } | null {
-    const symbol = this.checker.getSymbolAtLocation(node)
-    const declaration = symbol?.declarations?.find(ts.isImportSpecifier)
-    if (!declaration) return null
-    const importDeclaration = declaration.parent.parent.parent
-    if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier)) {
-      return null
-    }
-    return {
-      module: importDeclaration.moduleSpecifier.text,
-      imported: (declaration.propertyName ?? declaration.name).text,
-    }
-  }
-
-  private factoryResolution(
-    call: ts.CallExpression,
-    seen: ReadonlySet<ts.Symbol>,
-  ): CallableResolutionV1 {
-    const callee = unwrapExpression(call.expression)
-    const lookup = ts.isPropertyAccessExpression(callee) ? callee.name : callee
-    const identity = this.importIdentity(lookup)
-    if (identity?.module === 'react' && identity.imported === 'useCallback') {
-      return call.arguments[0]
-        ? this.callableResolution(call.arguments[0], new Set(seen))
-        : emptyCallableResolution(true)
-    }
-    if (identity?.module === 'drizzle-orm/pg-core' && identity.imported === 'pgEnum') {
-      // pgEnum constructs a schema enum callable from non-callable metadata; it
-      // cannot carry a hidden application callback or continuity writer.
-      return emptyCallableResolution(false)
-    }
-
-    const factory = this.aliasedSymbolAt(lookup)
-    const declaration = factory?.valueDeclaration ?? factory?.declarations?.[0]
-    if (!factory || !declaration || !isFunctionWithBody(declaration) || seen.has(factory)) {
-      return emptyCallableResolution(true)
-    }
-
-    const body = declaration.body
-    const substitutions = new Map<ts.Symbol, ts.Expression>()
-    declaration.parameters.forEach((parameter, index) => {
-      const argument = call.arguments[index]
-      if (!argument || !ts.isIdentifier(parameter.name)) return
-      const parameterSymbol = this.checker.getSymbolAtLocation(parameter.name)
-      if (parameterSymbol) substitutions.set(parameterSymbol, argument)
-    })
-    const nextSeen = new Set(seen)
-    nextSeen.add(factory)
-    const returns: ts.Expression[] = []
-    if (!ts.isBlock(body)) {
-      returns.push(body)
-    } else {
-      const visit = (node: ts.Node): void => {
-        if (node !== body && isFunctionWithBody(node)) return
-        if (ts.isReturnStatement(node)) {
-          if (node.expression) returns.push(node.expression)
-          else returns.push(ts.factory.createVoidZero())
-          return
-        }
-        ts.forEachChild(node, visit)
-      }
-      visit(body)
-    }
-    if (returns.length === 0) return emptyCallableResolution(true)
-    return mergeCallableResolutions(returns.map((expression) => (
-      this.callableResolution(expression, new Set(nextSeen), substitutions)
-    )))
-  }
-
-  private callableResolution(
-    expression: ts.Expression,
-    seen = new Set<ts.Symbol>(),
-    substitutions = new Map<ts.Symbol, ts.Expression>(),
-  ): CallableResolutionV1 {
-    const current = unwrapExpression(expression)
-    if (ts.isConditionalExpression(current)) {
-      return mergeCallableResolutions([
-        this.callableResolution(current.whenTrue, new Set(seen), substitutions),
-        this.callableResolution(current.whenFalse, new Set(seen), substitutions),
-      ])
-    }
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      return { symbols: new Set(), callbacks: new Set([this.functionId(current)]), unresolved: false }
-    }
-    if (ts.isCallExpression(current)) {
-      const bound = this.bindTarget(current)
-      return bound
-        ? this.callableResolution(bound, new Set(seen), substitutions)
-        : this.factoryResolution(current, seen)
-    }
-    if (!ts.isIdentifier(current) && !ts.isPropertyAccessExpression(current) && !ts.isElementAccessExpression(current)) {
-      return emptyCallableResolution(true)
-    }
-
-    const lookup = ts.isPropertyAccessExpression(current) ? current.name : current
-    const direct = this.checker.getSymbolAtLocation(lookup)
-    if (direct && substitutions.has(direct)) {
-      return this.callableResolution(substitutions.get(direct)!, new Set(seen), substitutions)
-    }
-    const symbol = this.aliasedSymbolAt(lookup)
-    if (!symbol || seen.has(symbol)) return emptyCallableResolution(true)
-    if (substitutions.has(symbol)) {
-      return this.callableResolution(substitutions.get(symbol)!, new Set(seen), substitutions)
-    }
-    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0]
-    if (!declaration) return emptyCallableResolution(true)
-    const nextSeen = new Set(seen)
-    nextSeen.add(symbol)
-    if (ts.isBindingElement(declaration)) {
-      const target = this.bindingElementTarget(declaration)
-      return target
-        ? this.callableResolution(target, nextSeen, substitutions)
-        : emptyCallableResolution(true)
-    }
-    if (ts.isVariableDeclaration(declaration) || ts.isPropertyAssignment(declaration)) {
-      return declaration.initializer
-        ? this.callableResolution(declaration.initializer, nextSeen, substitutions)
-        : emptyCallableResolution(true)
-    }
-    if (ts.isShorthandPropertyAssignment(declaration)) {
-      return this.callableResolution(declaration.name, nextSeen, substitutions)
-    }
-    if (isFunctionWithBody(declaration)) {
-      return { symbols: new Set([symbol]), callbacks: new Set(), unresolved: false }
-    }
-    if (['execute', 'insert', 'update', 'delete'].includes(symbol.getName())) {
-      return { symbols: new Set([symbol]), callbacks: new Set(), unresolved: false }
-    }
-    return emptyCallableResolution(true)
-  }
-
   private canonicalFromExpression(
     expression: ts.Expression,
     seen: Set<ts.Symbol>,
   ): ts.Symbol | undefined {
     const current = unwrapExpression(expression)
-    const bound = this.bindTarget(current)
-    const target = bound ?? current
-    if (ts.isCallExpression(target)) {
-      const resolution = this.factoryResolution(target, seen)
-      return !resolution.unresolved && resolution.callbacks.size === 0 && resolution.symbols.size === 1
-        ? [...resolution.symbols][0]
-        : undefined
-    }
-    if (ts.isIdentifier(target) || ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+    if (ts.isIdentifier(current) || ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
       return this.canonicalSymbolAt(
-        ts.isPropertyAccessExpression(target) ? target.name : target,
+        ts.isPropertyAccessExpression(current) ? current.name : current,
         seen,
       )
     }
@@ -338,10 +133,6 @@ export class TypeScriptProgramGraphV1 {
     }
 
     const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0]
-    if (declaration && ts.isBindingElement(declaration)) {
-      const target = this.bindingElementTarget(declaration)
-      return target ? this.canonicalFromExpression(target, seen) ?? symbol : symbol
-    }
     if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
       return this.canonicalFromExpression(declaration.initializer, seen) ?? symbol
     }
@@ -389,6 +180,137 @@ export class TypeScriptProgramGraphV1 {
     const incoming = this.reverseEdges.get(callee) ?? new Set<string>()
     incoming.add(caller)
     this.reverseEdges.set(callee, incoming)
+  }
+
+  private isDeclarationOrPlumbingReference(node: ts.Node): boolean {
+    if (!ts.isIdentifier(node)) return false
+    const parent = node.parent
+    if (
+      ts.isImportSpecifier(parent) ||
+      ts.isExportSpecifier(parent) ||
+      ts.isExportAssignment(parent) ||
+      ts.isImportClause(parent) ||
+      ts.isNamespaceImport(parent) ||
+      ts.isImportEqualsDeclaration(parent)
+    ) return true
+    if (
+      (ts.isFunctionDeclaration(parent) ||
+        ts.isFunctionExpression(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isMethodSignature(parent) ||
+        ts.isVariableDeclaration(parent) ||
+        ts.isParameter(parent) ||
+        ts.isPropertyAssignment(parent) ||
+        ts.isPropertyDeclaration(parent) ||
+        ts.isPropertySignature(parent) ||
+        ts.isClassDeclaration(parent) ||
+        ts.isClassExpression(parent) ||
+        ts.isInterfaceDeclaration(parent) ||
+        ts.isTypeAliasDeclaration(parent) ||
+        ts.isEnumDeclaration(parent)) &&
+      parent.name === node
+    ) return true
+    let current: ts.Node | undefined = node.parent
+    while (current && !ts.isStatement(current) && !ts.isExpression(current)) {
+      if (ts.isTypeNode(current)) return true
+      current = current.parent
+    }
+    return false
+  }
+
+  private isExactDirectCalleeReference(node: ts.Node): boolean {
+    let expression: ts.Node = node
+    if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+      expression = node.parent
+    } else if (
+      (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      ts.isElementAccessExpression(node.parent) &&
+      node.parent.argumentExpression === node
+    ) expression = node.parent
+    const parent = expression.parent
+    return (ts.isCallExpression(parent) || ts.isNewExpression(parent)) && parent.expression === expression
+  }
+
+  private symbolReferenceNodes(sourceFile: ts.SourceFile): readonly ts.Node[] {
+    const references: ts.Node[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        references.push(node)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+    return references
+  }
+
+  private sortedReferenceViolations(
+    violations: ProgramSymbolReferenceViolationV1[],
+  ): readonly ProgramSymbolReferenceViolationV1[] {
+    return violations.sort((left, right) => (
+      left.file.localeCompare(right.file) || left.position - right.position || left.symbol.localeCompare(right.symbol)
+    ))
+  }
+
+  symbolReferenceViolations(
+    policy: ReadonlyMap<string, ReadonlySet<string>>,
+  ): readonly ProgramSymbolReferenceViolationV1[] {
+    const violations: ProgramSymbolReferenceViolationV1[] = []
+    for (const sourceFile of this.program.getSourceFiles()) {
+      if (sourceFile.isDeclarationFile) continue
+      const recordedBindings = new Set<ts.BindingElement>()
+      for (const node of this.symbolReferenceNodes(sourceFile)) {
+        const binding = ts.isBindingElement(node.parent) ? node.parent : undefined
+        const symbol = binding ? this.destructuredPropertySymbol(binding) : this.aliasedSymbolAt(node)
+        const symbolName = this.symbolId(symbol)
+        if (!symbolName || !policy.has(symbolName) || this.isDeclarationOrPlumbingReference(node)) continue
+        if (binding && recordedBindings.has(binding)) continue
+        if (binding) recordedBindings.add(binding)
+        const owner = this.ownerId(node)
+        const direct = this.isExactDirectCalleeReference(node)
+        if (direct && policy.get(symbolName)!.has(owner)) continue
+        violations.push({
+          symbol: symbolName,
+          file: this.fileLabel(sourceFile),
+          owner,
+          reason: direct ? 'unapproved-direct-caller' : 'first-class-value',
+          position: node.getStart(),
+        })
+      }
+    }
+    return this.sortedReferenceViolations(violations)
+  }
+
+  private destructuredPropertySymbol(node: ts.BindingElement): ts.Symbol | undefined {
+    if (!ts.isObjectBindingPattern(node.parent)) return undefined
+    const declaration = node.parent.parent
+    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) return undefined
+    const property = node.propertyName ?? node.name
+    if (!ts.isIdentifier(property) && !ts.isStringLiteral(property) && !ts.isNumericLiteral(property)) return undefined
+    return this.checker.getTypeAtLocation(declaration.initializer).getProperty(property.text)
+  }
+
+  mutationSinkReferenceViolations(): readonly ProgramSymbolReferenceViolationV1[] {
+    const violations: ProgramSymbolReferenceViolationV1[] = []
+    for (const sourceFile of this.program.getSourceFiles()) {
+      if (sourceFile.isDeclarationFile) continue
+      const recordedBindings = new Set<ts.BindingElement>()
+      for (const node of this.symbolReferenceNodes(sourceFile)) {
+        const binding = ts.isBindingElement(node.parent) ? node.parent : undefined
+        const symbol = binding ? this.destructuredPropertySymbol(binding) : this.aliasedSymbolAt(node)
+        if (!symbol || !this.mutationSinkSymbols.has(symbol) || this.isDeclarationOrPlumbingReference(node)) continue
+        if (binding && recordedBindings.has(binding)) continue
+        if (binding) recordedBindings.add(binding)
+        if (!binding && this.isExactDirectCalleeReference(node)) continue
+        violations.push({
+          symbol: this.symbolId(symbol) ?? symbol.getName(),
+          file: this.fileLabel(sourceFile),
+          owner: this.ownerId(node),
+          reason: 'first-class-value',
+          position: node.getStart(),
+        })
+      }
+    }
+    return this.sortedReferenceViolations(violations)
   }
 
   private tableFromExpression(node: ts.Expression): { logical: string; sql: string } | null {
@@ -439,26 +361,21 @@ export class TypeScriptProgramGraphV1 {
     const expression = unwrapExpression(node.expression)
     const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
     const directOperation = callPropertyName(node.expression)
-    const directSymbol = this.checker.getSymbolAtLocation(lookup)
     const canonical = this.canonicalSymbolAt(lookup)
-    const directDeclaration = directSymbol?.valueDeclaration ?? directSymbol?.declarations?.[0]
-    const indirectOperation = (
-      directOperation === null &&
-      directDeclaration !== undefined &&
-      (ts.isVariableDeclaration(directDeclaration) || ts.isBindingElement(directDeclaration))
-    ) ? canonical?.getName() ?? null : null
-    const operation = directOperation === null
-      ? indirectOperation
-      : canonical?.getName() ?? directOperation
+    const operation = directOperation === null ? null : canonical?.getName() ?? directOperation
     if (!operation) return
     const owner = this.ownerId(node)
     const file = this.fileLabel(node.getSourceFile())
     if (['insert', 'update', 'delete'].includes(operation)) {
       const target = node.arguments[0] && this.tableFromExpression(node.arguments[0])
-      if (target) this.mutationSites.push({ file, owner, operation, table: target.logical, position: node.getStart() })
+      if (target) {
+        if (canonical) this.mutationSinkSymbols.add(canonical)
+        this.mutationSites.push({ file, owner, operation, table: target.logical, position: node.getStart() })
+      }
       return
     }
     if (operation !== 'execute' || !node.arguments[0]) return
+    if (canonical) this.mutationSinkSymbols.add(canonical)
     const sql = this.staticString(node.arguments[0])
     if (sql === null) {
       this.mutationSites.push({ file, owner, operation: 'unknown-sql', table: '<unknown>', position: node.getStart() })
@@ -480,23 +397,6 @@ export class TypeScriptProgramGraphV1 {
     }
   }
 
-  private isObjectLiteralPropertyReference(node: ts.Node): boolean {
-    const symbol = this.checker.getSymbolAtLocation(node)
-    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0]
-    return declaration !== undefined && ts.isPropertyAssignment(declaration) &&
-      ts.isObjectLiteralExpression(declaration.parent)
-  }
-
-  private isCallableAliasReference(node: ts.Node): boolean {
-    const symbol = this.checker.getSymbolAtLocation(node)
-    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0]
-    return declaration !== undefined && !declaration.getSourceFile().isDeclarationFile && (
-      ts.isVariableDeclaration(declaration) ||
-      ts.isBindingElement(declaration) ||
-      ts.isPropertyAssignment(declaration)
-    )
-  }
-
   private index(): void {
     for (const sourceFile of this.program.getSourceFiles()) {
       if (sourceFile.isDeclarationFile) continue
@@ -513,36 +413,8 @@ export class TypeScriptProgramGraphV1 {
           const caller = this.ownerId(node)
           const expression = unwrapExpression(node.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-          const canonical = this.canonicalSymbolAt(lookup)
-          const resolveCallable = (
-            ts.isIdentifier(expression) && this.isCallableAliasReference(lookup)
-          ) || this.isObjectLiteralPropertyReference(lookup)
-          const resolution = resolveCallable
-            ? this.callableResolution(expression)
-            : emptyCallableResolution(false)
-          if (
-            (ts.isElementAccessExpression(expression) &&
-              callPropertyName(expression) === null &&
-              !canonical &&
-              !ts.isPropertyAccessExpression(expression.argumentExpression)) ||
-            (resolveCallable && resolution.unresolved)
-          ) {
-            this.unresolvedCalls.push({
-              file: this.fileLabel(node.getSourceFile()),
-              owner: caller,
-              reference: ts.isIdentifier(expression)
-                ? expression.text
-                : callPropertyName(node.expression) ?? '<computed>',
-              position: node.getStart(),
-            })
-          }
-          const callee = this.symbolId(canonical)
+          const callee = this.symbolId(this.aliasedSymbolAt(lookup))
           if (callee) this.addEdge(caller, callee)
-          for (const target of resolution.symbols) {
-            const targetId = this.symbolId(target)
-            if (targetId) this.addEdge(caller, targetId)
-          }
-          for (const callback of resolution.callbacks) this.addEdge(caller, callback)
           for (const argument of node.arguments) {
             const unwrapped = unwrapExpression(argument)
             if (ts.isArrowFunction(unwrapped) || ts.isFunctionExpression(unwrapped)) {
@@ -567,20 +439,6 @@ export class TypeScriptProgramGraphV1 {
     const unknown = this.mutations().filter(({ operation }) => operation === 'unknown-sql')
     if (unknown.length === 0) return
     throw new Error(`Unclassified dynamic SQL: ${unknown.map(({ owner }) => owner).join(', ')}`)
-  }
-
-  unresolvedDynamicCalls(): readonly ProgramUnresolvedDynamicCallV1[] {
-    return [...this.unresolvedCalls].sort((left, right) => (
-      left.file.localeCompare(right.file) || left.position - right.position
-    ))
-  }
-
-  assertNoUnresolvedDynamicCalls(relevantOwners?: ReadonlySet<string>): void {
-    const unresolved = this.unresolvedDynamicCalls().filter(({ file }) => (
-      this.virtual || file.startsWith('app/') || file.startsWith('lib/')
-    )).filter(({ owner }) => relevantOwners === undefined || relevantOwners.has(owner))
-    if (unresolved.length === 0) return
-    throw new Error(`Unresolved dynamic calls: ${unresolved.map(({ owner }) => owner).join(', ')}`)
   }
 
   transitiveCallees(owner: string): readonly string[] {
@@ -643,7 +501,7 @@ export class TypeScriptProgramGraphV1 {
         if (ts.isCallExpression(child)) {
           const expression = unwrapExpression(child.expression)
           const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-          const resolved = this.symbolId(this.canonicalSymbolAt(lookup))
+          const resolved = this.symbolId(this.aliasedSymbolAt(lookup))
           if (
             resolved === callee ||
             (resolved !== null && this.transitiveCallees(resolved).includes(callee))
@@ -676,7 +534,7 @@ export class TypeScriptProgramGraphV1 {
       if (!call) return
       const callee = unwrapExpression(call.expression)
       const lookup = ts.isPropertyAccessExpression(callee) ? callee.name : callee
-      if (this.symbolId(this.canonicalSymbolAt(lookup)) !== gate) return
+      if (this.symbolId(this.aliasedSymbolAt(lookup)) !== gate) return
       const deniedSymbol = this.checker.getSymbolAtLocation(declaration.name)
       if (!deniedSymbol) return
       for (let index = declarationIndex + 1; index < body.statements.length; index += 1) {
@@ -740,7 +598,7 @@ export class TypeScriptProgramGraphV1 {
     return this.gateControlsTargets(owner, gate, (call) => {
       const expression = unwrapExpression(call.expression)
       const lookup = ts.isPropertyAccessExpression(expression) ? expression.name : expression
-      const resolved = this.symbolId(this.canonicalSymbolAt(lookup))
+      const resolved = this.symbolId(this.aliasedSymbolAt(lookup))
       return resolved === writer ||
         (resolved !== null && this.transitiveCallees(resolved).includes(writer))
     })

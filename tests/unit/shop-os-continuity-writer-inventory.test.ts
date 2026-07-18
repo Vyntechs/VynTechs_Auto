@@ -16,126 +16,81 @@ import {
 const root = process.cwd()
 const programGraph = createTypeScriptProgramGraphV1()
 
-const CONTINUITY_ALLOWED_UNRESOLVED_DYNAMIC_CALLS_V1: Readonly<Record<string, number>> = {
-  'app/(app)/settings/(admin)/billing/page.tsx#openPortal :: setBusy': 3,
-  'app/(app)/settings/(admin)/billing/page.tsx#openPortal :: setError': 3,
-  'app/(auth)/forgot-password/page.tsx#<callback@2610> :: setEmail': 1,
-  'app/(auth)/forgot-password/page.tsx#<callback@2610> :: setPhase': 1,
-  'app/(auth)/forgot-password/page.tsx#handleSubmit :: setErrorMsg': 2,
-  'app/(auth)/forgot-password/page.tsx#handleSubmit :: setPhase': 3,
-  'app/(auth)/reset-password/page.tsx#<callback@3992> :: setPassword': 1,
-  'app/(auth)/reset-password/page.tsx#check :: setPhase': 2,
-  'app/(auth)/reset-password/page.tsx#setNewPassword :: setBusy': 2,
-  'app/(auth)/reset-password/page.tsx#setNewPassword :: setSubmitError': 3,
-  'app/(auth)/sign-in/page.tsx#handleGoogleSignIn :: setBusy': 2,
-  'app/(auth)/sign-in/page.tsx#handleGoogleSignIn :: setError': 2,
-  'app/(auth)/sign-in/page.tsx#handleSubmit :: setBusy': 2,
-  'app/(auth)/sign-in/page.tsx#handleSubmit :: setError': 2,
-  'app/(auth)/sign-up/sign-up-form.tsx#<callback@360> :: setShowCanceledNotice': 1,
-  'app/(auth)/sign-up/sign-up-form.tsx#handleEmailSubmit :: setBusy': 5,
-  'app/(auth)/sign-up/sign-up-form.tsx#handleEmailSubmit :: setError': 5,
-  'app/(auth)/sign-up/sign-up-form.tsx#handleGoogleSignUp :: setBusy': 2,
-  'app/(auth)/sign-up/sign-up-form.tsx#handleGoogleSignUp :: setError': 2,
-  'app/curator/flows/[flowId]/page.tsx#cloneAction :: redirect': 1,
-  'lib/auth.ts#requireUserAndProfile :: ensure': 1,
-  'lib/db/schema.ts#<callback@86707> :: one': 1,
-  'lib/db/schema.ts#<callback@86869> :: many': 2,
-  'lib/db/schema.ts#<callback@86869> :: one': 3,
-  'lib/db/schema.ts#<callback@87255> :: many': 2,
-  'lib/db/schema.ts#<callback@87255> :: one': 1,
-  'lib/db/schema.ts#<callback@87465> :: many': 2,
-  'lib/db/schema.ts#<callback@87465> :: one': 2,
-  'lib/db/schema.ts#<callback@87779> :: many': 1,
-  'lib/db/schema.ts#<callback@87779> :: one': 7,
-  'lib/db/schema.ts#<callback@88717> :: one': 4,
-  'lib/db/schema.ts#<callback@89250> :: one': 1,
-  'lib/db/schema.ts#<callback@89416> :: many': 6,
-  'lib/db/schema.ts#<callback@89416> :: one': 1,
-  'lib/db/schema.ts#<callback@89948> :: many': 4,
-  'lib/db/schema.ts#<callback@89948> :: one': 1,
-  'lib/db/schema.ts#<callback@95118> :: one': 3,
-  'lib/db/schema.ts#<callback@96969> :: one': 3,
-  'lib/diagnostics/initial-tree-bootstrap.ts#generateInitialDiagnosticTree :: generateWithRetrieval': 1,
-  'lib/external/weather.ts#fetchAmbientConditions :: fetchFn': 1,
-  'lib/intake/quick-ticket.ts#<callback@10596> :: hintReceiptPresence': 1,
-  'lib/intake/quick-ticket.ts#<callback@13937> :: afterFinalization': 1,
-  'lib/intake/quick-ticket.ts#<callback@13937> :: afterLines': 1,
-  'lib/intake/quick-ticket.ts#<callback@13937> :: afterTicket': 1,
-  'lib/intake/quick-ticket.ts#createQuickTicket :: loadMutationKeyring': 1,
-  'lib/intake/use-search.ts#<callback@1597> :: setState': 5,
-  'lib/intake/use-search.ts#<callback@2220> :: setState': 1,
-  'lib/intake/use-search.ts#<callback@3729> :: setState': 1,
-  'lib/research/system-data-synthesis.ts#synthesizeSystemData :: call': 1,
-  'lib/retrieval/adapters/manufacturer-recall.ts#query :: builder': 1,
-  'lib/sessions.ts#advanceSession :: gateFn': 1,
-  'lib/sessions.ts#advanceSession :: listFn': 1,
-  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterDiscovery': 1,
-  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterFinalization': 1,
-  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterJobInsert': 1,
-  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterTicketLock': 1,
-  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterWrite': 1,
-  'lib/shop-os/messaging-consent.ts#validatedDisclosureProof :: renderer': 1,
-  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterDiscovery': 1,
-  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterFinalization': 1,
-  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterWrite': 1,
-  'lib/shop-os/parts-offers.ts#<callback@23038> :: beforeMutation': 1,
-  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterDiscovery': 1,
-  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterFinalization': 1,
-  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterWrite': 1,
-  'lib/shop-os/parts-offers.ts#<callback@30304> :: beforeMutation': 1,
-  'lib/shop-os/quotes.ts#<callback@60688> :: afterDiscovery': 1,
-  'lib/shop-os/quotes.ts#<callback@60688> :: afterFinalization': 1,
-  'lib/shop-os/quotes.ts#<callback@60688> :: afterTicketLock': 1,
-  'lib/shop-os/quotes.ts#<callback@60688> :: afterWrite': 1,
-  'lib/shop-os/quotes.ts#<callback@60688> :: beforeWrite': 1,
-  'lib/shop-os/quotes.ts#<callback@70151> :: afterDiscovery': 1,
-  'lib/shop-os/quotes.ts#<callback@70151> :: afterEventInsert': 1,
-  'lib/shop-os/quotes.ts#<callback@70151> :: afterFinalization': 1,
-  'lib/shop-os/quotes.ts#<callback@70151> :: afterTicketLock': 1,
-  'lib/shop-os/quotes.ts#<callback@70151> :: afterWrite': 1,
-  'lib/shop-os/quotes.ts#<callback@78613> :: afterDiscovery': 1,
-  'lib/shop-os/quotes.ts#<callback@78613> :: afterFinalization': 1,
-  'lib/shop-os/quotes.ts#<callback@78613> :: afterWrite': 1,
-  'lib/shop-os/quotes.ts#<callback@78613> :: beforeMutation': 1,
-  'lib/storage/client.ts#downloadArtifact :: download': 1,
-  'lib/storage/client.ts#signedUrl :: createSignedUrl': 1,
-  'lib/storage/client.ts#uploadArtifact :: upload': 1,
-  'lib/stripe.ts#createBillingPortalSessionForUser :: create': 1,
-  'lib/stripe.ts#createCheckoutSessionForUser :: create': 1,
-  'lib/stripe.ts#ensureStripeCustomer :: create': 1,
-  'lib/stripe.ts#handleStripeWebhook :: construct': 1,
-  'lib/tickets.ts#<callback@37849> :: afterFinalization': 1,
-  'lib/tickets.ts#<callback@37849> :: afterInsert': 1,
-  'lib/tickets.ts#<callback@46958> :: afterFinalization': 1,
-  'lib/tickets.ts#<callback@46958> :: afterWrite': 1,
-  'lib/use-advance-stream.ts#<callback@1632> :: setState': 4,
-  'lib/use-advance-stream.ts#<callback@2883> :: setState': 4,
-  'lib/use-advance-stream.ts#<callback@3736> :: setState': 1,
-}
+const CONTINUITY_DIRECT_REFERENCE_POLICY_V1 = new Map<string, ReadonlySet<string>>([
+  ['app/api/sessions/[id]/wizard-state/route.ts#POST', new Set([])],
+  ['lib/curator/deferred-actions.ts#approveDeferredSession', new Set(['app/api/curator/sessions/[id]/approve/route.ts#POST'])],
+  ['lib/curator/deferred-actions.ts#closeDeferredSession', new Set(['app/api/curator/sessions/[id]/close/route.ts#POST'])],
+  ['lib/curator/deferred-actions.ts#mutateDeferredSession', new Set(['lib/curator/deferred-actions.ts#approveDeferredSession', 'lib/curator/deferred-actions.ts#closeDeferredSession', 'lib/curator/deferred-actions.ts#overrideDeferredSession'])],
+  ['lib/curator/deferred-actions.ts#overrideDeferredSession', new Set(['app/api/curator/sessions/[id]/override/route.ts#POST'])],
+  ['lib/db/queries.ts#appendSessionEvent', new Set(['lib/sessions.ts#<callback@53083>', 'lib/sessions.ts#<callback@57135>', 'lib/sessions.ts#<callback@83019>', 'lib/sessions.ts#<callback@85013>', 'lib/sessions.ts#<callback@86644>', 'lib/sessions.ts#abandonSessionForUser', 'lib/sessions.ts#advanceSession', 'lib/sessions.ts#closeSessionForUser', 'lib/sessions.ts#declineOrDeferSessionForUser', 'lib/sessions.ts#lockDiagnosisForUser', 'lib/sessions.ts#lockDiagnosisFromWizard', 'lib/sessions.ts#recordAmbientConditions', 'lib/sessions.ts#releaseGateForUser', 'lib/sessions.ts#submitRepairObservationForUser'])],
+  ['lib/db/queries.ts#closeSession', new Set(['lib/sessions.ts#<callback@53083>', 'lib/sessions.ts#<callback@57135>', 'lib/sessions.ts#closeSessionForUser'])],
+  ['lib/db/queries.ts#createSession', new Set([])],
+  ['lib/db/queries.ts#setSessionTerminalStatus', new Set(['lib/sessions.ts#abandonSessionForUser', 'lib/sessions.ts#declineOrDeferSessionForUser'])],
+  ['lib/db/queries.ts#updateSessionIntake', new Set(['lib/sessions.ts#recordAmbientConditions'])],
+  ['lib/db/queries.ts#updateSessionMaxCorpusSimilarity', new Set(['lib/retrieval/wire-into-tree.ts#<callback@5337>'])],
+  ['lib/db/queries.ts#updateSessionTreeState', new Set(['lib/sessions.ts#advanceSession', 'lib/sessions.ts#lockDiagnosisForUser', 'lib/sessions.ts#recordAmbientConditions', 'lib/sessions.ts#releaseGateForUser'])],
+  ['lib/diagnostics/adaptive/state.ts#updateAdaptiveModeForUser', new Set(['app/api/sessions/[id]/adaptive/mode/route.ts#POST'])],
+  ['lib/intake/counter-ticket.ts#createCounterTicket', new Set(['app/api/tickets/counter/route.ts#POST'])],
+  ['lib/intake/customers.ts#upsertCustomer', new Set(['lib/intake/session.ts#<callback@2203>'])],
+  ['lib/intake/quick-ticket.ts#createQuickTicket', new Set(['app/api/tickets/quick/route.ts#POST'])],
+  ['lib/intake/session.ts#createSessionFromIntake', new Set(['app/api/intake/submit/route.ts#POST'])],
+  ['lib/intake/ticket-identity.ts#materializeTicketIntakeIdentityInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#<callback@10330>', 'lib/intake/quick-ticket.ts#<callback@13937>'])],
+  ['lib/intake/vehicles.ts#upsertVehicle', new Set(['lib/intake/session.ts#<callback@2203>'])],
+  ['lib/retrieval/wire-into-tree.ts#buildUpdateTreeWithRetrieval', new Set(['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#start', 'app/api/sessions/[id]/ambient/route.ts#POST'])],
+  ['lib/sessions.ts#abandonSessionForUser', new Set(['app/api/sessions/[id]/abandon/route.ts#POST'])],
+  ['lib/sessions.ts#advanceSession', new Set(['app/api/sessions/[id]/advance/route.ts#POST', 'app/api/sessions/[id]/advance/stream/route.ts#start'])],
+  ['lib/sessions.ts#captureArtifact', new Set([])],
+  ['lib/sessions.ts#closeSessionForUser', new Set(['app/api/sessions/[id]/close/route.ts#POST'])],
+  ['lib/sessions.ts#createSessionForUser', new Set(['app/api/sessions/route.ts#POST'])],
+  ['lib/sessions.ts#declineOrDeferSessionForUser', new Set(['app/api/sessions/[id]/decline-or-defer/route.ts#POST'])],
+  ['lib/sessions.ts#executeLocked', new Set(['lib/sessions.ts#<callback@23644>', 'lib/sessions.ts#<callback@23838>', 'lib/sessions.ts#runTechQuickMutation'])],
+  ['lib/sessions.ts#lockDiagnosisForUser', new Set(['app/api/sessions/[id]/lock-diagnosis/route.ts#POST'])],
+  ['lib/sessions.ts#lockDiagnosisFromWizard', new Set(['app/api/sessions/[id]/lock-in-diagnosis/route.ts#POST'])],
+  ['lib/sessions.ts#recordAmbientConditions', new Set(['app/api/sessions/[id]/ambient/route.ts#POST'])],
+  ['lib/sessions.ts#releaseGateForUser', new Set(['app/api/sessions/[id]/release-gate/route.ts#POST'])],
+  ['lib/sessions.ts#replayCompletedTechQuickSessionForUser', new Set(['app/api/sessions/route.ts#POST'])],
+  ['lib/sessions.ts#runTechQuickMutation', new Set(['lib/sessions.ts#createSessionForUser', 'lib/sessions.ts#replayCompletedTechQuickSessionForUser'])],
+  ['lib/sessions.ts#runTicketedSessionMutation', new Set(['lib/sessions.ts#closeSessionForUser', 'lib/sessions.ts#submitRepairObservationForUser'])],
+  ['lib/sessions.ts#submitRepairObservationForUser', new Set(['app/api/sessions/[id]/repair-observation/route.ts#POST'])],
+  ['lib/shop-os/canned-jobs.ts#applyCannedJobToTicket', new Set(['app/api/tickets/[id]/quote/canned-jobs/route.ts#POST'])],
+  ['lib/shop-os/continuity/mutation-foundation/attempt-capability.ts#bindLockedMutationScopeToAttemptV1', new Set(['lib/shop-os/continuity/mutation-foundation/lock-order.ts#lockMutationScopeV1'])],
+  ['lib/shop-os/continuity/mutation-foundation/attempt-capability.ts#createMutationAttemptCapabilityV1', new Set(['lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#<callback@3384>', 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#<callback@4456>'])],
+  ['lib/shop-os/continuity/mutation-foundation/lock-order.ts#lockMutationScopeV1', new Set(['lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#<callback@3384>', 'lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#<callback@4456>'])],
+  ['lib/shop-os/continuity/mutation-foundation/receipts.ts#insertMutationReceiptPrimitiveV1', new Set(['lib/tickets.ts#insertResolvedTicketCreationReceiptInTransactionV1'])],
+  ['lib/shop-os/continuity/mutation-foundation/receipts.ts#peekMutationReceiptV1', new Set(['lib/shop-os/continuity/mutation-foundation/lock-order.ts#lockMutationScopeV1'])],
+  ['lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1', new Set(['lib/sessions.ts#<callback@53083>', 'lib/sessions.ts#<callback@57135>', 'lib/shop-os/canned-jobs.ts#<callback@44902>', 'lib/shop-os/customer-stories.ts#<callback@40142>', 'lib/shop-os/customer-stories.ts#<callback@52667>', 'lib/shop-os/diagnostic-start.ts#finalizeChangedJob', 'lib/shop-os/parts-offers.ts#<callback@23038>', 'lib/shop-os/parts-offers.ts#<callback@30304>', 'lib/shop-os/quotes.ts#<callback@60688>', 'lib/shop-os/quotes.ts#<callback@70151>', 'lib/shop-os/quotes.ts#<callback@78613>', 'lib/shop-os/simple-work.ts#<callback@19437>', 'lib/shop-os/simple-work.ts#<callback@30669>', 'lib/tickets.ts#<callback@37849>', 'lib/tickets.ts#<callback@46958>', 'lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1'])],
+  ['lib/shop-os/continuity/mutation-foundation/revisions.ts#reserveJobSequencesForInsertionV1', new Set(['lib/shop-os/canned-jobs.ts#<callback@44902>', 'lib/shop-os/simple-work.ts#<callback@30669>', 'lib/tickets.ts#<callback@37849>', 'lib/tickets.ts#insertResolvedTicketBatchInTransactionV1'])],
+  ['lib/shop-os/continuity/mutation-foundation/transaction-runner.ts#runBoundedShopOsMutationV1', new Set(['lib/diagnostics/adaptive/state.ts#updateAdaptiveModeForUser', 'lib/intake/counter-ticket.ts#createCounterTicket', 'lib/intake/quick-ticket.ts#createQuickTicket', 'lib/sessions.ts#runTechQuickMutation', 'lib/sessions.ts#runTicketedSessionMutation', 'lib/shop-os/canned-jobs.ts#applyCannedJobToTicket', 'lib/shop-os/customer-stories.ts#generateAndSaveCustomerStory', 'lib/shop-os/customer-stories.ts#saveReviewedCustomerStory', 'lib/shop-os/diagnostic-start.ts#acquireDiagnosticStart', 'lib/shop-os/diagnostic-start.ts#finalizeDiagnosticStart', 'lib/shop-os/diagnostic-start.ts#settleDiagnosticStart', 'lib/shop-os/parts-offers.ts#captureManualOffer', 'lib/shop-os/parts-offers.ts#removeManualOffer', 'lib/shop-os/quotes.ts#createQuoteVersion', 'lib/shop-os/quotes.ts#recordQuoteDecision', 'lib/shop-os/quotes.ts#runMutation', 'lib/shop-os/repair-authorization.ts#lockDiagnosticRepairAccess', 'lib/shop-os/simple-work.ts#createWorkEscalation', 'lib/shop-os/simple-work.ts#mutateSimpleWork', 'lib/tickets.ts#addTicketJob', 'lib/tickets.ts#createTicket', 'lib/tickets.ts#mutateTicketJobAssignment'])],
+  ['lib/shop-os/customer-stories.ts#generateAndSaveCustomerStory', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/story/route.ts#POST'])],
+  ['lib/shop-os/customer-stories.ts#saveReviewedCustomerStory', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/story/route.ts#PUT'])],
+  ['lib/shop-os/diagnostic-start.ts#acquireDiagnosticStart', new Set(['app/api/tickets/[id]/jobs/[jobId]/diagnostic/start/route.ts#POST'])],
+  ['lib/shop-os/diagnostic-start.ts#finalizeChangedJob', new Set(['lib/shop-os/diagnostic-start.ts#<callback@18636>', 'lib/shop-os/diagnostic-start.ts#<callback@22838>', 'lib/shop-os/diagnostic-start.ts#<callback@24969>', 'lib/shop-os/diagnostic-start.ts#updateExpiredLease'])],
+  ['lib/shop-os/diagnostic-start.ts#finalizeDiagnosticStart', new Set(['app/api/tickets/[id]/jobs/[jobId]/diagnostic/start/route.ts#POST'])],
+  ['lib/shop-os/diagnostic-start.ts#recordDiagnosticStartFailure', new Set(['app/api/tickets/[id]/jobs/[jobId]/diagnostic/start/route.ts#recordFailure'])],
+  ['lib/shop-os/diagnostic-start.ts#settleDiagnosticStart', new Set(['lib/shop-os/diagnostic-start.ts#finalizeDiagnosticStart', 'lib/shop-os/diagnostic-start.ts#recordDiagnosticStartFailure'])],
+  ['lib/shop-os/diagnostic-start.ts#updateExpiredLease', new Set(['lib/shop-os/diagnostic-start.ts#<callback@18636>', 'lib/shop-os/diagnostic-start.ts#<callback@22838>'])],
+  ['lib/shop-os/parts-offers.ts#captureManualOffer', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/parts/manual-offers/route.ts#POST'])],
+  ['lib/shop-os/parts-offers.ts#removeManualOffer', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/parts/manual-offers/[lineId]/route.ts#DELETE'])],
+  ['lib/shop-os/quotes.ts#createDraftLine', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/lines/route.ts#POST'])],
+  ['lib/shop-os/quotes.ts#createQuoteVersion', new Set(['app/api/tickets/[id]/quote/versions/route.ts#POST'])],
+  ['lib/shop-os/quotes.ts#deleteDraftLine', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/lines/[lineId]/route.ts#DELETE'])],
+  ['lib/shop-os/quotes.ts#invalidateActiveQuoteVersion', new Set([])],
+  ['lib/shop-os/quotes.ts#invalidateActiveQuoteVersionDeltaV1', new Set(['lib/shop-os/canned-jobs.ts#<callback@44902>', 'lib/shop-os/customer-stories.ts#<callback@40142>', 'lib/shop-os/customer-stories.ts#<callback@52667>', 'lib/shop-os/parts-offers.ts#<callback@23038>', 'lib/shop-os/parts-offers.ts#<callback@30304>', 'lib/shop-os/quotes.ts#<callback@81239>', 'lib/shop-os/quotes.ts#<callback@83351>', 'lib/shop-os/quotes.ts#<callback@85198>', 'lib/shop-os/quotes.ts#invalidateActiveQuoteVersion'])],
+  ['lib/shop-os/quotes.ts#recordQuoteDecision', new Set(['app/api/tickets/[id]/quote/decisions/route.ts#POST'])],
+  ['lib/shop-os/quotes.ts#replaceDraftLine', new Set(['app/api/tickets/[id]/quote/jobs/[jobId]/lines/[lineId]/route.ts#PUT'])],
+  ['lib/shop-os/quotes.ts#runMutation', new Set(['lib/shop-os/quotes.ts#createDraftLine', 'lib/shop-os/quotes.ts#deleteDraftLine', 'lib/shop-os/quotes.ts#replaceDraftLine'])],
+  ['lib/shop-os/repair-authorization.ts#lockDiagnosticRepairAccess', new Set(['lib/sessions.ts#<callback@83019>', 'lib/sessions.ts#closeSessionForUser'])],
+  ['lib/shop-os/simple-work.ts#createWorkEscalation', new Set(['app/api/tickets/[id]/jobs/[jobId]/escalations/route.ts#POST'])],
+  ['lib/shop-os/simple-work.ts#mutateSimpleWork', new Set(['app/api/tickets/[id]/jobs/[jobId]/work/route.ts#POST'])],
+  ['lib/tickets.ts#addTicketJob', new Set(['app/api/tickets/[id]/jobs/route.ts#POST'])],
+  ['lib/tickets.ts#createTicket', new Set(['app/api/tickets/route.ts#POST'])],
+  ['lib/tickets.ts#finalizeResolvedTicketCreationInTransactionV1', new Set(['lib/intake/counter-ticket.ts#<callback@10330>', 'lib/intake/quick-ticket.ts#<callback@13937>', 'lib/sessions.ts#executeLocked', 'lib/tickets.ts#<callback@21081>'])],
+  ['lib/tickets.ts#insertResolvedTicketBatchInTransactionV1', new Set(['lib/intake/counter-ticket.ts#<callback@10330>', 'lib/intake/quick-ticket.ts#<callback@13937>', 'lib/sessions.ts#executeLocked', 'lib/tickets.ts#<callback@21081>'])],
+  ['lib/tickets.ts#insertResolvedTicketCreationReceiptInTransactionV1', new Set(['lib/intake/quick-ticket.ts#<callback@13937>'])],
+  ['lib/tickets.ts#mutateTicketJobAssignment', new Set(['app/api/tickets/[id]/jobs/[jobId]/assignment/route.ts#POST'])],
+  ['lib/tickets.ts#resolveTicketCreationInLockedScopeV1', new Set(['lib/intake/counter-ticket.ts#<callback@10330>', 'lib/intake/quick-ticket.ts#<callback@13937>', 'lib/intake/quick-ticket.ts#replay', 'lib/sessions.ts#executeLocked', 'lib/tickets.ts#<callback@21081>'])],
+])
 
-function unresolvedApplicationCallCounts(
-  calls = programGraph.unresolvedDynamicCalls(),
-): Record<string, number> {
-  const counts: Record<string, number> = {}
-  for (const call of calls) {
-    if (!call.file.startsWith('app/') && !call.file.startsWith('lib/')) continue
-    const key = `${call.owner} :: ${call.reference}`
-    counts[key] = (counts[key] ?? 0) + 1
-  }
-  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)))
-}
-
-function assertExactUnresolvedApplicationCalls(
-  calls = programGraph.unresolvedDynamicCalls(),
-): void {
-  const actual = unresolvedApplicationCallCounts(calls)
-  const expected = CONTINUITY_ALLOWED_UNRESOLVED_DYNAMIC_CALLS_V1
-  const added = Object.keys(actual).filter((key) => actual[key] !== expected[key])
-  const removed = Object.keys(expected).filter((key) => actual[key] !== expected[key])
-  if (added.length > 0 || removed.length > 0) {
-    throw new Error(`Unregistered unresolved dynamic calls: ${[...new Set([...added, ...removed])].join(', ')}`)
-  }
-}
 
 async function source(path: string): Promise<string> {
   return readFile(resolve(root, path), 'utf8')
@@ -222,17 +177,30 @@ describe('ShopOS continuity writer manifest', () => {
 })
 
 describe('ShopOS continuity writer source inventory', () => {
-  it('fails closed on every source-wide unresolved dynamic call outside the exact registry', () => {
-    expect(() => assertExactUnresolvedApplicationCalls()).not.toThrow()
-    expect(() => assertExactUnresolvedApplicationCalls([
-      ...programGraph.unresolvedDynamicCalls(),
-      {
-        file: 'app/api/unregistered/route.ts',
-        owner: 'app/api/unregistered/route.ts#POST',
-        reference: 'held',
-        position: 0,
-      },
-    ])).toThrow('app/api/unregistered/route.ts#POST :: held')
+  it('permits protected writers and mutation capabilities only as exact direct lexical calls', () => {
+    const registeredWriters = [
+      ...CONTINUITY_WRITER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_REGISTERED_CREATION_HELPER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_LOCK_ONLY_INVENTORY_V1.flatMap((entry) =>
+        ('transactions' in entry ? entry.transactions : []).map((name) => `${entry.file}#${name}`)),
+      ...CONTINUITY_DORMANT_COMPATIBILITY_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_GATED_NONWINNING_WRITER_INVENTORY_V1.flatMap(({ file, mutations }) =>
+        mutations.map((name) => `${file}#${name}`)),
+      ...CONTINUITY_NESTED_SESSION_HELPER_INVENTORY_V1.map(({ file, helper }) => `${file}#${helper}`),
+      ...programGraph.mutations().map(({ owner }) => owner).filter((owner) => !owner.includes('#<callback@')),
+    ]
+    expect(CONTINUITY_DIRECT_REFERENCE_POLICY_V1).toHaveLength(72)
+    for (const writer of new Set(registeredWriters)) {
+      expect(CONTINUITY_DIRECT_REFERENCE_POLICY_V1.has(writer), `${writer} protected`).toBe(true)
+    }
+    expect(programGraph.symbolReferenceViolations(CONTINUITY_DIRECT_REFERENCE_POLICY_V1)).toEqual([])
+    expect(programGraph.mutationSinkReferenceViolations()).toEqual([])
+    for (const [writer, approvedOwners] of CONTINUITY_DIRECT_REFERENCE_POLICY_V1) {
+      expect(programGraph.directCallers(writer), writer).toEqual([...approvedOwners].sort())
+    }
   })
 
   it('assigns every semantic tracked-table mutation to a registered transitive writer root', () => {

@@ -326,16 +326,26 @@ const UNIT_CROSS_WRITER_RACE_MATRIX_V1: readonly UnitRaceMatrixEntry[] = [
 
 describe('ShopOS continuity unit cross-writer race matrix', () => {
   it('names every mandatory race with an explicit executable owner', () => {
+    const unitOwnerEntries = UNIT_CROSS_WRITER_RACE_MATRIX_V1
+      .flatMap(({ owners }) => owners)
+      .filter(({ file }) => !file.startsWith('tests/integration/'))
     const declaredOwners = collectExecutableUnitOwnersV1(UNIT_CROSS_WRITER_RACE_MATRIX_V1)
     const subprocessOwners = declaredOwners.filter(({ file }) =>
       file !== 'tests/unit/shop-os-continuity-cross-writer-races.test.ts')
+    const sameFileOwners = declaredOwners.filter(({ file }) =>
+      file === 'tests/unit/shop-os-continuity-cross-writer-races.test.ts')
     const quickReplay = UNIT_CROSS_WRITER_RACE_MATRIX_V1
       .flatMap(({ owners }) => owners)
       .filter(({ file, title }) =>
         file === 'tests/unit/shop-os-quick-ticket.test.ts' &&
         title === 'replays the exact original request without mutation after template, tax, and identity drift')
+    expect(unitOwnerEntries).toHaveLength(51)
     expect(declaredOwners).toHaveLength(49)
     expect(subprocessOwners).toHaveLength(48)
+    expect(sameFileOwners).toEqual([{
+      file: 'tests/unit/shop-os-continuity-cross-writer-races.test.ts',
+      title: 'serializes assignment versus quote decision on one ticket without losing either revision',
+    }])
     expect(quickReplay).toHaveLength(2)
     expect(declaredOwners.filter(({ file, title }) =>
       file === quickReplay[0]!.file && title === quickReplay[0]!.title)).toHaveLength(1)

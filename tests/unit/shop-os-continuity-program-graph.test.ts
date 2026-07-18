@@ -32,14 +32,9 @@ const files = {
       db.update(ticketTable)
       db.execute(rawUpdate)
     }
-    const leafAlias = leafWriter
-    const registry = { run: leafAlias }
     export function winningWriter() {
-      coordinate(() => leafAlias())
+      coordinate(() => leafWriter())
       finalize()
-    }
-    export function objectHeldWriter() {
-      registry.run()
     }
     export function bypassSibling() {
       db['insert'](schema.ticketJobs)
@@ -92,7 +87,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     ]))
   })
 
-  it('follows function aliases, imported wrappers, and re-exports transitively without blessing a sibling', () => {
+  it('follows direct nested calls and re-exports transitively without blessing a sibling', () => {
     const graph = createVirtualTypeScriptProgramGraphV1(files)
     const winning = '/virtual/writer.ts#winningWriter'
 
@@ -105,8 +100,6 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       .not.toContain('/virtual/foundation.ts#finalizeMutationRevisionsV1')
     expect(graph.directCallers('/virtual/writer.ts#winningWriter'))
       .toContain('/virtual/route.ts#POST')
-    expect(graph.transitiveCallees('/virtual/writer.ts#objectHeldWriter'))
-      .toContain('/virtual/writer.ts#leafWriter')
   })
 
   it('finds private-seam re-exports and proves the real gate call precedes the routed writer alias', () => {
@@ -131,157 +124,111 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     ])).toEqual([-1, 0])
   })
 
-  it('keeps a called nested gate reachable and resolves every known dynamic object target', () => {
-    const graph = createVirtualTypeScriptProgramGraphV1({
-      ...files,
-      '/virtual/dynamic-wrapper.ts': `
-        import { winningWriter, bypassSibling } from './writer'
-        declare const choose: () => boolean
-        const unresolved = { run: choose() ? winningWriter : bypassSibling }
-        export function unsafe() { unresolved.run() }
-      `,
-    })
+  it('keeps a called nested gate reachable in the direct graph', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1(files)
 
     expect(graph.callOrder('/virtual/reachable-route.ts#POST', [
       '/virtual/gate.ts#entitlementReject',
       '/virtual/writer.ts#winningWriter',
     ])).toEqual([0, 1])
-    expect(graph.transitiveCallees('/virtual/dynamic-wrapper.ts#unsafe'))
-      .toEqual(expect.arrayContaining([
-        '/virtual/writer.ts#winningWriter',
-        '/virtual/writer.ts#bypassSibling',
-      ]))
-    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
-      .toContain('/virtual/dynamic-wrapper.ts#<module>')
   })
 
-  it('classifies dynamic SQL hidden behind an object-held execute alias', () => {
-    const graph = createVirtualTypeScriptProgramGraphV1({
-      '/virtual/app/rogue.ts': `
-        declare const db: { execute(statement: unknown): void }
-        const held = { run: db.execute }
-        export function bypass(statement: unknown) { held.run(statement) }
-      `,
+  it('forbids every first-class writer reference and permits only an approved direct lexical call', () => {
+    const writer = '/virtual/writer.ts#writer'
+    const policy = new Map([[writer, new Set(['/virtual/case.ts#approved'])]])
+    const cases = [
+      ['identity factory', `function identity<T>(value: T): T { return value }
+        export function rejected() { const held = identity(writer); held() }`],
+      ['returned writer', `export function rejected() { return writer }`],
+      ['assigned alias', `export function rejected() { const held = writer; held() }`],
+      ['array storage', `export function rejected() { return [writer] }`],
+      ['cast alias', `export function rejected() { const held = writer as () => void; held() }`],
+      ['returned closure', `export function rejected() { return () => writer() }`],
+      ['invoke callback', `declare function invoke(value: () => void): void
+        export function rejected() { invoke(writer) }`],
+      ['object arrow', `export function rejected() { const held = { run: () => writer() }; held.run() }`],
+      ['opaque destructuring', `export function rejected() { const registry = { run: writer }; const { run } = registry; run() }`],
+      ['native bind', `export function rejected() { writer.bind(null)() }`],
+      ['custom bind', `declare function bind(value: () => void): () => void
+        export function rejected() { bind(writer)() }`],
+      ['overridden bind', `export function rejected() { const value = { bind: writer }; value.bind() }`],
+      ['call', `export function rejected() { writer.call(null) }`],
+      ['apply', `export function rejected() { writer.apply(null, []) }`],
+      ['dead nested arrow', `export function rejected() { const dead = () => writer(); return dead }`],
+      ['React useCallback', `import { useCallback } from 'react'
+        export function rejected() { return useCallback(writer, []) }`],
+    ] as const
+
+    for (const [label, body] of cases) {
+      const graph = createVirtualTypeScriptProgramGraphV1({
+        '/virtual/writer.ts': `export function writer() {}`,
+        '/virtual/case.ts': `import { writer } from './writer'
+          ${body}
+          export function approved() { writer() }`,
+      })
+      expect(graph.symbolReferenceViolations(policy), label).not.toEqual([])
+      expect(graph.symbolReferenceViolations(policy).map(({ owner }) => owner), label)
+        .not.toContain('/virtual/case.ts#approved')
+    }
+
+    const approved = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export function writer() {}`,
+      '/virtual/case.ts': `import { writer } from './writer'
+        export function approved() { writer() }`,
     })
+    expect(approved.symbolReferenceViolations(policy)).toEqual([])
 
-    expect(graph.mutations()).toContainEqual(expect.objectContaining({
-      owner: '/virtual/app/rogue.ts#bypass',
-      operation: 'unknown-sql',
-    }))
+    const destructured = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export function writer() {}`,
+      '/virtual/case.ts': `import * as writers from './writer'
+        export function rejected() { const { writer: held } = writers; held() }
+        export function approved() { writers.writer() }`,
+    })
+    expect(destructured.symbolReferenceViolations(policy).map(({ owner }) => owner))
+      .toEqual(['/virtual/case.ts#rejected'])
+
+    const constructed = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/writer.ts': `export class Writer {}`,
+      '/virtual/case.ts': `import { Writer } from './writer'
+        export function approved() { return new Writer() }`,
+    })
+    expect(constructed.symbolReferenceViolations(new Map([
+      ['/virtual/writer.ts#Writer', new Set(['/virtual/case.ts#approved'])],
+    ]))).toEqual([])
   })
 
-  it('resolves destructured and aliased object bindings to an object-held execute target', () => {
+  it('forbids first-class tracked mutation methods while preserving direct sink enumeration', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
-      '/virtual/app/destructured.ts': `
-        declare const db: { execute(statement: unknown): void }
-        const held = { run: db.execute, execute: db.execute }
-        const heldAlias = held
-        const { run } = held
-        const { execute: aliased } = heldAlias
-        export function direct(statement: unknown) { run(statement) }
-        export function renamed(statement: unknown) { aliased(statement) }
+      '/virtual/schema.ts': `export const tickets = { name: 'tickets' }`,
+      '/virtual/app/sinks.ts': `
+        import { tickets } from '../schema'
+        declare const db: {
+          execute(statement: string): void
+          update(table: unknown): void
+        }
+        export function direct() {
+          db.execute('update tickets set concern = concern')
+          db.update(tickets)
+        }
+        export function stored() { const run = db.execute; return run }
+        export function destructured() { const { execute } = db; return execute }
+        export function bound() { return db.execute.bind(db) }
+        export function returned() { return db.update }
+        export function passed() { return [db.execute] }
       `,
     })
 
     expect(graph.mutations()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ owner: '/virtual/app/destructured.ts#direct', operation: 'unknown-sql' }),
-      expect.objectContaining({ owner: '/virtual/app/destructured.ts#renamed', operation: 'unknown-sql' }),
+      expect.objectContaining({ owner: '/virtual/app/sinks.ts#direct', operation: 'raw-update', table: 'tickets' }),
+      expect.objectContaining({ owner: '/virtual/app/sinks.ts#direct', operation: 'update', table: 'tickets' }),
     ]))
-  })
-
-  it('resolves bind aliases and fails closed on arbitrary callable factories', () => {
-    const graph = createVirtualTypeScriptProgramGraphV1({
-      ...files,
-      '/virtual/app/bound.ts': `
-        import { winningWriter } from '../writer'
-        declare const db: { execute(statement: unknown): void }
-        declare function wrap<T extends (...args: any[]) => any>(value: T): T
-        const run = db.execute.bind(db)
-        const held = winningWriter.bind(null)
-        const unsafe = wrap(winningWriter)
-        export function boundSql(statement: unknown) { run(statement) }
-        export function boundWriter() { held() }
-        export function factoryWriter() { unsafe() }
-      `,
-    })
-
-    expect(graph.mutations()).toContainEqual(expect.objectContaining({
-      owner: '/virtual/app/bound.ts#boundSql', operation: 'unknown-sql',
-    }))
-    expect(graph.transitiveCallees('/virtual/app/bound.ts#boundWriter'))
-      .toContain('/virtual/writer.ts#winningWriter')
-    expect(() => graph.assertNoUnresolvedDynamicCalls())
-      .toThrow('/virtual/app/bound.ts#factoryWriter')
-  })
-
-  it('follows every proven source-factory return and models React useCallback by module identity', () => {
-    const graph = createVirtualTypeScriptProgramGraphV1({
-      ...files,
-      '/virtual/app/factory-return.ts': `
-        import { useCallback as reactUseCallback } from 'react'
-        import { winningWriter, bypassSibling } from '../writer'
-        declare const choose: boolean
-        function identity<T>(value: T): T { return value }
-        function selectWriter() {
-          if (choose) return winningWriter
-          return bypassSibling
-        }
-        declare function useCallback<T>(value: T): T
-        const held = identity(winningWriter)
-        const selected = selectWriter()
-        const reactHeld = reactUseCallback(winningWriter, [])
-        const shadowHeld = useCallback(winningWriter)
-        export function visibleFactory() { held() }
-        export function selectedFactory() { selected() }
-        export function reactFactory() { reactHeld() }
-        export function shadowFactory() { shadowHeld() }
-      `,
-    })
-
-    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#visibleFactory'))
-      .toContain('/virtual/writer.ts#winningWriter')
-    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#selectedFactory'))
+    expect(graph.mutationSinkReferenceViolations().map(({ owner }) => owner))
       .toEqual(expect.arrayContaining([
-        '/virtual/writer.ts#winningWriter',
-        '/virtual/writer.ts#bypassSibling',
-      ]))
-    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#reactFactory'))
-      .toContain('/virtual/writer.ts#winningWriter')
-    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
-      .toContain('/virtual/app/factory-return.ts#shadowFactory')
-  })
-
-  it('links local object callbacks and fails closed on opaque destructured callables', () => {
-    const graph = createVirtualTypeScriptProgramGraphV1({
-      ...files,
-      '/virtual/app/object-callbacks.ts': `
-        import { winningWriter } from '../writer'
-        declare const db: { execute(statement: unknown): void }
-        const wrappers = {
-          write: () => winningWriter(),
-          sql: (statement: unknown) => db.execute(statement),
-        }
-        const { write: run } = wrappers
-        const { sql } = wrappers
-        declare const registry: { run(): void }
-        const { run: opaque } = registry
-        export function objectWriter() { run() }
-        export function hiddenSql(statement: unknown) { sql(statement) }
-        export function opaqueBinding() { opaque() }
-        export function opaqueParameter({ callback }: { callback(): void }) { callback() }
-      `,
-    })
-
-    expect(graph.transitiveCallees('/virtual/app/object-callbacks.ts#objectWriter'))
-      .toContain('/virtual/writer.ts#winningWriter')
-    const hiddenSql = graph.mutations().find(({ operation }) => operation === 'unknown-sql')
-    expect(hiddenSql).toBeDefined()
-    expect(graph.transitiveCallees('/virtual/app/object-callbacks.ts#hiddenSql'))
-      .toContain(hiddenSql!.owner)
-    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
-      .toEqual(expect.arrayContaining([
-        '/virtual/app/object-callbacks.ts#opaqueBinding',
-        '/virtual/app/object-callbacks.ts#opaqueParameter',
+        '/virtual/app/sinks.ts#stored',
+        '/virtual/app/sinks.ts#destructured',
+        '/virtual/app/sinks.ts#bound',
+        '/virtual/app/sinks.ts#returned',
+        '/virtual/app/sinks.ts#passed',
       ]))
   })
 
