@@ -81,6 +81,7 @@ export const shops = pgTable(
     nextTicketNumber: bigint('next_ticket_number', { mode: 'number' }).default(1).notNull(),
     laborRateCents: bigint('labor_rate_cents', { mode: 'number' }),
     taxRateBps: integer('tax_rate_bps'),
+    partsMarkupBps: integer('parts_markup_bps'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -93,6 +94,10 @@ export const shops = pgTable(
     check(
       'shops_tax_rate_bps_range',
       sql`${table.taxRateBps} is null or ${table.taxRateBps} between 0 and 10000`,
+    ),
+    check(
+      'shops_parts_markup_bps_range',
+      sql`${table.partsMarkupBps} is null or ${table.partsMarkupBps} between 0 and 100000`,
     ),
   ],
 )

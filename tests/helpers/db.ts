@@ -62,12 +62,42 @@ export async function createTestDb(): Promise<{
   await ensureMessagingRetentionAclMigration(client)
   await ensureMessagingRetentionFkIndexMigration(client)
   await ensureShopEntitlementsMigration(client)
+  await ensureShopPartsMarkupMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+async function shopHasPartsMarkupColumn(client: PGlite): Promise<boolean> {
+  const result = await client.query<{ present: boolean }>(`
+    select exists(
+      select 1 from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'shops'
+        and column_name = 'parts_markup_bps'
+    ) as present
+  `)
+  return result.rows[0]?.present === true
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureShopPartsMarkupMigration(client: PGlite): Promise<void> {
+  if (await shopHasPartsMarkupColumn(client)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0037_shop_parts_markup.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!(await shopHasPartsMarkupColumn(client))) {
+    throw new Error('shops.parts_markup_bps migration failed in ephemeral database')
   }
 }
 

@@ -201,6 +201,58 @@ describe('POST /api/shop', () => {
     expect(row.taxRateBps).toBeNull()
   })
 
+  it('sets the parts markup without disturbing the other rate columns', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ partsMarkupBps: 4000 }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.partsMarkupBps).toBe(4000)
+    expect(row.taxRateBps).toBeNull()
+    expect(row.laborRateCents).toBeNull()
+    expect(row.name).toBe('Old Name')
+  })
+
+  it('accepts a 0% markup and the 1000% (100,000 bps) boundary', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    expect((await POST(makeReq({ partsMarkupBps: 0 }))).status).toBe(200)
+    expect((await POST(makeReq({ partsMarkupBps: 100_000 }))).status).toBe(200)
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.partsMarkupBps).toBe(100_000)
+  })
+
+  it('rejects a markup above 1000% and never persists it', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ partsMarkupBps: 100_001 }))
+    expect(res.status).toBe(422)
+    expect(await res.json()).toEqual({ error: 'invalid_parts_markup' })
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.partsMarkupBps).toBeNull()
+  })
+
+  it('rejects a non-integer or negative markup', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    expect((await POST(makeReq({ partsMarkupBps: -1 }))).status).toBe(422)
+    expect((await POST(makeReq({ partsMarkupBps: 12.5 }))).status).toBe(422)
+  })
+
+  it('rejects markup changes from a tech (server-side admin gate)', async () => {
+    await seedProfile({ role: 'tech' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ partsMarkupBps: 4000 }))
+    expect(res.status).toBe(403)
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.partsMarkupBps).toBeNull()
+  })
+
   it('accepts a 0% (tax-exempt) rate and the 100% boundary', async () => {
     await seedProfile({ role: 'owner' })
     const { POST } = await import('@/app/api/shop/route')

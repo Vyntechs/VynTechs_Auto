@@ -7,11 +7,15 @@ import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder
 type Props = {
   initialTaxRateBps: number | null
   initialLaborRateCents: number | null
+  initialPartsMarkupBps: number | null
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 const MAX_TAX_RATE_BPS = 10_000
+// Markup can exceed 100% (a $2 part often doubles or more), so it has a far
+// higher ceiling than tax — 100,000 bps = 1000%.
+const MAX_PARTS_MARKUP_BPS = 100_000
 
 // A typed percent maps to basis points with the same math the quote parser
 // uses for dollars→cents ("8.25" → 825), so the two forms stay consistent.
@@ -53,6 +57,21 @@ function evalLabor(raw: string): FieldEval {
   return { state: 'valid', value: cents }
 }
 
+// A typed percent maps to basis points with the same dollars→cents math the
+// quote parser uses ("40" → 4000), so markup and tax stay consistent.
+function evalMarkup(raw: string): FieldEval {
+  const trimmed = raw.trim()
+  if (trimmed === '') return { state: 'empty' }
+  let bps: number
+  try {
+    bps = parseMoneyToCents(trimmed)
+  } catch {
+    return { state: 'invalid' }
+  }
+  if (bps > MAX_PARTS_MARKUP_BPS) return { state: 'invalid' }
+  return { state: 'valid', value: bps }
+}
+
 const hintStyle: CSSProperties = {
   margin: '6px 0 0',
   fontSize: 12,
@@ -89,23 +108,35 @@ const errorStyle: CSSProperties = {
   color: 'var(--vt-risk-high, #b22)',
 }
 
-export function RatesSection({ initialTaxRateBps, initialLaborRateCents }: Props) {
+export function RatesSection({
+  initialTaxRateBps,
+  initialLaborRateCents,
+  initialPartsMarkupBps,
+}: Props) {
   const router = useRouter()
   const initialTax = bpsToInput(initialTaxRateBps)
   const initialLabor = centsToInput(initialLaborRateCents)
+  const initialMarkup = bpsToInput(initialPartsMarkupBps)
   const [tax, setTax] = useState(initialTax)
   const [labor, setLabor] = useState(initialLabor)
+  const [markup, setMarkup] = useState(initialMarkup)
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const taxEval = evalTax(tax)
   const laborEval = evalLabor(labor)
+  const markupEval = evalMarkup(markup)
   const taxChanged = tax.trim() !== initialTax.trim()
   const laborChanged = labor.trim() !== initialLabor.trim()
+  const markupChanged = markup.trim() !== initialMarkup.trim()
   const submitTax = taxChanged && taxEval.state === 'valid'
   const submitLabor = laborChanged && laborEval.state === 'valid'
-  const anyInvalid = taxEval.state === 'invalid' || laborEval.state === 'invalid'
-  const canSave = !anyInvalid && (submitTax || submitLabor)
+  const submitMarkup = markupChanged && markupEval.state === 'valid'
+  const anyInvalid =
+    taxEval.state === 'invalid' ||
+    laborEval.state === 'invalid' ||
+    markupEval.state === 'invalid'
+  const canSave = !anyInvalid && (submitTax || submitLabor || submitMarkup)
 
   function markDirty() {
     if (saveState !== 'idle') setSaveState('idle')
@@ -117,9 +148,14 @@ export function RatesSection({ initialTaxRateBps, initialLaborRateCents }: Props
     setSaveState('saving')
     setSaveError(null)
 
-    const payload: { taxRateBps?: number; laborRateCents?: number } = {}
+    const payload: {
+      taxRateBps?: number
+      laborRateCents?: number
+      partsMarkupBps?: number
+    } = {}
     if (submitTax) payload.taxRateBps = taxEval.value
     if (submitLabor) payload.laborRateCents = laborEval.value
+    if (submitMarkup) payload.partsMarkupBps = markupEval.value
 
     try {
       const res = await fetch('/api/shop', {
@@ -186,6 +222,26 @@ export function RatesSection({ initialTaxRateBps, initialLaborRateCents }: Props
           </p>
         </div>
 
+        <div className="field">
+          <label htmlFor="shop-parts-markup">Default parts markup (%)</label>
+          <input
+            id="shop-parts-markup"
+            inputMode="decimal"
+            value={markup}
+            onChange={(e) => {
+              setMarkup(e.target.value)
+              markDirty()
+            }}
+            placeholder="e.g. 40"
+            aria-describedby="shop-parts-markup-hint"
+          />
+          <p id="shop-parts-markup-hint" style={markupEval.state === 'invalid' ? errorHintStyle : hintStyle}>
+            {markupEval.state === 'invalid'
+              ? 'Enter a percent between 0 and 1000, like 40.'
+              : 'Added to a part’s supplier cost to suggest its customer price — so no one has to work out retail by hand. Example: 40 turns a $100 part into $140.'}
+          </p>
+        </div>
+
         <div style={rowStyle}>
           <button
             type="submit"
@@ -213,6 +269,7 @@ export function RatesSection({ initialTaxRateBps, initialLaborRateCents }: Props
 function humanizeSaveError(code: string | undefined): string {
   if (code === 'invalid_tax_rate') return 'Tax rate must be between 0% and 100%.'
   if (code === 'invalid_labor_rate') return 'Labor rate must be a positive dollar amount.'
+  if (code === 'invalid_parts_markup') return 'Parts markup must be between 0% and 1000%.'
   if (code === 'no_changes') return 'Change a rate before saving.'
   if (code === 'forbidden') return 'Only admins can change rates.'
   if (code === 'no_shop') return 'No shop is assigned to your account.'

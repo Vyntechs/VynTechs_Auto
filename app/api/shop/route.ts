@@ -8,16 +8,24 @@ import { paywallReject } from '@/lib/auth-access'
 
 // Mirrors the DB range checks on the shops table (schema.ts): tax rate is
 // stored in basis points (0–10,000 = 0–100%); labor rate is stored in cents
-// and is bounded by the safe-integer range.
+// and is bounded by the safe-integer range; parts markup is stored in basis
+// points (0–100,000 = 0–1000%).
 const MAX_TAX_RATE_BPS = 10_000
+const MAX_PARTS_MARKUP_BPS = 100_000
 
 export async function POST(req: Request) {
-  let body: { name?: unknown; taxRateBps?: unknown; laborRateCents?: unknown }
+  let body: {
+    name?: unknown
+    taxRateBps?: unknown
+    laborRateCents?: unknown
+    partsMarkupBps?: unknown
+  }
   try {
     body = (await req.json()) as {
       name?: unknown
       taxRateBps?: unknown
       laborRateCents?: unknown
+      partsMarkupBps?: unknown
     }
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
@@ -51,6 +59,7 @@ export async function POST(req: Request) {
     name?: string
     taxRateBps?: number
     laborRateCents?: number
+    partsMarkupBps?: number
   } = {}
 
   if (body.name !== undefined) {
@@ -80,6 +89,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'invalid_labor_rate' }, { status: 422 })
     }
     updates.laborRateCents = cents
+  }
+
+  if (body.partsMarkupBps !== undefined && body.partsMarkupBps !== null) {
+    const bps = body.partsMarkupBps
+    if (
+      typeof bps !== 'number' ||
+      !Number.isInteger(bps) ||
+      bps < 0 ||
+      bps > MAX_PARTS_MARKUP_BPS
+    ) {
+      return NextResponse.json({ error: 'invalid_parts_markup' }, { status: 422 })
+    }
+    updates.partsMarkupBps = bps
   }
 
   if (Object.keys(updates).length === 0) {

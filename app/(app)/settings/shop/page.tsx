@@ -45,6 +45,7 @@ export default async function SettingsShopPage() {
     <RatesSection
       initialTaxRateBps={shop.taxRateBps}
       initialLaborRateCents={shop.laborRateCents}
+      initialPartsMarkupBps={shop.partsMarkupBps}
     />
     {library.ok ? (
       <CannedJobsSection
