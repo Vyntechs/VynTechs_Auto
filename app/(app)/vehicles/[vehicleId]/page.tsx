@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { customers, vehicles } from '@/lib/db/schema'
+import { listVehicleTicketHistory } from '@/lib/tickets'
 import { VehicleHistory } from '@/components/screens/vehicle-history'
 
 export default async function VehicleHistoryPage({
@@ -16,6 +17,7 @@ export default async function VehicleHistoryPage({
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
   if (!ctx.profile.shopId) notFound()
+  const shopId = ctx.profile.shopId
 
   const [row] = await db
     .select({
@@ -27,7 +29,9 @@ export default async function VehicleHistoryPage({
     .where(eq(vehicles.id, vehicleId))
     .limit(1)
 
-  if (!row || row.customer.shopId !== ctx.profile.shopId) notFound()
+  if (!row || row.customer.shopId !== shopId) notFound()
+
+  const visits = await listVehicleTicketHistory(db, { shopId, vehicleId })
 
   return (
     <VehicleHistory
@@ -40,6 +44,7 @@ export default async function VehicleHistoryPage({
         plate: row.vehicle.plate,
       }}
       customer={{ id: row.customer.id, name: row.customer.name }}
+      visits={visits}
     />
   )
 }
