@@ -24,6 +24,8 @@ console was out of scope.
 | Honest case-close record | `65f435f` | Verification no longer pre-asserts a clean fix (boxes start off; tech must state whether symptoms resolved before closing); the fabricated per-phase "diag/repair min" is collapsed to the one true number — how long the case was open. Also drops the inaccurate "all fields required" eyebrow. |
 | Vehicle history with recoverable work | `47c3496` | Vehicle-history screen now lists a vehicle's past repair orders, and leads with **Recommended — not done yet** (jobs the customer declined, `ticketJobs.approvalState = 'declined'`), each linking to its ticket. Read-only. |
 | Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
+| Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
+| Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
 
 All three: TypeScript clean, targeted tests green, production build passes. Not
 driven through a live authenticated session (QA-credential gate).
@@ -210,10 +212,14 @@ excluded from re-quoting (`lib/shop-os/quotes.ts:336,779,1333`).
 
 ### Build order (founder direction, plain)
 
-1. **Suppliers + markup rule in Settings (management side).** Suppliers half
-   shipped as `5943c0f` (Settings → Shop → Suppliers). Still open: a shop-level
-   **parts markup rule** (new storage) so supplier cost → customer price is
-   automatic and techs/advisors never invent retail.
+1. **Suppliers + markup rule in Settings (management side).** DONE — suppliers
+   (`5943c0f`) and the parts markup, both set-it (`6857852`) and auto-price
+   (`430c4cf`). Remaining nuance for later: the derived price is a flat
+   shop-wide markup shown **read-only** (like labor). Two possible follow-ups if
+   a shop asks: (a) a **per-line override** for the odd part priced by hand
+   (labor has the same rigidity today, so not urgent); (b) a **tiered parts
+   matrix** (markup by cost band) — the industry norm, but heavier and against
+   the "minimal friction" bias unless a real shop needs it.
    **Founder integration path (researched 2026-07-18):** for real in-app
    supplier catalogs, the practical first deal is the **PartsTech partner API**
    (one integration → 30k+ supplier locations incl. O'Reilly First Call,
