@@ -87,6 +87,7 @@ const quoteBuilderSchema = z.strictObject({
   configuration: z.strictObject({
     laborRateCents: safeMoneySchema.nullable(),
     taxRateBps: z.number().int().min(0).max(10_000).nullable(),
+    partsMarkupBps: z.number().int().min(0).max(100_000).nullable(),
     laborRateConfigured: z.boolean(),
     taxRateConfigured: z.boolean(),
   }).superRefine((configuration, context) => {

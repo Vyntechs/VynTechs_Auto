@@ -102,7 +102,7 @@ const builder = {
   ticket: { id: ticketId, status: 'open', reconciled: false },
   configuration: {
     laborRateCents: 12500, taxRateBps: 825,
-    laborRateConfigured: true, taxRateConfigured: true,
+    partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
   },
   jobs: [], capabilities: { canRecordCustomerApproval: true }, activeVersion: null,
 } satisfies QuoteBuilder

@@ -17,7 +17,7 @@ describe('quote preparation readiness', () => {
   const readyBuilder = parseQuoteBuilderProjection({
     ticket: { id: '00000000-0000-4000-8000-000000000101', status: 'open', reconciled: true },
     configuration: {
-      laborRateCents: null, taxRateBps: 825,
+      laborRateCents: null, taxRateBps: 825, partsMarkupBps: null,
       laborRateConfigured: false, taxRateConfigured: true,
     },
     jobs: [{
@@ -190,7 +190,7 @@ describe('quote builder refresh projection validation', () => {
   const valid = {
     ticket: { id: '00000000-0000-4000-8000-000000000101', status: 'open', reconciled: true },
     configuration: {
-      laborRateCents: 15_000, taxRateBps: 825,
+      laborRateCents: 15_000, taxRateBps: 825, partsMarkupBps: null,
       laborRateConfigured: true, taxRateConfigured: true,
     },
     jobs: [{

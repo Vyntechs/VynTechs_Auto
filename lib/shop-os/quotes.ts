@@ -147,6 +147,7 @@ export type QuoteBuilderResult =
       configuration: {
         laborRateCents: number | null
         taxRateBps: number | null
+        partsMarkupBps: number | null
         laborRateConfigured: boolean
         taxRateConfigured: boolean
       }
@@ -478,6 +479,7 @@ export async function getQuoteBuilder(
       const [shop] = await transactionDb.select({
         laborRateCents: shops.laborRateCents,
         taxRateBps: shops.taxRateBps,
+        partsMarkupBps: shops.partsMarkupBps,
       }).from(shops).where(eq(shops.id, actor.shopId as string)).limit(1)
       if (!shop) return { ok: false as const, error: 'not_found' as const }
 
@@ -626,6 +628,7 @@ export async function getQuoteBuilder(
             configuration: {
               laborRateCents: safeMoney(shop.laborRateCents, true),
               taxRateBps: shop.taxRateBps,
+              partsMarkupBps: shop.partsMarkupBps,
               laborRateConfigured: shop.laborRateCents !== null,
               taxRateConfigured: shop.taxRateBps !== null,
             },
