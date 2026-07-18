@@ -326,6 +326,19 @@ const UNIT_CROSS_WRITER_RACE_MATRIX_V1: readonly UnitRaceMatrixEntry[] = [
 
 describe('ShopOS continuity unit cross-writer race matrix', () => {
   it('names every mandatory race with an explicit executable owner', () => {
+    const declaredOwners = collectExecutableUnitOwnersV1(UNIT_CROSS_WRITER_RACE_MATRIX_V1)
+    const subprocessOwners = declaredOwners.filter(({ file }) =>
+      file !== 'tests/unit/shop-os-continuity-cross-writer-races.test.ts')
+    const quickReplay = UNIT_CROSS_WRITER_RACE_MATRIX_V1
+      .flatMap(({ owners }) => owners)
+      .filter(({ file, title }) =>
+        file === 'tests/unit/shop-os-quick-ticket.test.ts' &&
+        title === 'replays the exact original request without mutation after template, tax, and identity drift')
+    expect(declaredOwners).toHaveLength(49)
+    expect(subprocessOwners).toHaveLength(48)
+    expect(quickReplay).toHaveLength(2)
+    expect(declaredOwners.filter(({ file, title }) =>
+      file === quickReplay[0]!.file && title === quickReplay[0]!.title)).toHaveLength(1)
     expect(UNIT_CROSS_WRITER_RACE_MATRIX_V1.map(({ id }) => id)).toEqual([
       'assignment_vs_quote_decision',
       'story_vs_line_invalidation',

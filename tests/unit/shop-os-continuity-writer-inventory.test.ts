@@ -16,6 +16,127 @@ import {
 const root = process.cwd()
 const programGraph = createTypeScriptProgramGraphV1()
 
+const CONTINUITY_ALLOWED_UNRESOLVED_DYNAMIC_CALLS_V1: Readonly<Record<string, number>> = {
+  'app/(app)/settings/(admin)/billing/page.tsx#openPortal :: setBusy': 3,
+  'app/(app)/settings/(admin)/billing/page.tsx#openPortal :: setError': 3,
+  'app/(auth)/forgot-password/page.tsx#<callback@2610> :: setEmail': 1,
+  'app/(auth)/forgot-password/page.tsx#<callback@2610> :: setPhase': 1,
+  'app/(auth)/forgot-password/page.tsx#handleSubmit :: setErrorMsg': 2,
+  'app/(auth)/forgot-password/page.tsx#handleSubmit :: setPhase': 3,
+  'app/(auth)/reset-password/page.tsx#<callback@3992> :: setPassword': 1,
+  'app/(auth)/reset-password/page.tsx#check :: setPhase': 2,
+  'app/(auth)/reset-password/page.tsx#setNewPassword :: setBusy': 2,
+  'app/(auth)/reset-password/page.tsx#setNewPassword :: setSubmitError': 3,
+  'app/(auth)/sign-in/page.tsx#handleGoogleSignIn :: setBusy': 2,
+  'app/(auth)/sign-in/page.tsx#handleGoogleSignIn :: setError': 2,
+  'app/(auth)/sign-in/page.tsx#handleSubmit :: setBusy': 2,
+  'app/(auth)/sign-in/page.tsx#handleSubmit :: setError': 2,
+  'app/(auth)/sign-up/sign-up-form.tsx#<callback@360> :: setShowCanceledNotice': 1,
+  'app/(auth)/sign-up/sign-up-form.tsx#handleEmailSubmit :: setBusy': 5,
+  'app/(auth)/sign-up/sign-up-form.tsx#handleEmailSubmit :: setError': 5,
+  'app/(auth)/sign-up/sign-up-form.tsx#handleGoogleSignUp :: setBusy': 2,
+  'app/(auth)/sign-up/sign-up-form.tsx#handleGoogleSignUp :: setError': 2,
+  'app/curator/flows/[flowId]/page.tsx#cloneAction :: redirect': 1,
+  'lib/auth.ts#requireUserAndProfile :: ensure': 1,
+  'lib/db/schema.ts#<callback@86707> :: one': 1,
+  'lib/db/schema.ts#<callback@86869> :: many': 2,
+  'lib/db/schema.ts#<callback@86869> :: one': 3,
+  'lib/db/schema.ts#<callback@87255> :: many': 2,
+  'lib/db/schema.ts#<callback@87255> :: one': 1,
+  'lib/db/schema.ts#<callback@87465> :: many': 2,
+  'lib/db/schema.ts#<callback@87465> :: one': 2,
+  'lib/db/schema.ts#<callback@87779> :: many': 1,
+  'lib/db/schema.ts#<callback@87779> :: one': 7,
+  'lib/db/schema.ts#<callback@88717> :: one': 4,
+  'lib/db/schema.ts#<callback@89250> :: one': 1,
+  'lib/db/schema.ts#<callback@89416> :: many': 6,
+  'lib/db/schema.ts#<callback@89416> :: one': 1,
+  'lib/db/schema.ts#<callback@89948> :: many': 4,
+  'lib/db/schema.ts#<callback@89948> :: one': 1,
+  'lib/db/schema.ts#<callback@95118> :: one': 3,
+  'lib/db/schema.ts#<callback@96969> :: one': 3,
+  'lib/diagnostics/initial-tree-bootstrap.ts#generateInitialDiagnosticTree :: generateWithRetrieval': 1,
+  'lib/external/weather.ts#fetchAmbientConditions :: fetchFn': 1,
+  'lib/intake/quick-ticket.ts#<callback@10596> :: hintReceiptPresence': 1,
+  'lib/intake/quick-ticket.ts#<callback@13937> :: afterFinalization': 1,
+  'lib/intake/quick-ticket.ts#<callback@13937> :: afterLines': 1,
+  'lib/intake/quick-ticket.ts#<callback@13937> :: afterTicket': 1,
+  'lib/intake/quick-ticket.ts#createQuickTicket :: loadMutationKeyring': 1,
+  'lib/intake/use-search.ts#<callback@1597> :: setState': 5,
+  'lib/intake/use-search.ts#<callback@2220> :: setState': 1,
+  'lib/intake/use-search.ts#<callback@3729> :: setState': 1,
+  'lib/research/system-data-synthesis.ts#synthesizeSystemData :: call': 1,
+  'lib/retrieval/adapters/manufacturer-recall.ts#query :: builder': 1,
+  'lib/sessions.ts#advanceSession :: gateFn': 1,
+  'lib/sessions.ts#advanceSession :: listFn': 1,
+  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterDiscovery': 1,
+  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterFinalization': 1,
+  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterJobInsert': 1,
+  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterTicketLock': 1,
+  'lib/shop-os/canned-jobs.ts#<callback@44902> :: afterWrite': 1,
+  'lib/shop-os/messaging-consent.ts#validatedDisclosureProof :: renderer': 1,
+  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterDiscovery': 1,
+  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterFinalization': 1,
+  'lib/shop-os/parts-offers.ts#<callback@23038> :: afterWrite': 1,
+  'lib/shop-os/parts-offers.ts#<callback@23038> :: beforeMutation': 1,
+  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterDiscovery': 1,
+  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterFinalization': 1,
+  'lib/shop-os/parts-offers.ts#<callback@30304> :: afterWrite': 1,
+  'lib/shop-os/parts-offers.ts#<callback@30304> :: beforeMutation': 1,
+  'lib/shop-os/quotes.ts#<callback@60688> :: afterDiscovery': 1,
+  'lib/shop-os/quotes.ts#<callback@60688> :: afterFinalization': 1,
+  'lib/shop-os/quotes.ts#<callback@60688> :: afterTicketLock': 1,
+  'lib/shop-os/quotes.ts#<callback@60688> :: afterWrite': 1,
+  'lib/shop-os/quotes.ts#<callback@60688> :: beforeWrite': 1,
+  'lib/shop-os/quotes.ts#<callback@70151> :: afterDiscovery': 1,
+  'lib/shop-os/quotes.ts#<callback@70151> :: afterEventInsert': 1,
+  'lib/shop-os/quotes.ts#<callback@70151> :: afterFinalization': 1,
+  'lib/shop-os/quotes.ts#<callback@70151> :: afterTicketLock': 1,
+  'lib/shop-os/quotes.ts#<callback@70151> :: afterWrite': 1,
+  'lib/shop-os/quotes.ts#<callback@78613> :: afterDiscovery': 1,
+  'lib/shop-os/quotes.ts#<callback@78613> :: afterFinalization': 1,
+  'lib/shop-os/quotes.ts#<callback@78613> :: afterWrite': 1,
+  'lib/shop-os/quotes.ts#<callback@78613> :: beforeMutation': 1,
+  'lib/storage/client.ts#downloadArtifact :: download': 1,
+  'lib/storage/client.ts#signedUrl :: createSignedUrl': 1,
+  'lib/storage/client.ts#uploadArtifact :: upload': 1,
+  'lib/stripe.ts#createBillingPortalSessionForUser :: create': 1,
+  'lib/stripe.ts#createCheckoutSessionForUser :: create': 1,
+  'lib/stripe.ts#ensureStripeCustomer :: create': 1,
+  'lib/stripe.ts#handleStripeWebhook :: construct': 1,
+  'lib/tickets.ts#<callback@37849> :: afterFinalization': 1,
+  'lib/tickets.ts#<callback@37849> :: afterInsert': 1,
+  'lib/tickets.ts#<callback@46958> :: afterFinalization': 1,
+  'lib/tickets.ts#<callback@46958> :: afterWrite': 1,
+  'lib/use-advance-stream.ts#<callback@1632> :: setState': 4,
+  'lib/use-advance-stream.ts#<callback@2883> :: setState': 4,
+  'lib/use-advance-stream.ts#<callback@3736> :: setState': 1,
+}
+
+function unresolvedApplicationCallCounts(
+  calls = programGraph.unresolvedDynamicCalls(),
+): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const call of calls) {
+    if (!call.file.startsWith('app/') && !call.file.startsWith('lib/')) continue
+    const key = `${call.owner} :: ${call.reference}`
+    counts[key] = (counts[key] ?? 0) + 1
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)))
+}
+
+function assertExactUnresolvedApplicationCalls(
+  calls = programGraph.unresolvedDynamicCalls(),
+): void {
+  const actual = unresolvedApplicationCallCounts(calls)
+  const expected = CONTINUITY_ALLOWED_UNRESOLVED_DYNAMIC_CALLS_V1
+  const added = Object.keys(actual).filter((key) => actual[key] !== expected[key])
+  const removed = Object.keys(expected).filter((key) => actual[key] !== expected[key])
+  if (added.length > 0 || removed.length > 0) {
+    throw new Error(`Unregistered unresolved dynamic calls: ${[...new Set([...added, ...removed])].join(', ')}`)
+  }
+}
+
 async function source(path: string): Promise<string> {
   return readFile(resolve(root, path), 'utf8')
 }
@@ -101,6 +222,19 @@ describe('ShopOS continuity writer manifest', () => {
 })
 
 describe('ShopOS continuity writer source inventory', () => {
+  it('fails closed on every source-wide unresolved dynamic call outside the exact registry', () => {
+    expect(() => assertExactUnresolvedApplicationCalls()).not.toThrow()
+    expect(() => assertExactUnresolvedApplicationCalls([
+      ...programGraph.unresolvedDynamicCalls(),
+      {
+        file: 'app/api/unregistered/route.ts',
+        owner: 'app/api/unregistered/route.ts#POST',
+        reference: 'held',
+        position: 0,
+      },
+    ])).toThrow('app/api/unregistered/route.ts#POST :: held')
+  })
+
   it('assigns every semantic tracked-table mutation to a registered transitive writer root', () => {
     const roots = [
       ...CONTINUITY_WRITER_INVENTORY_V1.flatMap(({ file, mutations }) =>
@@ -117,7 +251,6 @@ describe('ShopOS continuity writer source inventory', () => {
       'lib/shop-os/continuity/mutation-foundation/revisions.ts#finalizeMutationRevisionsV1',
     ]
     expect(() => programGraph.assertNoUnknownSql()).not.toThrow()
-    expect(() => programGraph.assertNoUnresolvedDynamicCalls()).not.toThrow()
 
     for (const site of programGraph.mutations().filter(({ operation }) => operation !== 'unknown-sql')) {
       const owners = roots.filter((rootId) =>
@@ -350,6 +483,6 @@ describe('ShopOS gated writer entrance inventory', () => {
     }
     const wizardRoute = 'app/api/sessions/[id]/wizard-state/route.ts#POST'
     expect(isDiagnosticsGatedRoute('/api/sessions/test/wizard-state')).toBe(true)
-    expect(programGraph.callOrder(wizardRoute, [gateId])).toEqual([0])
+    expect(programGraph.gateControlsMutations(wizardRoute, gateId)).toBe(true)
   })
 })

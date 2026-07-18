@@ -51,12 +51,13 @@ const files = {
   '/virtual/writer-barrel.ts': `
     export { winningWriter as routedWriter } from './writer'
   `,
-  '/virtual/gate.ts': `export function entitlementReject() {}`,
+  '/virtual/gate.ts': `export function entitlementReject(): { denied: true } | null { return null }`,
   '/virtual/route.ts': `
     import { routedWriter as writer } from './writer-barrel'
     import { entitlementReject as gate } from './gate'
     export async function POST() {
-      gate()
+      const denied = await gate()
+      if (denied) return denied
       await writer()
     }
   `,
@@ -130,7 +131,7 @@ describe('ShopOS continuity TypeScript Program graph', () => {
     ])).toEqual([-1, 0])
   })
 
-  it('keeps a called nested gate reachable and fails closed on dynamic object wrappers', () => {
+  it('keeps a called nested gate reachable and resolves every known dynamic object target', () => {
     const graph = createVirtualTypeScriptProgramGraphV1({
       ...files,
       '/virtual/dynamic-wrapper.ts': `
@@ -145,8 +146,13 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       '/virtual/gate.ts#entitlementReject',
       '/virtual/writer.ts#winningWriter',
     ])).toEqual([0, 1])
-    expect(() => graph.assertNoUnresolvedDynamicCalls())
-      .toThrow('/virtual/dynamic-wrapper.ts#unsafe')
+    expect(graph.transitiveCallees('/virtual/dynamic-wrapper.ts#unsafe'))
+      .toEqual(expect.arrayContaining([
+        '/virtual/writer.ts#winningWriter',
+        '/virtual/writer.ts#bypassSibling',
+      ]))
+    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
+      .toContain('/virtual/dynamic-wrapper.ts#<module>')
   })
 
   it('classifies dynamic SQL hidden behind an object-held execute alias', () => {
@@ -206,6 +212,77 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       .toContain('/virtual/writer.ts#winningWriter')
     expect(() => graph.assertNoUnresolvedDynamicCalls())
       .toThrow('/virtual/app/bound.ts#factoryWriter')
+  })
+
+  it('follows every proven source-factory return and models React useCallback by module identity', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      ...files,
+      '/virtual/app/factory-return.ts': `
+        import { useCallback as reactUseCallback } from 'react'
+        import { winningWriter, bypassSibling } from '../writer'
+        declare const choose: boolean
+        function identity<T>(value: T): T { return value }
+        function selectWriter() {
+          if (choose) return winningWriter
+          return bypassSibling
+        }
+        declare function useCallback<T>(value: T): T
+        const held = identity(winningWriter)
+        const selected = selectWriter()
+        const reactHeld = reactUseCallback(winningWriter, [])
+        const shadowHeld = useCallback(winningWriter)
+        export function visibleFactory() { held() }
+        export function selectedFactory() { selected() }
+        export function reactFactory() { reactHeld() }
+        export function shadowFactory() { shadowHeld() }
+      `,
+    })
+
+    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#visibleFactory'))
+      .toContain('/virtual/writer.ts#winningWriter')
+    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#selectedFactory'))
+      .toEqual(expect.arrayContaining([
+        '/virtual/writer.ts#winningWriter',
+        '/virtual/writer.ts#bypassSibling',
+      ]))
+    expect(graph.transitiveCallees('/virtual/app/factory-return.ts#reactFactory'))
+      .toContain('/virtual/writer.ts#winningWriter')
+    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
+      .toContain('/virtual/app/factory-return.ts#shadowFactory')
+  })
+
+  it('links local object callbacks and fails closed on opaque destructured callables', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      ...files,
+      '/virtual/app/object-callbacks.ts': `
+        import { winningWriter } from '../writer'
+        declare const db: { execute(statement: unknown): void }
+        const wrappers = {
+          write: () => winningWriter(),
+          sql: (statement: unknown) => db.execute(statement),
+        }
+        const { write: run } = wrappers
+        const { sql } = wrappers
+        declare const registry: { run(): void }
+        const { run: opaque } = registry
+        export function objectWriter() { run() }
+        export function hiddenSql(statement: unknown) { sql(statement) }
+        export function opaqueBinding() { opaque() }
+        export function opaqueParameter({ callback }: { callback(): void }) { callback() }
+      `,
+    })
+
+    expect(graph.transitiveCallees('/virtual/app/object-callbacks.ts#objectWriter'))
+      .toContain('/virtual/writer.ts#winningWriter')
+    const hiddenSql = graph.mutations().find(({ operation }) => operation === 'unknown-sql')
+    expect(hiddenSql).toBeDefined()
+    expect(graph.transitiveCallees('/virtual/app/object-callbacks.ts#hiddenSql'))
+      .toContain(hiddenSql!.owner)
+    expect(graph.unresolvedDynamicCalls().map(({ owner }) => owner))
+      .toEqual(expect.arrayContaining([
+        '/virtual/app/object-callbacks.ts#opaqueBinding',
+        '/virtual/app/object-callbacks.ts#opaqueParameter',
+      ]))
   })
 
   it('requires the route gate to dominate its reachable writer', () => {
@@ -287,6 +364,14 @@ describe('ShopOS continuity TypeScript Program graph', () => {
           await writer()
         }
       `,
+      '/virtual/ignored-route.ts': `
+        import { routedWriter as writer } from './writer-barrel'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          await gate()
+          await writer()
+        }
+      `,
     })
     const gate = '/virtual/gate.ts#entitlementReject'
     const writer = '/virtual/writer.ts#winningWriter'
@@ -302,9 +387,66 @@ describe('ShopOS continuity TypeScript Program graph', () => {
       'catch-route',
       'finally-route',
       'helper-route',
+      'ignored-route',
     ]) {
       expect(graph.gateDominatesWriter(`/virtual/${route}.ts#POST`, gate, writer), route)
         .toBe(false)
+    }
+  })
+
+  it('requires the refusal guard to control direct mutations as well as writer calls', () => {
+    const graph = createVirtualTypeScriptProgramGraphV1({
+      '/virtual/schema.ts': `export const sessions = { name: 'sessions' }`,
+      '/virtual/gate.ts': `export function entitlementReject(): { denied: true } | null { return null }`,
+      '/virtual/db.ts': `export const db: any = {}`,
+      '/virtual/guarded.ts': `
+        import { sessions } from './schema'
+        import { db } from './db'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          const denied = await gate()
+          if (denied) return denied
+          await db.update(sessions)
+        }
+      `,
+      '/virtual/ignored.ts': `
+        import { sessions } from './schema'
+        import { db } from './db'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          await gate()
+          await db.update(sessions)
+        }
+      `,
+      '/virtual/moved.ts': `
+        import { sessions } from './schema'
+        import { db } from './db'
+        import { entitlementReject as gate } from './gate'
+        export async function POST() {
+          await db.update(sessions)
+          const denied = await gate()
+          if (denied) return denied
+        }
+      `,
+      '/virtual/conditional.ts': `
+        import { sessions } from './schema'
+        import { db } from './db'
+        import { entitlementReject as gate } from './gate'
+        declare const allowed: boolean
+        export async function POST() {
+          if (allowed) {
+            const denied = await gate()
+            if (denied) return denied
+          }
+          await db.update(sessions)
+        }
+      `,
+    })
+    const gate = '/virtual/gate.ts#entitlementReject'
+
+    expect(graph.gateControlsMutations('/virtual/guarded.ts#POST', gate)).toBe(true)
+    for (const route of ['ignored', 'moved', 'conditional']) {
+      expect(graph.gateControlsMutations(`/virtual/${route}.ts#POST`, gate), route).toBe(false)
     }
   })
 
