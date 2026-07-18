@@ -331,7 +331,8 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/)
     expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
-    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor:focus-within\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.jobHeader h3\s*\{[^}]*white-space:\s*normal/)
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/\.cannedPicker select\s*\{[^}]*min-height:\s*44px/)
     expect(css).toMatch(/\.cannedApply\s*\{[^}]*min-height:\s*44px/)
@@ -1343,7 +1344,7 @@ describe('ManualQuoteBuilder preparation', () => {
       jobs: [{ ...builder().jobs[0], lines: [] }],
     })} />)
     expect(screen.getByText('Add customer and vehicle.')).toBeInTheDocument()
-    expect(screen.getByText('Configure a tax rate.')).toBeInTheDocument()
+    expect(screen.getByText('Configure a tax rate in shop settings.')).toBeInTheDocument()
     expect(screen.getByText('Add at least one quote line.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
   })

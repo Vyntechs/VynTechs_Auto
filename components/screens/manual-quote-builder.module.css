@@ -925,7 +925,7 @@
     box-shadow: 0 -12px 30px color-mix(in oklch, var(--vt-fg) 10%, transparent);
   }
 
-  .workspace:has(.editor:focus-within) .prepareAction {
+  .workspace:has(.editor) .prepareAction {
     position: static;
     width: 100%;
     padding: 0 18px;
@@ -957,6 +957,14 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+
+  /* In the stacked (column) header the nowrap+ellipsis title has no width to
+     clamp against, so a long job title (often the customer concern) overflows
+     the card and forces the page to scroll sideways. Let it wrap instead. */
+  .jobHeader h3 {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .job {
