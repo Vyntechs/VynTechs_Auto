@@ -105,7 +105,7 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
   }
 
   return (
-    <Module num="02" label="Canned jobs" status={<span className={styles.count}>{jobs.length} active</span>}>
+    <Module num="03" label="Canned jobs" status={<span className={styles.count}>{jobs.length} active</span>}>
       <div className={styles.library} inert={retiring || discardAction ? true : undefined}>
         <header className={styles.intro}>
           <p>Keep priced repair and maintenance work ready for fast quotes.</p>

@@ -6,6 +6,7 @@ import { canManageTeam } from '@/lib/shop-os/capabilities'
 import { getShopById } from '@/lib/db/queries'
 import { Module } from '@/components/vt'
 import { ShopSection } from '@/components/vt/shop-section'
+import { RatesSection } from '@/components/vt/rates-section'
 import { CannedJobsSection } from '@/components/vt/canned-jobs-section'
 import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
 
@@ -35,13 +36,17 @@ export default async function SettingsShopPage() {
 
   return <>
     <ShopSection initialName={shop.name} />
+    <RatesSection
+      initialTaxRateBps={shop.taxRateBps}
+      initialLaborRateCents={shop.laborRateCents}
+    />
     {library.ok ? (
       <CannedJobsSection
         initialJobs={library.cannedJobs.map(publicCannedJob)}
         initialTaxRateBps={library.taxRateBps}
       />
     ) : (
-      <Module num="02" label="Canned jobs">
+      <Module num="03" label="Canned jobs">
         <p className="vt-settings-coming-soon">The canned-job library could not be loaded. Refresh the page to try again.</p>
       </Module>
     )}

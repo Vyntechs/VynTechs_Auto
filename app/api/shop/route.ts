@@ -6,10 +6,19 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile, isFounder } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 
+// Mirrors the DB range checks on the shops table (schema.ts): tax rate is
+// stored in basis points (0–10,000 = 0–100%); labor rate is stored in cents
+// and is bounded by the safe-integer range.
+const MAX_TAX_RATE_BPS = 10_000
+
 export async function POST(req: Request) {
-  let body: { name?: unknown }
+  let body: { name?: unknown; taxRateBps?: unknown; laborRateCents?: unknown }
   try {
-    body = (await req.json()) as { name?: unknown }
+    body = (await req.json()) as {
+      name?: unknown
+      taxRateBps?: unknown
+      laborRateCents?: unknown
+    }
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
@@ -35,11 +44,48 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'no_shop' }, { status: 403 })
   }
 
-  const name = typeof body.name === 'string' ? body.name.trim() : ''
-  if (name.length === 0 || name.length > 80) {
-    return NextResponse.json({ error: 'invalid_name' }, { status: 422 })
+  // Partial update: only the fields present in the body are validated and
+  // written, so the "Shop name" and "Rates & tax" forms can each save
+  // independently without clobbering the other's column.
+  const updates: {
+    name?: string
+    taxRateBps?: number
+    laborRateCents?: number
+  } = {}
+
+  if (body.name !== undefined) {
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (name.length === 0 || name.length > 80) {
+      return NextResponse.json({ error: 'invalid_name' }, { status: 422 })
+    }
+    updates.name = name
   }
 
-  await db.update(shops).set({ name }).where(eq(shops.id, ctx.profile.shopId))
+  if (body.taxRateBps !== undefined && body.taxRateBps !== null) {
+    const bps = body.taxRateBps
+    if (
+      typeof bps !== 'number' ||
+      !Number.isInteger(bps) ||
+      bps < 0 ||
+      bps > MAX_TAX_RATE_BPS
+    ) {
+      return NextResponse.json({ error: 'invalid_tax_rate' }, { status: 422 })
+    }
+    updates.taxRateBps = bps
+  }
+
+  if (body.laborRateCents !== undefined && body.laborRateCents !== null) {
+    const cents = body.laborRateCents
+    if (typeof cents !== 'number' || !Number.isSafeInteger(cents) || cents < 0) {
+      return NextResponse.json({ error: 'invalid_labor_rate' }, { status: 422 })
+    }
+    updates.laborRateCents = cents
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'no_changes' }, { status: 422 })
+  }
+
+  await db.update(shops).set(updates).where(eq(shops.id, ctx.profile.shopId))
   return NextResponse.json({ ok: true })
 }

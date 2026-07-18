@@ -175,4 +175,71 @@ describe('POST /api/shop', () => {
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: 'no_shop' })
   })
+
+  it('sets tax and labor rates when caller is owner', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ taxRateBps: 825, laborRateCents: 12000 }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.taxRateBps).toBe(825)
+    expect(row.laborRateCents).toBe(12000)
+    // A rates-only save must not touch the name column.
+    expect(row.name).toBe('Old Name')
+  })
+
+  it('updates only the fields provided (partial update)', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ laborRateCents: 9500 }))
+    expect(res.status).toBe(200)
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.laborRateCents).toBe(9500)
+    expect(row.taxRateBps).toBeNull()
+  })
+
+  it('accepts a 0% (tax-exempt) rate and the 100% boundary', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    expect((await POST(makeReq({ taxRateBps: 0 }))).status).toBe(200)
+    expect((await POST(makeReq({ taxRateBps: 10_000 }))).status).toBe(200)
+  })
+
+  it('rejects a tax rate above 100% (10,000 bps)', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ taxRateBps: 10_001 }))
+    expect(res.status).toBe(422)
+    expect(await res.json()).toEqual({ error: 'invalid_tax_rate' })
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.taxRateBps).toBeNull()
+  })
+
+  it('rejects a non-integer or negative labor rate', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    expect((await POST(makeReq({ laborRateCents: -1 }))).status).toBe(422)
+    expect((await POST(makeReq({ laborRateCents: 1.5 }))).status).toBe(422)
+  })
+
+  it('rejects rate changes from a tech (server-side admin gate)', async () => {
+    await seedProfile({ role: 'tech' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ taxRateBps: 500 }))
+    expect(res.status).toBe(403)
+
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row.taxRateBps).toBeNull()
+  })
+
+  it('returns 422 when no known field is provided', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ somethingElse: true }))
+    expect(res.status).toBe(422)
+  })
 })
