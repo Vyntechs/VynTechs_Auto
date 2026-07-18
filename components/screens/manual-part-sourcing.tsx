@@ -481,7 +481,7 @@ export function ManualPartSourcing({
               ) : (
                 <button ref={(node) => { fieldRefs.current.vendorAccountId = node }} type="button" className={styles.secondary} onClick={openAccountForm}>Add supplier</button>
               )) : (
-                <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier before this part can be sourced.</p>
+                <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier in Settings → Shop before this part can be sourced.</p>
               )}
             </fieldset>
           )}

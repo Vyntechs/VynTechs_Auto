@@ -89,7 +89,7 @@ describe('ManualPartSourcing', () => {
     expect(screen.getByRole('button', { name: 'Add supplier' })).toBeInTheDocument()
 
     rerender(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: false })} />)
-    expect(screen.getByText('An owner needs to add a supplier before this part can be sourced.')).toBeInTheDocument()
+    expect(screen.getByText('An owner needs to add a supplier in Settings → Shop before this part can be sourced.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add supplier' })).toBeNull()
 
     rerender(<ManualPartSourcing {...props({ accounts: [], catalogAvailable: false, canCreateVendorAccount: true })} />)
@@ -106,7 +106,7 @@ describe('ManualPartSourcing', () => {
     {
       label: 'non-manager notice',
       overrides: { accounts: [], canCreateVendorAccount: false },
-      target: () => screen.getByText('An owner needs to add a supplier before this part can be sourced.'),
+      target: () => screen.getByText('An owner needs to add a supplier in Settings → Shop before this part can be sourced.'),
     },
     {
       label: 'catalog-unavailable notice',

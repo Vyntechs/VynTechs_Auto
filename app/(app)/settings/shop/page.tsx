@@ -8,7 +8,9 @@ import { Module } from '@/components/vt'
 import { ShopSection } from '@/components/vt/shop-section'
 import { RatesSection } from '@/components/vt/rates-section'
 import { CannedJobsSection } from '@/components/vt/canned-jobs-section'
+import { SuppliersSection } from '@/components/vt/suppliers-section'
 import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
+import { listVendorAccounts, publicVendorAccount, vendorAccountActorFromProfile } from '@/lib/shop-os/parts'
 
 export default async function SettingsShopPage() {
   const supabase = await getServerSupabase()
@@ -33,6 +35,10 @@ export default async function SettingsShopPage() {
   const library = await listCannedJobs(db, {
     actor: cannedJobActorFromProfile(ctx.profile, founderOverride),
   })
+  const suppliers = await listVendorAccounts(db, {
+    actor: vendorAccountActorFromProfile(ctx.profile, founderOverride),
+    scope: 'all',
+  })
 
   return <>
     <ShopSection initialName={shop.name} />
@@ -48,6 +54,13 @@ export default async function SettingsShopPage() {
     ) : (
       <Module num="03" label="Canned jobs">
         <p className="vt-settings-coming-soon">The canned-job library could not be loaded. Refresh the page to try again.</p>
+      </Module>
+    )}
+    {suppliers.ok ? (
+      <SuppliersSection initialAccounts={suppliers.vendorAccounts.map(publicVendorAccount)} />
+    ) : (
+      <Module num="04" label="Suppliers">
+        <p className="vt-settings-coming-soon">The supplier list could not be loaded. Refresh the page to try again.</p>
       </Module>
     )}
   </>
