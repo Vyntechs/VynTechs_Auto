@@ -1,16 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import type { EmailOtpType } from '@supabase/supabase-js'
 import { getServerSupabase } from '@/lib/supabase-server'
-
-/** Same-origin path validator, matching the one on /sign-in and /auth/callback.
- *  Only relative paths starting with `/` and not `//` (protocol-relative). A
- *  crafted `?next=` cannot bounce the user to an external URL after the OTP
- *  exchange completes. */
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '/today'
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/today'
-  return raw
-}
+import { safeNextPath } from '@/lib/safe-next-path'
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)

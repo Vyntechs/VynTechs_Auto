@@ -3,16 +3,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBrowserSupabase } from '@/lib/supabase-client'
-
-/** Same-origin path validator. Only accept relative paths starting with `/`
- *  and not `//` (protocol-relative). Anything else falls through to the
- *  default landing so we can't be tricked into sending the user to an
- *  external URL after login. */
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '/today'
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/today'
-  return raw
-}
+import { safeNextPath } from '@/lib/safe-next-path'
 
 /** Read the post-login redirect target from the current URL's query string.
  *  We read it directly from window.location at submit time rather than using

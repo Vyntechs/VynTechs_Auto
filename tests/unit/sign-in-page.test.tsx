@@ -136,4 +136,17 @@ describe('SignInPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/today'))
   })
+
+  it('falls back to /today for a decoded backslash authority escape', async () => {
+    setLocationSearch('?next=%2F%5Cevil.example')
+    render(<SignInPage />)
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'brandon@vyntechs.com' },
+    })
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'correct-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/today'))
+  })
 })
