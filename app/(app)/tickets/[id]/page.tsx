@@ -3,8 +3,9 @@ import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
-import { canBuildQuotes, canCloseTickets } from '@/lib/shop-os/capabilities'
+import { canBuildQuotes, canCloseTickets, canPlacePartsOrders } from '@/lib/shop-os/capabilities'
 import { getTicketRingOut } from '@/lib/shop-os/ring-out'
+import { listPartRequestsForTicket } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
 
@@ -36,12 +37,18 @@ export default async function TicketPage({
     if (ringOutResult.ok) ringOut = ringOutResult.ringOut
   }
 
+  // The parts a tech flagged relay to whoever sources parts (parts/advisor/owner).
+  const partRequests = canPlacePartsOrders(ctx.profile.role) && ctx.profile.shopId
+    ? await listPartRequestsForTicket(db, { shopId: ctx.profile.shopId, ticketId: id })
+    : []
+
   return (
     <TicketDetailScreen
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
       currentProfileId={ctx.profile.id}
       ringOut={ringOut}
+      partRequests={partRequests}
     />
   )
 }

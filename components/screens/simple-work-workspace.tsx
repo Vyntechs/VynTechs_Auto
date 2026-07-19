@@ -15,17 +15,20 @@ import {
   type SimpleWorkProjectionView,
   type SimpleWorkWorkspaceView,
 } from '@/lib/shop-os/simple-work-ui'
+import type { PartRequestView } from '@/lib/shop-os/part-requests-ui'
+import { PartsNeededPanel } from './parts-needed-panel'
 import styles from './simple-work-workspace.module.css'
 
 type Props = {
   ticket: { id: string; number: number; customerName: string; vehicle: string }
   initialWorkspace: SimpleWorkWorkspaceView
+  initialPartRequests?: PartRequestView[]
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
 type Pending = 'clock' | 'note' | 'complete' | 'escalation' | null
 
-export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
+export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartRequests = [] }: Props) {
   const router = useRouter()
   const [workspace, setWorkspace] = useState(initialWorkspace)
   const [note, setNote] = useState(initialWorkspace.workNotes ?? '')
@@ -225,6 +228,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
                 {pending === 'complete' ? 'Completing…' : 'Complete work'}
               </button>
             </section>
+            <PartsNeededPanel ticketId={ticket.id} jobId={workspace.id} initialRequests={initialPartRequests} />
             <details className={styles.concern}>
               <summary>Found another concern</summary>
               {createdConcern ? (

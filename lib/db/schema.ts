@@ -528,6 +528,69 @@ export const jobAttachments = pgTable(
   ],
 )
 
+export const jobPartRequests = pgTable(
+  'job_part_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    requestedByProfileId: uuid('requested_by_profile_id').notNull(),
+    description: text('description').notNull(),
+    preference: text('preference'),
+    quantity: integer('quantity').default(1).notNull(),
+    status: text('status', { enum: ['requested', 'sourced', 'dismissed'] })
+      .default('requested')
+      .notNull(),
+    requestKey: uuid('request_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    resolvedByProfileId: uuid('resolved_by_profile_id'),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'job_part_requests_shop_job_fk',
+      columns: [table.shopId, table.ticketId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.ticketId, ticketJobs.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'job_part_requests_shop_requester_fk',
+      columns: [table.shopId, table.requestedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_part_requests_shop_resolver_fk',
+      columns: [table.shopId, table.resolvedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('job_part_requests_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('job_part_requests_shop_request_key_uq').on(table.shopId, table.requestKey),
+    index('job_part_requests_ticket_status_idx').on(table.shopId, table.ticketId, table.status),
+    index('job_part_requests_job_idx').on(table.shopId, table.jobId),
+    check('job_part_requests_quantity_range', sql`${table.quantity} between 1 and 99`),
+    check(
+      'job_part_requests_status_valid',
+      sql`${table.status} in ('requested', 'sourced', 'dismissed')`,
+    ),
+    check(
+      'job_part_requests_description_length',
+      sql`char_length(${table.description}) between 1 and 200`,
+    ),
+    check(
+      'job_part_requests_preference_length',
+      sql`${table.preference} is null or char_length(${table.preference}) between 1 and 200`,
+    ),
+    check(
+      'job_part_requests_resolved_consistent',
+      sql`(${table.status} = 'requested') = (${table.resolvedAt} is null)
+        and (${table.resolvedAt} is null) = (${table.resolvedByProfileId} is null)`,
+    ),
+  ],
+)
+
+export type JobPartRequest = typeof jobPartRequests.$inferSelect
+export type NewJobPartRequest = typeof jobPartRequests.$inferInsert
+
 export const vendorAccounts = pgTable(
   'vendor_accounts',
   {

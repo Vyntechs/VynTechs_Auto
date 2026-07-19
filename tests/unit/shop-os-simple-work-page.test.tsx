@@ -13,6 +13,7 @@ vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => (
 vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
 vi.mock('@/lib/auth-access', () => ({ checkAccess: vi.fn() }))
 vi.mock('@/lib/shop-os/simple-work', () => ({ getSimpleWorkWorkspace: vi.fn() }))
+vi.mock('@/lib/shop-os/part-requests', () => ({ listPartRequestsForJob: vi.fn(async () => []) }))
 vi.mock('@/lib/tickets', () => ({ getTicketDetail: vi.fn(), ticketActorFromProfile: vi.fn(() => ({ actor: true })) }))
 vi.mock('@/components/screens/simple-work-workspace', () => ({
   SimpleWorkWorkspace: (props: unknown) => workspaceScreenMock(props) ?? <div>Simple work screen</div>,
@@ -58,6 +59,7 @@ describe('simple work page', () => {
     expect(workspaceScreenMock).toHaveBeenCalledWith({
       ticket: { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' },
       initialWorkspace: workspace,
+      initialPartRequests: [],
     })
     expect(JSON.stringify(workspaceScreenMock.mock.calls[0][0])).not.toMatch(/phone|engine|vin|shopId/)
   })

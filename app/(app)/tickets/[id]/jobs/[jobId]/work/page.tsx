@@ -5,6 +5,7 @@ import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { getSimpleWorkWorkspace } from '@/lib/shop-os/simple-work'
 import { parseSimpleWorkWorkspaceResponse } from '@/lib/shop-os/simple-work-ui'
+import { listPartRequestsForJob } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
 
@@ -39,6 +40,11 @@ export default async function SimpleWorkPage({
   if (!ticket.customer || !ticket.vehicle) notFound()
   if (ticket.status !== 'open' && initialWorkspace.workStatus !== 'done') notFound()
 
+  const initialPartRequests = await listPartRequestsForJob(db, {
+    shopId: ctx.profile.shopId,
+    jobId: initialWorkspace.id,
+  })
+
   return (
     <SimpleWorkWorkspace
       ticket={{
@@ -48,6 +54,7 @@ export default async function SimpleWorkPage({
         vehicle: `${ticket.vehicle.year} ${ticket.vehicle.make} ${ticket.vehicle.model}`,
       }}
       initialWorkspace={initialWorkspace}
+      initialPartRequests={initialPartRequests}
     />
   )
 }

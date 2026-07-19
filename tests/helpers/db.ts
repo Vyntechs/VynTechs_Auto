@@ -66,6 +66,7 @@ export async function createTestDb(): Promise<{
   await ensureTicketPaymentsMigration(client)
   await ensureJobWorkClockMigration(client)
   await ensureJobTimeClockMigration(client)
+  await ensureJobPartRequestsMigration(client)
   return {
     db,
     client,
@@ -157,6 +158,67 @@ export async function ensureJobTimeClockMigration(client: PGlite): Promise<void>
 
   if (!(await ticketJobsHasTimeClockColumns(client))) {
     throw new Error('ticket_jobs time clock migration failed in ephemeral database')
+  }
+}
+
+type JobPartRequestsMarkers = {
+  table_exists: boolean
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function jobPartRequestsMarkers(client: PGlite): Promise<JobPartRequestsMarkers> {
+  const result = await client.query<JobPartRequestsMarkers>(`
+    select
+      to_regclass('public.job_part_requests') is not null as table_exists,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.job_part_requests')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'job_part_requests'
+         and policyname = 'job_part_requests_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'job_part_requests'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'job_part_requests'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('job part requests schema inspection failed')
+  return markers
+}
+
+function hasCompleteJobPartRequests(markers: JobPartRequestsMarkers): boolean {
+  return markers.table_exists
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureJobPartRequestsMigration(client: PGlite): Promise<void> {
+  const before = await jobPartRequestsMarkers(client)
+  if (hasCompleteJobPartRequests(before)) return
+  if (before.table_exists) {
+    throw new Error('partial job part requests schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0041_shop_os_job_part_requests.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!hasCompleteJobPartRequests(await jobPartRequestsMarkers(client))) {
+    throw new Error('job part requests migration failed in ephemeral database')
   }
 }
 
