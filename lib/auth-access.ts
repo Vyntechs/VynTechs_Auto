@@ -45,6 +45,9 @@ const EXEMPT_EXACT = new Set<string>([
   '/terms',
   // The browser must fetch the service worker before any session exists.
   '/sw.js',
+  // Mandatory import for the public-only worker; it must stay reachable so a
+  // revoked browser can install the cache-scrubbing privacy migration.
+  '/sw-policy.js',
   '/api/health',
 ])
 

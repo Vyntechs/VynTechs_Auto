@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
@@ -198,6 +200,7 @@ describe('isPaywallExempt', () => {
       '/privacy',
       '/terms',
       '/sw.js',
+      '/sw-policy.js',
     ])('exempts %s', (path) => {
       expect(isPaywallExempt(path)).toBe(true)
     })
@@ -256,5 +259,15 @@ describe('isPaywallExempt', () => {
     expect(isPaywallExempt('/sign-in-impostor')).toBe(false)
     expect(isPaywallExempt('/whats-newer')).toBe(false)
     expect(isPaywallExempt('/api/healthcheck')).toBe(false)
+    expect(isPaywallExempt('/sw-policy.js/anything')).toBe(false)
+  })
+
+  it('exempts every script the public privacy-migration worker imports', () => {
+    const worker = readFileSync(resolve(process.cwd(), 'public/sw.js'), 'utf8')
+    const dependencies = [...worker.matchAll(/importScripts\(['"]([^'"]+)['"]\)/g)]
+      .map((match) => match[1])
+
+    expect(dependencies).toEqual(['/sw-policy.js'])
+    expect(dependencies.every((path) => isPaywallExempt(path))).toBe(true)
   })
 })
