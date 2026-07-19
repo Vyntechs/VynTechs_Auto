@@ -165,6 +165,27 @@ describe('POST /api/team/role', () => {
     expect(row.role).toBe('curator')
   })
 
+  it('preserves explicit curator authority even when the shop role is owner', async () => {
+    await seedInviter('owner')
+    const CURATOR_ID = '00000000-0000-0000-0000-000000000019'
+    await currentDb.insert(profiles).values({
+      userId: CURATOR_ID,
+      role: 'owner',
+      isCurator: true,
+      shopId,
+      fullName: 'Owner Curator',
+    })
+
+    const { POST } = await import('@/app/api/team/role/route')
+    const res = await POST(makeReq({ userId: CURATOR_ID, role: 'tech' }))
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('protected_role')
+
+    const [row] = await currentDb.select().from(profiles).where(eq(profiles.userId, CURATOR_ID))
+    expect(row.role).toBe('owner')
+    expect(row.isCurator).toBe(true)
+  })
+
   it('returns 404 when target user does not exist', async () => {
     await seedInviter('owner')
     const { POST } = await import('@/app/api/team/role/route')

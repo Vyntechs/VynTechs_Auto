@@ -184,7 +184,7 @@ export async function updateTeamMember(
       }
     }
 
-    if (target.role === 'curator') {
+    if (target.isCurator || target.role === 'curator') {
       return { ok: false, error: 'protected_role' }
     }
 
@@ -244,7 +244,7 @@ export async function deactivateTeamMember(
         error: outsideShop ? 'forbidden' : 'not_found',
       }
     }
-    if (target.role === 'curator') {
+    if (target.isCurator || target.role === 'curator') {
       return { ok: false, error: 'protected_role' }
     }
     if (target.deactivatedAt) return { ok: true, noop: true }

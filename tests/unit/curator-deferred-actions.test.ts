@@ -130,4 +130,47 @@ describe('curator deferred-actions handlers', () => {
     const closeResult = await closeDeferredSession(db, UNKNOWN_ID, null)
     expect(closeResult.kind).toBe('not-found')
   })
+
+  it('rejects every stale non-deferred transition without changing the session', async () => {
+    const actions = [
+      () => approveDeferredSession(db, SESSION_ID, 'stale approve'),
+      () => overrideDeferredSession(db, SESSION_ID, 'stale-action', 'stale override'),
+      () => closeDeferredSession(db, SESSION_ID, 'stale close'),
+    ]
+
+    for (const action of actions) {
+      const baseline = new Date('2026-05-02T10:00:00Z')
+      await db.update(sessions).set({
+        status: 'open',
+        closedAt: baseline,
+        curatorNote: 'preserve me',
+        curatorOverrideAction: 'preserve-action',
+      }).where(eq(sessions.id, SESSION_ID))
+
+      await expect(action()).resolves.toEqual({ kind: 'not-found' })
+
+      const [unchanged] = await db.select().from(sessions).where(eq(sessions.id, SESSION_ID))
+      expect({
+        status: unchanged.status,
+        closedAt: unchanged.closedAt,
+        curatorNote: unchanged.curatorNote,
+        curatorOverrideAction: unchanged.curatorOverrideAction,
+      }).toEqual({
+        status: 'open',
+        closedAt: baseline,
+        curatorNote: 'preserve me',
+        curatorOverrideAction: 'preserve-action',
+      })
+    }
+  })
+
+  it('allows only the first replayed deferred transition to win', async () => {
+    await expect(approveDeferredSession(db, SESSION_ID, 'winner')).resolves.toEqual({ kind: 'ok' })
+    await expect(closeDeferredSession(db, SESSION_ID, 'stale replay')).resolves.toEqual({ kind: 'not-found' })
+
+    const [winner] = await db.select().from(sessions).where(eq(sessions.id, SESSION_ID))
+    expect(winner.status).toBe('open')
+    expect(winner.curatorNote).toBe('winner')
+    expect(winner.closedAt).toBeNull()
+  })
 })
