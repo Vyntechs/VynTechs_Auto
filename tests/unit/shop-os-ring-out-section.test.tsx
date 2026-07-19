@@ -8,6 +8,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => router }))
 
 const TICKET = '00000000-0000-4000-8000-000000000020'
 const REQUEST = '00000000-0000-4000-8000-000000000099'
+const SECOND_REQUEST = '00000000-0000-4000-8000-000000000100'
 
 const OPEN: TicketRingOut = {
   ticketId: TICKET,
@@ -39,6 +40,18 @@ const PAID: TicketRingOut = {
   }],
   canRecordPayment: false,
   canClose: true,
+}
+
+const PARTIAL: TicketRingOut = {
+  ...OPEN,
+  paidCents: 5_000,
+  balanceCents: 10_800,
+  payments: [{
+    id: '00000000-0000-4000-8000-000000000061',
+    amountCents: 5_000, method: 'cash', note: null, recordedAt: '2026-07-19T10:00:00.000Z',
+  }],
+  canRecordPayment: true,
+  canClose: false,
 }
 
 const CLOSED: TicketRingOut = {
@@ -111,6 +124,78 @@ describe('RingOutSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/more than the balance owed/i)
     expect(screen.getByRole('button', { name: 'Record payment' })).toBeInTheDocument()
+  })
+
+  it('reuses one request key when an unchanged payment retries after an ambiguous failure', async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce(REQUEST)
+      .mockReturnValueOnce(SECOND_REQUEST)
+    vi.stubGlobal('crypto', { randomUUID })
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('response lost after commit'))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: PARTIAL }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} />)
+    fireEvent.change(screen.getByLabelText('Payment amount'), { target: { value: '50.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    const retry = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+    expect(first.requestKey).toBe(REQUEST)
+    expect(retry.requestKey).toBe(REQUEST)
+    expect(randomUUID).toHaveBeenCalledTimes(1)
+    expect((await screen.findAllByText('$50.00')).length).toBeGreaterThan(0)
+  })
+
+  it('rotates the key when the normalized payment intent changes', async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce(REQUEST)
+      .mockReturnValueOnce(SECOND_REQUEST)
+    vi.stubGlobal('crypto', { randomUUID })
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('ambiguous'))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: PARTIAL }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} />)
+    fireEvent.change(screen.getByLabelText('Payment amount'), { target: { value: '50.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('How paid'), { target: { value: 'card' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    const changed = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+    expect(first.requestKey).toBe(REQUEST)
+    expect(changed.requestKey).toBe(SECOND_REQUEST)
+  })
+
+  it('clears a confirmed attempt key before a later legitimate payment', async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce(REQUEST)
+      .mockReturnValueOnce(SECOND_REQUEST)
+    vi.stubGlobal('crypto', { randomUUID })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: PARTIAL }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: PAID }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} />)
+    fireEvent.change(screen.getByLabelText('Payment amount'), { target: { value: '50.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByRole('button', { name: 'Record payment' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    const second = JSON.parse(String(fetchMock.mock.calls[1][1]?.body))
+    expect(first.requestKey).toBe(REQUEST)
+    expect(second.requestKey).toBe(SECOND_REQUEST)
   })
 
   it('renders a read-only receipt for a closed ticket', () => {
