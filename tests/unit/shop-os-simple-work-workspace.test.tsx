@@ -20,7 +20,7 @@ const REQUEST = '00000000-0000-4000-8000-000000000080'
 const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' }
 const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
-  startedAt: null, completedAt: null,
+  startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
 }
 
@@ -33,30 +33,30 @@ describe('simple work workspace', () => {
   it('renders distinct not-approved and declined states without mutation controls', () => {
     const { rerender } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, authorization: 'awaiting_approval' }} />)
     expect(screen.getByRole('heading', { name: 'Work not approved' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
     rerender(<SimpleWorkWorkspace key="declined" ticket={ticket} initialWorkspace={{ ...base, authorization: 'declined' }} />)
     expect(screen.getByRole('heading', { name: 'Customer declined this work' })).toBeInTheDocument()
     expect(screen.queryByText('Waiting for customer approval')).toBeNull()
   })
 
-  it('starts work only after a strict confirmed server response', async () => {
+  it('clocks on only after a strict confirmed server response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, updatedAt: '2026-07-11T12:01:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:01:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z' } }),
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
     await screen.findByRole('heading', { name: 'Work in progress' })
     expect(fetchMock).toHaveBeenCalledWith(`/api/tickets/${TICKET}/jobs/${JOB}/work`, expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ action: 'start' }),
+      method: 'POST', body: JSON.stringify({ action: 'clock_on' }),
     }))
   })
 
   it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', startedAt: '2026-07-11T12:00:30.000Z', completedAt: null, updatedAt: '2026-07-11T12:02:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', startedAt: '2026-07-11T12:00:30.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:30.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:02:00.000Z' } }),
     })
     vi.stubGlobal('fetch', fetchMock)
     const inProgress = { ...base, workStatus: 'in_progress' as const }
@@ -97,7 +97,7 @@ describe('simple work workspace', () => {
   it('replaces stale mutation UI with ticket context after a not-found response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'not_found' }) }))
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Start work' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith(`/tickets/${TICKET}`))
   })
 
@@ -111,24 +111,34 @@ describe('simple work workspace', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('shows the job clock and how long it ran once complete', () => {
+  it('shows total time on the job and when it finished, once complete', () => {
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
       ...base, workStatus: 'done', workNotes: 'Installed and verified.',
-      startedAt: '2026-07-11T09:14:00.000Z', completedAt: '2026-07-11T11:29:00.000Z',
+      activeSeconds: 8_100, clockedOnSince: null, completedAt: '2026-07-11T11:29:00.000Z',
     }} />)
-    expect(screen.getByText('Started')).toBeInTheDocument()
     expect(screen.getByText('Finished')).toBeInTheDocument()
     const onJob = screen.getByText('On the job').closest('div') as HTMLElement
     expect(within(onJob).getByText('2h 15m')).toBeInTheDocument()
   })
 
-  it('shows only the start time while work is still in progress', () => {
+  it('shows a running total and a clock-off control while clocked on', () => {
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
-      ...base, workStatus: 'in_progress', startedAt: '2026-07-11T09:14:00.000Z', completedAt: null,
+      ...base, workStatus: 'in_progress', clockedOnSince: '2026-07-11T09:14:00.000Z', activeSeconds: 600,
     }} />)
-    expect(screen.getByText('Started')).toBeInTheDocument()
+    expect(screen.getByText('On the job')).toBeInTheDocument()
+    expect(screen.getByText(/Running since/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clock off' })).toBeInTheDocument()
     expect(screen.queryByText('Finished')).toBeNull()
-    expect(screen.queryByText('On the job')).toBeNull()
+  })
+
+  it('shows a paused total and a clock-back-on control while clocked off', () => {
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base, workStatus: 'in_progress', clockedOnSince: null, activeSeconds: 8_100,
+    }} />)
+    const onJob = screen.getByText('On the job').closest('div') as HTMLElement
+    expect(within(onJob).getByText('2h 15m')).toBeInTheDocument()
+    expect(screen.getByText('Paused')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clock back on' })).toBeInTheDocument()
   })
 
   it('protects long technician-controlled strings from narrow-screen overflow', () => {

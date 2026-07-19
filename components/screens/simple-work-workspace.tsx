@@ -5,7 +5,8 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/vt'
 import {
-  formatWorkDuration,
+  activeDurationSeconds,
+  formatDurationSeconds,
   parseEscalationResponse,
   parseSimpleWorkMutationResponse,
   parseSimpleWorkWorkspaceResponse,
@@ -22,7 +23,7 @@ type Props = {
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
-type Pending = 'start' | 'note' | 'complete' | 'escalation' | null
+type Pending = 'clock' | 'note' | 'complete' | 'escalation' | null
 
 export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
   const router = useRouter()
@@ -43,6 +44,8 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
       workNotes: work.workNotes,
       startedAt: work.startedAt,
       completedAt: work.completedAt,
+      clockedOnSince: work.clockedOnSince,
+      activeSeconds: work.activeSeconds,
       updatedAt: work.updatedAt,
     }))
     setNote(work.workNotes ?? '')
@@ -69,11 +72,12 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
   async function mutateWork(
     action: Record<string, unknown>,
     mode: Exclude<Pending, 'escalation' | null>,
+    busy: string,
     success: string,
   ) {
     if (pending) return
     setPending(mode)
-    setNotice({ kind: 'status', text: mode === 'start' ? 'Starting work…' : mode === 'note' ? 'Saving note…' : 'Completing work…' })
+    setNotice({ kind: 'status', text: busy })
     try {
       const response = await fetch(`${basePath}/work`, {
         method: 'POST',
@@ -164,7 +168,11 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
             <p className={styles.stateMark}>Complete</p>
             <h2 id="work-complete">Work complete</h2>
             <p className={styles.savedNote}>{workspace.workNotes ?? 'No work note recorded.'}</p>
-            <JobClock startedAt={workspace.startedAt} completedAt={workspace.completedAt} />
+            <JobClock
+              clockedOnSince={workspace.clockedOnSince}
+              activeSeconds={workspace.activeSeconds}
+              completedAt={workspace.completedAt}
+            />
           </section>
         ) : workspace.authorization === 'declined' ? (
           <ReadOnlyState title="Customer declined this work" copy="This work is not authorized. No work action is available." />
@@ -174,10 +182,10 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
           <section className={styles.state} aria-labelledby="ready-heading">
             <p className={styles.stateMark}>Ready</p>
             <h2 id="ready-heading">Approved and ready</h2>
-            <p>Start only when the vehicle and bay are ready.</p>
+            <p>Clock on when you start working it. You can be clocked on to more than one job at a time.</p>
             <button className={styles.primary} type="button" disabled={pending !== null}
-              onClick={() => mutateWork({ action: 'start' }, 'start', 'Work started.')}>
-              {pending === 'start' ? 'Starting work…' : 'Start work'}
+              onClick={() => mutateWork({ action: 'clock_on' }, 'clock', 'Clocking on…', 'Clocked on.')}>
+              {pending === 'clock' ? 'Clocking on…' : 'Clock on'}
             </button>
           </section>
         ) : (
@@ -185,7 +193,17 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
             <section className={styles.state} aria-labelledby="progress-heading">
               <p className={styles.stateMark}>Now</p>
               <h2 id="progress-heading">Work in progress</h2>
-              <JobClock startedAt={workspace.startedAt} completedAt={workspace.completedAt} />
+              <JobClock
+                clockedOnSince={workspace.clockedOnSince}
+                activeSeconds={workspace.activeSeconds}
+                completedAt={null}
+              />
+              <button className={styles.primary} type="button" disabled={pending !== null}
+                onClick={() => workspace.clockedOnSince
+                  ? mutateWork({ action: 'clock_off' }, 'clock', 'Clocking off…', 'Clocked off. Time saved.')
+                  : mutateWork({ action: 'clock_on' }, 'clock', 'Clocking on…', 'Clocked back on.')}>
+                {pending === 'clock' ? 'Saving…' : workspace.clockedOnSince ? 'Clock off' : 'Clock back on'}
+              </button>
             </section>
             <section className={styles.module} aria-labelledby="note-heading">
               <div className={styles.moduleHeading}><span>01</span><h2 id="note-heading">Work note</h2></div>
@@ -194,7 +212,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
               <div className={styles.actionRow}>
                 <span>{note.length} / 2,000</span>
                 <button className={styles.secondary} type="button" disabled={pending !== null || note.trim().length < 1}
-                  onClick={() => mutateWork({ action: 'save_note', note, expectedUpdatedAt: workspace.updatedAt }, 'note', 'Work note saved.')}>
+                  onClick={() => mutateWork({ action: 'save_note', note, expectedUpdatedAt: workspace.updatedAt }, 'note', 'Saving note…', 'Work note saved.')}>
                   {pending === 'note' ? 'Saving note…' : 'Save note'}
                 </button>
               </div>
@@ -203,7 +221,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
               <div className={styles.moduleHeading}><span>02</span><h2 id="complete-heading">Complete work</h2></div>
               <p className={styles.helper}>Requires a saved work note.</p>
               <button className={styles.primary} type="button" disabled={pending !== null || !completeReady}
-                onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Work completed.')}>
+                onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Completing…', 'Work completed.')}>
                 {pending === 'complete' ? 'Completing…' : 'Complete work'}
               </button>
             </section>
@@ -253,19 +271,28 @@ function formatClockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-// The job's own clock: when it was started and finished, and how long it ran on
-// the bay. No money, no labor billing — just the tech's actual time on the job.
-function JobClock({ startedAt, completedAt }: { startedAt: string | null; completedAt: string | null }) {
-  if (!startedAt && !completedAt) return null
-  const duration = formatWorkDuration(startedAt, completedAt)
+// The job's own time: total actual time the tech has clocked on it (banked
+// intervals plus the interval running right now), whether the clock is running
+// or paused, and — once done — when it was finished. No money, just the time.
+function JobClock({
+  clockedOnSince,
+  activeSeconds,
+  completedAt,
+}: {
+  clockedOnSince: string | null
+  activeSeconds: number
+  completedAt: string | null
+}) {
+  const total = activeDurationSeconds(activeSeconds, clockedOnSince, Date.now())
+  const done = completedAt !== null
+  if (total === 0 && !clockedOnSince && !done) return null
   return (
     <dl className={styles.clock}>
-      <div><dt>Started</dt><dd>{startedAt ? formatClockTime(startedAt) : '—'}</dd></div>
-      {completedAt && (
-        <>
-          <div><dt>Finished</dt><dd>{formatClockTime(completedAt)}</dd></div>
-          <div><dt>On the job</dt><dd>{duration ?? '—'}</dd></div>
-        </>
+      <div><dt>On the job</dt><dd>{formatDurationSeconds(total)}</dd></div>
+      {done ? (
+        <div><dt>Finished</dt><dd>{formatClockTime(completedAt)}</dd></div>
+      ) : (
+        <div><dt>Clock</dt><dd>{clockedOnSince ? `Running since ${formatClockTime(clockedOnSince)}` : 'Paused'}</dd></div>
       )}
     </dl>
   )

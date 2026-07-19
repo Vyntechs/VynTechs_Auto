@@ -404,6 +404,8 @@ export const ticketJobs = pgTable(
     diagnosticStartErrorCode: text('diagnostic_start_error_code'),
     workStartedAt: timestamp('work_started_at', { withTimezone: true }),
     workCompletedAt: timestamp('work_completed_at', { withTimezone: true }),
+    clockedOnSince: timestamp('clocked_on_since', { withTimezone: true }),
+    activeSeconds: integer('active_seconds').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -471,6 +473,10 @@ export const ticketJobs = pgTable(
     check(
       'ticket_jobs_session_only_for_diagnostic',
       sql`${table.sessionId} is null or ${table.kind} = 'diagnostic'`,
+    ),
+    check(
+      'ticket_jobs_active_seconds_nonneg',
+      sql`${table.activeSeconds} >= 0`,
     ),
     check(
       'ticket_jobs_story_json_objects',

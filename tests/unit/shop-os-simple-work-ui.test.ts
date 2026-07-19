@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  formatWorkDuration,
+  activeDurationSeconds,
+  formatDurationSeconds,
   parseEscalationResponse,
   parseSimpleWorkMutationResponse,
   parseSimpleWorkWorkspaceResponse,
@@ -13,6 +14,7 @@ const uuid = (suffix: number) =>
 const workspace = {
   id: uuid(1), title: 'Install lift kit', kind: 'repair', workStatus: 'in_progress',
   workNotes: 'Started', startedAt: '2026-07-11T11:30:00.000Z', completedAt: null,
+  clockedOnSince: '2026-07-11T11:30:00.000Z', activeSeconds: 0,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
 }
 
@@ -20,7 +22,7 @@ describe('Shop OS simple-work UI contract', () => {
   it('strictly parses bounded text-only workspace, mutation, and escalation responses', () => {
     expect(parseSimpleWorkWorkspaceResponse({ workspace })).toEqual(workspace)
     expect(parseSimpleWorkMutationResponse({
-      changed: true, work: { status: 'done', workNotes: 'Done', startedAt: '2026-07-11T11:30:00.000Z', completedAt: '2026-07-11T12:02:00.000Z', updatedAt: '2026-07-11T12:02:00.000Z' },
+      changed: true, work: { status: 'done', workNotes: 'Done', startedAt: '2026-07-11T11:30:00.000Z', completedAt: '2026-07-11T12:02:00.000Z', clockedOnSince: null, activeSeconds: 1920, updatedAt: '2026-07-11T12:02:00.000Z' },
     })).toMatchObject({ changed: true, work: { status: 'done' } })
     expect(parseEscalationResponse({
       changed: true,
@@ -35,15 +37,23 @@ describe('Shop OS simple-work UI contract', () => {
     expect(parseEscalationResponse({ changed: true, job: { id: 'bad' } })).toBeNull()
   })
 
-  it('formats the on-the-job clock plainly and only for a finished span', () => {
-    const start = '2026-07-11T09:14:00.000Z'
-    expect(formatWorkDuration(start, '2026-07-11T11:29:00.000Z')).toBe('2h 15m')
-    expect(formatWorkDuration(start, '2026-07-11T11:14:00.000Z')).toBe('2h')
-    expect(formatWorkDuration(start, '2026-07-11T09:59:00.000Z')).toBe('45m')
-    expect(formatWorkDuration(start, '2026-07-11T09:14:20.000Z')).toBe('under a minute')
-    // No finished span yet: still running, or a job that predates the clock.
-    expect(formatWorkDuration(start, null)).toBeNull()
-    expect(formatWorkDuration(null, '2026-07-11T11:29:00.000Z')).toBeNull()
+  it('formats banked time on the job plainly', () => {
+    expect(formatDurationSeconds(8_100)).toBe('2h 15m')
+    expect(formatDurationSeconds(7_200)).toBe('2h')
+    expect(formatDurationSeconds(2_700)).toBe('45m')
+    expect(formatDurationSeconds(20)).toBe('under a minute')
+    expect(formatDurationSeconds(0)).toBe('under a minute')
+  })
+
+  it('totals actual seconds, adding the open interval only while clocked on', () => {
+    const since = '2026-07-11T09:14:00.000Z'
+    const now = new Date('2026-07-11T09:44:00.000Z').getTime() // 30 min later
+    // Clocked on: banked + the live open interval.
+    expect(activeDurationSeconds(600, since, now)).toBe(600 + 1_800)
+    // Clocked off (no open interval): just the banked seconds.
+    expect(activeDurationSeconds(600, null, now)).toBe(600)
+    // A future/again-clock-on with no elapsed time adds nothing.
+    expect(activeDurationSeconds(600, since, new Date(since).getTime())).toBe(600)
   })
 
   it('retains concern identity only for the exact normalized concern and tier', () => {

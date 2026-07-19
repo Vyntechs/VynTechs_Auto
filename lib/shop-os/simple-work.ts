@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -24,6 +24,8 @@ type WorkProjection = {
   workNotes: string | null
   startedAt: string | null
   completedAt: string | null
+  clockedOnSince: string | null
+  activeSeconds: number
   updatedAt: string
 }
 
@@ -33,7 +35,8 @@ export type SimpleWorkMutationResult =
 
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
 const actionSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('start') }),
+  z.strictObject({ action: z.literal('clock_on') }),
+  z.strictObject({ action: z.literal('clock_off') }),
   z.strictObject({
     action: z.literal('save_note'),
     note: z.string().trim().min(1).max(2_000),
@@ -56,7 +59,7 @@ function failure(error: SimpleWorkError, retryable = false): SimpleWorkFailure {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
 }
 
-function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'workNotes' | 'workStartedAt' | 'workCompletedAt' | 'updatedAt'>): WorkProjection {
+function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'workNotes' | 'workStartedAt' | 'workCompletedAt' | 'clockedOnSince' | 'activeSeconds' | 'updatedAt'>): WorkProjection {
   if (job.workStatus !== 'open' && job.workStatus !== 'in_progress' && job.workStatus !== 'done') {
     throw new TypeError('simple work status is unavailable')
   }
@@ -65,6 +68,8 @@ function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'work
     workNotes: job.workNotes,
     startedAt: job.workStartedAt ? job.workStartedAt.toISOString() : null,
     completedAt: job.workCompletedAt ? job.workCompletedAt.toISOString() : null,
+    clockedOnSince: job.clockedOnSince ? job.clockedOnSince.toISOString() : null,
+    activeSeconds: job.activeSeconds,
     updatedAt: job.updatedAt.toISOString(),
   }
 }
@@ -162,6 +167,14 @@ function nextTimestamp(previous: Date) {
   return sql`greatest(clock_timestamp(), ${previous}::timestamptz + interval '1 millisecond')`
 }
 
+// Bank the currently-open on-interval into active_seconds: add (now - since)
+// when the tech is clocked on, otherwise leave the running total untouched.
+// Used when clocking off and when completing (which also stops the clock).
+function settledActiveSeconds() {
+  return sql`${ticketJobs.activeSeconds} + case when ${ticketJobs.clockedOnSince} is not null
+    then round(extract(epoch from (clock_timestamp() - ${ticketJobs.clockedOnSince})))::int else 0 end`
+}
+
 export async function mutateSimpleWork(
   db: AppDb,
   input: { actor: SimpleWorkActor; ticketId: unknown; jobId: unknown; body: unknown },
@@ -189,25 +202,71 @@ export async function mutateSimpleWork(
       }
       if (context.ticket.status !== 'open') return failure('not_found')
 
-      if (action.action === 'start') {
-        if (job.workStatus === 'in_progress') {
-          return hasPinnedApproval(context, false)
-            ? { ok: true, changed: false, work: safeWork(job) }
-            : failure('not_authorized')
+      // Clock on: start the job the first time (open -> in_progress) or resume
+      // the timer after a break. Either way it needs a pinned approval — a tech
+      // never clocks time onto work the customer has not authorized. A job may
+      // be clocked on to several at once; each carries its own clock.
+      if (action.action === 'clock_on') {
+        if (job.workStatus === 'done') return failure('not_ready')
+        if (job.workStatus === 'open') {
+          if (!hasPinnedApproval(context, true)) return failure('not_authorized')
+          const [updated] = await (tx as AppDb)
+            .update(ticketJobs)
+            .set({
+              workStatus: 'in_progress',
+              workStartedAt: sql`clock_timestamp()`,
+              clockedOnSince: sql`clock_timestamp()`,
+              updatedAt: nextTimestamp(job.updatedAt),
+            })
+            .where(and(
+              eq(ticketJobs.shopId, parsedActor.data.shopId),
+              eq(ticketJobs.id, job.id),
+              eq(ticketJobs.workStatus, 'open'),
+            ))
+            .returning()
+          return updated
+            ? { ok: true, changed: true, work: safeWork(updated) }
+            : failure('conflict', true)
         }
-        if (job.workStatus !== 'open') return failure('not_ready')
-        if (!hasPinnedApproval(context, true)) return failure('not_authorized')
+        if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+        if (job.clockedOnSince !== null) {
+          return { ok: true, changed: false, work: safeWork(job) }
+        }
         const [updated] = await (tx as AppDb)
           .update(ticketJobs)
           .set({
-            workStatus: 'in_progress',
-            workStartedAt: sql`clock_timestamp()`,
+            clockedOnSince: sql`clock_timestamp()`,
             updatedAt: nextTimestamp(job.updatedAt),
           })
           .where(and(
             eq(ticketJobs.shopId, parsedActor.data.shopId),
             eq(ticketJobs.id, job.id),
-            eq(ticketJobs.workStatus, 'open'),
+            eq(ticketJobs.workStatus, 'in_progress'),
+            isNull(ticketJobs.clockedOnSince),
+          ))
+          .returning()
+        return updated
+          ? { ok: true, changed: true, work: safeWork(updated) }
+          : failure('conflict', true)
+      }
+
+      // Clock off: bank the open interval and stop the timer. Stopping needs no
+      // approval; if nothing is running it is a no-op.
+      if (action.action === 'clock_off') {
+        if (job.clockedOnSince === null) {
+          return { ok: true, changed: false, work: safeWork(job) }
+        }
+        const [updated] = await (tx as AppDb)
+          .update(ticketJobs)
+          .set({
+            activeSeconds: settledActiveSeconds(),
+            clockedOnSince: null,
+            updatedAt: nextTimestamp(job.updatedAt),
+          })
+          .where(and(
+            eq(ticketJobs.shopId, parsedActor.data.shopId),
+            eq(ticketJobs.id, job.id),
+            isNotNull(ticketJobs.clockedOnSince),
           ))
           .returning()
         return updated
@@ -248,6 +307,8 @@ export async function mutateSimpleWork(
         .set({
           workStatus: 'done',
           workCompletedAt: sql`clock_timestamp()`,
+          activeSeconds: settledActiveSeconds(),
+          clockedOnSince: null,
           updatedAt: nextTimestamp(job.updatedAt),
         })
         .where(and(
@@ -327,6 +388,8 @@ export async function getSimpleWorkWorkspace(
         workNotes: job.workNotes,
         startedAt: job.workStartedAt ? job.workStartedAt.toISOString() : null,
         completedAt: job.workCompletedAt ? job.workCompletedAt.toISOString() : null,
+        clockedOnSince: job.clockedOnSince ? job.clockedOnSince.toISOString() : null,
+        activeSeconds: job.activeSeconds,
         updatedAt: job.updatedAt.toISOString(),
         authorization,
       },
