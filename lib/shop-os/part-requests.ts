@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import { jobPartRequests, profiles, ticketJobs, tickets } from '@/lib/db/schema'
@@ -46,21 +46,11 @@ const resolveBodySchema = z.strictObject({
   status: z.enum(['sourced', 'dismissed']),
 })
 
+export const MAX_OPEN_PART_REQUESTS_PER_JOB = 50
+export const PART_REQUEST_LIST_LIMIT = 100
+
 function failure(error: PartRequestError, retryable = false): PartRequestFailure {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
-}
-
-// Drizzle/pglite wrap the driver error, so the Postgres code lives on the cause
-// chain — walk it, mirroring lib/shop-os/quotes.ts.
-function isUniqueViolation(error: unknown): boolean {
-  let current: unknown = error
-  while (current) {
-    if (typeof current === 'object' && 'code' in current && (current as { code?: string }).code === '23505') return true
-    current = typeof current === 'object' && current !== null && 'cause' in current
-      ? (current as { cause?: unknown }).cause
-      : null
-  }
-  return false
 }
 
 type RequestRow = typeof jobPartRequests.$inferSelect
@@ -104,35 +94,87 @@ export async function createPartRequest(
     return failure('invalid_input')
   }
   const shopId = parsedActor.data.shopId
-
-  const actor = await loadActiveActor(db, parsedActor.data)
-  if (!actor || !isShopRole(actor.role)) return failure('not_authorized')
-
-  const [ticket] = await db
-    .select({ id: tickets.id, status: tickets.status })
-    .from(tickets)
-    .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicket.data)))
-    .limit(1)
-  if (!ticket || ticket.status !== 'open') return failure('not_found')
-
-  const [job] = await db
-    .select({ id: ticketJobs.id, assignedTechId: ticketJobs.assignedTechId, kind: ticketJobs.kind })
-    .from(ticketJobs)
-    .where(and(
-      eq(ticketJobs.shopId, shopId),
-      eq(ticketJobs.ticketId, parsedTicket.data),
-      eq(ticketJobs.id, parsedJob.data),
-    ))
-    .limit(1)
-  // Only the tech the job is assigned to flags its parts, and only on real
-  // repair/maintenance work (never a diagnostic session job).
-  if (!job || job.assignedTechId !== actor.id || (job.kind !== 'repair' && job.kind !== 'maintenance')) {
-    return failure('not_found')
-  }
-
   const preference = parsedBody.data.preference?.trim() ? parsedBody.data.preference.trim() : null
-  try {
-    const [created] = await db
+  return db.transaction(async (tx) => {
+    const transactionDb = tx as AppDb
+    const actor = await loadActiveActor(transactionDb, parsedActor.data)
+    if (!actor || !isShopRole(actor.role)) return failure('not_authorized')
+
+    const sameRequest = (row: RequestRow) => row.jobId === parsedJob.data
+      && row.requestedByProfileId === actor.id
+    const [existingBeforeLock] = await transactionDb
+      .select()
+      .from(jobPartRequests)
+      .where(and(
+        eq(jobPartRequests.shopId, shopId),
+        eq(jobPartRequests.requestKey, parsedBody.data.requestKey),
+      ))
+      .limit(1)
+    if (existingBeforeLock) {
+      return sameRequest(existingBeforeLock)
+        ? { ok: true as const, request: safeRequest(existingBeforeLock) }
+        : failure('conflict', true)
+    }
+
+    const [ticket] = await transactionDb
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicket.data)))
+      .limit(1)
+      .for('update')
+    if (!ticket || ticket.status !== 'open') return failure('not_found')
+
+    const [job] = await transactionDb
+      .select({
+        id: ticketJobs.id,
+        assignedTechId: ticketJobs.assignedTechId,
+        kind: ticketJobs.kind,
+        approvalState: ticketJobs.approvalState,
+        workStatus: ticketJobs.workStatus,
+      })
+      .from(ticketJobs)
+      .where(and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, parsedTicket.data),
+        eq(ticketJobs.id, parsedJob.data),
+      ))
+      .limit(1)
+      .for('update')
+    if (!job
+      || job.assignedTechId !== actor.id
+      || (job.kind !== 'repair' && job.kind !== 'maintenance')
+      || job.approvalState !== 'approved'
+      || job.workStatus !== 'in_progress') {
+      return failure('not_found')
+    }
+
+    const [existingAfterLock] = await transactionDb
+      .select()
+      .from(jobPartRequests)
+      .where(and(
+        eq(jobPartRequests.shopId, shopId),
+        eq(jobPartRequests.requestKey, parsedBody.data.requestKey),
+      ))
+      .limit(1)
+    if (existingAfterLock) {
+      return sameRequest(existingAfterLock)
+        ? { ok: true as const, request: safeRequest(existingAfterLock) }
+        : failure('conflict', true)
+    }
+
+    const [countRow] = await transactionDb
+      .select({ openCount: sql<number>`count(*)::int` })
+      .from(jobPartRequests)
+      .where(and(
+        eq(jobPartRequests.shopId, shopId),
+        eq(jobPartRequests.jobId, parsedJob.data),
+        eq(jobPartRequests.status, 'requested'),
+      ))
+    if (Number(countRow?.openCount ?? 0) >= MAX_OPEN_PART_REQUESTS_PER_JOB) {
+      return failure('conflict')
+    }
+
+    const [created] = await transactionDb
       .insert(jobPartRequests)
       .values({
         shopId,
@@ -144,20 +186,21 @@ export async function createPartRequest(
         quantity: parsedBody.data.quantity,
         requestKey: parsedBody.data.requestKey,
       })
+      .onConflictDoNothing({
+        target: [jobPartRequests.shopId, jobPartRequests.requestKey],
+      })
       .returning()
-    return { ok: true, request: safeRequest(created) }
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      const [existing] = await db
+    if (created) return { ok: true as const, request: safeRequest(created) }
+
+    const [persisted] = await transactionDb
         .select()
         .from(jobPartRequests)
         .where(and(eq(jobPartRequests.shopId, shopId), eq(jobPartRequests.requestKey, parsedBody.data.requestKey)))
         .limit(1)
-      if (existing && existing.jobId === parsedJob.data) return { ok: true, request: safeRequest(existing) }
-      return failure('conflict', true)
-    }
-    throw error
-  }
+    return persisted && sameRequest(persisted)
+      ? { ok: true as const, request: safeRequest(persisted) }
+      : failure('conflict', true)
+  })
 }
 
 export async function resolvePartRequest(
@@ -219,7 +262,12 @@ export async function listPartRequestsForJob(
     .select()
     .from(jobPartRequests)
     .where(and(eq(jobPartRequests.shopId, input.shopId), eq(jobPartRequests.jobId, input.jobId)))
-    .orderBy(asc(jobPartRequests.createdAt), asc(jobPartRequests.id))
+    .orderBy(
+      sql`case when ${jobPartRequests.status} = 'requested' then 0 else 1 end`,
+      desc(jobPartRequests.createdAt),
+      desc(jobPartRequests.id),
+    )
+    .limit(PART_REQUEST_LIST_LIMIT)
   return rows.map(safeRequest)
 }
 
@@ -245,7 +293,12 @@ export async function listPartRequestsForTicket(
       eq(profiles.id, jobPartRequests.requestedByProfileId),
     ))
     .where(and(eq(jobPartRequests.shopId, input.shopId), eq(jobPartRequests.ticketId, input.ticketId)))
-    .orderBy(asc(jobPartRequests.createdAt), asc(jobPartRequests.id))
+    .orderBy(
+      sql`case when ${jobPartRequests.status} = 'requested' then 0 else 1 end`,
+      desc(jobPartRequests.createdAt),
+      desc(jobPartRequests.id),
+    )
+    .limit(PART_REQUEST_LIST_LIMIT)
   return rows.map((row) => ({
     ...safeRequest(row.request),
     jobTitle: row.jobTitle,

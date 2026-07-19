@@ -4,6 +4,7 @@ import { paywallReject } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { createPartRequest, type PartRequestFailure } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { rateLimitReject } from '@/lib/rate-limit'
 
 type RouteContext = { params: Promise<{ id: string; jobId: string }> }
 
@@ -30,6 +31,12 @@ export async function POST(req: Request, { params }: RouteContext) {
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
+  const limited = await rateLimitReject(
+    db,
+    `part-request:${ctx.profile.shopId}:${ctx.profile.id}`,
+    20,
+  )
+  if (limited) return limited
   const { id, jobId } = await params
   const result = await createPartRequest(db, {
     actor: { profileId: ctx.profile.id, shopId: ctx.profile.shopId },
