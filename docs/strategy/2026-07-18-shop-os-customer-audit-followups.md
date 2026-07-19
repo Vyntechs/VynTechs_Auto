@@ -48,21 +48,22 @@ Being shipped in safe, verified slices — safest/most-contained first:
   tsc + build clean; `shop-os-simple-work*` tests green (one flaky DB-setup hook
   TIMEOUT under parallel load — passes in isolation; not a logic failure).
 
-- **▶ SLICE 3 (do next) — "Found something" → real repair job to quote.** HIGH
-  value, clearly a defect today. From the work screen, "found another concern"
-  currently mints a dead `diagnostic` job via `createWorkEscalation`
-  (`lib/shop-os/simple-work.ts:384-464`) — doubly dead in prod: unassigned AND
-  the AI-diagnosis engine is force-`off` (`lib/release-policy.ts`). Replace with a
-  path that creates a `kind:'repair'` job (unassigned, `approvalState` defaults to
-  `pending_quote`) that flows to the advisor's quote. `addTicketJob`
-  (`lib/tickets.ts:876`, body schema `:438`) already builds repair jobs, but the
-  escalation path's idempotency (deterministic jobId from requestKey) + source-job
-  gating (actor's assigned, in-progress, approved job) are worth keeping — likely
-  generalize/replace `createWorkEscalation` to emit `repair` instead of
-  `diagnostic`. Note: repair/maintenance can't carry a `session_id`
-  (`ticket_jobs_session_only_for_diagnostic` check) — fine, we set none.
+- **✅ SLICE 3 — "Found something" → real repair job to quote. DONE, commit
+  `fed69cc`.** The work screen's "Found another concern" now raises found work to
+  the advisor as a `kind:'repair'` job (unassigned, `pending_quote`, titled
+  `Found: <concern>`) that flows through the normal quote/approve path — instead
+  of the old dead `diagnostic` job (doubly dead in prod: unassigned AND the
+  AI-diagnosis engine is force-`off` in `lib/release-policy.ts`). Done by
+  repurposing `createWorkEscalation` (`lib/shop-os/simple-work.ts`), keeping its
+  idempotency (deterministic jobId from requestKey, namespace bumped to
+  `shop-os-found-repair-v1`) + source-job gating (actor's own assigned, approved,
+  in-progress job); repair jobs carry no `session_id`
+  (`ticket_jobs_session_only_for_diagnostic` satisfied). Tech copy now honest:
+  button "Send to be quoted", confirms "unassigned until the advisor prices it".
+  tsc + build clean; escalation/ui/component + a quote/approval/ticket-render
+  integration sweep green.
 
-- **SLICE 4 (last) — parts picker on the tech screen, zero money.** Biggest,
+- **▶ SLICE 4 (do next) — parts picker on the tech screen, zero money.** Biggest,
   most entangled. Parts AND labor are BOTH `job_lines` rows (kind part/labor/fee)
   that feed the customer's approval-gated quote; sourcing a part calls
   `invalidateActiveQuoteVersion`, which UN-approves the job — so a tech mid-repair
@@ -107,6 +108,7 @@ asked (#175 already exists — verify its state on resume).
 | Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
 | Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
 | Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
+| Found work → real repair job | `fed69cc` | The work screen's **"Found another concern"** now raises found work to the advisor as a real **repair** job on the ticket (unassigned, `pending_quote`, titled `Found: <concern>`) that flows through the normal quote → approve path. Before, it minted a `diagnostic` job that went nowhere — unassigned, and in production the AI-diagnosis engine is switched off, so it sat dead. Repurposed the escalation path (kept idempotency by request key + gating to the tech's own assigned/approved/in-progress job); tech copy now honest ("Send to be quoted", "unassigned until the advisor prices it"). Fixes tracker "High — Mid-job discovery is a detour". |
 | Tech job clock — start/finish time | `699d230` | The technician's job page now records when work actually started and finished. `work_started_at`/`work_completed_at` (additive migration 0039, two nullable columns on `ticket_jobs`) are stamped server-side inside `mutateSimpleWork` on the same open→in_progress and in_progress→done taps the tech already makes — no new action, and replays never re-stamp. The completed job shows Started / Finished / "On the job: 2h 15m" (plain `formatWorkDuration`, unit-covered). First half of quoted-vs-actual; still zero money anywhere on the tech screen. First slice of the one-page tech job screen. |
 | Getting paid — ring out & close | _(this branch)_ | New **Ring out** panel on the ticket screen (advisor/owner only — techs never see it). Bill = the approved jobs' subtotals taxed once (derived, never stored); record cash/card/check/other payments (deposits + partials welcome); balance = owed − collected; the ticket closes only when the balance clears, stamping `closedAt`/`deliveredAt`/`closedBy`. New append-only `ticket_payments` table (server-only, migration 0038 with RLS deny + service-role-only ACL, mirroring `shop_entitlements`); `POST /api/tickets/[id]/payments` (idempotent by requestKey, rejects overpayment) and `POST /api/tickets/[id]/close`. No card processing — the app records the money truth and closes the order; the shop takes payment however it already does. First time a ticket can reach `closed` — those columns had zero writers before. |
 
