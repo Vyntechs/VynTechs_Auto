@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { createBillingPortalSessionForUser } from '@/lib/stripe'
 import { getServerSupabase } from '@/lib/supabase-server'
+import { isFounder } from '@/lib/auth'
 
 export async function POST(req: Request) {
   const supabase = await getServerSupabase()
@@ -18,6 +19,7 @@ export async function POST(req: Request) {
     db,
     userId: user.id,
     origin,
+    founderOverride: isFounder(user.email),
   })
 
   if (!result.ok) {

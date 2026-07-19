@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { shopEntitlements, stripeCustomers } from './db/schema'
 import { getProfileByUserId } from './db/queries'
 import type { AppDb } from './db/queries'
+import { canManageTeam } from './shop-os/capabilities'
 
 let _client: Stripe | undefined
 
@@ -60,16 +61,23 @@ export type CreateBillingPortalSessionFn = (params: {
 
 export type CreateBillingPortalSessionResult =
   | { ok: true; url: string }
-  | { ok: false; status: 400; error: string }
+  | { ok: false; status: 400 | 403; error: string }
 
 export async function createBillingPortalSessionForUser(opts: {
   db: AppDb
   userId: string
   origin: string
+  founderOverride?: boolean
   createPortalSession?: CreateBillingPortalSessionFn
 }): Promise<CreateBillingPortalSessionResult> {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
+  if (profile.deactivatedAt) {
+    return { ok: false, status: 403, error: 'deactivated' }
+  }
+  if (!canManageTeam(profile.role, opts.founderOverride)) {
+    return { ok: false, status: 403, error: 'forbidden' }
+  }
   if (!profile.shopId) return { ok: false, status: 400, error: 'no shop' }
 
   const [customer] = await opts.db
