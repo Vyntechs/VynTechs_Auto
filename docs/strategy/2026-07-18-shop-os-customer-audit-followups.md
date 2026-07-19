@@ -18,6 +18,30 @@ console was out of scope.
 
 ## NEXT UP (read this first on resume)
 
+**► DEPLOY STATUS (2026-07-19): branch is READY FOR PRODUCTION HAND-OFF.** The
+founder will run a **local session (with prod credentials) to apply the DB
+changes + merge PR #175 + deploy** — NOT this session. This session's job was to
+make the hand-off bulletproof; it's done:
+- **Deploy runbook committed:** `docs/operations/2026-07-19-deploy-parts-labor-getting-paid-runbook.md`
+  — the critical fact is that **migrations 0037–0041 (the only DB changes new on
+  this branch, all additive) must be applied to the production DB BY HAND, in
+  order**, because `drizzle-kit migrate` reads a journal frozen at 0028 and no
+  CI/Vercel step applies them. Runbook has the ordered file list, one copy-paste
+  verify query, DB-first→merge→deploy→smoke-test order, and rollback.
+- **PR #175 body updated** to describe all five areas + the migration/deploy note.
+- Branch clean + pushed (`8f05c63`), 22 ahead of `origin/main`, Vercel preview green.
+- **If the founder says "did it deploy / is it live" on resume:** the LOCAL session
+  handled it — check PR #175 merge state + prod, don't assume this session deployed.
+
+**► PartsTech application is a COLLABORATIVE next step** — the founder and this
+assistant do it TOGETHER via browser/computer-use (Playwright/Chromium is set up
+here). Assistant navigates + fills; founder supplies real business details and
+makes the final Submit (real commitment in their name). Checklist:
+`docs/strategy/2026-07-19-parts-integration-partstech-checklist.md`. Do this
+after/alongside the deploy, on the founder's go.
+
+---
+
 **Getting paid is DONE and shipped** — commit `ae208b9` on this branch (11
 commits ahead of `origin/main`, working tree clean). Ring-out panel on the
 ticket screen: bill from approved jobs → record cash/card/check/other (deposits
