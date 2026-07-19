@@ -68,7 +68,23 @@ Being shipped in safe, verified slices — safest/most-contained first:
   tsc + build clean; escalation/ui/component + a quote/approval/ticket-render
   integration sweep green.
 
-- **▶ SLICE 4 (parts) — needs a founder decision on the integration path first.**
+- **✅ SLICE 4a (parts relay) — DONE, commit `9895fe6`.** The founder gave the go
+  for the interim. The tech's job page now has a **"Parts I need"** panel: flag
+  what it is ("water pump") + an optional brand/source preference (Motorcraft,
+  AC Delco, dealer, a supplier) + how many, ZERO money. It relays to the parts
+  desk — a **"Parts the tech asked for"** section on the ticket detail
+  (parts/advisor/owner) with Got it / Not needed. New `job_part_requests` table
+  (additive migration 0041, server-only ACL), deliberately SEPARATE from
+  `job_lines`/the quote so it never carries money or touches approval.
+  `lib/shop-os/part-requests.ts` (+ `-ui.ts`), `POST .../jobs/[jobId]/part-requests`
+  + `POST .../part-requests/[requestId]`, `components/screens/parts-needed-panel.tsx`
+  + `ticket-part-requests.tsx`. tsc + build clean; domain/route/component tests green.
+  Fast-follows: let the tech flag parts before the job is approved (panel is
+  in_progress-only today); when PartsTech lands, the flag becomes a priced pick.
+
+- **▶ SLICE 4b (parts — real automatic pricing) — needs the PartsTech setup.** The
+  full checklist is in `docs/strategy/2026-07-19-parts-integration-partstech-checklist.md`
+  (delivered to the founder). Summary below stays for context.
   **Founder clarified (2026-07-19):** the shop uses **OEC RepairLink** (OEM/dealer
   parts, free to shops) and **O'Reilly First Call** (O'Reilly pro/wholesale) —
   they're logged into both, which handle cost + markup once set up. So the founder
@@ -136,6 +152,7 @@ asked (#175 already exists — verify its state on resume).
 | Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
 | Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
 | Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
+| Parts relay — tech flags, parts desk sources | `9895fe6` | The tech's job page has a **"Parts I need"** panel: flag the part ("water pump") + optional brand/source (Motorcraft, AC Delco, dealer, a supplier) + how many, with **zero money**. It relays to the parts desk — a **"Parts the tech asked for"** section on the ticket (parts/advisor/owner) with Got it / Not needed. New `job_part_requests` table (migration 0041, server-only), kept **separate from the quote/money** so it never touches cost, price, or approval. Interim until live supplier pricing (PartsTech) is wired — then the same flag becomes a priced pick. Honors "management sets up suppliers, techs never touch money, tech picks the part, one page." |
 | Found work → real repair job | `fed69cc` | The work screen's **"Found another concern"** now raises found work to the advisor as a real **repair** job on the ticket (unassigned, `pending_quote`, titled `Found: <concern>`) that flows through the normal quote → approve path. Before, it minted a `diagnostic` job that went nowhere — unassigned, and in production the AI-diagnosis engine is switched off, so it sat dead. Repurposed the escalation path (kept idempotency by request key + gating to the tech's own assigned/approved/in-progress job); tech copy now honest ("Send to be quoted", "unassigned until the advisor prices it"). Fixes tracker "High — Mid-job discovery is a detour". |
 | Tech job clock — on/off, actual time | `699d230` → `4c2ba14` | The technician's job page keeps its own clock. Shipped first as a single start/finish span (`699d230`, migration 0039), then evolved to **clock on / clock off with a running total** (`4c2ba14`, migration 0040) once the founder said they multitask ~10 jobs at once and want each job's ACTUAL time. Clock on starts/resumes (needs approval), clock off banks the interval and stops, completing banks the last interval; a tech can be clocked on to several jobs at once. Two columns on `ticket_jobs`: `clocked_on_since` (null when off) + `active_seconds` (banked; open interval added live at read time). Work screen shows the live total ("On the job: 1h 40m"), running/paused, one Clock on/off button. Zero money anywhere on the tech screen. Core slice of the one-page tech job screen. |
 | Getting paid — ring out & close | _(this branch)_ | New **Ring out** panel on the ticket screen (advisor/owner only — techs never see it). Bill = the approved jobs' subtotals taxed once (derived, never stored); record cash/card/check/other payments (deposits + partials welcome); balance = owed − collected; the ticket closes only when the balance clears, stamping `closedAt`/`deliveredAt`/`closedBy`. New append-only `ticket_payments` table (server-only, migration 0038 with RLS deny + service-role-only ACL, mirroring `shop_entitlements`); `POST /api/tickets/[id]/payments` (idempotent by requestKey, rejects overpayment) and `POST /api/tickets/[id]/close`. No card processing — the app records the money truth and closes the order; the shop takes payment however it already does. First time a ticket can reach `closed` — those columns had zero writers before. |
