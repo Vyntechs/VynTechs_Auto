@@ -71,14 +71,6 @@ const actor = {
 }
 const ticket = { id: TICKET_ID, ticketNumber: 101, status: 'open' }
 
-function jsonRequest(path: string, body: unknown): Request {
-  return new Request(`http://localhost${path}`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
 function invalidJsonRequest(path: string): Request {
   return new Request(`http://localhost${path}`, {
     method: 'POST',
@@ -126,14 +118,6 @@ describe('ticket HTTP access and contracts', () => {
       invoke: () =>
         getTicketRoute(new Request(`http://localhost/api/tickets/${TICKET_ID}`), params()),
     },
-    {
-      name: 'POST /api/tickets/:id/jobs',
-      invoke: () =>
-        addTicketJobRoute(
-          invalidJsonRequest(`/api/tickets/${TICKET_ID}/jobs`),
-          params(),
-        ),
-    },
   ])('$name authenticates first and returns the exact unauthenticated contract', async ({ invoke }) => {
     requireUserMock.mockResolvedValue(null)
 
@@ -152,14 +136,6 @@ describe('ticket HTTP access and contracts', () => {
       name: 'GET /api/tickets/:id',
       invoke: () =>
         getTicketRoute(new Request(`http://localhost/api/tickets/${TICKET_ID}`), params()),
-    },
-    {
-      name: 'POST /api/tickets/:id/jobs',
-      invoke: () =>
-        addTicketJobRoute(
-          invalidJsonRequest(`/api/tickets/${TICKET_ID}/jobs`),
-          params(),
-        ),
     },
   ])('$name returns the paywall response before parsing or domain access', async ({ invoke }) => {
     paywallMock.mockResolvedValue(
@@ -184,6 +160,28 @@ describe('ticket HTTP access and contracts', () => {
     expect(requireUserMock).not.toHaveBeenCalled()
     expect(paywallMock).not.toHaveBeenCalled()
     expect(createTicketMock).not.toHaveBeenCalled()
+  })
+
+  it('retires public add-job before auth, parsing, route parameters, or domain work', async () => {
+    let paramsRead = false
+    const response = await addTicketJobRoute(
+      invalidJsonRequest(`/api/tickets/${TICKET_ID}/jobs`),
+      {
+        params: {
+          then() {
+            paramsRead = true
+            return Promise.resolve({ id: TICKET_ID })
+          },
+        } as Promise<{ id: string }>,
+      },
+    )
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+    expect(paramsRead).toBe(false)
+    expect(requireUserMock).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
+    expect(addTicketJobMock).not.toHaveBeenCalled()
   })
 
   it('forwards the route parameter and returns ticket detail JSON', async () => {
@@ -211,44 +209,4 @@ describe('ticket HTTP access and contracts', () => {
     await expect(response.json()).resolves.toEqual({ error: 'not_found' })
   })
 
-  it('returns invalid_json without calling addTicketJob', async () => {
-    const response = await addTicketJobRoute(
-      invalidJsonRequest(`/api/tickets/${TICKET_ID}/jobs`),
-      params(),
-    )
-
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
-    expect(addTicketJobMock).not.toHaveBeenCalled()
-  })
-
-  it('forwards the route parameter, body, and actor when adding a job', async () => {
-    const body = { title: 'Replace pads', kind: 'repair', requiredSkillTier: 2 }
-    addTicketJobMock.mockResolvedValue({ ok: true, ticket } as never)
-
-    const response = await addTicketJobRoute(
-      jsonRequest(`/api/tickets/${TICKET_ID}/jobs`, body),
-      params(),
-    )
-
-    expect(addTicketJobMock).toHaveBeenCalledWith({}, {
-      actor,
-      ticketId: TICKET_ID,
-      body,
-    })
-    expect(response.status).toBe(201)
-    await expect(response.json()).resolves.toEqual({ ticket })
-  })
-
-  it('maps a closed ticket add attempt to the exact 409 error JSON', async () => {
-    addTicketJobMock.mockResolvedValue({ ok: false, error: 'ticket_not_open' })
-
-    const response = await addTicketJobRoute(
-      jsonRequest(`/api/tickets/${TICKET_ID}/jobs`, {}),
-      params(),
-    )
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({ error: 'ticket_not_open' })
-  })
 })
