@@ -61,7 +61,7 @@ Then redeploy production by pushing a no-op commit to `main`, or via Vercel dash
 ## Step 6 — Sanity check
 
 - Sign in to vyntechs.dev
-- Check `/api/health` — should report `pingOk: true`
+- Check `/api/health` — should report `{ "ok": true }` for application liveness; verify database readiness through authenticated provider monitoring.
 - Verify a known work order still exists in `/today`
 - Verify assignments, quotes, and text work notes are readable
 - Confirm the diagnostic release remains off
