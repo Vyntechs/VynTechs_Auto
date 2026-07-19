@@ -57,9 +57,9 @@ describe('Shop OS simple work routes', () => {
   it('passes only persisted identity and maps safe success', async () => {
     vi.mocked(mutateSimpleWork).mockResolvedValue({
       ok: true, changed: true,
-      work: { status: 'in_progress', workNotes: null, updatedAt: '2026-07-11T12:00:00.000Z' },
+      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z' },
     })
-    const body = { action: 'start' }
+    const body = { action: 'clock_on' }
     const response = await POST(request(JSON.stringify(body)), params)
     expect(mutateSimpleWork).toHaveBeenCalledWith({}, {
       actor: { profileId: profile.id, shopId: profile.shopId },
@@ -68,7 +68,7 @@ describe('Shop OS simple work routes', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       changed: true,
-      work: { status: 'in_progress', workNotes: null, updatedAt: '2026-07-11T12:00:00.000Z' },
+      work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z' },
     })
   })
 
@@ -82,7 +82,7 @@ describe('Shop OS simple work routes', () => {
     vi.mocked(mutateSimpleWork).mockResolvedValue({
       ok: false, error, ...(retryable ? { retryable: true } : {}),
     })
-    const response = await POST(request(JSON.stringify({ action: 'start' })), params)
+    const response = await POST(request(JSON.stringify({ action: 'clock_on' })), params)
     expect(response.status).toBe(status)
     expect(await response.json()).toEqual({ error, ...(retryable ? { retryable: true } : {}) })
   })

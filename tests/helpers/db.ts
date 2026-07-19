@@ -62,12 +62,224 @@ export async function createTestDb(): Promise<{
   await ensureMessagingRetentionAclMigration(client)
   await ensureMessagingRetentionFkIndexMigration(client)
   await ensureShopEntitlementsMigration(client)
+  await ensureShopPartsMarkupMigration(client)
+  await ensureTicketPaymentsMigration(client)
+  await ensureJobWorkClockMigration(client)
+  await ensureJobTimeClockMigration(client)
+  await ensureJobPartRequestsMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+async function shopHasPartsMarkupColumn(client: PGlite): Promise<boolean> {
+  const result = await client.query<{ present: boolean }>(`
+    select exists(
+      select 1 from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'shops'
+        and column_name = 'parts_markup_bps'
+    ) as present
+  `)
+  return result.rows[0]?.present === true
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureShopPartsMarkupMigration(client: PGlite): Promise<void> {
+  if (await shopHasPartsMarkupColumn(client)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0037_shop_parts_markup.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!(await shopHasPartsMarkupColumn(client))) {
+    throw new Error('shops.parts_markup_bps migration failed in ephemeral database')
+  }
+}
+
+async function ticketJobsHasWorkClockColumns(client: PGlite): Promise<boolean> {
+  const result = await client.query<{ present: number }>(`
+    select count(*)::int as present
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'ticket_jobs'
+      and column_name in ('work_started_at', 'work_completed_at')
+  `)
+  return result.rows[0]?.present === 2
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureJobWorkClockMigration(client: PGlite): Promise<void> {
+  if (await ticketJobsHasWorkClockColumns(client)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0039_shop_os_job_work_clock.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!(await ticketJobsHasWorkClockColumns(client))) {
+    throw new Error('ticket_jobs work clock migration failed in ephemeral database')
+  }
+}
+
+async function ticketJobsHasTimeClockColumns(client: PGlite): Promise<boolean> {
+  const result = await client.query<{ present: number }>(`
+    select count(*)::int as present
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'ticket_jobs'
+      and column_name in ('clocked_on_since', 'active_seconds')
+  `)
+  return result.rows[0]?.present === 2
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureJobTimeClockMigration(client: PGlite): Promise<void> {
+  if (await ticketJobsHasTimeClockColumns(client)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0040_shop_os_job_time_clock_onoff.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!(await ticketJobsHasTimeClockColumns(client))) {
+    throw new Error('ticket_jobs time clock migration failed in ephemeral database')
+  }
+}
+
+type JobPartRequestsMarkers = {
+  table_exists: boolean
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function jobPartRequestsMarkers(client: PGlite): Promise<JobPartRequestsMarkers> {
+  const result = await client.query<JobPartRequestsMarkers>(`
+    select
+      to_regclass('public.job_part_requests') is not null as table_exists,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.job_part_requests')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'job_part_requests'
+         and policyname = 'job_part_requests_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'job_part_requests'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'job_part_requests'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('job part requests schema inspection failed')
+  return markers
+}
+
+function hasCompleteJobPartRequests(markers: JobPartRequestsMarkers): boolean {
+  return markers.table_exists
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureJobPartRequestsMigration(client: PGlite): Promise<void> {
+  const before = await jobPartRequestsMarkers(client)
+  if (hasCompleteJobPartRequests(before)) return
+  if (before.table_exists) {
+    throw new Error('partial job part requests schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0041_shop_os_job_part_requests.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!hasCompleteJobPartRequests(await jobPartRequestsMarkers(client))) {
+    throw new Error('job part requests migration failed in ephemeral database')
+  }
+}
+
+type TicketPaymentsMarkers = {
+  table_exists: boolean
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function ticketPaymentsMarkers(client: PGlite): Promise<TicketPaymentsMarkers> {
+  const result = await client.query<TicketPaymentsMarkers>(`
+    select
+      to_regclass('public.ticket_payments') is not null as table_exists,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.ticket_payments')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'ticket_payments'
+         and policyname = 'ticket_payments_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'ticket_payments'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'ticket_payments'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('ticket payments schema inspection failed')
+  return markers
+}
+
+function hasCompleteTicketPayments(markers: TicketPaymentsMarkers): boolean {
+  return markers.table_exists
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureTicketPaymentsMigration(client: PGlite): Promise<void> {
+  const before = await ticketPaymentsMarkers(client)
+  if (hasCompleteTicketPayments(before)) return
+  if (before.table_exists) {
+    throw new Error('partial ticket payments schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0038_shop_os_ticket_payments.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!hasCompleteTicketPayments(await ticketPaymentsMarkers(client))) {
+    throw new Error('ticket payments migration failed in ephemeral database')
   }
 }
 

@@ -81,6 +81,7 @@ export const shops = pgTable(
     nextTicketNumber: bigint('next_ticket_number', { mode: 'number' }).default(1).notNull(),
     laborRateCents: bigint('labor_rate_cents', { mode: 'number' }),
     taxRateBps: integer('tax_rate_bps'),
+    partsMarkupBps: integer('parts_markup_bps'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -93,6 +94,10 @@ export const shops = pgTable(
     check(
       'shops_tax_rate_bps_range',
       sql`${table.taxRateBps} is null or ${table.taxRateBps} between 0 and 10000`,
+    ),
+    check(
+      'shops_parts_markup_bps_range',
+      sql`${table.partsMarkupBps} is null or ${table.partsMarkupBps} between 0 and 100000`,
     ),
   ],
 )
@@ -397,6 +402,10 @@ export const ticketJobs = pgTable(
     diagnosticStartAttemptKey: text('diagnostic_start_attempt_key'),
     diagnosticStartLeaseUntil: timestamp('diagnostic_start_lease_until', { withTimezone: true }),
     diagnosticStartErrorCode: text('diagnostic_start_error_code'),
+    workStartedAt: timestamp('work_started_at', { withTimezone: true }),
+    workCompletedAt: timestamp('work_completed_at', { withTimezone: true }),
+    clockedOnSince: timestamp('clocked_on_since', { withTimezone: true }),
+    activeSeconds: integer('active_seconds').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -466,6 +475,10 @@ export const ticketJobs = pgTable(
       sql`${table.sessionId} is null or ${table.kind} = 'diagnostic'`,
     ),
     check(
+      'ticket_jobs_active_seconds_nonneg',
+      sql`${table.activeSeconds} >= 0`,
+    ),
+    check(
       'ticket_jobs_story_json_objects',
       sql`(${table.customerStory} is null or jsonb_typeof(${table.customerStory}) = 'object')
         and (${table.storyMeta} is null or jsonb_typeof(${table.storyMeta}) = 'object')`,
@@ -514,6 +527,69 @@ export const jobAttachments = pgTable(
     ),
   ],
 )
+
+export const jobPartRequests = pgTable(
+  'job_part_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    jobId: uuid('job_id').notNull(),
+    requestedByProfileId: uuid('requested_by_profile_id').notNull(),
+    description: text('description').notNull(),
+    preference: text('preference'),
+    quantity: integer('quantity').default(1).notNull(),
+    status: text('status', { enum: ['requested', 'sourced', 'dismissed'] })
+      .default('requested')
+      .notNull(),
+    requestKey: uuid('request_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    resolvedByProfileId: uuid('resolved_by_profile_id'),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'job_part_requests_shop_job_fk',
+      columns: [table.shopId, table.ticketId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.ticketId, ticketJobs.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'job_part_requests_shop_requester_fk',
+      columns: [table.shopId, table.requestedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'job_part_requests_shop_resolver_fk',
+      columns: [table.shopId, table.resolvedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('job_part_requests_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('job_part_requests_shop_request_key_uq').on(table.shopId, table.requestKey),
+    index('job_part_requests_ticket_status_idx').on(table.shopId, table.ticketId, table.status),
+    index('job_part_requests_job_idx').on(table.shopId, table.jobId),
+    check('job_part_requests_quantity_range', sql`${table.quantity} between 1 and 99`),
+    check(
+      'job_part_requests_status_valid',
+      sql`${table.status} in ('requested', 'sourced', 'dismissed')`,
+    ),
+    check(
+      'job_part_requests_description_length',
+      sql`char_length(${table.description}) between 1 and 200`,
+    ),
+    check(
+      'job_part_requests_preference_length',
+      sql`${table.preference} is null or char_length(${table.preference}) between 1 and 200`,
+    ),
+    check(
+      'job_part_requests_resolved_consistent',
+      sql`(${table.status} = 'requested') = (${table.resolvedAt} is null)
+        and (${table.resolvedAt} is null) = (${table.resolvedByProfileId} is null)`,
+    ),
+  ],
+)
+
+export type JobPartRequest = typeof jobPartRequests.$inferSelect
+export type NewJobPartRequest = typeof jobPartRequests.$inferInsert
 
 export const vendorAccounts = pgTable(
   'vendor_accounts',
@@ -932,6 +1008,52 @@ export const quoteEvents = pgTable(
       sql`${table.kind} <> 'approved'
         or ${table.approvedVia} not in ('phone', 'in_person')
         or ${table.actorProfileId} is not null`,
+    ),
+  ],
+)
+
+// Money the shop has actually collected against a repair order. Append-only:
+// each row is one payment (a deposit, a partial, or the whole thing). The
+// amount owed is derived from the ticket's approved quote jobs; the balance is
+// owed minus the sum of these rows. Techs never write here — recording money
+// is an advisor/owner action (see canCloseTickets).
+export const ticketPayments = pgTable(
+  'ticket_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    method: text('method', {
+      enum: ['cash', 'card', 'check', 'other'],
+    }).notNull(),
+    note: text('note'),
+    recordedByProfileId: uuid('recorded_by_profile_id').notNull(),
+    requestKey: uuid('request_key').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'ticket_payments_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_payments_shop_actor_fk',
+      columns: [table.shopId, table.recordedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('ticket_payments_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('ticket_payments_shop_request_key_uq').on(table.shopId, table.requestKey),
+    index('ticket_payments_ticket_idx').on(table.shopId, table.ticketId, table.recordedAt),
+    check('ticket_payments_amount_positive', sql`${table.amountCents} > 0`),
+    check(
+      'ticket_payments_method_valid',
+      sql`${table.method} in ('cash', 'card', 'check', 'other')`,
+    ),
+    check(
+      'ticket_payments_note_length',
+      sql`${table.note} is null or char_length(${table.note}) between 1 and 500`,
     ),
   ],
 )
@@ -1845,6 +1967,8 @@ export type Ticket = typeof tickets.$inferSelect
 export type NewTicket = typeof tickets.$inferInsert
 export type TicketJob = typeof ticketJobs.$inferSelect
 export type NewTicketJob = typeof ticketJobs.$inferInsert
+export type TicketPayment = typeof ticketPayments.$inferSelect
+export type NewTicketPayment = typeof ticketPayments.$inferInsert
 
 export const retrievalCache = pgTable('retrieval_cache', {
   id: uuid('id').primaryKey().defaultRandom(),

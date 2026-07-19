@@ -13,6 +13,7 @@ vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => (
 vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
 vi.mock('@/lib/auth-access', () => ({ checkAccess: vi.fn() }))
 vi.mock('@/lib/shop-os/simple-work', () => ({ getSimpleWorkWorkspace: vi.fn() }))
+vi.mock('@/lib/shop-os/part-requests', () => ({ listPartRequestsForJob: vi.fn(async () => []) }))
 vi.mock('@/lib/tickets', () => ({ getTicketDetail: vi.fn(), ticketActorFromProfile: vi.fn(() => ({ actor: true })) }))
 vi.mock('@/components/screens/simple-work-workspace', () => ({
   SimpleWorkWorkspace: (props: unknown) => workspaceScreenMock(props) ?? <div>Simple work screen</div>,
@@ -27,7 +28,7 @@ import { getTicketDetail } from '@/lib/tickets'
 const TICKET = '00000000-0000-4000-8000-000000000020'
 const JOB = '00000000-0000-4000-8000-000000000030'
 const profile = { id: '00000000-0000-4000-8000-000000000001', userId: 'user-1', shopId: '00000000-0000-4000-8000-000000000201', role: 'tech', skillTier: 2, membershipStatus: 'active', deactivatedAt: null }
-const workspace = { id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null, updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved' }
+const workspace = { id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null, startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved' }
 const ticket = { id: TICKET, ticketNumber: 7, status: 'open', customer: { id: 'private', name: 'Morgan Lee', phone: 'private', email: null }, vehicle: { id: 'private', year: 2020, make: 'Jeep', model: 'Wrangler', engine: 'private', vin: null, mileage: null, plate: null }, jobs: [] }
 const props = { params: Promise.resolve({ id: TICKET, jobId: JOB }) }
 
@@ -58,6 +59,7 @@ describe('simple work page', () => {
     expect(workspaceScreenMock).toHaveBeenCalledWith({
       ticket: { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' },
       initialWorkspace: workspace,
+      initialPartRequests: [],
     })
     expect(JSON.stringify(workspaceScreenMock.mock.calls[0][0])).not.toMatch(/phone|engine|vin|shopId/)
   })

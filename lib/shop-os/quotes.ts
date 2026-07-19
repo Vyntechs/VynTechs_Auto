@@ -147,6 +147,7 @@ export type QuoteBuilderResult =
       configuration: {
         laborRateCents: number | null
         taxRateBps: number | null
+        partsMarkupBps: number | null
         laborRateConfigured: boolean
         taxRateConfigured: boolean
       }
@@ -333,6 +334,25 @@ export function quoteSnapshotContainsExactJob(
     && parsed.data.jobs.some((job) => job.id === input.jobId && job.kind === input.kind)
 }
 
+// One approved job's pre-tax money, pulled from the exact quote version the
+// customer approved. Per-job totals in a snapshot carry no tax (tax is applied
+// once at the ticket level), so ring-out sums these and taxes the total. Null
+// when the snapshot is unparseable or does not contain the job — the caller
+// treats that as "this job's price is not billable" rather than guessing.
+export function readApprovedJobBreakdown(
+  snapshot: unknown,
+  jobId: string,
+): { subtotalCents: number; taxableSubtotalCents: number } | null {
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  if (!parsed.success) return null
+  const job = parsed.data.jobs.find((candidate) => candidate.id === jobId)
+  if (!job) return null
+  return {
+    subtotalCents: job.totals.subtotalCents,
+    taxableSubtotalCents: job.totals.taxableSubtotalCents,
+  }
+}
+
 function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus'>,
 ): boolean {
@@ -478,6 +498,7 @@ export async function getQuoteBuilder(
       const [shop] = await transactionDb.select({
         laborRateCents: shops.laborRateCents,
         taxRateBps: shops.taxRateBps,
+        partsMarkupBps: shops.partsMarkupBps,
       }).from(shops).where(eq(shops.id, actor.shopId as string)).limit(1)
       if (!shop) return { ok: false as const, error: 'not_found' as const }
 
@@ -626,6 +647,7 @@ export async function getQuoteBuilder(
             configuration: {
               laborRateCents: safeMoney(shop.laborRateCents, true),
               taxRateBps: shop.taxRateBps,
+              partsMarkupBps: shop.partsMarkupBps,
               laborRateConfigured: shop.laborRateCents !== null,
               taxRateConfigured: shop.taxRateBps !== null,
             },

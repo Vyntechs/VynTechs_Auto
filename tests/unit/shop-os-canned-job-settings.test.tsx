@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CannedJobsSection } from '@/components/vt/canned-jobs-section'
 import type { CannedJobProjection } from '@/lib/shop-os/canned-jobs-ui'
 
-const { auth, getShop, list, notFound } = vi.hoisted(() => ({ auth: vi.fn(), getShop: vi.fn(), list: vi.fn(), notFound: vi.fn(() => { throw new Error('not-found') }) }))
+const { auth, getShop, list, listVendors, notFound } = vi.hoisted(() => ({ auth: vi.fn(), getShop: vi.fn(), list: vi.fn(), listVendors: vi.fn(), notFound: vi.fn(() => { throw new Error('not-found') }) }))
 vi.mock('next/navigation', () => ({ redirect: vi.fn((path: string) => { throw new Error(`redirect:${path}`) }), notFound, useRouter: () => ({ refresh: vi.fn() }) }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
@@ -15,6 +15,10 @@ vi.mock('@/lib/db/queries', () => ({ getShopById: getShop }))
 vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/shop-os/canned-jobs')>()
   return { ...actual, listCannedJobs: list }
+})
+vi.mock('@/lib/shop-os/parts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/shop-os/parts')>()
+  return { ...actual, listVendorAccounts: listVendors }
 })
 
 import SettingsShopPage from '@/app/(app)/settings/shop/page'
@@ -29,7 +33,7 @@ function success(changed = true, cannedJob = job) { return new Response(JSON.str
 
 describe('protected canned job settings page', () => {
   beforeEach(() => {
-    vi.clearAllMocks(); getShop.mockResolvedValue({ id: 'shop-1', name: 'Honest Auto' }); list.mockResolvedValue({ ok: true, cannedJobs: [job], taxRateBps: 800 })
+    vi.clearAllMocks(); getShop.mockResolvedValue({ id: 'shop-1', name: 'Honest Auto' }); list.mockResolvedValue({ ok: true, cannedJobs: [job], taxRateBps: 800 }); listVendors.mockResolvedValue({ ok: true, vendorAccounts: [] })
   })
 
   it.each([{ role: 'owner', email: 'owner@test.dev' }, { role: 'tech', email: 'founder@test.dev' }])('loads persisted library for $role founder/owner authority', async ({ role, email }) => {

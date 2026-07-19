@@ -17,7 +17,7 @@ const REQUEST = '00000000-0000-4000-8000-000000000901'
 const ticket = { id: TICKET, ticketNumber: 42, concern: 'Brake vibration', customer: { name: 'Marisol Vega' }, vehicle: { year: 2019, make: 'Ford', model: 'F-150' } }
 function builder(canApprove = true, approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null }): Builder {
   return {
-    ticket: { id: TICKET, status: 'open', reconciled: true }, configuration: { laborRateCents: 12000, taxRateBps: 825, laborRateConfigured: true, taxRateConfigured: true },
+    ticket: { id: TICKET, status: 'open', reconciled: true }, configuration: { laborRateCents: 12000, taxRateBps: 825, partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true },
     jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: true, approval, lines: [] }],
     capabilities: { canRecordCustomerApproval: canApprove },
     activeVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, jobs: [{ jobId: JOB, subtotalCents: 84217 }] },

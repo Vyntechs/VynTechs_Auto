@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
+import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 import { parseScaledDecimal } from '@/lib/shop-os/quote-math'
 import styles from './manual-part-sourcing.module.css'
 import {
   buildManualOfferPayload,
+  deriveMarkupLinePrice,
   manualPartCommitLabel,
   normalizedManualPartSignature,
   parseCreatedVendorAccountResponse,
@@ -24,6 +25,7 @@ export type ManualPartSourcingProps = {
   accounts: SafeManualVendorAccount[]
   catalogAvailable: boolean
   canCreateVendorAccount: boolean
+  partsMarkupBps: number | null
   diagnosisSeed: { description: string } | null
   busy: boolean
   onBusyChange: (busy: boolean) => void
@@ -67,6 +69,7 @@ export function ManualPartSourcing({
   accounts,
   catalogAvailable,
   canCreateVendorAccount,
+  partsMarkupBps,
   diagnosisSeed,
   busy,
   onBusyChange,
@@ -107,6 +110,28 @@ export function ManualPartSourcing({
     setStatus('')
     setDraft((previous) => {
       const next = { ...previous, [key]: value }
+      if (normalizedManualPartSignature(previous) !== normalizedManualPartSignature(next)) {
+        setClientKey(crypto.randomUUID())
+      }
+      return next
+    })
+  }
+
+  // When the shop set a default parts markup, the customer price is derived from
+  // supplier cost × quantity × markup and shown read-only — nobody hand-enters
+  // retail. Cost and quantity flow through this setter so the price recomputes.
+  const derivedLinePrice = partsMarkupBps !== null
+    ? deriveMarkupLinePrice(draft.unitCost, draft.quantity, partsMarkupBps)
+    : null
+
+  function updateCostField(key: 'unitCost' | 'quantity', value: string) {
+    setStatus('')
+    setDraft((previous) => {
+      let next = { ...previous, [key]: value }
+      if (partsMarkupBps !== null) {
+        const derived = deriveMarkupLinePrice(next.unitCost, next.quantity, partsMarkupBps)
+        next = { ...next, customerPrice: derived ?? '' }
+      }
       if (normalizedManualPartSignature(previous) !== normalizedManualPartSignature(next)) {
         setClientKey(crypto.randomUUID())
       }
@@ -481,7 +506,7 @@ export function ManualPartSourcing({
               ) : (
                 <button ref={(node) => { fieldRefs.current.vendorAccountId = node }} type="button" className={styles.secondary} onClick={openAccountForm}>Add supplier</button>
               )) : (
-                <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier before this part can be sourced.</p>
+                <p ref={(node) => { fieldRefs.current.vendorAccountId = node }} className={styles.notice} tabIndex={-1}>An owner needs to add a supplier in Settings → Shop before this part can be sourced.</p>
               )}
             </fieldset>
           )}
@@ -513,7 +538,7 @@ export function ManualPartSourcing({
                 id="manual-part-quantity"
                 inputMode="decimal"
                 value={draft.quantity}
-                onChange={(event) => updateDraft('quantity', event.target.value)}
+                onChange={(event) => updateCostField('quantity', event.target.value)}
               />
             </div>
             <MoneyField
@@ -521,21 +546,42 @@ export function ManualPartSourcing({
               label="Supplier unit cost"
               value={draft.unitCost}
               setRef={(node) => { fieldRefs.current.unitCost = node }}
-              onChange={(value) => updateDraft('unitCost', value)}
+              onChange={(value) => updateCostField('unitCost', value)}
             />
           </div>
 
-          <div className={`${styles.field} ${styles.customerPrice}`}>
-            <label htmlFor="manual-part-customer-price">Customer line price</label>
-            <span>Complete price shown on the quote</span>
-            <input
-              ref={(node) => { fieldRefs.current.customerPrice = node }}
-              id="manual-part-customer-price"
-              inputMode="decimal"
-              value={draft.customerPrice}
-              onChange={(event) => updateDraft('customerPrice', event.target.value)}
-            />
-          </div>
+          {partsMarkupBps !== null ? (
+            <div className={`${styles.field} ${styles.customerPrice}`}>
+              <label htmlFor="manual-part-customer-price">Customer line price</label>
+              <span>Set automatically from your {partsMarkupBps / 100}% markup — no need to work out retail</span>
+              <p
+                id="manual-part-customer-price"
+                style={{
+                  margin: '4px 0 0',
+                  fontFamily: 'var(--vt-font-mono)',
+                  fontSize: 16,
+                  fontWeight: 600,
+                  color: 'var(--vt-fg)',
+                }}
+              >
+                {derivedLinePrice
+                  ? formatMoneyCents(parseMoneyToCents(derivedLinePrice))
+                  : 'Enter the supplier cost and quantity above'}
+              </p>
+            </div>
+          ) : (
+            <div className={`${styles.field} ${styles.customerPrice}`}>
+              <label htmlFor="manual-part-customer-price">Customer line price</label>
+              <span>Complete price shown on the quote</span>
+              <input
+                ref={(node) => { fieldRefs.current.customerPrice = node }}
+                id="manual-part-customer-price"
+                inputMode="decimal"
+                value={draft.customerPrice}
+                onChange={(event) => updateDraft('customerPrice', event.target.value)}
+              />
+            </div>
+          )}
 
           <label className={styles.toggle}>
             <input type="checkbox" checked={draft.taxable} onChange={(event) => updateDraft('taxable', event.target.checked)} />

@@ -45,6 +45,10 @@ vi.mock('@/lib/tickets', async (importOriginal) => {
   }
 })
 
+vi.mock('@/lib/shop-os/part-requests', () => ({
+  listPartRequestsForTicket: vi.fn(async () => []),
+}))
+
 vi.mock('@/components/screens/ticket-detail', () => ({
   TicketDetailScreen: ({ ticket, canBuildQuote, currentProfileId }: { ticket: TicketDetail; canBuildQuote: boolean; currentProfileId: string }) => (
     <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; actor {currentProfileId}</div>

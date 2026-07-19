@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import {
   buildManualOfferPayload,
+  deriveMarkupLinePrice,
   manualPartCommitLabel,
   normalizedManualPartSignature,
   parseCreatedVendorAccountResponse,
@@ -299,5 +300,38 @@ describe('locked diagnosis description seed', () => {
     expect(selectLockedDiagnosisSeed([diagnosisJob('Repair recommendation', {
       kind: 'repair', storyMode: null,
     })])).toBeNull()
+  })
+})
+
+describe('deriveMarkupLinePrice', () => {
+  it('applies the markup to unit cost for a single unit', () => {
+    expect(deriveMarkupLinePrice('100.00', '1', 4000)).toBe('140.00')
+  })
+
+  it('extends the derived price by quantity (line total, not per-unit)', () => {
+    // 4 rotors at $50 cost, 40% markup => $70 each => $280 line total.
+    expect(deriveMarkupLinePrice('50.00', '4', 4000)).toBe('280.00')
+  })
+
+  it('returns the cost unchanged at a 0% markup', () => {
+    expect(deriveMarkupLinePrice('10.00', '1', 0)).toBe('10.00')
+  })
+
+  it('rounds the customer cent half-up without floating error', () => {
+    // 9.99 x 3 x 1.5 = 44.955 -> 44.96
+    expect(deriveMarkupLinePrice('9.99', '3', 5000)).toBe('44.96')
+  })
+
+  it('handles fractional quantities', () => {
+    // 2.5 units at $10 cost, 100% markup => $50 line total.
+    expect(deriveMarkupLinePrice('10.00', '2.5', 10000)).toBe('50.00')
+  })
+
+  it('returns null for an unusable cost, quantity, or markup', () => {
+    expect(deriveMarkupLinePrice('', '1', 4000)).toBeNull()
+    expect(deriveMarkupLinePrice('abc', '1', 4000)).toBeNull()
+    expect(deriveMarkupLinePrice('10.00', '0', 4000)).toBeNull()
+    expect(deriveMarkupLinePrice('10.00', '1', -1)).toBeNull()
+    expect(deriveMarkupLinePrice('10.00', '1', 1.5)).toBeNull()
   })
 })

@@ -108,7 +108,7 @@ describe('Shop OS quote builder read model', () => {
       builder: {
         ticket: { id: ticketId, status: 'open', reconciled: false },
         configuration: {
-          laborRateCents: 15_000, taxRateBps: 825,
+          laborRateCents: 15_000, taxRateBps: 825, partsMarkupBps: null,
           laborRateConfigured: true, taxRateConfigured: true,
         },
         jobs: [{

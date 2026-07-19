@@ -104,7 +104,7 @@ function builder(overrides: Partial<Builder> = {}): Builder {
     ticket: { id: TICKET_ID, status: 'open', reconciled: true },
     configuration: {
       laborRateCents: 15_000, taxRateBps: 825,
-      laborRateConfigured: true, taxRateConfigured: true,
+      partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
     },
     jobs: [{
       id: JOB_ID, title: 'Replace front brakes', kind: 'repair', workStatus: 'open',
@@ -230,7 +230,7 @@ describe('ManualQuoteBuilder', () => {
       ticket: { id: TICKET_ID, status: 'open', reconciled: false },
       configuration: {
         laborRateCents: null, taxRateBps: 825,
-        laborRateConfigured: false, taxRateConfigured: true,
+        partsMarkupBps: null, laborRateConfigured: false, taxRateConfigured: true,
       },
       jobs: [{
         id: JOB_ID, title: 'Inspect brakes', kind: 'maintenance', workStatus: 'open',
@@ -254,7 +254,7 @@ describe('ManualQuoteBuilder', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder({
       configuration: {
         laborRateCents: 15_000, taxRateBps: null,
-        laborRateConfigured: true, taxRateConfigured: false,
+        partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: false,
       },
       activeVersion: null,
     })} />)
@@ -1158,7 +1158,7 @@ describe('ManualQuoteBuilder line mutations', () => {
     const state = builder({
       configuration: {
         laborRateCents: 15_000, taxRateBps: 825,
-        laborRateConfigured: true, taxRateConfigured: true,
+        partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
       },
       jobs: [{
         id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', lines: [pinned],
@@ -1339,7 +1339,7 @@ describe('ManualQuoteBuilder preparation', () => {
       ticket: { id: TICKET_ID, status: 'open', reconciled: false },
       configuration: {
         laborRateCents: null, taxRateBps: null,
-        laborRateConfigured: false, taxRateConfigured: false,
+        partsMarkupBps: null, laborRateConfigured: false, taxRateConfigured: false,
       },
       jobs: [{ ...builder().jobs[0], lines: [] }],
     })} />)
@@ -1358,7 +1358,7 @@ describe('ManualQuoteBuilder preparation', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={ready({
       configuration: {
         laborRateCents: null, taxRateBps: 825,
-        laborRateConfigured: false, taxRateConfigured: true,
+        partsMarkupBps: null, laborRateConfigured: false, taxRateConfigured: true,
       },
       jobs: [{ ...builder().jobs[0], lines: [explicitLabor] }],
     })} />)
@@ -1371,7 +1371,7 @@ describe('ManualQuoteBuilder preparation', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={ready({
       configuration: {
         laborRateCents: null, taxRateBps: 825,
-        laborRateConfigured: false, taxRateConfigured: true,
+        partsMarkupBps: null, laborRateConfigured: false, taxRateConfigured: true,
       },
     })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))

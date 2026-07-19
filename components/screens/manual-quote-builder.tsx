@@ -1091,6 +1091,7 @@ export function ManualQuoteBuilder({
           accounts={accounts}
           catalogAvailable={vendorCatalogAvailable}
           canCreateVendorAccount={canCreateVendorAccount}
+          partsMarkupBps={current.configuration.partsMarkupBps}
           diagnosisSeed={diagnosisSeed}
           busy={busy}
           onBusyChange={setSourcingBusy}

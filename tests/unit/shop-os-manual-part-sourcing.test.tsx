@@ -30,6 +30,7 @@ function props(overrides: Partial<ManualPartSourcingProps> = {}): ManualPartSour
     accounts: [ACCOUNT_ONE],
     catalogAvailable: true,
     canCreateVendorAccount: false,
+    partsMarkupBps: null,
     diagnosisSeed: null,
     busy: false,
     onBusyChange: vi.fn(),
@@ -89,7 +90,7 @@ describe('ManualPartSourcing', () => {
     expect(screen.getByRole('button', { name: 'Add supplier' })).toBeInTheDocument()
 
     rerender(<ManualPartSourcing {...props({ accounts: [], canCreateVendorAccount: false })} />)
-    expect(screen.getByText('An owner needs to add a supplier before this part can be sourced.')).toBeInTheDocument()
+    expect(screen.getByText('An owner needs to add a supplier in Settings → Shop before this part can be sourced.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add supplier' })).toBeNull()
 
     rerender(<ManualPartSourcing {...props({ accounts: [], catalogAvailable: false, canCreateVendorAccount: true })} />)
@@ -106,7 +107,7 @@ describe('ManualPartSourcing', () => {
     {
       label: 'non-manager notice',
       overrides: { accounts: [], canCreateVendorAccount: false },
-      target: () => screen.getByText('An owner needs to add a supplier before this part can be sourced.'),
+      target: () => screen.getByText('An owner needs to add a supplier in Settings → Shop before this part can be sourced.'),
     },
     {
       label: 'catalog-unavailable notice',
@@ -545,6 +546,31 @@ describe('ManualPartSourcing', () => {
     )
     expect(onBusyChange.mock.calls).toEqual([[true], [false]])
     expect(onSaved).toHaveBeenCalledWith(manualOfferResponse({ lineId }).line)
+  })
+
+  it('with a shop parts markup, shows a read-only price from cost × quantity and sends it — no retail typed', async () => {
+    const user = userEvent.setup()
+    const lineId = '00000000-0000-4000-8000-000000000901'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manualOfferResponse({ lineId })), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualPartSourcing {...props({ partsMarkupBps: 4000 })} />)
+
+    await user.type(screen.getByLabelText('Part description'), 'Brake pads')
+    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '2' } })
+    await user.type(screen.getByLabelText('Supplier unit cost'), '80')
+
+    // 2 × $80 cost × 1.40 = $224.00, shown read-only — there is no price input.
+    expect(screen.queryByRole('textbox', { name: 'Customer line price' })).toBeNull()
+    expect(screen.getByText('$224.00')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Add 2 Brake pads/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.priceCents).toBe(22400)
+    expect(body.unitCostCents).toBe(8000)
   })
 
   it('retains retry identity after an ambiguous failure and rotates it after normalized quantity or price edits', async () => {

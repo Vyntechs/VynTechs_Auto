@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -38,6 +38,8 @@ export type TicketDomainError =
   | 'ticket_not_open'
   | 'job_not_open'
   | 'assignment_conflict'
+  | 'overpayment'
+  | 'balance_outstanding'
 
 export type AssignmentTierWarning = {
   code: 'below_required_tier'
@@ -90,6 +92,128 @@ export type TicketDetail = {
   }>
   createdAt: Date
   updatedAt: Date
+}
+
+// ---- Vehicle history (read-only) -------------------------------------------
+// A vehicle's past repair orders and the jobs on them, powering the
+// vehicle-history screen. The "recommended, not done" surface is derived from
+// jobs the customer declined (approvalState === 'declined').
+
+export type VehicleHistoryJob = {
+  id: string
+  ticketId: string
+  ticketNumber: number
+  title: string
+  kind: 'diagnostic' | 'repair' | 'maintenance'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
+}
+
+export type VehicleHistoryTicket = {
+  id: string
+  ticketNumber: number
+  concern: string
+  status: 'open' | 'closed' | 'canceled'
+  createdAt: Date
+  closedAt: Date | null
+  jobs: VehicleHistoryJob[]
+}
+
+// Flat (ticket × job) row before grouping. Job columns are null for a ticket
+// that has no jobs yet (left join).
+export type VehicleHistoryRow = {
+  ticketId: string
+  ticketNumber: number
+  concern: string
+  status: 'open' | 'closed' | 'canceled'
+  createdAt: Date
+  closedAt: Date | null
+  jobId: string | null
+  jobTitle: string | null
+  jobKind: 'diagnostic' | 'repair' | 'maintenance' | null
+  jobApprovalState: VehicleHistoryJob['approvalState'] | null
+  jobWorkStatus: VehicleHistoryJob['workStatus'] | null
+}
+
+/**
+ * Collapse flat ticket×job rows into tickets carrying their jobs, preserving
+ * the query's row order (tickets newest-first; jobs oldest-first within a
+ * ticket). Pure, so the grouping is unit-testable without a database.
+ */
+export function groupVehicleHistoryRows(
+  rows: VehicleHistoryRow[],
+): VehicleHistoryTicket[] {
+  const byTicket = new Map<string, VehicleHistoryTicket>()
+  const order: string[] = []
+  for (const row of rows) {
+    let ticket = byTicket.get(row.ticketId)
+    if (!ticket) {
+      ticket = {
+        id: row.ticketId,
+        ticketNumber: row.ticketNumber,
+        concern: row.concern,
+        status: row.status,
+        createdAt: row.createdAt,
+        closedAt: row.closedAt,
+        jobs: [],
+      }
+      byTicket.set(row.ticketId, ticket)
+      order.push(row.ticketId)
+    }
+    if (row.jobId) {
+      ticket.jobs.push({
+        id: row.jobId,
+        ticketId: row.ticketId,
+        ticketNumber: row.ticketNumber,
+        title: row.jobTitle ?? '',
+        kind: row.jobKind ?? 'repair',
+        approvalState: row.jobApprovalState ?? 'pending_quote',
+        workStatus: row.jobWorkStatus ?? 'open',
+      })
+    }
+  }
+  return order.map((id) => byTicket.get(id) as VehicleHistoryTicket)
+}
+
+/**
+ * A vehicle's full repair-order history within its shop, newest ticket first,
+ * each ticket carrying its jobs. Read-only.
+ */
+export async function listVehicleTicketHistory(
+  db: AppDb,
+  opts: { shopId: string; vehicleId: string },
+): Promise<VehicleHistoryTicket[]> {
+  const rows = await db
+    .select({
+      ticketId: tickets.id,
+      ticketNumber: tickets.ticketNumber,
+      concern: tickets.concern,
+      status: tickets.status,
+      createdAt: tickets.createdAt,
+      closedAt: tickets.closedAt,
+      jobId: ticketJobs.id,
+      jobTitle: ticketJobs.title,
+      jobKind: ticketJobs.kind,
+      jobApprovalState: ticketJobs.approvalState,
+      jobWorkStatus: ticketJobs.workStatus,
+    })
+    .from(tickets)
+    .leftJoin(
+      ticketJobs,
+      and(
+        eq(ticketJobs.shopId, tickets.shopId),
+        eq(ticketJobs.ticketId, tickets.id),
+      ),
+    )
+    .where(
+      and(eq(tickets.shopId, opts.shopId), eq(tickets.vehicleId, opts.vehicleId)),
+    )
+    .orderBy(
+      desc(tickets.ticketNumber),
+      asc(ticketJobs.createdAt),
+      asc(ticketJobs.id),
+    )
+  return groupVehicleHistoryRows(rows)
 }
 
 export type CreateTicketResult =
@@ -290,6 +414,7 @@ export function ticketDomainStatus(
   switch (result.error) {
     case 'invalid_input':
     case 'invalid_assignee':
+    case 'overpayment':
       return 422
     case 'forbidden':
     case 'no_shop':
@@ -302,6 +427,7 @@ export function ticketDomainStatus(
     case 'ticket_not_open':
     case 'job_not_open':
     case 'assignment_conflict':
+    case 'balance_outstanding':
       return 409
   }
 }

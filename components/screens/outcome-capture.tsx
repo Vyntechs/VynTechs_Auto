@@ -81,9 +81,13 @@ export function OutcomeCapture({
   const [partName, setPartName] = useState('')
   const [oemNumber, setOemNumber] = useState('')
   const [partCost, setPartCost] = useState('')
-  const [codesCleared, setCodesCleared] = useState(true)
-  const [testDrive, setTestDrive] = useState(true)
-  const [symptomsResolved, setSymptomsResolved] = useState<SymptomsResolved>('yes')
+  // Verification is not pre-asserted: a tech must tick what they actually did
+  // and explicitly state whether the symptoms resolved. Closing a case may not
+  // claim a verified fix the tech never affirmed (matches the auto
+  // declined-no-repair close, which also writes false/false).
+  const [codesCleared, setCodesCleared] = useState(false)
+  const [testDrive, setTestDrive] = useState(false)
+  const [symptomsResolved, setSymptomsResolved] = useState<SymptomsResolved | null>(null)
   const [notes, setNotes] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -97,10 +101,13 @@ export function OutcomeCapture({
     !previewMode &&
     !busy &&
     rootCause.trim().length >= 10 &&
+    symptomsResolved !== null &&
     (!requiresPart || partName.trim().length > 0)
 
   async function handleSubmit() {
-    if (!sessionId) return
+    // symptomsResolved must be an explicit choice — never send a default
+    // "resolved" the tech didn't pick (mirrors canSubmit; narrows the type).
+    if (!sessionId || symptomsResolved === null) return
     setBusy(true)
     setError(null)
 
@@ -194,7 +201,7 @@ export function OutcomeCapture({
           flexDirection: 'column',
         }}
       >
-        <span className="eyebrow">Closing the case · all fields required</span>
+        <span className="eyebrow">Closing the case</span>
         {!previewMode && sessionId && (
           <div
             style={{
@@ -312,9 +319,9 @@ export function OutcomeCapture({
         </div>
 
         <div className="field">
-          <label>Time spent</label>
+          <label>Case open</label>
           <div style={{ fontFamily: 'var(--vt-font-mono)', fontSize: 14 }}>
-            diag {diagMin} min · repair {repairMin} min ·{' '}
+            {diagMin} min ·{' '}
             <span style={{ color: 'var(--vt-fg-3)' }}>auto</span>
           </div>
         </div>

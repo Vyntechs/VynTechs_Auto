@@ -25,7 +25,7 @@ const story = {
 function builder(mode: Builder['jobs'][number]['storyMode'], storyValue: Builder['jobs'][number]['story'] = { content: null, source: null, reviewStatus: null, revision: 0 }): Builder {
   return {
     ticket: { id: TICKET, status: 'open', reconciled: true },
-    configuration: { laborRateCents: 12000, taxRateBps: 825, laborRateConfigured: true, taxRateConfigured: true },
+    configuration: { laborRateCents: 12000, taxRateBps: 825, partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true },
     jobs: [{
       id: JOB, title: 'Charging system diagnosis', kind: 'diagnostic', workStatus: 'open',
       story: storyValue, storyMode: mode,

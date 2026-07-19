@@ -151,6 +151,37 @@ const manualOfferPayloadSchema = z.strictObject({
   externalOfferId: nullableCanonicalText(500),
 })
 
+// Derives the complete customer line price from a supplier unit cost, the line
+// quantity, and the shop's default markup (basis points; 4000 = 40%). The
+// quote money summary treats a part line's priceCents as the extended line
+// total (not per-unit), so the markup is applied to unit cost × quantity.
+// Returns a plain dollar string (e.g. "280.00") that canonicalMoney round-trips,
+// or null when the inputs are not yet a valid cost/quantity/markup — the caller
+// then leaves the price blank and the normal cost/quantity validation fires.
+export function deriveMarkupLinePrice(
+  unitCost: string,
+  quantity: string,
+  markupBps: number,
+): string | null {
+  if (!Number.isInteger(markupBps) || markupBps < 0) return null
+  let unitCostCents: number
+  let scaledQuantity: bigint
+  try {
+    unitCostCents = parseMoneyToCents(unitCost.trim())
+    scaledQuantity = parseScaledDecimal(quantity.trim(), 3)
+  } catch {
+    return null
+  }
+  if (scaledQuantity <= 0n) return null
+  // quantity is scaled by 1000 (3 dp); markup is out of 10000. Round half-up in
+  // integer space so the customer cent is exact — no floating point.
+  const numerator = BigInt(unitCostCents) * scaledQuantity * BigInt(10_000 + markupBps)
+  const denominator = 10_000_000n
+  const derivedCents = Number((numerator + denominator / 2n) / denominator)
+  if (!Number.isSafeInteger(derivedCents)) return null
+  return formatMoneyCents(derivedCents).replace(/[$,]/g, '')
+}
+
 export function parseEnabledVendorAccountsResponse(value: unknown): SafeManualVendorAccount[] | null {
   const parsed = enabledVendorAccountsResponseSchema.safeParse(value)
   return parsed.success ? parsed.data.vendorAccounts : null

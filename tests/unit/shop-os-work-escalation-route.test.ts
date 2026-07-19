@@ -43,7 +43,7 @@ describe('Shop OS work escalation route', () => {
     const body = { requestKey: NEW_JOB, concern: 'Found a clunk', requiredSkillTier: 2 }
     vi.mocked(createWorkEscalation).mockResolvedValue({
       ok: true, changed: true,
-      job: { id: NEW_JOB, title: 'Diagnose: Found a clunk', kind: 'diagnostic', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null },
+      job: { id: NEW_JOB, title: 'Found: Found a clunk', kind: 'repair', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null },
     })
     const response = await POST(request(JSON.stringify(body)), params)
     expect(response.status).toBe(201)

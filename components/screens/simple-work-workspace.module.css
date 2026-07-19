@@ -11,6 +11,10 @@
 .state h2 { margin-top: 8px; font-size: clamp(28px, 4vw, 40px); }
 .state > p:last-of-type { color: var(--vt-fg-2); line-height: 1.5; }
 .savedNote { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.clock { margin: 18px 0 0; display: flex; flex-wrap: wrap; gap: 8px 24px; font-family: var(--vt-font-mono); }
+.clock div { display: flex; flex-direction: column; gap: 2px; }
+.clock dt { margin: 0; color: var(--vt-fg-3); font-size: var(--vt-fs-12); font-weight: 600; letter-spacing: var(--vt-tr-eyebrow); text-transform: uppercase; }
+.clock dd { margin: 0; color: var(--vt-fg); font-size: 15px; }
 .module { min-width: 0; border-top: var(--vt-stroke-strong); padding-top: 22px; }
 .moduleHeading { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
 .moduleHeading span { color: var(--vt-accent); font-size: var(--vt-fs-12); }
