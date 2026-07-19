@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { AppHeader } from '@/components/vt'
 import type { TicketDetail } from '@/lib/tickets'
+import type { TicketRingOut } from '@/lib/shop-os/ring-out'
+import { RingOutSection } from './ring-out-section'
 import styles from './ticket-detail.module.css'
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -48,10 +50,12 @@ export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
   currentProfileId = null,
+  ringOut = null,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
   currentProfileId?: string | null
+  ringOut?: TicketRingOut | null
 }): React.JSX.Element {
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
@@ -234,6 +238,10 @@ export function TicketDetailScreen({
             ))}
           </ol>
         </section>
+
+        {ringOut && (
+          <RingOutSection ticketId={ticket.id} initialRingOut={ringOut} />
+        )}
       </div>
     </main>
   )

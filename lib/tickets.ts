@@ -38,6 +38,8 @@ export type TicketDomainError =
   | 'ticket_not_open'
   | 'job_not_open'
   | 'assignment_conflict'
+  | 'overpayment'
+  | 'balance_outstanding'
 
 export type AssignmentTierWarning = {
   code: 'below_required_tier'
@@ -412,6 +414,7 @@ export function ticketDomainStatus(
   switch (result.error) {
     case 'invalid_input':
     case 'invalid_assignee':
+    case 'overpayment':
       return 422
     case 'forbidden':
     case 'no_shop':
@@ -424,6 +427,7 @@ export function ticketDomainStatus(
     case 'ticket_not_open':
     case 'job_not_open':
     case 'assignment_conflict':
+    case 'balance_outstanding':
       return 409
   }
 }

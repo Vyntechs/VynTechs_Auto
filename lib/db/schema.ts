@@ -941,6 +941,52 @@ export const quoteEvents = pgTable(
   ],
 )
 
+// Money the shop has actually collected against a repair order. Append-only:
+// each row is one payment (a deposit, a partial, or the whole thing). The
+// amount owed is derived from the ticket's approved quote jobs; the balance is
+// owed minus the sum of these rows. Techs never write here — recording money
+// is an advisor/owner action (see canCloseTickets).
+export const ticketPayments = pgTable(
+  'ticket_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    method: text('method', {
+      enum: ['cash', 'card', 'check', 'other'],
+    }).notNull(),
+    note: text('note'),
+    recordedByProfileId: uuid('recorded_by_profile_id').notNull(),
+    requestKey: uuid('request_key').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'ticket_payments_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_payments_shop_actor_fk',
+      columns: [table.shopId, table.recordedByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('ticket_payments_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('ticket_payments_shop_request_key_uq').on(table.shopId, table.requestKey),
+    index('ticket_payments_ticket_idx').on(table.shopId, table.ticketId, table.recordedAt),
+    check('ticket_payments_amount_positive', sql`${table.amountCents} > 0`),
+    check(
+      'ticket_payments_method_valid',
+      sql`${table.method} in ('cash', 'card', 'check', 'other')`,
+    ),
+    check(
+      'ticket_payments_note_length',
+      sql`${table.note} is null or char_length(${table.note}) between 1 and 500`,
+    ),
+  ],
+)
+
 export const smsLog = pgTable(
   'sms_log',
   {
@@ -1850,6 +1896,8 @@ export type Ticket = typeof tickets.$inferSelect
 export type NewTicket = typeof tickets.$inferInsert
 export type TicketJob = typeof ticketJobs.$inferSelect
 export type NewTicketJob = typeof ticketJobs.$inferInsert
+export type TicketPayment = typeof ticketPayments.$inferSelect
+export type NewTicketPayment = typeof ticketPayments.$inferInsert
 
 export const retrievalCache = pgTable('retrieval_cache', {
   id: uuid('id').primaryKey().defaultRandom(),

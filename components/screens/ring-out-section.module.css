@@ -1,0 +1,301 @@
+.ringOut {
+  border-top: 1px solid var(--vt-rule-strong);
+  padding-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.head h2 {
+  margin: 8px 0 0;
+  font-family: var(--vt-font-serif);
+  font-weight: 400;
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: -0.02em;
+}
+
+.closedStamp {
+  border: 1px solid var(--vt-status-closed);
+  border-radius: var(--vt-radius-2);
+  padding: 7px 10px;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.bill,
+.tally {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.billRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+}
+
+.billRow dt {
+  min-width: 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-serif);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.billRow dd {
+  margin: 0;
+  color: var(--vt-fg-1);
+  font-family: var(--vt-font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.total {
+  border-top: 1px solid var(--vt-rule);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.total dt {
+  color: var(--vt-fg-1);
+  font-weight: 500;
+}
+
+.total dd {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.empty {
+  margin: 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 16px;
+}
+
+.payments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 16px;
+}
+
+.payment {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.payMethod {
+  min-width: 52px;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.payAmount {
+  color: var(--vt-fg-1);
+  font-family: var(--vt-font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.payNote {
+  min-width: 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-serif);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.payDate {
+  margin-left: auto;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tally {
+  border-top: 1px solid var(--vt-rule-strong);
+  padding-top: 16px;
+  gap: 10px;
+}
+
+.tally > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+}
+
+.tally dt {
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tally dd {
+  margin: 0;
+  color: var(--vt-fg-1);
+  font-family: var(--vt-font-mono);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.balance dt {
+  color: var(--vt-fg-1);
+}
+
+.balance dd {
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 20px;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 140px);
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span {
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.field input,
+.field select {
+  min-height: 48px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  padding: 0 14px;
+  background: var(--vt-bone-50);
+  color: var(--vt-fg-1);
+  font-family: var(--vt-font-mono);
+  font-size: 16px;
+}
+
+.field input:focus-visible,
+.field select:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 2px;
+}
+
+.recordButton,
+.closeButton {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vt-radius-2);
+  padding: 0 20px;
+  font-family: var(--vt-font-sans);
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.recordButton {
+  border: 1px solid var(--vt-signal-600);
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+}
+
+.recordButton:hover:not(:disabled) {
+  background: var(--vt-signal-700);
+}
+
+.closeButton {
+  align-self: flex-start;
+  border: 1px solid var(--vt-fg-1);
+  background: var(--vt-fg-1);
+  color: var(--vt-bone-50);
+}
+
+.closeButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.recordButton:disabled,
+.closeButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.recordButton:focus-visible,
+.closeButton:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.error {
+  margin: 0;
+  color: var(--vt-status-declined);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+}
+
+@media (max-width: 600px) {
+  .formRow {
+    grid-template-columns: 1fr;
+  }
+
+  .head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+}

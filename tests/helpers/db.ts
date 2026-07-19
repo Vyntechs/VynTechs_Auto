@@ -63,6 +63,7 @@ export async function createTestDb(): Promise<{
   await ensureMessagingRetentionFkIndexMigration(client)
   await ensureShopEntitlementsMigration(client)
   await ensureShopPartsMarkupMigration(client)
+  await ensureTicketPaymentsMigration(client)
   return {
     db,
     client,
@@ -98,6 +99,67 @@ export async function ensureShopPartsMarkupMigration(client: PGlite): Promise<vo
 
   if (!(await shopHasPartsMarkupColumn(client))) {
     throw new Error('shops.parts_markup_bps migration failed in ephemeral database')
+  }
+}
+
+type TicketPaymentsMarkers = {
+  table_exists: boolean
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function ticketPaymentsMarkers(client: PGlite): Promise<TicketPaymentsMarkers> {
+  const result = await client.query<TicketPaymentsMarkers>(`
+    select
+      to_regclass('public.ticket_payments') is not null as table_exists,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.ticket_payments')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'ticket_payments'
+         and policyname = 'ticket_payments_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'ticket_payments'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'ticket_payments'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('ticket payments schema inspection failed')
+  return markers
+}
+
+function hasCompleteTicketPayments(markers: TicketPaymentsMarkers): boolean {
+  return markers.table_exists
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureTicketPaymentsMigration(client: PGlite): Promise<void> {
+  const before = await ticketPaymentsMarkers(client)
+  if (hasCompleteTicketPayments(before)) return
+  if (before.table_exists) {
+    throw new Error('partial ticket payments schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0038_shop_os_ticket_payments.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!hasCompleteTicketPayments(await ticketPaymentsMarkers(client))) {
+    throw new Error('ticket payments migration failed in ephemeral database')
   }
 }
 

@@ -26,9 +26,18 @@ console was out of scope.
 | Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
 | Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
 | Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
+| Getting paid — ring out & close | _(this branch)_ | New **Ring out** panel on the ticket screen (advisor/owner only — techs never see it). Bill = the approved jobs' subtotals taxed once (derived, never stored); record cash/card/check/other payments (deposits + partials welcome); balance = owed − collected; the ticket closes only when the balance clears, stamping `closedAt`/`deliveredAt`/`closedBy`. New append-only `ticket_payments` table (server-only, migration 0038 with RLS deny + service-role-only ACL, mirroring `shop_entitlements`); `POST /api/tickets/[id]/payments` (idempotent by requestKey, rejects overpayment) and `POST /api/tickets/[id]/close`. No card processing — the app records the money truth and closes the order; the shop takes payment however it already does. First time a ticket can reach `closed` — those columns had zero writers before. |
 
-All three: TypeScript clean, targeted tests green, production build passes. Not
+All: TypeScript clean, targeted tests green, production build passes. Not
 driven through a live authenticated session (QA-credential gate).
+
+**Deliberately deferred on getting-paid (v1 keeps it simple):** closing with an
+outstanding balance / write-off (v1 requires paid-in-full or a $0 close);
+reopening a closed ticket; voiding/refunding a recorded payment; a per-line or
+parts-vs-labor customer receipt (kept to job subtotals + tax + total to preserve
+the existing margin-protection rule that customers never see itemized parts);
+and closing a still-open ticket where the customer declined *all* work (the
+ring-out panel only appears once there's money to collect or a receipt to show).
 
 ---
 
@@ -173,11 +182,13 @@ technician seat. Principles (founder's words, condensed):
 
 ### New gaps confirmed by the sweep
 
-- **High — Getting paid is absent.** No invoice / paid state / balance /
-  deposit on the repair spine; `tickets.closedAt/deliveredAt/canceledAt`
-  columns exist but **nothing writes them** — a shop cannot ring a customer out
-  or even close/deliver a ticket. (Every money hit in the repo is SaaS
-  subscription billing, not repair-order money.)
+- **~~High — Getting paid is absent.~~ SHIPPED (this branch).** Ring-out now
+  bills approved work, takes payments, and closes/delivers the ticket
+  (`tickets.closedAt/deliveredAt/closedBy` finally have writers). Remaining
+  getting-paid gaps are the "deliberately deferred" list under Shipped:
+  balance-on-delivery / write-off close, reopen, void/refund, and a $0 close for
+  a fully-declined ticket. Canceling a ticket (`canceledAt`) is still unwritten —
+  that's a separate "abandon vs close" concept, not part of ring-out.
 - **High — Mid-job discovery is a detour.** Adding a repair job to an open
   ticket exists in the domain (`lib/tickets.ts:872`,
   `POST app/api/tickets/[id]/jobs/route.ts:35`) but the only in-UI button mints

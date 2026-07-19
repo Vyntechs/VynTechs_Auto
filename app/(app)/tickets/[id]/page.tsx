@@ -3,7 +3,8 @@ import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
-import { canBuildQuotes } from '@/lib/shop-os/capabilities'
+import { canBuildQuotes, canCloseTickets } from '@/lib/shop-os/capabilities'
+import { getTicketRingOut } from '@/lib/shop-os/ring-out'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
 
@@ -23,17 +24,24 @@ export default async function TicketPage({
   if (access.kind === 'paywall') redirect('/subscribe')
 
   const { id } = await params
-  const result = await getTicketDetail(db, {
-    actor: ticketActorFromProfile(ctx.profile),
-    ticketId: id,
-  })
+  const actor = ticketActorFromProfile(ctx.profile)
+  const result = await getTicketDetail(db, { actor, ticketId: id })
   if (!result.ok) notFound()
+
+  // Getting paid is an advisor/owner surface — techs never see money. Only load
+  // the ring-out state when the viewer can act on it.
+  let ringOut = null
+  if (canCloseTickets(ctx.profile.role)) {
+    const ringOutResult = await getTicketRingOut(db, { actor, ticketId: id })
+    if (ringOutResult.ok) ringOut = ringOutResult.ringOut
+  }
 
   return (
     <TicketDetailScreen
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
       currentProfileId={ctx.profile.id}
+      ringOut={ringOut}
     />
   )
 }

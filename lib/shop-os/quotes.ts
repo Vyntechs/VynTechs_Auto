@@ -334,6 +334,25 @@ export function quoteSnapshotContainsExactJob(
     && parsed.data.jobs.some((job) => job.id === input.jobId && job.kind === input.kind)
 }
 
+// One approved job's pre-tax money, pulled from the exact quote version the
+// customer approved. Per-job totals in a snapshot carry no tax (tax is applied
+// once at the ticket level), so ring-out sums these and taxes the total. Null
+// when the snapshot is unparseable or does not contain the job — the caller
+// treats that as "this job's price is not billable" rather than guessing.
+export function readApprovedJobBreakdown(
+  snapshot: unknown,
+  jobId: string,
+): { subtotalCents: number; taxableSubtotalCents: number } | null {
+  const parsed = quoteSnapshotSchema.safeParse(snapshot)
+  if (!parsed.success) return null
+  const job = parsed.data.jobs.find((candidate) => candidate.id === jobId)
+  if (!job) return null
+  return {
+    subtotalCents: job.totals.subtotalCents,
+    taxableSubtotalCents: job.totals.taxableSubtotalCents,
+  }
+}
+
 function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus'>,
 ): boolean {
