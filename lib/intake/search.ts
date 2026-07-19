@@ -1,6 +1,7 @@
 import { and, desc, eq, ilike, inArray, like, or, sql } from 'drizzle-orm'
 import { customers, sessions, vehicles } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
+import { boundedSearchTokens } from '@/lib/intake/search-limits'
 
 export type CustomerVehicle = {
   id: string
@@ -45,16 +46,12 @@ export type SearchResults = {
 
 const PER_GROUP_LIMIT = 5
 
-function tokenize(q: string): string[] {
-  return q.trim().split(/\s+/).filter((t) => t !== '')
-}
-
 export async function searchIntake(opts: {
   db: AppDb
   shopId: string
   q: string
 }): Promise<SearchResults> {
-  const tokens = tokenize(opts.q)
+  const tokens = boundedSearchTokens(opts.q)
   if (tokens.length === 0) return { customers: [], vehicles: [] }
 
   // ----- Customers -----

@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { customers, vehicles, sessions, shops, profiles } from '@/lib/db/schema'
 import { searchIntake } from '@/lib/intake/search'
+import { boundedSearchTokens } from '@/lib/intake/search-limits'
 
 let db: TestDb
 let close: () => Promise<void>
@@ -217,5 +218,15 @@ describe('searchIntake', () => {
     expect(v.lastVisit).toBeNull()
     expect((v as unknown as { ownerId?: string }).ownerId).toBeUndefined()
     expect((v as unknown as { ownerName?: string }).ownerName).toBeUndefined()
+  })
+})
+
+describe('boundedSearchTokens', () => {
+  it('keeps direct callers within the finite SQL-predicate budget', () => {
+    const tokens = boundedSearchTokens(
+      Array.from({ length: 20 }, (_, index) => `${index}${'x'.repeat(100)}`).join(' '),
+    )
+    expect(tokens).toHaveLength(8)
+    expect(tokens.every((token) => token.length <= 64)).toBe(true)
   })
 })

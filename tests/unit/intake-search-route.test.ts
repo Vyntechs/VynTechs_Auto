@@ -18,17 +18,22 @@ vi.mock('@/lib/db/client', () => ({ db: {} }))
 vi.mock('@/lib/auth-access', () => ({
   paywallReject: vi.fn(async () => null),
 }))
+vi.mock('@/lib/rate-limit', () => ({
+  rateLimitReject: vi.fn(async () => null),
+}))
 
 import { POST } from '@/app/api/intake/search/route'
 import { searchIntake } from '@/lib/intake/search'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
+import { rateLimitReject } from '@/lib/rate-limit'
 
 const searchMock = vi.mocked(searchIntake)
 const recentsMock = vi.mocked(getRecentIntakeCustomers)
 const authMock = vi.mocked(requireUserAndProfile)
 const paywallMock = vi.mocked(paywallReject)
+const rateLimitMock = vi.mocked(rateLimitReject)
 
 function req(body: unknown) {
   return new Request('http://localhost/api/intake/search', {
@@ -58,6 +63,7 @@ describe('POST /api/intake/search', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     paywallMock.mockResolvedValue(null)
+    rateLimitMock.mockResolvedValue(null)
     authMock.mockResolvedValue({ profile: ownerProfile, user: { id: 'u1', email: 'o@shop.test' } })
   })
 
@@ -132,5 +138,42 @@ describe('POST /api/intake/search', () => {
     })
     const res = await POST(badReq)
     expect(res.status).toBe(400)
+  })
+
+  it.each([
+    ['over 256 characters', 'a'.repeat(257)],
+    ['over eight tokens', 'a b c d e f g h i'],
+    ['a token over 64 characters', 'a'.repeat(65)],
+  ])('rejects a query %s before quota or database search', async (_label, q) => {
+    const res = await POST(req({ q }))
+    expect(res.status).toBe(400)
+    await expect(res.json()).resolves.toEqual({ error: 'query_too_complex' })
+    expect(rateLimitMock).not.toHaveBeenCalled()
+    expect(searchMock).not.toHaveBeenCalled()
+    expect(recentsMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['exactly 256 characters', `${'a'.repeat(64)} ${'b'.repeat(64)} ${'c'.repeat(64)} ${'d'.repeat(61)}`],
+    ['exactly eight tokens', 'a b c d e f g h'],
+    ['a token exactly 64 characters', 'a'.repeat(64)],
+  ])('accepts a query at the %s boundary', async (_label, q) => {
+    searchMock.mockResolvedValue({ customers: [], vehicles: [] })
+    const res = await POST(req({ q }))
+    expect(res.status).toBe(200)
+    expect(searchMock).toHaveBeenCalledWith({ db: {}, shopId: 's1', q })
+  })
+
+  it('uses a per-user search quota and stops before search when exhausted', async () => {
+    const { NextResponse } = await import('next/server')
+    rateLimitMock.mockResolvedValue(
+      NextResponse.json({ error: 'rate_limited' }, { status: 429 }),
+    )
+
+    const res = await POST(req({ q: 'smith' }))
+
+    expect(rateLimitMock).toHaveBeenCalledWith({}, 'intake-search:u1', 60)
+    expect(res.status).toBe(429)
+    expect(searchMock).not.toHaveBeenCalled()
   })
 })
