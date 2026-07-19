@@ -122,10 +122,6 @@ describe('ticket HTTP access and contracts', () => {
 
   it.each([
     {
-      name: 'POST /api/tickets',
-      invoke: () => createTicketRoute(invalidJsonRequest('/api/tickets')),
-    },
-    {
       name: 'GET /api/tickets/:id',
       invoke: () =>
         getTicketRoute(new Request(`http://localhost/api/tickets/${TICKET_ID}`), params()),
@@ -152,10 +148,6 @@ describe('ticket HTTP access and contracts', () => {
   })
 
   it.each([
-    {
-      name: 'POST /api/tickets',
-      invoke: () => createTicketRoute(invalidJsonRequest('/api/tickets')),
-    },
     {
       name: 'GET /api/tickets/:id',
       invoke: () =>
@@ -184,45 +176,14 @@ describe('ticket HTTP access and contracts', () => {
     expect(addTicketJobMock).not.toHaveBeenCalled()
   })
 
-  it('returns invalid_json without calling createTicket', async () => {
+  it('retires generic ticket creation before auth, parsing, or domain work', async () => {
     const response = await createTicketRoute(invalidJsonRequest('/api/tickets'))
 
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+    expect(requireUserMock).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
     expect(createTicketMock).not.toHaveBeenCalled()
-  })
-
-  it('creates a ticket with the translated actor and exact success JSON', async () => {
-    const body = { concern: 'Brake vibration', jobs: [{ title: 'Inspect brakes' }] }
-    createTicketMock.mockResolvedValue({ ok: true, ticket } as never)
-
-    const response = await createTicketRoute(jsonRequest('/api/tickets', body))
-
-    expect(createTicketMock).toHaveBeenCalledWith({}, { actor, body })
-    expect(response.status).toBe(201)
-    await expect(response.json()).resolves.toEqual({ ticket })
-  })
-
-  it('returns create errors and warnings without exposing the domain discriminator', async () => {
-    const warning = {
-      code: 'below_required_tier' as const,
-      assignedTechId: profile.id,
-      assignedSkillTier: 2 as const,
-      requiredSkillTier: 3 as const,
-    }
-    createTicketMock.mockResolvedValue({
-      ok: false,
-      error: 'tier_confirmation_required',
-      warning,
-    })
-
-    const response = await createTicketRoute(jsonRequest('/api/tickets', {}))
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
-      error: 'tier_confirmation_required',
-      warning,
-    })
   })
 
   it('forwards the route parameter and returns ticket detail JSON', async () => {
