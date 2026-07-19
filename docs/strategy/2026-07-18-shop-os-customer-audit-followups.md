@@ -16,6 +16,53 @@ console was out of scope.
 
 ---
 
+## NEXT UP (read this first on resume)
+
+**Getting paid is DONE and shipped** — commit `ae208b9` on this branch (11
+commits ahead of `origin/main`, working tree clean). Ring-out panel on the
+ticket screen: bill from approved jobs → record cash/card/check/other (deposits
++ partials) → close & deliver when the balance clears. New `ticket_payments`
+table (migration 0038, server-only), `POST /api/tickets/[id]/payments` +
+`/close`, `lib/shop-os/ring-out.ts`, `components/screens/ring-out-section.tsx`.
+Own tests green (`shop-os-ring-out*`, `shop-os-ticket-payments-schema`), tsc
+clean, production build clean. Full-suite failures are all pre-existing/flaky in
+unrelated areas (proven: count swung 20→9→2 across identical runs; the one
+deterministic failure is `shop-os-vehicle-history-page.test.tsx`, whose mock
+implements only `.innerJoin` while `listVehicleTicketHistory` uses `.leftJoin` —
+broken by earlier branch commit `47c3496`, not by ring-out).
+
+**Next feature: the one-page technician job screen** (the other fork the founder
+named — "a tech never leaves the job"). Ties together the parts/labor vision
+already built (suppliers + markup). Build on the existing work screen:
+`app/(app)/tickets/[id]/jobs/[jobId]/work/` + `POST .../work/route.ts` (actions
+`start`/`save_note`/`complete`) and its screen component. Four moves, all on that
+one page, tech never navigates away:
+1. **Parts picker, zero money** — tech picks a part + quantity from a set-up
+   supplier; sees NO cost / markup / customer price (management set markup;
+   auto-price is done). Reuse the sourcing panel but strip every money field on
+   the tech surface.
+2. **Labor time only** — tech enters hours; never touches money.
+3. **"Found something" → repair job to quote** — from the work screen, add a new
+   *repair* job to the ticket that flows to the advisor's quote. Tracker "High —
+   Mid-job discovery is a detour": today's only in-UI button mints a dead
+   `diagnostic` job via escalation (`lib/shop-os/simple-work.ts:384-452`,
+   `lib/tickets.ts:872`, `POST app/api/tickets/[id]/jobs/route.ts:35`). Needs a
+   plain repair-job path.
+4. **Start / finish stamps** — stamp started/finished on the work transitions the
+   tech already taps (quoted hours vs actual time). Tracker "Med — Actual job
+   time".
+
+**Optional quick cleanup (not blocking):** fix the stale
+`shop-os-vehicle-history-page.test.tsx` mock to add `.leftJoin` (one line).
+Pre-existing, unrelated to getting-paid.
+
+**Standing rules reminder:** develop on `claude/handoff-opus-fable-strategy-zxe329`;
+plain language with the founder (no engineering jargon); make the product/eng
+calls yourself, only surface genuine business choices; don't open a new PR unless
+asked (#175 already exists — verify its state on resume).
+
+---
+
 ## Shipped on `claude/handoff-opus-fable-strategy-zxe329`
 
 | Fix | Commit | What |
