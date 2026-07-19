@@ -101,4 +101,10 @@ describe('VehicleHistory', () => {
 
     expect(screen.getByText(/No past visits recorded/i)).toBeInTheDocument()
   })
+
+  it('honestly signals when older stored visits are outside the bounded view', () => {
+    render(<VehicleHistory vehicle={vehicle} customer={customer} visits={[ticket({})]} hasMore />)
+
+    expect(screen.getByText('Showing the 100 most recent visits. Older repair orders remain stored.')).toBeInTheDocument()
+  })
 })

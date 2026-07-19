@@ -31,7 +31,7 @@ export default async function VehicleHistoryPage({
 
   if (!row || row.customer.shopId !== shopId) notFound()
 
-  const visits = await listVehicleTicketHistory(db, { shopId, vehicleId })
+  const history = await listVehicleTicketHistory(db, { shopId, vehicleId })
 
   return (
     <VehicleHistory
@@ -44,7 +44,8 @@ export default async function VehicleHistoryPage({
         plate: row.vehicle.plate,
       }}
       customer={{ id: row.customer.id, name: row.customer.name }}
-      visits={visits}
+      visits={history.visits}
+      hasMore={history.hasMore}
     />
   )
 }

@@ -119,6 +119,13 @@ export type VehicleHistoryTicket = {
   jobs: VehicleHistoryJob[]
 }
 
+export type VehicleHistoryResult = {
+  visits: VehicleHistoryTicket[]
+  hasMore: boolean
+}
+
+const VEHICLE_HISTORY_VISIT_LIMIT = 100
+
 // Flat (ticket × job) row before grouping. Job columns are null for a ticket
 // that has no jobs yet (left join).
 export type VehicleHistoryRow = {
@@ -176,44 +183,63 @@ export function groupVehicleHistoryRows(
 }
 
 /**
- * A vehicle's full repair-order history within its shop, newest ticket first,
- * each ticket carrying its jobs. Read-only.
+ * A vehicle's newest repair-order history within its shop, each ticket
+ * carrying its jobs. The sentinel row reports older stored visits without
+ * sending an unbounded backlog to the server or browser.
  */
 export async function listVehicleTicketHistory(
   db: AppDb,
   opts: { shopId: string; vehicleId: string },
-): Promise<VehicleHistoryTicket[]> {
-  const rows = await db
+): Promise<VehicleHistoryResult> {
+  const recentTickets = db
     .select({
+      shopId: tickets.shopId,
       ticketId: tickets.id,
       ticketNumber: tickets.ticketNumber,
       concern: tickets.concern,
       status: tickets.status,
       createdAt: tickets.createdAt,
       closedAt: tickets.closedAt,
+    })
+    .from(tickets)
+    .where(
+      and(eq(tickets.shopId, opts.shopId), eq(tickets.vehicleId, opts.vehicleId)),
+    )
+    .orderBy(desc(tickets.ticketNumber))
+    .limit(VEHICLE_HISTORY_VISIT_LIMIT + 1)
+    .as('recent_vehicle_tickets')
+  const rows = await db
+    .select({
+      ticketId: recentTickets.ticketId,
+      ticketNumber: recentTickets.ticketNumber,
+      concern: recentTickets.concern,
+      status: recentTickets.status,
+      createdAt: recentTickets.createdAt,
+      closedAt: recentTickets.closedAt,
       jobId: ticketJobs.id,
       jobTitle: ticketJobs.title,
       jobKind: ticketJobs.kind,
       jobApprovalState: ticketJobs.approvalState,
       jobWorkStatus: ticketJobs.workStatus,
     })
-    .from(tickets)
+    .from(recentTickets)
     .leftJoin(
       ticketJobs,
       and(
-        eq(ticketJobs.shopId, tickets.shopId),
-        eq(ticketJobs.ticketId, tickets.id),
+        eq(ticketJobs.shopId, recentTickets.shopId),
+        eq(ticketJobs.ticketId, recentTickets.ticketId),
       ),
     )
-    .where(
-      and(eq(tickets.shopId, opts.shopId), eq(tickets.vehicleId, opts.vehicleId)),
-    )
     .orderBy(
-      desc(tickets.ticketNumber),
+      desc(recentTickets.ticketNumber),
       asc(ticketJobs.createdAt),
       asc(ticketJobs.id),
     )
-  return groupVehicleHistoryRows(rows)
+  const grouped = groupVehicleHistoryRows(rows)
+  return {
+    visits: grouped.slice(0, VEHICLE_HISTORY_VISIT_LIMIT),
+    hasMore: grouped.length > VEHICLE_HISTORY_VISIT_LIMIT,
+  }
 }
 
 export type CreateTicketResult =
@@ -280,7 +306,10 @@ export type TodayTicketJobs = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
   linkedSessionIds: string[]
+  hasMore?: boolean
 }
+
+const TODAY_JOB_LIMIT = 200
 
 const emptyTodayTicketJobs = (): TodayTicketJobs => ({
   myJobs: [],
@@ -367,13 +396,20 @@ export async function listTodayTicketJobs(
         ),
       ),
     )
-    .orderBy(asc(tickets.ticketNumber), asc(ticketJobs.createdAt), asc(ticketJobs.id))
+    .orderBy(
+      sql`CASE WHEN ${ticketJobs.assignedTechId} = ${actor.profileId} THEN 0 ELSE 1 END`,
+      asc(tickets.ticketNumber),
+      asc(ticketJobs.createdAt),
+      asc(ticketJobs.id),
+    )
+    .limit(TODAY_JOB_LIMIT + 1)
 
   const myJobs: TodayTicketJob[] = []
   const openJobs: TodayTicketJob[] = []
   const linkedSessionIds: string[] = []
 
-  for (const row of rows) {
+  const hasMore = rows.length > TODAY_JOB_LIMIT
+  for (const row of rows.slice(0, TODAY_JOB_LIMIT)) {
     const job: TodayTicketJob = {
       id: row.id,
       ticketId: row.ticketId,
@@ -402,7 +438,7 @@ export async function listTodayTicketJobs(
     if (row.persistedSessionId) linkedSessionIds.push(row.persistedSessionId)
   }
 
-  return { myJobs, openJobs, linkedSessionIds }
+  return { myJobs, openJobs, linkedSessionIds, ...(hasMore ? { hasMore: true } : {}) }
 }
 
 export function ticketDomainStatus(

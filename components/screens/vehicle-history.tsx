@@ -51,10 +51,12 @@ export function VehicleHistory({
   vehicle,
   customer,
   visits,
+  hasMore = false,
 }: {
   vehicle: VehicleHistoryVehicle
   customer: VehicleHistoryCustomer
   visits: VehicleHistoryTicket[]
+  hasMore?: boolean
 }) {
   const recommended = visits.flatMap((visit) =>
     visit.jobs
@@ -165,6 +167,11 @@ export function VehicleHistory({
         )}
 
         <Module num="—" label="Past visits">
+          {hasMore && (
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--vt-fg-3)', lineHeight: 1.5 }}>
+              Showing the 100 most recent visits. Older repair orders remain stored.
+            </p>
+          )}
           {visits.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--vt-fg-3)', lineHeight: 1.5 }}>
               No past visits recorded for this vehicle yet.

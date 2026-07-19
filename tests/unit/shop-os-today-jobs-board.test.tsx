@@ -108,6 +108,12 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
   })
 
+  it('honestly signals when the bounded Today view has more work', () => {
+    render(<TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} hasMore />)
+
+    expect(screen.getByText('Showing the first 200 active jobs. Assigned work appears first; remaining work stays stored.')).toBeInTheDocument()
+  })
+
   it('uses honest persisted-data fallbacks without inventing customer or vehicle facts', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
 

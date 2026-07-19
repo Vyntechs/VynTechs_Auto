@@ -65,7 +65,7 @@ describe('reachable vehicle history page without diagnostics', () => {
         name: 'Jane Doe',
       },
     }])
-    listTicketHistoryMock.mockResolvedValue([])
+    listTicketHistoryMock.mockResolvedValue({ visits: [], hasMore: false })
     listSessionsMock.mockResolvedValue([])
   })
 
@@ -91,6 +91,7 @@ describe('reachable vehicle history page without diagnostics', () => {
       },
       customer: { id: 'customer-1', name: 'Jane Doe' },
       visits: [],
+      hasMore: false,
     })
   })
 

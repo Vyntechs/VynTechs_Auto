@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { customers, vehicles, sessions, shops, profiles } from '@/lib/db/schema'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 let db: TestDb
 let close: () => Promise<void>
@@ -187,5 +189,13 @@ describe('getRecentIntakeCustomers', () => {
     expect(result[0].vehicles).toHaveLength(3)
     expect(result[0].vehicles[0].id).toBe(seededVehicleIds[2])
     expect(result[0].vehicles[2].id).toBe(seededVehicleIds[0])
+  })
+
+  it('pushes the per-customer vehicle cap into SQL instead of trimming an unbounded result', () => {
+    const source = readFileSync(resolve(process.cwd(), 'lib/intake/recent-customers.ts'), 'utf8')
+
+    expect(source).toMatch(/ROW_NUMBER\(\) OVER/i)
+    expect(source).toMatch(/lte\(rankedVehicles\.rank, 10\)/)
+    expect(source).not.toMatch(/if \(bucket\.length < 10\)/)
   })
 })
