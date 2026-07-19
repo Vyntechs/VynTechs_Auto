@@ -79,18 +79,18 @@ describe('simple work workspace', () => {
     expect(container.textContent).not.toMatch(/proof|photo|upload|filename|download/i)
   })
 
-  it('keeps found concern optional and reports only unassigned/unstarted truth', async () => {
+  it('sends found work to be quoted and reports its unassigned truth', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true, status: 201,
-      json: async () => ({ changed: true, job: { id: REQUEST, title: 'Diagnose: steering clunk', kind: 'diagnostic', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null } }),
+      json: async () => ({ changed: true, job: { id: REQUEST, title: 'Found: steering clunk', kind: 'repair', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null } }),
     }))
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
     expect(screen.getByLabelText('Concern')).not.toBeVisible()
     fireEvent.click(screen.getByText('Found another concern'))
     fireEvent.change(screen.getByLabelText('Concern'), { target: { value: 'Steering clunk' } })
     fireEvent.change(screen.getByLabelText('Required skill tier'), { target: { value: '2' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create diagnostic job' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Diagnostic job added. It is unassigned and unstarted.')
+    fireEvent.click(screen.getByRole('button', { name: 'Send to be quoted' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.')
     expect(screen.queryByText(/needs.*approval/i)).toBeNull()
   })
 

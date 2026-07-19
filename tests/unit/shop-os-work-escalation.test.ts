@@ -82,13 +82,13 @@ describe('Shop OS found-concern escalation', () => {
     requestKey, concern: '  steering clunk under load  ', requiredSkillTier: 2, ...overrides,
   })
 
-  it('creates one honest unassigned diagnostic and replays the exact request', async () => {
+  it('creates one honest unassigned repair job and replays the exact request', async () => {
     const sourceBefore = await db.select().from(ticketJobs).where(eq(ticketJobs.id, sourceJobId))
     const first = await createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() })
     expect(first).toMatchObject({
       ok: true, changed: true,
       job: {
-        title: 'Diagnose: steering clunk under load', kind: 'diagnostic', requiredSkillTier: 2,
+        title: 'Found: steering clunk under load', kind: 'repair', requiredSkillTier: 2,
         assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null,
       },
     })

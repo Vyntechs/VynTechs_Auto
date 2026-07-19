@@ -349,7 +349,7 @@ function derivedUuid(label: string, parts: string[]): string {
 type SafeEscalatedJob = {
   id: string
   title: string
-  kind: 'diagnostic'
+  kind: 'repair'
   requiredSkillTier: number
   assignedTechId: null
   workStatus: 'open'
@@ -368,7 +368,7 @@ const escalationBodySchema = z.strictObject({
 })
 
 function safeEscalatedJob(job: typeof ticketJobs.$inferSelect): SafeEscalatedJob | null {
-  if (job.kind !== 'diagnostic' || job.assignedTechId !== null || job.workStatus !== 'open'
+  if (job.kind !== 'repair' || job.assignedTechId !== null || job.workStatus !== 'open'
     || job.approvalState !== 'pending_quote' || job.sessionId !== null) return null
   return {
     id: job.id,
@@ -411,8 +411,13 @@ export async function createWorkEscalation(
   if (!parsedActor.success || !parsedTicket.success || !parsedSource.success || !parsedBody.success) {
     return failure('invalid_input')
   }
-  const title = `Diagnose: ${parsedBody.data.concern}`
-  const jobId = derivedUuid('shop-os-work-escalation-v1', [
+  // A tech who finds more work while turning wrenches raises it to the advisor
+  // as a new repair job on the ticket — unassigned and pending a quote, so the
+  // advisor prices it and the customer approves it through the normal flow. It
+  // is never a diagnostic job (the AI-diagnosis engine is off in production, and
+  // found work is work, not a mystery to investigate).
+  const title = `Found: ${parsedBody.data.concern}`
+  const jobId = derivedUuid('shop-os-found-repair-v1', [
     parsedActor.data.shopId,
     parsedTicket.data,
     parsedSource.data,
@@ -453,7 +458,7 @@ export async function createWorkEscalation(
         shopId: parsedActor.data.shopId,
         ticketId: parsedTicket.data,
         title,
-        kind: 'diagnostic',
+        kind: 'repair',
         requiredSkillTier: parsedBody.data.requiredSkillTier,
         assignedTechId: null,
         sessionId: null,

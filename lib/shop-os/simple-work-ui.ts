@@ -23,7 +23,7 @@ const work = z.strictObject({
 const escalationJob = z.strictObject({
   id: uuid,
   title: z.string().min(1).max(520),
-  kind: z.literal('diagnostic'),
+  kind: z.literal('repair'),
   requiredSkillTier: z.number().int().min(1).max(3),
   assignedTechId: z.null(),
   workStatus: z.literal('open'),

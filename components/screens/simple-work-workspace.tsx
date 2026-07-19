@@ -119,7 +119,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
     )
     escalationAttempt.current = attempt
     setPending('escalation')
-    setNotice({ kind: 'status', text: 'Adding diagnostic job…' })
+    setNotice({ kind: 'status', text: 'Sending…' })
     try {
       const response = await fetch(`${basePath}/escalations`, {
         method: 'POST',
@@ -135,7 +135,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
       if (!result) throw new Error('escalation_failed')
       escalationAttempt.current = null
       setCreatedConcern(true)
-      setNotice({ kind: 'status', text: 'Diagnostic job added. It is unassigned and unstarted.' })
+      setNotice({ kind: 'status', text: 'Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.' })
     } catch {
       setNotice({ kind: 'error', text: 'Not saved — check your connection and retry.' })
     } finally {
@@ -227,7 +227,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
                     <option value="2">B-tech · Tier 2</option><option value="3">A-tech · Tier 3</option>
                   </select>
                   <button className={styles.secondary} type="submit" disabled={pending !== null}>
-                    {pending === 'escalation' ? 'Adding diagnostic job…' : 'Create diagnostic job'}
+                    {pending === 'escalation' ? 'Sending…' : 'Send to be quoted'}
                   </button>
                 </form>
               )}

@@ -24,7 +24,7 @@ describe('Shop OS simple-work UI contract', () => {
     })).toMatchObject({ changed: true, work: { status: 'done' } })
     expect(parseEscalationResponse({
       changed: true,
-      job: { id: uuid(3), title: 'Diagnose: steering clunk', kind: 'diagnostic', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null },
+      job: { id: uuid(3), title: 'Found: steering clunk', kind: 'repair', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null },
     })).toMatchObject({ changed: true, job: { assignedTechId: null, sessionId: null } })
   })
 
