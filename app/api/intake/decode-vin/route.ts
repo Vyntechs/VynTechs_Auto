@@ -3,7 +3,8 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
-import { decodeVin } from '@/lib/intake/decode-vin'
+import { decodeVin, normalizeVin } from '@/lib/intake/decode-vin'
+import { rateLimitReject } from '@/lib/rate-limit'
 
 type Body = { vin?: string }
 
@@ -24,10 +25,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
 
-  const vin = typeof body.vin === 'string' ? body.vin.trim() : ''
-  if (vin === '') {
-    return NextResponse.json({ error: 'vin_required' }, { status: 400 })
+  const vin = typeof body.vin === 'string' ? normalizeVin(body.vin) : null
+  if (!vin) {
+    return NextResponse.json({ error: 'invalid_vin' }, { status: 400 })
   }
+
+  const limited = await rateLimitReject(db, `vin-decode:${ctx.user.id}`, 20)
+  if (limited) return limited
 
   const result = await decodeVin(vin)
   return NextResponse.json(result, { status: 200 })
