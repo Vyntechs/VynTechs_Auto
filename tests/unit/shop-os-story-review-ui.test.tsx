@@ -61,6 +61,7 @@ describe('Shop OS diagnostic story UI', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder('ordinary_locked_tree', { content: story, source: 'ai', reviewStatus: 'pending', revision: 1 })} />)
 
     expect(fetchMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Review saved story' }))
     const card = screen.getByRole('region', { name: 'Diagnostic story for Charging system diagnosis' })
     expect(within(card).getByText('Pending human review')).toBeInTheDocument()
     expect(within(card).getByText('Battery warning appears while driving.')).toBeInTheDocument()
@@ -119,6 +120,7 @@ describe('Shop OS diagnostic story UI', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: builder('ordinary_locked_tree', { content: { ...changedStory, whatWeFound: 'My preserved draft.' }, source: 'ai', reviewStatus: 'reviewed', revision: 3 }) }) })
     vi.stubGlobal('fetch', fetchMock)
     render(<ManualQuoteBuilder ticket={ticket} builder={builder('ordinary_locked_tree', { content: story, source: 'ai', reviewStatus: 'pending', revision: 1 })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Review saved story' }))
     const found = await screen.findByLabelText('What we found')
     fireEvent.change(found, { target: { value: 'My preserved draft.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save reviewed story' }))

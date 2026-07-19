@@ -1188,6 +1188,7 @@ function StoryCard({
   // session) and manual_findings (no session — shop without the diagnostics
   // add-on records findings by hand). Both write the same story shape.
   const manualStoryMode = job.storyMode === 'topology_manual' || job.storyMode === 'manual_findings'
+  const [open, setOpen] = useState(manualStoryMode)
   const [story, setStory] = useState(job.story.content)
   const [revision, setRevision] = useState(job.story.revision)
   const [reviewStatus, setReviewStatus] = useState(job.story.reviewStatus)
@@ -1291,8 +1292,11 @@ function StoryCard({
     <section ref={focusRef} className={styles.storyCard} role="region" aria-label={`Diagnostic story for ${job.title}`} tabIndex={-1}>
       <div className={styles.storyHeading}>
         <div><p className={styles.eyebrow}>Diagnostic story</p><h4>{job.storyMode === 'topology_manual' ? 'Human-authored topology story' : job.storyMode === 'manual_findings' ? 'Recorded findings' : 'Customer-ready finding'}</h4></div>
+        {job.storyMode === 'ordinary_locked_tree' && !open && (
+          <button type="button" className={styles.lineAction} onClick={() => setOpen(true)}>Review saved story</button>
+        )}
       </div>
-      <>
+      {open && <>
           {reviewStatus === 'pending' && <p className={styles.pending}>Pending human review</p>}
           {reviewStatus === 'reviewed' && <p className={styles.reviewed} role="status">Reviewed customer story</p>}
           {(story || manualStoryMode) && (
@@ -1311,7 +1315,7 @@ function StoryCard({
           )}
           {busy && !story && <p role="status" aria-live="polite">Loading story truth…</p>}
           {error && <p className={styles.storyError} role="alert">{error}</p>}
-      </>
+      </>}
     </section>
   )
 }
