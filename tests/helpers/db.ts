@@ -67,12 +67,105 @@ export async function createTestDb(): Promise<{
   await ensureJobWorkClockMigration(client)
   await ensureJobTimeClockMigration(client)
   await ensureJobPartRequestsMigration(client)
+  await ensureStripeWebhookOrderingMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+type StripeWebhookOrderingMarkers = {
+  cursor_column_count: number
+  cursor_constraint_count: number
+  table_exists: boolean
+  table_constraint_count: number
+  index_count: number
+  rls_enabled: boolean
+  policy_count: number
+  direct_client_grant_count: number
+  service_crud_count: number
+}
+
+async function stripeWebhookOrderingMarkers(
+  client: PGlite,
+): Promise<StripeWebhookOrderingMarkers> {
+  const result = await client.query<StripeWebhookOrderingMarkers>(`
+    select
+      (select count(*)::int from information_schema.columns
+       where table_schema = 'public' and table_name = 'stripe_customers'
+         and column_name in ('last_webhook_event_id', 'last_webhook_event_created'))
+        as cursor_column_count,
+      (select count(*)::int from pg_constraint
+       where conrelid = to_regclass('public.stripe_customers')
+         and conname in (
+           'stripe_customers_webhook_cursor_paired',
+           'stripe_customers_webhook_event_id_length',
+           'stripe_customers_webhook_event_created_nonnegative'
+         )) as cursor_constraint_count,
+      to_regclass('public.processed_stripe_events') is not null as table_exists,
+      (select count(*)::int from pg_constraint
+       where conrelid = to_regclass('public.processed_stripe_events')
+         and conname in (
+           'processed_stripe_events_pkey',
+           'processed_stripe_events_stripe_customer_fk',
+           'processed_stripe_events_id_length',
+           'processed_stripe_events_type_length',
+           'processed_stripe_events_created_nonnegative',
+           'processed_stripe_events_disposition_valid'
+         )) as table_constraint_count,
+      (select count(*)::int from pg_indexes
+       where schemaname = 'public'
+         and indexname = 'processed_stripe_events_customer_created_idx') as index_count,
+      coalesce((select relrowsecurity from pg_class
+        where oid = to_regclass('public.processed_stripe_events')), false) as rls_enabled,
+      (select count(*)::int from pg_policies
+       where schemaname = 'public' and tablename = 'processed_stripe_events'
+         and policyname = 'processed_stripe_events_server_only_deny_direct'
+         and roles::text = '{anon,authenticated}'
+         and cmd = 'ALL' and qual = 'false' and with_check = 'false') as policy_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'processed_stripe_events'
+         and grantee in ('anon', 'authenticated')) as direct_client_grant_count,
+      (select count(*)::int from information_schema.role_table_grants
+       where table_schema = 'public' and table_name = 'processed_stripe_events'
+         and grantee = 'service_role'
+         and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) as service_crud_count
+  `)
+  const markers = result.rows[0]
+  if (!markers) throw new Error('Stripe webhook ordering schema inspection failed')
+  return markers
+}
+
+function hasCompleteStripeWebhookOrdering(markers: StripeWebhookOrderingMarkers): boolean {
+  return markers.cursor_column_count === 2
+    && markers.cursor_constraint_count === 3
+    && markers.table_exists
+    && markers.table_constraint_count === 6
+    && markers.index_count === 1
+    && markers.rls_enabled
+    && markers.policy_count === 1
+    && markers.direct_client_grant_count === 0
+    && markers.service_crud_count === 4
+}
+
+export async function ensureStripeWebhookOrderingMigration(client: PGlite): Promise<void> {
+  const before = await stripeWebhookOrderingMarkers(client)
+  if (hasCompleteStripeWebhookOrdering(before)) return
+  if (before.cursor_column_count > 0 || before.table_exists) {
+    throw new Error('partial Stripe webhook ordering schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0042_stripe_webhook_ordering.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!hasCompleteStripeWebhookOrdering(await stripeWebhookOrderingMarkers(client))) {
+    throw new Error('Stripe webhook ordering migration failed in ephemeral database')
   }
 }
 

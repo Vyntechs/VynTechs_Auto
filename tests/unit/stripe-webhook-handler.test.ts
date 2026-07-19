@@ -59,6 +59,26 @@ describe('handleStripeWebhook', () => {
     expect(result.error).toMatch(/invalid/i)
   })
 
+  it('rejects a verified subscription event without durable ordering metadata', async () => {
+    const result = await handleStripeWebhook({
+      db: stubDb,
+      body: '{}',
+      signature: 't=1,v1=valid',
+      secret: 'whsec_test',
+      constructEvent: () => ({
+        id: 'evt_missing_created',
+        type: 'customer.subscription.updated',
+        data: { object: { id: 'sub_123', customer: 'cus_123', status: 'active' } },
+      }) as never,
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'invalid stripe event envelope',
+    })
+  })
+
   it('returns ok with the event type for non-subscription events', async () => {
     const construct = vi
       .fn()

@@ -1,6 +1,10 @@
 import Stripe from 'stripe'
 import { eq } from 'drizzle-orm'
-import { shopEntitlements, stripeCustomers } from './db/schema'
+import {
+  processedStripeEvents,
+  shopEntitlements,
+  stripeCustomers,
+} from './db/schema'
 import { getProfileByUserId } from './db/queries'
 import type { AppDb } from './db/queries'
 import { canManageTeam } from './shop-os/capabilities'
@@ -156,6 +160,10 @@ export type ConstructStripeEventFn = (
   secret: string,
 ) => Stripe.Event
 
+export type RetrieveStripeSubscriptionFn = (
+  subscriptionId: string,
+) => Promise<Stripe.Subscription>
+
 export type HandleStripeWebhookResult =
   | { ok: true; eventType: Stripe.Event.Type }
   | { ok: false; status: 400 | 500; error: string }
@@ -183,21 +191,95 @@ function readSubscriptionPeriodEnd(
 
 async function applySubscriptionEvent(
   db: AppDb,
-  subscription: Stripe.Subscription,
-  eventType: Stripe.Event.Type,
+  input: {
+    eventId: string
+    eventCreated: number
+    eventType: Stripe.Event.Type
+    subscription: Stripe.Subscription
+  },
+  retrieveSubscription: RetrieveStripeSubscriptionFn,
 ): Promise<void> {
+  const subscription = input.subscription
   const customerId =
     typeof subscription.customer === 'string'
       ? subscription.customer
       : subscription.customer.id
-  await db
-    .update(stripeCustomers)
-    .set({
-      subscriptionStatus: subscription.status,
-      currentPeriodEnd: readSubscriptionPeriodEnd(subscription),
-    })
-    .where(eq(stripeCustomers.stripeCustomerId, customerId))
-  await applyDiagnosticsEntitlement(db, subscription, customerId, eventType)
+
+  await db.transaction(async (tx) => {
+    const [customer] = await tx
+      .select({
+        lastEventId: stripeCustomers.lastWebhookEventId,
+        lastEventCreated: stripeCustomers.lastWebhookEventCreated,
+      })
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.stripeCustomerId, customerId))
+      .limit(1)
+      .for('update')
+    if (!customer) return
+
+    const [claimed] = await tx
+      .insert(processedStripeEvents)
+      .values({
+        eventId: input.eventId,
+        stripeCustomerId: customerId,
+        eventCreated: input.eventCreated,
+        eventType: input.eventType,
+        disposition: 'pending',
+      })
+      .onConflictDoNothing({ target: processedStripeEvents.eventId })
+      .returning()
+    if (!claimed) return
+
+    if (
+      customer.lastEventCreated != null
+      && customer.lastEventCreated > input.eventCreated
+    ) {
+      await tx
+        .update(processedStripeEvents)
+        .set({ disposition: 'stale' })
+        .where(eq(processedStripeEvents.eventId, input.eventId))
+      return
+    }
+
+    let authoritative = subscription
+    let disposition: 'applied' | 'reconciled' = 'applied'
+    if (
+      customer.lastEventCreated === input.eventCreated
+      && customer.lastEventId !== input.eventId
+    ) {
+      authoritative = await retrieveSubscription(subscription.id)
+      const authoritativeCustomerId = typeof authoritative.customer === 'string'
+        ? authoritative.customer
+        : authoritative.customer.id
+      if (authoritativeCustomerId !== customerId) {
+        throw new Error('Stripe reconciliation customer mismatch')
+      }
+      disposition = 'reconciled'
+    }
+
+    await tx
+      .update(stripeCustomers)
+      .set({
+        subscriptionStatus: authoritative.status,
+        currentPeriodEnd: readSubscriptionPeriodEnd(authoritative),
+        lastWebhookEventId: input.eventId,
+        lastWebhookEventCreated: input.eventCreated,
+      })
+      .where(eq(stripeCustomers.stripeCustomerId, customerId))
+    await applyDiagnosticsEntitlement(
+      tx as AppDb,
+      authoritative,
+      customerId,
+      disposition === 'reconciled'
+        ? authoritative.status === 'canceled'
+        : input.eventType === 'customer.subscription.deleted'
+          || authoritative.status === 'canceled',
+    )
+    await tx
+      .update(processedStripeEvents)
+      .set({ disposition })
+      .where(eq(processedStripeEvents.eventId, input.eventId))
+  })
 }
 
 // Maps the diagnostics add-on subscription item to shop_entitlements
@@ -210,7 +292,7 @@ async function applyDiagnosticsEntitlement(
   db: AppDb,
   subscription: Stripe.Subscription,
   customerId: string,
-  eventType: Stripe.Event.Type,
+  subscriptionDeleted: boolean,
 ): Promise<void> {
   const priceId = process.env.STRIPE_DIAGNOSTICS_PRICE_ID
   if (!priceId) return
@@ -224,7 +306,7 @@ async function applyDiagnosticsEntitlement(
 
   const items = subscription.items?.data ?? []
   const diagnostics =
-    eventType !== 'customer.subscription.deleted' &&
+    !subscriptionDeleted &&
     items.some((item) => item.price?.id === priceId)
   await db
     .insert(shopEntitlements)
@@ -250,6 +332,7 @@ export async function handleStripeWebhook(opts: {
   signature: string | null
   secret: string | undefined
   constructEvent?: ConstructStripeEventFn
+  retrieveSubscription?: RetrieveStripeSubscriptionFn
 }): Promise<HandleStripeWebhookResult> {
   if (!opts.signature) {
     return { ok: false, status: 400, error: 'missing stripe-signature header' }
@@ -267,11 +350,35 @@ export async function handleStripeWebhook(opts: {
     return { ok: false, status: 400, error: 'invalid signature' }
   }
   if (SUBSCRIPTION_EVENT_TYPES.has(event.type)) {
-    await applySubscriptionEvent(
-      opts.db,
-      event.data.object as Stripe.Subscription,
-      event.type,
-    )
+    if (
+      typeof event.id !== 'string'
+      || event.id.length < 1
+      || event.id.length > 255
+      || !Number.isSafeInteger(event.created)
+      || event.created < 0
+    ) {
+      return { ok: false, status: 400, error: 'invalid stripe event envelope' }
+    }
+    const subscription = event.data.object as Stripe.Subscription
+    if (
+      typeof subscription?.id !== 'string'
+      || !subscription.id
+      || (!subscription.customer)
+    ) {
+      return { ok: false, status: 400, error: 'invalid stripe subscription event' }
+    }
+    const retrieve = opts.retrieveSubscription
+      ?? ((subscriptionId) => stripe.subscriptions.retrieve(subscriptionId))
+    try {
+      await applySubscriptionEvent(opts.db, {
+        eventId: event.id,
+        eventCreated: event.created,
+        eventType: event.type,
+        subscription,
+      }, retrieve)
+    } catch {
+      return { ok: false, status: 500, error: 'webhook processing failed' }
+    }
   }
   return { ok: true, eventType: event.type }
 }
