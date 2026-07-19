@@ -35,18 +35,23 @@ broken by earlier branch commit `47c3496`, not by ring-out).
 named — "a tech never leaves the job"). Ties together the parts/labor vision
 already built (suppliers + markup). Build on the existing work screen:
 `app/(app)/tickets/[id]/jobs/[jobId]/work/` + `POST .../work/route.ts` (actions
-`start`/`save_note`/`complete`), `lib/shop-os/simple-work.ts`,
+now `clock_on`/`clock_off`/`save_note`/`complete`), `lib/shop-os/simple-work.ts`,
 `lib/shop-os/simple-work-ui.ts`, `components/screens/simple-work-workspace.tsx`.
 Being shipped in safe, verified slices — safest/most-contained first:
 
-- **✅ SLICE 1 — start/finish clock. DONE, commit `699d230`.** The job now keeps
-  its own time: `work_started_at`/`work_completed_at` (additive migration 0039,
-  two nullable columns on `ticket_jobs`) stamped server-side inside
-  `mutateSimpleWork` on the existing open→in_progress and in_progress→done
-  transitions (replays never re-stamp). Work screen shows Started / Finished /
-  "On the job: 2h 15m" (plain `formatWorkDuration`). No money on the tech screen.
-  tsc + build clean; `shop-os-simple-work*` tests green (one flaky DB-setup hook
-  TIMEOUT under parallel load — passes in isolation; not a logic failure).
+- **✅ SLICE 1 — the job clock. DONE.** Shipped first as a single start/finish
+  span (`699d230`, migration 0039 `work_started_at`/`work_completed_at`), then
+  **evolved to clock-on / clock-off with a running total (`4c2ba14`, migration
+  0040)** after the founder clarified they work ~10 jobs at once and want each
+  job's ACTUAL time, not one start-to-finish stretch. Model: two more columns on
+  `ticket_jobs` — `clocked_on_since` (null when off) + `active_seconds` (banked
+  from finished intervals; the open interval is added live at read time). Total =
+  `active_seconds + (now - clocked_on_since)` while on. Clock on = start/resume
+  (needs approval); clock off = bank + stop (no approval); complete banks the
+  final interval. A job can be clocked on to several at once (per-job columns, no
+  exclusivity). UI shows the live total, running/paused, one Clock on/off button.
+  tsc + build clean; `shop-os-simple-work*` green (incl. a real-clock banking
+  test); one flaky DB-setup hook TIMEOUT under parallel load (passes in isolation).
 
 - **✅ SLICE 3 — "Found something" → real repair job to quote. DONE, commit
   `fed69cc`.** The work screen's "Found another concern" now raises found work to
@@ -63,29 +68,52 @@ Being shipped in safe, verified slices — safest/most-contained first:
   tsc + build clean; escalation/ui/component + a quote/approval/ticket-render
   integration sweep green.
 
-- **▶ SLICE 4 (do next) — parts picker on the tech screen, zero money.** Biggest,
-  most entangled. Parts AND labor are BOTH `job_lines` rows (kind part/labor/fee)
-  that feed the customer's approval-gated quote; sourcing a part calls
-  `invalidateActiveQuoteVersion`, which UN-approves the job — so a tech mid-repair
-  (in_progress, needs pinned approval) can't safely source under today's rules
-  (sourcing gate is open|blocked only). Reuse `ManualPartSourcing`
-  (`components/screens/manual-part-sourcing.tsx`) with every money field stripped;
-  recon flagged that sourced parts persist a CLIENT-supplied `priceCents`
-  (`lib/shop-os/parts-offers.ts:486`) with client-side-only markup — a tech-safe
-  path must recompute/validate markup SERVER-side. Think hard about WHEN the
-  tech's part reaches the customer's price (advisor re-quote vs auto) before
-  building; this is the one with a real product question.
+- **▶ SLICE 4 (parts) — needs a founder decision on the integration path first.**
+  **Founder clarified (2026-07-19):** the shop uses **OEC RepairLink** (OEM/dealer
+  parts, free to shops) and **O'Reilly First Call** (O'Reilly pro/wholesale) —
+  they're logged into both, which handle cost + markup once set up. So the founder
+  does NOT want to type prices or keep a manual list; they want the price to come
+  from those accounts. **Research verdict (see the parts-integration research this
+  session):** neither has an open public API. The pragmatic single path is an
+  **aggregator — PartsTech** (which covers BOTH O'Reilly and OEM/RepairLink; OEC,
+  RepairLink's maker, actually owns PartsTech). One integration → live
+  shop-specific COST + availability + ordering from both. Nexpart/WHI OrderLink is
+  the backup. **Hard dependency:** PartsTech's partner API is apply-only (email
+  PartsTech-Partner-API@oeconnection.com — free to integrate but not self-serve),
+  and each shop links its own O'Reilly (account # + invoice #, O'Reilly manually
+  approves) and dealer accounts. Platforms return COST; OUR app applies the
+  markup we already built (`shops.parts_markup_bps`) to get the customer price —
+  so the tech still sees nothing. This is a real project with an OUTSIDE
+  dependency (partner onboarding + per-shop account linking), not an in-app toggle.
+  - **Interim, buildable in-app now (once founder picks it):** the tech flags the
+    part they need (identity + qty, ZERO money) on their job page; it lands as a
+    proposed part-request; whoever quotes looks up the price in
+    RepairLink/First Call and it fills in. This keeps "techs never touch money"
+    and slots straight into the found-work → quote flow already built. When
+    PartsTech is wired later, the flag becomes a live-priced pick with no rework.
+  - **Engineering caveats when building:** parts AND labor are BOTH `job_lines`
+    rows feeding the approval-gated quote; sourcing calls
+    `invalidateActiveQuoteVersion` (UN-approves the job), and the sourcing gate is
+    open|blocked only — so a tech can't safely add parts to their approved,
+    in-progress job. Part-picking belongs on a `pending_quote` job (quoting stage
+    / the found-work repair job), not the in-progress one. Sourced parts persist a
+    CLIENT-supplied `priceCents` (`lib/shop-os/parts-offers.ts:486`) with
+    client-side-only markup — a tech-safe path must recompute markup SERVER-side.
+  - **DECISION GATE:** before building, confirm with the founder whether to (a)
+    build the in-app "tech flags the part, front desk prices it" interim now, and
+    (b) pursue the PartsTech partner integration as the real fix. Do not build the
+    big integration on spec — it needs their PartsTech/vendor account action.
 
 **Deliberately NOT building (simplicity-first, avoid speculation):**
-- *Explicit "tech types labor hours" field* — the auto-clock (slice 1) already
-  captures the tech's time without touching money, which satisfies founder
-  principle 3 ("techs enter labor time only"). A manual hours entry is speculative
-  until wall-clock proves too coarse; don't add it on spec.
 - *Owner-facing "quoted hrs vs actual" on the ticket ledger* — the honest place
   for the comparison (NOT the tech screen). Quoted labor hours ARE cheaply
   readable (`quoteSnapshotSchema` line schema has `laborHours`, `quotes.ts:283`).
   Deferred: it ripples through the whole `TicketDetail` projection
   (`lib/tickets.ts:51`) + `ticket-detail.tsx`. Do it when there's a real ask.
+- *A "see all my running clocks at once" board* — natural follow-up to slice 1's
+  clock on/off (the founder runs ~10 jobs): surface clocked-on state + running
+  time on the Today jobs board. Not built yet; per-job on/off on the work screen
+  is the core and is done.
 
 **Optional quick cleanup (not blocking):** fix the stale
 `shop-os-vehicle-history-page.test.tsx` mock to add `.leftJoin` (one line).
@@ -109,7 +137,7 @@ asked (#175 already exists — verify its state on resume).
 | Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
 | Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
 | Found work → real repair job | `fed69cc` | The work screen's **"Found another concern"** now raises found work to the advisor as a real **repair** job on the ticket (unassigned, `pending_quote`, titled `Found: <concern>`) that flows through the normal quote → approve path. Before, it minted a `diagnostic` job that went nowhere — unassigned, and in production the AI-diagnosis engine is switched off, so it sat dead. Repurposed the escalation path (kept idempotency by request key + gating to the tech's own assigned/approved/in-progress job); tech copy now honest ("Send to be quoted", "unassigned until the advisor prices it"). Fixes tracker "High — Mid-job discovery is a detour". |
-| Tech job clock — start/finish time | `699d230` | The technician's job page now records when work actually started and finished. `work_started_at`/`work_completed_at` (additive migration 0039, two nullable columns on `ticket_jobs`) are stamped server-side inside `mutateSimpleWork` on the same open→in_progress and in_progress→done taps the tech already makes — no new action, and replays never re-stamp. The completed job shows Started / Finished / "On the job: 2h 15m" (plain `formatWorkDuration`, unit-covered). First half of quoted-vs-actual; still zero money anywhere on the tech screen. First slice of the one-page tech job screen. |
+| Tech job clock — on/off, actual time | `699d230` → `4c2ba14` | The technician's job page keeps its own clock. Shipped first as a single start/finish span (`699d230`, migration 0039), then evolved to **clock on / clock off with a running total** (`4c2ba14`, migration 0040) once the founder said they multitask ~10 jobs at once and want each job's ACTUAL time. Clock on starts/resumes (needs approval), clock off banks the interval and stops, completing banks the last interval; a tech can be clocked on to several jobs at once. Two columns on `ticket_jobs`: `clocked_on_since` (null when off) + `active_seconds` (banked; open interval added live at read time). Work screen shows the live total ("On the job: 1h 40m"), running/paused, one Clock on/off button. Zero money anywhere on the tech screen. Core slice of the one-page tech job screen. |
 | Getting paid — ring out & close | _(this branch)_ | New **Ring out** panel on the ticket screen (advisor/owner only — techs never see it). Bill = the approved jobs' subtotals taxed once (derived, never stored); record cash/card/check/other payments (deposits + partials welcome); balance = owed − collected; the ticket closes only when the balance clears, stamping `closedAt`/`deliveredAt`/`closedBy`. New append-only `ticket_payments` table (server-only, migration 0038 with RLS deny + service-role-only ACL, mirroring `shop_entitlements`); `POST /api/tickets/[id]/payments` (idempotent by requestKey, rejects overpayment) and `POST /api/tickets/[id]/close`. No card processing — the app records the money truth and closes the order; the shop takes payment however it already does. First time a ticket can reach `closed` — those columns had zero writers before. |
 
 All: TypeScript clean, targeted tests green, production build passes. Not
