@@ -31,30 +31,64 @@ deterministic failure is `shop-os-vehicle-history-page.test.tsx`, whose mock
 implements only `.innerJoin` while `listVehicleTicketHistory` uses `.leftJoin` —
 broken by earlier branch commit `47c3496`, not by ring-out).
 
-**Next feature: the one-page technician job screen** (the other fork the founder
+**Building now: the one-page technician job screen** (the other fork the founder
 named — "a tech never leaves the job"). Ties together the parts/labor vision
 already built (suppliers + markup). Build on the existing work screen:
 `app/(app)/tickets/[id]/jobs/[jobId]/work/` + `POST .../work/route.ts` (actions
-`start`/`save_note`/`complete`) and its screen component. Four moves, all on that
-one page, tech never navigates away:
-1. **Parts picker, zero money** — tech picks a part + quantity from a set-up
-   supplier; sees NO cost / markup / customer price (management set markup;
-   auto-price is done). Reuse the sourcing panel but strip every money field on
-   the tech surface.
-2. **Labor time only** — tech enters hours; never touches money.
-3. **"Found something" → repair job to quote** — from the work screen, add a new
-   *repair* job to the ticket that flows to the advisor's quote. Tracker "High —
-   Mid-job discovery is a detour": today's only in-UI button mints a dead
-   `diagnostic` job via escalation (`lib/shop-os/simple-work.ts:384-452`,
-   `lib/tickets.ts:872`, `POST app/api/tickets/[id]/jobs/route.ts:35`). Needs a
-   plain repair-job path.
-4. **Start / finish stamps** — stamp started/finished on the work transitions the
-   tech already taps (quoted hours vs actual time). Tracker "Med — Actual job
-   time".
+`start`/`save_note`/`complete`), `lib/shop-os/simple-work.ts`,
+`lib/shop-os/simple-work-ui.ts`, `components/screens/simple-work-workspace.tsx`.
+Being shipped in safe, verified slices — safest/most-contained first:
+
+- **✅ SLICE 1 — start/finish clock. DONE, commit `699d230`.** The job now keeps
+  its own time: `work_started_at`/`work_completed_at` (additive migration 0039,
+  two nullable columns on `ticket_jobs`) stamped server-side inside
+  `mutateSimpleWork` on the existing open→in_progress and in_progress→done
+  transitions (replays never re-stamp). Work screen shows Started / Finished /
+  "On the job: 2h 15m" (plain `formatWorkDuration`). No money on the tech screen.
+  tsc + build clean; `shop-os-simple-work*` tests green (one flaky DB-setup hook
+  TIMEOUT under parallel load — passes in isolation; not a logic failure).
+
+- **▶ SLICE 3 (do next) — "Found something" → real repair job to quote.** HIGH
+  value, clearly a defect today. From the work screen, "found another concern"
+  currently mints a dead `diagnostic` job via `createWorkEscalation`
+  (`lib/shop-os/simple-work.ts:384-464`) — doubly dead in prod: unassigned AND
+  the AI-diagnosis engine is force-`off` (`lib/release-policy.ts`). Replace with a
+  path that creates a `kind:'repair'` job (unassigned, `approvalState` defaults to
+  `pending_quote`) that flows to the advisor's quote. `addTicketJob`
+  (`lib/tickets.ts:876`, body schema `:438`) already builds repair jobs, but the
+  escalation path's idempotency (deterministic jobId from requestKey) + source-job
+  gating (actor's assigned, in-progress, approved job) are worth keeping — likely
+  generalize/replace `createWorkEscalation` to emit `repair` instead of
+  `diagnostic`. Note: repair/maintenance can't carry a `session_id`
+  (`ticket_jobs_session_only_for_diagnostic` check) — fine, we set none.
+
+- **SLICE 4 (last) — parts picker on the tech screen, zero money.** Biggest,
+  most entangled. Parts AND labor are BOTH `job_lines` rows (kind part/labor/fee)
+  that feed the customer's approval-gated quote; sourcing a part calls
+  `invalidateActiveQuoteVersion`, which UN-approves the job — so a tech mid-repair
+  (in_progress, needs pinned approval) can't safely source under today's rules
+  (sourcing gate is open|blocked only). Reuse `ManualPartSourcing`
+  (`components/screens/manual-part-sourcing.tsx`) with every money field stripped;
+  recon flagged that sourced parts persist a CLIENT-supplied `priceCents`
+  (`lib/shop-os/parts-offers.ts:486`) with client-side-only markup — a tech-safe
+  path must recompute/validate markup SERVER-side. Think hard about WHEN the
+  tech's part reaches the customer's price (advisor re-quote vs auto) before
+  building; this is the one with a real product question.
+
+**Deliberately NOT building (simplicity-first, avoid speculation):**
+- *Explicit "tech types labor hours" field* — the auto-clock (slice 1) already
+  captures the tech's time without touching money, which satisfies founder
+  principle 3 ("techs enter labor time only"). A manual hours entry is speculative
+  until wall-clock proves too coarse; don't add it on spec.
+- *Owner-facing "quoted hrs vs actual" on the ticket ledger* — the honest place
+  for the comparison (NOT the tech screen). Quoted labor hours ARE cheaply
+  readable (`quoteSnapshotSchema` line schema has `laborHours`, `quotes.ts:283`).
+  Deferred: it ripples through the whole `TicketDetail` projection
+  (`lib/tickets.ts:51`) + `ticket-detail.tsx`. Do it when there's a real ask.
 
 **Optional quick cleanup (not blocking):** fix the stale
 `shop-os-vehicle-history-page.test.tsx` mock to add `.leftJoin` (one line).
-Pre-existing, unrelated to getting-paid.
+Pre-existing, unrelated to this work.
 
 **Standing rules reminder:** develop on `claude/handoff-opus-fable-strategy-zxe329`;
 plain language with the founder (no engineering jargon); make the product/eng
@@ -73,6 +107,7 @@ asked (#175 already exists — verify its state on resume).
 | Supplier setup in Settings | `5943c0f` | New **Settings → Shop → Suppliers** (module 04): owners add, rename, and turn suppliers on/off ahead of time, reusing the existing vendor-account domain/API unchanged. Sourcing's non-owner dead-end now points at Settings → Shop. First slice of the founder bench direction (principle 1). |
 | Parts markup — set it | `6857852` | New `shops.parts_markup_bps` (nullable, additive migration 0037) + a **Default parts markup** field in the Rates section; `POST /api/shop` validates/saves it. Management sets markup once. |
 | Parts markup — auto-price | `430c4cf` | With a markup set, the part-sourcing panel derives the customer line price from supplier cost × quantity × markup and shows it **read-only** — techs/advisors never type retail (principles 2 + 3). Mirrors how a labor line already hides its price when a labor rate is set. |
+| Tech job clock — start/finish time | `699d230` | The technician's job page now records when work actually started and finished. `work_started_at`/`work_completed_at` (additive migration 0039, two nullable columns on `ticket_jobs`) are stamped server-side inside `mutateSimpleWork` on the same open→in_progress and in_progress→done taps the tech already makes — no new action, and replays never re-stamp. The completed job shows Started / Finished / "On the job: 2h 15m" (plain `formatWorkDuration`, unit-covered). First half of quoted-vs-actual; still zero money anywhere on the tech screen. First slice of the one-page tech job screen. |
 | Getting paid — ring out & close | _(this branch)_ | New **Ring out** panel on the ticket screen (advisor/owner only — techs never see it). Bill = the approved jobs' subtotals taxed once (derived, never stored); record cash/card/check/other payments (deposits + partials welcome); balance = owed − collected; the ticket closes only when the balance clears, stamping `closedAt`/`deliveredAt`/`closedBy`. New append-only `ticket_payments` table (server-only, migration 0038 with RLS deny + service-role-only ACL, mirroring `shop_entitlements`); `POST /api/tickets/[id]/payments` (idempotent by requestKey, rejects overpayment) and `POST /api/tickets/[id]/close`. No card processing — the app records the money truth and closes the order; the shop takes payment however it already does. First time a ticket can reach `closed` — those columns had zero writers before. |
 
 All: TypeScript clean, targeted tests green, production build passes. Not
