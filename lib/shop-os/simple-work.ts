@@ -22,6 +22,8 @@ export type SimpleWorkFailure = { ok: false; error: SimpleWorkError; retryable?:
 type WorkProjection = {
   status: 'open' | 'in_progress' | 'done'
   workNotes: string | null
+  startedAt: string | null
+  completedAt: string | null
   updatedAt: string
 }
 
@@ -54,13 +56,15 @@ function failure(error: SimpleWorkError, retryable = false): SimpleWorkFailure {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
 }
 
-function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'workNotes' | 'updatedAt'>): WorkProjection {
+function safeWork(job: Pick<typeof ticketJobs.$inferSelect, 'workStatus' | 'workNotes' | 'workStartedAt' | 'workCompletedAt' | 'updatedAt'>): WorkProjection {
   if (job.workStatus !== 'open' && job.workStatus !== 'in_progress' && job.workStatus !== 'done') {
     throw new TypeError('simple work status is unavailable')
   }
   return {
     status: job.workStatus,
     workNotes: job.workNotes,
+    startedAt: job.workStartedAt ? job.workStartedAt.toISOString() : null,
+    completedAt: job.workCompletedAt ? job.workCompletedAt.toISOString() : null,
     updatedAt: job.updatedAt.toISOString(),
   }
 }
@@ -195,7 +199,11 @@ export async function mutateSimpleWork(
         if (!hasPinnedApproval(context, true)) return failure('not_authorized')
         const [updated] = await (tx as AppDb)
           .update(ticketJobs)
-          .set({ workStatus: 'in_progress', updatedAt: nextTimestamp(job.updatedAt) })
+          .set({
+            workStatus: 'in_progress',
+            workStartedAt: sql`clock_timestamp()`,
+            updatedAt: nextTimestamp(job.updatedAt),
+          })
           .where(and(
             eq(ticketJobs.shopId, parsedActor.data.shopId),
             eq(ticketJobs.id, job.id),
@@ -237,7 +245,11 @@ export async function mutateSimpleWork(
       if (!job.workNotes?.trim()) return failure('not_ready')
       const [updated] = await (tx as AppDb)
         .update(ticketJobs)
-        .set({ workStatus: 'done', updatedAt: nextTimestamp(job.updatedAt) })
+        .set({
+          workStatus: 'done',
+          workCompletedAt: sql`clock_timestamp()`,
+          updatedAt: nextTimestamp(job.updatedAt),
+        })
         .where(and(
           eq(ticketJobs.shopId, parsedActor.data.shopId),
           eq(ticketJobs.id, job.id),
@@ -313,6 +325,8 @@ export async function getSimpleWorkWorkspace(
         kind: job.kind,
         workStatus: job.workStatus as 'open' | 'in_progress' | 'done',
         workNotes: job.workNotes,
+        startedAt: job.workStartedAt ? job.workStartedAt.toISOString() : null,
+        completedAt: job.workCompletedAt ? job.workCompletedAt.toISOString() : null,
         updatedAt: job.updatedAt.toISOString(),
         authorization,
       },

@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/vt'
 import {
+  formatWorkDuration,
   parseEscalationResponse,
   parseSimpleWorkMutationResponse,
   parseSimpleWorkWorkspaceResponse,
@@ -40,6 +41,8 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
       ...current,
       workStatus: work.status,
       workNotes: work.workNotes,
+      startedAt: work.startedAt,
+      completedAt: work.completedAt,
       updatedAt: work.updatedAt,
     }))
     setNote(work.workNotes ?? '')
@@ -161,6 +164,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
             <p className={styles.stateMark}>Complete</p>
             <h2 id="work-complete">Work complete</h2>
             <p className={styles.savedNote}>{workspace.workNotes ?? 'No work note recorded.'}</p>
+            <JobClock startedAt={workspace.startedAt} completedAt={workspace.completedAt} />
           </section>
         ) : workspace.authorization === 'declined' ? (
           <ReadOnlyState title="Customer declined this work" copy="This work is not authorized. No work action is available." />
@@ -181,6 +185,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
             <section className={styles.state} aria-labelledby="progress-heading">
               <p className={styles.stateMark}>Now</p>
               <h2 id="progress-heading">Work in progress</h2>
+              <JobClock startedAt={workspace.startedAt} completedAt={workspace.completedAt} />
             </section>
             <section className={styles.module} aria-labelledby="note-heading">
               <div className={styles.moduleHeading}><span>01</span><h2 id="note-heading">Work note</h2></div>
@@ -242,4 +247,26 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace }: Props) {
 
 function ReadOnlyState({ title, copy }: { title: string; copy: string }) {
   return <section className={styles.state}><p className={styles.stateMark}>Hold</p><h2>{title}</h2><p>{copy}</p></section>
+}
+
+function formatClockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// The job's own clock: when it was started and finished, and how long it ran on
+// the bay. No money, no labor billing — just the tech's actual time on the job.
+function JobClock({ startedAt, completedAt }: { startedAt: string | null; completedAt: string | null }) {
+  if (!startedAt && !completedAt) return null
+  const duration = formatWorkDuration(startedAt, completedAt)
+  return (
+    <dl className={styles.clock}>
+      <div><dt>Started</dt><dd>{startedAt ? formatClockTime(startedAt) : '—'}</dd></div>
+      {completedAt && (
+        <>
+          <div><dt>Finished</dt><dd>{formatClockTime(completedAt)}</dd></div>
+          <div><dt>On the job</dt><dd>{duration ?? '—'}</dd></div>
+        </>
+      )}
+    </dl>
+  )
 }

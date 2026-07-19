@@ -170,6 +170,28 @@ describe('Shop OS approved simple work', () => {
     expect(replay).toMatchObject({ ok: true, changed: false, work: { status: 'done' } })
   })
 
+  it('stamps the work clock on start and complete, in order', async () => {
+    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'start' } })
+    if (!started.ok) throw new Error('start failed')
+    expect(started.work.startedAt).not.toBeNull()
+    expect(started.work.completedAt).toBeNull()
+    const noted = await mutateSimpleWork(db, {
+      actor, ticketId, jobId,
+      body: { action: 'save_note', note: 'Installed and torqued.', expectedUpdatedAt: started.work.updatedAt },
+    })
+    if (!noted.ok) throw new Error('note failed')
+    const completed = await mutateSimpleWork(db, {
+      actor, ticketId, jobId, body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },
+    })
+    if (!completed.ok) throw new Error('complete failed')
+    expect(completed.work.startedAt).toBe(started.work.startedAt)
+    expect(completed.work.completedAt).not.toBeNull()
+    const [row] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    expect(row.workStartedAt).not.toBeNull()
+    expect(row.workCompletedAt).not.toBeNull()
+    expect(row.workCompletedAt!.getTime()).toBeGreaterThanOrEqual(row.workStartedAt!.getTime())
+  })
+
   it('returns a bounded assigned workspace without internal quote or storage truth', async () => {
     const result = await getSimpleWorkWorkspace(db, { actor, ticketId, jobId })
     expect(result).toMatchObject({

@@ -402,6 +402,8 @@ export const ticketJobs = pgTable(
     diagnosticStartAttemptKey: text('diagnostic_start_attempt_key'),
     diagnosticStartLeaseUntil: timestamp('diagnostic_start_lease_until', { withTimezone: true }),
     diagnosticStartErrorCode: text('diagnostic_start_error_code'),
+    workStartedAt: timestamp('work_started_at', { withTimezone: true }),
+    workCompletedAt: timestamp('work_completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

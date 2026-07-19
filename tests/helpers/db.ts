@@ -64,6 +64,7 @@ export async function createTestDb(): Promise<{
   await ensureShopEntitlementsMigration(client)
   await ensureShopPartsMarkupMigration(client)
   await ensureTicketPaymentsMigration(client)
+  await ensureJobWorkClockMigration(client)
   return {
     db,
     client,
@@ -99,6 +100,34 @@ export async function ensureShopPartsMarkupMigration(client: PGlite): Promise<vo
 
   if (!(await shopHasPartsMarkupColumn(client))) {
     throw new Error('shops.parts_markup_bps migration failed in ephemeral database')
+  }
+}
+
+async function ticketJobsHasWorkClockColumns(client: PGlite): Promise<boolean> {
+  const result = await client.query<{ present: number }>(`
+    select count(*)::int as present
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'ticket_jobs'
+      and column_name in ('work_started_at', 'work_completed_at')
+  `)
+  return result.rows[0]?.present === 2
+}
+
+// Mirrors the ensure-guard pattern used for the other post-0028 migrations:
+// the Drizzle journal is frozen at 0028, so newer migrations are applied
+// against the ephemeral DB by hand when their marker is absent.
+export async function ensureJobWorkClockMigration(client: PGlite): Promise<void> {
+  if (await ticketJobsHasWorkClockColumns(client)) return
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0039_shop_os_job_work_clock.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  if (!(await ticketJobsHasWorkClockColumns(client))) {
+    throw new Error('ticket_jobs work clock migration failed in ephemeral database')
   }
 }
 

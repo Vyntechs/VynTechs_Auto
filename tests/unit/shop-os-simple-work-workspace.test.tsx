@@ -20,6 +20,7 @@ const REQUEST = '00000000-0000-4000-8000-000000000080'
 const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' }
 const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
+  startedAt: null, completedAt: null,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
 }
 
@@ -41,7 +42,7 @@ describe('simple work workspace', () => {
   it('starts work only after a strict confirmed server response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, updatedAt: '2026-07-11T12:01:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, updatedAt: '2026-07-11T12:01:00.000Z' } }),
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
@@ -55,7 +56,7 @@ describe('simple work workspace', () => {
   it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
-      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', updatedAt: '2026-07-11T12:02:00.000Z' } }),
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: 'Installed and torqued.', startedAt: '2026-07-11T12:00:30.000Z', completedAt: null, updatedAt: '2026-07-11T12:02:00.000Z' } }),
     })
     vi.stubGlobal('fetch', fetchMock)
     const inProgress = { ...base, workStatus: 'in_progress' as const }
@@ -108,6 +109,26 @@ describe('simple work workspace', () => {
     expect(screen.getByText('Installed and verified.')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /proof|photo|attachment|download/i })).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows the job clock and how long it ran once complete', () => {
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base, workStatus: 'done', workNotes: 'Installed and verified.',
+      startedAt: '2026-07-11T09:14:00.000Z', completedAt: '2026-07-11T11:29:00.000Z',
+    }} />)
+    expect(screen.getByText('Started')).toBeInTheDocument()
+    expect(screen.getByText('Finished')).toBeInTheDocument()
+    const onJob = screen.getByText('On the job').closest('div') as HTMLElement
+    expect(within(onJob).getByText('2h 15m')).toBeInTheDocument()
+  })
+
+  it('shows only the start time while work is still in progress', () => {
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base, workStatus: 'in_progress', startedAt: '2026-07-11T09:14:00.000Z', completedAt: null,
+    }} />)
+    expect(screen.getByText('Started')).toBeInTheDocument()
+    expect(screen.queryByText('Finished')).toBeNull()
+    expect(screen.queryByText('On the job')).toBeNull()
   })
 
   it('protects long technician-controlled strings from narrow-screen overflow', () => {
