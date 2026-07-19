@@ -132,6 +132,19 @@ export async function listSessionsForShop(
     .orderBy(desc(sessions.createdAt))
 }
 
+export async function listSessionsForTech(
+  db: AppDb,
+  shopId: string,
+  techId: string,
+): Promise<Session[]> {
+  return db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.shopId, shopId), eq(sessions.techId, techId)))
+    .orderBy(desc(sessions.createdAt))
+    .limit(50)
+}
+
 export async function listSessionsForVehicle(
   db: AppDb,
   vehicleId: string,

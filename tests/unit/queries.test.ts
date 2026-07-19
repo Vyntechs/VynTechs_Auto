@@ -14,6 +14,7 @@ import {
   getOpenSessionForTech,
   countOpenSessionsForTech,
   listSessionsForShop,
+  listSessionsForTech,
   closeSession,
   getThreshold,
   createArtifact,
@@ -21,7 +22,7 @@ import {
   listArtifactsForSession,
   setArtifactExtraction,
 } from '@/lib/db/queries'
-import { sessionEvents, confidenceCalibration } from '@/lib/db/schema'
+import { sessionEvents, confidenceCalibration, sessions } from '@/lib/db/schema'
 
 describe('shops queries', () => {
   let db: TestDb
@@ -514,6 +515,56 @@ describe('listSessionsForShop', () => {
     const items = await listSessionsForShop(db, shop.id)
     expect(items[0].id).toBe(newer.id)
     expect(items[1].id).toBe(older.id)
+  })
+
+  it('returns only the requested technician newest-first and caps the transfer at 50', async () => {
+    const shopA = await createShop(db, { name: 'Shop A' })
+    const shopB = await createShop(db, { name: 'Shop B' })
+    const techA = await createProfile(db, { userId: crypto.randomUUID(), shopId: shopA.id })
+    const peer = await createProfile(db, { userId: crypto.randomUUID(), shopId: shopA.id })
+    const outsider = await createProfile(db, { userId: crypto.randomUUID(), shopId: shopB.id })
+
+    for (let index = 0; index < 51; index += 1) {
+      const owned = await createSession(db, {
+        shopId: shopA.id,
+        techId: techA.id,
+        intake: {
+          vehicleYear: 2024,
+          vehicleMake: 'Ford',
+          vehicleModel: 'F-350',
+          customerComplaint: `owned synthetic concern ${index}`,
+        },
+        treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+      })
+      await db
+        .update(sessions)
+        .set({ createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)) })
+        .where(eq(sessions.id, owned.id))
+    }
+
+    for (const [tech, complaint] of [
+      [peer, 'peer private concern'],
+      [outsider, 'other shop private concern'],
+    ] as const) {
+      await createSession(db, {
+        shopId: tech.shopId!,
+        techId: tech.id,
+        intake: {
+          vehicleYear: 2023,
+          vehicleMake: 'Toyota',
+          vehicleModel: 'Tundra',
+          customerComplaint: complaint,
+        },
+        treeState: { nodes: [], currentNodeId: 'root', message: 'go' },
+      })
+    }
+
+    const items = await listSessionsForTech(db, shopA.id, techA.id)
+    expect(items).toHaveLength(50)
+    expect(items.every((item) => item.shopId === shopA.id && item.techId === techA.id)).toBe(true)
+    expect(items[0].intake.customerComplaint).toBe('owned synthetic concern 50')
+    expect(items.at(-1)?.intake.customerComplaint).toBe('owned synthetic concern 1')
+    expect(items.map((item) => item.intake.customerComplaint)).not.toContain('peer private concern')
   })
 })
 
