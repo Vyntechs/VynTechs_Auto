@@ -1157,8 +1157,6 @@ export function ManualQuoteBuilder({
 
 type BuilderLine = QuoteBuilder['jobs'][number]['lines'][number]
 type BuilderJob = QuoteBuilder['jobs'][number]
-type StoryWorkspace = NonNullable<ReturnType<typeof parseCustomerStoryWorkspaceResponse>>
-
 type DecisionState = {
   jobId: string
   title: string
@@ -1190,18 +1188,14 @@ function StoryCard({
   // session) and manual_findings (no session — shop without the diagnostics
   // add-on records findings by hand). Both write the same story shape.
   const manualStoryMode = job.storyMode === 'topology_manual' || job.storyMode === 'manual_findings'
-  const [open, setOpen] = useState(manualStoryMode)
   const [story, setStory] = useState(job.story.content)
   const [revision, setRevision] = useState(job.story.revision)
   const [reviewStatus, setReviewStatus] = useState(job.story.reviewStatus)
-  const [evidence, setEvidence] = useState<StoryWorkspace['evidence'] | null>(null)
-  const [selectedEvents, setSelectedEvents] = useState<string[]>([])
   const [whatWeFound, setWhatWeFound] = useState(job.story.content?.whatWeFound ?? '')
   const [whatWeRecommend, setWhatWeRecommend] = useState(job.story.content?.whatWeRecommend ?? '')
   const dirtyRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const generationKey = useRef<string | null>(null)
   const reviewKey = useRef<string | null>(null)
   const endpoint = `/api/tickets/${ticketId}/quote/jobs/${job.id}/story`
 
@@ -1217,83 +1211,6 @@ function StoryCard({
 
   async function readBody(response: Response): Promise<unknown> {
     try { return await response.json() } catch { return {} }
-  }
-
-  async function openWorkspace(): Promise<void> {
-    setOpen(true)
-    if (job.storyMode !== 'ordinary_locked_tree' || evidence || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const response = await fetch(endpoint, { headers: { accept: 'application/json' } })
-      const body = await readBody(response)
-      const parsed = response.ok ? parseCustomerStoryWorkspaceResponse(body) : null
-      if (!parsed) {
-        setError('Story evidence is unavailable. Refresh before retrying.')
-        return
-      }
-      setEvidence(parsed.evidence)
-      if (parsed.story) {
-        setStory(parsed.story)
-        setRevision(parsed.storyRevision)
-        setReviewStatus(parsed.storyMeta?.reviewStatus ?? null)
-        setWhatWeFound(parsed.story.whatWeFound)
-        setWhatWeRecommend(parsed.story.whatWeRecommend)
-      }
-    } catch {
-      setError('Connection interrupted. Retry loading evidence.')
-    } finally { setBusy(false) }
-  }
-
-  async function generate(): Promise<void> {
-    if (busy || !evidence) return
-    generationKey.current ??= crypto.randomUUID()
-    setBusy(true)
-    setError(null)
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ clientKey: generationKey.current, expectedStoryRevision: revision,
-          sourceEventIds: selectedEvents, sourceArtifactIds: [] }),
-      })
-      if (response.status === 409) {
-        try {
-          const workspaceResponse = await fetch(endpoint, { headers: { accept: 'application/json' } })
-          const rebased = workspaceResponse.ok
-            ? parseCustomerStoryWorkspaceResponse(await readBody(workspaceResponse)) : null
-          if (!rebased) {
-            setError('Story changed elsewhere. Refresh before choosing proof again.')
-            return
-          }
-          const currentEventIds = new Set(rebased.evidence.events.map((item) => item.id))
-          setSelectedEvents((ids) => ids.filter((id) => currentEventIds.has(id)))
-          setStory(rebased.story)
-          setRevision(rebased.storyRevision)
-          setReviewStatus(rebased.storyMeta?.reviewStatus ?? null)
-          setEvidence(rebased.evidence)
-          generationKey.current = null
-          setError('Story refreshed. Your selected proof is preserved; retry generation.')
-        } catch {
-          setError('Story changed elsewhere. Refresh before choosing proof again.')
-        }
-        return
-      }
-      const parsed = response.ok ? parseCustomerStoryMutationResponse(await readBody(response)) : null
-      if (!parsed) {
-        setError('Story generation did not return safe server truth. Retry with the same evidence.')
-        return
-      }
-      setStory(parsed.story)
-      setRevision(parsed.storyRevision)
-      setReviewStatus(parsed.storyMeta.reviewStatus ?? null)
-      setWhatWeFound(parsed.story.whatWeFound)
-      setWhatWeRecommend(parsed.story.whatWeRecommend)
-      dirtyRef.current = false
-      generationKey.current = null
-      reviewKey.current = crypto.randomUUID()
-    } catch {
-      setError('Connection interrupted. Retry with the same evidence.')
-    } finally { setBusy(false) }
   }
 
   function edit(field: 'found' | 'recommend', value: string): void {
@@ -1319,7 +1236,6 @@ function StoryCard({
       setStory(parsed.story)
       setRevision(parsed.storyRevision)
       setReviewStatus(parsed.storyMeta?.reviewStatus ?? null)
-      setEvidence(parsed.evidence)
       setError('Story refreshed. Your draft is preserved; review current proof and retry.')
     } catch {
       setError('Story changed elsewhere. Your draft is preserved; refresh before retrying.')
@@ -1367,33 +1283,18 @@ function StoryCard({
   if (job.storyMode === 'unavailable') {
     return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Finish and lock this diagnosis before preparing its customer story.</p></section>
   }
+  if (job.storyMode === 'ordinary_locked_tree' && !story) {
+    return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Legacy AI story generation is unavailable while diagnostics is off. Record findings in the work order instead.</p></section>
+  }
 
   return (
     <section ref={focusRef} className={styles.storyCard} role="region" aria-label={`Diagnostic story for ${job.title}`} tabIndex={-1}>
       <div className={styles.storyHeading}>
         <div><p className={styles.eyebrow}>Diagnostic story</p><h4>{job.storyMode === 'topology_manual' ? 'Human-authored topology story' : job.storyMode === 'manual_findings' ? 'Recorded findings' : 'Customer-ready finding'}</h4></div>
-        {job.storyMode === 'ordinary_locked_tree' && !open && (
-          <button type="button" className={styles.lineAction} onClick={openWorkspace}>Open diagnostic story</button>
-        )}
       </div>
-      {open && (
-        <>
+      <>
           {reviewStatus === 'pending' && <p className={styles.pending}>Pending human review</p>}
           {reviewStatus === 'reviewed' && <p className={styles.reviewed} role="status">Reviewed customer story</p>}
-          {!story && job.storyMode === 'ordinary_locked_tree' && evidence && (
-            <fieldset className={styles.evidencePicker}>
-              <legend>Select proof to include</legend>
-              {evidence.events.map((item) => (
-                <label key={item.id}><input type="checkbox" checked={selectedEvents.includes(item.id)}
-                  disabled={selectedEvents.length >= 20 && !selectedEvents.includes(item.id)} onChange={(event) => {
-                  setSelectedEvents((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))
-                }} /> <span>{item.label}</span></label>
-              ))}
-              <p role="status" aria-label="Evidence selection" aria-live="polite">Observations selected · {selectedEvents.length} of 20</p>
-              {selectedEvents.length === 0 && <p>No observation selected. The short story will use locked diagnosis facts only.</p>}
-              <button type="button" className={styles.storyAction} disabled={busy} onClick={generate}>{busy ? 'Generating…' : 'Generate customer story'}</button>
-            </fieldset>
-          )}
           {(story || manualStoryMode) && (
             <div className={styles.storyEditor}>
               {story && <><p className={styles.storyLabel}>What you told us</p><p>{story.whatYouToldUs}</p></>}
@@ -1410,8 +1311,7 @@ function StoryCard({
           )}
           {busy && !story && <p role="status" aria-live="polite">Loading story truth…</p>}
           {error && <p className={styles.storyError} role="alert">{error}</p>}
-        </>
-      )}
+      </>
     </section>
   )
 }
