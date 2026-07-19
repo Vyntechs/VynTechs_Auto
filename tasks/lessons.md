@@ -5,8 +5,8 @@ Reason: Double-quoted backticks execute command substitution and silently corrup
 
 ### serialize-heavy-test-runs
 Trigger: Parallel reviewers launched Vitest while the control lane ran the full suite, causing resource contention and a false timeout.
-Rule: One lane owns heavy tests; reviewers perform static review or wait for shared verification evidence.
-Reason: Concurrent suites distort timing, waste compute, and weaken verification signal.
+Rule: One lane owns heavy tests; run database-heavy Vitest as eight sequential shards with two workers, while reviewers use shared evidence.
+Reason: Bounded shards finish visibly; concurrent or monolithic runs distort timing, waste compute, and weaken verification signal.
 
 ### own-verification-identity
 Trigger: Authenticated verification required Brandon to sign in manually from another device.
