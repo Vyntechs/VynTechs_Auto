@@ -115,6 +115,32 @@ describe('resolveFollowUp', () => {
     expect(input.rootCause).toContain('Wastegate')
   })
 
+  it('allows exactly one decay winner for concurrent resolutions of one follow-up', async () => {
+    const { tech, followUp } = await seedClosedSessionWithSurfacedFollowUp(db)
+    const decay = vi.fn().mockResolvedValue({ decayed: 1, retired: 0 })
+
+    const results = await Promise.all([
+      resolveFollowUp({
+        db,
+        userId: tech.userId,
+        followUpId: followUp.id,
+        body: { comebackRecorded: true, notes: 'first' },
+        recordCorpusComeback: decay,
+      }),
+      resolveFollowUp({
+        db,
+        userId: tech.userId,
+        followUpId: followUp.id,
+        body: { comebackRecorded: true, notes: 'second' },
+        recordCorpusComeback: decay,
+      }),
+    ])
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1)
+    expect(results.filter((result) => !result.ok)).toHaveLength(1)
+    expect(decay).toHaveBeenCalledTimes(1)
+  })
+
   it('does not invoke decay when comebackRecorded=false', async () => {
     const { tech, followUp } = await seedClosedSessionWithSurfacedFollowUp(db)
     const decay = vi.fn()
