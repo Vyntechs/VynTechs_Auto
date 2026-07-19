@@ -68,12 +68,58 @@ export async function createTestDb(): Promise<{
   await ensureJobTimeClockMigration(client)
   await ensureJobPartRequestsMigration(client)
   await ensureStripeWebhookOrderingMigration(client)
+  await ensurePublicSchemaClientAclMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+export async function ensurePublicSchemaClientAclMigration(client: PGlite): Promise<void> {
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0043_public_schema_client_acl.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const result = await client.query<{
+    client_table_privileges: number
+    client_function_privileges: number
+  }>(`
+    with client_roles(role_name) as (values ('anon'), ('authenticated')),
+    table_privileges(privilege_name) as (values
+      ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'),
+      ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+    )
+    select
+      (select count(*)::int
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       cross join client_roles r
+       cross join table_privileges p
+       where n.nspname = 'public'
+         and c.relkind in ('r', 'p')
+         and has_table_privilege(r.role_name, c.oid, p.privilege_name))
+        as client_table_privileges,
+      (select count(*)::int
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       cross join client_roles r
+       where n.nspname = 'public'
+         and p.proname = 'rls_auto_enable'
+         and pg_get_function_identity_arguments(p.oid) = ''
+         and has_function_privilege(r.role_name, p.oid, 'execute'))
+        as client_function_privileges
+  `)
+
+  const markers = result.rows[0]
+  if (!markers
+      || markers.client_table_privileges !== 0
+      || markers.client_function_privileges !== 0) {
+    throw new Error('public-schema client ACL migration failed in ephemeral database')
   }
 }
 
