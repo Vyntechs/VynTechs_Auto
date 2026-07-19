@@ -7,11 +7,16 @@ import { profiles } from '@/lib/db/schema'
 import { Module } from '@/components/vt'
 import { TeamSection, type TeamMemberRow } from '@/components/vt/team-section'
 import { canManageTeam } from '@/lib/shop-os/capabilities'
+import { checkAccess } from '@/lib/auth-access'
 
 export default async function SettingsTeamPage() {
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
+
+  const access = await checkAccess(db, ctx.user.id)
+  if (access.kind === 'deactivated') redirect('/deactivated')
+  if (access.kind === 'paywall') redirect('/subscribe')
 
   const isAdmin = canManageTeam(ctx.profile.role, isFounder(ctx.user.email))
   if (!isAdmin) notFound()

@@ -11,11 +11,16 @@ import { CannedJobsSection } from '@/components/vt/canned-jobs-section'
 import { SuppliersSection } from '@/components/vt/suppliers-section'
 import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
 import { listVendorAccounts, publicVendorAccount, vendorAccountActorFromProfile } from '@/lib/shop-os/parts'
+import { checkAccess } from '@/lib/auth-access'
 
 export default async function SettingsShopPage() {
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
+
+  const access = await checkAccess(db, ctx.user.id)
+  if (access.kind === 'deactivated') redirect('/deactivated')
+  if (access.kind === 'paywall') redirect('/subscribe')
 
   const isAdmin = canManageTeam(ctx.profile.role, isFounder(ctx.user.email))
   if (!isAdmin) notFound()
