@@ -31,7 +31,7 @@
 - Consumes: `kind`, `sessionId`, and resolved `diagnosticsEntitled` truth.
 - Produces: `canUseManualWork({ kind, sessionId, diagnosticsEntitled }): boolean`.
 
-- [ ] **Step 1: Write RED policy and domain tests**
+- [x] **Step 1: Write RED policy and domain tests**
 
 Add table tests proving repair/maintenance remain eligible only without a session; a diagnostic is eligible only when diagnostics are unavailable and `sessionId` is null. Extend the simple-work fixture with `shop_entitlements.diagnostics = false`, a reviewed sessionless diagnostic snapshot, exact approval, and assignment; prove `getSimpleWorkWorkspace()` and `clock_on` succeed. Prove both fail when entitlement is true or a session ID exists.
 
@@ -44,7 +44,7 @@ expect(canUseManualWork({
 })).toBe(false)
 ```
 
-- [ ] **Step 2: Prove RED**
+- [x] **Step 2: Prove RED**
 
 Run:
 
@@ -54,7 +54,7 @@ pnpm vitest run tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-living
 
 Expected: diagnostic manual-work assertions fail under the categorical kind guards.
 
-- [ ] **Step 3: Implement the shared pure policy and authoritative domain check**
+- [x] **Step 3: Implement the shared pure policy and authoritative domain check**
 
 Create:
 
@@ -74,7 +74,7 @@ In both `lockContext()` and `getSimpleWorkWorkspace()`, resolve current shop dia
 
 Extend `LivingTicketJob` with `sessionId`, extend projector input with `diagnosticsEntitled`, and replace the hardcoded repair/maintenance condition with the shared policy.
 
-- [ ] **Step 4: Prove the bounded behavior and commit**
+- [x] **Step 4: Prove the bounded behavior and commit**
 
 Run:
 
@@ -224,19 +224,19 @@ Expected: both clean runs pass with no environment variables, network, skips, or
 - Consumes: verified Tasks 1–3 and consolidated review findings.
 - Produces: Row 54 status and durable next-safe-move evidence.
 
-- [ ] **Step 1: Run focused convergence**
+- [x] **Step 1: Run focused convergence**
 
 Run the Golden gate plus existing auth, capability, Today, ticket, quote, decision, simple-work, parts, ring-out, and no-media files with at most two workers.
 
-- [ ] **Step 2: Run one consolidated static/security/runtime review**
+- [x] **Step 2: Run one consolidated static/security/runtime review**
 
 Review for entitlement races, auth/capability expansion, session-backed diagnostic reopening, cross-shop leakage, stale state, duplicate payment/part writes, hidden live-data dependencies, added pages, diagnostic-engine/media drift, and test assertions that merely mirror implementation.
 
-- [ ] **Step 3: Apply one repair wave and focused re-review**
+- [x] **Step 3: Apply one repair wave and focused re-review**
 
 Batch all blocking findings, rerun only affected tests, and stop/re-plan if a new Critical or Important architecture defect appears that was not caused by the repair.
 
-- [ ] **Step 4: Run repository gates**
+- [x] **Step 4: Run repository gates**
 
 Run the documented eight serialized Vitest shards with two workers, then:
 
@@ -248,7 +248,7 @@ git diff --check
 
 Expected: zero failures; no new schema, page, dependency, credential, network, diagnostic engine, media, or production-data path.
 
-- [ ] **Step 5: Record proof and commit**
+- [x] **Step 5: Record proof and commit**
 
 Add Row 54 with exact counts and review verdict. Update `SHOP_OS_DRIVER_STATE.md` with Outcome, Current slice, Last proof, Next safe move, Open gates, Worker lanes, Stop only when, and Usage balance. Mark this plan's tasks complete only from real evidence.
 
