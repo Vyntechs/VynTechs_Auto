@@ -4,6 +4,16 @@ export const INTAKE_SEARCH_LIMITS = Object.freeze({
   maxTokenCharacters: 64,
 })
 
+const LIKE_ESCAPE = '!'
+
+/** Escapes user text for a SQL LIKE/ILIKE pattern using `ESCAPE '!'`. */
+export function literalLikeToken(token: string): string {
+  return token
+    .replaceAll(LIKE_ESCAPE, `${LIKE_ESCAPE}${LIKE_ESCAPE}`)
+    .replaceAll('%', `${LIKE_ESCAPE}%`)
+    .replaceAll('_', `${LIKE_ESCAPE}_`)
+}
+
 function rawSearchTokens(q: string): string[] {
   return q.trim().split(/\s+/).filter((token) => token !== '')
 }

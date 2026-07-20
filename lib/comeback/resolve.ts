@@ -78,6 +78,7 @@ export async function resolveFollowUp(opts: {
         .limit(1)
       if (session?.outcome) {
         await opts.recordCorpusComeback(opts.db, {
+          shopId: claimed.shopId,
           vehicleYear: session.intake.vehicleYear,
           vehicleMake: session.intake.vehicleMake,
           vehicleModel: session.intake.vehicleModel,

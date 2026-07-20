@@ -16,6 +16,7 @@ import {
   canCreateTickets,
   isShopRole,
 } from '@/lib/shop-os/capabilities'
+import { MAX_TICKET_JOBS_PER_TICKET, ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 
 export type TicketActor = {
   profileId: string
@@ -40,6 +41,7 @@ export type TicketDomainError =
   | 'assignment_conflict'
   | 'overpayment'
   | 'balance_outstanding'
+  | 'job_limit_reached'
 
 export type AssignmentTierWarning = {
   code: 'below_required_tier'
@@ -117,6 +119,7 @@ export type VehicleHistoryTicket = {
   createdAt: Date
   closedAt: Date | null
   jobs: VehicleHistoryJob[]
+  jobsHasMore?: boolean
 }
 
 export type VehicleHistoryResult = {
@@ -125,6 +128,7 @@ export type VehicleHistoryResult = {
 }
 
 const VEHICLE_HISTORY_VISIT_LIMIT = 100
+export { MAX_TICKET_JOBS_PER_TICKET }
 
 // Flat (ticket × job) row before grouping. Job columns are null for a ticket
 // that has no jobs yet (left join).
@@ -163,9 +167,16 @@ export function groupVehicleHistoryRows(
         createdAt: row.createdAt,
         closedAt: row.closedAt,
         jobs: [],
+        jobsHasMore: false,
       }
       byTicket.set(row.ticketId, ticket)
       order.push(row.ticketId)
+    }
+    // The lateral query returns at most 26 newest jobs. The twenty-sixth is a
+    // sentinel only; never let it reach the browser as a rendered job.
+    if (row.jobId && ticket.jobs.length >= MAX_TICKET_JOBS_PER_TICKET) {
+      ticket.jobsHasMore = true
+      continue
     }
     if (row.jobId) {
       ticket.jobs.push({
@@ -191,7 +202,10 @@ export async function listVehicleTicketHistory(
   db: AppDb,
   opts: { shopId: string; vehicleId: string },
 ): Promise<VehicleHistoryResult> {
-  const recentTickets = db
+  // Fetch one extra repair order solely as the history sentinel. The lateral
+  // job lookup below sees only the 100 visible tickets, so an older visit
+  // never triggers any job-table work.
+  const ticketWindow = db
     .select({
       shopId: tickets.shopId,
       ticketId: tickets.id,
@@ -207,38 +221,71 @@ export async function listVehicleTicketHistory(
     )
     .orderBy(desc(tickets.ticketNumber))
     .limit(VEHICLE_HISTORY_VISIT_LIMIT + 1)
-    .as('recent_vehicle_tickets')
+    .as('vehicle_ticket_window')
+  const visibleTickets = db
+    .select({
+      shopId: ticketWindow.shopId,
+      ticketId: ticketWindow.ticketId,
+      ticketNumber: ticketWindow.ticketNumber,
+      concern: ticketWindow.concern,
+      status: ticketWindow.status,
+      createdAt: ticketWindow.createdAt,
+      closedAt: ticketWindow.closedAt,
+      historyHasMore: sql<boolean>`(
+        select count(*) > ${VEHICLE_HISTORY_VISIT_LIMIT}
+        from ${ticketWindow}
+      )`.as('history_has_more'),
+    })
+    .from(ticketWindow)
+    .orderBy(desc(ticketWindow.ticketNumber))
+    .limit(VEHICLE_HISTORY_VISIT_LIMIT)
+    .as('visible_vehicle_tickets')
+  const boundedJobs = db
+    .select({
+      id: ticketJobs.id,
+      title: ticketJobs.title,
+      kind: ticketJobs.kind,
+      approvalState: ticketJobs.approvalState,
+      workStatus: ticketJobs.workStatus,
+      createdAt: ticketJobs.createdAt,
+    })
+    .from(ticketJobs)
+    .where(and(
+      eq(ticketJobs.shopId, visibleTickets.shopId),
+      eq(ticketJobs.ticketId, visibleTickets.ticketId),
+    ))
+    .orderBy(desc(ticketJobs.createdAt), desc(ticketJobs.id))
+    .limit(MAX_TICKET_JOBS_PER_TICKET + 1)
+    .as('bounded_vehicle_ticket_jobs')
   const rows = await db
     .select({
-      ticketId: recentTickets.ticketId,
-      ticketNumber: recentTickets.ticketNumber,
-      concern: recentTickets.concern,
-      status: recentTickets.status,
-      createdAt: recentTickets.createdAt,
-      closedAt: recentTickets.closedAt,
-      jobId: ticketJobs.id,
-      jobTitle: ticketJobs.title,
-      jobKind: ticketJobs.kind,
-      jobApprovalState: ticketJobs.approvalState,
-      jobWorkStatus: ticketJobs.workStatus,
+      ticketId: visibleTickets.ticketId,
+      ticketNumber: visibleTickets.ticketNumber,
+      concern: visibleTickets.concern,
+      status: visibleTickets.status,
+      createdAt: visibleTickets.createdAt,
+      closedAt: visibleTickets.closedAt,
+      historyHasMore: visibleTickets.historyHasMore,
+      jobId: boundedJobs.id,
+      jobTitle: boundedJobs.title,
+      jobKind: boundedJobs.kind,
+      jobApprovalState: boundedJobs.approvalState,
+      jobWorkStatus: boundedJobs.workStatus,
     })
-    .from(recentTickets)
-    .leftJoin(
-      ticketJobs,
-      and(
-        eq(ticketJobs.shopId, recentTickets.shopId),
-        eq(ticketJobs.ticketId, recentTickets.ticketId),
-      ),
-    )
+    .from(visibleTickets)
+    .leftJoinLateral(boundedJobs, sql`true`)
     .orderBy(
-      desc(recentTickets.ticketNumber),
-      asc(ticketJobs.createdAt),
-      asc(ticketJobs.id),
+      desc(visibleTickets.ticketNumber),
+      desc(boundedJobs.createdAt),
+      desc(boundedJobs.id),
     )
-  const grouped = groupVehicleHistoryRows(rows)
+  const grouped = groupVehicleHistoryRows(rows).map((ticket) => ({
+    ...ticket,
+    jobs: [...ticket.jobs].reverse(),
+  }))
   return {
     visits: grouped.slice(0, VEHICLE_HISTORY_VISIT_LIMIT),
-    hasMore: grouped.length > VEHICLE_HISTORY_VISIT_LIMIT,
+    hasMore: rows[0]?.historyHasMore ?? false,
   }
 }
 
@@ -464,6 +511,7 @@ export function ticketDomainStatus(
     case 'job_not_open':
     case 'assignment_conflict':
     case 'balance_outstanding':
+    case 'job_limit_reached':
       return 409
   }
 }
@@ -941,7 +989,9 @@ export async function addTicketJob(
     if (lockedTicket.status !== 'open') {
       return { ok: false, error: 'ticket_not_open' as const }
     }
-
+    if (await ticketAtJobLimit(tx as AppDb, { shopId, ticketId: parsedTicketId.data })) {
+      return { ok: false, error: 'job_limit_reached' as const }
+    }
     const assignment = await validateAssignment(tx as AppDb, input.actor, parsedBody.data)
     if (!assignment.ok) return assignment
 

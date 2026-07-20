@@ -19,6 +19,7 @@ import {
 } from '@/lib/shop-os/quote-builder-ui'
 import {
   parseAppliedCannedJobResponse,
+  isJobLimitReachedFailure,
   type SafeCannedJobTemplate,
 } from '@/lib/shop-os/canned-jobs-ui'
 import {
@@ -614,7 +615,12 @@ export function ManualQuoteBuilder({
       const body = await readJson(response)
       if (!response.ok) {
         const record = body && typeof body === 'object' ? body as Record<string, unknown> : {}
-        if (response.status === 404 || (response.status === 409 && record.retryable !== true)) {
+        if (isJobLimitReachedFailure(response.status, body)) {
+          setError({
+            message: 'This repair order already has 25 jobs. Remove a job before adding another.',
+            refresh: true,
+          })
+        } else if (response.status === 404 || (response.status === 409 && record.retryable !== true)) {
           resetCannedSelectionOnReloadRef.current = true
           setError({
             message: 'Quote or canned-job context changed. Refresh canned jobs and choose again.',

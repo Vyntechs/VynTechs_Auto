@@ -4,6 +4,7 @@ import {
   cannedJobActorFromProfile,
   cannedJobDomainStatus,
   cannedJobErrorBody,
+  applyCannedJobToTicket,
   createCannedJob,
   listCannedJobs,
   publicCannedJob,
@@ -11,7 +12,7 @@ import {
   retireCannedJob,
   type CannedJobActor,
 } from '@/lib/shop-os/canned-jobs'
-import { cannedJobs, profiles, shops } from '@/lib/db/schema'
+import { cannedJobs, customers, profiles, shops, ticketJobs, tickets, vehicles } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
 const uuid = (suffix: number) =>
@@ -238,6 +239,34 @@ describe('Shop OS canned jobs domain', () => {
     const [stored] = await db.select().from(cannedJobs).where(eq(cannedJobs.id, created.cannedJob.id))
     expect(stored.retiredAt).toBeInstanceOf(Date)
     await expect(listCannedJobs(db, { actor })).resolves.toMatchObject({ ok: true, cannedJobs: [] })
+  })
+
+  it('preserves a canned-job replay at capacity and rejects a fresh add without exceeding 25 jobs', async () => {
+    const customerId = uuid(301)
+    const vehicleId = uuid(302)
+    const ticketId = uuid(303)
+    await db.insert(customers).values({ id: customerId, shopId, name: 'Capacity customer', phone: '5550303' })
+    await db.insert(vehicles).values({ id: vehicleId, customerId, year: 2022, make: 'Ford', model: 'Maverick' })
+    await db.insert(tickets).values({
+      id: ticketId, shopId, ticketNumber: 1, source: 'counter', customerId, vehicleId,
+      concern: 'Capacity regression', createdByProfileId: uuid(1),
+    })
+    await db.insert(ticketJobs).values(Array.from({ length: 24 }, (_, index) => ({
+      id: uuid(320 + index), shopId, ticketId, title: `Existing ${index + 1}`,
+      kind: 'repair' as const, requiredSkillTier: 1,
+    })))
+    const canned = await createCannedJob(db, { actor, clientKey: uuid(350), body: body() })
+    if (!canned.ok) throw new Error('canned job creation failed')
+    const input = {
+      actor, ticketId, clientKey: uuid(351), cannedJobId: canned.cannedJob.id,
+      expectedFingerprint: canned.cannedJob.fingerprint, expectedTaxRateBps: 825,
+    }
+
+    await expect(applyCannedJobToTicket(db, input)).resolves.toMatchObject({ ok: true, changed: true })
+    await expect(applyCannedJobToTicket(db, input)).resolves.toMatchObject({ ok: true, changed: false })
+    await expect(applyCannedJobToTicket(db, { ...input, clientKey: uuid(352) }))
+      .resolves.toEqual({ ok: false, error: 'job_limit_reached', retryable: false })
+    expect(await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))).toHaveLength(25)
   })
 
   it('uses privacy-safe not found for malformed, missing, and cross-shop identities', async () => {

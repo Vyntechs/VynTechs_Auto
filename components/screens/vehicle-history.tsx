@@ -246,6 +246,11 @@ export function VehicleHistory({
                       ))}
                     </ul>
                   )}
+                  {visit.jobsHasMore && (
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--vt-fg-3)' }}>
+                      Additional jobs remain stored on this repair order.
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>

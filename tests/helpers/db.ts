@@ -69,12 +69,44 @@ export async function createTestDb(): Promise<{
   await ensureJobPartRequestsMigration(client)
   await ensureStripeWebhookOrderingMigration(client)
   await ensurePublicSchemaClientAclMigration(client)
+  await ensureTicketJobHistoryBoundMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+export async function ensureTicketJobHistoryBoundMigration(client: PGlite): Promise<void> {
+  const index = await client.query<{ indexdef: string }>(`
+    select indexdef
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'ticket_jobs'
+      and indexname = 'ticket_jobs_shop_ticket_created_idx'
+  `)
+  if (index.rows[0]?.indexdef.includes('created_at DESC, id DESC')) return
+  if (index.rows.length > 0) {
+    throw new Error('ticket job history index has an unexpected definition')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0044_ticket_job_history_bound.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const applied = await client.query<{ indexdef: string }>(`
+    select indexdef
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'ticket_jobs'
+      and indexname = 'ticket_jobs_shop_ticket_created_idx'
+  `)
+  if (!applied.rows[0]?.indexdef.includes('created_at DESC, id DESC')) {
+    throw new Error('ticket job history migration failed')
   }
 }
 

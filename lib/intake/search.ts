@@ -1,7 +1,7 @@
-import { and, desc, eq, ilike, inArray, like, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql, type SQLWrapper } from 'drizzle-orm'
 import { customers, sessions, vehicles } from '@/lib/db/schema'
 import type { AppDb } from '@/lib/db/queries'
-import { boundedSearchTokens } from '@/lib/intake/search-limits'
+import { boundedSearchTokens, literalLikeToken } from '@/lib/intake/search-limits'
 
 export type CustomerVehicle = {
   id: string
@@ -46,6 +46,12 @@ export type SearchResults = {
 
 const PER_GROUP_LIMIT = 5
 
+const containsLiteral = (column: SQLWrapper, token: string) =>
+  sql<boolean>`${column} ILIKE ${`%${literalLikeToken(token)}%`} ESCAPE '!'`
+
+const containsLiteralCaseSensitive = (column: SQLWrapper, token: string) =>
+  sql<boolean>`${column} LIKE ${`%${literalLikeToken(token)}%`} ESCAPE '!'`
+
 export async function searchIntake(opts: {
   db: AppDb
   shopId: string
@@ -59,14 +65,14 @@ export async function searchIntake(opts: {
   // All tokens AND'd. Order: exact-prefix (name) > substring > most-recent visit.
   const customerConditions = tokens.map((t) =>
     or(
-      ilike(customers.name, `%${t}%`),
-      like(customers.phone, `%${t}%`),
-      ilike(customers.email, `%${t}%`),
+      containsLiteral(customers.name, t),
+      containsLiteralCaseSensitive(customers.phone, t),
+      containsLiteral(customers.email, t),
     ),
   )
 
-  const firstTok = tokens[0]
-  const prefixScore = sql<number>`CASE WHEN ${customers.name} ILIKE ${firstTok + '%'} THEN 0 ELSE 1 END`.as('prefix_score')
+  const firstTok = literalLikeToken(tokens[0])
+  const prefixScore = sql<number>`CASE WHEN ${customers.name} ILIKE ${firstTok + '%'} ESCAPE '!' THEN 0 ELSE 1 END`.as('prefix_score')
   const lastVisitExpr = sql<Date | null>`(
     SELECT MAX(${sessions.createdAt}) FROM ${sessions}
     WHERE ${sessions.vehicleId} IN (
@@ -148,13 +154,13 @@ export async function searchIntake(opts: {
   // Per token, match across vehicle fields OR owning customer's name.
   const vehicleConditions = tokens.map((t) =>
     or(
-      sql`CAST(${vehicles.year} AS TEXT) LIKE ${`%${t}%`}`,
-      ilike(vehicles.make, `%${t}%`),
-      ilike(vehicles.model, `%${t}%`),
-      ilike(vehicles.engine, `%${t}%`),
-      ilike(vehicles.vin, `%${t}%`),
-      ilike(vehicles.plate, `%${t}%`),
-      ilike(customers.name, `%${t}%`),
+      sql<boolean>`CAST(${vehicles.year} AS TEXT) LIKE ${`%${literalLikeToken(t)}%`} ESCAPE '!'`,
+      containsLiteral(vehicles.make, t),
+      containsLiteral(vehicles.model, t),
+      containsLiteral(vehicles.engine, t),
+      containsLiteral(vehicles.vin, t),
+      containsLiteral(vehicles.plate, t),
+      containsLiteral(customers.name, t),
     ),
   )
 

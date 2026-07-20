@@ -450,6 +450,12 @@ export const ticketJobs = pgTable(
       .on(table.shopId, table.requiredSkillTier, table.workStatus)
       .where(sql`${table.assignedTechId} is null`),
     index('ticket_jobs_ticket_idx').on(table.ticketId),
+    index('ticket_jobs_shop_ticket_created_idx').on(
+      table.shopId,
+      table.ticketId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
     check(
       'ticket_jobs_kind_valid',
       sql`${table.kind} in ('diagnostic', 'repair', 'maintenance')`,

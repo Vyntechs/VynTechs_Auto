@@ -87,6 +87,34 @@ describe('Shop OS part request routes', () => {
     expect(createPartRequest).not.toHaveBeenCalled()
   })
 
+  it('meters an exhausted request before touching its body', async () => {
+    vi.mocked(rateLimitReject).mockResolvedValue(
+      NextResponse.json({ error: 'rate_limited' }, { status: 429 }),
+    )
+    const incoming = request('{')
+    const json = vi.fn(async () => {
+      throw new Error('the body must not be read')
+    })
+    Object.defineProperty(incoming, 'json', { value: json })
+
+    const response = await CREATE(incoming, { params: Promise.resolve({ id: TICKET, jobId: JOB }) })
+
+    expect(response.status).toBe(429)
+    expect(json).not.toHaveBeenCalled()
+    expect(createPartRequest).not.toHaveBeenCalled()
+  })
+
+  it('rejects streamed bodies over 16 KiB before the part-request domain', async () => {
+    const response = await CREATE(
+      request(JSON.stringify({ requestKey: REQ, description: 'x'.repeat(16 * 1024) })),
+      { params: Promise.resolve({ id: TICKET, jobId: JOB }) },
+    )
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({ error: 'payload_too_large' })
+    expect(createPartRequest).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['invalid_input', 400, false],
     ['not_found', 404, false],

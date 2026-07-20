@@ -138,6 +138,11 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartReque
         return
       }
       const body = await response.json().catch(() => null)
+      if (response.status === 409 && body?.error === 'job_limit_reached') {
+        escalationAttempt.current = null
+        setNotice({ kind: 'error', text: 'This repair order already has its maximum number of jobs.' })
+        return
+      }
       const result = response.ok ? parseEscalationResponse(body) : null
       if (!result) throw new Error('escalation_failed')
       escalationAttempt.current = null
