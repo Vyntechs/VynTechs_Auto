@@ -82,9 +82,9 @@ Brandon directs AI-assisted implementation and owns the domain, product, and arc
 
 ## Verification surface
 
-- **184 unit test files**, 1,300+ test blocks under Vitest, backed by an in-memory Postgres (pglite) so handlers test against real SQL without mocking the framework. Plus Playwright e2e specs.
-- **38 Postgres tables**, 27 versioned migrations, a daily backup workflow, two scheduled cron jobs.
-- An enforced convention: every API route is a thin ~30-line shim that delegates to a `lib/` handler taking `db` as its first argument — which is *why* the logic is testable against real Postgres without mocking Next.js.
+- Extensive unit and integration coverage exercises database behavior against PGlite rather than replacing the SQL layer with framework mocks.
+- Schema changes are preserved as versioned Postgres migrations.
+- Where handler extraction applies, thin route shims delegate to domain handlers with injected dependencies, keeping the core behavior independently testable.
 
 ## Stack
 
