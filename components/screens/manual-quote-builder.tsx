@@ -51,6 +51,10 @@ export function ManualQuoteBuilder({
   vendorAccounts = [],
   vendorCatalogAvailable = false,
   canCreateVendorAccount = false,
+  embedded = false,
+  onClose,
+  onProjection,
+  onReloadCatalog,
 }: {
   ticket: QuoteTicketIdentity
   builder: QuoteBuilder
@@ -59,6 +63,14 @@ export function ManualQuoteBuilder({
   vendorAccounts?: SafeManualVendorAccount[]
   vendorCatalogAvailable?: boolean
   canCreateVendorAccount?: boolean
+  embedded?: boolean
+  onClose?: () => void
+  onProjection?: (jobs: Array<{
+    id: string
+    workStatus: 'open' | 'in_progress' | 'blocked'
+    approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  }>) => void
+  onReloadCatalog?: () => void
 }): React.JSX.Element {
   const router = useRouter()
   const [current, setCurrent] = useState(builder)
@@ -102,6 +114,13 @@ export function ManualQuoteBuilder({
   const catalogSignature = cannedJobs.map((job) => `${job.id}:${job.fingerprint}`).join('|')
 
   useEffect(() => setCurrent(builder), [builder])
+  useEffect(() => {
+    onProjection?.(current.jobs.map((job) => ({
+      id: job.id,
+      workStatus: job.workStatus,
+      approvalState: job.approval.state,
+    })))
+  }, [current, onProjection])
   useEffect(() => {
     if (!reloadPendingRef.current || !reloadBaselineRef.current) return
     const baseline = reloadBaselineRef.current
@@ -670,7 +689,8 @@ export function ManualQuoteBuilder({
   function reloadCannedPage(): void {
     reloadPendingRef.current = true
     reloadBaselineRef.current = { builder, catalogSignature, available: cannedCatalogAvailable }
-    router.refresh()
+    if (embedded && onReloadCatalog) onReloadCatalog()
+    else router.refresh()
   }
 
   function setSourcingBusy(nextBusy: boolean): void {
@@ -678,15 +698,19 @@ export function ManualQuoteBuilder({
     else if (inFlightRef.current) endOperation()
   }
 
+  const Root = embedded ? 'section' : 'main'
   return (
-    <main className={`app ${styles.screen} ${sourcingJob ? styles.screenWithSourcing : ''}`}>
+    <Root
+      className={`${embedded ? styles.embeddedScreen : `app ${styles.screen}`} ${sourcingJob ? styles.screenWithSourcing : ''}`}
+      aria-label={embedded ? 'Quote workspace' : undefined}
+    >
       <div data-testid="quote-background" inert={modal || decision || sourcingJob ? true : undefined}>
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}>
             Repair order {String(ticket.ticketNumber).padStart(6, '0')}
           </p>
-          <h1>Build quote</h1>
+          {embedded ? <h2>Build quote</h2> : <h1>Build quote</h1>}
           {ticket.customer && ticket.vehicle && (
             <p className={styles.identity}>
               <span>{ticket.customer.name}</span>
@@ -694,7 +718,13 @@ export function ManualQuoteBuilder({
             </p>
           )}
         </div>
-        <Link href={`/tickets/${ticket.id}`}>Back to ticket</Link>
+        {embedded ? (
+          <button type="button" className={styles.closeEmbedded} onClick={onClose}>
+            Close quote
+          </button>
+        ) : (
+          <Link href={`/tickets/${ticket.id}`}>Back to ticket</Link>
+        )}
       </div>
 
       <section className={styles.truth} aria-label="Quote readiness">
@@ -1157,7 +1187,7 @@ export function ManualQuoteBuilder({
           onConfirm={submitDecision}
         />
       )}
-    </main>
+    </Root>
   )
 }
 

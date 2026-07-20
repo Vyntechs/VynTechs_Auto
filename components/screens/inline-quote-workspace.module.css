@@ -1,0 +1,41 @@
+.state {
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-3);
+  background: var(--vt-bone-50);
+  padding: clamp(20px, 4vw, 36px);
+}
+
+.state p {
+  margin: 8px 0 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.actions button,
+.actions a {
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-signal-600);
+  padding: 10px 14px;
+  font-family: var(--vt-font-sans);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actions button:focus-visible,
+.actions a:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}

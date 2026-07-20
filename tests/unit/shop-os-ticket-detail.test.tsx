@@ -23,6 +23,26 @@ vi.mock('@/components/vt/whats-new-badge', () => ({
   WhatsNewBadge: () => null,
 }))
 
+vi.mock('@/components/screens/inline-quote-workspace', () => ({
+  InlineQuoteWorkspace: ({ onClose, onProjection }: {
+    onClose: () => void
+    onProjection: (jobs: Array<{
+      id: string
+      workStatus: 'open'
+      approvalState: 'quote_ready'
+    }>) => void
+  }) => (
+    <section aria-label="Inline quote workspace">
+      <button type="button" onClick={() => onProjection([{
+        id: 'job-1',
+        workStatus: 'open',
+        approvalState: 'quote_ready',
+      }])}>Publish quote state</button>
+      <button type="button" onClick={onClose}>Close quote</button>
+    </section>
+  ),
+}))
+
 const timestamp = new Date('2026-07-10T14:30:00Z')
 
 type TicketJob = TicketDetail['jobs'][number]
@@ -175,6 +195,31 @@ describe('TicketDetailScreen', () => {
       />,
     )
     expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+  })
+
+  it('opens the role-shaped quote tool in place, reconciles ledger truth, and restores focus', async () => {
+    const user = userEvent.setup()
+    render(
+      <TicketDetailScreen
+        ticket={ticket()}
+        canBuildQuote
+        currentProfileId="advisor-1"
+        role="advisor"
+      />,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Build quote' })
+    expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+    await user.click(opener)
+
+    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
+    expect(screen.getByText('Approval · Quote ready')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+    expect(opener).toHaveFocus()
   })
 
   it('keeps the quote entry at least 44px with a visible focus treatment', () => {

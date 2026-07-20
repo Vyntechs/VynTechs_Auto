@@ -25,6 +25,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/lib/auth', () => ({
   requireUserAndProfile: vi.fn(),
+  isFounder: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/auth-access', () => ({
@@ -57,8 +58,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, currentProfileId, role, team }: { ticket: TicketDetail; canBuildQuote: boolean; currentProfileId: string; role: string; team: unknown[] }) => (
-    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; actor {currentProfileId}; role {role}; team {team.length}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, currentProfileId, role, team }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; currentProfileId: string; role: string; team: unknown[] }) => (
+    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}</div>
   ),
 }))
 
@@ -164,7 +165,7 @@ describe('TicketPage', () => {
   it('renders the ticket detail screen on success', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote true; actor ${profile.id}; role advisor; team 1`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1`)).toBeInTheDocument()
     expect(getShopTeamMock).toHaveBeenCalledWith({
       db: {},
       shopId: profile.shopId,
@@ -180,7 +181,7 @@ describe('TicketPage', () => {
 
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote false; actor ${profile.id}; role legacy_role; team 0`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote false; vendor setup false; actor ${profile.id}; role legacy_role; team 0`)).toBeInTheDocument()
   })
 
   it.each<TicketDomainError>([

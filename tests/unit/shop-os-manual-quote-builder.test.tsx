@@ -201,6 +201,34 @@ describe('ManualQuoteBuilder', () => {
     router.replace.mockReset()
     router.refresh.mockReset()
   })
+
+  it('embeds the existing quote tool without a second page shell and publishes ledger truth', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onProjection = vi.fn()
+
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder()}
+      embedded
+      onClose={onClose}
+      onProjection={onProjection}
+    />)
+
+    expect(screen.queryByRole('main')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Back to ticket' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Build quote' })).toBeInTheDocument()
+    expect(onProjection).toHaveBeenCalledWith([{
+      id: JOB_ID,
+      workStatus: 'open',
+      approvalState: 'pending_quote',
+    }])
+
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('renders customer-safe job and manual line truth with the calibrated quote tape', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
 

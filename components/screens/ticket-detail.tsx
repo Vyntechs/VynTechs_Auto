@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
 import type { TeamMember } from '@/lib/intake/team'
 import {
@@ -12,6 +12,10 @@ import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
 import { RingOutSection } from './ring-out-section'
+import {
+  InlineQuoteWorkspace,
+  type QuoteWorkspaceProjection,
+} from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import styles from './ticket-detail.module.css'
@@ -60,6 +64,7 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
 export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
+  canCreateVendorAccount = false,
   currentProfileId = null,
   currentProfileName = null,
   role = '',
@@ -70,6 +75,7 @@ export function TicketDetailScreen({
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
+  canCreateVendorAccount?: boolean
   currentProfileId?: string | null
   currentProfileName?: string | null
   role?: string
@@ -81,7 +87,12 @@ export function TicketDetailScreen({
   const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
     () => new Map(),
   )
+  const [quoteOverrides, setQuoteOverrides] = useState<ReadonlyMap<string, QuoteOverride>>(
+    () => new Map(),
+  )
+  const [activeTool, setActiveTool] = useState<'quote' | null>(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
+  const quoteOpenerRef = useRef<HTMLButtonElement>(null)
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
@@ -89,14 +100,20 @@ export function TicketDetailScreen({
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
+  const displayedJobs = ticket.jobs.map((job) => ({
+    ...job,
+    workStatus: quoteOverrides.get(job.id)?.workStatus
+      ?? assignmentOverrides.get(job.id)?.workStatus
+      ?? job.workStatus,
+    approvalState: quoteOverrides.get(job.id)?.approvalState ?? job.approvalState,
+  }))
   const commands = projectLivingTicketCommands({
     role,
     profileId: currentProfileId,
     skillTier,
     ticketStatus: ticket.status,
-    jobs: ticket.jobs.map((job) => ({
+    jobs: displayedJobs.map((job) => ({
       ...job,
-      workStatus: assignmentOverrides.get(job.id)?.workStatus ?? job.workStatus,
       assignmentState: assignmentOverrides.get(job.id)?.state,
     })),
     ringOut,
@@ -104,6 +121,24 @@ export function TicketDetailScreen({
   const allCommands = commands.primary
     ? [commands.primary, ...commands.secondary]
     : commands.secondary
+  const quoteCommand = allCommands.find((command) => command.kind === 'quote') ?? null
+  const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
+    setQuoteOverrides((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const projected of projection) {
+        const existing = current.get(projected.id)
+        if (existing?.workStatus === projected.workStatus
+          && existing.approvalState === projected.approvalState) continue
+        next.set(projected.id, {
+          workStatus: projected.workStatus,
+          approvalState: projected.approvalState,
+        })
+        changed = true
+      }
+      return changed ? next : current
+    })
+  }, [])
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -130,13 +165,47 @@ export function TicketDetailScreen({
 
         {ticket.status === 'open' && canBuildQuote && (
           <div className={styles.actions}>
-            <Link
-              href={`/tickets/${ticket.id}/quote`}
-              className={styles.quoteAction}
-            >
-              Build quote
-            </Link>
+            {quoteCommand ? (
+              <button
+                ref={quoteOpenerRef}
+                type="button"
+                className={styles.quoteAction}
+                aria-expanded={activeTool === 'quote'}
+                onClick={() => setActiveTool((current) => current === 'quote' ? null : 'quote')}
+              >
+                {quoteCommand.label}
+              </button>
+            ) : (
+              <Link
+                href={`/tickets/${ticket.id}/quote`}
+                className={styles.quoteAction}
+              >
+                Build quote
+              </Link>
+            )}
           </div>
+        )}
+
+        {activeTool === 'quote' && (
+          <InlineQuoteWorkspace
+            ticket={{
+              id: ticket.id,
+              ticketNumber: ticket.ticketNumber,
+              concern: ticket.concern,
+              customer: ticket.customer ? { name: ticket.customer.name } : null,
+              vehicle: ticket.vehicle ? {
+                year: ticket.vehicle.year,
+                make: ticket.vehicle.make,
+                model: ticket.vehicle.model,
+              } : null,
+            }}
+            canCreateVendorAccount={canCreateVendorAccount}
+            onProjection={applyQuoteProjection}
+            onClose={() => {
+              setActiveTool(null)
+              setTimeout(() => quoteOpenerRef.current?.focus(), 0)
+            }}
+          />
         )}
 
         {!ticket.customer || !ticket.vehicle ? (
@@ -246,7 +315,7 @@ export function TicketDetailScreen({
           </div>
 
           <ol className={styles.ledger}>
-            {ticket.jobs.map((job, index) => (
+            {displayedJobs.map((job, index) => (
               <li key={job.id} className={styles.job} tabIndex={-1} ref={(element) => {
                 if (element) jobRefs.current.set(job.id, element)
                 else jobRefs.current.delete(job.id)
@@ -414,6 +483,11 @@ type AssignmentOverride = {
   assignedTechName: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
   notice: string
+}
+
+type QuoteOverride = {
+  workStatus: 'open' | 'in_progress' | 'blocked'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
 }
 
 function assigneeLabel(

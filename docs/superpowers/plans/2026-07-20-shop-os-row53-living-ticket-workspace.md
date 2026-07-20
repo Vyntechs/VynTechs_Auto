@@ -25,7 +25,7 @@
 - [x] Add a pure projector that returns one primary command plus eligible secondary commands without inventing authority.
 - [x] Prefer, in order: resolve assignment → finish quote/approval → perform assigned approved work → ring out/close → read-only current truth.
 - [x] Keep terminal tickets read-only and keep diagnostics unavailable.
-- [ ] Render the command as a quiet 44px action on the existing ticket, with no route change.
+- [x] Render the command as a quiet 44px action on the existing ticket, with no route change.
 
 ### Task 2 — Handoff in place
 
@@ -36,9 +36,9 @@
 
 ### Task 3 — Quote in place
 
-- [ ] Lazy-load the existing quote, canned-work, and safe vendor projections only when Quote opens.
-- [ ] Add an embedded mode to the existing manual quote builder; do not fork quote logic or remove deep-link support.
-- [ ] Replace embedded refresh paths with focused refetches and publish approval/work-state changes back to the mounted ledger.
+- [x] Lazy-load the existing quote, canned-work, and safe vendor projections only when Quote opens.
+- [x] Add an embedded mode to the existing manual quote builder; do not fork quote logic or remove deep-link support.
+- [x] Replace embedded refresh paths with focused refetches and publish approval/work-state changes back to the mounted ledger.
 - [ ] Collapse to a concise prepared/approved proof without losing an unsaved editor or retry identity.
 
 ### Task 4 — Perform in place

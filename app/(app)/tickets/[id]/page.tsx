@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
-import { requireUserAndProfile } from '@/lib/auth'
+import { isFounder, requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { getShopTeam } from '@/lib/intake/team'
@@ -8,6 +8,7 @@ import {
   canAssignWork,
   canBuildQuotes,
   canCloseTickets,
+  canManageIntegrations,
   canPlacePartsOrders,
 } from '@/lib/shop-os/capabilities'
 import { getTicketRingOut } from '@/lib/shop-os/ring-out'
@@ -60,6 +61,10 @@ export default async function TicketPage({
     <TicketDetailScreen
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
+      canCreateVendorAccount={canManageIntegrations(
+        ctx.profile.role,
+        isFounder(ctx.user.email),
+      )}
       currentProfileId={ctx.profile.id}
       currentProfileName={ctx.profile.fullName}
       role={ctx.profile.role}
