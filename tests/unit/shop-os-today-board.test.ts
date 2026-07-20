@@ -125,7 +125,7 @@ describe('Today board projection', () => {
       myJobs: [], openJobs: [baseJob], teamJobs: [], createdJobs: [],
       canDispatchWork: false, overrides,
     })
-    expect(technician).toEqual({ mine: [], open: [], team: [], created: [] })
+    expect(technician).toEqual({ mine: [], open: [], team: [], created: [], parts: [] })
   })
 })
 

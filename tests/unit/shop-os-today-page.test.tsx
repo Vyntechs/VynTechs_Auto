@@ -132,6 +132,7 @@ const jobs: TodayTicketJobs = {
   ],
   createdJobs: [],
   teamJobs: [],
+  partsJobs: [],
   linkedSessionIds: ['linked-open', 'linked-closed'],
 }
 

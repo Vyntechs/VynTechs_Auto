@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, exists, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
   customers,
+  jobPartRequests,
   profiles,
   sessions,
   shops,
@@ -359,6 +360,7 @@ export type TodayTicketJobs = {
   openJobs: TodayTicketJob[]
   createdJobs: TodayTicketJob[]
   teamJobs: TodayTicketJob[]
+  partsJobs: TodayTicketJob[]
   linkedSessionIds: string[]
   hasMore?: boolean
 }
@@ -370,6 +372,7 @@ const emptyTodayTicketJobs = (): TodayTicketJobs => ({
   openJobs: [],
   createdJobs: [],
   teamJobs: [],
+  partsJobs: [],
   linkedSessionIds: [],
 })
 
@@ -413,6 +416,17 @@ export async function listTodayTicketJobs(
         inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
       )
     : undefined
+  const hasRequestedParts = exists(
+    db.select({ id: jobPartRequests.id })
+      .from(jobPartRequests)
+      .where(and(
+        eq(jobPartRequests.shopId, ticketJobs.shopId),
+        eq(jobPartRequests.ticketId, tickets.id),
+        eq(jobPartRequests.jobId, ticketJobs.id),
+        eq(jobPartRequests.status, 'requested'),
+      )),
+  )
+  const visiblePartsWork = actor.role === 'parts' ? hasRequestedParts : undefined
 
   const rows = await db
     .select({
@@ -435,6 +449,7 @@ export async function listTodayTicketJobs(
       assignedTechFullName: profiles.fullName,
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
+      hasRequestedParts,
     })
     .from(ticketJobs)
     .innerJoin(
@@ -473,6 +488,7 @@ export async function listTodayTicketJobs(
           visibleOpenWork,
           createdActiveWork,
           visibleTeamWork,
+          visiblePartsWork,
         ),
       ),
     )
@@ -493,6 +509,7 @@ export async function listTodayTicketJobs(
   const openJobs: TodayTicketJob[] = []
   const createdJobs: TodayTicketJob[] = []
   const teamJobs: TodayTicketJob[] = []
+  const partsJobs: TodayTicketJob[] = []
   const linkedSessionIds: string[] = []
 
   const hasMore = rows.length > TODAY_JOB_LIMIT
@@ -530,7 +547,8 @@ export async function listTodayTicketJobs(
       diagnosticStartErrorCode: safeDiagnosticStartErrorCode(row.diagnosticStartErrorCode),
     }
 
-    if (row.assignedTechId === actor.profileId) myJobs.push(job)
+    if (actor.role === 'parts' && row.hasRequestedParts) partsJobs.push(job)
+    else if (row.assignedTechId === actor.profileId) myJobs.push(job)
     else if (row.assignedTechId === null && row.workStatus === 'open') openJobs.push(job)
     else if (canDispatch && row.assignedTechId !== null) teamJobs.push(job)
     else if (row.createdByProfileId === actor.profileId) createdJobs.push(job)
@@ -542,6 +560,7 @@ export async function listTodayTicketJobs(
     openJobs,
     createdJobs,
     teamJobs,
+    partsJobs,
     linkedSessionIds,
     ...(hasMore ? { hasMore: true } : {}),
   }

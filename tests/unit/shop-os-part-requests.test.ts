@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import {
-  customers, jobPartRequests, profiles, shops, ticketJobs, tickets, vehicles,
+  customers, jobPartRequests, profiles, shopEntitlements, shops, ticketJobs, tickets, vehicles,
 } from '@/lib/db/schema'
 import {
   createPartRequest,
@@ -71,6 +71,38 @@ describe('Shop OS job part requests', () => {
     const [row] = await db.select().from(jobPartRequests)
     expect(Object.keys(row)).not.toContain('price_cents')
     expect(Object.keys(row)).not.toContain('unit_cost_cents')
+  })
+
+  it('lets diagnostics-off manual work request parts without reopening entitled diagnostics', async () => {
+    const diagnosticJobId = uuid(31)
+    await db.insert(ticketJobs).values({
+      id: diagnosticJobId,
+      shopId,
+      ticketId,
+      title: 'Manual charging-system diagnosis',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      assignedTechId: techId,
+      workStatus: 'in_progress',
+      approvalState: 'approved',
+    })
+    await db.insert(shopEntitlements).values({ shopId, diagnostics: false })
+
+    await expect(createPartRequest(db, {
+      actor: techActor,
+      ticketId,
+      jobId: diagnosticJobId,
+      body: body({ requestKey: uuid(85), description: 'Alternator' }),
+    })).resolves.toMatchObject({ ok: true, request: { description: 'Alternator' } })
+
+    await db.update(shopEntitlements).set({ diagnostics: true })
+      .where(eq(shopEntitlements.shopId, shopId))
+    await expect(createPartRequest(db, {
+      actor: techActor,
+      ticketId,
+      jobId: diagnosticJobId,
+      body: body({ requestKey: uuid(86), description: 'Battery cable' }),
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('rejects a tech who is not the one assigned, and inactive callers', async () => {

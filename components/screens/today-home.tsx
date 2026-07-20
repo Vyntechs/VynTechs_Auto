@@ -43,6 +43,7 @@ export function TodayHome({
     openJobs: [],
     createdJobs: [],
     teamJobs: [],
+    partsJobs: [],
     linkedSessionIds: [],
   },
   diagnosticsEntitled = false,
@@ -140,6 +141,7 @@ export function TodayHome({
           openJobs={todayJobs.openJobs}
           teamJobs={todayJobs.teamJobs}
           createdJobs={todayJobs.createdJobs}
+          partsJobs={todayJobs.partsJobs}
           canDispatchWork={canDispatchWork}
           hasMore={todayJobs.hasMore}
           diagnosticsEntitled={diagnosticsEntitled}
@@ -189,7 +191,8 @@ export function TodayHome({
           todayJobs.myJobs.length === 0 &&
           todayJobs.openJobs.length === 0 &&
           todayJobs.teamJobs.length === 0 &&
-          todayJobs.createdJobs.length === 0 && (
+          todayJobs.createdJobs.length === 0 &&
+          todayJobs.partsJobs.length === 0 && (
             <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
                 No assigned work yet. New work orders and quick tickets appear here.

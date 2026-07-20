@@ -888,6 +888,24 @@ describe('TodayJobsBoard persisted ledger', () => {
   })
 })
 
+describe('TodayJobsBoard parts handoff', () => {
+  it('mounts requested parts in one Today lane that jumps to the repair-order control', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[]}
+        partsJobs={[unlinkedDiagnostic]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Parts needed' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Source parts' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-42#parts-requested-heading',
+    )
+  })
+})
+
 describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
   it('renders the legacy Start diagnosis action only when explicitly enabled', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
