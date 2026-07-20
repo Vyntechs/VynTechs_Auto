@@ -1,20 +1,20 @@
 # VynTechs_Auto
 
-> **Status:** Public technical proof. Built for independent repair shops; no verified live-shop deployment is claimed here.
+> **Status:** Source-available technical prototype; not part of the current paid ShopOS release. Diagnostic guidance and operational file intake are unavailable. No live-shop deployment, diagnostic accuracy, or safety performance is claimed. Do not use this repository as repair instructions; technicians must rely on authorized, current service information and professional judgment.
 
 An automotive diagnostic technician translated a safety-critical shop workflow into a stateful AI diagnostic system. The evidence in this repository is the working architecture: retrieval with provenance, explicit risk classification, confidence gates that fail closed, audit history, multi-tenant data boundaries, billing scaffolding, versioned migrations, and tests against real SQL behavior.
 
-A tech enters a vehicle and a complaint; the system runs a stateful, evidence-grounded diagnostic — and refuses to recommend a risky action it isn't confident enough to stand behind. Designed as one subscription per shop.
+The prototype models a flow where a tech enters a vehicle and a complaint, and an internal score is compared with a configured action threshold that can block the proposed action. Designed as one subscription per shop.
 
 ## The problem
 
 A misdiagnosis isn't a wrong answer. It's a customer who pays for the wrong part, comes back angry, and never trusts the shop again — a comeback.
 
-Most "AI mechanic" tools are a chatbot with a service manual stapled on. They sound confident and guess. This one is built the other way around: confidence is measured, risk is classified, and the system would rather ask for one more reading than tell a tech to cut a wire on a hunch. The safety floor is code, not vibes.
+Most "AI mechanic" tools are a chatbot with a service manual stapled on. They sound confident and guess. This prototype is built the other way around: risk is classified, an internal score is checked against configured policy, and the system can ask for more information instead of presenting a blocked action. The gate is implemented in code, not left to a prompt.
 
 ## Architecture
 
-The core is a stateful decision-tree engine, not a single prompt. Every turn pulls evidence, advances the tree, and gates the proposed action against a calibrated confidence threshold before the tech ever sees it.
+The core is a stateful decision-tree engine, not a single prompt. Every turn pulls evidence, advances the tree, and compares the proposed action's internal score with a configured action threshold before the action can be presented.
 
 ```
                         TECH: vehicle + complaint
@@ -40,7 +40,7 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
                     └─────────────┬───────────────┘
                                   │
                     ┌─────────────▼───────────────┐
-                    │   Risk + confidence gate    │  classify action:
+                    │   Risk + policy gate        │  classify action:
                     │                             │  zero / low / medium /
                     │   ~15 regex rules FIRST      │  high / destructive
                     │   (Haiku only if no rule     │  destructive (cut wire,
@@ -48,7 +48,7 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
                     │    on any failure)          │  can't be downgraded
                     └─────────────┬───────────────┘
                                   │
-              confidence ≥ threshold?  ──── no ──▶  block · offer
+     internal score ≥ configured threshold? ─ no ─▶  block · offer
                                   │                 [gather more low-risk · defer]
                                  yes                + show what would close the gap
                                   │
@@ -63,10 +63,10 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
 ### The AI pipeline
 
 - **One LLM provider, two tiers.** A single Anthropic client. `claude-sonnet-4-6` (overridable via `ANTHROPIC_MODEL`) does the heavy reasoning — tree generation, vision extraction, retrieval grading, repair guidance, outcome validation. `claude-haiku-4-5` is used in exactly one place: the fallback risk classifier. No Opus tier — the work doesn't need it.
-- **Rules first, LLM second.** The risk classifier runs ~15 regex rules before it ever calls a model. Destructive actions — cut/splice a wire, reflash an ECU — are matched first so they can never be quietly downgraded. If a rule matches, no LLM runs. If the model is called and returns malformed JSON, the action defaults to `high`. Safety bias is the default, not the exception.
-- **Confidence is calibrated, not asserted.** Thresholds live per `(risk class × vehicle family × symptom class)` cell, most-specific-cell wins, with a hard fallback (`zero 0 · low .70 · medium .80 · high .90 · destructive .95`). A weekly Beta-Binomial refit watches each cell's comeback rate and proposes a nudge — but it's **advisory**. Drift only writes an alert for a human curator when it clears `0.05` with a sample of `10+`. The threshold table is read-only to the job, and the refit is clamped to `[0.5, 0.99]` so the safety floor can never be turned off.
+- **Rules first, LLM second.** The risk classifier runs ~15 regex rules before it ever calls a model. Destructive actions — cut/splice a wire, reflash an ECU — are matched first so they can never be quietly downgraded. If a rule matches, no LLM runs. If the model is called and returns malformed JSON, the action defaults to `high`. Fail-closed policy is the default.
+- **Threshold policy is explicit, not a validated accuracy score.** Configured action thresholds live per `(risk class × vehicle family × symptom class)` cell; the most-specific configuration wins, with fallbacks of `zero 0 · low .70 · medium .80 · high .90 · destructive .95`. A weekly Beta-Binomial job can propose an advisory change from recorded comeback outcomes. Drift writes an alert for a human curator only when it clears `0.05` with a sample of `10+`; the job cannot write the threshold table, and proposals are clamped to `[0.5, 0.99]`. These are policy controls, not validated probabilities or evidence of diagnostic accuracy or safety performance.
 - **Vision is earned, not default.** Four Sonnet vision extractors read scan screens (DTCs, freeze-frame, PIDs), wiring diagrams (wire colors, pins, grounds, splices), and steered generic photos. The tree prompt is told *not* to ask for photos by default — vision is expensive, text confirms are cheap. Video is stored describe-first, no extraction. (Audio transcription is a known stub: the SDK has no native audio block yet, so that path is documented as API-pending, not silently broken.)
-- **The corpus is designed to self-curate.** The architecture can promote closed cases into a shared corpus. Each entry's confidence is roughly `successes / (successes + comebacks)` (Laplace-smoothed, capped at 0.99). Comebacks decay it; an entry with `3+` comebacks that outnumber its successes auto-retires. The ranking model gives shop-owner-verified cases the highest source weight.
+- **The corpus is designed to self-curate.** The architecture can promote closed cases into a shared corpus. Each entry's internal ranking score is roughly `successes / (successes + comebacks)` (Laplace-smoothed, capped at 0.99). Comebacks decay it; an entry with `3+` comebacks that outnumber its successes auto-retires. The ranking model gives shop-owner-verified cases the highest source weight.
 
 ### Data, auth, billing
 
