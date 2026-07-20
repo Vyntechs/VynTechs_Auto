@@ -50,9 +50,9 @@
 
 ### Task 5 — Ring out and close in place
 
-- [ ] Keep advisor/owner money and close authority unchanged.
-- [ ] Remove the broad refresh after close; update the mounted repair order and receipt from the returned ring-out truth.
-- [ ] Prove unfinished work, outstanding balance, concurrent changes, and terminal tickets fail safely without disappearing.
+- [x] Keep advisor/owner money and close authority unchanged.
+- [x] Remove the broad refresh after close; update the mounted repair order and receipt from the returned ring-out truth.
+- [x] Prove unfinished work, outstanding balance, concurrent changes, and terminal tickets fail safely without disappearing.
 
 ### Task 6 — Converge and publish
 

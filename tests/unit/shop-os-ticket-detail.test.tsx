@@ -631,4 +631,52 @@ describe('TicketDetailScreen', () => {
     expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
   })
+
+  it('moves zero-dollar closeout into view and folds the returned receipt into the mounted ticket', async () => {
+    const user = userEvent.setup()
+    const ticketId = '00000000-0000-4000-8000-000000000020'
+    const jobId = '00000000-0000-4000-8000-000000000030'
+    const ringOut = {
+      ticketId,
+      status: 'open' as const,
+      owed: { subtotalCents: 0, taxCents: 0, totalCents: 0, jobs: [] },
+      paidCents: 0,
+      balanceCents: 0,
+      payments: [],
+      canRecordPayment: false,
+      canClose: true,
+      closedAt: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ringOut: {
+        ...ringOut,
+        status: 'closed',
+        canClose: false,
+        closedAt: '2026-07-20T14:00:00.000Z',
+      },
+    })))
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="00000000-0000-4000-8000-000000000010"
+      ticket={ticket({
+        id: ticketId,
+        jobs: [job({
+          id: jobId,
+          kind: 'repair',
+          workStatus: 'done',
+          approvalState: 'approved',
+        })],
+      })}
+      ringOut={ringOut}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Close repair order' }))
+    expect(screen.getByRole('region', { name: 'Ring out' })).toHaveFocus()
+    await user.click(screen.getByRole('button', { name: 'Close ticket' }))
+
+    expect(await screen.findByText('Closed · Counter intake')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close repair order' })).toBeNull()
+  })
 })

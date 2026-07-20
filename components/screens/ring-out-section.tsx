@@ -1,9 +1,9 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 import type { TicketPaymentMethod, TicketRingOut } from '@/lib/shop-os/ring-out'
+import { parseRingOutResponse } from '@/lib/shop-os/ring-out-ui'
 import styles from './ring-out-section.module.css'
 
 const METHOD_LABELS: Record<TicketPaymentMethod, string> = {
@@ -51,11 +51,14 @@ function humanizeError(error: unknown): string {
 export function RingOutSection({
   ticketId,
   initialRingOut,
+  onChange,
+  sectionRef,
 }: {
   ticketId: string
   initialRingOut: TicketRingOut
+  onChange?: (ringOut: TicketRingOut) => void
+  sectionRef?: React.RefObject<HTMLElement | null>
 }): React.JSX.Element | null {
-  const router = useRouter()
   const [ringOut, setRingOut] = useState(initialRingOut)
   const [amount, setAmount] = useState(() => balanceDollars(initialRingOut.balanceCents))
   const [method, setMethod] = useState<TicketPaymentMethod>('cash')
@@ -66,7 +69,7 @@ export function RingOutSection({
 
   const { owed, payments } = ringOut
   const isClosed = ringOut.status !== 'open'
-  const relevant = owed.totalCents > 0 || payments.length > 0 || isClosed
+  const relevant = owed.totalCents > 0 || payments.length > 0 || isClosed || ringOut.canClose
   if (!relevant) return null
 
   async function submitPayment(event: React.FormEvent) {
@@ -102,13 +105,14 @@ export function RingOutSection({
         }),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data?.ringOut) {
+      const next = res.ok ? parseRingOutResponse(data) : null
+      if (!next) {
         setError(humanizeError(data?.error))
         return
       }
-      const next = data.ringOut as TicketRingOut
       pendingPayment.current = null
       setRingOut(next)
+      onChange?.(next)
       setNote('')
       setAmount(balanceDollars(next.balanceCents))
     } catch {
@@ -124,12 +128,13 @@ export function RingOutSection({
     try {
       const res = await fetch(`/api/tickets/${ticketId}/close`, { method: 'POST' })
       const data = await res.json().catch(() => null)
-      if (!res.ok || !data?.ringOut) {
+      const next = res.ok ? parseRingOutResponse(data) : null
+      if (!next) {
         setError(humanizeError(data?.error))
         return
       }
-      setRingOut(data.ringOut as TicketRingOut)
-      router.refresh()
+      setRingOut(next)
+      onChange?.(next)
     } catch {
       setError('Something went wrong. Try again.')
     } finally {
@@ -138,7 +143,7 @@ export function RingOutSection({
   }
 
   return (
-    <section className={styles.ringOut} aria-labelledby="ringout-heading">
+    <section ref={sectionRef} tabIndex={-1} className={styles.ringOut} aria-labelledby="ringout-heading">
       <div className={styles.head}>
         <div>
           <p className={styles.eyebrow}>Getting paid</p>

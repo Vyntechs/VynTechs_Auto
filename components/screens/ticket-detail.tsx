@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
 import type { TeamMember } from '@/lib/intake/team'
 import {
@@ -99,14 +99,17 @@ export function TicketDetailScreen({
     () => new Map(),
   )
   const [escalatedJobs, setEscalatedJobs] = useState<SimpleWorkEscalationView[]>([])
+  const [ringOutState, setRingOutState] = useState(ringOut)
+  const [ticketStatus, setTicketStatus] = useState(ticket.status)
   const [activeTool, setActiveTool] = useState<
     { kind: 'quote' } | { kind: 'work'; jobId: string } | null
   >(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
   const quoteOpenerRef = useRef<HTMLButtonElement>(null)
   const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
+  const ringOutRef = useRef<HTMLElement>(null)
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
-  const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
+  const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticketStatus)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
   const phoneTarget = ticket.customer ? phoneHref(ticket.customer.phone) : null
   const emailTarget = ticket.customer?.email
@@ -128,17 +131,21 @@ export function TicketDetailScreen({
     role,
     profileId: currentProfileId,
     skillTier,
-    ticketStatus: ticket.status,
+    ticketStatus,
     jobs: displayedJobs.map((job) => ({
       ...job,
       assignmentState: assignmentOverrides.get(job.id)?.state,
     })),
-    ringOut,
+    ringOut: ringOutState,
   })
   const allCommands = commands.primary
     ? [commands.primary, ...commands.secondary]
     : commands.secondary
   const quoteCommand = allCommands.find((command) => command.kind === 'quote') ?? null
+  const ringOutCommand = allCommands.find((command) => (
+    command.kind === 'ring_out' || command.kind === 'close'
+  )) ?? null
+  const legacyQuoteFallback = !currentProfileId || !role
   const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
     setQuoteOverrides((current) => {
       const next = new Map(current)
@@ -156,6 +163,8 @@ export function TicketDetailScreen({
       return changed ? next : current
     })
   }, [])
+  useEffect(() => setTicketStatus(ticket.status), [ticket.status])
+  useEffect(() => setRingOutState(ringOut), [ringOut])
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -180,9 +189,11 @@ export function TicketDetailScreen({
           )}
         </header>
 
-        {ticket.status === 'open' && canBuildQuote && (
+        {ticketStatus === 'open' && (
+          (canBuildQuote && (quoteCommand || legacyQuoteFallback)) || ringOutCommand
+        ) && (
           <div className={styles.actions}>
-            {quoteCommand ? (
+            {canBuildQuote && (quoteCommand ? (
               <button
                 ref={quoteOpenerRef}
                 type="button"
@@ -192,13 +203,22 @@ export function TicketDetailScreen({
               >
                 {quoteCommand.label}
               </button>
-            ) : (
+            ) : legacyQuoteFallback ? (
               <Link
                 href={`/tickets/${ticket.id}/quote`}
                 className={styles.quoteAction}
               >
                 Build quote
               </Link>
+            ) : null)}
+            {ringOutCommand && (
+              <button
+                type="button"
+                className={styles.quoteAction}
+                onClick={() => ringOutRef.current?.focus()}
+              >
+                {ringOutCommand.label}
+              </button>
             )}
           </div>
         )}
@@ -469,8 +489,17 @@ export function TicketDetailScreen({
 
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />
 
-        {ringOut && (
-          <RingOutSection ticketId={ticket.id} initialRingOut={ringOut} />
+        {ringOutState && (
+          <RingOutSection
+            ticketId={ticket.id}
+            initialRingOut={ringOutState}
+            sectionRef={ringOutRef}
+            onChange={(next) => {
+              setRingOutState(next)
+              setTicketStatus(next.status)
+              if (next.status !== 'open') setActiveTool(null)
+            }}
+          />
         )}
       </div>
     </main>
