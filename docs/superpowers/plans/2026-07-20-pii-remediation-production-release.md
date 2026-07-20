@@ -23,19 +23,19 @@
 - Modify: `docs/superpowers/plans/2026-07-19-pii-security-scan-remediation.md`
 - Create: `drizzle/migrations/0044_ticket_job_history_bound.sql`
 
-- [ ] Confirm the branch diff contains only the remediation and its regression evidence.
-- [ ] Run focused regression tests, TypeScript, production build, diff whitespace check, and dependency audit.
-- [ ] Commit and push the exact candidate branch.
+- [x] Confirm the branch diff contains only the remediation and its regression evidence.
+- [x] Run focused regression tests, TypeScript, production build, diff whitespace check, and dependency audit.
+- [x] Commit and push the exact candidate branch.
 
 ### Task 2: Apply the production index before source promotion
 
 **Files:**
 - Apply source-equivalent SQL: `drizzle/migrations/0044_ticket_job_history_bound.sql`
 
-- [ ] Read the live migration history and catalog to ensure the index is absent and no conflicting name exists.
-- [ ] Apply `create index ticket_jobs_shop_ticket_created_idx on public.ticket_jobs (shop_id, ticket_id, created_at desc, id desc);` through Supabase migration history.
-- [ ] Query the live catalog to prove the exact index definition.
-- [ ] Run Supabase security and performance advisors; stop if the migration introduces a new warning.
+- [x] Read the live migration history and catalog to ensure the index is absent and no conflicting name exists.
+- [x] Apply `create index ticket_jobs_shop_ticket_created_idx on public.ticket_jobs (shop_id, ticket_id, created_at desc, id desc);` through Supabase migration history.
+- [x] Query the live catalog to prove the exact index definition.
+- [x] Run Supabase security and performance advisors; no new security finding was introduced. The performance advisor's unused-index notice is expected while production has only one job row and no post-release history query yet.
 
 ### Task 3: Merge and verify production
 
@@ -51,3 +51,12 @@
 
 - Code: revert the release commit on `main` and let the normal deployment pipeline restore the previous application behavior.
 - Database: retain the additive index; it is safe and supports the former query too. Do not drop it during an incident.
+
+## Release Receipt — 2026-07-20
+
+- Candidate commit: `55f7b3f3387213dc6aafe5b0b87e60cc17206ed2` on `security/ai-pii-penetration-audit-2026-07-19`.
+- Local proof: focused regression suites passed; `pnpm exec tsc --noEmit`, `pnpm build`, `git diff --check`, and `pnpm audit --prod --audit-level=high` passed.
+- Production preflight: `ticket_jobs` had one row and no existing `ticket_jobs_shop_ticket_created_idx` catalog entry or matching migration record.
+- Applied Supabase migration: `ticket_jobs_history_bound_index`.
+- Catalog proof: `CREATE INDEX ticket_jobs_shop_ticket_created_idx ON public.ticket_jobs USING btree (shop_id, ticket_id, created_at DESC, id DESC)`.
+- Advisor outcome: existing informational policy/index backlog remains outside this release; the new index is reported unused only because the current production dataset has not exercised the new history query. No customer rows, permissions, RLS policies, or storage objects were changed.
