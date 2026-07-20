@@ -17,6 +17,14 @@
 - Add no new page. Existing `/today`, `/intake`, and `/tickets/[id]` remain the surfaces.
 - Run database-heavy tests serially with at most two workers.
 
+## Completion receipt — 2026-07-20
+
+- **Task 1 complete:** active `open`, `in_progress`, and `blocked` work now prevents repair-order closeout inside the existing transaction; `done` and `canceled` work remains terminal.
+- **Task 2 complete:** unassigned creator work remains visible even above the creator's tier or without a tier; work assigned to someone else appears in a quiet `Created by me` recovery lane with ticket-view authority only.
+- **Task 3 complete:** Today, the intake layout, and the counter API now share `canAssignWork()`; advisor and owner pass, while tech and parts continue to fail closed.
+- **Scope held:** no schema, migration, new page, general add-job route, cache, gesture, diagnostic/media path, external integration, or production mutation.
+- **Proof:** 10 affected files / 125 tests, TypeScript, production build, and clean diff checks pass. Final independent review remains the branch-convergence gate.
+
 ---
 
 ### Task 1: Refuse terminal closeout while any work remains active
