@@ -266,7 +266,13 @@ export async function recordTicketPayment(
 
       // Idempotent retry: the same requestKey has already been recorded.
       const [existing] = await tx
-        .select({ id: ticketPayments.id })
+        .select({
+          ticketId: ticketPayments.ticketId,
+          amountCents: ticketPayments.amountCents,
+          method: ticketPayments.method,
+          note: ticketPayments.note,
+          recordedByProfileId: ticketPayments.recordedByProfileId,
+        })
         .from(ticketPayments)
         .where(and(
           eq(ticketPayments.shopId, shopId),
@@ -274,6 +280,13 @@ export async function recordTicketPayment(
         ))
         .limit(1)
       if (existing) {
+        if (existing.ticketId !== ticket.id
+          || existing.amountCents !== parsedBody.data.amountCents
+          || existing.method !== parsedBody.data.method
+          || existing.note !== (parsedBody.data.note ?? null)
+          || existing.recordedByProfileId !== input.actor.profileId) {
+          return { ok: false as const, error: 'conflict' }
+        }
         const ringOut = await assembleRingOut(tx, shopId, ticket, taxRateBps)
         return { ok: true as const, ringOut }
       }
@@ -303,8 +316,30 @@ export async function recordTicketPayment(
     })
   } catch (error) {
     // A concurrent request with the same requestKey lost the unique race; the
-    // winning row is authoritative, so re-read and return success.
+    // winning row is authoritative only when it represents the same intent.
     if (isUniqueViolation(error)) {
+      const [existing] = await db
+        .select({
+          ticketId: ticketPayments.ticketId,
+          amountCents: ticketPayments.amountCents,
+          method: ticketPayments.method,
+          note: ticketPayments.note,
+          recordedByProfileId: ticketPayments.recordedByProfileId,
+        })
+        .from(ticketPayments)
+        .where(and(
+          eq(ticketPayments.shopId, shopId),
+          eq(ticketPayments.requestKey, parsedBody.data.requestKey),
+        ))
+        .limit(1)
+      if (!existing
+        || existing.ticketId !== parsedTicket.data
+        || existing.amountCents !== parsedBody.data.amountCents
+        || existing.method !== parsedBody.data.method
+        || existing.note !== (parsedBody.data.note ?? null)
+        || existing.recordedByProfileId !== input.actor.profileId) {
+        return { ok: false, error: 'conflict' }
+      }
       return getTicketRingOut(db, { actor: input.actor, ticketId: input.ticketId })
     }
     if (isLockUnavailable(error)) return { ok: false, error: 'conflict' }

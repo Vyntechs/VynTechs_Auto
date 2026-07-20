@@ -189,6 +189,45 @@ describe('Shop OS ring-out (getting paid)', () => {
     expect(rows).toHaveLength(1)
   })
 
+  it('rejects the same payment key when any normalized payment truth differs', async () => {
+    const requestKey = uuid(175)
+    expect((await recordTicketPayment(db, {
+      actor: ownerActor,
+      ticketId: TICKET,
+      body: { requestKey, amountCents: 5_000, method: 'cash', note: 'Deposit' },
+    })).ok).toBe(true)
+
+    await expect(recordTicketPayment(db, {
+      actor: ownerActor,
+      ticketId: TICKET,
+      body: { requestKey, amountCents: 5_001, method: 'card', note: 'Changed' },
+    })).resolves.toEqual({ ok: false, error: 'conflict' })
+
+    const rows = await db.select().from(ticketPayments)
+      .where(eq(ticketPayments.ticketId, TICKET))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ amountCents: 5_000, method: 'cash', note: 'Deposit' })
+  })
+
+  it('allows exactly one winner for concurrent different intents sharing a key', async () => {
+    const requestKey = uuid(176)
+    const results = await Promise.all([
+      recordTicketPayment(db, {
+        actor: ownerActor,
+        ticketId: TICKET,
+        body: { requestKey, amountCents: 4_000, method: 'cash' },
+      }),
+      recordTicketPayment(db, {
+        actor: ownerActor,
+        ticketId: TICKET,
+        body: { requestKey, amountCents: 5_000, method: 'card' },
+      }),
+    ])
+    expect(results.filter((result) => result.ok)).toHaveLength(1)
+    expect(results.filter((result) => !result.ok)).toEqual([{ ok: false, error: 'conflict' }])
+    expect(await db.select().from(ticketPayments)).toHaveLength(1)
+  })
+
   it('will not close a ticket with an outstanding balance', async () => {
     expect(await closeTicket(db, { actor: ownerActor, ticketId: TICKET }))
       .toEqual({ ok: false, error: 'balance_outstanding' })

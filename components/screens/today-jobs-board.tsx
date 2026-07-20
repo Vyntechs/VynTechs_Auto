@@ -9,6 +9,7 @@ import styles from './today-jobs-board.module.css'
 type Props = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
+  hasMore?: boolean
   // Resolved server-side release availability. Fail closed so a missing prop
   // can never reopen a diagnostic-engine entrance.
   diagnosticsEntitled?: boolean
@@ -47,7 +48,7 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
-export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = false }: Props) {
+export function TodayJobsBoard({ myJobs, openJobs, hasMore = false, diagnosticsEntitled = false }: Props) {
   const router = useRouter()
   const boardRef = useRef<HTMLElement>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
@@ -272,6 +273,11 @@ export function TodayJobsBoard({ myJobs, openJobs, diagnosticsEntitled = false }
             else claimButtons.current.delete(jobId)
           }}
         />
+      )}
+      {hasMore && (
+        <p className={styles.announcement} role="status">
+          Showing the first 200 active jobs. Assigned work appears first; remaining work stays stored.
+        </p>
       )}
       {announcement && (
         <p

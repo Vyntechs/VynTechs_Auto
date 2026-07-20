@@ -31,7 +31,7 @@ describe('createBillingPortalSessionForUser', () => {
 
   it('returns 400 when the profile has no shop', async () => {
     const userId = crypto.randomUUID()
-    await createProfile(db, { userId, shopId: null as never })
+    await createProfile(db, { userId, shopId: null as never, role: 'owner' })
     const result = await createBillingPortalSessionForUser({
       db,
       userId,
@@ -47,7 +47,7 @@ describe('createBillingPortalSessionForUser', () => {
   it('returns 400 when no stripe customer is associated with the shop', async () => {
     const shop = await createShop(db, { name: 'Joe Garage' })
     const userId = crypto.randomUUID()
-    await createProfile(db, { userId, shopId: shop.id })
+    await createProfile(db, { userId, shopId: shop.id, role: 'owner' })
 
     const result = await createBillingPortalSessionForUser({
       db,
@@ -64,7 +64,7 @@ describe('createBillingPortalSessionForUser', () => {
   it('opens a portal session and returns the URL on the happy path', async () => {
     const shop = await createShop(db, { name: 'Joe Garage' })
     const userId = crypto.randomUUID()
-    await createProfile(db, { userId, shopId: shop.id })
+    await createProfile(db, { userId, shopId: shop.id, role: 'owner' })
     await db
       .insert(stripeCustomers)
       .values({ shopId: shop.id, stripeCustomerId: 'cus_garage' })
@@ -87,5 +87,77 @@ describe('createBillingPortalSessionForUser', () => {
       customer: 'cus_garage',
       return_url: 'https://app.vyntechs.com/settings/billing',
     })
+  })
+
+  it.each(['tech', 'advisor', 'parts'])('rejects an active %s before minting a portal session', async (role) => {
+    const shop = await createShop(db, { name: 'Authority Garage' })
+    const userId = crypto.randomUUID()
+    await createProfile(db, { userId, shopId: shop.id, role })
+    await db.insert(stripeCustomers).values({
+      shopId: shop.id,
+      stripeCustomerId: 'cus_authority',
+    })
+    const createPortalSession = vi.fn()
+
+    const result = await createBillingPortalSessionForUser({
+      db,
+      userId,
+      origin: 'https://app.vyntechs.com',
+      createPortalSession,
+    })
+
+    expect(result).toEqual({ ok: false, status: 403, error: 'forbidden' })
+    expect(createPortalSession).not.toHaveBeenCalled()
+  })
+
+  it('rejects a deactivated owner before minting a portal session', async () => {
+    const shop = await createShop(db, { name: 'Inactive Garage' })
+    const userId = crypto.randomUUID()
+    await createProfile(db, {
+      userId,
+      shopId: shop.id,
+      role: 'owner',
+      deactivatedAt: new Date('2026-07-19T12:00:00Z'),
+    })
+    await db.insert(stripeCustomers).values({
+      shopId: shop.id,
+      stripeCustomerId: 'cus_inactive',
+    })
+    const createPortalSession = vi.fn()
+
+    const result = await createBillingPortalSessionForUser({
+      db,
+      userId,
+      origin: 'https://app.vyntechs.com',
+      createPortalSession,
+      founderOverride: true,
+    })
+
+    expect(result).toEqual({ ok: false, status: 403, error: 'deactivated' })
+    expect(createPortalSession).not.toHaveBeenCalled()
+  })
+
+  it('allows an active configured founder through an explicit override', async () => {
+    const shop = await createShop(db, { name: 'Founder Garage' })
+    const userId = crypto.randomUUID()
+    await createProfile(db, { userId, shopId: shop.id, role: 'tech' })
+    await db.insert(stripeCustomers).values({
+      shopId: shop.id,
+      stripeCustomerId: 'cus_founder',
+    })
+    const createPortalSession = vi.fn().mockResolvedValue({
+      url: 'https://billing.stripe.com/session/founder',
+    })
+
+    const result = await createBillingPortalSessionForUser({
+      db,
+      userId,
+      origin: 'https://app.vyntechs.com',
+      createPortalSession,
+      founderOverride: true,
+    })
+
+    expect(result).toEqual({ ok: true, url: 'https://billing.stripe.com/session/founder' })
+    expect(createPortalSession).toHaveBeenCalledTimes(1)
   })
 })

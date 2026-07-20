@@ -14,9 +14,10 @@ import {
   isLockUnavailable,
   quoteSnapshotContainsExactJob,
 } from '@/lib/shop-os/quotes'
+import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 
 export type SimpleWorkActor = { profileId: string; shopId: string }
-export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict'
+export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict' | 'job_limit_reached'
 export type SimpleWorkFailure = { ok: false; error: SimpleWorkError; retryable?: true }
 
 type WorkProjection = {
@@ -516,6 +517,10 @@ export async function createWorkEscalation(
         return failure('not_ready')
       }
       if (!hasPinnedApproval(context, false)) return failure('not_authorized')
+      if (await ticketAtJobLimit(transactionDb, {
+        shopId: parsedActor.data.shopId,
+        ticketId: parsedTicket.data,
+      })) return failure('job_limit_reached')
       const [created] = await transactionDb.insert(ticketJobs).values({
         id: jobId,
         shopId: parsedActor.data.shopId,

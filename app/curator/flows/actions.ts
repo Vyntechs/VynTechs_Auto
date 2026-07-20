@@ -91,17 +91,16 @@ export async function createFlow(args: {
 export async function saveDraft(args: { flowVersionId: string; body: Flow; changeNote: string }) {
   const profile = await requireCuratorProfile()
   const [version] = await db
-    .select({ state: flowVersions.state, flowId: flowVersions.flowId })
-    .from(flowVersions)
-    .where(eq(flowVersions.id, args.flowVersionId))
-    .limit(1)
-  if (!version) throw new Error('Flow version not found')
-  if (version.state !== 'draft') throw new Error('Only draft versions can be edited; clone published first.')
-
-  await db
     .update(flowVersions)
     .set({ body: args.body, changeNote: args.changeNote, authoredBy: profile.id })
-    .where(eq(flowVersions.id, args.flowVersionId))
+    .where(and(eq(flowVersions.id, args.flowVersionId), eq(flowVersions.state, 'draft')))
+    .returning({ flowId: flowVersions.flowId })
+  if (!version) {
+    const [existing] = await db.select({ id: flowVersions.id }).from(flowVersions)
+      .where(eq(flowVersions.id, args.flowVersionId)).limit(1)
+    if (!existing) throw new Error('Flow version not found')
+    throw new Error('Only draft versions can be edited; clone published first.')
+  }
 
   revalidatePath(`/curator/flows/${version.flowId}/edit`)
 }
@@ -115,46 +114,54 @@ export async function publishDraft(args: {
   changeNote: string
 }): Promise<{ ok: true } | { ok: false; errors: string[] }> {
   const profile = await requireCuratorProfile()
+  const outcome = await db.transaction(async (tx) => {
+    const [version] = await tx
+      .select()
+      .from(flowVersions)
+      .where(eq(flowVersions.id, args.flowVersionId))
+      .limit(1)
+      .for('update')
+    if (!version) throw new Error('Flow version not found')
+    if (version.state !== 'draft') throw new Error('Only drafts can be published')
 
-  const [version] = await db
-    .select()
-    .from(flowVersions)
-    .where(eq(flowVersions.id, args.flowVersionId))
-    .limit(1)
-  if (!version) throw new Error('Flow version not found')
-  if (version.state !== 'draft') throw new Error('Only drafts can be published')
+    const bodyCheck = validateFlowForPublish(version.body as Flow)
+    if (!bodyCheck.ok) return { result: bodyCheck, flowId: version.flowId }
 
-  const bodyCheck = validateFlowForPublish(version.body as Flow)
-  if (!bodyCheck.ok) return bodyCheck
+    // The body and state are now locked together. Any save that wins before
+    // this lock is what gets validated; any later save loses its draft CAS.
+    const [flow] = await tx
+      .select({ platformSlug: flows.platformSlug, symptomSlug: flows.symptomSlug })
+      .from(flows)
+      .where(eq(flows.id, version.flowId))
+      .limit(1)
+    if (!flow) throw new Error('Parent flow not found')
+    const slugCheck = validateFlowSlugs(flow.platformSlug, flow.symptomSlug)
+    if (!slugCheck.ok) return { result: slugCheck, flowId: version.flowId }
 
-  // Known-slug gate — replaces the removed DB FK to platforms/symptoms.
-  const [flow] = await db
-    .select({ platformSlug: flows.platformSlug, symptomSlug: flows.symptomSlug })
-    .from(flows)
-    .where(eq(flows.id, version.flowId))
-    .limit(1)
-  if (!flow) throw new Error('Parent flow not found')
-  const slugCheck = validateFlowSlugs(flow.platformSlug, flow.symptomSlug)
-  if (!slugCheck.ok) return slugCheck
+    if (!args.changeNote.trim()) {
+      return {
+        result: { ok: false as const, errors: ['A change note is required to publish.'] },
+        flowId: version.flowId,
+      }
+    }
 
-  if (!args.changeNote.trim()) {
-    return { ok: false, errors: ['A change note is required to publish.'] }
-  }
-
-  await db.transaction(async (tx) => {
     await tx
       .update(flowVersions)
       .set({ state: 'archived', archivedAt: new Date(), archivedBy: profile.id })
       .where(and(eq(flowVersions.flowId, version.flowId), eq(flowVersions.state, 'published')))
 
-    await tx
+    const [published] = await tx
       .update(flowVersions)
       .set({ state: 'published', publishedAt: new Date(), publishedBy: profile.id, changeNote: args.changeNote })
-      .where(eq(flowVersions.id, args.flowVersionId))
+      .where(and(eq(flowVersions.id, args.flowVersionId), eq(flowVersions.state, 'draft')))
+      .returning({ id: flowVersions.id })
+    if (!published) throw new Error('Draft state changed while publishing')
+    return { result: { ok: true as const }, flowId: version.flowId }
   })
 
+  if (!outcome.result.ok) return outcome.result
   revalidatePath('/curator/flows')
-  revalidatePath(`/curator/flows/${version.flowId}`)
+  revalidatePath(`/curator/flows/${outcome.flowId}`)
   return { ok: true }
 }
 
@@ -202,17 +209,16 @@ export async function cloneFromPublished(args: { flowId: string }): Promise<{ fl
 export async function archiveDraft(args: { flowVersionId: string }) {
   const profile = await requireCuratorProfile()
   const [v] = await db
-    .select({ state: flowVersions.state, flowId: flowVersions.flowId })
-    .from(flowVersions)
-    .where(eq(flowVersions.id, args.flowVersionId))
-    .limit(1)
-  if (!v) throw new Error('Not found')
-  if (v.state !== 'draft') throw new Error('Only drafts can be archived without publishing')
-
-  await db
     .update(flowVersions)
     .set({ state: 'archived', archivedAt: new Date(), archivedBy: profile.id })
-    .where(eq(flowVersions.id, args.flowVersionId))
+    .where(and(eq(flowVersions.id, args.flowVersionId), eq(flowVersions.state, 'draft')))
+    .returning({ flowId: flowVersions.flowId })
+  if (!v) {
+    const [existing] = await db.select({ id: flowVersions.id }).from(flowVersions)
+      .where(eq(flowVersions.id, args.flowVersionId)).limit(1)
+    if (!existing) throw new Error('Not found')
+    throw new Error('Only drafts can be archived without publishing')
+  }
 
   revalidatePath(`/curator/flows/${v.flowId}`)
 }

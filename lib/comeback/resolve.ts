@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { followUps, sessions } from '@/lib/db/schema'
 import { getProfileByUserId } from '@/lib/db/queries'
 import type { AppDb } from '@/lib/db/queries'
@@ -35,6 +35,11 @@ export async function resolveFollowUp(opts: {
   const profile = await getProfileByUserId(opts.db, opts.userId)
   if (!profile) return { ok: false, status: 400, error: 'no profile' }
 
+  const parsed = resolveSchema.safeParse(opts.body)
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message }
+  }
+
   const [followUp] = await opts.db
     .select()
     .from(followUps)
@@ -47,29 +52,33 @@ export async function resolveFollowUp(opts: {
     return { ok: false, status: 400, error: 'already resolved' }
   }
 
-  const parsed = resolveSchema.safeParse(opts.body)
-  if (!parsed.success) {
-    return { ok: false, status: 400, error: parsed.error.message }
-  }
-
-  await opts.db
+  const [claimed] = await opts.db
     .update(followUps)
     .set({
       resolvedAt: new Date(),
       comebackRecorded: parsed.data.comebackRecorded,
       notes: parsed.data.notes ?? null,
     })
-    .where(eq(followUps.id, opts.followUpId))
+    .where(and(
+      eq(followUps.id, opts.followUpId),
+      eq(followUps.techId, profile.id),
+      isNull(followUps.resolvedAt),
+    ))
+    .returning()
+  if (!claimed) {
+    return { ok: false, status: 400, error: 'already resolved' }
+  }
 
   if (parsed.data.comebackRecorded) {
     try {
       const [session] = await opts.db
         .select()
         .from(sessions)
-        .where(eq(sessions.id, followUp.sessionId))
+        .where(eq(sessions.id, claimed.sessionId))
         .limit(1)
       if (session?.outcome) {
         await opts.recordCorpusComeback(opts.db, {
+          shopId: claimed.shopId,
           vehicleYear: session.intake.vehicleYear,
           vehicleMake: session.intake.vehicleMake,
           vehicleModel: session.intake.vehicleModel,

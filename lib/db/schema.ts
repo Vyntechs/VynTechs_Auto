@@ -450,6 +450,12 @@ export const ticketJobs = pgTable(
       .on(table.shopId, table.requiredSkillTier, table.workStatus)
       .where(sql`${table.assignedTechId} is null`),
     index('ticket_jobs_ticket_idx').on(table.ticketId),
+    index('ticket_jobs_shop_ticket_created_idx').on(
+      table.shopId,
+      table.ticketId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
     check(
       'ticket_jobs_kind_valid',
       sql`${table.kind} in ('diagnostic', 'repair', 'maintenance')`,
@@ -1804,13 +1810,65 @@ export const techAssistRequests = pgTable('tech_assist_requests', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
-export const stripeCustomers = pgTable('stripe_customers', {
-  shopId: uuid('shop_id').primaryKey().references(() => shops.id, { onDelete: 'cascade' }),
-  stripeCustomerId: text('stripe_customer_id').notNull().unique(),
-  subscriptionStatus: text('subscription_status'),
-  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+export const stripeCustomers = pgTable(
+  'stripe_customers',
+  {
+    shopId: uuid('shop_id').primaryKey().references(() => shops.id, { onDelete: 'cascade' }),
+    stripeCustomerId: text('stripe_customer_id').notNull().unique(),
+    subscriptionStatus: text('subscription_status'),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    lastWebhookEventId: text('last_webhook_event_id'),
+    lastWebhookEventCreated: bigint('last_webhook_event_created', { mode: 'number' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'stripe_customers_webhook_cursor_paired',
+      sql`(${table.lastWebhookEventId} is null) = (${table.lastWebhookEventCreated} is null)`,
+    ),
+    check(
+      'stripe_customers_webhook_event_id_length',
+      sql`${table.lastWebhookEventId} is null or char_length(${table.lastWebhookEventId}) between 1 and 255`,
+    ),
+    check(
+      'stripe_customers_webhook_event_created_nonnegative',
+      sql`${table.lastWebhookEventCreated} is null or ${table.lastWebhookEventCreated} >= 0`,
+    ),
+  ],
+)
+
+export const processedStripeEvents = pgTable(
+  'processed_stripe_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    stripeCustomerId: text('stripe_customer_id')
+      .references(() => stripeCustomers.stripeCustomerId, { onDelete: 'cascade' })
+      .notNull(),
+    eventCreated: bigint('event_created', { mode: 'number' }).notNull(),
+    eventType: text('event_type').notNull(),
+    disposition: text('disposition', {
+      enum: ['pending', 'applied', 'stale', 'reconciled'],
+    }).notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('processed_stripe_events_customer_created_idx')
+      .on(table.stripeCustomerId, table.eventCreated),
+    check(
+      'processed_stripe_events_id_length',
+      sql`char_length(${table.eventId}) between 1 and 255`,
+    ),
+    check(
+      'processed_stripe_events_type_length',
+      sql`char_length(${table.eventType}) between 1 and 255`,
+    ),
+    check('processed_stripe_events_created_nonnegative', sql`${table.eventCreated} >= 0`),
+    check(
+      'processed_stripe_events_disposition_valid',
+      sql`${table.disposition} in ('pending', 'applied', 'stale', 'reconciled')`,
+    ),
+  ],
+)
 
 // Per-shop add-on entitlements (Phase 0 of the diagnostics add-on plan).
 // One row per shop; a missing row for an otherwise-paid shop resolves via
@@ -1953,6 +2011,8 @@ export type SessionEvent = typeof sessionEvents.$inferSelect
 export type NewSessionEvent = typeof sessionEvents.$inferInsert
 export type StripeCustomer = typeof stripeCustomers.$inferSelect
 export type NewStripeCustomer = typeof stripeCustomers.$inferInsert
+export type ProcessedStripeEvent = typeof processedStripeEvents.$inferSelect
+export type NewProcessedStripeEvent = typeof processedStripeEvents.$inferInsert
 export type ConfidenceCalibration = typeof confidenceCalibration.$inferSelect
 export type NewConfidenceCalibration = typeof confidenceCalibration.$inferInsert
 export type TechAssistRequest = typeof techAssistRequests.$inferSelect

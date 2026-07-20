@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { sessions } from '@/lib/db/schema'
 
@@ -18,14 +18,6 @@ export async function approveDeferredSession(
   note: string | null,
 ): Promise<DeferredActionResult> {
   const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
     .update(sessions)
     .set({
       status: 'open',
@@ -33,9 +25,10 @@ export async function approveDeferredSession(
       curatorNote: note,
       curatorOverrideAction: null,
     })
-    .where(eq(sessions.id, sessionId))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'deferred')))
+    .returning()
 
-  return { kind: 'ok' }
+  return session ? { kind: 'ok' } : { kind: 'not-found' }
 }
 
 /**
@@ -49,14 +42,6 @@ export async function overrideDeferredSession(
   note: string | null,
 ): Promise<DeferredActionResult> {
   const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
     .update(sessions)
     .set({
       status: 'open',
@@ -64,9 +49,10 @@ export async function overrideDeferredSession(
       curatorOverrideAction: overrideAction,
       curatorNote: note,
     })
-    .where(eq(sessions.id, sessionId))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'deferred')))
+    .returning()
 
-  return { kind: 'ok' }
+  return session ? { kind: 'ok' } : { kind: 'not-found' }
 }
 
 /**
@@ -79,21 +65,14 @@ export async function closeDeferredSession(
   note: string | null,
 ): Promise<DeferredActionResult> {
   const [session] = await db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1)
-
-  if (!session) return { kind: 'not-found' }
-
-  await db
     .update(sessions)
     .set({
       status: 'closed',
       closedAt: new Date(),
       curatorNote: note,
     })
-    .where(eq(sessions.id, sessionId))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'deferred')))
+    .returning()
 
-  return { kind: 'ok' }
+  return session ? { kind: 'ok' } : { kind: 'not-found' }
 }

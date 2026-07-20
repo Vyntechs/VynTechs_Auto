@@ -297,6 +297,23 @@ describe('ticket detail access and job mutation', () => {
     }
   })
 
+  it('refuses a twenty-sixth job after the ticket lock without changing the ticket', async () => {
+    await db.insert(ticketJobs).values(Array.from({ length: 24 }, (_, index) => ({
+      shopId: shopA.id,
+      ticketId,
+      title: `Stored job ${index + 2}`,
+      kind: 'repair' as const,
+      requiredSkillTier: 1,
+    })))
+
+    await expect(addTicketJob(db, {
+      actor: actors.owner,
+      ticketId,
+      body: { title: 'One too many', kind: 'repair', requiredSkillTier: 1 },
+    })).resolves.toEqual({ ok: false, error: 'job_limit_reached' })
+    expect(await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))).toHaveLength(25)
+  })
+
   it('applies the shared assignment rules when adding a job', async () => {
     const selfAssigned = await addTicketJob(db, {
       actor: actors.tech,

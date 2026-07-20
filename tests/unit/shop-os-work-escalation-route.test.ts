@@ -55,7 +55,7 @@ describe('Shop OS work escalation route', () => {
 
   it.each([
     ['invalid_input', 400, false], ['not_found', 404, false], ['not_authorized', 409, false],
-    ['not_ready', 409, false], ['conflict', 409, true],
+    ['not_ready', 409, false], ['job_limit_reached', 409, false], ['conflict', 409, true],
   ] as const)('maps %s safely', async (error, status, retryable) => {
     vi.mocked(createWorkEscalation).mockResolvedValue({ ok: false, error, ...(retryable ? { retryable: true } : {}) })
     const response = await POST(request('{}'), params)

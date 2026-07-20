@@ -121,4 +121,92 @@ describe('Shop OS job part requests', () => {
       description: 'Serpentine belt', jobTitle: 'Replace water pump', requestedByName: 'Alex Tech',
     })
   })
+
+  it.each([
+    ['pending_quote', 'in_progress'],
+    ['quote_ready', 'in_progress'],
+    ['sent', 'in_progress'],
+    ['declined', 'in_progress'],
+    ['approved', 'open'],
+    ['approved', 'blocked'],
+    ['approved', 'done'],
+    ['approved', 'canceled'],
+  ] as const)('rejects parts creation for approval=%s and work=%s', async (approvalState, workStatus) => {
+    await db.update(ticketJobs).set({ approvalState, workStatus }).where(eq(ticketJobs.id, jobId))
+    await expect(createPartRequest(db, {
+      actor: techActor,
+      ticketId,
+      jobId,
+      body: body(),
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(jobPartRequests)).toHaveLength(0)
+  })
+
+  it('enforces 50 open requests while preserving exact-key replay', async () => {
+    await db.insert(jobPartRequests).values(Array.from({ length: 50 }, (_, index) => ({
+      shopId,
+      ticketId,
+      jobId,
+      requestedByProfileId: techId,
+      description: `Seeded part ${index}`,
+      quantity: 1,
+      requestKey: uuid(1_000 + index),
+    })))
+
+    await expect(createPartRequest(db, {
+      actor: techActor,
+      ticketId,
+      jobId,
+      body: body({ requestKey: uuid(1_000), description: 'Seeded part 0' }),
+    })).resolves.toMatchObject({ ok: true, request: { description: 'Seeded part 0' } })
+
+    await expect(createPartRequest(db, {
+      actor: techActor,
+      ticketId,
+      jobId,
+      body: body({ requestKey: uuid(2_000) }),
+    })).resolves.toEqual({ ok: false, error: 'conflict' })
+    expect(await db.select().from(jobPartRequests)).toHaveLength(50)
+  })
+
+  it('serializes concurrent creates at the open-request ceiling', async () => {
+    await db.insert(jobPartRequests).values(Array.from({ length: 49 }, (_, index) => ({
+      shopId,
+      ticketId,
+      jobId,
+      requestedByProfileId: techId,
+      description: `Seeded part ${index}`,
+      quantity: 1,
+      requestKey: uuid(3_000 + index),
+    })))
+
+    const results = await Promise.all([
+      createPartRequest(db, { actor: techActor, ticketId, jobId, body: body({ requestKey: uuid(4_001) }) }),
+      createPartRequest(db, { actor: techActor, ticketId, jobId, body: body({ requestKey: uuid(4_002) }) }),
+    ])
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1)
+    expect(results.filter((result) => !result.ok)).toEqual([{ ok: false, error: 'conflict' }])
+    expect(await db.select().from(jobPartRequests)).toHaveLength(50)
+  })
+
+  it('bounds job and ticket history projections to 100 current-first rows', async () => {
+    await db.insert(jobPartRequests).values(Array.from({ length: 110 }, (_, index) => ({
+      shopId,
+      ticketId,
+      jobId,
+      requestedByProfileId: techId,
+      description: `Historical part ${index}`,
+      quantity: 1,
+      requestKey: uuid(5_000 + index),
+      createdAt: new Date(Date.UTC(2026, 6, 19, 0, index)),
+    })))
+
+    const jobRows = await listPartRequestsForJob(db, { shopId, jobId })
+    const ticketRows = await listPartRequestsForTicket(db, { shopId, ticketId })
+    expect(jobRows).toHaveLength(100)
+    expect(ticketRows).toHaveLength(100)
+    expect(jobRows[0].description).toBe('Historical part 109')
+    expect(ticketRows[0].description).toBe('Historical part 109')
+  })
 })

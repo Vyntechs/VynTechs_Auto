@@ -5,8 +5,8 @@ Reason: Double-quoted backticks execute command substitution and silently corrup
 
 ### serialize-heavy-test-runs
 Trigger: Parallel reviewers launched Vitest while the control lane ran the full suite, causing resource contention and a false timeout.
-Rule: One lane owns heavy tests; reviewers perform static review or wait for shared verification evidence.
-Reason: Concurrent suites distort timing, waste compute, and weaken verification signal.
+Rule: One lane owns heavy tests; run database-heavy Vitest as eight sequential shards with two workers, while reviewers use shared evidence.
+Reason: Bounded shards finish visibly; concurrent or monolithic runs distort timing, waste compute, and weaken verification signal.
 
 ### own-verification-identity
 Trigger: Authenticated verification required Brandon to sign in manually from another device.
@@ -47,3 +47,8 @@ Reason: Workflow value must not silently create infrastructure cost or adoption 
 Trigger: A successful create flow redirects to a home queue that filters the creator's new record out.
 Rule: Prove every created record remains discoverable from the creator's normal role-shaped home after navigation.
 Reason: Successful persistence without a durable return path feels exactly like data loss.
+
+### shard-vitest-with-observable-exit
+Trigger: A monolithic sequential Vitest process lost its controller output and remained idle after its worker exited.
+Rule: Use the documented sequential shards and record each shard exit; terminate idle runners before starting another verification command.
+Reason: A hanging aggregate runner provides neither a trustworthy pass nor a usable failure report.

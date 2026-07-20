@@ -1,8 +1,11 @@
 import { sql } from 'drizzle-orm'
 import { embed } from '@/lib/ai/embeddings'
 import type { AppDb } from '@/lib/db/queries'
+import { unwrapRows } from '@/lib/db/unwrap-rows'
 
 export type CorpusComebackInput = {
+  /** Server-owned shop identity from the claimed follow-up. */
+  shopId: string
   vehicleYear: number
   vehicleMake: string
   vehicleModel: string
@@ -35,7 +38,11 @@ export async function recordCorpusComeback(
   const vector = await embed(target)
   const vecLiteral = `[${vector.join(',')}]`
 
-  const decayed = (await db.execute(sql`
+  const decayed = unwrapRows<{
+    id: string
+    comebackRecordedCount: number
+    successConfirmCount: number
+  }>(await db.execute(sql`
     UPDATE corpus_entries
     SET
       comeback_recorded_count = comeback_recorded_count + 1,
@@ -43,16 +50,13 @@ export async function recordCorpusComeback(
       updated_at = NOW()
     WHERE
       is_retired = false
+      AND source_shop_id = ${input.shopId}
       AND vehicle_make = ${input.vehicleMake}
       AND vehicle_model = ${input.vehicleModel}
       AND ABS(vehicle_year - ${input.vehicleYear}) <= 2
       AND (embedding <=> ${vecLiteral}::vector) < 0.15
     RETURNING id, comeback_recorded_count AS "comebackRecordedCount", success_confirm_count AS "successConfirmCount"
-  `)) as unknown as Array<{
-    id: string
-    comebackRecordedCount: number
-    successConfirmCount: number
-  }>
+  `))
 
   // After increment, check the post-increment counts. The RETURNING reflects
   // the UPDATEd row, so comebackRecordedCount is already the new value.
@@ -66,6 +70,7 @@ export async function recordCorpusComeback(
       UPDATE corpus_entries
       SET is_retired = true, updated_at = NOW()
       WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+        AND source_shop_id = ${input.shopId}
     `)
   }
 

@@ -67,6 +67,7 @@ const appliedEnvelope = z.strictObject({
     lineCount: z.number().int().min(1).max(25),
   }),
 })
+const jobLimitFailureEnvelope = z.strictObject({ error: z.literal('job_limit_reached') })
 
 export type SafeCannedJobListResponse = z.infer<typeof listEnvelope>
 export type SafeCannedJobTemplate = z.infer<typeof cannedJobProjectionSchema>
@@ -97,6 +98,11 @@ export function parseAppliedCannedJobResponse(status: number, value: unknown) {
   const parsed = appliedEnvelope.safeParse(value)
   if (!parsed.success || (status === 201 ? !parsed.data.changed : status === 200 ? parsed.data.changed : true)) return null
   return parsed.data
+}
+
+/** A terminal ticket capacity response is not stale quote state. */
+export function isJobLimitReachedFailure(status: number, value: unknown): boolean {
+  return status === 409 && jobLimitFailureEnvelope.safeParse(value).success
 }
 
 /** @deprecated Prefer parseCannedJobListResponse. */

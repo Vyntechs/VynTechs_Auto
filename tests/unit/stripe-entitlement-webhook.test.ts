@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop } from '@/lib/db/queries'
-import { shopEntitlements, stripeCustomers } from '@/lib/db/schema'
+import { processedStripeEvents, shopEntitlements, stripeCustomers } from '@/lib/db/schema'
 import { handleStripeWebhook } from '@/lib/stripe'
 
 const DIAG_PRICE = 'price_diag_test'
@@ -13,10 +13,17 @@ function subscriptionEvent(
     | 'customer.subscription.created'
     | 'customer.subscription.updated'
     | 'customer.subscription.deleted',
-  overrides: Partial<{ customer: string; status: string; priceIds: string[] }> = {},
+  overrides: Partial<{
+    id: string
+    created: number
+    customer: string
+    status: string
+    priceIds: string[]
+  }> = {},
 ) {
   return {
-    id: 'evt_subscription',
+    id: overrides.id ?? 'evt_subscription',
+    created: overrides.created ?? 100,
     type,
     data: {
       object: {
@@ -135,6 +142,40 @@ describe('handleStripeWebhook — diagnostics entitlement mapping', () => {
     expect(row.diagnostics).toBe(false)
   })
 
+  it('keeps newer cancellation and add-on removal when an older active event arrives later', async () => {
+    vi.stubEnv('STRIPE_DIAGNOSTICS_PRICE_ID', DIAG_PRICE)
+
+    await fireWebhook(
+      db,
+      subscriptionEvent('customer.subscription.deleted', {
+        id: 'evt_newer_deleted',
+        created: 200,
+        status: 'canceled',
+        priceIds: [BASE_PRICE],
+      }),
+    )
+    await fireWebhook(
+      db,
+      subscriptionEvent('customer.subscription.updated', {
+        id: 'evt_older_active',
+        created: 100,
+        status: 'active',
+        priceIds: [BASE_PRICE, DIAG_PRICE],
+      }),
+    )
+
+    const [customer] = await db
+      .select()
+      .from(stripeCustomers)
+      .where(eq(stripeCustomers.shopId, shopId))
+    const [entitlement] = await db
+      .select()
+      .from(shopEntitlements)
+      .where(eq(shopEntitlements.shopId, shopId))
+    expect(customer.subscriptionStatus).toBe('canceled')
+    expect(entitlement.diagnostics).toBe(false)
+  })
+
   it('does not error and writes nothing for an unknown customer', async () => {
     vi.stubEnv('STRIPE_DIAGNOSTICS_PRICE_ID', DIAG_PRICE)
     const result = await fireWebhook(
@@ -146,5 +187,6 @@ describe('handleStripeWebhook — diagnostics entitlement mapping', () => {
     )
     expect(result.ok).toBe(true)
     expect(await db.select().from(shopEntitlements)).toHaveLength(0)
+    expect(await db.select().from(processedStripeEvents)).toHaveLength(0)
   })
 })

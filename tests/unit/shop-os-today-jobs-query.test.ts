@@ -468,4 +468,23 @@ describe('Today ticket jobs read model', () => {
     expect(ownerResult.openJobs).toMatchObject([{ id: job.id, sessionId: session.id }])
     expect(ownerResult.linkedSessionIds).toEqual([session.id])
   })
+
+  it('bounds a high-cardinality Today backlog and reports that more work remains', async () => {
+    await db.insert(ticketJobs).values(
+      Array.from({ length: 205 }, (_, index) => ({
+        shopId,
+        ticketId,
+        title: `Assigned backlog ${index + 1}`,
+        kind: 'repair' as const,
+        requiredSkillTier: 1,
+        assignedTechId: actorProfileId,
+      })),
+    )
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result.myJobs).toHaveLength(200)
+    expect(result.openJobs).toEqual([])
+    expect(result.hasMore).toBe(true)
+  })
 })

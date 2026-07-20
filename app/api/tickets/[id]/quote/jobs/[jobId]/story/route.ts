@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { generateCustomerStory } from '@/lib/ai/customer-story'
 import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { db } from '@/lib/db/client'
 import {
   customerStoryDomainStatus,
   customerStoryErrorBody,
-  generateAndSaveCustomerStory,
   getCustomerStoryWorkspace,
   saveReviewedCustomerStory,
 } from '@/lib/shop-os/customer-stories'
@@ -19,17 +17,6 @@ import {
 
 const cursorQuery = z.strictObject({
   eventCursor: z.string().min(1).max(1_000).optional(),
-})
-const uuidList = z.array(z.uuid()).max(20).superRefine((ids, context) => {
-  if (new Set(ids).size !== ids.length) {
-    context.addIssue({ code: 'custom', message: 'IDs must be unique' })
-  }
-})
-const generationEnvelope = z.strictObject({
-  clientKey: z.uuid(),
-  expectedStoryRevision: z.number().int().nonnegative(),
-  sourceEventIds: uuidList,
-  sourceArtifactIds: z.array(z.never()).length(0),
 })
 const reviewEnvelope = z.strictObject({
   clientKey: z.uuid(),
@@ -79,39 +66,12 @@ export async function GET(req: Request, { params }: RouteContext) {
   return NextResponse.json(result.workspace, { status: 200 })
 }
 
-export async function POST(req: Request, { params }: RouteContext) {
-  const ctx = await authenticate()
-  if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
-  const denied = await paywallReject(db, ctx.user.id)
-  if (denied) return denied
-
-  let rawBody: unknown
-  try {
-    rawBody = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
-  }
-  const body = generationEnvelope.safeParse(rawBody)
-  if (!body.success) return invalidInput()
-
-  const { id, jobId } = await params
-  const result = await generateAndSaveCustomerStory(db, {
-    actor: { profileId: ctx.profile.id },
-    ticketId: id,
-    jobId,
-    ...body.data,
-  }, { generateCustomerStory })
-  if (!result.ok) {
-    return NextResponse.json(customerStoryErrorBody(result), {
-      status: customerStoryDomainStatus(result),
-    })
-  }
-  return NextResponse.json({
-    changed: result.changed,
-    story: result.story,
-    storyMeta: result.storyMeta,
-    storyRevision: result.storyRevision,
-  }, { status: 200 })
+export async function POST(_req: Request, _context: RouteContext) {
+  // Legacy AI story generation is intentionally unavailable while diagnostics
+  // are off. Keep this fixed response ahead of auth, parsing, and provider
+  // code so stale clients and fresh idempotency keys cannot create paid calls
+  // or transmit technician observations.
+  return NextResponse.json({ error: 'feature_unavailable' }, { status: 404 })
 }
 
 export async function PUT(req: Request, { params }: RouteContext) {

@@ -106,6 +106,22 @@ describe('Shop OS found-concern escalation', () => {
     expect(await db.select().from(quoteEvents)).toHaveLength(2)
   })
 
+  it('preserves an exact replay at the 25-job cap and rejects a fresh escalation', async () => {
+    await db.insert(ticketJobs).values(Array.from({ length: 22 }, (_, index) => ({
+      id: uuid(200 + index), shopId, ticketId, title: `Existing ${index + 1}`,
+      kind: 'repair' as const, requiredSkillTier: 1,
+    })))
+
+    const first = await createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() })
+    expect(first).toMatchObject({ ok: true, changed: true })
+    await expect(createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() }))
+      .resolves.toMatchObject({ ok: true, changed: false })
+    await expect(createWorkEscalation(db, {
+      actor, ticketId, sourceJobId, body: body({ requestKey: uuid(81) }),
+    })).resolves.toEqual({ ok: false, error: 'job_limit_reached' })
+    expect(await db.select().from(ticketJobs).where(eq(ticketJobs.ticketId, ticketId))).toHaveLength(25)
+  })
+
   it('binds retry identity to source and actor and fails a changed collision closed', async () => {
     const first = await createWorkEscalation(db, { actor, ticketId, sourceJobId, body: body() })
     const second = await createWorkEscalation(db, {

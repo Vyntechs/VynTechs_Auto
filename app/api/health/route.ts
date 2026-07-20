@@ -1,21 +1,8 @@
 import { NextResponse } from 'next/server'
-import { sql } from 'drizzle-orm'
-import { db } from '@/lib/db/client'
 
-// Public liveness endpoint. Returns ONLY whether the database ping
-// succeeded. Earlier versions echoed the database host, Supabase URL,
-// and which third-party API keys were configured — that turned a routine
-// health check into unauthenticated reconnaissance, so it was stripped.
-// For richer diagnostics, run them locally with the env loaded.
+// Public process/deployment liveness only. Database readiness belongs in
+// authenticated monitoring; putting it here lets anonymous traffic amplify
+// database work and turns a liveness check into infrastructure discovery.
 export async function GET() {
-  let pingOk = true
-  try {
-    await db.execute(sql`select 1 as ok`)
-  } catch {
-    pingOk = false
-  }
-  return NextResponse.json(
-    { ok: pingOk },
-    { status: pingOk ? 200 : 503 },
-  )
+  return NextResponse.json({ ok: true }, { status: 200 })
 }

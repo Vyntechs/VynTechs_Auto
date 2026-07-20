@@ -130,6 +130,7 @@ export function TodayHome({
         <TodayJobsBoard
           myJobs={todayJobs.myJobs}
           openJobs={todayJobs.openJobs}
+          hasMore={todayJobs.hasMore}
           diagnosticsEntitled={diagnosticsEntitled}
         />
 

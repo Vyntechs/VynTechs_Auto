@@ -1,7 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { customers, vehicles, sessions, shops, profiles } from '@/lib/db/schema'
 import { searchIntake } from '@/lib/intake/search'
+import { boundedSearchTokens, literalLikeToken } from '@/lib/intake/search-limits'
 
 let db: TestDb
 let close: () => Promise<void>
@@ -100,6 +102,34 @@ describe('searchIntake', () => {
     const r = await searchIntake({ db, shopId: shop.id, q: 'ZZZZZZZ' })
     expect(r.customers).toEqual([])
     expect(r.vehicles).toEqual([])
+  })
+
+  it('treats LIKE wildcard characters as literal search text', async () => {
+    const { shop } = await seed('literal-wildcard')
+    await db.insert(customers).values({
+      shopId: shop.id,
+      name: 'Percent% Customer',
+      phone: '5559090',
+    })
+
+    const r = await searchIntake({ db, shopId: shop.id, q: '%' })
+
+    expect(r.customers.map((customer) => customer.name)).toEqual(['Percent% Customer'])
+    expect(r.vehicles).toEqual([])
+  })
+
+  it('treats underscore as literal text in vehicle search fields', async () => {
+    const { shop } = await seed('literal-underscore')
+    await db.insert(vehicles).values({
+      customerId: (await db.select().from(customers).where(eq(customers.shopId, shop.id)).limit(1))[0].id,
+      year: 2024,
+      make: 'Ford_Pro',
+      model: 'Transit',
+    })
+
+    const r = await searchIntake({ db, shopId: shop.id, q: 'Ford_' })
+
+    expect(r.vehicles.map((vehicle) => vehicle.make)).toEqual(['Ford_Pro'])
   })
 
   it('scopes by shopId — never returns rows from another shop', async () => {
@@ -217,5 +247,21 @@ describe('searchIntake', () => {
     expect(v.lastVisit).toBeNull()
     expect((v as unknown as { ownerId?: string }).ownerId).toBeUndefined()
     expect((v as unknown as { ownerName?: string }).ownerName).toBeUndefined()
+  })
+})
+
+describe('boundedSearchTokens', () => {
+  it('keeps direct callers within the finite SQL-predicate budget', () => {
+    const tokens = boundedSearchTokens(
+      Array.from({ length: 20 }, (_, index) => `${index}${'x'.repeat(100)}`).join(' '),
+    )
+    expect(tokens).toHaveLength(8)
+    expect(tokens.every((token) => token.length <= 64)).toBe(true)
+  })
+})
+
+describe('literalLikeToken', () => {
+  it('escapes the escape character before SQL wildcard characters', () => {
+    expect(literalLikeToken('a!b%c_d')).toBe('a!!b!%c!_d')
   })
 })

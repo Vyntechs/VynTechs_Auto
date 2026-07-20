@@ -6,6 +6,7 @@ import { cannedJobs, jobLines, profiles, quoteVersions, shops, ticketJobs, ticke
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, formatScaledDecimal, parseScaledDecimal, stableStringify } from '@/lib/shop-os/quote-math'
 import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_TEMPLATE_BYTES = 16 * 1024
@@ -86,7 +87,7 @@ export type SafeCannedJob = {
 
 type Failure = {
   ok: false
-  error: 'invalid_input' | 'not_found' | 'conflict'
+  error: 'invalid_input' | 'not_found' | 'conflict' | 'job_limit_reached'
   retryable?: boolean
 }
 type ListResult = { ok: true; cannedJobs: SafeCannedJob[]; taxRateBps: number | null } | Failure
@@ -645,6 +646,10 @@ export async function applyCannedJobToTicket(
         if (!safe) throw new AbortCannedApply(conflict())
         return { ok: true, changed: false, job: safe }
       }
+      if (await ticketAtJobLimit(tx as AppDb, {
+        shopId: persistedActor.shopId,
+        ticketId: ticketId.data,
+      })) return { ok: false, error: 'job_limit_reached', retryable: false }
       if (activeVersions.length > 1) throw new AbortCannedApply(conflict())
 
       const [shop] = await tx.select({ taxRateBps: shops.taxRateBps }).from(shops)

@@ -6,12 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   historyScreenMock,
   limitMock,
+  listTicketHistoryMock,
   listSessionsMock,
   requireUserMock,
   selectMock,
 } = vi.hoisted(() => ({
   historyScreenMock: vi.fn(),
   limitMock: vi.fn(),
+  listTicketHistoryMock: vi.fn(),
   listSessionsMock: vi.fn(),
   requireUserMock: vi.fn(),
   selectMock: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('@/lib/auth', () => ({ requireUserAndProfile: requireUserMock }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
 vi.mock('@/lib/db/client', () => ({ db: { select: selectMock } }))
 vi.mock('@/lib/db/queries', () => ({ listSessionsForVehicle: listSessionsMock }))
+vi.mock('@/lib/tickets', () => ({ listVehicleTicketHistory: listTicketHistoryMock }))
 vi.mock('@/components/screens/vehicle-history', () => ({
   VehicleHistory: (props: unknown) => {
     historyScreenMock(props)
@@ -62,6 +65,7 @@ describe('reachable vehicle history page without diagnostics', () => {
         name: 'Jane Doe',
       },
     }])
+    listTicketHistoryMock.mockResolvedValue({ visits: [], hasMore: false })
     listSessionsMock.mockResolvedValue([])
   })
 
@@ -72,6 +76,10 @@ describe('reachable vehicle history page without diagnostics', () => {
 
     expect(screen.getByText('Vehicle facts')).toBeInTheDocument()
     expect(listSessionsMock).not.toHaveBeenCalled()
+    expect(listTicketHistoryMock).toHaveBeenCalledWith(
+      { select: selectMock },
+      { shopId: 'shop-1', vehicleId: 'vehicle-1' },
+    )
     expect(historyScreenMock).toHaveBeenCalledWith({
       vehicle: {
         id: 'vehicle-1',
@@ -82,6 +90,8 @@ describe('reachable vehicle history page without diagnostics', () => {
         plate: 'ABC123',
       },
       customer: { id: 'customer-1', name: 'Jane Doe' },
+      visits: [],
+      hasMore: false,
     })
   })
 

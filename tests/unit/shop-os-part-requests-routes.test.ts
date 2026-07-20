@@ -5,6 +5,7 @@ vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
 vi.mock('@/lib/auth-access', () => ({ paywallReject: vi.fn() }))
 vi.mock('@/lib/supabase-server', () => ({ getServerSupabase: vi.fn(async () => ({})) }))
 vi.mock('@/lib/db/client', () => ({ db: {} }))
+vi.mock('@/lib/rate-limit', () => ({ rateLimitReject: vi.fn() }))
 vi.mock('@/lib/shop-os/part-requests', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/shop-os/part-requests')>()
   return { ...actual, createPartRequest: vi.fn(), resolvePartRequest: vi.fn() }
@@ -15,6 +16,7 @@ import { POST as RESOLVE } from '@/app/api/tickets/[id]/part-requests/[requestId
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import { createPartRequest, resolvePartRequest } from '@/lib/shop-os/part-requests'
+import { rateLimitReject } from '@/lib/rate-limit'
 
 const TICKET = '00000000-0000-4000-8000-000000000020'
 const JOB = '00000000-0000-4000-8000-000000000030'
@@ -40,6 +42,7 @@ describe('Shop OS part request routes', () => {
     vi.clearAllMocks()
     vi.mocked(requireUserAndProfile).mockResolvedValue({ user: { id: profile.userId }, profile } as never)
     vi.mocked(paywallReject).mockResolvedValue(null)
+    vi.mocked(rateLimitReject).mockResolvedValue(null)
   })
 
   it('create authenticates, applies the paywall, and rejects malformed JSON before the domain', async () => {
@@ -65,6 +68,51 @@ describe('Shop OS part request routes', () => {
     })
     expect(response.status).toBe(201)
     expect(await response.json()).toEqual({ request: REQUEST })
+    expect(rateLimitReject).toHaveBeenCalledWith(
+      {},
+      `part-request:${profile.shopId}:${profile.id}`,
+      20,
+    )
+  })
+
+  it('returns the shared quota response before domain work', async () => {
+    vi.mocked(rateLimitReject).mockResolvedValue(
+      NextResponse.json({ error: 'rate_limited' }, { status: 429 }),
+    )
+    const response = await CREATE(
+      request(JSON.stringify({ requestKey: REQ, description: 'Water pump', quantity: 1 })),
+      { params: Promise.resolve({ id: TICKET, jobId: JOB }) },
+    )
+    expect(response.status).toBe(429)
+    expect(createPartRequest).not.toHaveBeenCalled()
+  })
+
+  it('meters an exhausted request before touching its body', async () => {
+    vi.mocked(rateLimitReject).mockResolvedValue(
+      NextResponse.json({ error: 'rate_limited' }, { status: 429 }),
+    )
+    const incoming = request('{')
+    const json = vi.fn(async () => {
+      throw new Error('the body must not be read')
+    })
+    Object.defineProperty(incoming, 'json', { value: json })
+
+    const response = await CREATE(incoming, { params: Promise.resolve({ id: TICKET, jobId: JOB }) })
+
+    expect(response.status).toBe(429)
+    expect(json).not.toHaveBeenCalled()
+    expect(createPartRequest).not.toHaveBeenCalled()
+  })
+
+  it('rejects streamed bodies over 16 KiB before the part-request domain', async () => {
+    const response = await CREATE(
+      request(JSON.stringify({ requestKey: REQ, description: 'x'.repeat(16 * 1024) })),
+      { params: Promise.resolve({ id: TICKET, jobId: JOB }) },
+    )
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({ error: 'payload_too_large' })
+    expect(createPartRequest).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -7,7 +7,7 @@ import {
   createSession,
   closeSession,
 } from '@/lib/db/queries'
-import { followUps } from '@/lib/db/schema'
+import { followUps, profiles } from '@/lib/db/schema'
 import { resolveFollowUp } from '@/lib/comeback/resolve'
 import type { OutcomePayload } from '@/lib/db/schema'
 
@@ -113,6 +113,51 @@ describe('resolveFollowUp', () => {
     expect(input.vehicleMake).toBe('Ford')
     expect(input.vehicleModel).toBe('F-150')
     expect(input.rootCause).toContain('Wastegate')
+    expect(input.shopId).toBe(tech.shopId)
+  })
+
+  it('uses the claimed follow-up shop even if the technician later moves shops', async () => {
+    const { shop, tech, followUp } = await seedClosedSessionWithSurfacedFollowUp(db)
+    const laterShop = await createShop(db, { name: 'Technician moved shop' })
+    await db.update(profiles).set({ shopId: laterShop.id }).where(eq(profiles.id, tech.id))
+    const decay = vi.fn().mockResolvedValue({ decayed: 1, retired: 0 })
+
+    await expect(resolveFollowUp({
+      db,
+      userId: tech.userId,
+      followUpId: followUp.id,
+      body: { comebackRecorded: true },
+      recordCorpusComeback: decay,
+    })).resolves.toEqual({ ok: true, comebackRecorded: true })
+
+    expect(decay).toHaveBeenCalledWith(db, expect.objectContaining({ shopId: shop.id }))
+    expect(decay).not.toHaveBeenCalledWith(db, expect.objectContaining({ shopId: laterShop.id }))
+  })
+
+  it('allows exactly one decay winner for concurrent resolutions of one follow-up', async () => {
+    const { tech, followUp } = await seedClosedSessionWithSurfacedFollowUp(db)
+    const decay = vi.fn().mockResolvedValue({ decayed: 1, retired: 0 })
+
+    const results = await Promise.all([
+      resolveFollowUp({
+        db,
+        userId: tech.userId,
+        followUpId: followUp.id,
+        body: { comebackRecorded: true, notes: 'first' },
+        recordCorpusComeback: decay,
+      }),
+      resolveFollowUp({
+        db,
+        userId: tech.userId,
+        followUpId: followUp.id,
+        body: { comebackRecorded: true, notes: 'second' },
+        recordCorpusComeback: decay,
+      }),
+    ])
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1)
+    expect(results.filter((result) => !result.ok)).toHaveLength(1)
+    expect(decay).toHaveBeenCalledTimes(1)
   })
 
   it('does not invoke decay when comebackRecorded=false', async () => {

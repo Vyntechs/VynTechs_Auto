@@ -4,7 +4,7 @@ import { Plus } from '@phosphor-icons/react/dist/ssr'
 import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
-import { listSessionsForShop } from '@/lib/db/queries'
+import { listSessionsForTech } from '@/lib/db/queries'
 import { AppHeader, Module, Pill } from '@/components/vt'
 import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
@@ -15,7 +15,7 @@ export default async function SessionsPage() {
   if (!ctx) redirect('/sign-in')
 
   const items = ctx.profile.shopId
-    ? await listSessionsForShop(db, ctx.profile.shopId)
+    ? await listSessionsForTech(db, ctx.profile.shopId, ctx.profile.id)
     : []
 
   const open = items.filter((s) => s.status === 'open')

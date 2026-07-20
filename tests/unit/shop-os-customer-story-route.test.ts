@@ -24,7 +24,6 @@ import {
   generateAndSaveCustomerStory,
   getCustomerStoryWorkspace,
   saveReviewedCustomerStory,
-  type CustomerStoryError,
 } from '@/lib/shop-os/customer-stories'
 
 const { GET, POST } = storyRoute
@@ -34,7 +33,6 @@ const TICKET_ID = '00000000-0000-4000-8000-000000000020'
 const JOB_ID = '00000000-0000-4000-8000-000000000030'
 const CLIENT_KEY = '00000000-0000-4000-8000-000000000050'
 const EVENT_ID = '00000000-0000-4000-8000-000000000060'
-const ARTIFACT_ID = '00000000-0000-4000-8000-000000000070'
 const profile = { id: '00000000-0000-4000-8000-000000000001', userId: '00000000-0000-4000-8000-000000000101' }
 const authContext = { profile, user: { id: profile.userId, email: 'tech@test.local' } }
 const actor = { profileId: profile.id }
@@ -100,53 +98,42 @@ describe('customer story route', () => {
     paywallMock.mockResolvedValue(null)
   })
 
-  it.each([
-    ['GET', () => GET(request('GET'), params()), workspaceMock],
-    ['POST', () => POST(request('POST', postBody), params()), generationMock],
-  ] as const)('%s authenticates before paywall or domain access', async (_method, invoke, domainMock) => {
+  it('retires AI generation before authentication, parsing, domain, or provider access', async () => {
     authMock.mockResolvedValue(null)
-    const response = await invoke()
+    const requests = [
+      request('POST', postBody),
+      request('POST', { ...postBody, clientKey: '00000000-0000-4000-8000-000000000051' }),
+      request('POST', undefined, 'not-json{'),
+    ]
+
+    for (const generationRequest of requests) {
+      const response = await POST(generationRequest, params())
+      expect(response.status).toBe(404)
+      await expect(response.json()).resolves.toEqual({ error: 'feature_unavailable' })
+    }
+    expect(authMock).not.toHaveBeenCalled()
+    expect(paywallMock).not.toHaveBeenCalled()
+    expect(generationMock).not.toHaveBeenCalled()
+    expect(providerMock).not.toHaveBeenCalled()
+  })
+
+  it('GET authenticates before paywall or domain access', async () => {
+    authMock.mockResolvedValue(null)
+    const response = await GET(request('GET'), params())
     expect(response.status).toBe(401)
     await expect(response.json()).resolves.toEqual({ error: 'unauthenticated' })
     expect(paywallMock).not.toHaveBeenCalled()
-    expect(domainMock).not.toHaveBeenCalled()
+    expect(workspaceMock).not.toHaveBeenCalled()
     expect(providerMock).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['GET', () => GET(request('GET'), params()), workspaceMock],
-    ['POST', () => POST(request('POST', undefined, 'not-json{'), params()), generationMock],
-  ] as const)('%s returns the paywall response before parsing or domain access', async (_method, invoke, domainMock) => {
+  it('GET returns the paywall response before domain access', async () => {
     paywallMock.mockResolvedValue(NextResponse.json({ error: 'paywall', reason: 'past_due' }, { status: 403 }))
-    const response = await invoke()
+    const response = await GET(request('GET'), params())
     expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual({ error: 'paywall', reason: 'past_due' })
     expect(paywallMock).toHaveBeenCalledWith({}, profile.userId)
-    expect(domainMock).not.toHaveBeenCalled()
-    expect(providerMock).not.toHaveBeenCalled()
-  })
-
-  it('rejects malformed JSON before domain or provider access', async () => {
-    const response = await POST(request('POST', undefined, 'not-json{'), params())
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
-    expect(generationMock).not.toHaveBeenCalled()
-    expect(providerMock).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    { ...postBody, extra: true },
-    { ...postBody, clientKey: 'not-a-uuid' },
-    { ...postBody, expectedStoryRevision: -1 },
-    { ...postBody, expectedStoryRevision: 1.5 },
-    { ...postBody, sourceEventIds: 'not-an-array' },
-    { ...postBody, sourceArtifactIds: [ARTIFACT_ID, ARTIFACT_ID] },
-    { ...postBody, sourceEventIds: Array.from({ length: 21 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`) },
-  ])('rejects a non-contract POST envelope before domain or provider access', async (body) => {
-    const response = await POST(request('POST', body), params())
-    expect(response.status).toBe(422)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_input' })
-    expect(generationMock).not.toHaveBeenCalled()
+    expect(workspaceMock).not.toHaveBeenCalled()
     expect(providerMock).not.toHaveBeenCalled()
   })
 
@@ -190,24 +177,6 @@ describe('customer story route', () => {
     expect(response.status).toBe(422)
     await expect(response.json()).resolves.toEqual({ error: 'invalid_input' })
     expect(workspaceMock).not.toHaveBeenCalled()
-  })
-
-  it('passes exact generation input and production provider dependency, then maps changed success', async () => {
-    generationMock.mockResolvedValue({ ok: true, changed: true, story, storyMeta, storyRevision: 1 })
-    const response = await POST(request('POST', postBody), params())
-    expect(generationMock).toHaveBeenCalledWith({}, {
-      actor, ticketId: TICKET_ID, jobId: JOB_ID, ...postBody,
-    }, { generateCustomerStory })
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ changed: true, story, storyMeta, storyRevision: 1 })
-  })
-
-  it('maps an exact committed retry as unchanged server truth without provider invocation', async () => {
-    generationMock.mockResolvedValue({ ok: true, changed: false, story, storyMeta, storyRevision: 1 })
-    const response = await POST(request('POST', postBody), params())
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ changed: false, story, storyMeta, storyRevision: 1 })
-    expect(providerMock).not.toHaveBeenCalled()
   })
 
   it('exports the reviewed-story PUT seam', () => {
@@ -285,24 +254,6 @@ describe('customer story route', () => {
     const response = await PUT(request('PUT', reviewBody), params())
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({ error: 'conflict', retryable: true })
-    expect(providerMock).not.toHaveBeenCalled()
-  })
-
-  it.each<[CustomerStoryError, number, boolean?]>([
-    ['invalid_input', 422],
-    ['not_found', 404],
-    ['forbidden', 403],
-    ['state_conflict', 409],
-    ['invalid_evidence', 422],
-    ['conflict', 409, false],
-    ['conflict', 409, true],
-    ['provider_timeout', 504],
-    ['provider_failed', 502],
-  ])('maps %s to HTTP %i with only the pinned safe body', async (error, status, retryable) => {
-    generationMock.mockResolvedValue({ ok: false, error, ...(retryable === undefined ? {} : { retryable }) })
-    const response = await POST(request('POST', postBody), params())
-    expect(response.status).toBe(status)
-    await expect(response.json()).resolves.toEqual(retryable ? { error, retryable: true } : { error })
     expect(providerMock).not.toHaveBeenCalled()
   })
 

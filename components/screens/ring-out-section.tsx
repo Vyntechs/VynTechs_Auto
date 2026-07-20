@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 import type { TicketPaymentMethod, TicketRingOut } from '@/lib/shop-os/ring-out'
@@ -60,6 +60,7 @@ export function RingOutSection({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const pendingPayment = useRef<{ fingerprint: string; requestKey: string } | null>(null)
 
   const { owed, payments } = ringOut
   const isClosed = ringOut.status !== 'open'
@@ -80,16 +81,22 @@ export function RingOutSection({
       setError('Enter an amount greater than zero.')
       return
     }
+    const normalizedNote = note.trim() ? note.trim() : null
+    const fingerprint = JSON.stringify([ticketId, amountCents, method, normalizedNote])
+    const requestKey = pendingPayment.current?.fingerprint === fingerprint
+      ? pendingPayment.current.requestKey
+      : crypto.randomUUID()
+    pendingPayment.current = { fingerprint, requestKey }
     setBusy(true)
     try {
       const res = await fetch(`/api/tickets/${ticketId}/payments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          requestKey: crypto.randomUUID(),
+          requestKey,
           amountCents,
           method,
-          note: note.trim() ? note.trim() : null,
+          note: normalizedNote,
         }),
       })
       const data = await res.json().catch(() => null)
@@ -98,6 +105,7 @@ export function RingOutSection({
         return
       }
       const next = data.ringOut as TicketRingOut
+      pendingPayment.current = null
       setRingOut(next)
       setNote('')
       setAmount(balanceDollars(next.balanceCents))

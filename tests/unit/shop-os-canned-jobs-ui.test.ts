@@ -6,6 +6,7 @@ import {
   parseCannedJobListResponse,
   parseCannedJobMutationResponse,
   parseManagementCannedJobMutationResponse,
+  isJobLimitReachedFailure,
   type CannedJobProjection,
 } from '@/lib/shop-os/canned-jobs-ui'
 
@@ -91,5 +92,11 @@ describe('canned job client contracts', () => {
     expect(classifyCannedJobFailure(409)).toMatch(/changed.*Refresh/i)
     expect(classifyCannedJobFailure(401)).toMatch(/Sign in/i)
     expect(classifyCannedJobFailure(500)).toMatch(/Could not update/i)
+  })
+
+  it('recognizes the terminal per-ticket job limit without calling it stale state', () => {
+    expect(isJobLimitReachedFailure(409, { error: 'job_limit_reached' })).toBe(true)
+    expect(isJobLimitReachedFailure(409, { error: 'conflict' })).toBe(false)
+    expect(isJobLimitReachedFailure(500, { error: 'job_limit_reached' })).toBe(false)
   })
 })

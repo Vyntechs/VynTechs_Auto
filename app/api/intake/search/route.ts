@@ -4,7 +4,9 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { searchIntake } from '@/lib/intake/search'
+import { isIntakeSearchQueryWithinLimits } from '@/lib/intake/search-limits'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
+import { rateLimitReject } from '@/lib/rate-limit'
 
 type Body = { q?: string }
 
@@ -30,6 +32,12 @@ export async function POST(req: Request) {
   }
 
   const q = typeof body.q === 'string' ? body.q : ''
+  if (!isIntakeSearchQueryWithinLimits(q)) {
+    return NextResponse.json({ error: 'query_too_complex' }, { status: 400 })
+  }
+
+  const limited = await rateLimitReject(db, `intake-search:${ctx.user.id}`, 60)
+  if (limited) return limited
 
   const start = performance.now()
 
