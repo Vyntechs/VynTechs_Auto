@@ -58,8 +58,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, currentProfileId, role, team }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; currentProfileId: string; role: string; team: unknown[] }) => (
-    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, currentProfileId, role, team, diagnosticsEntitled }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean }) => (
+    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
   ),
 }))
 
@@ -165,12 +165,21 @@ describe('TicketPage', () => {
   it('renders the ticket detail screen on success', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1; diagnostics true`)).toBeInTheDocument()
     expect(getShopTeamMock).toHaveBeenCalledWith({
       db: {},
       shopId: profile.shopId,
       currentUserId: profile.id,
     })
+  })
+
+  it('passes current diagnostics availability into the mounted repair order', async () => {
+    checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: false } })
+
+    render(await TicketPage(pageProps()))
+
+    expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1; diagnostics false`)).toBeInTheDocument()
+    expect(checkAccessMock).toHaveBeenCalledWith({}, profile.userId)
   })
 
   it('keeps the ticket readable but omits quote entry for an unsupported role', async () => {
@@ -181,7 +190,7 @@ describe('TicketPage', () => {
 
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote false; vendor setup false; actor ${profile.id}; role legacy_role; team 0`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote false; vendor setup false; actor ${profile.id}; role legacy_role; team 0; diagnostics true`)).toBeInTheDocument()
   })
 
   it.each<TicketDomainError>([

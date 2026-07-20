@@ -8,6 +8,7 @@ import {
   projectLivingTicketCommands,
   type LivingTicketCommand,
 } from '@/lib/shop-os/living-ticket'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
@@ -77,6 +78,7 @@ export function TicketDetailScreen({
   team = [],
   ringOut = null,
   partRequests = [],
+  diagnosticsEntitled = true,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
@@ -88,6 +90,7 @@ export function TicketDetailScreen({
   team?: TeamMember[]
   ringOut?: TicketRingOut | null
   partRequests?: TicketPartRequestView[]
+  diagnosticsEntitled?: boolean
 }): React.JSX.Element {
   const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
     () => new Map(),
@@ -137,6 +140,7 @@ export function TicketDetailScreen({
       assignmentState: assignmentOverrides.get(job.id)?.state,
     })),
     ringOut: ringOutState,
+    diagnosticsEntitled,
   })
   const allCommands = commands.primary
     ? [commands.primary, ...commands.secondary]
@@ -429,7 +433,13 @@ export function TicketDetailScreen({
                       >
                         {workCommandFor(allCommands, job.id)?.label}
                       </button>
-                    ) : simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
+                    ) : simpleWorkLink(
+                      ticket,
+                      job,
+                      currentProfileId,
+                      diagnosticsEntitled,
+                      assignmentOverrides.get(job.id),
+                    )}
                   </div>
                   {activeTool === null && currentProfileId && assignmentCommandFor(allCommands, job.id) && (
                     <TicketAssignmentControl
@@ -508,6 +518,7 @@ function simpleWorkLink(
   ticket: TicketDetail,
   job: DisplayJob,
   currentProfileId: string | null,
+  diagnosticsEntitled: boolean,
   assignmentOverride?: AssignmentOverride,
 ) {
   const assignedToCurrent = assignmentOverride
@@ -515,8 +526,11 @@ function simpleWorkLink(
     : job.assignedTechId === currentProfileId
   if (!ticket.customer || !ticket.vehicle || !currentProfileId
     || !assignedToCurrent
-    || (job.kind !== 'repair' && job.kind !== 'maintenance')
-    || job.sessionId !== null
+    || !canUseManualWork({
+      kind: job.kind,
+      sessionId: job.sessionId,
+      diagnosticsEntitled,
+    })
     || (ticket.status !== 'open' && job.workStatus !== 'done')
     || !['open', 'in_progress', 'done'].includes(job.workStatus)) return null
   const label = job.workStatus === 'done'

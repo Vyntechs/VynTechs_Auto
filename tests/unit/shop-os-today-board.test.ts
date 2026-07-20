@@ -18,6 +18,7 @@ const baseJob: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: null,
   workStatus: 'open',
+  approvalState: 'pending_quote',
   canClaim: true,
   assignmentState: 'unassigned',
   assignedTechName: null,

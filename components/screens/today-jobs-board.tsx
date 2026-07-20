@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TodayTicketJob } from '@/lib/tickets'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
@@ -506,6 +507,12 @@ function JobRow({
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
     : 'Vehicle not recorded'
+  const manualDiagnosticWorkAvailable = job.approvalState === 'approved'
+    && canUseManualWork({
+      kind: job.kind,
+      sessionId: job.sessionId,
+      diagnosticsEntitled: diagnosticsEntitled ?? true,
+    })
 
   return (
     <article
@@ -562,6 +569,8 @@ function JobRow({
           >
             View ticket
           </Link>
+        ) : manualDiagnosticWorkAvailable ? (
+          <SimpleWorkAction job={job} />
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
             job={job}

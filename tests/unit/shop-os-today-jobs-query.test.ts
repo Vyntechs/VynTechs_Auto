@@ -222,6 +222,7 @@ describe('Today ticket jobs read model', () => {
       requiredSkillTier: 2,
       sessionId: session.id,
       workStatus: 'open',
+      approvalState: 'pending_quote',
       canClaim: false,
       assignmentState: 'mine',
       assignedTechName: 'Taylor Tech',

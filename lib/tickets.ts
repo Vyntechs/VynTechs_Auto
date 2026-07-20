@@ -326,6 +326,7 @@ export type TodayTicketJob = {
   requiredSkillTier: number
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
   canClaim: boolean
   assignmentState: 'mine' | 'team' | 'unassigned'
   assignedTechName: string | null
@@ -429,6 +430,7 @@ export async function listTodayTicketJobs(
       persistedSessionId: ticketJobs.sessionId,
       accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
+      approvalState: ticketJobs.approvalState,
       createdByProfileId: tickets.createdByProfileId,
       assignedTechFullName: profiles.fullName,
       diagnosticStartState: ticketJobs.diagnosticStartState,
@@ -509,6 +511,7 @@ export async function listTodayTicketJobs(
       requiredSkillTier: row.requiredSkillTier,
       sessionId: row.accessibleSessionId,
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
+      approvalState: row.approvalState,
       canClaim:
         row.assignedTechId === null &&
         row.workStatus === 'open' &&

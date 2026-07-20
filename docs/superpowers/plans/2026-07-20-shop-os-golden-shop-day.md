@@ -95,19 +95,21 @@ Expected: diagnostics-off sessionless work passes; entitled or session-backed di
 - Modify: `app/(app)/tickets/[id]/page.tsx`
 - Modify: `components/screens/ticket-detail.tsx`
 - Modify: `components/screens/today-jobs-board.tsx`
+- Modify: `lib/tickets.ts`
 - Test: `tests/unit/shop-os-ticket-page.test.tsx`
 - Test: `tests/unit/shop-os-ticket-detail.test.tsx`
 - Test: `tests/unit/shop-os-today-jobs-board.test.tsx`
+- Test: `tests/unit/shop-os-today-jobs-query.test.ts`
 
 **Interfaces:**
 - Consumes: server-resolved `diagnosticsEntitled` and the shared manual-work policy.
 - Produces: one `Open work`/`Start work` path for an approved assigned diagnostics-off sessionless job; `Record findings` remains the pre-approval move.
 
-- [ ] **Step 1: Write RED UI tests**
+- [x] **Step 1: Write RED UI tests**
 
 Prove the ticket page resolves entitlements and passes them to the mounted screen. For a diagnostics-off assigned job, assert `Record findings` before approval and `Open work`/`Start work` after approval. Repeat with entitlement true and session present to prove no manual-work entrance appears. Preserve the no-diagnostics/no-media copy contract.
 
-- [ ] **Step 2: Prove RED**
+- [x] **Step 2: Prove RED**
 
 Run:
 
@@ -117,13 +119,13 @@ pnpm vitest run tests/unit/shop-os-ticket-page.test.tsx tests/unit/shop-os-ticke
 
 Expected: the approved diagnostics-off job still renders `Record findings` and the living projector has no work command.
 
-- [ ] **Step 3: Wire server truth into existing surfaces**
+- [x] **Step 3: Wire server truth into existing surfaces**
 
-Resolve `hasDiagnostics()` in the ticket page beside the existing ticket/team/ring-out reads. Pass the boolean to `TicketDetailScreen`, then to `projectLivingTicketCommands()`. In Today, use the shared policy to choose `SimpleWorkAction` for an approved assigned sessionless diagnostics-off job; otherwise retain `DiagnosticAction` and its manual-findings link.
+Reuse the authoritative diagnostics entitlement already returned by `checkAccess()` in the ticket page, avoiding a second entitlement read. Pass the boolean to `TicketDetailScreen`, then to `projectLivingTicketCommands()`. Add approval state to the bounded Today read model, then use the shared policy to choose `SimpleWorkAction` for an approved assigned sessionless diagnostics-off job; otherwise retain `DiagnosticAction` and its manual-findings link.
 
 No route or new screen is added. Both surfaces link to the existing `/tickets/[id]/jobs/[jobId]/work` fallback.
 
-- [ ] **Step 4: Prove responsive and authority contracts and commit**
+- [x] **Step 4: Prove responsive and authority contracts and commit**
 
 Run:
 

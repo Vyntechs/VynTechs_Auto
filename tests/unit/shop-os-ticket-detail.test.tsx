@@ -475,6 +475,49 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
   })
 
+  it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={3}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      diagnosticsEntitled={false}
+      ticket={ticket({ jobs: [job({
+        id: 'manual-diagnostic',
+        assignedTechId: 'tech-1',
+        approvalState: 'approved',
+      })] })}
+    />)
+
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /diagnosis/i })).toBeNull()
+  })
+
+  it('keeps entitled and session-backed diagnostics out of manual work', () => {
+    const diagnostic = job({
+      id: 'entitled-diagnostic',
+      assignedTechId: 'tech-1',
+      approvalState: 'approved',
+    })
+    const { rerender } = render(<TicketDetailScreen
+      role="tech"
+      skillTier={3}
+      currentProfileId="tech-1"
+      diagnosticsEntitled
+      ticket={ticket({ jobs: [diagnostic] })}
+    />)
+    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+
+    rerender(<TicketDetailScreen
+      role="tech"
+      skillTier={3}
+      currentProfileId="tech-1"
+      diagnosticsEntitled={false}
+      ticket={ticket({ jobs: [{ ...diagnostic, sessionId: 'session-1' }] })}
+    />)
+    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+  })
+
   it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {
     render(<TicketDetailScreen currentProfileId="tech-1" ticket={ticket({
       vehicle: null,
