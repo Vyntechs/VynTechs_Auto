@@ -99,11 +99,11 @@
 
 ### Task 5 — Converge, publish, and continue
 
-- [ ] Run the affected suite with at most two workers.
-- [ ] Run `pnpm exec tsc --noEmit` and `pnpm build`.
-- [ ] Review the full diff for tenant/capability expansion, response leakage, duplicate lanes, stale overrides, pagination starvation, diagnostics/media drift, and extra pages.
-- [ ] Run independent static, security, and runtime reviews in parallel; consolidate once, repair once, focused re-review once.
-- [ ] Update Row 52 and `SHOP_OS_DRIVER_STATE.md` with exact proof.
+- [x] Run the affected suite with at most two workers.
+- [x] Run `pnpm exec tsc --noEmit` and `pnpm build`.
+- [x] Review the full diff for tenant/capability expansion, response leakage, duplicate lanes, stale overrides, pagination starvation, diagnostics/media drift, and extra pages.
+- [x] Run independent static, security, and runtime reviews in parallel; consolidate once, repair once, focused re-review once.
+- [x] Update Row 52 and `SHOP_OS_DRIVER_STATE.md` with exact proof.
 - [ ] Publish and merge only after green GitHub/Vercel gates, then verify production health.
 
 **Stop if:** tenant-safe assignee projection needs schema; literal unbounded/exhaustive team pagination becomes required; local reconciliation would expose full ticket/contact/VIN/session data; diagnostics behavior changes; or a new blocking architecture defect appears after focused re-review.
