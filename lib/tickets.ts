@@ -353,6 +353,7 @@ function safeDiagnosticStartErrorCode(value: string | null): TodayDiagnosticStar
 export type TodayTicketJobs = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
+  createdJobs: TodayTicketJob[]
   linkedSessionIds: string[]
   hasMore?: boolean
 }
@@ -362,6 +363,7 @@ const TODAY_JOB_LIMIT = 200
 const emptyTodayTicketJobs = (): TodayTicketJobs => ({
   myJobs: [],
   openJobs: [],
+  createdJobs: [],
   linkedSessionIds: [],
 })
 
@@ -393,6 +395,10 @@ export async function listTodayTicketJobs(
         eq(ticketJobs.workStatus, 'open'),
       )
     : claimable
+  const createdActiveWork = and(
+    eq(tickets.createdByProfileId, actor.profileId),
+    inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
+  )
 
   const rows = await db
     .select({
@@ -410,6 +416,7 @@ export async function listTodayTicketJobs(
       persistedSessionId: ticketJobs.sessionId,
       accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
+      createdByProfileId: tickets.createdByProfileId,
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
     })
@@ -441,6 +448,7 @@ export async function listTodayTicketJobs(
             inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
           ),
           visibleOpenWork,
+          createdActiveWork,
         ),
       ),
     )
@@ -454,6 +462,7 @@ export async function listTodayTicketJobs(
 
   const myJobs: TodayTicketJob[] = []
   const openJobs: TodayTicketJob[] = []
+  const createdJobs: TodayTicketJob[] = []
   const linkedSessionIds: string[] = []
 
   const hasMore = rows.length > TODAY_JOB_LIMIT
@@ -482,11 +491,18 @@ export async function listTodayTicketJobs(
     }
 
     if (row.assignedTechId === actor.profileId) myJobs.push(job)
-    else openJobs.push(job)
+    else if (row.assignedTechId === null) openJobs.push(job)
+    else if (row.createdByProfileId === actor.profileId) createdJobs.push(job)
     if (row.persistedSessionId) linkedSessionIds.push(row.persistedSessionId)
   }
 
-  return { myJobs, openJobs, linkedSessionIds, ...(hasMore ? { hasMore: true } : {}) }
+  return {
+    myJobs,
+    openJobs,
+    createdJobs,
+    linkedSessionIds,
+    ...(hasMore ? { hasMore: true } : {}),
+  }
 }
 
 export function ticketDomainStatus(

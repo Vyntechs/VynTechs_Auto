@@ -207,7 +207,9 @@ describe('Today ticket jobs read model', () => {
     expect(result.openJobs.map((job) => job.title)).toEqual([
       'Tier one open maintenance',
       'Tier two open diagnosis',
+      'Tier three hidden repair',
     ])
+    expect(result.createdJobs).toEqual([])
     expect(result.myJobs[0]).toEqual({
       id: uuid(41),
       ticketId,
@@ -296,7 +298,12 @@ describe('Today ticket jobs read model', () => {
 
     const result = await listTodayTicketJobs(db, { actor })
 
-    expect(result).toEqual({ myJobs: [], openJobs: [], linkedSessionIds: [] })
+    expect(result).toEqual({
+      myJobs: [],
+      openJobs: [],
+      createdJobs: [],
+      linkedSessionIds: [],
+    })
     expect(JSON.stringify(result)).not.toMatch(
       /Taylor Tech|Hidden Technician|00000000-0000-4000-8000-00000000010[12]|North Shop|South Shop|private@example|PRIVATEVIN|PRIVATE|engine detail|Persisted concern|Hidden concern/,
     )
@@ -342,7 +349,7 @@ describe('Today ticket jobs read model', () => {
     expect(JSON.stringify(unknownErrorResult)).not.toContain('provider_secret')
   })
 
-  it('gates all jobs to active same-shop Shop roles and gives null-tier actors assigned jobs but no Open Jobs', async () => {
+  it('gates all jobs to active same-shop Shop roles and keeps creator work visible to null-tier actors', async () => {
     await db.insert(ticketJobs).values([
       {
         shopId,
@@ -366,7 +373,7 @@ describe('Today ticket jobs read model', () => {
       listTodayTicketJobs(db, { actor: { ...actor, skillTier: null } }),
     ).resolves.toMatchObject({
       myJobs: [{ title: 'Assigned job' }],
-      openJobs: [],
+      openJobs: [{ title: 'Open job', canClaim: false }],
     })
 
     const deniedActors: TicketActor[] = [
@@ -379,9 +386,77 @@ describe('Today ticket jobs read model', () => {
       await expect(listTodayTicketJobs(db, { actor: deniedActor })).resolves.toEqual({
         myJobs: [],
         openJobs: [],
+        createdJobs: [],
         linkedSessionIds: [],
       })
     }
+  })
+
+  it('keeps newly created work discoverable when the creator cannot claim it', async () => {
+    await db.insert(ticketJobs).values({
+      shopId,
+      ticketId,
+      title: 'Tier two inspection created by parts',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      workStatus: 'open',
+    })
+
+    const partsResult = await listTodayTicketJobs(db, {
+      actor: { ...actor, role: 'parts', skillTier: null },
+    })
+    const juniorTechResult = await listTodayTicketJobs(db, {
+      actor: { ...actor, role: 'tech', skillTier: 1 },
+    })
+
+    expect(partsResult.openJobs).toEqual([
+      expect.objectContaining({
+        title: 'Tier two inspection created by parts',
+        canClaim: false,
+      }),
+    ])
+    expect(juniorTechResult.openJobs).toEqual([
+      expect.objectContaining({
+        title: 'Tier two inspection created by parts',
+        canClaim: false,
+      }),
+    ])
+  })
+
+  it('keeps preassigned work in a creator-only recovery lane', async () => {
+    const [assignee] = await db
+      .insert(profiles)
+      .values({
+        id: uuid(4),
+        userId: uuid(104),
+        shopId,
+        fullName: 'Morgan Technician',
+        role: 'tech',
+        skillTier: 2,
+      })
+      .returning()
+    await db.insert(ticketJobs).values({
+      shopId,
+      ticketId,
+      title: 'Preassigned cooling-system inspection',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      assignedTechId: assignee.id,
+      workStatus: 'open',
+    })
+
+    const result = await listTodayTicketJobs(db, {
+      actor: { ...actor, role: 'advisor', skillTier: null },
+    })
+
+    expect(result.myJobs).toEqual([])
+    expect(result.openJobs).toEqual([])
+    expect(result.createdJobs).toEqual([
+      expect.objectContaining({
+        title: 'Preassigned cooling-system inspection',
+        canClaim: false,
+      }),
+    ])
   })
 
   it('keeps unassigned shop work visible to a tierless Owner without making it claimable', async () => {
