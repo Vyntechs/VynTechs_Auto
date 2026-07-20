@@ -49,20 +49,29 @@ vi.mock('@/lib/shop-os/part-requests', () => ({
   listPartRequestsForTicket: vi.fn(async () => []),
 }))
 
+vi.mock('@/lib/intake/team', () => ({
+  getShopTeam: vi.fn(async () => ({
+    members: [{ id: 'tech-1', name: 'Toni Tech', skillTier: 3, isCurrentUser: false }],
+    workloadFailed: false,
+  })),
+}))
+
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, currentProfileId }: { ticket: TicketDetail; canBuildQuote: boolean; currentProfileId: string }) => (
-    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; actor {currentProfileId}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, currentProfileId, role, team }: { ticket: TicketDetail; canBuildQuote: boolean; currentProfileId: string; role: string; team: unknown[] }) => (
+    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; actor {currentProfileId}; role {role}; team {team.length}</div>
   ),
 }))
 
 import TicketPage from '@/app/(app)/tickets/[id]/page'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
+import { getShopTeam } from '@/lib/intake/team'
 import { getTicketDetail } from '@/lib/tickets'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
 const checkAccessMock = vi.mocked(checkAccess)
 const getTicketMock = vi.mocked(getTicketDetail)
+const getShopTeamMock = vi.mocked(getShopTeam)
 
 const TICKET_ID = '00000000-0000-0000-0000-000000000101'
 const profile = {
@@ -155,7 +164,12 @@ describe('TicketPage', () => {
   it('renders the ticket detail screen on success', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote true; actor ${profile.id}`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote true; actor ${profile.id}; role advisor; team 1`)).toBeInTheDocument()
+    expect(getShopTeamMock).toHaveBeenCalledWith({
+      db: {},
+      shopId: profile.shopId,
+      currentUserId: profile.id,
+    })
   })
 
   it('keeps the ticket readable but omits quote entry for an unsupported role', async () => {
@@ -166,7 +180,7 @@ describe('TicketPage', () => {
 
     render(await TicketPage(pageProps()))
 
-    expect(screen.getByText(`Ticket screen 101; quote false; actor ${profile.id}`)).toBeInTheDocument()
+    expect(screen.getByText(`Ticket screen 101; quote false; actor ${profile.id}; role legacy_role; team 0`)).toBeInTheDocument()
   })
 
   it.each<TicketDomainError>([

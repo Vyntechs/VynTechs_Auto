@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -362,5 +363,144 @@ describe('TicketDetailScreen', () => {
     })} />)
     expect(screen.getByText('Stale open work').closest('li')).not.toHaveTextContent('Open work')
     expect(screen.getByRole('link', { name: 'View work history' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/closed-history/work')
+  })
+
+  it('assigns an open job inside its ledger row and reconciles only returned truth', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'team',
+        assignedTechName: 'Angel Rivera',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      currentProfileName="Avery Advisor"
+      team={[{ id: 'tech-1', name: 'Angel Rivera', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({
+        jobs: [
+          job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2 }),
+          job({ id: 'other-open', title: 'Replace wipers', kind: 'maintenance', requiredSkillTier: 1 }),
+        ],
+      })}
+    />)
+
+    const target = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    const untouched = screen.getByRole('heading', { name: 'Replace wipers' }).closest('li')!
+    await user.click(within(target).getByRole('button', { name: 'Assign work' }))
+    await user.click(within(target).getByRole('button', { name: /Angel Rivera.*B-tech/i }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ action: 'reassign', assignedTechId: 'tech-1' }),
+      }),
+    )
+    expect(within(target).getByText('Assigned · Angel Rivera')).toBeInTheDocument()
+    expect(within(untouched).getByText('Open — no technician assigned')).toBeInTheDocument()
+    expect(within(target).queryByRole('button', { name: 'Assign work' })).toBeNull()
+    expect(target).toHaveFocus()
+  })
+
+  it('lets an eligible technician claim in one tap without exposing the shop roster', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'mine',
+        assignedTechName: 'Toni Tech',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      team={[{ id: 'other-tech', name: 'Not visible', skillTier: 3, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2, approvalState: 'approved' })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({ body: JSON.stringify({ action: 'claim' }) }),
+    )
+    expect(screen.getByText('Assigned · Toni Tech')).toBeInTheDocument()
+    expect(screen.queryByText('Not visible')).toBeNull()
+  })
+
+  it('requires an explicit compact confirmation before a below-tier handoff', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'team',
+        assignedTechName: 'Casey Climber',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="owner"
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      team={[{ id: 'tech-1', name: 'Casey Climber', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({ id: 'repair-open', kind: 'repair', requiredSkillTier: 3 })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Assign work' }))
+    await user.click(screen.getByRole('button', { name: /Casey Climber.*B-tech/i }))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByText(/requires an A-tech/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Assign anyway' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'reassign',
+          assignedTechId: 'tech-1',
+          confirmBelowTier: true,
+        }),
+      }),
+    )
+  })
+
+  it('keeps the row mounted and shows only the safe winner after a claim race', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      error: 'assignment_conflict',
+      currentAssignee: { fullName: 'Morgan Master' },
+    }, { status: 409 })))
+
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={3}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      ticket={ticket({ jobs: [job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2, approvalState: 'approved' })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    expect(screen.getByRole('heading', { name: 'Install lift kit' })).toBeInTheDocument()
+    expect(screen.getByText('Assigned · Morgan Master')).toBeInTheDocument()
+    expect(screen.getByText('Morgan Master claimed it first. The repair order is current.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
   })
 })

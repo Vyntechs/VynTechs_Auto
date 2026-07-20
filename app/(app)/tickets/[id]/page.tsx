@@ -3,7 +3,13 @@ import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
-import { canBuildQuotes, canCloseTickets, canPlacePartsOrders } from '@/lib/shop-os/capabilities'
+import { getShopTeam } from '@/lib/intake/team'
+import {
+  canAssignWork,
+  canBuildQuotes,
+  canCloseTickets,
+  canPlacePartsOrders,
+} from '@/lib/shop-os/capabilities'
 import { getTicketRingOut } from '@/lib/shop-os/ring-out'
 import { listPartRequestsForTicket } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
@@ -29,6 +35,14 @@ export default async function TicketPage({
   const result = await getTicketDetail(db, { actor, ticketId: id })
   if (!result.ok) notFound()
 
+  const team = canAssignWork(ctx.profile.role) && ctx.profile.shopId
+    ? (await getShopTeam({
+        db,
+        shopId: ctx.profile.shopId,
+        currentUserId: ctx.profile.id,
+      })).members
+    : []
+
   // Getting paid is an advisor/owner surface — techs never see money. Only load
   // the ring-out state when the viewer can act on it.
   let ringOut = null
@@ -47,6 +61,10 @@ export default async function TicketPage({
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
       currentProfileId={ctx.profile.id}
+      currentProfileName={ctx.profile.fullName}
+      role={ctx.profile.role}
+      skillTier={ctx.profile.skillTier}
+      team={team}
       ringOut={ringOut}
       partRequests={partRequests}
     />

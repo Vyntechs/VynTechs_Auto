@@ -21,18 +21,18 @@
 
 ### Task 1 — Project the one honest next move
 
-- [ ] Write RED table tests across tech/advisor/parts/owner, ticket state, assignment, approval, and work state.
-- [ ] Add a pure projector that returns one primary command plus eligible secondary commands without inventing authority.
-- [ ] Prefer, in order: resolve assignment → finish quote/approval → perform assigned approved work → ring out/close → read-only current truth.
-- [ ] Keep terminal tickets read-only and keep diagnostics unavailable.
+- [x] Write RED table tests across tech/advisor/parts/owner, ticket state, assignment, approval, and work state.
+- [x] Add a pure projector that returns one primary command plus eligible secondary commands without inventing authority.
+- [x] Prefer, in order: resolve assignment → finish quote/approval → perform assigned approved work → ring out/close → read-only current truth.
+- [x] Keep terminal tickets read-only and keep diagnostics unavailable.
 - [ ] Render the command as a quiet 44px action on the existing ticket, with no route change.
 
 ### Task 2 — Handoff in place
 
-- [ ] Load only the active same-shop wrenching roster for advisor/owner.
-- [ ] Open a compact assignee chooser inside the selected ledger row.
-- [ ] Claim, unassign, and reassign through the existing assignment route, including explicit below-tier confirmation.
-- [ ] Reconcile only that job from the narrow assignment envelope; preserve focus, conflicts, and the rest of the repair order.
+- [x] Load only the active same-shop wrenching roster for advisor/owner.
+- [x] Open a compact assignee chooser inside the selected ledger row.
+- [x] Claim, unassign, and reassign through the existing assignment route, including explicit below-tier confirmation.
+- [x] Reconcile only that job from the narrow assignment envelope; preserve focus, conflicts, and the rest of the repair order.
 
 ### Task 3 — Quote in place
 

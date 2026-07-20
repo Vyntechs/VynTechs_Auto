@@ -1,9 +1,18 @@
+'use client'
+
 import Link from 'next/link'
+import { useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
+import type { TeamMember } from '@/lib/intake/team'
+import {
+  projectLivingTicketCommands,
+  type LivingTicketCommand,
+} from '@/lib/shop-os/living-ticket'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
 import { RingOutSection } from './ring-out-section'
+import { TicketAssignmentControl } from './ticket-assignment-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import styles from './ticket-detail.module.css'
 
@@ -52,15 +61,27 @@ export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
   currentProfileId = null,
+  currentProfileName = null,
+  role = '',
+  skillTier = null,
+  team = [],
   ringOut = null,
   partRequests = [],
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
   currentProfileId?: string | null
+  currentProfileName?: string | null
+  role?: string
+  skillTier?: number | null
+  team?: TeamMember[]
   ringOut?: TicketRingOut | null
   partRequests?: TicketPartRequestView[]
 }): React.JSX.Element {
+  const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
+    () => new Map(),
+  )
+  const jobRefs = useRef(new Map<string, HTMLLIElement>())
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
@@ -68,6 +89,21 @@ export function TicketDetailScreen({
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
+  const commands = projectLivingTicketCommands({
+    role,
+    profileId: currentProfileId,
+    skillTier,
+    ticketStatus: ticket.status,
+    jobs: ticket.jobs.map((job) => ({
+      ...job,
+      workStatus: assignmentOverrides.get(job.id)?.workStatus ?? job.workStatus,
+      assignmentState: assignmentOverrides.get(job.id)?.state,
+    })),
+    ringOut,
+  })
+  const allCommands = commands.primary
+    ? [commands.primary, ...commands.secondary]
+    : commands.secondary
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -211,7 +247,10 @@ export function TicketDetailScreen({
 
           <ol className={styles.ledger}>
             {ticket.jobs.map((job, index) => (
-              <li key={job.id} className={styles.job}>
+              <li key={job.id} className={styles.job} tabIndex={-1} ref={(element) => {
+                if (element) jobRefs.current.set(job.id, element)
+                else jobRefs.current.delete(job.id)
+              }}>
                 <div className={styles.railMark} aria-hidden="true">
                   <span>{String(index + 1).padStart(2, '0')}</span>
                 </div>
@@ -234,9 +273,57 @@ export function TicketDetailScreen({
                   </div>
 
                   <div className={styles.assignmentRow}>
-                    <p>{assigneeLabel(job)}</p>
-                    {simpleWorkLink(ticket, job, currentProfileId)}
+                    <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
+                    {simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
                   </div>
+                  {currentProfileId && assignmentCommandFor(allCommands, job.id) && (
+                    <TicketAssignmentControl
+                      ticketId={ticket.id}
+                      job={{
+                        id: job.id,
+                        requiredSkillTier: job.requiredSkillTier,
+                        assignedTechId: assignmentOverrides.has(job.id)
+                          ? assignmentOverrides.get(job.id)?.assignedTechId ?? null
+                          : job.assignedTechId,
+                      }}
+                      command={assignmentCommandFor(allCommands, job.id)!}
+                      team={team}
+                      currentProfileId={currentProfileId}
+                      onApplied={(assignment) => {
+                        const selected = team.find((member) => member.id === assignment.assignedTechId)
+                        const assignedTechName = assignment.assignedTechName
+                          ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
+                          ?? null
+                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                          state: assignment.state,
+                          assignedTechId: assignment.assignedTechId,
+                          assignedTechName,
+                          workStatus: assignment.workStatus,
+                          notice: assignment.state === 'unassigned'
+                            ? 'Work is open.'
+                            : assignment.state === 'mine'
+                              ? 'Work is yours.'
+                              : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
+                        }))
+                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                      }}
+                      onConflict={({ assignedTechName }) => {
+                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                          state: 'team',
+                          assignedTechId: null,
+                          assignedTechName,
+                          workStatus: 'open',
+                          notice: `${assignedTechName} claimed it first. The repair order is current.`,
+                        }))
+                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                      }}
+                    />
+                  )}
+                  {assignmentOverrides.get(job.id)?.notice && (
+                    <p className={styles.assignmentNotice} role="status" aria-live="polite">
+                      {assignmentOverrides.get(job.id)?.notice}
+                    </p>
+                  )}
                 </div>
               </li>
             ))}
@@ -257,9 +344,13 @@ function simpleWorkLink(
   ticket: TicketDetail,
   job: TicketDetail['jobs'][number],
   currentProfileId: string | null,
+  assignmentOverride?: AssignmentOverride,
 ) {
+  const assignedToCurrent = assignmentOverride
+    ? assignmentOverride.state === 'mine'
+    : job.assignedTechId === currentProfileId
   if (!ticket.customer || !ticket.vehicle || !currentProfileId
-    || job.assignedTechId !== currentProfileId
+    || !assignedToCurrent
     || (job.kind !== 'repair' && job.kind !== 'maintenance')
     || job.sessionId !== null
     || (ticket.status !== 'open' && job.workStatus !== 'done')
@@ -317,8 +408,34 @@ function formatCents(cents: number): string {
   }).format(cents / 100)
 }
 
-function assigneeLabel(job: TicketDetail['jobs'][number]): string {
+type AssignmentOverride = {
+  state: 'mine' | 'team' | 'unassigned'
+  assignedTechId: string | null
+  assignedTechName: string | null
+  workStatus: 'open' | 'in_progress' | 'blocked'
+  notice: string
+}
+
+function assigneeLabel(
+  job: TicketDetail['jobs'][number],
+  override?: AssignmentOverride,
+): string {
+  if (override?.state === 'unassigned') return 'Open — no technician assigned'
+  if (override && override.assignedTechName) return `Assigned · ${override.assignedTechName}`
+  if (override) return 'Assigned technician · Name not provided'
   if (!job.assignedTechId) return 'Open — no technician assigned'
   if (job.assignedTech?.fullName) return `Assigned · ${job.assignedTech.fullName}`
   return 'Assigned technician · Name not provided'
+}
+
+function assignmentCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'assign' | 'claim' | 'handoff' }) | null {
+  const command = commands.find((candidate) => candidate.jobId === jobId && (
+    candidate.kind === 'assign' || candidate.kind === 'claim' || candidate.kind === 'handoff'
+  ))
+  return command
+    ? command as LivingTicketCommand & { kind: 'assign' | 'claim' | 'handoff' }
+    : null
 }
