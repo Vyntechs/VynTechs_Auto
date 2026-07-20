@@ -483,6 +483,7 @@ export async function listTodayTicketJobs(
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
       canClaim:
         row.assignedTechId === null &&
+        row.workStatus === 'open' &&
         actor.skillTier !== null &&
         [1, 2, 3].includes(actor.skillTier) &&
         row.requiredSkillTier <= actor.skillTier,
@@ -491,7 +492,7 @@ export async function listTodayTicketJobs(
     }
 
     if (row.assignedTechId === actor.profileId) myJobs.push(job)
-    else if (row.assignedTechId === null) openJobs.push(job)
+    else if (row.assignedTechId === null && row.workStatus === 'open') openJobs.push(job)
     else if (row.createdByProfileId === actor.profileId) createdJobs.push(job)
     if (row.persistedSessionId) linkedSessionIds.push(row.persistedSessionId)
   }

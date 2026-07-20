@@ -132,6 +132,21 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
 
+  it('fails closed when an open-queue row is not actually open', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[{ ...unlinkedDiagnostic, workStatus: 'blocked', canClaim: true }]}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-42',
+    )
+  })
+
   it('uses honest persisted-data fallbacks without inventing customer or vehicle facts', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
 

@@ -438,7 +438,7 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.canClaim ? (
+        {mode === 'open' && job.workStatus === 'open' && job.canClaim ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
             type="button"

@@ -459,6 +459,31 @@ describe('Today ticket jobs read model', () => {
     ])
   })
 
+  it.each(['in_progress', 'blocked'] as const)(
+    'keeps unassigned creator work that is %s view-only',
+    async (workStatus) => {
+      await db.insert(ticketJobs).values({
+        shopId,
+        ticketId,
+        title: `Creator recovery ${workStatus}`,
+        kind: 'repair',
+        requiredSkillTier: 1,
+        workStatus,
+      })
+
+      const result = await listTodayTicketJobs(db, { actor })
+
+      expect(result.openJobs).toEqual([])
+      expect(result.createdJobs).toEqual([
+        expect.objectContaining({
+          title: `Creator recovery ${workStatus}`,
+          workStatus,
+          canClaim: false,
+        }),
+      ])
+    },
+  )
+
   it('keeps unassigned shop work visible to a tierless Owner without making it claimable', async () => {
     await db.insert(ticketJobs).values({
       shopId,

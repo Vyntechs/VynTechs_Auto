@@ -23,7 +23,7 @@
 - **Task 2 complete:** unassigned creator work remains visible even above the creator's tier or without a tier; work assigned to someone else appears in a quiet `Created by me` recovery lane with ticket-view authority only.
 - **Task 3 complete:** Today, the intake layout, and the counter API now share `canAssignWork()`; advisor and owner pass, while tech and parts continue to fail closed.
 - **Scope held:** no schema, migration, new page, general add-job route, cache, gesture, diagnostic/media path, external integration, or production mutation.
-- **Proof:** 10 affected files / 125 tests, TypeScript, production build, and clean diff checks pass. Final independent review remains the branch-convergence gate.
+- **Proof:** 10 affected files / 128 tests, TypeScript, production build, and clean diff checks pass. Independent static, security, and runtime reviews pass after one consolidated repair.
 
 ---
 
@@ -40,7 +40,7 @@
 - Consumes: `ticketJobs.workStatus` values `open | in_progress | blocked | done | canceled`.
 - Produces: `TicketDomainError` value `unfinished_work`, mapped through the existing ring-out API and rendered as calm corrective copy.
 
-- [ ] **Step 1: Write failing domain tests**
+- [x] **Step 1: Write failing domain tests**
 
 Add one parameterized test that creates an otherwise closable ticket containing each active status and proves closure is refused:
 
@@ -65,13 +65,13 @@ it.each(['open', 'in_progress', 'blocked'] as const)(
 
 Extend the successful zero-balance test with one `done` and one `canceled` job so both terminal statuses remain closable.
 
-- [ ] **Step 2: Run the focused domain test and prove RED**
+- [x] **Step 2: Run the focused domain test and prove RED**
 
 Run: `pnpm vitest run tests/unit/shop-os-ring-out.test.ts --maxWorkers=2 --reporter=dot`
 
 Expected: the three new cases fail because `closeTicket()` currently closes them.
 
-- [ ] **Step 3: Add the minimal locked guard**
+- [x] **Step 3: Add the minimal locked guard**
 
 Add `unfinished_work` to `TicketDomainError`. Inside the existing ticket transaction, after locking the ticket and before computing money, read at most one active job:
 
@@ -90,7 +90,7 @@ if (unfinishedJob) return { ok: false as const, error: 'unfinished_work' }
 
 Keep this inside the existing transaction so work cannot be created or changed between the decision and close.
 
-- [ ] **Step 4: Add the user-facing refusal**
+- [x] **Step 4: Add the user-facing refusal**
 
 Map `unfinished_work` in `humanizeError()`:
 
@@ -101,7 +101,7 @@ case 'unfinished_work':
 
 Add a component test that submits close, receives `unfinished_work`, and asserts the exact message without navigation or refresh.
 
-- [ ] **Step 5: Run focused proof and commit**
+- [x] **Step 5: Run focused proof and commit**
 
 Run:
 
@@ -130,7 +130,7 @@ Expected: both files pass and the commit contains only terminal closeout safety.
 - Consumes: immutable `tickets.createdByProfileId` plus active job state.
 - Produces: `TodayTicketJobs.createdJobs` for work created by the actor but assigned elsewhere; unassigned created work remains in `openJobs`. No new page.
 
-- [ ] **Step 1: Write three failing recovery tests**
+- [x] **Step 1: Write three failing recovery tests**
 
 Using the existing Today fixtures, prove both recovery cases:
 
@@ -151,13 +151,13 @@ it('keeps a null-tier creator\'s unassigned open job discoverable', async () => 
 
 Add the equivalent Tier-1 tech / Tier-2 work test. Add a third case where an advisor creates work pre-assigned to another profile and prove it appears in `createdJobs`, not `myJobs` or `openJobs`. In every case, assert the job is viewable without expanding claim or work authority.
 
-- [ ] **Step 2: Run the focused query test and prove RED**
+- [x] **Step 2: Run the focused query test and prove RED**
 
 Run: `pnpm vitest run tests/unit/shop-os-today-jobs-query.test.ts --maxWorkers=2 --reporter=dot`
 
 Expected: all three recovery cases fail because the current projection excludes creator-only work.
 
-- [ ] **Step 3: Add the creator recovery projection**
+- [x] **Step 3: Add the creator recovery projection**
 
 Add `createdJobs` to `TodayTicketJobs` and its empty value. Compose creator visibility without changing claim authorization:
 
@@ -175,13 +175,13 @@ Include `createdOpenWork` as a separate branch in the query's outer `or()`. Sele
 
 ```ts
 if (row.assignedTechId === actor.profileId) myJobs.push(job)
-else if (row.assignedTechId === null) openJobs.push(job)
+else if (row.assignedTechId === null && row.workStatus === 'open') openJobs.push(job)
 else if (row.createdByProfileId === actor.profileId) createdJobs.push(job)
 ```
 
-The existing `canClaim` calculation remains tier-based and unchanged. Render `createdJobs` as a third Today section labeled `Created by me`; its only row action is `View ticket`. Include it in Today empty-state calculations.
+Keep `canClaim` tier-based and require persisted `workStatus === 'open'`. Classify unassigned non-open creator work into `createdJobs`, never `openJobs`. Render that third Today section as `Created by me`; its only row action is `View ticket`. Include it in Today empty-state calculations.
 
-- [ ] **Step 4: Prove tenant, status, and capability boundaries still hold**
+- [x] **Step 4: Prove tenant, status, and capability boundaries still hold**
 
 Run:
 
@@ -210,7 +210,7 @@ Expected: unassigned and pre-assigned creator recovery passes; cross-shop, close
 - Consumes: `canAssignWork(role)` capability authority.
 - Produces: unchanged `/intake` page and `/api/tickets/counter` contract for advisors and owners.
 
-- [ ] **Step 1: Write failing advisor-access tests**
+- [x] **Step 1: Write failing advisor-access tests**
 
 Add assertions that an active advisor sees `New work order`, the server layout returns its children for an advisor, and the API reaches `createCounterTicket()` for an advisor. Preserve tech and parts 404 behavior.
 
@@ -221,13 +221,13 @@ expect(canAssignWork('tech')).toBe(false)
 expect(canAssignWork('parts')).toBe(false)
 ```
 
-- [ ] **Step 2: Run the three focused files and prove RED**
+- [x] **Step 2: Run the three focused files and prove RED**
 
 Run: `pnpm vitest run tests/unit/today-home.test.tsx tests/unit/shop-os-counter-ticket-route.test.ts tests/unit/shop-os-counter-intake-access.test.tsx --maxWorkers=2 --reporter=dot`
 
 Expected: advisor UI/page/API access assertions fail under the current owner string comparisons.
 
-- [ ] **Step 3: Replace scattered role checks with the capability helper**
+- [x] **Step 3: Replace scattered role checks with the capability helper**
 
 Use `canAssignWork(ctx.profile.role)` consistently:
 
@@ -245,7 +245,7 @@ if (!canAssignWork(ctx.profile.role)) {
 }
 ```
 
-- [ ] **Step 4: Run focused access proof and commit**
+- [x] **Step 4: Run focused access proof and commit**
 
 Run:
 
@@ -271,7 +271,7 @@ Expected: advisor and owner pass; tech and parts continue to fail closed.
 - Consumes: the three verified commits above.
 - Produces: a durable checkpoint that names the next slice: role-shaped queue lenses and precise local mutation updates.
 
-- [ ] **Step 1: Run the affected regression set**
+- [x] **Step 1: Run the affected regression set**
 
 Run:
 
@@ -284,11 +284,11 @@ git diff --check
 
 Expected: all focused files, TypeScript, and production build pass.
 
-- [ ] **Step 2: Review the complete Wave 1 diff**
+- [x] **Step 2: Review the complete Wave 1 diff**
 
 Confirm there is no schema/DDL, new page, general add-job route, diagnostics/media path, cross-tenant disclosure, claim expansion, or unrelated refactor.
 
-- [ ] **Step 3: Record the durable checkpoint and commit**
+- [x] **Step 3: Record the durable checkpoint and commit**
 
 Update the active plan with fresh row numbers after Row 50, mark the production security row complete through PR #176, and record Wave 1 proof. Update `SHOP_OS_DRIVER_STATE.md` with the broader outcome, exact proof, next safe move, gates, lanes, and stop condition.
 
