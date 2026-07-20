@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parsePartRequestListResponse, type PartRequestView } from './part-requests-ui'
 
 const uuid = z.uuid().transform((value) => value.toLowerCase())
 const timestamp = z.string().datetime({ offset: true })
@@ -42,6 +43,19 @@ export type SimpleWorkEscalationView = z.infer<typeof escalationJob>
 export function parseSimpleWorkWorkspaceResponse(value: unknown): SimpleWorkWorkspaceView | null {
   const parsed = z.strictObject({ workspace }).safeParse(value)
   return parsed.success ? parsed.data.workspace : null
+}
+
+export function parseInlineSimpleWorkResponse(value: unknown): {
+  workspace: SimpleWorkWorkspaceView
+  partRequests: PartRequestView[]
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const keys = Object.keys(value).sort()
+  if (keys.length !== 2 || keys[0] !== 'partRequests' || keys[1] !== 'workspace') return null
+  const envelope = value as { workspace?: unknown; partRequests?: unknown }
+  const parsedWorkspace = parseSimpleWorkWorkspaceResponse({ workspace: envelope.workspace })
+  const partRequests = parsePartRequestListResponse({ requests: envelope.partRequests })
+  return parsedWorkspace && partRequests ? { workspace: parsedWorkspace, partRequests } : null
 }
 
 export function parseSimpleWorkMutationResponse(

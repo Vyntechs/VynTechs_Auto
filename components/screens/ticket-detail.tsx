@@ -11,6 +11,10 @@ import {
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
+import type {
+  SimpleWorkEscalationView,
+  SimpleWorkProjectionView,
+} from '@/lib/shop-os/simple-work-ui'
 import { RingOutSection } from './ring-out-section'
 import {
   InlineQuoteWorkspace,
@@ -18,6 +22,7 @@ import {
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
 import { TicketPartRequests } from './ticket-part-requests'
+import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './ticket-detail.module.css'
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -90,9 +95,16 @@ export function TicketDetailScreen({
   const [quoteOverrides, setQuoteOverrides] = useState<ReadonlyMap<string, QuoteOverride>>(
     () => new Map(),
   )
-  const [activeTool, setActiveTool] = useState<'quote' | null>(null)
+  const [workOverrides, setWorkOverrides] = useState<ReadonlyMap<string, WorkOverride>>(
+    () => new Map(),
+  )
+  const [escalatedJobs, setEscalatedJobs] = useState<SimpleWorkEscalationView[]>([])
+  const [activeTool, setActiveTool] = useState<
+    { kind: 'quote' } | { kind: 'work'; jobId: string } | null
+  >(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
   const quoteOpenerRef = useRef<HTMLButtonElement>(null)
+  const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
@@ -100,9 +112,14 @@ export function TicketDetailScreen({
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
-  const displayedJobs = ticket.jobs.map((job) => ({
+  const baseJobs: DisplayJob[] = [
+    ...ticket.jobs,
+    ...escalatedJobs.map((job) => ({ ...job, assignedTech: null })),
+  ]
+  const displayedJobs = baseJobs.map((job) => ({
     ...job,
-    workStatus: quoteOverrides.get(job.id)?.workStatus
+    workStatus: workOverrides.get(job.id)?.workStatus
+      ?? quoteOverrides.get(job.id)?.workStatus
       ?? assignmentOverrides.get(job.id)?.workStatus
       ?? job.workStatus,
     approvalState: quoteOverrides.get(job.id)?.approvalState ?? job.approvalState,
@@ -170,8 +187,8 @@ export function TicketDetailScreen({
                 ref={quoteOpenerRef}
                 type="button"
                 className={styles.quoteAction}
-                aria-expanded={activeTool === 'quote'}
-                onClick={() => setActiveTool((current) => current === 'quote' ? null : 'quote')}
+                aria-expanded={activeTool?.kind === 'quote'}
+                onClick={() => setActiveTool((current) => current?.kind === 'quote' ? null : { kind: 'quote' })}
               >
                 {quoteCommand.label}
               </button>
@@ -186,7 +203,7 @@ export function TicketDetailScreen({
           </div>
         )}
 
-        {activeTool === 'quote' && (
+        {activeTool?.kind === 'quote' && (
           <InlineQuoteWorkspace
             ticket={{
               id: ticket.id,
@@ -202,8 +219,42 @@ export function TicketDetailScreen({
             canCreateVendorAccount={canCreateVendorAccount}
             onProjection={applyQuoteProjection}
             onClose={() => {
-              setActiveTool(null)
+                      setActiveTool(null)
               setTimeout(() => quoteOpenerRef.current?.focus(), 0)
+            }}
+          />
+        )}
+
+        {activeTool?.kind === 'work' && ticket.customer && ticket.vehicle && (
+          <InlineWorkWorkspace
+            ticket={{
+              id: ticket.id,
+              number: ticket.ticketNumber,
+              customerName: ticket.customer.name,
+              vehicle: vehicleName(ticket.vehicle),
+            }}
+            jobId={activeTool.jobId}
+            onProjection={(work) => {
+              const jobId = activeTool.jobId
+              setWorkOverrides((current) => {
+                const existing = current.get(jobId)
+                if (existing?.workStatus === work.status) return current
+                return new Map(current).set(jobId, { workStatus: work.status })
+              })
+            }}
+            onEscalation={(job) => {
+              setEscalatedJobs((current) => (
+                current.some((existing) => existing.id === job.id) ? current : [...current, job]
+              ))
+              setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+            }}
+            onClose={() => {
+              const jobId = activeTool.jobId
+              setActiveTool(null)
+              setTimeout(() => {
+                const target = workOpenerRefs.current.get(jobId) ?? jobRefs.current.get(jobId)
+                target?.focus()
+              }, 0)
             }}
           />
         )}
@@ -311,7 +362,7 @@ export function TicketDetailScreen({
               <p className={styles.eyebrow}>Persisted work</p>
               <h2 id="jobs-heading">Job ledger</h2>
             </div>
-            <span className={styles.jobCount}>{ticket.jobs.length} {ticket.jobs.length === 1 ? 'line' : 'lines'}</span>
+            <span className={styles.jobCount}>{displayedJobs.length} {displayedJobs.length === 1 ? 'line' : 'lines'}</span>
           </div>
 
           <ol className={styles.ledger}>
@@ -343,7 +394,24 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
+                    {workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
+                      <button
+                        ref={(element) => {
+                          if (element) workOpenerRefs.current.set(job.id, element)
+                          else workOpenerRefs.current.delete(job.id)
+                        }}
+                        type="button"
+                        className={styles.inlineAction}
+                        aria-expanded={activeTool?.kind === 'work' && activeTool.jobId === job.id}
+                        onClick={() => setActiveTool((current) => (
+                          current?.kind === 'work' && current.jobId === job.id
+                            ? null
+                            : { kind: 'work', jobId: job.id }
+                        ))}
+                      >
+                        {workCommandFor(allCommands, job.id)?.label}
+                      </button>
+                    ) : simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
                   </div>
                   {currentProfileId && assignmentCommandFor(allCommands, job.id) && (
                     <TicketAssignmentControl
@@ -411,7 +479,7 @@ export function TicketDetailScreen({
 
 function simpleWorkLink(
   ticket: TicketDetail,
-  job: TicketDetail['jobs'][number],
+  job: DisplayJob,
   currentProfileId: string | null,
   assignmentOverride?: AssignmentOverride,
 ) {
@@ -490,8 +558,24 @@ type QuoteOverride = {
   approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
 }
 
+type WorkOverride = {
+  workStatus: SimpleWorkProjectionView['status']
+}
+
+type DisplayJob = Pick<TicketDetail['jobs'][number],
+  | 'id'
+  | 'title'
+  | 'kind'
+  | 'requiredSkillTier'
+  | 'assignedTechId'
+  | 'assignedTech'
+  | 'sessionId'
+  | 'workStatus'
+  | 'approvalState'
+>
+
 function assigneeLabel(
-  job: TicketDetail['jobs'][number],
+  job: DisplayJob,
   override?: AssignmentOverride,
 ): string {
   if (override?.state === 'unassigned') return 'Open — no technician assigned'
@@ -512,4 +596,14 @@ function assignmentCommandFor(
   return command
     ? command as LivingTicketCommand & { kind: 'assign' | 'claim' | 'handoff' }
     : null
+}
+
+function workCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'work' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'work' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'work' } : null
 }

@@ -13,6 +13,7 @@ import {
   retainEscalationAttempt,
   type EscalationAttempt,
   type SimpleWorkProjectionView,
+  type SimpleWorkEscalationView,
   type SimpleWorkWorkspaceView,
 } from '@/lib/shop-os/simple-work-ui'
 import type { PartRequestView } from '@/lib/shop-os/part-requests-ui'
@@ -23,12 +24,24 @@ type Props = {
   ticket: { id: string; number: number; customerName: string; vehicle: string }
   initialWorkspace: SimpleWorkWorkspaceView
   initialPartRequests?: PartRequestView[]
+  embedded?: boolean
+  onClose?: () => void
+  onProjection?: (work: SimpleWorkProjectionView) => void
+  onEscalation?: (job: SimpleWorkEscalationView) => void
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
 type Pending = 'clock' | 'note' | 'complete' | 'escalation' | null
 
-export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartRequests = [] }: Props) {
+export function SimpleWorkWorkspace({
+  ticket,
+  initialWorkspace,
+  initialPartRequests = [],
+  embedded = false,
+  onClose,
+  onProjection,
+  onEscalation,
+}: Props) {
   const router = useRouter()
   const [workspace, setWorkspace] = useState(initialWorkspace)
   const [note, setNote] = useState(initialWorkspace.workNotes ?? '')
@@ -52,9 +65,14 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartReque
       updatedAt: work.updatedAt,
     }))
     setNote(work.workNotes ?? '')
+    onProjection?.(work)
   }
 
   function stalePage() {
+    if (embedded) {
+      setNotice({ kind: 'error', text: 'This work changed or is no longer assigned to you. The repair order is still open.' })
+      return
+    }
     router.replace(`/tickets/${ticket.id}`)
   }
 
@@ -147,6 +165,7 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartReque
       if (!result) throw new Error('escalation_failed')
       escalationAttempt.current = null
       setCreatedConcern(true)
+      onEscalation?.(result.job)
       setNotice({ kind: 'status', text: 'Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.' })
     } catch {
       setNotice({ kind: 'error', text: 'Not saved — check your connection and retry.' })
@@ -158,17 +177,24 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartReque
   const completeReady = workspace.workStatus === 'in_progress'
     && Boolean(workspace.workNotes?.trim())
 
+  const Root = embedded ? 'section' : 'main'
   return (
-    <main className={`app ${styles.screen}`}>
-      <AppHeader
+    <Root
+      className={embedded ? styles.embeddedScreen : `app ${styles.screen}`}
+      {...(embedded ? { 'aria-label': 'Work workspace' } : {})}
+    >
+      {!embedded && <AppHeader
         title={`Work order ${String(ticket.number).padStart(6, '0')}`}
         meta={<span>{ticket.customerName} · {ticket.vehicle}</span>}
         back={{ href: `/tickets/${ticket.id}`, label: 'Ticket' }}
-      />
+      />}
       <div className={styles.content}>
         <header className={styles.hero}>
-          <p className={styles.eyebrow}>{workspace.kind === 'repair' ? 'Repair' : 'Maintenance'} · assigned work</p>
-          <h1>{workspace.title}</h1>
+          <div>
+            <p className={styles.eyebrow}>{workspace.kind === 'repair' ? 'Repair' : 'Maintenance'} · assigned work</p>
+            <h1>{workspace.title}</h1>
+          </div>
+          {embedded && <button className={styles.closeEmbedded} type="button" onClick={onClose}>Close work</button>}
         </header>
 
         {workspace.workStatus === 'done' ? (
@@ -266,9 +292,9 @@ export function SimpleWorkWorkspace({ ticket, initialWorkspace, initialPartReque
           role={notice.kind === 'error' ? 'alert' : 'status'} aria-live={notice.kind === 'error' ? 'assertive' : 'polite'}>
           {notice.text}
         </p>}
-        <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>View repair order</Link>
+        {!embedded && <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>View repair order</Link>}
       </div>
-    </main>
+    </Root>
   )
 }
 

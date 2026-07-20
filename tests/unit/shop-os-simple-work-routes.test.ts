@@ -9,11 +9,13 @@ vi.mock('@/lib/shop-os/simple-work', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/shop-os/simple-work')>()
   return { ...actual, getSimpleWorkWorkspace: vi.fn(), mutateSimpleWork: vi.fn() }
 })
+vi.mock('@/lib/shop-os/part-requests', () => ({ listPartRequestsForJob: vi.fn() }))
 
 import { GET, POST } from '@/app/api/tickets/[id]/jobs/[jobId]/work/route'
 import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
+import { listPartRequestsForJob } from '@/lib/shop-os/part-requests'
 
 const TICKET_ID = '00000000-0000-4000-8000-000000000020'
 const JOB_ID = '00000000-0000-4000-8000-000000000030'
@@ -70,6 +72,29 @@ describe('Shop OS simple work routes', () => {
       changed: true,
       work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:00:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:00:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:00:00.000Z' },
     })
+  })
+
+  it('loads assigned work and its text-only part requests in one bounded GET', async () => {
+    const workspace = {
+      id: JOB_ID, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
+      startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
+      updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+    } as const
+    const partRequests = [{
+      id: '00000000-0000-4000-8000-000000000080', jobId: JOB_ID,
+      description: 'Track bar', preference: null, quantity: 1, status: 'requested',
+      requestedAt: '2026-07-11T12:01:00.000Z', resolvedAt: null,
+    }] as const
+    vi.mocked(getSimpleWorkWorkspace).mockResolvedValue({ ok: true, workspace })
+    vi.mocked(listPartRequestsForJob).mockResolvedValue([...partRequests])
+
+    const response = await GET(new Request('http://localhost'), params)
+
+    expect(listPartRequestsForJob).toHaveBeenCalledWith({}, {
+      shopId: profile.shopId,
+      jobId: JOB_ID,
+    })
+    expect(await response.json()).toEqual({ workspace, partRequests })
   })
 
   it.each([

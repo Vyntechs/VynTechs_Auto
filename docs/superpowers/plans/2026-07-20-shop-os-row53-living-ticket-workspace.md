@@ -43,10 +43,10 @@
 
 ### Task 4 — Perform in place
 
-- [ ] Lazy-load the existing assigned simple-work projection and text-only part requests.
-- [ ] Add an embedded mode to the existing work surface; preserve clocks, notes, completion, escalation idempotency, and no-media behavior.
-- [ ] Publish work-state changes back to the ledger and advance the next move without a page refresh.
-- [ ] Keep diagnostic jobs dormant and preserve existing work deep links.
+- [x] Lazy-load the existing assigned simple-work projection and text-only part requests.
+- [x] Add an embedded mode to the existing work surface; preserve clocks, notes, completion, escalation idempotency, and no-media behavior.
+- [x] Publish work-state changes back to the ledger and advance the next move without a page refresh.
+- [x] Keep diagnostic jobs dormant and preserve existing work deep links.
 
 ### Task 5 — Ring out and close in place
 

@@ -53,6 +53,31 @@ describe('simple work workspace', () => {
     }))
   })
 
+  it('embeds the existing work surface and publishes confirmed work without a page shell', async () => {
+    const onClose = vi.fn()
+    const onProjection = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ changed: true, work: { status: 'in_progress', workNotes: null, startedAt: '2026-07-11T12:01:00.000Z', completedAt: null, clockedOnSince: '2026-07-11T12:01:00.000Z', activeSeconds: 0, updatedAt: '2026-07-11T12:01:00.000Z' } }),
+    }))
+
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={base}
+      embedded
+      onClose={onClose}
+      onProjection={onProjection}
+    />)
+
+    expect(screen.queryByText('Work order 000007')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'View repair order' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+    await screen.findByRole('heading', { name: 'Work in progress' })
+    expect(onProjection).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'in_progress' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
@@ -80,17 +105,27 @@ describe('simple work workspace', () => {
   })
 
   it('sends found work to be quoted and reports its unassigned truth', async () => {
+    const onEscalation = vi.fn()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true, status: 201,
       json: async () => ({ changed: true, job: { id: REQUEST, title: 'Found: steering clunk', kind: 'repair', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null } }),
     }))
-    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, workStatus: 'in_progress' }}
+      onEscalation={onEscalation}
+    />)
     expect(screen.getByLabelText('Concern')).not.toBeVisible()
     fireEvent.click(screen.getByText('Found another concern'))
     fireEvent.change(screen.getByLabelText('Concern'), { target: { value: 'Steering clunk' } })
     fireEvent.change(screen.getByLabelText('Required skill tier'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send to be quoted' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.')
+    expect(onEscalation).toHaveBeenCalledWith(expect.objectContaining({
+      id: REQUEST,
+      title: 'Found: steering clunk',
+      approvalState: 'pending_quote',
+    }))
     expect(screen.queryByText(/needs.*approval/i)).toBeNull()
   })
 

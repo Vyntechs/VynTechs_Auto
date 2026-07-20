@@ -7,6 +7,7 @@ import {
   mutateSimpleWork,
   type SimpleWorkFailure,
 } from '@/lib/shop-os/simple-work'
+import { listPartRequestsForJob } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
 
 type RouteContext = { params: Promise<{ id: string; jobId: string }> }
@@ -42,9 +43,12 @@ export async function GET(_req: Request, { params }: RouteContext) {
     ticketId: id,
     jobId,
   })
-  return result.ok
-    ? NextResponse.json({ workspace: result.workspace }, { status: 200 })
-    : failureResponse(result)
+  if (!result.ok) return failureResponse(result)
+  const partRequests = await listPartRequestsForJob(db, {
+    shopId: ctx.profile.shopId,
+    jobId,
+  })
+  return NextResponse.json({ workspace: result.workspace, partRequests }, { status: 200 })
 }
 
 export async function POST(req: Request, { params }: RouteContext) {

@@ -43,6 +43,54 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
   ),
 }))
 
+vi.mock('@/components/screens/inline-work-workspace', () => ({
+  InlineWorkWorkspace: ({ onClose, onProjection, onEscalation }: {
+    onClose: () => void
+    onProjection: (work: {
+      status: 'done'
+      workNotes: string
+      startedAt: string
+      completedAt: string
+      clockedOnSince: null
+      activeSeconds: number
+      updatedAt: string
+    }) => void
+    onEscalation: (job: {
+      id: string
+      title: string
+      kind: 'repair'
+      requiredSkillTier: number
+      assignedTechId: null
+      workStatus: 'open'
+      approvalState: 'pending_quote'
+      sessionId: null
+    }) => void
+  }) => (
+    <section aria-label="Inline work workspace">
+      <button type="button" onClick={() => onProjection({
+        status: 'done',
+        workNotes: 'Installed and torqued.',
+        startedAt: '2026-07-11T12:00:00.000Z',
+        completedAt: '2026-07-11T13:00:00.000Z',
+        clockedOnSince: null,
+        activeSeconds: 3600,
+        updatedAt: '2026-07-11T13:00:00.000Z',
+      })}>Publish work state</button>
+      <button type="button" onClick={() => onEscalation({
+        id: 'found-job',
+        title: 'Found: steering clunk',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: null,
+        workStatus: 'open',
+        approvalState: 'pending_quote',
+        sessionId: null,
+      })}>Publish found concern</button>
+      <button type="button" onClick={onClose}>Close work</button>
+    </section>
+  ),
+}))
+
 const timestamp = new Date('2026-07-10T14:30:00Z')
 
 type TicketJob = TicketDetail['jobs'][number]
@@ -388,6 +436,41 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('link', { name: 'Open work' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/repair-open/work')
     expect(screen.getByRole('link', { name: 'View work history' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/maintenance-done/work')
     expect(screen.getByText('Other tech work').closest('li')).not.toHaveTextContent('Continue work')
+  })
+
+  it('performs assigned approved work in place and folds confirmed completion into the ledger', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      ticket={ticket({ jobs: [job({
+        id: 'repair-open',
+        title: 'Install lift kit',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: 'tech-1',
+        approvalState: 'approved',
+      })] })}
+    />)
+
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Start work' }))
+    expect(screen.getByRole('region', { name: 'Inline work workspace' })).toBeInTheDocument()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
+    expect(screen.getByRole('heading', { name: 'Found: steering clunk' })).toBeInTheDocument()
+    expect(screen.getByText('2 lines')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Publish work state' }))
+    expect(screen.getByText('Work · Done')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^(Start|Continue) work$/ })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(screen.queryByRole('region', { name: 'Inline work workspace' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
   })
 
   it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {
