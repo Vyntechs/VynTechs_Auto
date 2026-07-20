@@ -72,6 +72,7 @@ export default async function TicketPage({
       team={team}
       ringOut={ringOut}
       partRequests={partRequests}
+      diagnosticsEntitled={access.entitlements.diagnostics}
     />
   )
 }

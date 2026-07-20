@@ -80,6 +80,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'session-linked',
       workStatus: 'in_progress',
+      approvalState: 'pending_quote',
       canClaim: false,
       assignmentState: 'mine',
       assignedTechName: 'Taylor Tech',
@@ -98,6 +99,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 1,
       sessionId: null,
       workStatus: 'open',
+      approvalState: 'pending_quote',
       canClaim: true,
       assignmentState: 'unassigned',
       assignedTechName: null,
@@ -106,6 +108,7 @@ const todayJobs: TodayTicketJobs = {
   ],
   createdJobs: [],
   teamJobs: [],
+  partsJobs: [],
   linkedSessionIds: ['session-linked'],
 }
 
@@ -181,6 +184,7 @@ describe('TodayHome', () => {
       openJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
       createdJobs: [],
       teamJobs: [],
+      partsJobs: [],
       linkedSessionIds: [],
     }
 
@@ -272,6 +276,7 @@ describe('TodayHome', () => {
         createdByMe: true,
       }],
       teamJobs: [],
+      partsJobs: [],
       linkedSessionIds: [],
     }
 
@@ -315,6 +320,7 @@ describe('TodayHome', () => {
         openJobs: [todayJobs.openJobs[0]],
         createdJobs: [],
         teamJobs: [],
+        partsJobs: [],
         linkedSessionIds: [],
       }
       const emptyJobs: TodayTicketJobs = {
@@ -322,6 +328,7 @@ describe('TodayHome', () => {
         openJobs: [],
         createdJobs: [],
         teamJobs: [],
+        partsJobs: [],
         linkedSessionIds: [],
       }
       const { rerender } = render(

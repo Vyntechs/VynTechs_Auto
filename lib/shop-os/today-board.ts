@@ -1,6 +1,6 @@
 import type { TodayTicketJob } from '@/lib/tickets'
 
-export type TodayBoardLane = 'mine' | 'open' | 'team' | 'created' | 'hidden'
+export type TodayBoardLane = 'mine' | 'open' | 'team' | 'created' | 'parts' | 'hidden'
 
 export type AssignmentEnvelope = {
   ticketId: string
@@ -72,6 +72,7 @@ export type TodayBoardLanes = {
   open: TodayTicketJob[]
   team: TodayTicketJob[]
   created: TodayTicketJob[]
+  parts: TodayTicketJob[]
 }
 
 type TodayBoardProjectionInput = {
@@ -79,6 +80,7 @@ type TodayBoardProjectionInput = {
   openJobs: TodayTicketJob[]
   teamJobs: TodayTicketJob[]
   createdJobs: TodayTicketJob[]
+  partsJobs?: TodayTicketJob[]
   canDispatchWork: boolean
   overrides: ReadonlyMap<string, TodayJobOverride>
 }
@@ -112,7 +114,9 @@ export function createTodayJobOverride(
 export function placeTodayJob(
   job: TodayTicketJob,
   canDispatchWork: boolean,
+  needsParts = false,
 ): TodayBoardLane {
+  if (needsParts) return 'parts'
   if (job.assignmentState === 'mine') return 'mine'
   if (job.assignmentState === 'team') {
     if (canDispatchWork) return 'team'
@@ -130,6 +134,7 @@ export function projectTodayBoard(input: TodayBoardProjectionInput): TodayBoardL
     ...input.openJobs,
     ...input.teamJobs,
     ...input.createdJobs,
+    ...(input.partsJobs ?? []),
   ]) {
     jobs.set(job.id, job)
   }
@@ -140,9 +145,10 @@ export function projectTodayBoard(input: TodayBoardProjectionInput): TodayBoardL
     jobs.set(jobId, { ...current, ...override.after })
   }
 
-  const lanes: TodayBoardLanes = { mine: [], open: [], team: [], created: [] }
+  const lanes: TodayBoardLanes = { mine: [], open: [], team: [], created: [], parts: [] }
+  const partsJobIds = new Set((input.partsJobs ?? []).map((job) => job.id))
   for (const job of jobs.values()) {
-    const lane = placeTodayJob(job, input.canDispatchWork)
+    const lane = placeTodayJob(job, input.canDispatchWork, partsJobIds.has(job.id))
     if (lane !== 'hidden') lanes[lane].push(job)
   }
   return lanes

@@ -34,6 +34,7 @@ const linkedDiagnostic: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: 'session-41',
   workStatus: 'in_progress',
+  approvalState: 'pending_quote',
   canClaim: false,
   assignmentState: 'mine',
   assignedTechName: 'Taylor Tech',
@@ -887,6 +888,24 @@ describe('TodayJobsBoard persisted ledger', () => {
   })
 })
 
+describe('TodayJobsBoard parts handoff', () => {
+  it('mounts requested parts in one Today lane that jumps to the repair-order control', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[]}
+        partsJobs={[unlinkedDiagnostic]}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Parts needed' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Source parts' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-42#parts-requested-heading',
+    )
+  })
+})
+
 describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
   it('renders the legacy Start diagnosis action only when explicitly enabled', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
@@ -908,6 +927,27 @@ describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
     expect(link).toHaveAttribute('href', '/tickets/ticket-42/quote')
     expect(screen.queryByRole('button', { name: 'Start diagnosis' })).not.toBeInTheDocument()
     expect(screen.queryByText('Diagnose with AI — add-on')).not.toBeInTheDocument()
+  })
+
+  it('opens approved sessionless manual diagnostic work without reopening the engine', () => {
+    render(
+      <TodayJobsBoardComponent
+        myJobs={[{
+          ...unlinkedDiagnostic,
+          customerName: 'Golden Customer',
+          vehicle: { year: 2020, make: 'Ford', model: 'F-150' },
+          approvalState: 'approved',
+        }]}
+        openJobs={[]}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Open work' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-42/jobs/job-unlinked/work',
+    )
+    expect(screen.queryByRole('button', { name: 'Start diagnosis' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Record findings' })).toBeNull()
   })
 
   it('fails closed for linked diagnostics too: no Open diagnosis without the add-on', () => {

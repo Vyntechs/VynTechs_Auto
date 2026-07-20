@@ -123,6 +123,7 @@ const jobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'linked-open',
       workStatus: 'open',
+      approvalState: 'pending_quote',
       canClaim: true,
       assignmentState: 'unassigned',
       assignedTechName: null,
@@ -131,6 +132,7 @@ const jobs: TodayTicketJobs = {
   ],
   createdJobs: [],
   teamJobs: [],
+  partsJobs: [],
   linkedSessionIds: ['linked-open', 'linked-closed'],
 }
 

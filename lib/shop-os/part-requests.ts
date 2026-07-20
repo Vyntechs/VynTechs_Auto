@@ -2,7 +2,9 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import { jobPartRequests, profiles, ticketJobs, tickets } from '@/lib/db/schema'
+import { hasDiagnostics } from '@/lib/entitlements'
 import { canPlacePartsOrders, isShopRole } from '@/lib/shop-os/capabilities'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 
 // A tech's "I need this part" relay to the parts person. Deliberately money-free
 // and separate from the quote: a request never carries cost or price and never
@@ -70,7 +72,7 @@ function safeRequest(row: RequestRow): SafePartRequest {
 
 async function loadActiveActor(db: AppDb, actor: { profileId: string; shopId: string }) {
   const [row] = await db
-    .select({ id: profiles.id, role: profiles.role })
+    .select({ id: profiles.id, role: profiles.role, isComp: profiles.isComp })
     .from(profiles)
     .where(and(
       eq(profiles.id, actor.profileId),
@@ -129,6 +131,7 @@ export async function createPartRequest(
         id: ticketJobs.id,
         assignedTechId: ticketJobs.assignedTechId,
         kind: ticketJobs.kind,
+        sessionId: ticketJobs.sessionId,
         approvalState: ticketJobs.approvalState,
         workStatus: ticketJobs.workStatus,
       })
@@ -140,9 +143,16 @@ export async function createPartRequest(
       ))
       .limit(1)
       .for('update')
+    const diagnosticsEntitled = job?.kind === 'diagnostic'
+      ? await hasDiagnostics(transactionDb, { shopId, isComp: actor.isComp })
+      : false
     if (!job
       || job.assignedTechId !== actor.id
-      || (job.kind !== 'repair' && job.kind !== 'maintenance')
+      || !canUseManualWork({
+        kind: job.kind,
+        sessionId: job.sessionId,
+        diagnosticsEntitled,
+      })
       || job.approvalState !== 'approved'
       || job.workStatus !== 'in_progress') {
       return failure('not_found')

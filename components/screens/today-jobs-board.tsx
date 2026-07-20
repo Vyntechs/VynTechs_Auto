@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TodayTicketJob } from '@/lib/tickets'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
@@ -18,6 +19,7 @@ type Props = {
   openJobs: TodayTicketJob[]
   teamJobs?: TodayTicketJob[]
   createdJobs?: TodayTicketJob[]
+  partsJobs?: TodayTicketJob[]
   canDispatchWork?: boolean
   hasMore?: boolean
   // Resolved server-side release availability. Fail closed so a missing prop
@@ -58,6 +60,7 @@ export function TodayJobsBoard({
   openJobs,
   teamJobs = [],
   createdJobs = [],
+  partsJobs = [],
   canDispatchWork = false,
   hasMore = false,
   diagnosticsEntitled = false,
@@ -84,9 +87,10 @@ export function TodayJobsBoard({
     openJobs,
     teamJobs,
     createdJobs,
+    partsJobs,
     canDispatchWork,
     overrides: jobOverrides,
-  }), [myJobs, openJobs, teamJobs, createdJobs, canDispatchWork, jobOverrides])
+  }), [myJobs, openJobs, teamJobs, createdJobs, partsJobs, canDispatchWork, jobOverrides])
 
   useEffect(() => {
     if (!focusRequest) return
@@ -339,6 +343,7 @@ export function TodayJobsBoard({
         board.open.length === 0 &&
         board.team.length === 0 &&
         board.created.length === 0 &&
+        board.parts.length === 0 &&
         !announcement
       }
     >
@@ -388,6 +393,13 @@ export function TodayJobsBoard({
           mode="created"
         />
       )}
+      {board.parts.length > 0 && (
+        <JobSection
+          label="Parts needed"
+          jobs={board.parts}
+          mode="parts"
+        />
+      )}
       {hasMore && (
         <p className={styles.announcement} role="status">
           Showing the first 200 active jobs. Assigned work appears first; remaining work stays stored.
@@ -425,7 +437,7 @@ function JobSection({
 }: {
   label: string
   jobs: TodayTicketJob[]
-  mode: 'mine' | 'open' | 'team' | 'created'
+  mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
   pendingJobId?: string | null
   claimsDisabled?: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -489,7 +501,7 @@ function JobRow({
   setDiagnosticButton,
 }: {
   job: TodayTicketJob
-  mode: 'mine' | 'open' | 'team' | 'created'
+  mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
   pending: boolean
   claimDisabled: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -506,6 +518,12 @@ function JobRow({
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
     : 'Vehicle not recorded'
+  const manualDiagnosticWorkAvailable = job.approvalState === 'approved'
+    && canUseManualWork({
+      kind: job.kind,
+      sessionId: job.sessionId,
+      diagnosticsEntitled: diagnosticsEntitled ?? true,
+    })
 
   return (
     <article
@@ -555,6 +573,13 @@ function JobRow({
           >
             View ticket
           </Link>
+        ) : mode === 'parts' ? (
+          <Link
+            href={`/tickets/${job.ticketId}#parts-requested-heading`}
+            className={`${styles.control} ${styles.claim}`}
+          >
+            Source parts
+          </Link>
         ) : mode === 'created' || mode === 'team' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
@@ -562,6 +587,8 @@ function JobRow({
           >
             View ticket
           </Link>
+        ) : manualDiagnosticWorkAvailable ? (
+          <SimpleWorkAction job={job} />
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
             job={job}

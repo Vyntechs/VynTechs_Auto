@@ -7,6 +7,7 @@ import {
 } from '@/lib/tickets'
 import {
   customers,
+  jobPartRequests,
   profiles,
   sessions,
   shops,
@@ -222,6 +223,7 @@ describe('Today ticket jobs read model', () => {
       requiredSkillTier: 2,
       sessionId: session.id,
       workStatus: 'open',
+      approvalState: 'pending_quote',
       canClaim: false,
       assignmentState: 'mine',
       assignedTechName: 'Taylor Tech',
@@ -307,6 +309,7 @@ describe('Today ticket jobs read model', () => {
       openJobs: [],
       createdJobs: [],
       teamJobs: [],
+      partsJobs: [],
       linkedSessionIds: [],
     })
     expect(JSON.stringify(result)).not.toMatch(
@@ -393,6 +396,7 @@ describe('Today ticket jobs read model', () => {
         openJobs: [],
         createdJobs: [],
         teamJobs: [],
+        partsJobs: [],
         linkedSessionIds: [],
       })
     }
@@ -427,6 +431,52 @@ describe('Today ticket jobs read model', () => {
         canClaim: false,
       }),
     ])
+  })
+
+  it('gives the parts role a bounded queue only while a request needs handling', async () => {
+    const [partsProfile] = await db.insert(profiles).values({
+      id: uuid(91),
+      userId: uuid(191),
+      shopId,
+      role: 'parts',
+      fullName: 'Golden Parts',
+    }).returning()
+    const [job] = await db.insert(ticketJobs).values({
+      id: uuid(92),
+      shopId,
+      ticketId,
+      title: 'Charging repair',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      assignedTechId: actorProfileId,
+      workStatus: 'in_progress',
+      approvalState: 'approved',
+    }).returning()
+    const [request] = await db.insert(jobPartRequests).values({
+      id: uuid(93),
+      shopId,
+      ticketId,
+      jobId: job.id,
+      requestedByProfileId: actorProfileId,
+      requestKey: uuid(94),
+      description: 'Alternator',
+      quantity: 1,
+    }).returning()
+    const partsActor = ticketActorFromProfile(partsProfile)
+
+    const waiting = await listTodayTicketJobs(db, { actor: partsActor })
+    expect(waiting.partsJobs).toEqual([
+      expect.objectContaining({ id: job.id, title: 'Charging repair' }),
+    ])
+    expect(waiting.myJobs).toEqual([])
+
+    await db.update(jobPartRequests).set({
+      status: 'sourced',
+      resolvedByProfileId: partsProfile.id,
+      resolvedAt: new Date(),
+    })
+      .where(eq(jobPartRequests.id, request.id))
+    expect((await listTodayTicketJobs(db, { actor: partsActor })).partsJobs).toEqual([])
   })
 
   it('places preassigned work in the dispatch team lane', async () => {

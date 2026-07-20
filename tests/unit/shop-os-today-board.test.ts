@@ -18,6 +18,7 @@ const baseJob: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: null,
   workStatus: 'open',
+  approvalState: 'pending_quote',
   canClaim: true,
   assignmentState: 'unassigned',
   assignedTechName: null,
@@ -124,7 +125,7 @@ describe('Today board projection', () => {
       myJobs: [], openJobs: [baseJob], teamJobs: [], createdJobs: [],
       canDispatchWork: false, overrides,
     })
-    expect(technician).toEqual({ mine: [], open: [], team: [], created: [] })
+    expect(technician).toEqual({ mine: [], open: [], team: [], created: [], parts: [] })
   })
 })
 

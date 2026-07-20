@@ -8,6 +8,7 @@ function job(overrides: Partial<{
   kind: string
   requiredSkillTier: number
   assignedTechId: string | null
+  sessionId: string | null
   workStatus: string
   approvalState: string
 }> = {}) {
@@ -16,13 +17,18 @@ function job(overrides: Partial<{
     kind: 'repair',
     requiredSkillTier: 2,
     assignedTechId: null,
+    sessionId: null,
     workStatus: 'open',
     approvalState: 'pending_quote',
     ...overrides,
   }
 }
 
-function project(overrides: Partial<Parameters<typeof projectLivingTicketCommands>[0]> = {}) {
+type ProjectInput = Parameters<typeof projectLivingTicketCommands>[0] & {
+  diagnosticsEntitled?: boolean
+}
+
+function project(overrides: Partial<ProjectInput> = {}) {
   return projectLivingTicketCommands({
     role: 'tech',
     profileId: PROFILE,
@@ -30,8 +36,9 @@ function project(overrides: Partial<Parameters<typeof projectLivingTicketCommand
     ticketStatus: 'open',
     jobs: [job()],
     ringOut: null,
+    diagnosticsEntitled: false,
     ...overrides,
-  })
+  } as Parameters<typeof projectLivingTicketCommands>[0])
 }
 
 describe('living repair order next-move projection', () => {
@@ -70,13 +77,27 @@ describe('living repair order next-move projection', () => {
     expect(result.primary).toMatchObject({ kind: 'work', label: 'Continue work' })
   })
 
-  it('opens approved assigned repair and maintenance work, but never diagnostic work', () => {
+  it('opens approved assigned simple work, including manual diagnostics only while diagnostics are unavailable', () => {
     expect(project({
       jobs: [job({ assignedTechId: PROFILE, approvalState: 'approved' })],
     }).primary).toMatchObject({ kind: 'work', label: 'Start work' })
 
     expect(project({
       jobs: [job({ kind: 'diagnostic', assignedTechId: PROFILE, approvalState: 'approved' })],
+    }).primary).toMatchObject({ kind: 'work', label: 'Start work' })
+
+    expect(project({
+      diagnosticsEntitled: true,
+      jobs: [job({ kind: 'diagnostic', assignedTechId: PROFILE, approvalState: 'approved' })],
+    }).primary).toBeNull()
+
+    expect(project({
+      jobs: [job({
+        kind: 'diagnostic',
+        sessionId: '00000000-0000-0000-0000-000000000777',
+        assignedTechId: PROFILE,
+        approvalState: 'approved',
+      })],
     }).primary).toBeNull()
   })
 

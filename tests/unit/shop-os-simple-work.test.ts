@@ -10,6 +10,7 @@ import {
   quoteEvents,
   quoteVersions,
   sessions,
+  shopEntitlements,
   shops,
   ticketJobs,
   tickets,
@@ -102,6 +103,159 @@ describe('Shop OS approved simple work', () => {
     expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
     const second = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
     expect(second).toMatchObject({ ok: true, changed: false, work: { status: 'in_progress' } })
+  })
+
+  it('opens and starts an approved sessionless diagnostic only while diagnostics are unavailable', async () => {
+    const manualTicketId = uuid(21)
+    const manualJobId = uuid(31)
+    const manualVersionId = uuid(51)
+    await db.insert(tickets).values({
+      id: manualTicketId,
+      shopId,
+      ticketNumber: 2,
+      source: 'counter',
+      customerId: uuid(10),
+      vehicleId: uuid(11),
+      concern: 'Intermittent no start',
+      createdByProfileId: advisorId,
+    })
+    await db.insert(ticketJobs).values({
+      id: manualJobId,
+      shopId,
+      ticketId: manualTicketId,
+      title: 'Diagnose intermittent no start',
+      kind: 'diagnostic',
+      requiredSkillTier: 2,
+      assignedTechId: techId,
+      workStatus: 'open',
+      approvalState: 'quote_ready',
+      customerStory: {
+        whatYouToldUs: 'Intermittent no start',
+        whatWeFound: 'Loose battery ground',
+        howWeKnow: [],
+        whatItMeansIfWaived: 'The concern remains unresolved.',
+        whatWeRecommend: 'Clean and secure the ground, then retest.',
+      },
+      storyMeta: {
+        source: 'manual',
+        lastEditedByProfileId: techId,
+        lastEditedAt: '2026-07-20T12:00:00.000Z',
+        storyRevision: 1,
+        reviewStatus: 'reviewed',
+        reviewClientKey: uuid(73),
+        reviewRequestFingerprint: 'a'.repeat(64),
+        reviewedByProfileId: techId,
+        reviewedAt: '2026-07-20T12:01:00.000Z',
+      },
+    })
+    await db.insert(quoteVersions).values({
+      id: manualVersionId,
+      shopId,
+      ticketId: manualTicketId,
+      versionNumber: 1,
+      snapshot: {
+        schemaVersion: 1,
+        ticket: {
+          id: manualTicketId,
+          number: 2,
+          customerId: uuid(10),
+          vehicleId: uuid(11),
+          laborRateCents: 15_000,
+          taxRateBps: 825,
+        },
+        jobs: [{
+          id: manualJobId,
+          title: 'Diagnose intermittent no start',
+          kind: 'diagnostic',
+          customerStory: {
+            whatYouToldUs: 'Intermittent no start',
+            whatWeFound: 'Loose battery ground',
+            howWeKnow: [],
+            whatItMeansIfWaived: 'The concern remains unresolved.',
+            whatWeRecommend: 'Clean and secure the ground, then retest.',
+          },
+          storyMeta: { source: 'manual' },
+          lines: [{
+            id: uuid(41),
+            kind: 'labor',
+            description: 'Manual inspection and ground repair',
+            quantity: '1',
+            priceCents: 15_000,
+            taxable: false,
+            partNumber: null,
+            brand: null,
+            coreChargeCents: null,
+            fitment: null,
+            laborHours: '1',
+            laborRateCents: 15_000,
+            source: 'manual',
+            vendorContext: null,
+          }],
+          attachments: [],
+          totals: { subtotalCents: 15_000, taxableSubtotalCents: 0 },
+        }],
+        totals: {
+          subtotalCents: 15_000,
+          taxableSubtotalCents: 0,
+          taxCents: 0,
+          totalCents: 15_000,
+        },
+      },
+      createdByProfileId: advisorId,
+    })
+    await db.update(ticketJobs).set({
+      approvalState: 'approved',
+      approvedQuoteVersionId: manualVersionId,
+    }).where(eq(ticketJobs.id, manualJobId))
+    await db.insert(quoteEvents).values({
+      id: uuid(61),
+      shopId,
+      ticketId: manualTicketId,
+      jobId: manualJobId,
+      quoteVersionId: manualVersionId,
+      kind: 'approved',
+      actorProfileId: advisorId,
+      approvedVia: 'phone',
+      requestKey: uuid(71),
+    })
+    await db.insert(shopEntitlements).values({ shopId, diagnostics: true })
+
+    const manualActor = { profileId: techId, shopId }
+    await expect(getSimpleWorkWorkspace(db, {
+      actor: manualActor,
+      ticketId: manualTicketId,
+      jobId: manualJobId,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+
+    await db.update(shopEntitlements).set({ diagnostics: false })
+      .where(eq(shopEntitlements.shopId, shopId))
+
+    await db.update(profiles).set({ isComp: true }).where(eq(profiles.id, techId))
+    await expect(getSimpleWorkWorkspace(db, {
+      actor: manualActor,
+      ticketId: manualTicketId,
+      jobId: manualJobId,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await db.update(profiles).set({ isComp: false }).where(eq(profiles.id, techId))
+
+    await expect(getSimpleWorkWorkspace(db, {
+      actor: manualActor,
+      ticketId: manualTicketId,
+      jobId: manualJobId,
+    })).resolves.toMatchObject({
+      ok: true,
+      workspace: { kind: 'diagnostic', authorization: 'approved', workStatus: 'open' },
+    })
+    await expect(mutateSimpleWork(db, {
+      actor: manualActor,
+      ticketId: manualTicketId,
+      jobId: manualJobId,
+      body: { action: 'clock_on' },
+    })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+      work: { status: 'in_progress' },
+    })
   })
 
   it('fails closed for stale assignment, inactive actor, missing event, or snapshot kind drift', async () => {
