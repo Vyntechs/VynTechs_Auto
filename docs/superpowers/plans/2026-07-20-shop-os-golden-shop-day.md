@@ -145,12 +145,18 @@ Expected: one existing route, one next move, no diagnostic engine entrance, and 
 **Files:**
 - Create: `tests/helpers/golden-shop-day.ts`
 - Create: `tests/unit/shop-os-golden-shop-day.test.ts`
+- Modify: `lib/shop-os/part-requests.ts`
+- Modify: `lib/tickets.ts`
+- Modify: `lib/shop-os/today-board.ts`
+- Modify: `components/screens/today-jobs-board.tsx`
+- Modify: `components/screens/today-home.tsx`
+- Test: existing focused parts and Today suites
 
 **Interfaces:**
 - Consumes: existing `createCounterTicket`, `listTodayTicketJobs`, `mutateTicketJobAssignment`, manual-story, quote, decision, simple-work, part-request, payment, close, ticket-detail, and living-command functions.
 - Produces: `createGoldenShopDay()` returning a disposable PGlite database, four actors, and fixed fake scenario identities; one release-gate test with checkpoint receipts.
 
-- [ ] **Step 1: Add the synthetic shop fixture**
+- [x] **Step 1: Add the synthetic shop fixture**
 
 Seed only reserved fake values:
 
@@ -165,7 +171,7 @@ const PEOPLE = {
 
 Insert one diagnostics-false entitlement. Use fixed UUIDs, `example.invalid` email strings where needed, no phone resembling a real subscriber, and return `close()` so every test disposes its database.
 
-- [ ] **Step 2: Write the complete RED journey**
+- [x] **Step 2: Write the complete RED journey**
 
 Drive this exact sequence through domain functions:
 
@@ -179,7 +185,7 @@ owner ring-out -> payment -> close -> terminal read-only receipts for all roles
 
 At each checkpoint call `listTodayTicketJobs()`, `getTicketDetail()`, and `projectLivingTicketCommands()` again. Assert intended lane/command and explicitly forbidden assign, work, parts, money, or close authority for the other roles.
 
-- [ ] **Step 3: Add failure-path receipts**
+- [x] **Step 3: Add failure-path receipts**
 
 Within the same journey prove:
 
@@ -191,7 +197,7 @@ Within the same journey prove:
 - replaying part request and payment keys creates one record;
 - a second fresh fixture starts at ticket number one and contains none of the first run's rows.
 
-- [ ] **Step 4: Run the gate twice and commit**
+- [x] **Step 4: Run the gate twice and commit**
 
 Run:
 
