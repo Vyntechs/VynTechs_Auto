@@ -67,10 +67,10 @@ The acceptance test owns one repair-order narrative:
 ```text
 ADVISOR creates ordinary work
   -> ADVISOR finds it in Today and assigns TECH
-  -> TECH finds owned work; no premature work action appears
+  -> TECH finds owned work and records manual findings; no premature work action appears
   -> ADVISOR or OWNER builds the quote
   -> ADVISOR records approval
-  -> TECH starts work and requests a text-only part
+  -> TECH starts the sessionless manual work and requests a text-only part
   -> PARTS finds and resolves the request without wrenching/close authority
   -> TECH records work and completes it
   -> OWNER sees terminal work, records payment if required, and closes
@@ -78,6 +78,8 @@ ADVISOR creates ordinary work
 ```
 
 At every arrow the test re-reads persisted server truth. It does not carry an optimistic object forward as proof.
+
+The journey starts from Counter intake with diagnostics unavailable. Current source inspection found a concrete continuity break: Counter intake still creates a sessionless `diagnostic` job, but the simple-work domain and both living surfaces categorically refuse diagnostic jobs. After manual findings and approval, the job therefore has no completion path and terminal closeout correctly refuses it forever. This slice must allow only an approved, assigned, sessionless diagnostic job from a diagnostics-unavailable shop to use the existing text-only simple-work seam. An entitled diagnostic or any diagnostic with a session remains excluded.
 
 ### Role and queue receipts
 
