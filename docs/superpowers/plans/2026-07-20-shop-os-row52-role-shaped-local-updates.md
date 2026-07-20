@@ -41,8 +41,8 @@
 - Modify `app/api/tickets/[id]/jobs/[jobId]/assignment/route.ts`
 - Modify `tests/unit/shop-os-job-assignment-route.test.ts`
 
-- [ ] Write RED route tests that reject full ticket/customer/job projection in success and conflict responses.
-- [ ] Return only:
+- [x] Write RED route tests that reject full ticket/customer/job projection in success and conflict responses.
+- [x] Return only:
 
 ```ts
 {
@@ -56,10 +56,10 @@
 }
 ```
 
-- [ ] On conflict, preserve the exact error and project only `currentAssignee.fullName`.
-- [ ] Validate the target job exists in the domain result; fail closed if the supposedly successful result cannot be projected.
-- [ ] Preserve authentication → paywall → parse → domain ordering and all status codes.
-- [ ] Run assignment domain/route tests and commit.
+- [x] On conflict, preserve the exact error and project only `currentAssignee.fullName`.
+- [x] Validate the target job exists in the domain result; fail closed if the supposedly successful result cannot be projected.
+- [x] Preserve authentication → paywall → parse → domain ordering and all status codes.
+- [x] Run assignment domain/route tests and commit.
 
 ### Task 3 — Derive role-shaped lanes from one normalized board
 

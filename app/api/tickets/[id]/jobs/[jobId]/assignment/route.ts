@@ -7,7 +7,34 @@ import {
   mutateTicketJobAssignment,
   ticketActorFromProfile,
   ticketDomainStatus,
+  type TicketDetail,
 } from '@/lib/tickets'
+
+const activeWorkStatuses = new Set(['open', 'in_progress', 'blocked'])
+
+function assignmentEnvelope(input: {
+  ticket: TicketDetail
+  ticketId: string
+  jobId: string
+  actorProfileId: string
+}) {
+  if (input.ticket.id !== input.ticketId) return null
+  const job = input.ticket.jobs.find((candidate) => candidate.id === input.jobId)
+  if (!job || !activeWorkStatuses.has(job.workStatus)) return null
+
+  return {
+    ticketId: input.ticketId,
+    jobId: input.jobId,
+    workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
+    state:
+      job.assignedTechId === input.actorProfileId
+        ? 'mine' as const
+        : job.assignedTechId === null
+          ? 'unassigned' as const
+          : 'team' as const,
+    assignedTechName: job.assignedTech?.fullName ?? null,
+  }
+}
 
 export async function POST(
   req: Request,
@@ -42,9 +69,21 @@ export async function POST(
     const error = result.warning
       ? { error: result.error, warning: result.warning }
       : result.error === 'assignment_conflict' && result.currentAssignee
-        ? { error: result.error, currentAssignee: result.currentAssignee }
+        ? {
+            error: result.error,
+            currentAssignee: { fullName: result.currentAssignee.fullName },
+          }
         : { error: result.error }
     return NextResponse.json(error, { status: ticketDomainStatus(result, 200) })
   }
-  return NextResponse.json({ ticket: result.ticket }, { status: 200 })
+  const assignment = assignmentEnvelope({
+    ticket: result.ticket,
+    ticketId: id,
+    jobId,
+    actorProfileId: ctx.profile.id,
+  })
+  if (!assignment) {
+    return NextResponse.json({ error: 'invalid_assignment_result' }, { status: 500 })
+  }
+  return NextResponse.json({ assignment }, { status: 200 })
 }
