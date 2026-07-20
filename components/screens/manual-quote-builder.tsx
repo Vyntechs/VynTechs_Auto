@@ -223,6 +223,15 @@ export function ManualQuoteBuilder({
     setEditor(createEditor(target))
   }
 
+  function requestEmbeddedClose(invoker: HTMLElement): void {
+    if (inFlightRef.current || modal || sourcingJobId) return
+    if (editor?.dirty) {
+      setModal({ kind: 'discard-close', target: editor, invoker })
+      return
+    }
+    onClose?.()
+  }
+
   function createEditor(target: EditorTarget): EditorState {
     const line = target.line
     return {
@@ -762,7 +771,11 @@ export function ManualQuoteBuilder({
           )}
         </div>
         {embedded ? (
-          <button type="button" className={styles.closeEmbedded} onClick={onClose}>
+          <button
+            type="button"
+            className={styles.closeEmbedded}
+            onClick={(event) => requestEmbeddedClose(event.currentTarget)}
+          >
             Close quote
           </button>
         ) : (
@@ -1209,10 +1222,17 @@ export function ManualQuoteBuilder({
             if (!inFlightRef.current) closeModal()
           }}
           onDiscard={() => {
-            if (modal.kind !== 'discard' || inFlightRef.current) return
-            setEditor(createEditor(modal.target))
-            closeModal('editor')
-            setError(null)
+            if (inFlightRef.current) return
+            if (modal.kind === 'discard') {
+              setEditor(createEditor(modal.target))
+              closeModal('editor')
+              setError(null)
+            } else if (modal.kind === 'discard-close') {
+              setEditor(null)
+              setModal(null)
+              setError(null)
+              onClose?.()
+            }
           }}
           onRemove={confirmRemove}
           onRemoveSourced={confirmSourcedRemove}
@@ -1475,6 +1495,7 @@ type EditorState = EditorTarget & {
 
 type ModalState =
   | { kind: 'discard'; target: EditorTarget; invoker: HTMLElement }
+  | { kind: 'discard-close'; target: EditorTarget; invoker: HTMLElement }
   | {
     kind: 'remove'
     target: { jobId: string; line: BuilderLine }
@@ -1609,7 +1630,7 @@ function ConfirmationModal({
     }
   }
 
-  const discard = modal.kind === 'discard'
+  const discard = modal.kind === 'discard' || modal.kind === 'discard-close'
   const sourced = modal.kind === 'remove-sourced'
   const descriptionId = discard ? undefined : `${titleId}-target`
   return (

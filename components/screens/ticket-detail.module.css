@@ -107,6 +107,12 @@
   background: var(--vt-signal-700);
 }
 
+.quoteAction:disabled,
+.inlineAction:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .quoteAction:focus-visible {
   outline: 2px solid var(--vt-focus-ring);
   outline-offset: 3px;

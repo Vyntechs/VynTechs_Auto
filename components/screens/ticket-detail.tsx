@@ -199,7 +199,8 @@ export function TicketDetailScreen({
                 type="button"
                 className={styles.quoteAction}
                 aria-expanded={activeTool?.kind === 'quote'}
-                onClick={() => setActiveTool((current) => current?.kind === 'quote' ? null : { kind: 'quote' })}
+                disabled={activeTool !== null}
+                onClick={() => setActiveTool({ kind: 'quote' })}
               >
                 {quoteCommand.label}
               </button>
@@ -423,17 +424,14 @@ export function TicketDetailScreen({
                         type="button"
                         className={styles.inlineAction}
                         aria-expanded={activeTool?.kind === 'work' && activeTool.jobId === job.id}
-                        onClick={() => setActiveTool((current) => (
-                          current?.kind === 'work' && current.jobId === job.id
-                            ? null
-                            : { kind: 'work', jobId: job.id }
-                        ))}
+                      disabled={activeTool !== null}
+                      onClick={() => setActiveTool({ kind: 'work', jobId: job.id })}
                       >
                         {workCommandFor(allCommands, job.id)?.label}
                       </button>
                     ) : simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
                   </div>
-                  {currentProfileId && assignmentCommandFor(allCommands, job.id) && (
+                  {activeTool === null && currentProfileId && assignmentCommandFor(allCommands, job.id) && (
                     <TicketAssignmentControl
                       ticketId={ticket.id}
                       job={{

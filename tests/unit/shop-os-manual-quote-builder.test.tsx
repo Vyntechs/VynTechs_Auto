@@ -229,6 +229,25 @@ describe('ManualQuoteBuilder', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('requires an explicit discard before closing an unsaved embedded line', async () => {
+    const onClose = vi.fn()
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder()}
+      embedded
+      onClose={onClose}
+    />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add part' })[0])
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Unsaved water pump' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close quote' }))
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('alertdialog', { name: 'Discard unsaved line changes?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('collapses a fully decided embedded quote to one concise proof', () => {
     render(<ManualQuoteBuilder
       ticket={ticket}

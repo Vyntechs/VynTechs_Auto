@@ -56,11 +56,13 @@
 
 ### Task 6 — Converge and publish
 
-- [ ] Prove phone (375px), desktop, keyboard, focus, reduced motion, and long technician/customer-controlled text.
-- [ ] Run focused tests with at most two workers, TypeScript, full suite, production build, and diff guards.
-- [ ] Review tenant/capability boundaries, stale state, lost work, duplicate tools, refreshes, diagnostics/media drift, and extra pages.
-- [ ] Run final static, security, and runtime convergence; consolidate once, repair once, and focused re-review once.
+- [x] Prove 375px/desktop layout contracts, keyboard/focus, reduced motion, and long technician/customer-controlled text through component and CSS checks. A temporary real-browser harness was removed after missing local auth configuration and an orphaned dev-server port exhausted its two allowed attempts; no screenshot claim is made.
+- [x] Run focused tests with at most two workers, TypeScript, full suite, production build, and diff guards.
+- [x] Review tenant/capability boundaries, stale state, lost work, duplicate tools, refreshes, diagnostics/media drift, and extra pages.
+- [x] Run final static, security, and runtime convergence; consolidate once, repair once, and focused re-review once.
 - [ ] Update Row 53 and `SHOP_OS_DRIVER_STATE.md`, publish, merge after green gates, and verify exact-revision production health.
+
+**Convergence receipt:** The eight serialized post-repair shards pass 3,487 tests with zero failures. TypeScript, the 64-page production build under webpack, and `git diff --check` pass. The single consolidated repair prevents quote/work tool switching and close/completion from silently dropping unsaved quote lines, technician notes, found concerns, or text-only parts requests. Focused re-review passes 115 tests. The branch adds no schema, migration, dependency, page, diagnostic/media enablement, general add-job path, provider, messaging, or production-data mutation. One unused invalid export was removed from the existing disabled attachment route because it blocked the current Next.js production build; its four route tests pass.
 
 **Stop if:** Any inline tool requires a new data model, broader response envelope, engine semantic change, media/diagnostic enablement, or a repair/close authorization bypass; or focused re-review discovers a new blocking architecture defect.
 

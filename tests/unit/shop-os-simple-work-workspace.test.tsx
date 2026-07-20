@@ -78,6 +78,38 @@ describe('simple work workspace', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps embedded work open while any technician draft is unsaved', () => {
+    const onClose = vi.fn()
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, workStatus: 'in_progress' }}
+      embedded
+      onClose={onClose}
+    />)
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), {
+      target: { value: 'Unsaved torque note' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Finish or clear the draft before closing work.')
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'What part do you need?' }), {
+      target: { value: 'Water pump' },
+    })
+    expect(screen.getByRole('button', { name: 'Complete work' })).toBeDisabled()
+    expect(screen.getByText('Finish or clear the open concern or parts draft first.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'What part do you need?' }), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,

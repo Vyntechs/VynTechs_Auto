@@ -50,8 +50,21 @@ export function SimpleWorkWorkspace({
   const [concern, setConcern] = useState('')
   const [tier, setTier] = useState('')
   const [createdConcern, setCreatedConcern] = useState(false)
+  const [partsDraftDirty, setPartsDraftDirty] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
   const basePath = `/api/tickets/${ticket.id}/jobs/${workspace.id}`
+  const hasAuxiliaryDraft = concern.trim().length > 0
+    || tier !== ''
+    || partsDraftDirty
+  const hasUnsavedDraft = note !== (workspace.workNotes ?? '') || hasAuxiliaryDraft
+
+  function requestClose(): void {
+    if (pending !== null || hasUnsavedDraft) {
+      setNotice({ kind: 'error', text: 'Finish or clear the draft before closing work.' })
+      return
+    }
+    onClose?.()
+  }
 
   function applyWork(work: SimpleWorkProjectionView) {
     setWorkspace((current) => ({
@@ -194,7 +207,7 @@ export function SimpleWorkWorkspace({
             <p className={styles.eyebrow}>{workspace.kind === 'repair' ? 'Repair' : 'Maintenance'} · assigned work</p>
             <h1>{workspace.title}</h1>
           </div>
-          {embedded && <button className={styles.closeEmbedded} type="button" onClick={onClose}>Close work</button>}
+          {embedded && <button className={styles.closeEmbedded} type="button" onClick={requestClose}>Close work</button>}
         </header>
 
         {workspace.workStatus === 'done' ? (
@@ -253,13 +266,22 @@ export function SimpleWorkWorkspace({
             </section>
             <section className={styles.module} aria-labelledby="complete-heading">
               <div className={styles.moduleHeading}><span>02</span><h2 id="complete-heading">Complete work</h2></div>
-              <p className={styles.helper}>Requires a saved work note.</p>
-              <button className={styles.primary} type="button" disabled={pending !== null || !completeReady}
+              <p className={styles.helper}>
+                {hasAuxiliaryDraft
+                  ? 'Finish or clear the open concern or parts draft first.'
+                  : 'Requires a saved work note.'}
+              </p>
+              <button className={styles.primary} type="button" disabled={pending !== null || !completeReady || hasAuxiliaryDraft}
                 onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Completing…', 'Work completed.')}>
                 {pending === 'complete' ? 'Completing…' : 'Complete work'}
               </button>
             </section>
-            <PartsNeededPanel ticketId={ticket.id} jobId={workspace.id} initialRequests={initialPartRequests} />
+            <PartsNeededPanel
+              ticketId={ticket.id}
+              jobId={workspace.id}
+              initialRequests={initialPartRequests}
+              onDraftChange={setPartsDraftDirty}
+            />
             <details className={styles.concern}>
               <summary>Found another concern</summary>
               {createdConcern ? (

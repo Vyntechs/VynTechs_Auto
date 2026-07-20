@@ -261,6 +261,7 @@ describe('TicketDetailScreen', () => {
     await user.click(opener)
 
     expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(opener).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
     expect(screen.getByText('Approval · Quote ready')).toBeInTheDocument()
@@ -458,6 +459,7 @@ describe('TicketDetailScreen', () => {
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Start work' }))
     expect(screen.getByRole('region', { name: 'Inline work workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
