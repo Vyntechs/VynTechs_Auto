@@ -60,9 +60,11 @@
 - [x] Run focused tests with at most two workers, TypeScript, full suite, production build, and diff guards.
 - [x] Review tenant/capability boundaries, stale state, lost work, duplicate tools, refreshes, diagnostics/media drift, and extra pages.
 - [x] Run final static, security, and runtime convergence; consolidate once, repair once, and focused re-review once.
-- [ ] Update Row 53 and `SHOP_OS_DRIVER_STATE.md`, publish, merge after green gates, and verify exact-revision production health.
+- [x] Update Row 53 and `SHOP_OS_DRIVER_STATE.md`, publish, merge after green gates, and verify exact-revision production health.
 
 **Convergence receipt:** The eight serialized post-repair shards pass 3,487 tests with zero failures. TypeScript, the 64-page production build under webpack, and `git diff --check` pass. The single consolidated repair prevents quote/work tool switching and close/completion from silently dropping unsaved quote lines, technician notes, found concerns, or text-only parts requests. Focused re-review passes 115 tests. The branch adds no schema, migration, dependency, page, diagnostic/media enablement, general add-job path, provider, messaging, or production-data mutation. One unused invalid export was removed from the existing disabled attachment route because it blocked the current Next.js production build; its four route tests pass.
+
+**Production receipt:** PR #179 merged to `main` as `6d85c8a5cb9d9b3b85f919683aaa89f89dd5217e`. GitGuardian and Vercel passed; Vercel reports that exact revision READY in production. `https://vyntechs.dev/api/health` returned `200 {"ok":true}`, `/sign-in` returned 200, and anonymous `/today` returned the expected 307 authentication redirect.
 
 **Stop if:** Any inline tool requires a new data model, broader response envelope, engine semantic change, media/diagnostic enablement, or a repair/close authorization bypass; or focused re-review discovers a new blocking architecture defect.
 
