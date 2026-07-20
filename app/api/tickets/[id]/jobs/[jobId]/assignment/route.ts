@@ -12,14 +12,18 @@ import {
 
 const activeWorkStatuses = new Set(['open', 'in_progress', 'blocked'])
 
+function sameUuid(left: string, right: string) {
+  return left.toLowerCase() === right.toLowerCase()
+}
+
 function assignmentEnvelope(input: {
   ticket: TicketDetail
   ticketId: string
   jobId: string
   actorProfileId: string
 }) {
-  if (input.ticket.id !== input.ticketId) return null
-  const job = input.ticket.jobs.find((candidate) => candidate.id === input.jobId)
+  if (!sameUuid(input.ticket.id, input.ticketId)) return null
+  const job = input.ticket.jobs.find((candidate) => sameUuid(candidate.id, input.jobId))
   if (!job || !activeWorkStatuses.has(job.workStatus)) return null
 
   return {
@@ -27,7 +31,7 @@ function assignmentEnvelope(input: {
     jobId: input.jobId,
     workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
     state:
-      job.assignedTechId === input.actorProfileId
+      job.assignedTechId !== null && sameUuid(job.assignedTechId, input.actorProfileId)
         ? 'mine' as const
         : job.assignedTechId === null
           ? 'unassigned' as const

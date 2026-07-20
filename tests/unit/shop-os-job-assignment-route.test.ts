@@ -226,6 +226,46 @@ describe('job assignment route', () => {
     await expect(response.json()).resolves.toEqual({ error: 'invalid_assignment_result' })
   })
 
+  it('reconciles canonical database UUIDs after a valid uppercase route mutation', async () => {
+    const canonicalTicketId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const canonicalJobId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const uppercaseTicketId = canonicalTicketId.toUpperCase()
+    const uppercaseJobId = canonicalJobId.toUpperCase()
+    const ticket = updatedTicket({
+      assignedTechId: profile.id,
+      assignedTechName: profile.fullName,
+    })
+    mutationMock.mockResolvedValue({
+      ok: true,
+      ticket: {
+        ...ticket,
+        id: canonicalTicketId,
+        jobs: ticket.jobs.map((job, index) => index === 0
+          ? { ...job, id: canonicalJobId }
+          : job),
+      },
+    } as never)
+
+    const response = await POST(request({ action: 'claim' }), {
+      params: Promise.resolve({ id: uppercaseTicketId, jobId: uppercaseJobId }),
+    })
+
+    expect(mutationMock).toHaveBeenCalledWith({}, expect.objectContaining({
+      ticketId: uppercaseTicketId,
+      jobId: uppercaseJobId,
+    }))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      assignment: {
+        ticketId: uppercaseTicketId,
+        jobId: uppercaseJobId,
+        workStatus: 'open',
+        state: 'mine',
+        assignedTechName: profile.fullName,
+      },
+    })
+  })
+
   it('returns only the assignee display name with a losing claim conflict', async () => {
     const currentAssignee = {
       id: '00000000-0000-0000-0000-000000000501',
