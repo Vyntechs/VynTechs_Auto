@@ -81,6 +81,9 @@ const todayJobs: TodayTicketJobs = {
       sessionId: 'session-linked',
       workStatus: 'in_progress',
       canClaim: false,
+      assignmentState: 'mine',
+      assignedTechName: 'Taylor Tech',
+      createdByMe: false,
     },
   ],
   openJobs: [
@@ -96,9 +99,13 @@ const todayJobs: TodayTicketJobs = {
       sessionId: null,
       workStatus: 'open',
       canClaim: true,
+      assignmentState: 'unassigned',
+      assignedTechName: null,
+      createdByMe: false,
     },
   ],
   createdJobs: [],
+  teamJobs: [],
   linkedSessionIds: ['session-linked'],
 }
 
@@ -158,9 +165,9 @@ describe('TodayHome', () => {
     )
 
     expect(screen.getByRole('region', { name: 'Ticket jobs' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'My jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'My work' })).toBeInTheDocument()
     expect(screen.getByText('Trace intermittent no-start')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Open jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Available' })).toBeInTheDocument()
     expect(screen.getByText('Replace front brake pads')).toBeInTheDocument()
     expect(screen.getByText(/Check-ins · 1/i)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'In progress' })).toBeInTheDocument()
@@ -173,6 +180,7 @@ describe('TodayHome', () => {
       myJobs: [],
       openJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
       createdJobs: [],
+      teamJobs: [],
       linkedSessionIds: [],
     }
 
@@ -192,6 +200,53 @@ describe('TodayHome', () => {
     expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
   })
 
+  it('turns the same Today surface into a dispatch board without adding a page', () => {
+    const teamJob = {
+      ...todayJobs.openJobs[0],
+      id: 'job-team',
+      ticketId: 'ticket-team',
+      assignmentState: 'team' as const,
+      assignedTechName: 'Avery Technician With A Long Display Name',
+      canClaim: false,
+    }
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        canDispatchWork
+        todayJobs={{ ...todayJobs, teamJobs: [teamJob] }}
+      />,
+    )
+
+    expect(screen.getByText('Shop floor')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Needs assignment' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument()
+    expect(screen.getByText('Avery Technician With A Long Display Name')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'View ticket' })).toHaveLength(1)
+  })
+
+  it('keeps personal Today role-shaped and never renders another technician queue', () => {
+    const teamJob = {
+      ...todayJobs.openJobs[0],
+      assignmentState: 'team' as const,
+      assignedTechName: 'Avery Tech',
+      canClaim: false,
+    }
+    render(
+      <TodayHome
+        techName="Taylor"
+        inProgress={[]}
+        closedToday={[]}
+        todayJobs={{ ...todayJobs, teamJobs: [teamJob] }}
+      />,
+    )
+
+    expect(screen.getByText('My Jobs')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'With the team' })).toBeNull()
+    expect(screen.queryByText('Avery Tech')).toBeNull()
+  })
+
   it('does not show legacy empty guidance when ticket work exists', () => {
     render(
       <TodayHome
@@ -209,7 +264,14 @@ describe('TodayHome', () => {
     const creatorOnlyJobs: TodayTicketJobs = {
       myJobs: [],
       openJobs: [],
-      createdJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
+      createdJobs: [{
+        ...todayJobs.openJobs[0],
+        canClaim: false,
+        assignmentState: 'team',
+        assignedTechName: 'Avery Tech',
+        createdByMe: true,
+      }],
+      teamJobs: [],
       linkedSessionIds: [],
     }
 
@@ -252,12 +314,14 @@ describe('TodayHome', () => {
         myJobs: [],
         openJobs: [todayJobs.openJobs[0]],
         createdJobs: [],
+        teamJobs: [],
         linkedSessionIds: [],
       }
       const emptyJobs: TodayTicketJobs = {
         myJobs: [],
         openJobs: [],
         createdJobs: [],
+        teamJobs: [],
         linkedSessionIds: [],
       }
       const { rerender } = render(

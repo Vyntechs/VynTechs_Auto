@@ -51,6 +51,7 @@ export default async function TodayPage() {
       canCurate={canCurate(ctx.profile.isCurator, ctx.user.email)}
       canWriteCounterOrder={canAssignWork(ctx.profile.role)}
       canCreateTickets={canCreateTickets(ctx.profile.role)}
+      canDispatchWork={canAssignWork(ctx.profile.role)}
       todayJobs={todayJobs}
       diagnosticsEntitled={diagnosticsEntitled}
     />

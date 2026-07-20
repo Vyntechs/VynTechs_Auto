@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -327,6 +327,9 @@ export type TodayTicketJob = {
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
   canClaim: boolean
+  assignmentState: 'mine' | 'team' | 'unassigned'
+  assignedTechName: string | null
+  createdByMe: boolean
   diagnosticStartState?: 'idle' | 'initializing' | 'ready' | 'failed' | 'ambiguous'
   diagnosticStartErrorCode?: TodayDiagnosticStartErrorCode | null
 }
@@ -354,6 +357,7 @@ export type TodayTicketJobs = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
   createdJobs: TodayTicketJob[]
+  teamJobs: TodayTicketJob[]
   linkedSessionIds: string[]
   hasMore?: boolean
 }
@@ -364,6 +368,7 @@ const emptyTodayTicketJobs = (): TodayTicketJobs => ({
   myJobs: [],
   openJobs: [],
   createdJobs: [],
+  teamJobs: [],
   linkedSessionIds: [],
 })
 
@@ -399,6 +404,14 @@ export async function listTodayTicketJobs(
     eq(tickets.createdByProfileId, actor.profileId),
     inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
   )
+  const canDispatch = canAssignWork(actor.role)
+  const visibleTeamWork = canDispatch
+    ? and(
+        isNotNull(ticketJobs.assignedTechId),
+        ne(ticketJobs.assignedTechId, actor.profileId),
+        inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
+      )
+    : undefined
 
   const rows = await db
     .select({
@@ -417,6 +430,7 @@ export async function listTodayTicketJobs(
       accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
       createdByProfileId: tickets.createdByProfileId,
+      assignedTechFullName: profiles.fullName,
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
     })
@@ -430,6 +444,13 @@ export async function listTodayTicketJobs(
     )
     .leftJoin(customers, eq(tickets.customerId, customers.id))
     .leftJoin(vehicles, eq(tickets.vehicleId, vehicles.id))
+    .leftJoin(
+      profiles,
+      and(
+        eq(profiles.shopId, ticketJobs.shopId),
+        eq(profiles.id, ticketJobs.assignedTechId),
+      ),
+    )
     .leftJoin(
       sessions,
       and(
@@ -449,11 +470,17 @@ export async function listTodayTicketJobs(
           ),
           visibleOpenWork,
           createdActiveWork,
+          visibleTeamWork,
         ),
       ),
     )
     .orderBy(
-      sql`CASE WHEN ${ticketJobs.assignedTechId} = ${actor.profileId} THEN 0 ELSE 1 END`,
+      sql`CASE
+        WHEN ${ticketJobs.assignedTechId} = ${actor.profileId} THEN 0
+        WHEN ${tickets.createdByProfileId} = ${actor.profileId} THEN 1
+        WHEN ${ticketJobs.assignedTechId} IS NOT NULL THEN 2
+        ELSE 3
+      END`,
       asc(tickets.ticketNumber),
       asc(ticketJobs.createdAt),
       asc(ticketJobs.id),
@@ -463,6 +490,7 @@ export async function listTodayTicketJobs(
   const myJobs: TodayTicketJob[] = []
   const openJobs: TodayTicketJob[] = []
   const createdJobs: TodayTicketJob[] = []
+  const teamJobs: TodayTicketJob[] = []
   const linkedSessionIds: string[] = []
 
   const hasMore = rows.length > TODAY_JOB_LIMIT
@@ -487,12 +515,21 @@ export async function listTodayTicketJobs(
         actor.skillTier !== null &&
         [1, 2, 3].includes(actor.skillTier) &&
         row.requiredSkillTier <= actor.skillTier,
+      assignmentState:
+        row.assignedTechId === actor.profileId
+          ? 'mine'
+          : row.assignedTechId === null
+            ? 'unassigned'
+            : 'team',
+      assignedTechName: row.assignedTechFullName,
+      createdByMe: row.createdByProfileId === actor.profileId,
       diagnosticStartState: row.diagnosticStartState,
       diagnosticStartErrorCode: safeDiagnosticStartErrorCode(row.diagnosticStartErrorCode),
     }
 
     if (row.assignedTechId === actor.profileId) myJobs.push(job)
     else if (row.assignedTechId === null && row.workStatus === 'open') openJobs.push(job)
+    else if (canDispatch && row.assignedTechId !== null) teamJobs.push(job)
     else if (row.createdByProfileId === actor.profileId) createdJobs.push(job)
     if (row.persistedSessionId) linkedSessionIds.push(row.persistedSessionId)
   }
@@ -501,6 +538,7 @@ export async function listTodayTicketJobs(
     myJobs,
     openJobs,
     createdJobs,
+    teamJobs,
     linkedSessionIds,
     ...(hasMore ? { hasMore: true } : {}),
   }

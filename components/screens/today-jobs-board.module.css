@@ -124,6 +124,11 @@
   text-transform: uppercase;
 }
 
+.facts span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .facts span + span::before {
   content: '·';
   margin-right: var(--vt-space-2);
@@ -223,6 +228,7 @@
   cursor: not-allowed;
 }
 
+.row:focus-visible,
 .ticketStamp:focus-visible,
 .control:focus-visible {
   outline: 2px solid var(--vt-focus-ring);

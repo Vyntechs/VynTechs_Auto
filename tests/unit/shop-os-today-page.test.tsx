@@ -38,19 +38,22 @@ vi.mock('@/components/screens/today-home', () => ({
     todayJobs,
     diagnosticsEntitled,
     canWriteCounterOrder,
+    canDispatchWork,
   }: {
     inProgress: Session[]
     closedToday: Session[]
     todayJobs: TodayTicketJobs
     diagnosticsEntitled: boolean
     canWriteCounterOrder: boolean
+    canDispatchWork: boolean
   }) => (
     <div>
-      <span>ticket jobs {todayJobs.myJobs.length + todayJobs.openJobs.length + todayJobs.createdJobs.length}</span>
+      <span>ticket jobs {todayJobs.myJobs.length + todayJobs.openJobs.length + todayJobs.teamJobs.length + todayJobs.createdJobs.length}</span>
       <span>active sessions {inProgress.map((session) => session.id).join(',')}</span>
       <span>closed sessions {closedToday.map((session) => session.id).join(',')}</span>
       <span>diagnostics {String(diagnosticsEntitled)}</span>
       <span>counter intake {String(canWriteCounterOrder)}</span>
+      <span>dispatch board {String(canDispatchWork)}</span>
     </div>
   ),
 }))
@@ -121,9 +124,13 @@ const jobs: TodayTicketJobs = {
       sessionId: 'linked-open',
       workStatus: 'open',
       canClaim: true,
+      assignmentState: 'unassigned',
+      assignedTechName: null,
+      createdByMe: false,
     },
   ],
   createdJobs: [],
+  teamJobs: [],
   linkedSessionIds: ['linked-open', 'linked-closed'],
 }
 
@@ -164,6 +171,7 @@ describe('TodayPage Shop OS composition', () => {
   it('shows complete counter intake to advisors but not technicians', async () => {
     render(await TodayPage())
     expect(screen.getByText('counter intake false')).toBeInTheDocument()
+    expect(screen.getByText('dispatch board false')).toBeInTheDocument()
 
     requireUserMock.mockResolvedValue({
       profile: { ...profile, role: 'advisor' },
@@ -172,6 +180,7 @@ describe('TodayPage Shop OS composition', () => {
 
     render(await TodayPage())
     expect(screen.getByText('counter intake true')).toBeInTheDocument()
+    expect(screen.getByText('dispatch board true')).toBeInTheDocument()
   })
 
   it('de-duplicates ticket-backed sessions by persisted linked IDs', async () => {

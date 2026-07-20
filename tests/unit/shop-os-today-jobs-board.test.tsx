@@ -35,6 +35,9 @@ const linkedDiagnostic: TodayTicketJob = {
   sessionId: 'session-41',
   workStatus: 'in_progress',
   canClaim: false,
+  assignmentState: 'mine',
+  assignedTechName: 'Taylor Tech',
+  createdByMe: false,
   diagnosticStartState: 'ready',
   diagnosticStartErrorCode: null,
 }
@@ -50,8 +53,16 @@ const unlinkedDiagnostic: TodayTicketJob = {
   sessionId: null,
   workStatus: 'open',
   canClaim: true,
+  assignmentState: 'mine',
+  assignedTechName: 'Taylor Tech',
   diagnosticStartState: 'idle',
   diagnosticStartErrorCode: null,
+}
+
+const availableDiagnostic: TodayTicketJob = {
+  ...unlinkedDiagnostic,
+  assignmentState: 'unassigned',
+  assignedTechName: null,
 }
 
 const repair: TodayTicketJob = {
@@ -119,7 +130,13 @@ describe('TodayJobsBoard persisted ledger', () => {
       <TodayJobsBoard
         myJobs={[]}
         openJobs={[]}
-        createdJobs={[{ ...maintenance, canClaim: false }]}
+        createdJobs={[{
+          ...maintenance,
+          canClaim: false,
+          assignmentState: 'team',
+          assignedTechName: 'Avery Tech',
+          createdByMe: true,
+        }]}
       />,
     )
 
@@ -136,7 +153,12 @@ describe('TodayJobsBoard persisted ledger', () => {
     render(
       <TodayJobsBoard
         myJobs={[]}
-        openJobs={[{ ...unlinkedDiagnostic, workStatus: 'blocked', canClaim: true }]}
+        openJobs={[{
+          ...availableDiagnostic,
+          workStatus: 'blocked',
+          canClaim: true,
+          createdByMe: true,
+        }]}
       />,
     )
 
@@ -602,10 +624,18 @@ describe('TodayJobsBoard persisted ledger', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ ticket: { id: unlinkedDiagnostic.ticketId } }),
+      json: async () => ({
+        assignment: {
+          ticketId: unlinkedDiagnostic.ticketId,
+          jobId: unlinkedDiagnostic.id,
+          workStatus: 'open',
+          state: 'mine',
+          assignedTechName: 'Taylor Tech',
+        },
+      }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<TodayJobsBoard myJobs={[]} openJobs={[unlinkedDiagnostic]} />)
+    render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
 
@@ -620,13 +650,13 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1)
   })
 
-  it('announces pending and success, disables duplicate claims, and refreshes server truth', async () => {
+  it('announces pending and success, disables duplicate claims, and moves the row in place', async () => {
     let resolveResponse: ((response: Response) => void) | undefined
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       resolveResponse = resolve
     }))
     vi.stubGlobal('fetch', fetchMock)
-    render(<TodayJobsBoard myJobs={[]} openJobs={[unlinkedDiagnostic]} />)
+    render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
     const claim = screen.getByRole('button', { name: 'Claim job' })
     fireEvent.click(claim)
@@ -639,22 +669,34 @@ describe('TodayJobsBoard persisted ledger', () => {
     resolveResponse?.({
       ok: true,
       status: 200,
-      json: async () => ({ ticket: { id: unlinkedDiagnostic.ticketId } }),
+      json: async () => ({
+        assignment: {
+          ticketId: unlinkedDiagnostic.ticketId,
+          jobId: unlinkedDiagnostic.id,
+          workStatus: 'open',
+          state: 'mine',
+          assignedTechName: 'Taylor Tech',
+        },
+      }),
     } as Response)
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('Ticket 42 claimed')
-      expect(refreshMock).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('heading', { name: 'My work' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Available' })).toBeNull()
+      expect(refreshMock).not.toHaveBeenCalled()
     })
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Ticket jobs' })).toHaveFocus()
+      expect(screen.getByRole('article', {
+        name: 'Ticket 42: Confirm charging fault',
+      })).toHaveFocus()
     })
   })
 
   it('disables every claim control while one assignment is pending', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
     const secondOpenJob = {
-      ...unlinkedDiagnostic,
+      ...availableDiagnostic,
       id: 'job-second',
       ticketId: 'ticket-45',
       ticketNumber: 45,
@@ -663,7 +705,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     render(
       <TodayJobsBoard
         myJobs={[]}
-        openJobs={[unlinkedDiagnostic, secondOpenJob]}
+        openJobs={[availableDiagnostic, secondOpenJob]}
       />,
     )
 
@@ -675,51 +717,111 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(claims[1]).toBeDisabled()
   })
 
-  it('announces only the safe winner after a losing race and refreshes server truth', async () => {
+  it('announces only the safe winner and moves a dispatch race to With the team', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
       json: async () => ({
         error: 'assignment_conflict',
-        currentAssignee: {
-          id: 'hidden-id',
-          fullName: 'Winner Tech',
-          role: 'owner',
-          skillTier: 3,
-        },
+        currentAssignee: { fullName: 'Winner Tech' },
       }),
     }))
-    render(<TodayJobsBoard myJobs={[]} openJobs={[unlinkedDiagnostic]} />)
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[availableDiagnostic]}
+        canDispatchWork
+      />,
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('Already claimed by Winner Tech')
-      expect(refreshMock).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument()
+      expect(screen.getByText('Winner Tech')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+      expect(refreshMock).not.toHaveBeenCalled()
     })
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: 'Ticket jobs' })).toHaveFocus()
+      expect(screen.getByRole('article', {
+        name: 'Ticket 42: Confirm charging fault',
+      })).toHaveFocus()
     })
-    expect(screen.queryByText(/hidden-id|owner|tier 3/i)).toBeNull()
+    expect(screen.queryByText(/hidden-id|owner/i)).toBeNull()
   })
 
-  it('uses a generic race announcement when no safe winner is returned', async () => {
+  it('uses a generic race announcement and quietly removes unrelated team work', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
       json: async () => ({ error: 'assignment_conflict' }),
     }))
-    render(<TodayJobsBoard myJobs={[]} openJobs={[unlinkedDiagnostic]} />)
+    render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('This job was already claimed')
-    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('article')).toBeNull()
+    expect(refreshMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a creator losing race discoverable without exposing ownership actions', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: 'assignment_conflict',
+        currentAssignee: { fullName: 'Winner Tech' },
+      }),
+    }))
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[{ ...availableDiagnostic, createdByMe: true }]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+
+    expect(await screen.findByRole('heading', { name: 'Created by me' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-42',
+    )
+    expect(refreshMock).not.toHaveBeenCalled()
+  })
+
+  it('fails closed on a mismatched success without dropping the row or enabling stale retry', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        assignment: {
+          ticketId: 'wrong-ticket',
+          jobId: unlinkedDiagnostic.id,
+          workStatus: 'open',
+          state: 'mine',
+          assignedTechName: 'Taylor Tech',
+        },
+      }),
+    }))
+    render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Ticket 42 changed, but this screen couldn't safely reconcile it. View the ticket.",
+    )
+    expect(screen.getByRole('article', { name: 'Ticket 42: Confirm charging fault' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'View ticket' })).toBeInTheDocument()
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 
   it('announces an error, restores the focused control, and does not refresh stale truth', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network detail must stay private')))
-    render(<TodayJobsBoard myJobs={[]} openJobs={[unlinkedDiagnostic]} />)
+    render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
     const claim = screen.getByRole('button', { name: 'Claim job' })
     claim.focus()
@@ -772,6 +874,16 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
 
     expect(baseStampRule).toMatch(/min-height:\s*44px/)
+  })
+
+  it('keeps long assignee names inside the ledger and gives moved rows visible focus', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'components/screens/today-jobs-board.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/\.facts span\s*{[^}]*overflow-wrap:\s*anywhere/s)
+    expect(css).toMatch(/\.row:focus-visible,[^{]*{[^}]*outline:\s*2px solid var\(--vt-focus-ring\)/s)
   })
 })
 

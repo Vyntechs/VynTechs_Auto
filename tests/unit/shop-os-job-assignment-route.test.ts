@@ -55,7 +55,41 @@ const actor = {
   membershipStatus: profile.membershipStatus,
   deactivatedAt: profile.deactivatedAt,
 }
-const ticket = { id: TICKET_ID, ticketNumber: 101, status: 'open' }
+function updatedTicket(input: {
+  assignedTechId: string | null
+  assignedTechName: string | null
+  workStatus?: 'open' | 'in_progress' | 'blocked'
+}) {
+  return {
+    id: TICKET_ID,
+    ticketNumber: 101,
+    status: 'open',
+    customer: {
+      id: 'private-customer-id',
+      name: 'Private Customer',
+      phone: '555-PRIVATE',
+      email: 'private@example.test',
+    },
+    vehicle: { vin: 'PRIVATEVIN', year: 2024, make: 'Ford', model: 'F-350' },
+    jobs: [
+      {
+        id: JOB_ID,
+        assignedTechId: input.assignedTechId,
+        assignedTech: input.assignedTechId
+          ? {
+              id: input.assignedTechId,
+              fullName: input.assignedTechName,
+              role: 'tech',
+              skillTier: 3,
+            }
+          : null,
+        workStatus: input.workStatus ?? 'open',
+        sessionId: 'private-session-id',
+      },
+      { id: 'private-other-job', workStatus: 'open' },
+    ],
+  }
+}
 
 function request(body: unknown): Request {
   return new Request(
@@ -123,15 +157,38 @@ describe('job assignment route', () => {
   })
 
   it.each([
-    { action: 'claim' as const },
-    { action: 'unclaim' as const },
     {
-      action: 'reassign' as const,
-      assignedTechId: '00000000-0000-0000-0000-000000000501',
-      confirmBelowTier: true,
+      body: { action: 'claim' as const },
+      assignedTechId: profile.id,
+      assignedTechName: profile.fullName,
+      state: 'mine' as const,
     },
-  ])('forwards $action with the translated actor and returns the updated safe ticket', async (body) => {
-    mutationMock.mockResolvedValue({ ok: true, ticket } as never)
+    {
+      body: { action: 'unclaim' as const },
+      assignedTechId: null,
+      assignedTechName: null,
+      state: 'unassigned' as const,
+    },
+    {
+      body: {
+        action: 'reassign' as const,
+        assignedTechId: '00000000-0000-0000-0000-000000000501',
+        confirmBelowTier: true,
+      },
+      assignedTechId: '00000000-0000-0000-0000-000000000501',
+      assignedTechName: 'Morgan Tech',
+      state: 'team' as const,
+    },
+  ])('forwards $body.action and returns only actor-relative assignment truth', async ({
+    body,
+    assignedTechId,
+    assignedTechName,
+    state,
+  }) => {
+    mutationMock.mockResolvedValue({
+      ok: true,
+      ticket: updatedTicket({ assignedTechId, assignedTechName }),
+    } as never)
 
     const response = await POST(request(body), params())
 
@@ -142,10 +199,74 @@ describe('job assignment route', () => {
       body,
     })
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ ticket })
+    const payload = await response.json()
+    expect(payload).toEqual({
+      assignment: {
+        ticketId: TICKET_ID,
+        jobId: JOB_ID,
+        workStatus: 'open',
+        state,
+        assignedTechName,
+      },
+    })
+    expect(JSON.stringify(payload)).not.toMatch(
+      /Private Customer|555-PRIVATE|private@example|PRIVATEVIN|private-session|private-other-job|skillTier|role/,
+    )
   })
 
-  it('returns only the safe current assignee with a losing claim conflict', async () => {
+  it('fails closed when a successful domain result lacks the target job', async () => {
+    mutationMock.mockResolvedValue({
+      ok: true,
+      ticket: { ...updatedTicket({ assignedTechId: profile.id, assignedTechName: profile.fullName }), jobs: [] },
+    } as never)
+
+    const response = await POST(request({ action: 'claim' }), params())
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({ error: 'invalid_assignment_result' })
+  })
+
+  it('reconciles canonical database UUIDs after a valid uppercase route mutation', async () => {
+    const canonicalTicketId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const canonicalJobId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const uppercaseTicketId = canonicalTicketId.toUpperCase()
+    const uppercaseJobId = canonicalJobId.toUpperCase()
+    const ticket = updatedTicket({
+      assignedTechId: profile.id,
+      assignedTechName: profile.fullName,
+    })
+    mutationMock.mockResolvedValue({
+      ok: true,
+      ticket: {
+        ...ticket,
+        id: canonicalTicketId,
+        jobs: ticket.jobs.map((job, index) => index === 0
+          ? { ...job, id: canonicalJobId }
+          : job),
+      },
+    } as never)
+
+    const response = await POST(request({ action: 'claim' }), {
+      params: Promise.resolve({ id: uppercaseTicketId, jobId: uppercaseJobId }),
+    })
+
+    expect(mutationMock).toHaveBeenCalledWith({}, expect.objectContaining({
+      ticketId: uppercaseTicketId,
+      jobId: uppercaseJobId,
+    }))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      assignment: {
+        ticketId: uppercaseTicketId,
+        jobId: uppercaseJobId,
+        workStatus: 'open',
+        state: 'mine',
+        assignedTechName: profile.fullName,
+      },
+    })
+  })
+
+  it('returns only the assignee display name with a losing claim conflict', async () => {
     const currentAssignee = {
       id: '00000000-0000-0000-0000-000000000501',
       fullName: 'Winner Tech',
@@ -163,7 +284,7 @@ describe('job assignment route', () => {
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({
       error: 'assignment_conflict',
-      currentAssignee,
+      currentAssignee: { fullName: 'Winner Tech' },
     })
   })
 
