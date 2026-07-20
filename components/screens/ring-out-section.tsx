@@ -33,6 +33,8 @@ function humanizeError(error: unknown): string {
       return 'That’s more than the balance owed. Enter the balance or less.'
     case 'balance_outstanding':
       return 'There’s still a balance to collect before this can close.'
+    case 'unfinished_work':
+      return 'Finish or cancel every work item before closing this repair order.'
     case 'ticket_not_open':
       return 'This ticket is already closed.'
     case 'forbidden':

@@ -126,6 +126,23 @@ describe('RingOutSection', () => {
     expect(screen.getByRole('button', { name: 'Record payment' })).toBeInTheDocument()
   })
 
+  it('explains unfinished work without refreshing or navigating', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false, status: 409, json: async () => ({ error: 'unfinished_work' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<RingOutSection ticketId={TICKET} initialRingOut={PAID} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paid & close ticket' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Finish or cancel every work item before closing this repair order.',
+    )
+    expect(router.refresh).not.toHaveBeenCalled()
+    expect(router.push).not.toHaveBeenCalled()
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+
   it('reuses one request key when an unchanged payment retries after an ambiguous failure', async () => {
     const randomUUID = vi.fn()
       .mockReturnValueOnce(REQUEST)

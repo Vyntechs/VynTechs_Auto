@@ -41,6 +41,7 @@ export type TicketDomainError =
   | 'assignment_conflict'
   | 'overpayment'
   | 'balance_outstanding'
+  | 'unfinished_work'
   | 'job_limit_reached'
 
 export type AssignmentTierWarning = {
@@ -511,6 +512,7 @@ export function ticketDomainStatus(
     case 'job_not_open':
     case 'assignment_conflict':
     case 'balance_outstanding':
+    case 'unfinished_work':
     case 'job_limit_reached':
       return 409
   }
