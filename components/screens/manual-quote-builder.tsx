@@ -698,6 +698,49 @@ export function ManualQuoteBuilder({
     else if (inFlightRef.current) endOperation()
   }
 
+  const decidedVersion = embedded
+    && current.activeVersion
+    && current.jobs.length > 0
+    && current.jobs.every((job) => (
+      job.approval.state === 'approved' || job.approval.state === 'declined'
+    ))
+    && !editor
+    && !modal
+    && !decision
+    && !sourcingJob
+    && !busy
+    && !error
+      ? current.activeVersion
+      : null
+
+  if (decidedVersion) {
+    return (
+      <section className={styles.embeddedProof} aria-label="Quote workspace">
+        <div className={styles.embeddedProofHead}>
+          <div>
+            <p className={styles.eyebrow}>Quote V{decidedVersion.versionNumber} · recorded</p>
+            <h2>Quote complete</h2>
+          </div>
+          <button className={styles.closeEmbedded} type="button" onClick={onClose}>Close quote</button>
+        </div>
+        <ul className={styles.embeddedProofJobs}>
+          {current.jobs.map((job) => (
+            <li key={job.id}>
+              <span>{job.title}</span>
+              <strong>
+                {job.approval.state === 'approved' ? 'Approved' : 'Declined'} · Version {decidedVersion.versionNumber}
+              </strong>
+            </li>
+          ))}
+        </ul>
+        <div className={styles.embeddedProofTotal}>
+          <span>Ticket total</span>
+          <strong>{formatMoneyCents(decidedVersion.totalCents)}</strong>
+        </div>
+      </section>
+    )
+  }
+
   const Root = embedded ? 'section' : 'main'
   return (
     <Root

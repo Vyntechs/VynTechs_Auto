@@ -229,6 +229,27 @@ describe('ManualQuoteBuilder', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('collapses a fully decided embedded quote to one concise proof', () => {
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      embedded
+      onClose={vi.fn()}
+      builder={builder({
+        jobs: [{
+          ...builder().jobs[0],
+          approval: { state: 'approved', quoteVersionId: VERSION_ID },
+        }],
+      })}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Quote complete' })).toBeInTheDocument()
+    expect(screen.getByText('Replace front brakes')).toBeInTheDocument()
+    expect(screen.getByText('Approved · Version 3')).toBeInTheDocument()
+    expect(screen.getByText('$322.81')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close quote' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add part' })).toBeNull()
+  })
+
   it('renders customer-safe job and manual line truth with the calibrated quote tape', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
 

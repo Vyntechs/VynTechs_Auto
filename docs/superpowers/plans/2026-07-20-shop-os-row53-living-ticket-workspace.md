@@ -39,7 +39,7 @@
 - [x] Lazy-load the existing quote, canned-work, and safe vendor projections only when Quote opens.
 - [x] Add an embedded mode to the existing manual quote builder; do not fork quote logic or remove deep-link support.
 - [x] Replace embedded refresh paths with focused refetches and publish approval/work-state changes back to the mounted ledger.
-- [ ] Collapse to a concise prepared/approved proof without losing an unsaved editor or retry identity.
+- [x] Collapse to a concise prepared/approved proof without losing an unsaved editor or retry identity.
 
 ### Task 4 — Perform in place
 

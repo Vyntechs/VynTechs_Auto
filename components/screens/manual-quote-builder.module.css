@@ -19,6 +19,64 @@
   padding: clamp(18px, 4vw, 36px);
 }
 
+.embeddedProof {
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-3);
+  background: var(--vt-bone-50);
+  padding: clamp(20px, 4vw, 36px);
+}
+
+.embeddedProofHead {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.embeddedProofHead h2 {
+  margin: 8px 0 0;
+  font-family: var(--vt-font-serif);
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 400;
+}
+
+.embeddedProofJobs {
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+  border-block: 1px solid var(--vt-rule);
+}
+
+.embeddedProofJobs li,
+.embeddedProofTotal {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 0;
+}
+
+.embeddedProofJobs span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--vt-font-serif);
+}
+
+.embeddedProofJobs strong,
+.embeddedProofTotal {
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+}
+
+.embeddedProofJobs strong {
+  flex: 0 0 auto;
+  color: var(--vt-fg-2);
+}
+
+.embeddedProofTotal strong {
+  font-size: 20px;
+}
+
 .header {
   display: flex;
   align-items: end;
