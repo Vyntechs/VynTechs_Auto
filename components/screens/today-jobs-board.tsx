@@ -1,15 +1,24 @@
 'use client'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TodayTicketJob } from '@/lib/tickets'
+import {
+  createTodayJobOverride,
+  parseAssignmentEnvelope,
+  placeTodayJob,
+  projectTodayBoard,
+  type TodayJobOverride,
+} from '@/lib/shop-os/today-board'
 import styles from './today-jobs-board.module.css'
 
 type Props = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
+  teamJobs?: TodayTicketJob[]
   createdJobs?: TodayTicketJob[]
+  canDispatchWork?: boolean
   hasMore?: boolean
   // Resolved server-side release availability. Fail closed so a missing prop
   // can never reopen a diagnostic-engine entrance.
@@ -19,11 +28,6 @@ type Props = {
 type Announcement = {
   kind: 'status' | 'error'
   text: string
-}
-
-type ConflictBody = {
-  error?: unknown
-  currentAssignee?: { fullName?: unknown } | null
 }
 
 type DiagnosticStartBody = {
@@ -52,7 +56,9 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
 export function TodayJobsBoard({
   myJobs,
   openJobs,
+  teamJobs = [],
   createdJobs = [],
+  canDispatchWork = false,
   hasMore = false,
   diagnosticsEntitled = false,
 }: Props) {
@@ -64,12 +70,49 @@ export function TodayJobsBoard({
     Map<string, TodayTicketJob['diagnosticStartState']>
   >(() => new Map())
   const [announcement, setAnnouncement] = useState<Announcement | null>(null)
+  const [jobOverrides, setJobOverrides] = useState<Map<string, TodayJobOverride>>(
+    () => new Map(),
+  )
+  const [focusRequest, setFocusRequest] = useState<{
+    kind: 'board' | 'row' | 'claim'
+    jobId: string
+  } | null>(null)
   const claimButtons = useRef(new Map<string, HTMLButtonElement>())
   const diagnosticButtons = useRef(new Map<string, HTMLButtonElement>())
+  const board = useMemo(() => projectTodayBoard({
+    myJobs,
+    openJobs,
+    teamJobs,
+    createdJobs,
+    canDispatchWork,
+    overrides: jobOverrides,
+  }), [myJobs, openJobs, teamJobs, createdJobs, canDispatchWork, jobOverrides])
+
+  useEffect(() => {
+    if (!focusRequest) return
+    const movedRow = Array.from(
+      boardRef.current?.querySelectorAll<HTMLElement>('[data-job-id]') ?? [],
+    ).find((element) => element.dataset.jobId === focusRequest.jobId)
+    const focusTarget = focusRequest.kind === 'board'
+      ? boardRef.current
+      : focusRequest.kind === 'row'
+        ? movedRow
+        : claimButtons.current.get(focusRequest.jobId)
+    focusTarget?.focus()
+    setFocusRequest(null)
+  }, [focusRequest, board])
+
+  function applyJobTruth(before: TodayTicketJob, after: TodayTicketJob) {
+    setJobOverrides((current) => new Map(current).set(
+      before.id,
+      createTodayJobOverride(before, after),
+    ))
+  }
 
   async function claim(job: TodayTicketJob) {
     if (pendingJobId) return
     let returnFocusToBoard = false
+    let returnFocusToRow = false
 
     setPendingJobId(job.id)
     setAnnouncement({ kind: 'status', text: `Claiming ticket ${job.ticketNumber}.` })
@@ -84,30 +127,76 @@ export function TodayJobsBoard({
         },
       )
 
-      const body = await response.json().catch(() => ({})) as ConflictBody
+      const body: unknown = await response.json().catch(() => ({}))
       if (response.ok) {
+        const assignment = parseAssignmentEnvelope(body, {
+          ticketId: job.ticketId,
+          jobId: job.id,
+        })
+        if (!assignment) {
+          applyJobTruth(job, { ...job, canClaim: false })
+          setAnnouncement({
+            kind: 'error',
+            text: `Ticket ${job.ticketNumber} changed, but this screen couldn't safely reconcile it. View the ticket.`,
+          })
+          returnFocusToRow = true
+          return
+        }
+        const updatedJob: TodayTicketJob = {
+          ...job,
+          workStatus: assignment.workStatus,
+          assignmentState: assignment.state,
+          assignedTechName: assignment.assignedTechName,
+          canClaim: false,
+        }
+        applyJobTruth(job, updatedJob)
         setAnnouncement({
           kind: 'status',
-          text: `Ticket ${job.ticketNumber} claimed. Refreshing jobs.`,
+          text: assignment.state === 'mine'
+            ? `Ticket ${job.ticketNumber} claimed.`
+            : `Ticket ${job.ticketNumber} assignment updated.`,
         })
-        returnFocusToBoard = true
-        router.refresh()
+        const lane = placeTodayJob(updatedJob, canDispatchWork)
+        returnFocusToBoard = lane === 'hidden'
+        returnFocusToRow = lane !== 'hidden'
         return
       }
 
-      if (response.status === 409 && body.error === 'assignment_conflict') {
-        const winner = body.currentAssignee?.fullName
-        const safeWinner = typeof winner === 'string' && winner.trim()
-          ? winner.trim()
+      if (
+        response.status === 409 &&
+        typeof body === 'object' &&
+        body !== null &&
+        'error' in body &&
+        body.error === 'assignment_conflict'
+      ) {
+        const currentAssignee = 'currentAssignee' in body &&
+          typeof body.currentAssignee === 'object' &&
+          body.currentAssignee !== null
+          ? body.currentAssignee
           : null
+        const winner = currentAssignee && 'fullName' in currentAssignee
+          ? currentAssignee.fullName
+          : null
+        const trimmedWinner = typeof winner === 'string' ? winner.trim() : ''
+        const safeWinner = trimmedWinner.length > 0 && trimmedWinner.length <= 120
+          ? trimmedWinner
+          : null
+        const updatedJob: TodayTicketJob = {
+          ...job,
+          assignmentState: 'team',
+          assignedTechName: safeWinner,
+          canClaim: false,
+        }
+        applyJobTruth(job, updatedJob)
         setAnnouncement({
           kind: 'status',
           text: safeWinner
-            ? `Already claimed by ${safeWinner}. Refreshing jobs.`
-            : 'This job was already claimed. Refreshing jobs.',
+            ? `Already claimed by ${safeWinner}.`
+            : 'This job was already claimed.',
         })
-        returnFocusToBoard = true
-        router.refresh()
+        const lane = placeTodayJob(updatedJob, canDispatchWork)
+        returnFocusToBoard = lane === 'hidden'
+        returnFocusToRow = lane !== 'hidden'
         return
       }
 
@@ -119,11 +208,9 @@ export function TodayJobsBoard({
       })
     } finally {
       setPendingJobId(null)
-      requestAnimationFrame(() => {
-        const focusTarget = returnFocusToBoard
-          ? boardRef.current
-          : claimButtons.current.get(job.id)
-        focusTarget?.focus()
+      setFocusRequest({
+        kind: returnFocusToBoard ? 'board' : returnFocusToRow ? 'row' : 'claim',
+        jobId: job.id,
       })
     }
   }
@@ -248,16 +335,17 @@ export function TodayJobsBoard({
       aria-label="Ticket jobs"
       tabIndex={-1}
       data-empty={
-        myJobs.length === 0 &&
-        openJobs.length === 0 &&
-        createdJobs.length === 0 &&
+        board.mine.length === 0 &&
+        board.open.length === 0 &&
+        board.team.length === 0 &&
+        board.created.length === 0 &&
         !announcement
       }
     >
-      {myJobs.length > 0 && (
+      {board.mine.length > 0 && (
         <JobSection
-          label="My jobs"
-          jobs={myJobs}
+          label="My work"
+          jobs={board.mine}
           mode="mine"
           pendingDiagnosticJobId={pendingDiagnosticJobId}
           diagnosticsDisabled={pendingDiagnosticJobId !== null}
@@ -272,10 +360,10 @@ export function TodayJobsBoard({
           }}
         />
       )}
-      {openJobs.length > 0 && (
+      {board.open.length > 0 && (
         <JobSection
-          label="Open jobs"
-          jobs={openJobs}
+          label={canDispatchWork ? 'Needs assignment' : 'Available'}
+          jobs={board.open}
           mode="open"
           pendingJobId={pendingJobId}
           claimsDisabled={pendingJobId !== null}
@@ -286,10 +374,17 @@ export function TodayJobsBoard({
           }}
         />
       )}
-      {createdJobs.length > 0 && (
+      {board.team.length > 0 && (
+        <JobSection
+          label="With the team"
+          jobs={board.team}
+          mode="team"
+        />
+      )}
+      {board.created.length > 0 && (
         <JobSection
           label="Created by me"
-          jobs={createdJobs}
+          jobs={board.created}
           mode="created"
         />
       )}
@@ -330,7 +425,7 @@ function JobSection({
 }: {
   label: string
   jobs: TodayTicketJob[]
-  mode: 'mine' | 'open' | 'created'
+  mode: 'mine' | 'open' | 'team' | 'created'
   pendingJobId?: string | null
   claimsDisabled?: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -394,7 +489,7 @@ function JobRow({
   setDiagnosticButton,
 }: {
   job: TodayTicketJob
-  mode: 'mine' | 'open' | 'created'
+  mode: 'mine' | 'open' | 'team' | 'created'
   pending: boolean
   claimDisabled: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -416,6 +511,8 @@ function JobRow({
     <article
       className={styles.row}
       aria-label={`Ticket ${job.ticketNumber}: ${job.title}`}
+      data-job-id={job.id}
+      tabIndex={-1}
     >
       <Link
         href={`/tickets/${job.ticketId}`}
@@ -435,6 +532,9 @@ function JobRow({
           <span>{titleCase[job.kind]}</span>
           <span>Tier {job.requiredSkillTier}</span>
           <span>{statusLabel[job.workStatus]}</span>
+          {(mode === 'team' || mode === 'created') && job.assignedTechName && (
+            <span>{job.assignedTechName}</span>
+          )}
         </div>
       </div>
       <div className={styles.action}>
@@ -455,7 +555,7 @@ function JobRow({
           >
             View ticket
           </Link>
-        ) : mode === 'created' ? (
+        ) : mode === 'created' || mode === 'team' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
             className={`${styles.control} ${styles.secondary}`}

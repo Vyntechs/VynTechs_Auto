@@ -69,17 +69,17 @@
 - Modify `components/screens/today-jobs-board.tsx`
 - Modify `tests/unit/shop-os-today-jobs-board.test.tsx`
 
-- [ ] Write RED reducer tests for mine, available, team, creator-recovery, and hidden placement.
-- [ ] Add one pure placement function and one normalized keyed job model; lane arrays are derived, never independently mutated.
-- [ ] Keep server props as the base and mutation overrides as a separate keyed map so stale props cannot overwrite a completed claim.
-- [ ] Strictly parse assignment envelopes: exact target ticket/job, active status, allowed state, and bounded assignee display name. Never merge unknown response fields.
-- [ ] Successful claim follows returned truth: mine → `My work`; team → dispatch `With the team`, creator recovery, or hidden according to capability and immutable creator fact.
-- [ ] Conflict applies the same placement rule. Missing safe winner never invents identity.
-- [ ] Malformed/mismatched success leaves persisted board truth intact, removes no work, announces a reconciliation error, and prevents automatic retry.
-- [ ] Replace claim success/conflict `router.refresh()` calls; preserve refreshes only in the dormant diagnostic lifecycle.
-- [ ] Preserve pending serialization, accessible announcements, and focus: moved rows focus their mounted row/control; removed rows focus the board.
-- [ ] Team and creator rows expose only `View ticket`.
-- [ ] Run reducer and board tests and commit.
+- [x] Write RED reducer tests for mine, available, team, creator-recovery, and hidden placement.
+- [x] Add one pure placement function and one normalized keyed job model; lane arrays are derived, never independently mutated.
+- [x] Keep server props as the base and mutation overrides as a separate keyed map so stale props cannot overwrite a completed claim.
+- [x] Strictly parse assignment envelopes: exact target ticket/job, active status, allowed state, and bounded assignee display name. Never merge unknown response fields.
+- [x] Successful claim follows returned truth: mine → `My work`; team → dispatch `With the team`, creator recovery, or hidden according to capability and immutable creator fact.
+- [x] Conflict applies the same placement rule. Missing safe winner never invents identity.
+- [x] Malformed/mismatched success leaves persisted board truth intact, removes no work, announces a reconciliation error, and prevents automatic retry.
+- [x] Replace claim success/conflict `router.refresh()` calls; preserve refreshes only in the dormant diagnostic lifecycle.
+- [x] Preserve pending serialization, accessible announcements, and focus: moved rows focus their mounted row/control; removed rows focus the board.
+- [x] Team and creator rows expose only `View ticket`.
+- [x] Run reducer and board tests and commit.
 
 ### Task 4 — Shape the existing surface by role
 
@@ -90,12 +90,12 @@
 - Modify `tests/unit/today-home.test.tsx`
 - Modify `components/screens/today-jobs-board.module.css` only if the existing responsive rules need a narrow assignee wrap correction.
 
-- [ ] Pass `canDispatchWork={canAssignWork(role)}` from the server boundary.
-- [ ] Dispatch view: header `Shop floor`; lane labels `My work`, `Needs assignment`, `With the team`, and `Created by me` when present.
-- [ ] Non-dispatch view: preserve personal header; labels `My work`, `Available`, and `Created by me`; never render a team heading.
-- [ ] Include `teamJobs` in empty-state truth.
-- [ ] Prove counts change in place, 44px controls remain, long assignee names wrap, and 375px stays one column.
-- [ ] Run Today page/home/board accessibility-focused tests and commit.
+- [x] Pass `canDispatchWork={canAssignWork(role)}` from the server boundary.
+- [x] Dispatch view: header `Shop floor`; lane labels `My work`, `Needs assignment`, `With the team`, and `Created by me` when present.
+- [x] Non-dispatch view: preserve personal header; labels `My work`, `Available`, and `Created by me`; never render a team heading.
+- [x] Include `teamJobs` in empty-state truth.
+- [x] Prove counts change in place, 44px controls remain, long assignee names wrap, and 375px stays one column.
+- [x] Run Today page/home/board accessibility-focused tests and commit.
 
 ### Task 5 — Converge, publish, and continue
 

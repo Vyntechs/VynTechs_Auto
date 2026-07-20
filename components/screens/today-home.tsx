@@ -23,6 +23,7 @@ type Props = {
   canCurate?: boolean
   canWriteCounterOrder?: boolean
   canCreateTickets?: boolean
+  canDispatchWork?: boolean
   todayJobs?: TodayTicketJobs
   diagnosticsEntitled?: boolean
 }
@@ -36,7 +37,14 @@ export function TodayHome({
   canCurate = false,
   canWriteCounterOrder = false,
   canCreateTickets = false,
-  todayJobs = { myJobs: [], openJobs: [], createdJobs: [], linkedSessionIds: [] },
+  canDispatchWork = false,
+  todayJobs = {
+    myJobs: [],
+    openJobs: [],
+    createdJobs: [],
+    teamJobs: [],
+    linkedSessionIds: [],
+  },
   diagnosticsEntitled = false,
 }: Props) {
   const meta = bay ? (
@@ -49,7 +57,7 @@ export function TodayHome({
 
   return (
     <main className="app">
-      <AppHeader title="My Jobs" meta={meta} />
+      <AppHeader title={canDispatchWork ? 'Shop floor' : 'My Jobs'} meta={meta} />
       <div
         style={{
           display: 'flex',
@@ -130,7 +138,9 @@ export function TodayHome({
         <TodayJobsBoard
           myJobs={todayJobs.myJobs}
           openJobs={todayJobs.openJobs}
+          teamJobs={todayJobs.teamJobs}
           createdJobs={todayJobs.createdJobs}
+          canDispatchWork={canDispatchWork}
           hasMore={todayJobs.hasMore}
           diagnosticsEntitled={diagnosticsEntitled}
         />
@@ -178,6 +188,7 @@ export function TodayHome({
           dueFollowUps.length === 0 &&
           todayJobs.myJobs.length === 0 &&
           todayJobs.openJobs.length === 0 &&
+          todayJobs.teamJobs.length === 0 &&
           todayJobs.createdJobs.length === 0 && (
             <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
