@@ -1,8 +1,10 @@
 # VynTechs_Auto
 
-An AI diagnostic copilot for the auto repair bay. A tech enters a vehicle and a complaint; the system runs a stateful, evidence-grounded diagnostic — and refuses to recommend a risky action it isn't confident enough to stand behind.
+> **Status:** Public technical proof. Built for independent repair shops; no verified live-shop deployment is claimed here.
 
-Built for independent shops. Billed per shop, one subscription per tenant.
+An automotive diagnostic technician translated a safety-critical shop workflow into a stateful AI diagnostic system. The evidence in this repository is the working architecture: retrieval with provenance, explicit risk classification, confidence gates that fail closed, audit history, multi-tenant data boundaries, billing scaffolding, versioned migrations, and tests against real SQL behavior.
+
+A tech enters a vehicle and a complaint; the system runs a stateful, evidence-grounded diagnostic — and refuses to recommend a risky action it isn't confident enough to stand behind. Designed as one subscription per shop.
 
 ## The problem
 
@@ -21,9 +23,9 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
                     │   Two-rung retrieval        │  ← bounded by a 20s deadline,
                     │   (parallel, fail-soft)     │    never blocks the LLM call
                     │                             │
-                    │  Rung 0  cross-shop corpus  │  pgvector cosine KNN
-                    │          (Voyage voyage-3,  │  founder-verified cases
-                    │           1024-dim)         │  get a top-2 fast lane
+                    │  Rung 0  promotable case    │  pgvector cosine KNN
+                    │          corpus (Voyage     │  verified case designs
+                    │          voyage-3, 1024-dim)│  get a top-2 fast lane
                     │                             │
                     │  Rung 1  6 internet adapters│  nhtsa .90 · recall .85
                     │          weighted + budgeted│  forum .60 · youtube .55
@@ -64,7 +66,7 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
 - **Rules first, LLM second.** The risk classifier runs ~15 regex rules before it ever calls a model. Destructive actions — cut/splice a wire, reflash an ECU — are matched first so they can never be quietly downgraded. If a rule matches, no LLM runs. If the model is called and returns malformed JSON, the action defaults to `high`. Safety bias is the default, not the exception.
 - **Confidence is calibrated, not asserted.** Thresholds live per `(risk class × vehicle family × symptom class)` cell, most-specific-cell wins, with a hard fallback (`zero 0 · low .70 · medium .80 · high .90 · destructive .95`). A weekly Beta-Binomial refit watches each cell's comeback rate and proposes a nudge — but it's **advisory**. Drift only writes an alert for a human curator when it clears `0.05` with a sample of `10+`. The threshold table is read-only to the job, and the refit is clamped to `[0.5, 0.99]` so the safety floor can never be turned off.
 - **Vision is earned, not default.** Four Sonnet vision extractors read scan screens (DTCs, freeze-frame, PIDs), wiring diagrams (wire colors, pins, grounds, splices), and steered generic photos. The tree prompt is told *not* to ask for photos by default — vision is expensive, text confirms are cheap. Video is stored describe-first, no extraction. (Audio transcription is a known stub: the SDK has no native audio block yet, so that path is documented as API-pending, not silently broken.)
-- **The corpus self-curates.** Closed cases can be promoted into a cross-shop corpus. Each entry's confidence is roughly `successes / (successes + comebacks)` (Laplace-smoothed, capped at 0.99). Comebacks decay it; an entry with `3+` comebacks that outnumber its successes auto-retires. Shop-owner-verified cases are tagged as the highest source of truth and jump the queue.
+- **The corpus is designed to self-curate.** The architecture can promote closed cases into a shared corpus. Each entry's confidence is roughly `successes / (successes + comebacks)` (Laplace-smoothed, capped at 0.99). Comebacks decay it; an entry with `3+` comebacks that outnumber its successes auto-retires. The ranking model gives shop-owner-verified cases the highest source weight.
 
 ### Data, auth, billing
 
@@ -76,12 +78,10 @@ The core is a stateful decision-tree engine, not a single prompt. Every turn pul
 
 ## How it's built
 
-This is AI-directed, human-verified work. I direct the agents; I own the judgment and the verification. The architecture decisions, the safety doctrine — rules before LLMs, advisory-not-automatic calibration, locked diagnoses — are mine, and they're enforced in the code and the convention docs. The line-by-line authoring is paired with Claude, credited in the commit trailers. I don't claim I hand-wrote every line. I claim I know exactly why every line is there — and I can show you the test that proves it.
+Brandon directs AI-assisted implementation and owns the domain, product, and architecture decisions. He inspects changes and accepts work through tests and observed behavior; AI collaborators are credited in the commit history.
 
-## Scale, plainly
+## Verification surface
 
-- **300+ commits** over roughly eight weeks of focused work.
-- **~64k lines** of TypeScript outside `node_modules`; `lib/` alone spans 15 domain subdirectories.
 - **184 unit test files**, 1,300+ test blocks under Vitest, backed by an in-memory Postgres (pglite) so handlers test against real SQL without mocking the framework. Plus Playwright e2e specs.
 - **38 Postgres tables**, 27 versioned migrations, a daily backup workflow, two scheduled cron jobs.
 - An enforced convention: every API route is a thin ~30-line shim that delegates to a `lib/` handler taking `db` as its first argument — which is *why* the logic is testable against real Postgres without mocking Next.js.
