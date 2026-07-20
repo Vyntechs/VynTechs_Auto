@@ -86,19 +86,37 @@ describe('POST /api/tickets/counter', () => {
     expect(handlerMock).not.toHaveBeenCalled()
   })
 
-  it('fails closed for a non-owner before paywall, parsing, quota, or mutation', async () => {
-    authMock.mockResolvedValue({
-      ...authContext,
-      profile: { ...profile, role: 'advisor' },
+  it.each(['tech', 'parts'] as const)(
+    'fails closed for %s before paywall, parsing, quota, or mutation',
+    async (role) => {
+      authMock.mockResolvedValue({
+        ...authContext,
+        profile: { ...profile, role },
+      })
+
+      const response = await POST(request('not json{'))
+
+      expect(response.status).toBe(404)
+      await expect(response.json()).resolves.toEqual({ error: 'not_found' })
+      expect(paywallMock).not.toHaveBeenCalled()
+      expect(rateLimitMock).not.toHaveBeenCalled()
+      expect(handlerMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('lets an advisor create a complete counter ticket', async () => {
+    const advisorProfile = { ...profile, role: 'advisor' }
+    const ticket = { id: '00000000-0000-0000-0000-000000000602', ticketNumber: 2 }
+    authMock.mockResolvedValue({ ...authContext, profile: advisorProfile })
+    handlerMock.mockResolvedValue({ ok: true, ticket } as never)
+
+    const response = await POST(request(body))
+
+    expect(response.status).toBe(201)
+    expect(handlerMock).toHaveBeenCalledWith({}, {
+      actor: { ...actor, role: 'advisor' },
+      body,
     })
-
-    const response = await POST(request('not json{'))
-
-    expect(response.status).toBe(404)
-    await expect(response.json()).resolves.toEqual({ error: 'not_found' })
-    expect(paywallMock).not.toHaveBeenCalled()
-    expect(rateLimitMock).not.toHaveBeenCalled()
-    expect(handlerMock).not.toHaveBeenCalled()
   })
 
   it('authenticates before parsing JSON and returns the exact 401 envelope', async () => {

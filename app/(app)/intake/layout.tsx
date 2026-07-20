@@ -4,6 +4,7 @@ import { db } from '@/lib/db/client'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { isDesktopIntakeEnabled } from '@/lib/feature-flags'
+import { canAssignWork } from '@/lib/shop-os/capabilities'
 
 export default async function IntakeLayout({ children }: { children: ReactNode }) {
   if (!isDesktopIntakeEnabled()) notFound()
@@ -11,7 +12,7 @@ export default async function IntakeLayout({ children }: { children: ReactNode }
   const supabase = await getServerSupabase()
   const ctx = await requireUserAndProfile({ supabase, db })
   if (!ctx) redirect('/sign-in')
-  if (ctx.profile.role !== 'owner') notFound()
+  if (!canAssignWork(ctx.profile.role)) notFound()
 
   return <>{children}</>
 }
