@@ -51,6 +51,10 @@ export function ManualQuoteBuilder({
   vendorAccounts = [],
   vendorCatalogAvailable = false,
   canCreateVendorAccount = false,
+  embedded = false,
+  onClose,
+  onProjection,
+  onReloadCatalog,
 }: {
   ticket: QuoteTicketIdentity
   builder: QuoteBuilder
@@ -59,6 +63,14 @@ export function ManualQuoteBuilder({
   vendorAccounts?: SafeManualVendorAccount[]
   vendorCatalogAvailable?: boolean
   canCreateVendorAccount?: boolean
+  embedded?: boolean
+  onClose?: () => void
+  onProjection?: (jobs: Array<{
+    id: string
+    workStatus: 'open' | 'in_progress' | 'blocked'
+    approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  }>) => void
+  onReloadCatalog?: () => void
 }): React.JSX.Element {
   const router = useRouter()
   const [current, setCurrent] = useState(builder)
@@ -102,6 +114,13 @@ export function ManualQuoteBuilder({
   const catalogSignature = cannedJobs.map((job) => `${job.id}:${job.fingerprint}`).join('|')
 
   useEffect(() => setCurrent(builder), [builder])
+  useEffect(() => {
+    onProjection?.(current.jobs.map((job) => ({
+      id: job.id,
+      workStatus: job.workStatus,
+      approvalState: job.approval.state,
+    })))
+  }, [current, onProjection])
   useEffect(() => {
     if (!reloadPendingRef.current || !reloadBaselineRef.current) return
     const baseline = reloadBaselineRef.current
@@ -202,6 +221,15 @@ export function ManualQuoteBuilder({
     }
     setError(null)
     setEditor(createEditor(target))
+  }
+
+  function requestEmbeddedClose(invoker: HTMLElement): void {
+    if (inFlightRef.current || modal || sourcingJobId) return
+    if (editor?.dirty) {
+      setModal({ kind: 'discard-close', target: editor, invoker })
+      return
+    }
+    onClose?.()
   }
 
   function createEditor(target: EditorTarget): EditorState {
@@ -670,7 +698,8 @@ export function ManualQuoteBuilder({
   function reloadCannedPage(): void {
     reloadPendingRef.current = true
     reloadBaselineRef.current = { builder, catalogSignature, available: cannedCatalogAvailable }
-    router.refresh()
+    if (embedded && onReloadCatalog) onReloadCatalog()
+    else router.refresh()
   }
 
   function setSourcingBusy(nextBusy: boolean): void {
@@ -678,15 +707,62 @@ export function ManualQuoteBuilder({
     else if (inFlightRef.current) endOperation()
   }
 
+  const decidedVersion = embedded
+    && current.activeVersion
+    && current.jobs.length > 0
+    && current.jobs.every((job) => (
+      job.approval.state === 'approved' || job.approval.state === 'declined'
+    ))
+    && !editor
+    && !modal
+    && !decision
+    && !sourcingJob
+    && !busy
+    && !error
+      ? current.activeVersion
+      : null
+
+  if (decidedVersion) {
+    return (
+      <section className={styles.embeddedProof} aria-label="Quote workspace">
+        <div className={styles.embeddedProofHead}>
+          <div>
+            <p className={styles.eyebrow}>Quote V{decidedVersion.versionNumber} · recorded</p>
+            <h2>Quote complete</h2>
+          </div>
+          <button className={styles.closeEmbedded} type="button" onClick={onClose}>Close quote</button>
+        </div>
+        <ul className={styles.embeddedProofJobs}>
+          {current.jobs.map((job) => (
+            <li key={job.id}>
+              <span>{job.title}</span>
+              <strong>
+                {job.approval.state === 'approved' ? 'Approved' : 'Declined'} · Version {decidedVersion.versionNumber}
+              </strong>
+            </li>
+          ))}
+        </ul>
+        <div className={styles.embeddedProofTotal}>
+          <span>Ticket total</span>
+          <strong>{formatMoneyCents(decidedVersion.totalCents)}</strong>
+        </div>
+      </section>
+    )
+  }
+
+  const Root = embedded ? 'section' : 'main'
   return (
-    <main className={`app ${styles.screen} ${sourcingJob ? styles.screenWithSourcing : ''}`}>
+    <Root
+      className={`${embedded ? styles.embeddedScreen : `app ${styles.screen}`} ${sourcingJob ? styles.screenWithSourcing : ''}`}
+      aria-label={embedded ? 'Quote workspace' : undefined}
+    >
       <div data-testid="quote-background" inert={modal || decision || sourcingJob ? true : undefined}>
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}>
             Repair order {String(ticket.ticketNumber).padStart(6, '0')}
           </p>
-          <h1>Build quote</h1>
+          {embedded ? <h2>Build quote</h2> : <h1>Build quote</h1>}
           {ticket.customer && ticket.vehicle && (
             <p className={styles.identity}>
               <span>{ticket.customer.name}</span>
@@ -694,7 +770,17 @@ export function ManualQuoteBuilder({
             </p>
           )}
         </div>
-        <Link href={`/tickets/${ticket.id}`}>Back to ticket</Link>
+        {embedded ? (
+          <button
+            type="button"
+            className={styles.closeEmbedded}
+            onClick={(event) => requestEmbeddedClose(event.currentTarget)}
+          >
+            Close quote
+          </button>
+        ) : (
+          <Link href={`/tickets/${ticket.id}`}>Back to ticket</Link>
+        )}
       </div>
 
       <section className={styles.truth} aria-label="Quote readiness">
@@ -1136,10 +1222,17 @@ export function ManualQuoteBuilder({
             if (!inFlightRef.current) closeModal()
           }}
           onDiscard={() => {
-            if (modal.kind !== 'discard' || inFlightRef.current) return
-            setEditor(createEditor(modal.target))
-            closeModal('editor')
-            setError(null)
+            if (inFlightRef.current) return
+            if (modal.kind === 'discard') {
+              setEditor(createEditor(modal.target))
+              closeModal('editor')
+              setError(null)
+            } else if (modal.kind === 'discard-close') {
+              setEditor(null)
+              setModal(null)
+              setError(null)
+              onClose?.()
+            }
           }}
           onRemove={confirmRemove}
           onRemoveSourced={confirmSourcedRemove}
@@ -1157,7 +1250,7 @@ export function ManualQuoteBuilder({
           onConfirm={submitDecision}
         />
       )}
-    </main>
+    </Root>
   )
 }
 
@@ -1402,6 +1495,7 @@ type EditorState = EditorTarget & {
 
 type ModalState =
   | { kind: 'discard'; target: EditorTarget; invoker: HTMLElement }
+  | { kind: 'discard-close'; target: EditorTarget; invoker: HTMLElement }
   | {
     kind: 'remove'
     target: { jobId: string; line: BuilderLine }
@@ -1536,7 +1630,7 @@ function ConfirmationModal({
     }
   }
 
-  const discard = modal.kind === 'discard'
+  const discard = modal.kind === 'discard' || modal.kind === 'discard-close'
   const sourced = modal.kind === 'remove-sourced'
   const descriptionId = discard ? undefined : `${titleId}-target`
   return (

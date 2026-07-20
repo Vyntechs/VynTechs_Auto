@@ -1,10 +1,28 @@
+'use client'
+
 import Link from 'next/link'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
+import type { TeamMember } from '@/lib/intake/team'
+import {
+  projectLivingTicketCommands,
+  type LivingTicketCommand,
+} from '@/lib/shop-os/living-ticket'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
+import type {
+  SimpleWorkEscalationView,
+  SimpleWorkProjectionView,
+} from '@/lib/shop-os/simple-work-ui'
 import { RingOutSection } from './ring-out-section'
+import {
+  InlineQuoteWorkspace,
+  type QuoteWorkspaceProjection,
+} from './inline-quote-workspace'
+import { TicketAssignmentControl } from './ticket-assignment-control'
 import { TicketPartRequests } from './ticket-part-requests'
+import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './ticket-detail.module.css'
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -51,23 +69,102 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
 export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
+  canCreateVendorAccount = false,
   currentProfileId = null,
+  currentProfileName = null,
+  role = '',
+  skillTier = null,
+  team = [],
   ringOut = null,
   partRequests = [],
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
+  canCreateVendorAccount?: boolean
   currentProfileId?: string | null
+  currentProfileName?: string | null
+  role?: string
+  skillTier?: number | null
+  team?: TeamMember[]
   ringOut?: TicketRingOut | null
   partRequests?: TicketPartRequestView[]
 }): React.JSX.Element {
+  const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
+    () => new Map(),
+  )
+  const [quoteOverrides, setQuoteOverrides] = useState<ReadonlyMap<string, QuoteOverride>>(
+    () => new Map(),
+  )
+  const [workOverrides, setWorkOverrides] = useState<ReadonlyMap<string, WorkOverride>>(
+    () => new Map(),
+  )
+  const [escalatedJobs, setEscalatedJobs] = useState<SimpleWorkEscalationView[]>([])
+  const [ringOutState, setRingOutState] = useState(ringOut)
+  const [ticketStatus, setTicketStatus] = useState(ticket.status)
+  const [activeTool, setActiveTool] = useState<
+    { kind: 'quote' } | { kind: 'work'; jobId: string } | null
+  >(null)
+  const jobRefs = useRef(new Map<string, HTMLLIElement>())
+  const quoteOpenerRef = useRef<HTMLButtonElement>(null)
+  const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
+  const ringOutRef = useRef<HTMLElement>(null)
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
-  const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticket.status)
+  const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticketStatus)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
   const phoneTarget = ticket.customer ? phoneHref(ticket.customer.phone) : null
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
+  const baseJobs: DisplayJob[] = [
+    ...ticket.jobs,
+    ...escalatedJobs.map((job) => ({ ...job, assignedTech: null })),
+  ]
+  const displayedJobs = baseJobs.map((job) => ({
+    ...job,
+    workStatus: workOverrides.get(job.id)?.workStatus
+      ?? quoteOverrides.get(job.id)?.workStatus
+      ?? assignmentOverrides.get(job.id)?.workStatus
+      ?? job.workStatus,
+    approvalState: quoteOverrides.get(job.id)?.approvalState ?? job.approvalState,
+  }))
+  const commands = projectLivingTicketCommands({
+    role,
+    profileId: currentProfileId,
+    skillTier,
+    ticketStatus,
+    jobs: displayedJobs.map((job) => ({
+      ...job,
+      assignmentState: assignmentOverrides.get(job.id)?.state,
+    })),
+    ringOut: ringOutState,
+  })
+  const allCommands = commands.primary
+    ? [commands.primary, ...commands.secondary]
+    : commands.secondary
+  const quoteCommand = allCommands.find((command) => command.kind === 'quote') ?? null
+  const ringOutCommand = allCommands.find((command) => (
+    command.kind === 'ring_out' || command.kind === 'close'
+  )) ?? null
+  const legacyQuoteFallback = !currentProfileId || !role
+  const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
+    setQuoteOverrides((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const projected of projection) {
+        const existing = current.get(projected.id)
+        if (existing?.workStatus === projected.workStatus
+          && existing.approvalState === projected.approvalState) continue
+        next.set(projected.id, {
+          workStatus: projected.workStatus,
+          approvalState: projected.approvalState,
+        })
+        changed = true
+      }
+      return changed ? next : current
+    })
+  }, [])
+  useEffect(() => setTicketStatus(ticket.status), [ticket.status])
+  useEffect(() => setRingOutState(ringOut), [ringOut])
 
   return (
     <main className={`app ${styles.screen}`}>
@@ -92,15 +189,95 @@ export function TicketDetailScreen({
           )}
         </header>
 
-        {ticket.status === 'open' && canBuildQuote && (
+        {ticketStatus === 'open' && (
+          (canBuildQuote && (quoteCommand || legacyQuoteFallback)) || ringOutCommand
+        ) && (
           <div className={styles.actions}>
-            <Link
-              href={`/tickets/${ticket.id}/quote`}
-              className={styles.quoteAction}
-            >
-              Build quote
-            </Link>
+            {canBuildQuote && (quoteCommand ? (
+              <button
+                ref={quoteOpenerRef}
+                type="button"
+                className={styles.quoteAction}
+                aria-expanded={activeTool?.kind === 'quote'}
+                disabled={activeTool !== null}
+                onClick={() => setActiveTool({ kind: 'quote' })}
+              >
+                {quoteCommand.label}
+              </button>
+            ) : legacyQuoteFallback ? (
+              <Link
+                href={`/tickets/${ticket.id}/quote`}
+                className={styles.quoteAction}
+              >
+                Build quote
+              </Link>
+            ) : null)}
+            {ringOutCommand && (
+              <button
+                type="button"
+                className={styles.quoteAction}
+                onClick={() => ringOutRef.current?.focus()}
+              >
+                {ringOutCommand.label}
+              </button>
+            )}
           </div>
+        )}
+
+        {activeTool?.kind === 'quote' && (
+          <InlineQuoteWorkspace
+            ticket={{
+              id: ticket.id,
+              ticketNumber: ticket.ticketNumber,
+              concern: ticket.concern,
+              customer: ticket.customer ? { name: ticket.customer.name } : null,
+              vehicle: ticket.vehicle ? {
+                year: ticket.vehicle.year,
+                make: ticket.vehicle.make,
+                model: ticket.vehicle.model,
+              } : null,
+            }}
+            canCreateVendorAccount={canCreateVendorAccount}
+            onProjection={applyQuoteProjection}
+            onClose={() => {
+                      setActiveTool(null)
+              setTimeout(() => quoteOpenerRef.current?.focus(), 0)
+            }}
+          />
+        )}
+
+        {activeTool?.kind === 'work' && ticket.customer && ticket.vehicle && (
+          <InlineWorkWorkspace
+            ticket={{
+              id: ticket.id,
+              number: ticket.ticketNumber,
+              customerName: ticket.customer.name,
+              vehicle: vehicleName(ticket.vehicle),
+            }}
+            jobId={activeTool.jobId}
+            onProjection={(work) => {
+              const jobId = activeTool.jobId
+              setWorkOverrides((current) => {
+                const existing = current.get(jobId)
+                if (existing?.workStatus === work.status) return current
+                return new Map(current).set(jobId, { workStatus: work.status })
+              })
+            }}
+            onEscalation={(job) => {
+              setEscalatedJobs((current) => (
+                current.some((existing) => existing.id === job.id) ? current : [...current, job]
+              ))
+              setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+            }}
+            onClose={() => {
+              const jobId = activeTool.jobId
+              setActiveTool(null)
+              setTimeout(() => {
+                const target = workOpenerRefs.current.get(jobId) ?? jobRefs.current.get(jobId)
+                target?.focus()
+              }, 0)
+            }}
+          />
         )}
 
         {!ticket.customer || !ticket.vehicle ? (
@@ -206,12 +383,15 @@ export function TicketDetailScreen({
               <p className={styles.eyebrow}>Persisted work</p>
               <h2 id="jobs-heading">Job ledger</h2>
             </div>
-            <span className={styles.jobCount}>{ticket.jobs.length} {ticket.jobs.length === 1 ? 'line' : 'lines'}</span>
+            <span className={styles.jobCount}>{displayedJobs.length} {displayedJobs.length === 1 ? 'line' : 'lines'}</span>
           </div>
 
           <ol className={styles.ledger}>
-            {ticket.jobs.map((job, index) => (
-              <li key={job.id} className={styles.job}>
+            {displayedJobs.map((job, index) => (
+              <li key={job.id} className={styles.job} tabIndex={-1} ref={(element) => {
+                if (element) jobRefs.current.set(job.id, element)
+                else jobRefs.current.delete(job.id)
+              }}>
                 <div className={styles.railMark} aria-hidden="true">
                   <span>{String(index + 1).padStart(2, '0')}</span>
                 </div>
@@ -234,9 +414,71 @@ export function TicketDetailScreen({
                   </div>
 
                   <div className={styles.assignmentRow}>
-                    <p>{assigneeLabel(job)}</p>
-                    {simpleWorkLink(ticket, job, currentProfileId)}
+                    <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
+                    {workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
+                      <button
+                        ref={(element) => {
+                          if (element) workOpenerRefs.current.set(job.id, element)
+                          else workOpenerRefs.current.delete(job.id)
+                        }}
+                        type="button"
+                        className={styles.inlineAction}
+                        aria-expanded={activeTool?.kind === 'work' && activeTool.jobId === job.id}
+                      disabled={activeTool !== null}
+                      onClick={() => setActiveTool({ kind: 'work', jobId: job.id })}
+                      >
+                        {workCommandFor(allCommands, job.id)?.label}
+                      </button>
+                    ) : simpleWorkLink(ticket, job, currentProfileId, assignmentOverrides.get(job.id))}
                   </div>
+                  {activeTool === null && currentProfileId && assignmentCommandFor(allCommands, job.id) && (
+                    <TicketAssignmentControl
+                      ticketId={ticket.id}
+                      job={{
+                        id: job.id,
+                        requiredSkillTier: job.requiredSkillTier,
+                        assignedTechId: assignmentOverrides.has(job.id)
+                          ? assignmentOverrides.get(job.id)?.assignedTechId ?? null
+                          : job.assignedTechId,
+                      }}
+                      command={assignmentCommandFor(allCommands, job.id)!}
+                      team={team}
+                      currentProfileId={currentProfileId}
+                      onApplied={(assignment) => {
+                        const selected = team.find((member) => member.id === assignment.assignedTechId)
+                        const assignedTechName = assignment.assignedTechName
+                          ?? (assignment.state === 'mine' ? currentProfileName : selected?.name)
+                          ?? null
+                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                          state: assignment.state,
+                          assignedTechId: assignment.assignedTechId,
+                          assignedTechName,
+                          workStatus: assignment.workStatus,
+                          notice: assignment.state === 'unassigned'
+                            ? 'Work is open.'
+                            : assignment.state === 'mine'
+                              ? 'Work is yours.'
+                              : `Assigned to ${assignedTechName ?? 'the selected technician'}.`,
+                        }))
+                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                      }}
+                      onConflict={({ assignedTechName }) => {
+                        setAssignmentOverrides((current) => new Map(current).set(job.id, {
+                          state: 'team',
+                          assignedTechId: null,
+                          assignedTechName,
+                          workStatus: 'open',
+                          notice: `${assignedTechName} claimed it first. The repair order is current.`,
+                        }))
+                        setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                      }}
+                    />
+                  )}
+                  {assignmentOverrides.get(job.id)?.notice && (
+                    <p className={styles.assignmentNotice} role="status" aria-live="polite">
+                      {assignmentOverrides.get(job.id)?.notice}
+                    </p>
+                  )}
                 </div>
               </li>
             ))}
@@ -245,8 +487,17 @@ export function TicketDetailScreen({
 
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />
 
-        {ringOut && (
-          <RingOutSection ticketId={ticket.id} initialRingOut={ringOut} />
+        {ringOutState && (
+          <RingOutSection
+            ticketId={ticket.id}
+            initialRingOut={ringOutState}
+            sectionRef={ringOutRef}
+            onChange={(next) => {
+              setRingOutState(next)
+              setTicketStatus(next.status)
+              if (next.status !== 'open') setActiveTool(null)
+            }}
+          />
         )}
       </div>
     </main>
@@ -255,11 +506,15 @@ export function TicketDetailScreen({
 
 function simpleWorkLink(
   ticket: TicketDetail,
-  job: TicketDetail['jobs'][number],
+  job: DisplayJob,
   currentProfileId: string | null,
+  assignmentOverride?: AssignmentOverride,
 ) {
+  const assignedToCurrent = assignmentOverride
+    ? assignmentOverride.state === 'mine'
+    : job.assignedTechId === currentProfileId
   if (!ticket.customer || !ticket.vehicle || !currentProfileId
-    || job.assignedTechId !== currentProfileId
+    || !assignedToCurrent
     || (job.kind !== 'repair' && job.kind !== 'maintenance')
     || job.sessionId !== null
     || (ticket.status !== 'open' && job.workStatus !== 'done')
@@ -317,8 +572,65 @@ function formatCents(cents: number): string {
   }).format(cents / 100)
 }
 
-function assigneeLabel(job: TicketDetail['jobs'][number]): string {
+type AssignmentOverride = {
+  state: 'mine' | 'team' | 'unassigned'
+  assignedTechId: string | null
+  assignedTechName: string | null
+  workStatus: 'open' | 'in_progress' | 'blocked'
+  notice: string
+}
+
+type QuoteOverride = {
+  workStatus: 'open' | 'in_progress' | 'blocked'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+}
+
+type WorkOverride = {
+  workStatus: SimpleWorkProjectionView['status']
+}
+
+type DisplayJob = Pick<TicketDetail['jobs'][number],
+  | 'id'
+  | 'title'
+  | 'kind'
+  | 'requiredSkillTier'
+  | 'assignedTechId'
+  | 'assignedTech'
+  | 'sessionId'
+  | 'workStatus'
+  | 'approvalState'
+>
+
+function assigneeLabel(
+  job: DisplayJob,
+  override?: AssignmentOverride,
+): string {
+  if (override?.state === 'unassigned') return 'Open — no technician assigned'
+  if (override && override.assignedTechName) return `Assigned · ${override.assignedTechName}`
+  if (override) return 'Assigned technician · Name not provided'
   if (!job.assignedTechId) return 'Open — no technician assigned'
   if (job.assignedTech?.fullName) return `Assigned · ${job.assignedTech.fullName}`
   return 'Assigned technician · Name not provided'
+}
+
+function assignmentCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'assign' | 'claim' | 'handoff' }) | null {
+  const command = commands.find((candidate) => candidate.jobId === jobId && (
+    candidate.kind === 'assign' || candidate.kind === 'claim' || candidate.kind === 'handoff'
+  ))
+  return command
+    ? command as LivingTicketCommand & { kind: 'assign' | 'claim' | 'handoff' }
+    : null
+}
+
+function workCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'work' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'work' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'work' } : null
 }

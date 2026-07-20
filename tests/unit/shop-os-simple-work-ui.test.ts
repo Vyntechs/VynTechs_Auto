@@ -3,6 +3,7 @@ import {
   activeDurationSeconds,
   formatDurationSeconds,
   parseEscalationResponse,
+  parseInlineSimpleWorkResponse,
   parseSimpleWorkMutationResponse,
   parseSimpleWorkWorkspaceResponse,
   retainEscalationAttempt,
@@ -28,6 +29,19 @@ describe('Shop OS simple-work UI contract', () => {
       changed: true,
       job: { id: uuid(3), title: 'Found: steering clunk', kind: 'repair', requiredSkillTier: 2, assignedTechId: null, workStatus: 'open', approvalState: 'pending_quote', sessionId: null },
     })).toMatchObject({ changed: true, job: { assignedTechId: null, sessionId: null } })
+  })
+
+  it('strictly parses the inline work envelope with text-only part requests', () => {
+    const request = {
+      id: uuid(4), jobId: workspace.id, description: 'Water pump', preference: null,
+      quantity: 1, status: 'requested', requestedAt: '2026-07-11T12:01:00.000Z', resolvedAt: null,
+    }
+    expect(parseInlineSimpleWorkResponse({ workspace, partRequests: [request] })).toEqual({
+      workspace,
+      partRequests: [request],
+    })
+    expect(parseInlineSimpleWorkResponse({ workspace, partRequests: [request], privateActor: uuid(9) })).toBeNull()
+    expect(parseInlineSimpleWorkResponse({ workspace, partRequests: [{ ...request, priceCents: 100 }] })).toBeNull()
   })
 
   it('fails closed on extra private fields or malformed persisted values', () => {

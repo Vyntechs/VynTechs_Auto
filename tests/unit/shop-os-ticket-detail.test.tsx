@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,6 +21,74 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/components/vt/whats-new-badge', () => ({
   WhatsNewBadge: () => null,
+}))
+
+vi.mock('@/components/screens/inline-quote-workspace', () => ({
+  InlineQuoteWorkspace: ({ onClose, onProjection }: {
+    onClose: () => void
+    onProjection: (jobs: Array<{
+      id: string
+      workStatus: 'open'
+      approvalState: 'quote_ready'
+    }>) => void
+  }) => (
+    <section aria-label="Inline quote workspace">
+      <button type="button" onClick={() => onProjection([{
+        id: 'job-1',
+        workStatus: 'open',
+        approvalState: 'quote_ready',
+      }])}>Publish quote state</button>
+      <button type="button" onClick={onClose}>Close quote</button>
+    </section>
+  ),
+}))
+
+vi.mock('@/components/screens/inline-work-workspace', () => ({
+  InlineWorkWorkspace: ({ onClose, onProjection, onEscalation }: {
+    onClose: () => void
+    onProjection: (work: {
+      status: 'done'
+      workNotes: string
+      startedAt: string
+      completedAt: string
+      clockedOnSince: null
+      activeSeconds: number
+      updatedAt: string
+    }) => void
+    onEscalation: (job: {
+      id: string
+      title: string
+      kind: 'repair'
+      requiredSkillTier: number
+      assignedTechId: null
+      workStatus: 'open'
+      approvalState: 'pending_quote'
+      sessionId: null
+    }) => void
+  }) => (
+    <section aria-label="Inline work workspace">
+      <button type="button" onClick={() => onProjection({
+        status: 'done',
+        workNotes: 'Installed and torqued.',
+        startedAt: '2026-07-11T12:00:00.000Z',
+        completedAt: '2026-07-11T13:00:00.000Z',
+        clockedOnSince: null,
+        activeSeconds: 3600,
+        updatedAt: '2026-07-11T13:00:00.000Z',
+      })}>Publish work state</button>
+      <button type="button" onClick={() => onEscalation({
+        id: 'found-job',
+        title: 'Found: steering clunk',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: null,
+        workStatus: 'open',
+        approvalState: 'pending_quote',
+        sessionId: null,
+      })}>Publish found concern</button>
+      <button type="button" onClick={onClose}>Close work</button>
+    </section>
+  ),
 }))
 
 const timestamp = new Date('2026-07-10T14:30:00Z')
@@ -174,6 +243,32 @@ describe('TicketDetailScreen', () => {
       />,
     )
     expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+  })
+
+  it('opens the role-shaped quote tool in place, reconciles ledger truth, and restores focus', async () => {
+    const user = userEvent.setup()
+    render(
+      <TicketDetailScreen
+        ticket={ticket()}
+        canBuildQuote
+        currentProfileId="advisor-1"
+        role="advisor"
+      />,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Build quote' })
+    expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+    await user.click(opener)
+
+    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(opener).toBeDisabled()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
+    expect(screen.getByText('Approval · Quote ready')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+    expect(opener).toHaveFocus()
   })
 
   it('keeps the quote entry at least 44px with a visible focus treatment', () => {
@@ -344,6 +439,42 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByText('Other tech work').closest('li')).not.toHaveTextContent('Continue work')
   })
 
+  it('performs assigned approved work in place and folds confirmed completion into the ledger', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      ticket={ticket({ jobs: [job({
+        id: 'repair-open',
+        title: 'Install lift kit',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: 'tech-1',
+        approvalState: 'approved',
+      })] })}
+    />)
+
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Start work' }))
+    expect(screen.getByRole('region', { name: 'Inline work workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeDisabled()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
+    expect(screen.getByRole('heading', { name: 'Found: steering clunk' })).toBeInTheDocument()
+    expect(screen.getByText('2 lines')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Publish work state' }))
+    expect(screen.getByText('Work · Done')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^(Start|Continue) work$/ })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(screen.queryByRole('region', { name: 'Inline work workspace' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
+  })
+
   it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {
     render(<TicketDetailScreen currentProfileId="tech-1" ticket={ticket({
       vehicle: null,
@@ -362,5 +493,192 @@ describe('TicketDetailScreen', () => {
     })} />)
     expect(screen.getByText('Stale open work').closest('li')).not.toHaveTextContent('Open work')
     expect(screen.getByRole('link', { name: 'View work history' })).toHaveAttribute('href', '/tickets/ticket-1/jobs/closed-history/work')
+  })
+
+  it('assigns an open job inside its ledger row and reconciles only returned truth', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'team',
+        assignedTechName: 'Angel Rivera',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      currentProfileName="Avery Advisor"
+      team={[{ id: 'tech-1', name: 'Angel Rivera', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({
+        jobs: [
+          job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2 }),
+          job({ id: 'other-open', title: 'Replace wipers', kind: 'maintenance', requiredSkillTier: 1 }),
+        ],
+      })}
+    />)
+
+    const target = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    const untouched = screen.getByRole('heading', { name: 'Replace wipers' }).closest('li')!
+    await user.click(within(target).getByRole('button', { name: 'Assign work' }))
+    await user.click(within(target).getByRole('button', { name: /Angel Rivera.*B-tech/i }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ action: 'reassign', assignedTechId: 'tech-1' }),
+      }),
+    )
+    expect(within(target).getByText('Assigned · Angel Rivera')).toBeInTheDocument()
+    expect(within(untouched).getByText('Open — no technician assigned')).toBeInTheDocument()
+    expect(within(target).queryByRole('button', { name: 'Assign work' })).toBeNull()
+    expect(target).toHaveFocus()
+  })
+
+  it('lets an eligible technician claim in one tap without exposing the shop roster', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'mine',
+        assignedTechName: 'Toni Tech',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      team={[{ id: 'other-tech', name: 'Not visible', skillTier: 3, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2, approvalState: 'approved' })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({ body: JSON.stringify({ action: 'claim' }) }),
+    )
+    expect(screen.getByText('Assigned · Toni Tech')).toBeInTheDocument()
+    expect(screen.queryByText('Not visible')).toBeNull()
+  })
+
+  it('requires an explicit compact confirmation before a below-tier handoff', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      assignment: {
+        ticketId: 'ticket-1',
+        jobId: 'repair-open',
+        workStatus: 'open',
+        state: 'team',
+        assignedTechName: 'Casey Climber',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="owner"
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      team={[{ id: 'tech-1', name: 'Casey Climber', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({ id: 'repair-open', kind: 'repair', requiredSkillTier: 3 })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Assign work' }))
+    await user.click(screen.getByRole('button', { name: /Casey Climber.*B-tech/i }))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByText(/requires an A-tech/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Assign anyway' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-open/assignment',
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'reassign',
+          assignedTechId: 'tech-1',
+          confirmBelowTier: true,
+        }),
+      }),
+    )
+  })
+
+  it('keeps the row mounted and shows only the safe winner after a claim race', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      error: 'assignment_conflict',
+      currentAssignee: { fullName: 'Morgan Master' },
+    }, { status: 409 })))
+
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={3}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      ticket={ticket({ jobs: [job({ id: 'repair-open', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2, approvalState: 'approved' })] })}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    expect(screen.getByRole('heading', { name: 'Install lift kit' })).toBeInTheDocument()
+    expect(screen.getByText('Assigned · Morgan Master')).toBeInTheDocument()
+    expect(screen.getByText('Morgan Master claimed it first. The repair order is current.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
+  })
+
+  it('moves zero-dollar closeout into view and folds the returned receipt into the mounted ticket', async () => {
+    const user = userEvent.setup()
+    const ticketId = '00000000-0000-4000-8000-000000000020'
+    const jobId = '00000000-0000-4000-8000-000000000030'
+    const ringOut = {
+      ticketId,
+      status: 'open' as const,
+      owed: { subtotalCents: 0, taxCents: 0, totalCents: 0, jobs: [] },
+      paidCents: 0,
+      balanceCents: 0,
+      payments: [],
+      canRecordPayment: false,
+      canClose: true,
+      closedAt: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ringOut: {
+        ...ringOut,
+        status: 'closed',
+        canClose: false,
+        closedAt: '2026-07-20T14:00:00.000Z',
+      },
+    })))
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="00000000-0000-4000-8000-000000000010"
+      ticket={ticket({
+        id: ticketId,
+        jobs: [job({
+          id: jobId,
+          kind: 'repair',
+          workStatus: 'done',
+          approvalState: 'approved',
+        })],
+      })}
+      ringOut={ringOut}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Close repair order' }))
+    expect(screen.getByRole('region', { name: 'Ring out' })).toHaveFocus()
+    await user.click(screen.getByRole('button', { name: 'Close ticket' }))
+
+    expect(await screen.findByText('Closed · Counter intake')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close repair order' })).toBeNull()
   })
 })

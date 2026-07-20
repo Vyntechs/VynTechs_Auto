@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { parsePartRequestResponse, type PartRequestView } from '@/lib/shop-os/part-requests-ui'
 import styles from './parts-needed-panel.module.css'
 
@@ -8,6 +8,7 @@ type Props = {
   ticketId: string
   jobId: string
   initialRequests: PartRequestView[]
+  onDraftChange?: (dirty: boolean) => void
 }
 
 const STATUS_LABEL: Record<PartRequestView['status'], string> = {
@@ -16,7 +17,7 @@ const STATUS_LABEL: Record<PartRequestView['status'], string> = {
   dismissed: 'Not needed',
 }
 
-export function PartsNeededPanel({ ticketId, jobId, initialRequests }: Props) {
+export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChange }: Props) {
   const [requests, setRequests] = useState(initialRequests)
   const [description, setDescription] = useState('')
   const [preference, setPreference] = useState('')
@@ -24,6 +25,15 @@ export function PartsNeededPanel({ ticketId, jobId, initialRequests }: Props) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestKey = useRef<string | null>(null)
+
+  useEffect(() => {
+    onDraftChange?.(
+      pending
+      || description.trim().length > 0
+      || preference.trim().length > 0
+      || quantity !== '1',
+    )
+  }, [description, onDraftChange, pending, preference, quantity])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()

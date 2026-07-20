@@ -25,3 +25,8 @@ export function parsePartRequestResponse(value: unknown): PartRequestView | null
   const parsed = z.strictObject({ request: partRequest }).safeParse(value)
   return parsed.success ? parsed.data.request : null
 }
+
+export function parsePartRequestListResponse(value: unknown): PartRequestView[] | null {
+  const parsed = z.strictObject({ requests: z.array(partRequest).max(100) }).safeParse(value)
+  return parsed.success ? parsed.data.requests : null
+}

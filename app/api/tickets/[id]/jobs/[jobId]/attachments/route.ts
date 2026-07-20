@@ -5,7 +5,6 @@ import { db } from '@/lib/db/client'
 import { OPERATIONAL_MEDIA_UNAVAILABLE } from '@/lib/release-policy'
 import { getServerSupabase } from '@/lib/supabase-server'
 
-export const MAX_JOB_MULTIPART_BYTES = 4_500_000
 export const maxDuration = 30
 
 export async function POST(

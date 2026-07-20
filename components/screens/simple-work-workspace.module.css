@@ -1,8 +1,11 @@
 .screen { min-height: 100%; overflow: auto; }
+.embeddedScreen { min-width: 0; border: var(--vt-stroke-strong); background: var(--vt-bg); }
+.embeddedScreen .content { padding: clamp(18px, 4vw, 32px); }
 .screen :global(.app-header__back) { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 .screen :global(.app-header__right button) { min-width: 44px !important; min-height: 44px !important; width: 44px !important; height: 44px !important; }
 .content { width: min(100%, 900px); min-width: 0; margin: 0 auto; padding: clamp(20px, 4vw, 48px); display: grid; gap: 28px; }
-.hero { padding-bottom: 24px; border-bottom: var(--vt-stroke-strong); }
+.hero { display: flex; align-items: start; justify-content: space-between; gap: 20px; padding-bottom: 24px; border-bottom: var(--vt-stroke-strong); }
+.hero > div { min-width: 0; }
 .eyebrow, .stateMark, .label, .moduleHeading span, .actionRow, .helper, .notice, .error { font-family: var(--vt-font-mono); }
 .eyebrow, .stateMark { margin: 0; color: var(--vt-fg-3); font-size: var(--vt-fs-12); font-weight: 600; letter-spacing: var(--vt-tr-eyebrow); text-transform: uppercase; }
 .hero h1, .state h2, .moduleHeading h2 { margin: 0; font-family: var(--vt-font-serif); font-weight: 400; }
@@ -37,5 +40,7 @@
 .notice, .error { margin: 0; padding: 12px 14px; border-left: 3px solid var(--vt-accent); background: var(--vt-surface); font-size: var(--vt-fs-12); line-height: 1.45; }
 .error { border-left-color: var(--vt-risk-destructive); color: var(--vt-risk-destructive); }
 .ticketLink { justify-self: start; }
+.closeEmbedded { min-width: 44px; min-height: 44px; flex: 0 0 auto; border: var(--vt-stroke-strong); border-radius: var(--vt-radius-2); background: var(--vt-bg); color: var(--vt-fg); padding: 8px 12px; font-family: var(--vt-font-sans); font-weight: 650; cursor: pointer; }
+.closeEmbedded:focus-visible { outline: 2px solid var(--vt-focus-ring); outline-offset: 3px; }
 @media (max-width: 420px) { .content { padding: 20px 14px 36px; } .primary, .secondary { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .screen * { scroll-behavior: auto !important; } }

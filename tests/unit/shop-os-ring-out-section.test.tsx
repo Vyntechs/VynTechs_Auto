@@ -83,12 +83,13 @@ describe('RingOutSection', () => {
   })
 
   it('records a payment then closes, sending the exact money to the server', async () => {
+    const onChange = vi.fn()
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: PAID }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ringOut: CLOSED }) })
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} />)
+    render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} onChange={onChange} />)
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -111,7 +112,23 @@ describe('RingOutSection', () => {
     expect(await screen.findByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
     expect(screen.getByText(/Closed/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /close ticket/i })).toBeNull()
-    expect(router.refresh).toHaveBeenCalled()
+    expect(onChange).toHaveBeenNthCalledWith(1, PAID)
+    expect(onChange).toHaveBeenNthCalledWith(2, CLOSED)
+    expect(router.refresh).not.toHaveBeenCalled()
+  })
+
+  it('keeps a zero-dollar completed ticket closable', () => {
+    render(<RingOutSection ticketId={TICKET} initialRingOut={{
+      ...OPEN,
+      owed: { subtotalCents: 0, taxCents: 0, totalCents: 0, jobs: [] },
+      paidCents: 0,
+      balanceCents: 0,
+      canRecordPayment: false,
+      canClose: true,
+    }} />)
+
+    expect(screen.getByRole('button', { name: 'Close ticket' })).toBeInTheDocument()
+    expect(screen.getByText('No approved work to bill on this ticket.')).toBeInTheDocument()
   })
 
   it('surfaces an overpayment rejection without changing the balance', async () => {

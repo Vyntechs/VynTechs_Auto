@@ -201,6 +201,74 @@ describe('ManualQuoteBuilder', () => {
     router.replace.mockReset()
     router.refresh.mockReset()
   })
+
+  it('embeds the existing quote tool without a second page shell and publishes ledger truth', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onProjection = vi.fn()
+
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder()}
+      embedded
+      onClose={onClose}
+      onProjection={onProjection}
+    />)
+
+    expect(screen.queryByRole('main')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Back to ticket' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Build quote' })).toBeInTheDocument()
+    expect(onProjection).toHaveBeenCalledWith([{
+      id: JOB_ID,
+      workStatus: 'open',
+      approvalState: 'pending_quote',
+    }])
+
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires an explicit discard before closing an unsaved embedded line', async () => {
+    const onClose = vi.fn()
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder()}
+      embedded
+      onClose={onClose}
+    />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add part' })[0])
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Unsaved water pump' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Close quote' }))
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('alertdialog', { name: 'Discard unsaved line changes?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('collapses a fully decided embedded quote to one concise proof', () => {
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      embedded
+      onClose={vi.fn()}
+      builder={builder({
+        jobs: [{
+          ...builder().jobs[0],
+          approval: { state: 'approved', quoteVersionId: VERSION_ID },
+        }],
+      })}
+    />)
+
+    expect(screen.getByRole('heading', { name: 'Quote complete' })).toBeInTheDocument()
+    expect(screen.getByText('Replace front brakes')).toBeInTheDocument()
+    expect(screen.getByText('Approved · Version 3')).toBeInTheDocument()
+    expect(screen.getByText('$322.81')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close quote' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add part' })).toBeNull()
+  })
+
   it('renders customer-safe job and manual line truth with the calibrated quote tape', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
 
