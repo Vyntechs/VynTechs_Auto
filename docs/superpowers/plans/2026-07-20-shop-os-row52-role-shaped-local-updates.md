@@ -27,13 +27,13 @@
 - Modify `lib/tickets.ts`
 - Modify `tests/unit/shop-os-today-jobs-query.test.ts`
 
-- [ ] Write RED tests proving advisor/owner receive all same-shop active jobs assigned to teammates in `teamJobs`, while tech/parts do not.
-- [ ] Prove own work, unassigned work, creator recovery, and team work are mutually exclusive.
-- [ ] Prove terminal jobs, closed tickets, cross-shop jobs, foreign assignee names, and teammate session navigation remain absent.
-- [ ] Prove the bounded priority keeps mine and creator recovery ahead of team/unassigned work and reports `hasMore`.
-- [ ] Add `teamJobs`, `assignmentState`, `assignedTechName`, and `createdByMe` to the safe read model.
-- [ ] Add a same-shop assignee join and the dispatch-only active-team query branch.
-- [ ] Run the focused query suite and commit.
+- [x] Write RED tests proving advisor/owner receive all same-shop active jobs assigned to teammates in `teamJobs`, while tech/parts do not.
+- [x] Prove own work, unassigned work, creator recovery, and team work are mutually exclusive.
+- [x] Prove terminal jobs, closed tickets, cross-shop jobs, foreign assignee names, and teammate session navigation remain absent.
+- [x] Prove the bounded priority keeps mine and creator recovery ahead of team/unassigned work and reports `hasMore`.
+- [x] Add `teamJobs`, `assignmentState`, `assignedTechName`, and `createdByMe` to the safe read model.
+- [x] Add a same-shop assignee join and the dispatch-only active-team query branch.
+- [x] Run the focused query suite and commit.
 
 ### Task 2 — Narrow the assignment response boundary
 

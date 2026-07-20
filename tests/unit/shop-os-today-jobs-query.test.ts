@@ -210,6 +210,7 @@ describe('Today ticket jobs read model', () => {
       'Tier three hidden repair',
     ])
     expect(result.createdJobs).toEqual([])
+    expect(result.teamJobs).toEqual([])
     expect(result.myJobs[0]).toEqual({
       id: uuid(41),
       ticketId,
@@ -222,6 +223,9 @@ describe('Today ticket jobs read model', () => {
       sessionId: session.id,
       workStatus: 'open',
       canClaim: false,
+      assignmentState: 'mine',
+      assignedTechName: 'Taylor Tech',
+      createdByMe: true,
       diagnosticStartState: 'ready',
       diagnosticStartErrorCode: null,
     })
@@ -302,6 +306,7 @@ describe('Today ticket jobs read model', () => {
       myJobs: [],
       openJobs: [],
       createdJobs: [],
+      teamJobs: [],
       linkedSessionIds: [],
     })
     expect(JSON.stringify(result)).not.toMatch(
@@ -387,6 +392,7 @@ describe('Today ticket jobs read model', () => {
         myJobs: [],
         openJobs: [],
         createdJobs: [],
+        teamJobs: [],
         linkedSessionIds: [],
       })
     }
@@ -423,7 +429,7 @@ describe('Today ticket jobs read model', () => {
     ])
   })
 
-  it('keeps preassigned work in a creator-only recovery lane', async () => {
+  it('places preassigned work in the dispatch team lane', async () => {
     const [assignee] = await db
       .insert(profiles)
       .values({
@@ -451,10 +457,144 @@ describe('Today ticket jobs read model', () => {
 
     expect(result.myJobs).toEqual([])
     expect(result.openJobs).toEqual([])
-    expect(result.createdJobs).toEqual([
+    expect(result.createdJobs).toEqual([])
+    expect(result.teamJobs).toEqual([
       expect.objectContaining({
         title: 'Preassigned cooling-system inspection',
         canClaim: false,
+        assignmentState: 'team',
+        assignedTechName: 'Morgan Technician',
+        createdByMe: true,
+      }),
+    ])
+  })
+
+  it.each(['advisor', 'owner'] as const)(
+    'shows %s every active same-shop teammate job without leaking it to tech or parts',
+    async (role) => {
+      const [teammate] = await db
+        .insert(profiles)
+        .values({
+          id: uuid(5),
+          userId: uuid(105),
+          shopId,
+          fullName: 'Morgan Technician',
+          role: 'tech',
+          skillTier: 3,
+        })
+        .returning()
+      const [teamTicket] = await db
+        .insert(tickets)
+        .values({
+          id: uuid(21),
+          shopId,
+          ticketNumber: 8,
+          source: 'tech_quick',
+          concern: 'Unrelated team work',
+          createdByProfileId: teammate.id,
+        })
+        .returning()
+      await db.insert(ticketJobs).values([
+        {
+          id: uuid(61),
+          shopId,
+          ticketId: teamTicket.id,
+          title: 'Team open',
+          kind: 'repair',
+          requiredSkillTier: 1,
+          assignedTechId: teammate.id,
+          workStatus: 'open',
+        },
+        {
+          id: uuid(62),
+          shopId,
+          ticketId: teamTicket.id,
+          title: 'Team in progress',
+          kind: 'maintenance',
+          requiredSkillTier: 2,
+          assignedTechId: teammate.id,
+          workStatus: 'in_progress',
+        },
+        {
+          id: uuid(63),
+          shopId,
+          ticketId: teamTicket.id,
+          title: 'Team blocked',
+          kind: 'diagnostic',
+          requiredSkillTier: 3,
+          assignedTechId: teammate.id,
+          workStatus: 'blocked',
+        },
+        {
+          id: uuid(64),
+          shopId,
+          ticketId: teamTicket.id,
+          title: 'Team done',
+          kind: 'repair',
+          requiredSkillTier: 1,
+          assignedTechId: teammate.id,
+          workStatus: 'done',
+        },
+      ])
+
+      const dispatchResult = await listTodayTicketJobs(db, {
+        actor: { ...actor, role, skillTier: null },
+      })
+      const techResult = await listTodayTicketJobs(db, { actor })
+      const partsResult = await listTodayTicketJobs(db, {
+        actor: { ...actor, role: 'parts', skillTier: null },
+      })
+
+      expect(dispatchResult.teamJobs).toEqual([
+        expect.objectContaining({
+          title: 'Team open',
+          assignmentState: 'team',
+          assignedTechName: 'Morgan Technician',
+          createdByMe: false,
+          sessionId: null,
+        }),
+        expect.objectContaining({ title: 'Team in progress' }),
+        expect.objectContaining({ title: 'Team blocked' }),
+      ])
+      expect(dispatchResult.myJobs).toEqual([])
+      expect(dispatchResult.createdJobs).toEqual([])
+      expect(JSON.stringify(techResult)).not.toContain('Team ')
+      expect(JSON.stringify(partsResult)).not.toContain('Team ')
+    },
+  )
+
+  it('keeps a tech creator preassigned to a teammate in creator recovery only', async () => {
+    const [teammate] = await db
+      .insert(profiles)
+      .values({
+        id: uuid(6),
+        userId: uuid(106),
+        shopId,
+        fullName: 'Casey Technician',
+        role: 'tech',
+        skillTier: 2,
+      })
+      .returning()
+    await db.insert(ticketJobs).values({
+      id: uuid(65),
+      shopId,
+      ticketId,
+      title: 'Creator handoff',
+      kind: 'repair',
+      requiredSkillTier: 2,
+      assignedTechId: teammate.id,
+      workStatus: 'open',
+    })
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result.teamJobs).toEqual([])
+    expect(result.createdJobs).toEqual([
+      expect.objectContaining({
+        title: 'Creator handoff',
+        assignmentState: 'team',
+        assignedTechName: 'Casey Technician',
+        createdByMe: true,
       }),
     ])
   })
@@ -506,6 +646,7 @@ describe('Today ticket jobs read model', () => {
         canClaim: false,
       }),
     ])
+    expect(result.teamJobs).toEqual([])
   })
 
   it('keeps linked sessions for de-duplication but exposes navigation only to the session owner', async () => {
@@ -585,6 +726,62 @@ describe('Today ticket jobs read model', () => {
 
     expect(result.myJobs).toHaveLength(200)
     expect(result.openJobs).toEqual([])
+    expect(result.teamJobs).toEqual([])
+    expect(result.hasMore).toBe(true)
+  })
+
+  it('prioritizes creator recovery ahead of a bounded dispatch backlog', async () => {
+    const [teammate] = await db
+      .insert(profiles)
+      .values({
+        id: uuid(7),
+        userId: uuid(107),
+        shopId,
+        fullName: 'Dispatch Teammate',
+        role: 'tech',
+        skillTier: 2,
+      })
+      .returning()
+    const [teamTicket] = await db
+      .insert(tickets)
+      .values({
+        id: uuid(22),
+        shopId,
+        ticketNumber: 8,
+        source: 'tech_quick',
+        concern: 'Dispatch backlog',
+        createdByProfileId: teammate.id,
+      })
+      .returning()
+    await db.insert(ticketJobs).values([
+      {
+        id: uuid(67),
+        shopId,
+        ticketId,
+        title: 'Creator recovery first',
+        kind: 'repair',
+        requiredSkillTier: 1,
+        assignedTechId: teammate.id,
+      },
+      ...Array.from({ length: 201 }, (_, index) => ({
+        shopId,
+        ticketId: teamTicket.id,
+        title: `Team backlog ${index + 1}`,
+        kind: 'repair' as const,
+        requiredSkillTier: 1,
+        assignedTechId: teammate.id,
+      })),
+    ])
+
+    const result = await listTodayTicketJobs(db, {
+      actor: { ...actor, role: 'advisor', skillTier: null },
+    })
+
+    expect(result.teamJobs).toHaveLength(200)
+    expect(result.teamJobs[0]).toMatchObject({
+      title: 'Creator recovery first',
+      createdByMe: true,
+    })
     expect(result.hasMore).toBe(true)
   })
 })
