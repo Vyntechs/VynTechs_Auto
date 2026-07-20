@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
+import { hasDiagnostics } from '@/lib/entitlements'
 import {
   profiles,
   quoteEvents,
@@ -15,6 +16,7 @@ import {
   quoteSnapshotContainsExactJob,
 } from '@/lib/shop-os/quotes'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 
 export type SimpleWorkActor = { profileId: string; shopId: string }
 export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict' | 'job_limit_reached'
@@ -130,7 +132,7 @@ async function lockContext(
     .for('update', { noWait: true })
 
   const [actor] = await db
-    .select({ id: profiles.id, role: profiles.role })
+    .select({ id: profiles.id, role: profiles.role, isComp: profiles.isComp })
     .from(profiles)
     .where(and(
       eq(profiles.id, input.actor.profileId),
@@ -140,10 +142,17 @@ async function lockContext(
     ))
     .limit(1)
     .for('update', { noWait: true })
-  if (!job || !actor || !isShopRole(actor.role)
-    || job.assignedTechId !== actor.id
-    || (job.kind !== 'repair' && job.kind !== 'maintenance')
-    || job.sessionId !== null) return null
+  if (!job || !actor || !isShopRole(actor.role) || job.assignedTechId !== actor.id) {
+    return null
+  }
+  const diagnosticsEntitled = job.kind === 'diagnostic'
+    ? await hasDiagnostics(db, { shopId: input.actor.shopId, isComp: actor.isComp })
+    : false
+  if (!canUseManualWork({
+    kind: job.kind,
+    sessionId: job.sessionId,
+    diagnosticsEntitled,
+  })) return null
 
   const decisions = await db
     .select({
@@ -340,7 +349,11 @@ export async function getSimpleWorkWorkspace(
 
   return db.transaction(async (tx) => {
     const transactionDb = tx as AppDb
-    const [actor] = await transactionDb.select({ id: profiles.id, role: profiles.role })
+    const [actor] = await transactionDb.select({
+      id: profiles.id,
+      role: profiles.role,
+      isComp: profiles.isComp,
+    })
       .from(profiles).where(and(
         eq(profiles.id, parsedActor.data.profileId),
         eq(profiles.shopId, parsedActor.data.shopId),
@@ -357,9 +370,20 @@ export async function getSimpleWorkWorkspace(
       eq(ticketJobs.ticketId, parsedTicket.data),
       eq(ticketJobs.id, parsedJob.data),
     )).limit(1)
-    if (!actor || !isShopRole(actor.role) || !ticket || !job || job.assignedTechId !== actor.id
-      || (job.kind !== 'repair' && job.kind !== 'maintenance')
-      || job.sessionId !== null
+    if (!actor || !isShopRole(actor.role) || !ticket || !job || job.assignedTechId !== actor.id) {
+      return failure('not_found')
+    }
+    const diagnosticsEntitled = job.kind === 'diagnostic'
+      ? await hasDiagnostics(transactionDb, {
+          shopId: parsedActor.data.shopId,
+          isComp: actor.isComp,
+        })
+      : false
+    if (!canUseManualWork({
+      kind: job.kind,
+      sessionId: job.sessionId,
+      diagnosticsEntitled,
+    })
       || job.workStatus === 'blocked' || job.workStatus === 'canceled'
       || (ticket.status !== 'open' && job.workStatus !== 'done')) return failure('not_found')
     const versions = await transactionDb.select().from(quoteVersions).where(and(

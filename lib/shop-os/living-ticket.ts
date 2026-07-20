@@ -4,12 +4,14 @@ import {
   canCloseTickets,
   isShopRole,
 } from '@/lib/shop-os/capabilities'
+import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 
 export type LivingTicketJob = {
   id: string
   kind: string
   requiredSkillTier: number
   assignedTechId: string | null
+  sessionId: string | null
   workStatus: string
   approvalState: string
   assignmentState?: 'mine' | 'team' | 'unassigned'
@@ -33,6 +35,7 @@ type Input = {
   ticketStatus: string
   jobs: LivingTicketJob[]
   ringOut: { balanceCents: number; canClose: boolean } | null
+  diagnosticsEntitled?: boolean
 }
 
 type RankedCommand = LivingTicketCommand & { rank: number }
@@ -81,7 +84,11 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
     const state = assignmentState(job, input.profileId)
     const isOwnApprovedSimpleWork = state === 'mine'
       && job.approvalState === 'approved'
-      && (job.kind === 'repair' || job.kind === 'maintenance')
+      && canUseManualWork({
+        kind: job.kind,
+        sessionId: job.sessionId,
+        diagnosticsEntitled: input.diagnosticsEntitled ?? true,
+      })
       && (job.workStatus === 'open' || job.workStatus === 'in_progress')
     if (isOwnApprovedSimpleWork) {
       commands.push({
