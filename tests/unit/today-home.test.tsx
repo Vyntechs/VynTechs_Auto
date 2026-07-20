@@ -98,6 +98,7 @@ const todayJobs: TodayTicketJobs = {
       canClaim: true,
     },
   ],
+  createdJobs: [],
   linkedSessionIds: ['session-linked'],
 }
 
@@ -171,6 +172,7 @@ describe('TodayHome', () => {
     const dispatchOnlyJobs: TodayTicketJobs = {
       myJobs: [],
       openJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
+      createdJobs: [],
       linkedSessionIds: [],
     }
 
@@ -203,6 +205,27 @@ describe('TodayHome', () => {
     expect(screen.queryByText(/No work orders yet/i)).not.toBeInTheDocument()
   })
 
+  it('does not show empty guidance when only creator-recovery work exists', () => {
+    const creatorOnlyJobs: TodayTicketJobs = {
+      myJobs: [],
+      openJobs: [],
+      createdJobs: [{ ...todayJobs.openJobs[0], canClaim: false }],
+      linkedSessionIds: [],
+    }
+
+    render(
+      <TodayHome
+        techName="Brandon"
+        inProgress={[]}
+        closedToday={[]}
+        todayJobs={creatorOnlyJobs}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Created by me' })).toBeInTheDocument()
+    expect(screen.queryByText(/No assigned work yet/i)).toBeNull()
+  })
+
   it.each([
     {
       label: 'safe winner',
@@ -228,11 +251,13 @@ describe('TodayHome', () => {
       const openOnly: TodayTicketJobs = {
         myJobs: [],
         openJobs: [todayJobs.openJobs[0]],
+        createdJobs: [],
         linkedSessionIds: [],
       }
       const emptyJobs: TodayTicketJobs = {
         myJobs: [],
         openJobs: [],
+        createdJobs: [],
         linkedSessionIds: [],
       }
       const { rerender } = render(

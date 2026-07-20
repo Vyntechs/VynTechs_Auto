@@ -7,6 +7,7 @@ import { isDesktopIntakeEnabled } from '@/lib/feature-flags'
 import { rateLimitReject } from '@/lib/rate-limit'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { ticketActorFromProfile, ticketDomainStatus } from '@/lib/tickets'
+import { canAssignWork } from '@/lib/shop-os/capabilities'
 
 export async function POST(req: Request) {
   if (!isDesktopIntakeEnabled()) {
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
   if (!ctx) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
-  if (ctx.profile.role !== 'owner') {
+  if (!canAssignWork(ctx.profile.role)) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 })
   }
 

@@ -7,7 +7,7 @@ import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
 import { hasDiagnostics } from '@/lib/entitlements'
 import { TodayHome } from '@/components/screens/today-home'
-import { canCreateTickets } from '@/lib/shop-os/capabilities'
+import { canAssignWork, canCreateTickets } from '@/lib/shop-os/capabilities'
 import { listTodayTicketJobs, ticketActorFromProfile } from '@/lib/tickets'
 
 export default async function TodayPage() {
@@ -49,7 +49,7 @@ export default async function TodayPage() {
       closedToday={closedToday}
       dueFollowUps={dueFollowUps}
       canCurate={canCurate(ctx.profile.isCurator, ctx.user.email)}
-      canWriteCounterOrder={ctx.profile.role === 'owner'}
+      canWriteCounterOrder={canAssignWork(ctx.profile.role)}
       canCreateTickets={canCreateTickets(ctx.profile.role)}
       todayJobs={todayJobs}
       diagnosticsEntitled={diagnosticsEntitled}

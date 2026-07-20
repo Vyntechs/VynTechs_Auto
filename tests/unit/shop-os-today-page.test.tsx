@@ -37,17 +37,20 @@ vi.mock('@/components/screens/today-home', () => ({
     closedToday,
     todayJobs,
     diagnosticsEntitled,
+    canWriteCounterOrder,
   }: {
     inProgress: Session[]
     closedToday: Session[]
     todayJobs: TodayTicketJobs
     diagnosticsEntitled: boolean
+    canWriteCounterOrder: boolean
   }) => (
     <div>
-      <span>ticket jobs {todayJobs.myJobs.length + todayJobs.openJobs.length}</span>
+      <span>ticket jobs {todayJobs.myJobs.length + todayJobs.openJobs.length + todayJobs.createdJobs.length}</span>
       <span>active sessions {inProgress.map((session) => session.id).join(',')}</span>
       <span>closed sessions {closedToday.map((session) => session.id).join(',')}</span>
       <span>diagnostics {String(diagnosticsEntitled)}</span>
+      <span>counter intake {String(canWriteCounterOrder)}</span>
     </div>
   ),
 }))
@@ -120,6 +123,7 @@ const jobs: TodayTicketJobs = {
       canClaim: true,
     },
   ],
+  createdJobs: [],
   linkedSessionIds: ['linked-open', 'linked-closed'],
 }
 
@@ -155,6 +159,19 @@ describe('TodayPage Shop OS composition', () => {
     await TodayPage()
 
     expect(todayJobsMock).toHaveBeenCalledWith({}, { actor })
+  })
+
+  it('shows complete counter intake to advisors but not technicians', async () => {
+    render(await TodayPage())
+    expect(screen.getByText('counter intake false')).toBeInTheDocument()
+
+    requireUserMock.mockResolvedValue({
+      profile: { ...profile, role: 'advisor' },
+      user: { id: profile.userId, email: 'taylor@shop.test' },
+    })
+
+    render(await TodayPage())
+    expect(screen.getByText('counter intake true')).toBeInTheDocument()
   })
 
   it('de-duplicates ticket-backed sessions by persisted linked IDs', async () => {

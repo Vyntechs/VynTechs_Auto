@@ -36,7 +36,7 @@ export function TodayHome({
   canCurate = false,
   canWriteCounterOrder = false,
   canCreateTickets = false,
-  todayJobs = { myJobs: [], openJobs: [], linkedSessionIds: [] },
+  todayJobs = { myJobs: [], openJobs: [], createdJobs: [], linkedSessionIds: [] },
   diagnosticsEntitled = false,
 }: Props) {
   const meta = bay ? (
@@ -130,6 +130,7 @@ export function TodayHome({
         <TodayJobsBoard
           myJobs={todayJobs.myJobs}
           openJobs={todayJobs.openJobs}
+          createdJobs={todayJobs.createdJobs}
           hasMore={todayJobs.hasMore}
           diagnosticsEntitled={diagnosticsEntitled}
         />
@@ -176,7 +177,8 @@ export function TodayHome({
           closedToday.length === 0 &&
           dueFollowUps.length === 0 &&
           todayJobs.myJobs.length === 0 &&
-          todayJobs.openJobs.length === 0 && (
+          todayJobs.openJobs.length === 0 &&
+          todayJobs.createdJobs.length === 0 && (
             <Module num="—" label="My Jobs">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
                 No assigned work yet. New work orders and quick tickets appear here.

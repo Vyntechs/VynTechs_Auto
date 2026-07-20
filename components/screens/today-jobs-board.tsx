@@ -9,6 +9,7 @@ import styles from './today-jobs-board.module.css'
 type Props = {
   myJobs: TodayTicketJob[]
   openJobs: TodayTicketJob[]
+  createdJobs?: TodayTicketJob[]
   hasMore?: boolean
   // Resolved server-side release availability. Fail closed so a missing prop
   // can never reopen a diagnostic-engine entrance.
@@ -48,7 +49,13 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
-export function TodayJobsBoard({ myJobs, openJobs, hasMore = false, diagnosticsEntitled = false }: Props) {
+export function TodayJobsBoard({
+  myJobs,
+  openJobs,
+  createdJobs = [],
+  hasMore = false,
+  diagnosticsEntitled = false,
+}: Props) {
   const router = useRouter()
   const boardRef = useRef<HTMLElement>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
@@ -240,7 +247,12 @@ export function TodayJobsBoard({ myJobs, openJobs, hasMore = false, diagnosticsE
       className={styles.board}
       aria-label="Ticket jobs"
       tabIndex={-1}
-      data-empty={myJobs.length === 0 && openJobs.length === 0 && !announcement}
+      data-empty={
+        myJobs.length === 0 &&
+        openJobs.length === 0 &&
+        createdJobs.length === 0 &&
+        !announcement
+      }
     >
       {myJobs.length > 0 && (
         <JobSection
@@ -272,6 +284,13 @@ export function TodayJobsBoard({ myJobs, openJobs, hasMore = false, diagnosticsE
             if (element) claimButtons.current.set(jobId, element)
             else claimButtons.current.delete(jobId)
           }}
+        />
+      )}
+      {createdJobs.length > 0 && (
+        <JobSection
+          label="Created by me"
+          jobs={createdJobs}
+          mode="created"
         />
       )}
       {hasMore && (
@@ -311,7 +330,7 @@ function JobSection({
 }: {
   label: string
   jobs: TodayTicketJob[]
-  mode: 'mine' | 'open'
+  mode: 'mine' | 'open' | 'created'
   pendingJobId?: string | null
   claimsDisabled?: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -375,7 +394,7 @@ function JobRow({
   setDiagnosticButton,
 }: {
   job: TodayTicketJob
-  mode: 'mine' | 'open'
+  mode: 'mine' | 'open' | 'created'
   pending: boolean
   claimDisabled: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -419,7 +438,7 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.canClaim ? (
+        {mode === 'open' && job.workStatus === 'open' && job.canClaim ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
             type="button"
@@ -430,6 +449,13 @@ function JobRow({
             {pending ? 'Claiming…' : 'Claim job'}
           </button>
         ) : mode === 'open' ? (
+          <Link
+            href={`/tickets/${job.ticketId}`}
+            className={`${styles.control} ${styles.secondary}`}
+          >
+            View ticket
+          </Link>
+        ) : mode === 'created' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
             className={`${styles.control} ${styles.secondary}`}

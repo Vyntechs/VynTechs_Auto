@@ -229,11 +229,33 @@ describe('Shop OS ring-out (getting paid)', () => {
   })
 
   it('will not close a ticket with an outstanding balance', async () => {
+    await db.update(ticketJobs).set({ workStatus: 'done' })
+      .where(and(eq(ticketJobs.shopId, ownerActor.shopId as string), eq(ticketJobs.ticketId, TICKET)))
     expect(await closeTicket(db, { actor: ownerActor, ticketId: TICKET }))
       .toEqual({ ok: false, error: 'balance_outstanding' })
   })
 
+  it.each(['open', 'in_progress', 'blocked'] as const)(
+    'refuses to close while a job is %s',
+    async (workStatus) => {
+      await db.insert(ticketJobs).values({
+        id: uuid(workStatus === 'open' ? 201 : workStatus === 'in_progress' ? 202 : 203),
+        shopId: ownerActor.shopId as string,
+        ticketId: EMPTY_TICKET,
+        title: `Still ${workStatus}`,
+        kind: 'repair',
+        requiredSkillTier: 1,
+        workStatus,
+      })
+
+      await expect(closeTicket(db, { actor: ownerActor, ticketId: EMPTY_TICKET }))
+        .resolves.toEqual({ ok: false, error: 'unfinished_work' })
+    },
+  )
+
   it('closes and stamps delivery once the balance is cleared', async () => {
+    await db.update(ticketJobs).set({ workStatus: 'done' })
+      .where(and(eq(ticketJobs.shopId, ownerActor.shopId as string), eq(ticketJobs.ticketId, TICKET)))
     await recordTicketPayment(db, {
       actor: ownerActor, ticketId: TICKET,
       body: { requestKey: uuid(76), amountCents: 15_800, method: 'cash' },
@@ -263,6 +285,12 @@ describe('Shop OS ring-out (getting paid)', () => {
   })
 
   it('closes a ticket with nothing to collect at a zero balance', async () => {
+    await db.insert(ticketJobs).values([
+      { id: uuid(204), shopId: ownerActor.shopId as string, ticketId: EMPTY_TICKET,
+        title: 'Completed inspection', kind: 'maintenance', requiredSkillTier: 1, workStatus: 'done' },
+      { id: uuid(205), shopId: ownerActor.shopId as string, ticketId: EMPTY_TICKET,
+        title: 'Declined service', kind: 'repair', requiredSkillTier: 1, workStatus: 'canceled' },
+    ])
     const ringOut = await getTicketRingOut(db, { actor: ownerActor, ticketId: EMPTY_TICKET })
     expect(ringOut.ok).toBe(true)
     if (!ringOut.ok) return

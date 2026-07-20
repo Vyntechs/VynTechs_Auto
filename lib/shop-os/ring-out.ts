@@ -369,6 +369,17 @@ export async function closeTicket(
       if (!ticket) return { ok: false as const, error: 'not_found' }
       if (ticket.status !== 'open') return { ok: false as const, error: 'ticket_not_open' }
 
+      const [unfinishedJob] = await tx
+        .select({ id: ticketJobs.id })
+        .from(ticketJobs)
+        .where(and(
+          eq(ticketJobs.shopId, shopId),
+          eq(ticketJobs.ticketId, ticket.id),
+          inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
+        ))
+        .limit(1)
+      if (unfinishedJob) return { ok: false as const, error: 'unfinished_work' }
+
       const [shop] = await tx
         .select({ taxRateBps: shops.taxRateBps })
         .from(shops)
