@@ -98,6 +98,12 @@ vi.mock('@/components/screens/inline-work-workspace', () => ({
   ),
 }))
 
+vi.mock('@/components/screens/ticket-interruption-action', () => ({
+  TicketInterruptionAction: ({ onApplied }: { onApplied: (job: { workStatus: 'in_progress' }) => void }) => (
+    <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
+  ),
+}))
+
 const timestamp = new Date('2026-07-10T14:30:00Z')
 
 type TicketJob = TicketDetail['jobs'][number]
@@ -483,6 +489,28 @@ describe('TicketDetailScreen', () => {
     await user.click(screen.getByRole('button', { name: 'Close work' }))
     expect(screen.queryByRole('region', { name: 'Inline work workspace' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
+  })
+
+  it('keeps a technician’s blocked assigned work on the mounted repair order until it is resolved', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      ticket={ticket({ jobs: [job({
+        id: 'blocked-repair',
+        title: 'Install lift kit',
+        kind: 'repair',
+        assignedTechId: 'tech-1',
+        approvalState: 'approved',
+        workStatus: 'blocked',
+      })] })}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    expect(within(row).getByRole('button', { name: 'Resolve hold' })).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'Resolve hold' }))
+    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
   })
 
   it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {

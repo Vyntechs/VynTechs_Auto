@@ -23,6 +23,7 @@ import {
   type QuoteWorkspaceProjection,
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
+import { TicketInterruptionAction } from './ticket-interruption-action'
 import { TicketPartRequests } from './ticket-part-requests'
 import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './ticket-detail.module.css'
@@ -423,7 +424,21 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
+                    {resolveHoldCommandFor(allCommands, job.id) ? (
+                      <TicketInterruptionAction
+                        ticketId={ticket.id}
+                        jobId={job.id}
+                        className={styles.inlineAction}
+                        onApplied={(interrupted) => {
+                          setWorkOverrides((current) => {
+                            const existing = current.get(job.id)
+                            if (existing?.workStatus === interrupted.workStatus) return current
+                            return new Map(current).set(job.id, { workStatus: interrupted.workStatus })
+                          })
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    ) : workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
                       <button
                         ref={(element) => {
                           if (element) workOpenerRefs.current.set(job.id, element)
@@ -604,7 +619,7 @@ type QuoteOverride = {
 }
 
 type WorkOverride = {
-  workStatus: SimpleWorkProjectionView['status']
+  workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
 }
 
 type DisplayJob = Pick<TicketDetail['jobs'][number],
@@ -651,4 +666,14 @@ function workCommandFor(
     candidate.kind === 'work' && candidate.jobId === jobId
   ))
   return command ? command as LivingTicketCommand & { kind: 'work' } : null
+}
+
+function resolveHoldCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'resolve_hold' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'resolve_hold' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'resolve_hold' } : null
 }
