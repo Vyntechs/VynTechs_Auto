@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-ignore -- The executable is intentionally Node-only JavaScript with runtime-tested exports.
-import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_USERS, cleanupStatements, parseEnvFile, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
+import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupStatements, parseEnvFile, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
 
 type QaUser = { email: string; role: string; skillTier: number | null }
 type CleanupStatement = { table: string; sql: string; values: string[] }
@@ -21,6 +21,12 @@ describe('Golden browser QA control', () => {
     expect(users.every((user) => user.email.endsWith('.invalid'))).toBe(true)
     expect(QA_USERS.tech.skillTier).toBe(3)
     expect(QA_USERS.owner.skillTier).toBeNull()
+  })
+
+  it('uses only browser-public Supabase configuration for QA auth provisioning', () => {
+    expect(QA_SUPABASE_URL).toBe('https://ynmtszuybeenjbigxdyl.supabase.co')
+    expect(QA_SUPABASE_PUBLISHABLE_KEY).toMatch(/^sb_publishable_/)
+    expect(QA_SUPABASE_PUBLISHABLE_KEY).not.toMatch(/service_role/i)
   })
 
   it('parses a Vercel env file without evaluating its contents', () => {

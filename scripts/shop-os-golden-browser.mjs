@@ -15,10 +15,11 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..')
 
 export const QA_SHOP_ID = '8f33a153-1267-4cd8-8e2e-6a72a9f5a101'
 export const QA_SHOP_NAME = 'Vyntechs Golden Browser QA'
+export const QA_SUPABASE_URL = 'https://ynmtszuybeenjbigxdyl.supabase.co'
+export const QA_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3uwoW37WS09mI6cgUQP2-Q_CeJ8-X1J'
 
 export const QA_USERS = Object.freeze({
   owner: Object.freeze({
-    authUserId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a110',
     profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a120',
     role: 'owner',
     skillTier: null,
@@ -28,7 +29,6 @@ export const QA_USERS = Object.freeze({
     envPrefix: 'GOLDEN_QA_OWNER',
   }),
   advisor: Object.freeze({
-    authUserId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a111',
     profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a121',
     role: 'advisor',
     skillTier: null,
@@ -38,7 +38,6 @@ export const QA_USERS = Object.freeze({
     envPrefix: 'GOLDEN_QA_ADVISOR',
   }),
   tech: Object.freeze({
-    authUserId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a112',
     profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a122',
     role: 'tech',
     skillTier: 3,
@@ -48,7 +47,6 @@ export const QA_USERS = Object.freeze({
     envPrefix: 'GOLDEN_QA_TECH',
   }),
   parts: Object.freeze({
-    authUserId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a113',
     profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a123',
     role: 'parts',
     skillTier: null,
@@ -153,11 +151,7 @@ function pullProductionEnv() {
     )
     chmodSync(file, 0o600)
     const env = parseEnvFile(readFileSync(file, 'utf8'))
-    requireEnv(env, [
-      'NEXT_PUBLIC_SUPABASE_URL',
-      'SUPABASE_SERVICE_ROLE_KEY',
-      'DATABASE_URL',
-    ])
+    requireEnv(env, ['DATABASE_URL'])
     return {
       env,
       dispose() {
@@ -181,9 +175,9 @@ function writeKeychainPassword(user, password) {
       '-a', user.email,
       '-s', user.keychainService,
       '-l', `Vyntechs Golden QA ${user.role}`,
-      '-w',
+      '-w', password,
     ],
-    { input: `${password}\n`, encoding: 'utf8', stdio: ['pipe', 'ignore', 'pipe'] },
+    { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] },
   )
   if (result.status !== 0) throw new Error(`Keychain write failed for ${user.role}`)
 }
@@ -229,50 +223,101 @@ async function assertQaIdentityPreflight(sql) {
   `
   if (nameCollisions.length > 0) throw new Error('QA shop name belongs to an unexpected shop ID')
 
-  const authIds = Object.values(QA_USERS).map((user) => user.authUserId)
   const profileIds = Object.values(QA_USERS).map((user) => user.profileId)
   const profileCollisions = await sql`
-    select id::text, user_id::text
-    from public.profiles
-    where (id = any(${profileIds}::uuid[]) or user_id = any(${authIds}::uuid[]))
-      and not (id = any(${profileIds}::uuid[]) and user_id = any(${authIds}::uuid[]))
+    select p.id::text, lower(u.email) as email
+    from public.profiles p
+    left join auth.users u on u.id = p.user_id
+    where p.id = any(${profileIds}::uuid[])
   `
-  if (profileCollisions.length > 0) throw new Error('QA identity IDs collide with an unexpected profile')
+  for (const row of profileCollisions) {
+    const expected = Object.values(QA_USERS).find((user) => user.profileId === row.id)
+    if (!expected || row.email !== expected.email) {
+      throw new Error('QA profile ID collides with an unexpected auth identity')
+    }
+  }
+
+  const emails = Object.values(QA_USERS).map((user) => user.email)
+  const emailCollisions = await sql`
+    select lower(u.email) as email, p.id::text as profile_id
+    from auth.users u
+    join public.profiles p on p.user_id = u.id
+    where lower(u.email) = any(${emails}::text[])
+  `
+  for (const row of emailCollisions) {
+    const expected = Object.values(QA_USERS).find((user) => user.email === row.email)
+    if (!expected || row.profile_id !== expected.profileId) {
+      throw new Error('QA auth email is attached to an unexpected profile')
+    }
+  }
+}
+
+async function ensureQaAuthUsers(databaseUrl) {
+  return withDatabase(databaseUrl, async (sql) => {
+    const ids = {}
+  for (const user of Object.values(QA_USERS)) {
+    const password = randomBytes(36).toString('base64url')
+      let rows = await sql`
+        select id::text
+        from auth.users
+        where lower(email) = ${user.email}
+      `
+      if (rows.length === 0) {
+        const client = createClient(QA_SUPABASE_URL, QA_SUPABASE_PUBLISHABLE_KEY, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+        const created = await client.auth.signUp({
+          email: user.email,
+          password,
+          options: { data: { qa_shop_id: QA_SHOP_ID, qa_role: user.role } },
+        })
+        if (created.error || !created.data.user?.id) {
+          throw new Error(`QA ${user.role} auth signup failed: ${created.error?.message ?? 'missing user'}`)
+        }
+        rows = [{ id: created.data.user.id }]
+      }
+      if (rows.length !== 1) throw new Error(`QA ${user.role} auth identity is not unique`)
+      const authUserId = rows[0].id
+      await sql`
+        update auth.users set
+          encrypted_password = extensions.crypt(${password}, extensions.gen_salt('bf')),
+          email_confirmed_at = coalesce(email_confirmed_at, now()),
+          updated_at = now(),
+          raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+            || jsonb_build_object(
+              'qa_shop_id', ${QA_SHOP_ID}::text,
+              'qa_role', ${user.role}::text
+            )
+        where id = ${authUserId}::uuid and lower(email) = ${user.email}
+      `
+      ids[user.role] = authUserId
+      writeKeychainPassword(user, password)
+    }
+    return ids
+  })
+}
+
+async function verifyQaSignIns() {
+  for (const user of Object.values(QA_USERS)) {
+    const client = createClient(QA_SUPABASE_URL, QA_SUPABASE_PUBLISHABLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+    const result = await client.auth.signInWithPassword({
+      email: user.email,
+      password: readKeychainPassword(user),
+    })
+    if (result.error || result.data.user?.email?.toLowerCase() !== user.email) {
+      throw new Error(`QA ${user.role} sign-in verification failed`)
+    }
+    await client.auth.signOut()
+  }
 }
 
 export async function ensureQaTenant(env) {
-  requireEnv(env, ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'DATABASE_URL'])
-  const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  requireEnv(env, ['DATABASE_URL'])
 
   await withDatabase(env.DATABASE_URL, async (sql) => assertQaIdentityPreflight(sql))
-
-  for (const user of Object.values(QA_USERS)) {
-    const password = randomBytes(36).toString('base64url')
-    const existing = await admin.auth.admin.getUserById(user.authUserId)
-    if (existing.data?.user) {
-      if (existing.data.user.email?.toLowerCase() !== user.email) {
-        throw new Error(`QA auth ID belongs to an unexpected ${user.role} email`)
-      }
-      const updated = await admin.auth.admin.updateUserById(user.authUserId, {
-        password,
-        email_confirm: true,
-        app_metadata: { qa_shop_id: QA_SHOP_ID, qa_role: user.role },
-      })
-      if (updated.error) throw new Error(`QA ${user.role} auth update failed: ${updated.error.message}`)
-    } else {
-      const created = await admin.auth.admin.createUser({
-        id: user.authUserId,
-        email: user.email,
-        password,
-        email_confirm: true,
-        app_metadata: { qa_shop_id: QA_SHOP_ID, qa_role: user.role },
-      })
-      if (created.error) throw new Error(`QA ${user.role} auth create failed: ${created.error.message}`)
-    }
-    writeKeychainPassword(user, password)
-  }
+  const authUserIds = await ensureQaAuthUsers(env.DATABASE_URL)
 
   await withDatabase(env.DATABASE_URL, async (sql) => {
     await sql.begin(async (tx) => {
@@ -297,7 +342,7 @@ export async function ensureQaTenant(env) {
             membership_status, membership_activated_at, is_comp, is_curator, deactivated_at
           ) values (
             ${user.profileId}::uuid,
-            ${user.authUserId}::uuid,
+            ${authUserIds[user.role]}::uuid,
             ${QA_SHOP_ID}::uuid,
             ${user.fullName},
             ${user.role},
@@ -333,6 +378,7 @@ export async function ensureQaTenant(env) {
     })
   })
 
+  await verifyQaSignIns()
   return verifyQaContract(env)
 }
 
