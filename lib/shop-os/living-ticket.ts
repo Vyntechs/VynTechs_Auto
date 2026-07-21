@@ -18,7 +18,7 @@ export type LivingTicketJob = {
 }
 
 export type LivingTicketCommand = {
-  kind: 'assign' | 'claim' | 'handoff' | 'quote' | 'work' | 'ring_out' | 'close'
+  kind: 'assign' | 'claim' | 'handoff' | 'quote' | 'work' | 'resolve_hold' | 'ring_out' | 'close'
   label: string
   jobId?: string
 }
@@ -89,8 +89,15 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
         sessionId: job.sessionId,
         diagnosticsEntitled: input.diagnosticsEntitled ?? true,
       })
-      && (job.workStatus === 'open' || job.workStatus === 'in_progress')
-    if (isOwnApprovedSimpleWork) {
+    if (isOwnApprovedSimpleWork && job.workStatus === 'blocked') {
+      commands.push({
+        kind: 'resolve_hold',
+        jobId: job.id,
+        label: 'Resolve hold',
+        rank: 0,
+      })
+    }
+    if (isOwnApprovedSimpleWork && (job.workStatus === 'open' || job.workStatus === 'in_progress')) {
       commands.push({
         kind: 'work',
         jobId: job.id,
@@ -101,11 +108,18 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
   }
 
   if (canAssignWork(input.role)) {
-    for (const job of openJobs) {
+    for (const job of activeJobs) {
       if (assignmentState(job, input.profileId) === 'unassigned') {
-        commands.push({ kind: 'assign', jobId: job.id, label: 'Assign work', rank: 10 })
+        if (job.workStatus === 'open') {
+          commands.push({ kind: 'assign', jobId: job.id, label: 'Assign work', rank: 10 })
+        }
       } else {
-        commands.push({ kind: 'handoff', jobId: job.id, label: 'Hand off', rank: 60 })
+        commands.push({
+          kind: 'handoff',
+          jobId: job.id,
+          label: 'Hand off',
+          rank: job.workStatus === 'blocked' ? 10 : 60,
+        })
       }
     }
   } else if (input.skillTier !== null && input.skillTier >= 1 && input.skillTier <= 3) {
