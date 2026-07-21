@@ -125,6 +125,29 @@ describe('requireUserAndProfile', () => {
     })
   })
 
+  it('does not create external billing state for a complimentary profile', async () => {
+    const userId = crypto.randomUUID()
+    const [shop] = await db.insert(shops).values({ name: 'Complimentary QA Shop' }).returning()
+    await db.insert(profiles).values({
+      userId,
+      shopId: shop.id,
+      role: 'owner',
+      membershipStatus: 'active',
+      membershipActivatedAt: new Date(),
+      isComp: true,
+    })
+    const ensureCustomer = vi.fn().mockResolvedValue('cus_should_not_exist')
+
+    const result = await requireUserAndProfile({
+      supabase: fakeSupabase({ id: userId, email: 'qa-owner@example.invalid' }) as never,
+      db,
+      ensureCustomer,
+    })
+
+    expect(result?.profile.isComp).toBe(true)
+    expect(ensureCustomer).not.toHaveBeenCalled()
+  })
+
   it('does not block sign-in when the Stripe customer hook fails', async () => {
     const userId = crypto.randomUUID()
     const ensureCustomer = vi.fn().mockRejectedValue(new Error('stripe is down'))

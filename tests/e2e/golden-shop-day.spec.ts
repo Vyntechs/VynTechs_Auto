@@ -145,7 +145,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await tech.getByRole('button', { name: 'Clock on' }).click()
     expect((await clockResponsePromise).status(), 'clock-on API status').toBe(200)
     await expect(tech.getByRole('heading', { name: 'Work in progress' })).toBeVisible()
-    const note = tech.getByLabel('Work note')
+    const note = tech.getByRole('textbox', { name: 'Work note' })
     await note.fill('Confirmed pad wear, replaced front pads, torqued hardware, and completed a quiet road test.')
     await tech.getByRole('button', { name: 'Close work' }).click()
     await expect(tech.getByRole('alert')).toContainText('Finish or clear the draft')
