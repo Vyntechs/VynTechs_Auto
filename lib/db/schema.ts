@@ -406,6 +406,15 @@ export const ticketJobs = pgTable(
     workCompletedAt: timestamp('work_completed_at', { withTimezone: true }),
     clockedOnSince: timestamp('clocked_on_since', { withTimezone: true }),
     activeSeconds: integer('active_seconds').default(0).notNull(),
+    holdKind: text('hold_kind', {
+      enum: ['parts', 'customer', 'schedule', 'shop'],
+    }),
+    holdNote: text('hold_note'),
+    holdResumeStatus: text('hold_resume_status', {
+      enum: ['open', 'in_progress'],
+    }),
+    heldAt: timestamp('held_at', { withTimezone: true }),
+    heldByProfileId: uuid('held_by_profile_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -429,6 +438,11 @@ export const ticketJobs = pgTable(
       name: 'ticket_jobs_approved_quote_version_fk',
       columns: [table.shopId, table.ticketId, table.approvedQuoteVersionId],
       foreignColumns: [quoteVersions.shopId, quoteVersions.ticketId, quoteVersions.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_jobs_shop_holder_fk',
+      columns: [table.shopId, table.heldByProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
     }).onDelete('restrict'),
     uniqueIndex('ticket_jobs_shop_id_uq').on(table.shopId, table.id),
     uniqueIndex('ticket_jobs_shop_ticket_id_uq').on(table.shopId, table.ticketId, table.id),
@@ -489,6 +503,69 @@ export const ticketJobs = pgTable(
       sql`(${table.customerStory} is null or jsonb_typeof(${table.customerStory}) = 'object')
         and (${table.storyMeta} is null or jsonb_typeof(${table.storyMeta}) = 'object')`,
     ),
+  ],
+)
+
+export const TICKET_ACTIVITY_KINDS = [
+  'work_paused',
+  'work_resumed',
+  'job_blocked',
+  'job_hold_resolved',
+  'job_reassigned',
+  'job_handed_off',
+  'ticket_canceled',
+  'ticket_reopened',
+] as const
+
+export const ticketActivity = pgTable(
+  'ticket_activity',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shopId: uuid('shop_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    jobId: uuid('job_id'),
+    actorProfileId: uuid('actor_profile_id').notNull(),
+    kind: text('kind', { enum: TICKET_ACTIVITY_KINDS }).notNull(),
+    requestKey: uuid('request_key').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'ticket_activity_shop_ticket_fk',
+      columns: [table.shopId, table.ticketId],
+      foreignColumns: [tickets.shopId, tickets.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_activity_shop_job_fk',
+      columns: [table.shopId, table.ticketId, table.jobId],
+      foreignColumns: [ticketJobs.shopId, ticketJobs.ticketId, ticketJobs.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'ticket_activity_shop_actor_fk',
+      columns: [table.shopId, table.actorProfileId],
+      foreignColumns: [profiles.shopId, profiles.id],
+    }).onDelete('restrict'),
+    uniqueIndex('ticket_activity_shop_id_uq').on(table.shopId, table.id),
+    uniqueIndex('ticket_activity_shop_request_key_uq').on(table.shopId, table.requestKey),
+    index('ticket_activity_shop_ticket_created_idx').on(
+      table.shopId,
+      table.ticketId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index('ticket_activity_shop_job_created_idx')
+      .on(table.shopId, table.jobId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.jobId} is not null`),
+    check(
+      'ticket_activity_kind_valid',
+      sql`${table.kind} in (
+        'work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved',
+        'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened'
+      )`,
+    ),
+    check('ticket_activity_payload_object', sql`jsonb_typeof(${table.payload}) = 'object'`),
+    check('ticket_activity_payload_bounded', sql`octet_length(${table.payload}::text) <= 12288`),
   ],
 )
 
