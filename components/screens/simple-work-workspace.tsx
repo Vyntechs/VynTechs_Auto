@@ -33,6 +33,12 @@ type Props = {
 type Notice = { kind: 'status' | 'error'; text: string }
 type Pending = 'clock' | 'note' | 'complete' | 'escalation' | null
 
+const WORK_KIND_LABEL: Record<SimpleWorkWorkspaceView['kind'], string> = {
+  diagnostic: 'Diagnostic',
+  repair: 'Repair',
+  maintenance: 'Maintenance',
+}
+
 export function SimpleWorkWorkspace({
   ticket,
   initialWorkspace,
@@ -204,7 +210,7 @@ export function SimpleWorkWorkspace({
       <div className={styles.content}>
         <header className={styles.hero}>
           <div>
-            <p className={styles.eyebrow}>{workspace.kind === 'repair' ? 'Repair' : 'Maintenance'} · assigned work</p>
+            <p className={styles.eyebrow}>{WORK_KIND_LABEL[workspace.kind]} · assigned work</p>
             <h1>{workspace.title}</h1>
           </div>
           {embedded && <button className={styles.closeEmbedded} type="button" onClick={requestClose}>Close work</button>}

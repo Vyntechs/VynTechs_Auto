@@ -10,10 +10,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "qa:golden:provision": "node scripts/shop-os-golden-browser.mjs provision",
+    "test:e2e:golden": "node scripts/shop-os-golden-browser.mjs test --base-url https://vyntechs.dev",
+    "qa:golden:clean": "node scripts/shop-os-golden-browser.mjs clean",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@electric-sql/pglite": "^0.4.5",
     "@playwright/test": "^1.59.1",
     "@testing-library/jest-dom": "^6.9.1",

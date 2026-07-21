@@ -34,7 +34,7 @@ export async function requireUserAndProfile(opts: {
     profile =
       (await activatePendingProfileMembership(opts.db, user.id)) ?? profile
   }
-  if (profile.shopId) {
+  if (profile.shopId && !profile.isComp) {
     const ensure: EnsureCustomerFn =
       opts.ensureCustomer ??
       ((args) => ensureStripeCustomer(args))

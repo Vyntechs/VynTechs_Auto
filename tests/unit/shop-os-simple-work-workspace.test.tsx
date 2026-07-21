@@ -39,6 +39,15 @@ describe('simple work workspace', () => {
     expect(screen.queryByText('Waiting for customer approval')).toBeNull()
   })
 
+  it('renders diagnostics-off manual diagnostic work as diagnostic work', () => {
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, kind: 'diagnostic', title: 'Brake squeal diagnosis' }}
+    />)
+    expect(screen.getByText('Diagnostic · assigned work')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clock on' })).toBeEnabled()
+  })
+
   it('clocks on only after a strict confirmed server response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
