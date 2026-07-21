@@ -14,6 +14,7 @@ type Props = {
   initialDraft?: PartRequestDraft
   onDraftChange?: (dirty: boolean) => void
   onDraft?: (draft: PartRequestDraft) => void
+  onRequestSaved?: () => void
 }
 
 const STATUS_LABEL: Record<PartRequestView['status'], string> = {
@@ -33,6 +34,7 @@ export function PartsNeededPanel({
   initialDraft = EMPTY_DRAFT,
   onDraftChange,
   onDraft,
+  onRequestSaved,
 }: Props) {
   const [requests, setRequests] = useState(initialRequests)
   const [description, setDescription] = useState(initialDraft.description)
@@ -100,6 +102,9 @@ export function PartsNeededPanel({
       setPreference('')
       setQuantity('1')
       setRequestKey(null)
+      // The part is durable now, so the parent can immediately offer the
+      // technician's next action instead of waiting for an effect round-trip.
+      onRequestSaved?.()
     } catch {
       setError('Not sent — check your connection and try again.')
     } finally {

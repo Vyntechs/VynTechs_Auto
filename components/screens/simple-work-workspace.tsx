@@ -485,6 +485,10 @@ export function SimpleWorkWorkspace({
               onDraftChange={setPartsDraftDirty}
               initialDraft={partsDraft}
               onDraft={setPartsDraft}
+              onRequestSaved={() => {
+                setPartsDraft(EMPTY_PARTS_DRAFT)
+                setPartsDraftDirty(false)
+              }}
             />
             <details className={styles.concern}>
               <summary>Put work on hold</summary>
