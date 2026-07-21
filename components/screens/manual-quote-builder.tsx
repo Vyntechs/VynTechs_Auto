@@ -28,6 +28,11 @@ import {
   type SafeManualVendorAccount,
   type SafeSourcedQuoteLine,
 } from '@/lib/shop-os/parts-sourcing-ui'
+import {
+  encodeQuoteEditorDraft,
+  parseQuoteEditorDraft,
+  quoteEditorDraftKey,
+} from '@/lib/shop-os/quote-editor-draft'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
 import { ManualPartSourcing } from './manual-part-sourcing'
@@ -44,6 +49,7 @@ export type QuoteTicketIdentity = {
 }
 
 export function ManualQuoteBuilder({
+  actorId = null,
   ticket,
   builder,
   cannedJobs = [],
@@ -56,6 +62,7 @@ export function ManualQuoteBuilder({
   onProjection,
   onReloadCatalog,
 }: {
+  actorId?: string | null
   ticket: QuoteTicketIdentity
   builder: QuoteBuilder
   cannedJobs?: SafeCannedJobTemplate[]
@@ -84,6 +91,8 @@ export function ManualQuoteBuilder({
   const [busy, setBusy] = useState(false)
   const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | 'sourcing' | null>(null)
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('')
+  const [confirmedTarget, setConfirmedTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
   const [decision, setDecision] = useState<DecisionState | null>(null)
@@ -110,10 +119,90 @@ export function ManualQuoteBuilder({
     available: boolean
   } | null>(null)
   const selectedFingerprintRef = useRef<string | null>(null)
+  const draftRecoveryAttemptedRef = useRef(false)
   const quotePath = `/tickets/${ticket.id}/quote`
   const catalogSignature = cannedJobs.map((job) => `${job.id}:${job.fingerprint}`).join('|')
 
   useEffect(() => setCurrent(builder), [builder])
+  useEffect(() => {
+    if (!actorId || draftRecoveryAttemptedRef.current) return
+    draftRecoveryAttemptedRef.current = true
+    let key: string
+    try {
+      key = quoteEditorDraftKey(actorId, ticket.id)
+    } catch {
+      return
+    }
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return
+    const draft = parseQuoteEditorDraft(raw, { actorId, ticketId: ticket.id })
+    if (!draft) {
+      sessionStorage.removeItem(key)
+      return
+    }
+    const job = current.jobs.find((candidate) => candidate.id === draft.jobId)
+    const line = draft.lineId
+      ? job?.lines.find((candidate) => candidate.id === draft.lineId)
+      : undefined
+    if (!job || (draft.mode === 'edit' && (
+      !line || !line.mutable || line.kind !== draft.kind
+    ))) {
+      sessionStorage.removeItem(key)
+      return
+    }
+    setEditor({
+      mode: draft.mode,
+      jobId: draft.jobId,
+      kind: draft.kind,
+      line,
+      values: draft.values,
+      dirty: true,
+      hoursChanged: draft.hoursChanged,
+      clientKey: draft.clientKey,
+      invokerKey: editorInvokerKey({
+        mode: draft.mode,
+        jobId: draft.jobId,
+        kind: draft.kind,
+        line,
+      }),
+    })
+    setStatusMessage(`Unsaved ${draft.kind} restored`)
+  }, [actorId, current.jobs, ticket.id])
+  useEffect(() => {
+    if (!actorId || !editor?.dirty) return
+    try {
+      const key = quoteEditorDraftKey(actorId, ticket.id)
+      sessionStorage.setItem(key, encodeQuoteEditorDraft({
+        version: 1,
+        actorId,
+        ticketId: ticket.id,
+        jobId: editor.jobId,
+        mode: editor.mode,
+        kind: editor.kind,
+        lineId: editor.line?.id ?? null,
+        values: editor.values,
+        hoursChanged: editor.hoursChanged,
+        clientKey: editor.clientKey,
+        savedAt: Date.now(),
+      }))
+    } catch {
+      setStatusMessage('Draft remains open, but reload protection is unavailable')
+    }
+  }, [actorId, editor, ticket.id])
+  useEffect(() => {
+    if (!editor?.dirty) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [editor?.dirty])
+  useEffect(() => {
+    if (!confirmedTarget) return
+    const timer = window.setTimeout(() => setConfirmedTarget(null), 1_200)
+    return () => window.clearTimeout(timer)
+  }, [confirmedTarget])
   useEffect(() => {
     onProjection?.(current.jobs.map((job) => ({
       id: job.id,
@@ -174,7 +263,10 @@ export function ManualQuoteBuilder({
     if (!input) return
     queueMicrotask(() => {
       input.focus()
-      try { input.scrollIntoView({ block: 'center' }) } catch { /* layout-less env */ }
+      const bounds = input.getBoundingClientRect()
+      if (bounds.top < 0 || bounds.bottom > window.innerHeight) {
+        try { input.scrollIntoView({ block: 'center' }) } catch { /* layout-less env */ }
+      }
     })
   }, [editor])
 
@@ -219,6 +311,7 @@ export function ManualQuoteBuilder({
       setModal({ kind: 'discard', target, invoker })
       return
     }
+    clearStoredEditorDraft()
     setError(null)
     setEditor(createEditor(target))
   }
@@ -240,7 +333,27 @@ export function ManualQuoteBuilder({
       hoursChanged: false,
       clientKey: target.mode === 'create' ? crypto.randomUUID() : null,
       values: line ? valuesFromLine(line) : emptyValues(),
+      invokerKey: editorInvokerKey(target),
     }
+  }
+
+  function clearStoredEditorDraft(): void {
+    if (!actorId) return
+    try {
+      sessionStorage.removeItem(quoteEditorDraftKey(actorId, ticket.id))
+    } catch {
+      // Storage is an optional reload guard. The mounted editor remains authoritative.
+    }
+  }
+
+  function cancelEditor(): void {
+    if (inFlightRef.current || !editor) return
+    const invokerKey = editor.invokerKey
+    clearStoredEditorDraft()
+    setEditor(null)
+    setError(null)
+    setStatusMessage('Draft cleared')
+    setTimeout(() => focusRefs.current.get(invokerKey)?.focus(), 0)
   }
 
   function updateValue<K extends keyof ManualLineFormValues>(
@@ -422,7 +535,13 @@ export function ManualQuoteBuilder({
       const lineId = typeof returnedLine?.id === 'string'
         ? returnedLine.id
         : editor.line?.id
-      await refreshQuote(lineId ? `line:${lineId}` : `add:${editor.jobId}:part`, true, true)
+      const target = lineId ? `line:${lineId}` : `add:${editor.jobId}:${editor.kind}`
+      const refreshed = await refreshQuote(target, true, true)
+      if (refreshed) {
+        clearStoredEditorDraft()
+        setConfirmedTarget(target)
+        setStatusMessage(`${capitalize(editor.kind)} ${editor.mode === 'create' ? 'added' : 'updated'}`)
+      }
     } catch {
       setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
     } finally {
@@ -756,6 +875,11 @@ export function ManualQuoteBuilder({
       className={`${embedded ? styles.embeddedScreen : `app ${styles.screen}`} ${sourcingJob ? styles.screenWithSourcing : ''}`}
       aria-label={embedded ? 'Quote workspace' : undefined}
     >
+      {statusMessage && (
+        <p className={styles.liveStatus} role="status" aria-label="Quote update" aria-live="polite">
+          {statusMessage}
+        </p>
+      )}
       <div data-testid="quote-background" inert={modal || decision || sourcingJob ? true : undefined}>
       <div className={styles.header}>
         <div>
@@ -888,6 +1012,7 @@ export function ManualQuoteBuilder({
                 <li
                   key={job.id}
                   className={styles.job}
+                  data-change-state={confirmedTarget === `job:${job.id}` ? 'confirmed' : undefined}
                   tabIndex={-1}
                   ref={(element) => {
                     if (element) focusRefs.current.set(`job:${job.id}`, element)
@@ -914,6 +1039,7 @@ export function ManualQuoteBuilder({
                           <li
                             key={line.id}
                             className={styles.line}
+                            data-change-state={confirmedTarget === `line:${line.id}` ? 'confirmed' : undefined}
                             tabIndex={-1}
                             ref={(element) => {
                               if (element) focusRefs.current.set(`line:${line.id}`, element)
@@ -936,6 +1062,11 @@ export function ManualQuoteBuilder({
                                 type="button"
                                 className={styles.lineAction}
                                 disabled={busy}
+                                ref={(element) => {
+                                  const key = `edit:${line.id}`
+                                  if (element) focusRefs.current.set(key, element)
+                                  else focusRefs.current.delete(key)
+                                }}
                                 onClick={(event) => requestEditor(
                                   { mode: 'edit', jobId: job.id, kind: line.kind, line },
                                   event.currentTarget,
@@ -990,12 +1121,18 @@ export function ManualQuoteBuilder({
                       </ul>
                     )}
                     <div className={styles.addActions}>
-                      {(['part', 'labor', 'fee'] as const).map((kind) => (
-                        <button
+                      {(['part', 'labor', 'fee'] as const).map((kind) => {
+                        const active = editor?.jobId === job.id
+                          && editor.mode === 'create' && editor.kind === kind
+                        const editorId = quoteEditorId(job.id)
+                        return <button
                           key={kind}
                           type="button"
                           className={styles.lineAction}
                           disabled={busy}
+                          aria-expanded={active}
+                          aria-controls={active ? editorId : undefined}
+                          data-active={active ? 'true' : undefined}
                           ref={(element) => {
                             const key = `add:${job.id}:${kind}`
                             if (element) focusRefs.current.set(key, element)
@@ -1006,9 +1143,9 @@ export function ManualQuoteBuilder({
                             event.currentTarget,
                           )}
                         >
-                          Add {kind}
+                          {active ? `Adding ${kind}` : `Add ${kind}`}
                         </button>
-                      ))}
+                      })}
                       {(job.kind === 'repair' || job.kind === 'maintenance')
                         && (job.workStatus === 'open' || job.workStatus === 'blocked') && (
                         <button
@@ -1031,6 +1168,18 @@ export function ManualQuoteBuilder({
                         </button>
                       )}
                     </div>
+                    {editor?.jobId === job.id && (
+                      <LineEditor
+                        id={quoteEditorId(job.id)}
+                        editor={editor}
+                        laborRateCents={current.configuration.laborRateCents}
+                        busy={busy}
+                        firstInputRef={editorFirstInputRef}
+                        onChange={updateValue}
+                        onCancel={cancelEditor}
+                        onSubmit={submitEditor}
+                      />
+                    )}
                     {job.kind === 'diagnostic' && (
                       <StoryCard
                         ticketId={ticket.id}
@@ -1041,21 +1190,6 @@ export function ManualQuoteBuilder({
                           else focusRefs.current.delete(`story:${job.id}`)
                         }}
                         onServerChange={() => refreshQuote(`story:${job.id}`)}
-                      />
-                    )}
-                    {editor?.jobId === job.id && (
-                      <LineEditor
-                        editor={editor}
-                        laborRateCents={current.configuration.laborRateCents}
-                        busy={busy}
-                        firstInputRef={editorFirstInputRef}
-                        onChange={updateValue}
-                        onCancel={() => {
-                          if (inFlightRef.current) return
-                          setEditor(null)
-                          setError(null)
-                        }}
-                        onSubmit={submitEditor}
                       />
                     )}
                   </div>
@@ -1224,10 +1358,12 @@ export function ManualQuoteBuilder({
           onDiscard={() => {
             if (inFlightRef.current) return
             if (modal.kind === 'discard') {
+              clearStoredEditorDraft()
               setEditor(createEditor(modal.target))
               closeModal('editor')
               setError(null)
             } else if (modal.kind === 'discard-close') {
+              clearStoredEditorDraft()
               setEditor(null)
               setModal(null)
               setError(null)
@@ -1491,6 +1627,7 @@ type EditorState = EditorTarget & {
   dirty: boolean
   hoursChanged: boolean
   clientKey: string | null
+  invokerKey: string
 }
 
 type ModalState =
@@ -1508,6 +1645,7 @@ type ModalState =
   }
 
 function LineEditor({
+  id,
   editor,
   laborRateCents,
   busy,
@@ -1516,6 +1654,7 @@ function LineEditor({
   onCancel,
   onSubmit,
 }: {
+  id: string
   editor: EditorState
   laborRateCents: number | null
   busy: boolean
@@ -1524,6 +1663,7 @@ function LineEditor({
   onCancel: () => void
   onSubmit: (event: React.FormEvent) => void
 }): React.JSX.Element {
+  const headingId = `${id}-heading`
   const effectiveLaborRate = editor.mode === 'edit' && editor.line?.kind === 'labor'
     ? editor.line.laborRateCents
     : laborRateCents
@@ -1535,8 +1675,8 @@ function LineEditor({
     } catch { calculated = null }
   }
   return (
-    <form className={styles.editor} onSubmit={onSubmit}>
-      <h4>{editor.mode === 'create' ? 'Add' : 'Edit'} {editor.kind} line</h4>
+    <form id={id} className={styles.editor} aria-labelledby={headingId} onSubmit={onSubmit}>
+      <h4 id={headingId}>{editor.mode === 'create' ? 'Add' : 'Edit'} {editor.kind} line</h4>
       <label>
         Description
         <input
@@ -1549,17 +1689,17 @@ function LineEditor({
       </label>
       {editor.kind === 'part' && (
         <>
-          <label>Quantity<input inputMode="decimal" autoComplete="off" value={editor.values.quantity} onChange={(event) => onChange('quantity', event.target.value)} /></label>
-          <label>Part number<input autoComplete="off" value={editor.values.partNumber} onChange={(event) => onChange('partNumber', event.target.value)} /></label>
-          <label>Brand<input autoComplete="off" value={editor.values.brand} onChange={(event) => onChange('brand', event.target.value)} /></label>
-          <label>Fitment<input autoComplete="off" value={editor.values.fitment} onChange={(event) => onChange('fitment', event.target.value)} /></label>
+          <label>Quantity<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.quantity} onChange={(event) => onChange('quantity', event.target.value)} /></label>
+          <label>Part number<input autoComplete="off" maxLength={200} value={editor.values.partNumber} onChange={(event) => onChange('partNumber', event.target.value)} /></label>
+          <label>Brand<input autoComplete="off" maxLength={200} value={editor.values.brand} onChange={(event) => onChange('brand', event.target.value)} /></label>
+          <label>Fitment<input autoComplete="off" maxLength={500} value={editor.values.fitment} onChange={(event) => onChange('fitment', event.target.value)} /></label>
         </>
       )}
       {editor.kind === 'labor' && (
-        <label>Hours<input inputMode="decimal" autoComplete="off" value={editor.values.hours} onChange={(event) => onChange('hours', event.target.value)} /></label>
+        <label>Hours<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.hours} onChange={(event) => onChange('hours', event.target.value)} /></label>
       )}
       {(editor.kind !== 'labor' || effectiveLaborRate === null) && (
-        <label>Line price<input inputMode="decimal" autoComplete="off" value={editor.values.price} onChange={(event) => onChange('price', event.target.value)} /></label>
+        <label>Line price<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.price} onChange={(event) => onChange('price', event.target.value)} /></label>
       )}
       {editor.kind === 'labor' && effectiveLaborRate !== null && (
         <p className={styles.calculated}>
@@ -1742,4 +1882,17 @@ function vehicleName(vehicle: NonNullable<QuoteTicketIdentity['vehicle']>): stri
 
 function formatStatus(status: string): string {
   return status.replace('_', ' ')
+}
+
+function quoteEditorId(jobId: string): string {
+  return `quote-line-editor-${jobId}`
+}
+
+function editorInvokerKey(editor: EditorTarget): string {
+  if (editor.mode === 'edit' && editor.line) return `edit:${editor.line.id}`
+  return `add:${editor.jobId}:${editor.kind}`
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
 }

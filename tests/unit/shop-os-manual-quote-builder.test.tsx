@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
 import type { SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
+import { quoteEditorDraftKey } from '@/lib/shop-os/quote-editor-draft'
 import { parseQuoteBuilderProjection } from '@/lib/shop-os/quote-builder-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import type { TicketDetail } from '@/lib/tickets'
@@ -23,6 +24,8 @@ type Builder = Extract<QuoteBuilderResult, { ok: true }>['builder']
 type BuilderLine = Builder['jobs'][number]['lines'][number]
 
 const TICKET_ID = '00000000-0000-4000-8000-000000000101'
+const ACTOR_ID = '00000000-0000-4000-8000-000000000102'
+const OTHER_ACTOR_ID = '00000000-0000-4000-8000-000000000103'
 const JOB_ID = '00000000-0000-4000-8000-000000000201'
 const LINE_ID = '00000000-0000-4000-8000-000000000301'
 const LABOR_LINE_ID = '00000000-0000-4000-8000-000000000302'
@@ -197,6 +200,7 @@ function capturedOfferResponse(lineId = SOURCED_LINE_ID) {
 describe('ManualQuoteBuilder', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    sessionStorage.clear()
     router.push.mockReset()
     router.replace.mockReset()
     router.refresh.mockReset()
@@ -246,6 +250,106 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.getByRole('alertdialog', { name: 'Discard unsaved line changes?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('reveals the active line editor directly at its invoking job action', async () => {
+    const user = userEvent.setup()
+    render(<ManualQuoteBuilder
+      actorId={ACTOR_ID}
+      ticket={ticket}
+      builder={builder({ jobs: [reviewedDiagnosis('Replace worn pads')], activeVersion: null })}
+    />)
+
+    const add = screen.getByRole('button', { name: 'Add part' })
+    await user.click(add)
+
+    const editor = screen.getByRole('form', { name: 'Add part line' })
+    const story = screen.getByRole('region', { name: 'Diagnostic story for Brake diagnosis' })
+    expect(add).toHaveAccessibleName('Adding part')
+    expect(add).toHaveAttribute('aria-expanded', 'true')
+    expect(add).toHaveAttribute('aria-controls', editor.id)
+    expect(add).toHaveAttribute('data-active', 'true')
+    expect(add.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(editor.compareDocumentPosition(story) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByLabelText('Description'))
+  })
+
+  it('recovers one bounded same-actor draft after remount and clears it on cancel', async () => {
+    const user = userEvent.setup()
+    const key = quoteEditorDraftKey(ACTOR_ID, TICKET_ID)
+    const view = render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add fee' }))
+    await user.type(screen.getByLabelText('Description'), 'Environmental handling')
+    expect(sessionStorage.getItem(key)).toContain('Environmental handling')
+
+    view.unmount()
+    render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />)
+
+    expect(await screen.findByRole('form', { name: 'Add fee line' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Description')).toHaveValue('Environmental handling')
+    expect(screen.getByRole('status', { name: 'Quote update' })).toHaveTextContent(
+      'Unsaved fee restored',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(sessionStorage.getItem(key)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add fee' })).toHaveFocus()
+  })
+
+  it('fails closed on corrupt or other-actor draft storage', async () => {
+    const key = quoteEditorDraftKey(ACTOR_ID, TICKET_ID)
+    sessionStorage.setItem(key, '{')
+    const view = render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />)
+
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
+    expect(screen.queryByRole('form')).toBeNull()
+
+    view.unmount()
+    sessionStorage.setItem(quoteEditorDraftKey(OTHER_ACTOR_ID, TICKET_ID), JSON.stringify({
+      hidden: 'other user draft',
+    }))
+    render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />)
+    expect(screen.queryByText('other user draft')).toBeNull()
+    expect(screen.queryByRole('form')).toBeNull()
+  })
+
+  it('clears the recovered draft and marks only server-confirmed truth after save', async () => {
+    const empty = builder({
+      activeVersion: null,
+      jobs: [{
+        id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+        ...jobFacts, lines: [],
+      }],
+    })
+    const refreshed = builder({
+      activeVersion: null,
+      jobs: [{
+        id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+        ...jobFacts, lines: [line({ id: NEW_LINE_ID, description: 'Premium pad set' })],
+      }],
+    })
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(
+      '00000000-0000-4000-8000-000000000901',
+    )
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: NEW_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+
+    render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={empty} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add part' }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Premium pad set' } })
+    fireEvent.change(screen.getByLabelText('Line price'), { target: { value: '120.00' } })
+    expect(sessionStorage.getItem(quoteEditorDraftKey(ACTOR_ID, TICKET_ID))).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    const saved = await screen.findByText('Premium pad set')
+    expect(sessionStorage.getItem(quoteEditorDraftKey(ACTOR_ID, TICKET_ID))).toBeNull()
+    expect(screen.getByRole('status', { name: 'Quote update' })).toHaveTextContent('Part added')
+    expect(saved.closest('li')).toHaveAttribute('data-change-state', 'confirmed')
+    expect(screen.getByRole('heading', { name: 'Brake service' }).closest('li'))
+      .not.toHaveAttribute('data-change-state')
   })
 
   it('collapses a fully decided embedded quote to one concise proof', () => {
@@ -395,12 +499,15 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/@media\s*\(min-width:\s*801px\)\s*and\s*\(max-width:\s*1290px\)[\s\S]*\.screenWithSourcing\s+\.workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
     expect(css).toMatch(/@media\s*\(min-width:\s*801px\)\s*and\s*\(max-width:\s*1290px\)[\s\S]*\.screenWithSourcing\s+\.tape\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/\.jobHeader\s*>\s*div\s*\{[^}]*min-width:\s*0/)
-    expect(css).toMatch(/\.jobHeader h3\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/)
-    expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis/)
+    const baseJobTitle = css.match(/\.jobHeader h3\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(baseJobTitle).toMatch(/white-space:\s*normal/)
+    expect(baseJobTitle).toMatch(/overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.description\s*\{[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.lineFacts span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
-    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.jobHeader h3\s*\{[^}]*white-space:\s*normal/)
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/\.cannedPicker select\s*\{[^}]*min-height:\s*44px/)
     expect(css).toMatch(/\.cannedApply\s*\{[^}]*min-height:\s*44px/)
