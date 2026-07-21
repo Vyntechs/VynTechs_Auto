@@ -1,10 +1,10 @@
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
 import { assertNoBrowserFaults, checkpoint, watchBrowserFaults } from './golden-browser-receipts'
 
-type Role = 'owner' | 'advisor' | 'tech' | 'parts'
+type Role = 'owner' | 'advisor' | 'tech' | 'relief' | 'parts'
 type Credential = { email: string; password: string }
 
-const roles: Role[] = ['owner', 'advisor', 'tech', 'parts']
+const roles: Role[] = ['owner', 'advisor', 'tech', 'relief', 'parts']
 
 function credential(role: Role): Credential {
   const prefix = `GOLDEN_QA_${role.toUpperCase()}`

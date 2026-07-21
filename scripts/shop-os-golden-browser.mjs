@@ -46,6 +46,15 @@ export const QA_USERS = Object.freeze({
     keychainService: 'com.vyntechs.shopos.golden-qa.tech',
     envPrefix: 'GOLDEN_QA_TECH',
   }),
+  relief: Object.freeze({
+    profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a124',
+    role: 'tech',
+    skillTier: 3,
+    fullName: 'Golden QA Relief Technician',
+    email: 'shopos.qa.relief@vyntechs.invalid',
+    keychainService: 'com.vyntechs.shopos.golden-qa.relief',
+    envPrefix: 'GOLDEN_QA_RELIEF',
+  }),
   parts: Object.freeze({
     profileId: '8f33a153-1267-4cd8-8e2e-6a72a9f5a123',
     role: 'parts',
@@ -58,6 +67,7 @@ export const QA_USERS = Object.freeze({
 })
 
 export const CLEANUP_TABLES = Object.freeze([
+  'ticket_activity',
   'ticket_payments',
   'quote_events',
   'job_part_requests',
@@ -414,15 +424,15 @@ export async function verifyQaContract(env) {
       select role, skill_tier
       from public.profiles
       where shop_id = ${QA_SHOP_ID}::uuid
-      order by case role when 'owner' then 1 when 'advisor' then 2 when 'tech' then 3 when 'parts' then 4 else 5 end
+      order by case role when 'owner' then 1 when 'advisor' then 2 when 'tech' then 3 when 'parts' then 4 else 5 end, id
     `
     const roleReceipt = roles.map((row) => `${row.role}:${row.skill_tier ?? 'none'}`).join(',')
     if (
       receipt.shops !== 1
-      || receipt.profiles !== 4
+      || receipt.profiles !== 5
       || receipt.diagnostics_off !== 1
       || receipt.stripe_customers !== 0
-      || roleReceipt !== 'owner:none,advisor:none,tech:3,parts:none'
+      || roleReceipt !== 'owner:none,advisor:none,tech:3,tech:3,parts:none'
     ) {
       throw new Error('QA tenant contract verification failed')
     }
