@@ -14,6 +14,7 @@ describe('createCounterTicket', () => {
   let shopA: typeof shops.$inferSelect
   let shopB: typeof shops.$inferSelect
   let actor: TicketActor
+  let tierOneTechId: string
   let tierTwoTechId: string
   let existingCustomer: typeof customers.$inferSelect
   let existingVehicle: typeof vehicles.$inferSelect
@@ -29,7 +30,7 @@ describe('createCounterTicket', () => {
       .values([{ name: 'North Shop' }, { name: 'South Shop' }])
       .returning()
 
-    const [owner, tierTwoTech] = await db
+    const [owner, tierOneTech, tierTwoTech] = await db
       .insert(profiles)
       .values([
         {
@@ -41,6 +42,13 @@ describe('createCounterTicket', () => {
         },
         {
           userId: uuid(2),
+          shopId: shopA.id,
+          role: 'tech',
+          skillTier: 1,
+          fullName: 'Jordan Tech',
+        },
+        {
+          userId: uuid(3),
           shopId: shopA.id,
           role: 'tech',
           skillTier: 2,
@@ -56,6 +64,7 @@ describe('createCounterTicket', () => {
       membershipStatus: owner.membershipStatus,
       deactivatedAt: owner.deactivatedAt,
     }
+    tierOneTechId = tierOneTech.id
     tierTwoTechId = tierTwoTech.id
 
     const [customerA, customerB] = await db
@@ -106,10 +115,6 @@ describe('createCounterTicket', () => {
       concern: '  Loss of power on hills  ',
       whenStarted: '  two weeks ago  ',
       howOften: '  daily  ',
-      diagnosticAuthorization: {
-        amountDollars: '125.05',
-        note: '  approved by phone  ',
-      },
       assignedTechId: null,
       ...overrides,
     }
@@ -125,7 +130,7 @@ describe('createCounterTicket', () => {
     }
   }
 
-  it('creates a full new-customer ticket with exact cents, full concern, and true-open diagnostic work', async () => {
+  it('creates one ordinary repair job from a new customer concern while diagnostics are dark', async () => {
     const result = await createCounterTicket(db, { actor, body: newBody() })
 
     expect(result).toMatchObject({
@@ -136,8 +141,6 @@ describe('createCounterTicket', () => {
         concern: 'Loss of power on hills',
         whenStarted: 'two weeks ago',
         howOften: 'daily',
-        diagnosticAuthorizedCents: 12_505,
-        diagnosticAuthorizationNote: 'approved by phone',
         customer: {
           name: 'Maria Lopez',
           phone: '555-1234',
@@ -154,9 +157,9 @@ describe('createCounterTicket', () => {
         },
         jobs: [
           {
-            title: 'Diagnose: Loss of power on hills',
-            kind: 'diagnostic',
-            requiredSkillTier: 3,
+            title: 'Customer request: Loss of power on hills',
+            kind: 'repair',
+            requiredSkillTier: 2,
             assignedTechId: null,
             assignedTech: null,
             sessionId: null,
@@ -166,7 +169,7 @@ describe('createCounterTicket', () => {
     })
   })
 
-  it('creates one diagnostic A-tier job plus one maintenance C-tier job', async () => {
+  it('uses requested maintenance as the one work item instead of creating duplicate work', async () => {
     const result = await createCounterTicket(db, {
       actor,
       body: newBody({
@@ -176,18 +179,14 @@ describe('createCounterTicket', () => {
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.ticket.jobs).toHaveLength(2)
-    expect(result.ticket.jobs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'diagnostic', requiredSkillTier: 3 }),
-        expect.objectContaining({
-          title: 'Rotate tires',
-          kind: 'maintenance',
-          requiredSkillTier: 1,
-          assignedTechId: null,
-        }),
-      ]),
-    )
+    expect(result.ticket.jobs).toEqual([
+      expect.objectContaining({
+        title: 'Rotate tires',
+        kind: 'maintenance',
+        requiredSkillTier: 1,
+        assignedTechId: null,
+      }),
+    ])
   })
 
   it('assigns every created job to the selected technician', async () => {
@@ -202,13 +201,13 @@ describe('createCounterTicket', () => {
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.ticket.jobs).toHaveLength(2)
-    expect(result.ticket.jobs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ requiredSkillTier: 3, assignedTechId: tierTwoTechId }),
-        expect.objectContaining({ requiredSkillTier: 2, assignedTechId: tierTwoTechId }),
-      ]),
-    )
+    expect(result.ticket.jobs).toEqual([
+      expect.objectContaining({
+        title: 'Replace boost hose',
+        requiredSkillTier: 2,
+        assignedTechId: tierTwoTechId,
+      }),
+    ])
   })
 
   it('preserves row-8 below-tier warning and rolls back the new customer and vehicle', async () => {
@@ -217,7 +216,7 @@ describe('createCounterTicket', () => {
 
     const result = await createCounterTicket(db, {
       actor,
-      body: newBody({ assignedTechId: tierTwoTechId }),
+      body: newBody({ assignedTechId: tierOneTechId }),
     })
 
     expect(result).toEqual({
@@ -225,9 +224,9 @@ describe('createCounterTicket', () => {
       error: 'tier_confirmation_required',
       warning: {
         code: 'below_required_tier',
-        assignedTechId: tierTwoTechId,
-        assignedSkillTier: 2,
-        requiredSkillTier: 3,
+        assignedTechId: tierOneTechId,
+        assignedSkillTier: 1,
+        requiredSkillTier: 2,
       },
     })
     expect(await db.select().from(customers)).toEqual(beforeCustomers)
@@ -286,9 +285,7 @@ describe('createCounterTicket', () => {
       { ...existingBody(), customer: newBody().customer, vehicle: newBody().vehicle },
       newBody({ concern: ' ' }),
       newBody({ assignedTechId: undefined }),
-      newBody({ diagnosticAuthorization: { amountDollars: '1.999', note: null } }),
-      newBody({ diagnosticAuthorization: { amountDollars: '-1.00', note: null } }),
-      newBody({ diagnosticAuthorization: { amountDollars: '1e3', note: null } }),
+      newBody({ diagnosticAuthorization: { amountDollars: '120', note: 'legacy field' } }),
       newBody({ requestedService: { kind: 'diagnostic', description: 'extra' } }),
       existingBody({ mileage: -1 }),
       { ...newBody(), status: 'closed' },
@@ -325,39 +322,12 @@ describe('createCounterTicket', () => {
     expect(await db.select().from(ticketJobs)).toEqual([])
   })
 
-  it('parses decimal dollars without binary floating-point rounding', async () => {
-    const expected = [
-      ['0', 0],
-      ['0.01', 1],
-      ['10.10', 1_010],
-      ['90071992547409.91', Number.MAX_SAFE_INTEGER],
-    ] as const
-
-    for (const [amountDollars, cents] of expected) {
-      const phone = `555-${amountDollars}`
-      const body = newBody({
-        customer: { name: 'Money Test', phone, email: null },
-        vehicle: {
-          ...newBody().vehicle,
-          vin: null,
-          plate: phone,
-        },
-        diagnosticAuthorization: { amountDollars, note: null },
-      })
-      const result = await createCounterTicket(db, { actor, body })
-      expect(result).toMatchObject({
-        ok: true,
-        ticket: { diagnosticAuthorizedCents: cents },
-      })
-    }
-  })
-
   it('rolls back an existing mileage change when nested ticket creation fails', async () => {
     const result = await createCounterTicket(db, {
       actor,
       body: existingBody({
         mileage: 99_999,
-        assignedTechId: tierTwoTechId,
+        assignedTechId: tierOneTechId,
       }),
     })
 

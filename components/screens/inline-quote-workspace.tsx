@@ -70,6 +70,13 @@ export function InlineQuoteWorkspace({
           cannedResponse.json().catch(() => null),
           vendorResponse.json().catch(() => null),
         ])
+        // A quote builder can briefly contend with the immediately preceding
+        // assignment or another mounted view. One quiet retry preserves the
+        // in-place flow without pretending a persistent conflict succeeded.
+        if (quoteResponse.status === 409 && attempt < 1) {
+          if (!canceled) setAttempt((current) => current + 1)
+          return
+        }
         const builder = quoteResponse.ok
           && typeof quoteBody === 'object' && quoteBody !== null && 'builder' in quoteBody
           ? parseQuoteBuilderProjection((quoteBody as { builder: unknown }).builder)

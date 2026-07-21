@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,6 +27,7 @@ const linkedDiagnostic: TodayTicketJob = {
   id: 'job-linked',
   ticketId: 'ticket-41',
   ticketNumber: 41,
+  concern: 'Intermittent no-start after overnight parking',
   customerName: 'Morgan Lee',
   vehicle: { year: 2018, make: 'Honda', model: 'Accord' },
   title: 'Trace intermittent no-start',
@@ -100,6 +101,7 @@ describe('TodayJobsBoard persisted ledger', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -148,6 +150,137 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
     expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+  })
+
+  it('opens a pending quote in the mounted board instead of navigating away', async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          concern: 'Customer hears a brake squeal when stopping.',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        openJobs={[]}
+        canBuildQuote
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build quote' }))
+
+    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening the current quote…')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/quote',
+      { cache: 'no-store' },
+    ))
+    expect(screen.queryByRole('link', { name: 'Open the full quote page' })).toBeNull()
+  })
+
+  it('does not expose the quote workspace without the server-resolved role capability', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          concern: 'Customer hears a brake squeal when stopping.',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+  })
+
+  it('makes a pending quote the dispatch role’s next action for assigned team work', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[]}
+        teamJobs={[{
+          ...maintenance,
+          assignmentState: 'team',
+          assignedTechName: 'Avery Tech',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        canDispatchWork
+        canBuildQuote
+        currentProfileId="advisor-1"
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Build quote' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
+  })
+
+  it('opens assigned simple work directly beneath its command instead of navigating away', async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[maintenance]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open work' }))
+
+    expect(screen.getByLabelText('Work workspace')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/jobs/job-maintenance/work',
+      { method: 'GET', cache: 'no-store' },
+    ))
+    expect(screen.queryByRole('link', { name: 'Open the full work page' })).toBeNull()
+  })
+
+  it('resolves an assigned approved work hold in place and reveals the next action', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      job: {
+        id: 'job-maintenance',
+        assignedTechId: 'profile-1',
+        workStatus: 'open',
+        holdKind: null,
+        holdNote: null,
+        holdResumeStatus: null,
+        heldAt: null,
+        heldByProfileId: null,
+        clockedOnSince: null,
+        activeSeconds: 0,
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          workStatus: 'blocked',
+          approvalState: 'approved',
+        }]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve hold' }))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      'Hold resolved for ticket 44.',
+    ))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(screen.getByRole('button', { name: 'Open work' })).toBeEnabled()
   })
 
   it('fails closed when an open-queue row is not actually open', () => {
@@ -732,16 +865,24 @@ describe('TodayJobsBoard persisted ledger', () => {
         myJobs={[]}
         openJobs={[availableDiagnostic]}
         canDispatchWork
+        currentProfileId="00000000-0000-4000-8000-000000000095"
+        team={[{
+          id: '00000000-0000-4000-8000-000000000096',
+          name: 'Avery Tech',
+          skillTier: 3,
+          isCurrentUser: false,
+        }]}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Assign work' }))
+    fireEvent.click(screen.getByRole('button', { name: /Avery Tech/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Already claimed by Winner Tech')
+      expect(screen.getByRole('status')).toHaveTextContent('Already assigned to Winner Tech')
       expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument()
       expect(screen.getByText('Winner Tech')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Assign work' })).toBeNull()
       expect(refreshMock).not.toHaveBeenCalled()
     })
     await waitFor(() => {
@@ -889,20 +1030,80 @@ describe('TodayJobsBoard persisted ledger', () => {
 })
 
 describe('TodayJobsBoard parts handoff', () => {
-  it('mounts requested parts in one Today lane that jumps to the repair-order control', () => {
+  it('lets the parts desk finish its next request without leaving Today', async () => {
+    const requestId = '00000000-0000-4000-8000-000000000091'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        request: {
+          id: requestId,
+          jobId: '00000000-0000-4000-8000-000000000092',
+          description: 'Front brake pads',
+          preference: null,
+          quantity: 1,
+          status: 'sourced',
+          requestedAt: '2026-07-21T12:00:00.000Z',
+          resolvedAt: '2026-07-21T12:01:00.000Z',
+        },
+      }),
+    }))
     render(
       <TodayJobsBoard
         myJobs={[]}
         openJobs={[]}
-        partsJobs={[unlinkedDiagnostic]}
+        partsJobs={[{
+          ...unlinkedDiagnostic,
+          partRequest: {
+            id: requestId,
+            description: 'Front brake pads',
+            preference: null,
+            quantity: 1,
+          },
+        }]}
       />,
     )
 
     expect(screen.getByRole('heading', { name: 'Parts needed' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Source parts' })).toHaveAttribute(
-      'href',
-      '/tickets/ticket-42#parts-requested-heading',
+    expect(screen.getByText('Needs 1× Front brake pads')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Got it' })).toBeNull())
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/tickets/ticket-42/part-requests/00000000-0000-4000-8000-000000000091',
+      expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('lets a dispatcher assign directly from the open queue', async () => {
+    const currentProfileId = '00000000-0000-4000-8000-000000000093'
+    const assigneeId = '00000000-0000-4000-8000-000000000094'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        assignment: {
+          ticketId: 'ticket-42',
+          jobId: 'job-unlinked',
+          workStatus: 'open',
+          state: 'team',
+          assignedTechName: 'Avery Tech',
+        },
+      }),
+    }))
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[availableDiagnostic]}
+        canDispatchWork
+        currentProfileId={currentProfileId}
+        team={[{ id: assigneeId, name: 'Avery Tech', skillTier: 3, isCurrentUser: false }]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign work' }))
+    fireEvent.click(screen.getByRole('button', { name: /Avery Tech/ }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Hand off' })).toBeInTheDocument()
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 })
 

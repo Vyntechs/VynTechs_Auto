@@ -57,6 +57,7 @@ describe('simple work page', () => {
     })
     expect(screen.getByText('Simple work screen')).toBeInTheDocument()
     expect(workspaceScreenMock).toHaveBeenCalledWith({
+      actorProfileId: profile.id,
       ticket: { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' },
       initialWorkspace: workspace,
       initialPartRequests: [],

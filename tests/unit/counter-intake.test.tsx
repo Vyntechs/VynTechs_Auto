@@ -209,7 +209,7 @@ describe('CounterIntake', () => {
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
-  it('POSTs the exact new-vehicle ticket body with structured authorization and requested service, then navigates to the ticket', async () => {
+  it('POSTs the exact new-vehicle ticket body with requested work and no dormant diagnostic fields, then navigates to the ticket', async () => {
     render(<CounterIntake userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '(303) 555-0142' } })
@@ -224,16 +224,10 @@ describe('CounterIntake', () => {
       target: { value: 'Yesterday' },
     })
     fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'Every time' } })
-    fireEvent.change(screen.getByLabelText(/diagnostic authorization amount/i), {
-      target: { value: '175.50' },
-    })
-    fireEvent.change(screen.getByLabelText(/authorization note/i), {
-      target: { value: 'Call before exceeding this amount' },
-    })
-    fireEvent.change(screen.getByLabelText(/requested service description/i), {
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
       target: { value: 'Replace rear brake pads' },
     })
-    fireEvent.change(screen.getByLabelText(/requested service kind/i), {
+    fireEvent.change(screen.getByLabelText(/^work type$/i), {
       target: { value: 'repair' },
     })
 
@@ -269,10 +263,6 @@ describe('CounterIntake', () => {
       concern: 'Crank-no-start',
       whenStarted: 'Yesterday',
       howOften: 'Every time',
-      diagnosticAuthorization: {
-        amountDollars: '175.50',
-        note: 'Call before exceeding this amount',
-      },
       requestedService: { kind: 'repair', description: 'Replace rear brake pads' },
       assignedTechId: null,
     })
@@ -372,7 +362,7 @@ describe('CounterIntake', () => {
     })
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/below.*a-tier/i))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/below.*required tier/i))
     expect(screen.getByRole('alert').getAttribute('style')).toContain(
       'var(--vt-risk-medium)',
     )

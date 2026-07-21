@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { jobPartRequests, quoteEvents, ticketActivity, ticketPayments } from '@/lib/db/schema'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
-import { saveReviewedCustomerStory } from '@/lib/shop-os/customer-stories'
 import { projectLivingTicketCommands } from '@/lib/shop-os/living-ticket'
 import { createPartRequest, resolvePartRequest } from '@/lib/shop-os/part-requests'
 import { createDraftLine, createQuoteVersion, recordQuoteDecision } from '@/lib/shop-os/quotes'
@@ -41,7 +40,6 @@ describe('Golden Shop Day release gate', () => {
           vehicleMode: 'new', customer: golden.customer, vehicle: golden.vehicle,
           concern: 'Customer wants us to address braking and a separate maintenance item.',
           whenStarted: 'This week', howOften: 'Every drive',
-          diagnosticAuthorization: { amountDollars: '120', note: 'Synthetic only' },
           assignedTechId: golden.people.tech.id,
         },
       })
@@ -60,13 +58,6 @@ describe('Golden Shop Day release gate', () => {
       if (!added.ok) throw new Error('second job failed')
       const secondJob = added.ticket.jobs.find((job) => job.id !== firstJob.id)
       if (!secondJob) throw new Error('second job missing')
-      expect(await saveReviewedCustomerStory(golden.db, {
-        actor: { profileId: golden.people.tech.id }, ticketId: created.ticket.id, jobId: firstJob.id,
-        clientKey: GOLDEN_KEYS.story, expectedStoryRevision: 0,
-        whatWeFound: 'Brake pads are worn below service recommendation.',
-        whatWeRecommend: 'Replace pads and verify the brake system.',
-      })).toMatchObject({ ok: true, changed: true })
-
       for (const [job, key, description] of [
         [firstJob, GOLDEN_KEYS.line, 'Brake repair labor'],
         [secondJob, GOLDEN_KEYS.secondLine, 'Cabin filter labor'],
@@ -131,7 +122,6 @@ describe('Golden Shop Day release gate', () => {
           concern: 'Charging warning appears at idle.',
           whenStarted: 'This morning',
           howOften: 'Intermittent',
-          diagnosticAuthorization: { amountDollars: '120', note: 'Approved at counter' },
           assignedTechId: null,
         },
       })
@@ -184,17 +174,6 @@ describe('Golden Shop Day release gate', () => {
         jobId: job.id,
         body: { action: 'clock_on' },
       })).toEqual({ ok: false, error: 'not_authorized' })
-
-      const story = await saveReviewedCustomerStory(golden.db, {
-        actor: { profileId: golden.people.tech.id },
-        ticketId,
-        jobId: job.id,
-        clientKey: GOLDEN_KEYS.story,
-        expectedStoryRevision: 0,
-        whatWeFound: 'Alternator output drops below specification at hot idle.',
-        whatWeRecommend: 'Replace the alternator and verify charging output.',
-      })
-      expect(story).toMatchObject({ ok: true, changed: true, storyRevision: 1 })
 
       const line = await createDraftLine(golden.db, {
         actor: { profileId: golden.people.advisor.id },

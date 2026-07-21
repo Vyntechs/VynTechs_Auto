@@ -80,17 +80,19 @@ describe('Shop OS quote builder read model', () => {
 
   afterEach(async () => close())
 
-  it('reauthorizes the persisted actor inside the read transaction', () => {
+  it('reauthorizes the persisted actor inside a consistent read-only snapshot', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
     const handler = source.slice(
       source.indexOf('export async function getQuoteBuilder'),
       source.indexOf('function isLockUnavailable'),
     )
     expect(handler).toMatch(/db\.transaction[\s\S]*loadActiveActor\(transactionDb/)
-    expect(handler).toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?\.from\(jobLines\)[\s\S]*?\.from\(quoteVersions\)/)
+    expect(handler).toMatch(/isolationLevel: 'repeatable read', accessMode: 'read only'/)
+    expect(handler).toMatch(/\.from\(tickets\)[\s\S]*?\.limit\(1\)[\s\S]*?\.from\(ticketJobs\)[\s\S]*?\.from\(jobLines\)[\s\S]*?\.from\(quoteVersions\)/)
+    expect(handler).not.toMatch(/\.from\(tickets\)[\s\S]*?\.for\('update'/)
   })
 
-  it('classifies ticket-lock contention as retryable without masking unexpected errors', async () => {
+  it('classifies an injected read failure without masking unexpected errors', async () => {
     const lockError = Object.assign(new Error('held ticket'), { code: '55P03' })
     await expect(getQuoteBuilder(db, { actor, ticketId }, {
       afterTicketLock: async () => { throw lockError },

@@ -179,10 +179,8 @@ describe('TicketDetailScreen', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Three days ago')).toBeInTheDocument()
     expect(screen.getByText('Every stop above 50 mph')).toBeInTheDocument()
-    expect(screen.getByText('$187.50')).toBeInTheDocument()
-    expect(
-      screen.getByText('Call before exceeding the authorized amount.'),
-    ).toBeInTheDocument()
+    expect(screen.queryByText('$187.50')).toBeNull()
+    expect(screen.queryByText('Call before exceeding the authorized amount.')).toBeNull()
 
     expect(screen.getAllByText('Marisol Vega')).toHaveLength(2)
     expect(screen.getByRole('link', { name: '(214) 555-0197' })).toHaveAttribute(

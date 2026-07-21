@@ -332,6 +332,7 @@ export type TodayTicketJob = {
   id: string
   ticketId: string
   ticketNumber: number
+  concern: string
   customerName: string | null
   vehicle: { year: number; make: string; model: string } | null
   title: string
@@ -344,6 +345,14 @@ export type TodayTicketJob = {
   assignmentState: 'mine' | 'team' | 'unassigned'
   assignedTechName: string | null
   createdByMe: boolean
+  // Only projected to the parts desk: enough context to finish the next
+  // request in place, without leaking parts details to every role.
+  partRequest?: {
+    id: string
+    description: string
+    preference: string | null
+    quantity: number
+  } | null
   diagnosticStartState?: 'idle' | 'initializing' | 'ready' | 'failed' | 'ambiguous'
   diagnosticStartErrorCode?: TodayDiagnosticStartErrorCode | null
 }
@@ -438,6 +447,46 @@ export async function listTodayTicketJobs(
         eq(jobPartRequests.status, 'requested'),
       )),
   )
+  const nextPartRequestId = sql<string | null>`(
+    select ${jobPartRequests.id}
+    from ${jobPartRequests}
+    where ${jobPartRequests.shopId} = ${ticketJobs.shopId}
+      and ${jobPartRequests.ticketId} = ${tickets.id}
+      and ${jobPartRequests.jobId} = ${ticketJobs.id}
+      and ${jobPartRequests.status} = 'requested'
+    order by ${jobPartRequests.createdAt} asc, ${jobPartRequests.id} asc
+    limit 1
+  )`
+  const nextPartRequestDescription = sql<string | null>`(
+    select ${jobPartRequests.description}
+    from ${jobPartRequests}
+    where ${jobPartRequests.shopId} = ${ticketJobs.shopId}
+      and ${jobPartRequests.ticketId} = ${tickets.id}
+      and ${jobPartRequests.jobId} = ${ticketJobs.id}
+      and ${jobPartRequests.status} = 'requested'
+    order by ${jobPartRequests.createdAt} asc, ${jobPartRequests.id} asc
+    limit 1
+  )`
+  const nextPartRequestPreference = sql<string | null>`(
+    select ${jobPartRequests.preference}
+    from ${jobPartRequests}
+    where ${jobPartRequests.shopId} = ${ticketJobs.shopId}
+      and ${jobPartRequests.ticketId} = ${tickets.id}
+      and ${jobPartRequests.jobId} = ${ticketJobs.id}
+      and ${jobPartRequests.status} = 'requested'
+    order by ${jobPartRequests.createdAt} asc, ${jobPartRequests.id} asc
+    limit 1
+  )`
+  const nextPartRequestQuantity = sql<number | null>`(
+    select ${jobPartRequests.quantity}
+    from ${jobPartRequests}
+    where ${jobPartRequests.shopId} = ${ticketJobs.shopId}
+      and ${jobPartRequests.ticketId} = ${tickets.id}
+      and ${jobPartRequests.jobId} = ${ticketJobs.id}
+      and ${jobPartRequests.status} = 'requested'
+    order by ${jobPartRequests.createdAt} asc, ${jobPartRequests.id} asc
+    limit 1
+  )`
   const visiblePartsWork = actor.role === 'parts' ? hasRequestedParts : undefined
 
   const rows = await db
@@ -445,6 +494,7 @@ export async function listTodayTicketJobs(
       id: ticketJobs.id,
       ticketId: tickets.id,
       ticketNumber: tickets.ticketNumber,
+      concern: tickets.concern,
       customerName: customers.name,
       vehicleYear: vehicles.year,
       vehicleMake: vehicles.make,
@@ -462,6 +512,10 @@ export async function listTodayTicketJobs(
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
       hasRequestedParts,
+      nextPartRequestId,
+      nextPartRequestDescription,
+      nextPartRequestPreference,
+      nextPartRequestQuantity,
     })
     .from(ticketJobs)
     .innerJoin(
@@ -530,6 +584,7 @@ export async function listTodayTicketJobs(
       id: row.id,
       ticketId: row.ticketId,
       ticketNumber: row.ticketNumber,
+      concern: row.concern,
       customerName: row.customerName,
       vehicle:
         row.vehicleYear !== null && row.vehicleMake !== null && row.vehicleModel !== null
@@ -555,6 +610,18 @@ export async function listTodayTicketJobs(
             : 'team',
       assignedTechName: row.assignedTechFullName,
       createdByMe: row.createdByProfileId === actor.profileId,
+      ...(actor.role === 'parts' ? {
+        partRequest: row.nextPartRequestId !== null
+          && row.nextPartRequestDescription !== null
+          && row.nextPartRequestQuantity !== null
+          ? {
+              id: row.nextPartRequestId,
+              description: row.nextPartRequestDescription,
+              preference: row.nextPartRequestPreference,
+              quantity: Number(row.nextPartRequestQuantity),
+            }
+          : null,
+      } : {}),
       diagnosticStartState: row.diagnosticStartState,
       diagnosticStartErrorCode: safeDiagnosticStartErrorCode(row.diagnosticStartErrorCode),
     }

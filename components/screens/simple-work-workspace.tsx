@@ -381,8 +381,14 @@ export function SimpleWorkWorkspace({
       if (!job) throw new Error('hold_failed')
       clearDraft()
       onInterrupted?.(job)
-      if (embedded) onClose?.()
-      else router.replace(`/tickets/${ticket.id}`)
+      // The embedded Today surface projects the blocked job before it closes
+      // this workspace. Let that parent own the close so the row never flashes
+      // back to its stale in-progress state.
+      if (embedded) {
+        if (!onInterrupted) onClose?.()
+      } else {
+        router.replace(`/tickets/${ticket.id}`)
+      }
     } catch {
       setNotice({ kind: 'error', text: 'Work was not put on hold. Check the connection and retry.' })
       setPending(null)

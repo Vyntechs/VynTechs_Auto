@@ -337,7 +337,7 @@ describe('simple work workspace', () => {
         holdNote: 'Waiting for the lift-kit hardware.',
       }),
     }))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('does not let a technician lose an unsaved note by putting work on hold', () => {

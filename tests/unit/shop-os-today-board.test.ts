@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
+  parseTodayJobsResponse,
   placeTodayJob,
   projectTodayBoard,
 } from '@/lib/shop-os/today-board'
@@ -11,6 +12,7 @@ const baseJob: TodayTicketJob = {
   id: 'job-1',
   ticketId: 'ticket-1',
   ticketNumber: 1,
+  concern: 'Customer reports a coolant smell after driving.',
   customerName: 'Morgan Lee',
   vehicle: { year: 2024, make: 'Ford', model: 'F-350' },
   title: 'Inspect coolant leak',
@@ -161,5 +163,50 @@ describe('assignment envelope parsing', () => {
     { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'team', assignedTechName: 'x'.repeat(121) } },
   ])('fails closed for malformed or mismatched payload %#', (body) => {
     expect(parseAssignmentEnvelope(body, { ticketId: 'ticket-1', jobId: 'job-1' })).toBeNull()
+  })
+})
+
+describe('Today live-feed parsing', () => {
+  const liveJob = {
+    id: '00000000-0000-4000-8000-000000000001',
+    ticketId: '00000000-0000-4000-8000-000000000002',
+    ticketNumber: 12,
+    concern: 'Brake pedal pulses at highway speed.',
+    customerName: 'Morgan Lee',
+    vehicle: { year: 2024, make: 'Ford', model: 'F-350' },
+    title: 'Replace brake pads',
+    kind: 'repair',
+    requiredSkillTier: 2,
+    sessionId: null,
+    workStatus: 'open',
+    approvalState: 'approved',
+    canClaim: true,
+    assignmentState: 'unassigned',
+    assignedTechName: null,
+    createdByMe: false,
+  }
+
+  it('accepts only a bounded Today projection before replacing the mounted board', () => {
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [liveJob], createdJobs: [], teamJobs: [], partsJobs: [],
+        linkedSessionIds: [], hasMore: false,
+      },
+    })).toMatchObject({ openJobs: [liveJob] })
+  })
+
+  it('fails closed for an unknown field or malformed identity in the live response', () => {
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [{ ...liveJob, id: 'not-a-uuid' }], createdJobs: [], teamJobs: [], partsJobs: [],
+        linkedSessionIds: [],
+      },
+    })).toBeNull()
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [liveJob], createdJobs: [], teamJobs: [], partsJobs: [],
+        linkedSessionIds: [], privateField: 'do not merge',
+      },
+    })).toBeNull()
   })
 })

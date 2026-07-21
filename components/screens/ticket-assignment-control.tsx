@@ -20,7 +20,7 @@ type Props = {
   job: {
     id: string
     requiredSkillTier: number
-    assignedTechId: string | null
+    hasAssignee: boolean
     workStatus: 'open' | 'in_progress' | 'blocked'
   }
   command: AssignmentCommand
@@ -227,7 +227,7 @@ export function TicketAssignmentControl({
                   <small>{tierLabel(member.skillTier)}</small>
                 </button>
               ))}
-              {job.assignedTechId !== null && !isActiveHandoff && (
+              {job.hasAssignee && !isActiveHandoff && (
                 <button
                   type="button"
                   disabled={pending}

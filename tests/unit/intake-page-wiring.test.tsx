@@ -142,10 +142,10 @@ describe('CounterIntake page wiring (search + form)', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'Oil service due' },
     })
-    fireEvent.change(screen.getByLabelText(/requested service description/i), {
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
       target: { value: 'Change engine oil and filter' },
     })
-    fireEvent.change(screen.getByLabelText(/requested service kind/i), {
+    fireEvent.change(screen.getByLabelText(/^work type$/i), {
       target: { value: 'maintenance' },
     })
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
@@ -164,7 +164,6 @@ describe('CounterIntake page wiring (search + form)', () => {
       concern: 'Oil service due',
       whenStarted: null,
       howOften: null,
-      diagnosticAuthorization: { amountDollars: null, note: null },
       requestedService: {
         kind: 'maintenance',
         description: 'Change engine oil and filter',

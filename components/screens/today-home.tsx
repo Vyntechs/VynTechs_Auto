@@ -12,6 +12,7 @@ import { formatVehicleName, formatElapsed } from '@/lib/format'
 import type { Session } from '@/lib/db/schema'
 import type { DueFollowUp } from '@/lib/comeback/list'
 import type { TodayTicketJobs } from '@/lib/tickets'
+import type { TeamMember } from '@/lib/intake/team'
 import { TodayJobsBoard } from '@/components/screens/today-jobs-board'
 
 type Props = {
@@ -24,6 +25,9 @@ type Props = {
   canWriteCounterOrder?: boolean
   canCreateTickets?: boolean
   canDispatchWork?: boolean
+  canBuildQuote?: boolean
+  currentProfileId?: string
+  team?: TeamMember[]
   todayJobs?: TodayTicketJobs
   diagnosticsEntitled?: boolean
 }
@@ -38,6 +42,9 @@ export function TodayHome({
   canWriteCounterOrder = false,
   canCreateTickets = false,
   canDispatchWork = false,
+  canBuildQuote = false,
+  currentProfileId,
+  team = [],
   todayJobs = {
     myJobs: [],
     openJobs: [],
@@ -143,6 +150,9 @@ export function TodayHome({
           createdJobs={todayJobs.createdJobs}
           partsJobs={todayJobs.partsJobs}
           canDispatchWork={canDispatchWork}
+          canBuildQuote={canBuildQuote}
+          currentProfileId={currentProfileId}
+          team={team}
           hasMore={todayJobs.hasMore}
           diagnosticsEntitled={diagnosticsEntitled}
         />
