@@ -152,6 +152,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const quoteViewers: Array<{ role: Role; entry: string; canDecide: boolean }> = [
       { role: 'owner', entry: 'Record approval', canDecide: true },
       { role: 'tech', entry: 'View quote', canDecide: false },
+      { role: 'relief', entry: 'View quote', canDecide: false },
       { role: 'parts', entry: 'View quote', canDecide: false },
     ]
     for (const viewer of quoteViewers) {
