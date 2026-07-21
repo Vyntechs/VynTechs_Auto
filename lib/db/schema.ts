@@ -557,6 +557,8 @@ export const ticketActivity = pgTable(
     index('ticket_activity_shop_job_created_idx')
       .on(table.shopId, table.jobId, table.createdAt.desc(), table.id.desc())
       .where(sql`${table.jobId} is not null`),
+    index('ticket_activity_shop_ticket_job_fk_idx').on(table.shopId, table.ticketId, table.jobId),
+    index('ticket_activity_shop_actor_fk_idx').on(table.shopId, table.actorProfileId),
     check(
       'ticket_activity_kind_valid',
       sql`${table.kind} in (

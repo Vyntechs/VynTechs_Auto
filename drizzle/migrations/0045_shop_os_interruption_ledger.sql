@@ -59,6 +59,14 @@ create index ticket_activity_shop_job_created_idx
   on public.ticket_activity (shop_id, job_id, created_at desc, id desc)
   where job_id is not null;
 
+-- Cover composite foreign keys so history writes and referenced-row changes
+-- do not devolve into full-ledger scans as a shop's activity grows.
+create index ticket_activity_shop_ticket_job_fk_idx
+  on public.ticket_activity (shop_id, ticket_id, job_id);
+
+create index ticket_activity_shop_actor_fk_idx
+  on public.ticket_activity (shop_id, actor_profile_id);
+
 create function public.ticket_activity_reject_mutation()
 returns trigger
 language plpgsql

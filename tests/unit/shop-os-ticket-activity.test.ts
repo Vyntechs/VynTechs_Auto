@@ -28,13 +28,20 @@ describe('ticket activity persistence contract', () => {
   it('applies the ledger migration to every ephemeral database', async () => {
     const { client, close } = await createTestDb()
     try {
-      const result = await client.query<{ count: number }>(`
-        select count(*)::int as count
+      const result = await client.query<{ table_count: number; index_count: number }>(`
+        select
+          (select count(*)::int
         from information_schema.tables
         where table_schema = 'public' and table_name = 'ticket_activity'
+          ) as table_count,
+          (select count(*)::int
+           from pg_indexes
+           where schemaname = 'public' and tablename = 'ticket_activity'
+             and indexname in ('ticket_activity_shop_ticket_job_fk_idx', 'ticket_activity_shop_actor_fk_idx')
+          ) as index_count
       `)
 
-      expect(result.rows[0]?.count).toBe(1)
+      expect(result.rows[0]).toMatchObject({ table_count: 1, index_count: 2 })
     } finally {
       await close()
     }
