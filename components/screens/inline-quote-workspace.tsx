@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { parseCannedJobListResponse, type SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
 import { parseEnabledVendorAccountsResponse, type SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
 import { parseQuoteBuilderProjection } from '@/lib/shop-os/quote-builder-ui'
@@ -17,6 +17,10 @@ export type QuoteWorkspaceProjection = Array<{
   approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
 }>
 
+export function inlineQuoteWorkspaceId(ticketId: string): string {
+  return `inline-quote-workspace-${ticketId}`
+}
+
 type Loaded = {
   builder: QuoteBuilder
   cannedJobs: SafeCannedJobTemplate[]
@@ -26,19 +30,28 @@ type Loaded = {
 }
 
 export function InlineQuoteWorkspace({
+  actorId,
+  workspaceId,
   ticket,
   canCreateVendorAccount = false,
   onClose,
   onProjection,
 }: {
+  actorId: string
+  workspaceId?: string
   ticket: QuoteTicketIdentity
   canCreateVendorAccount?: boolean
   onClose: () => void
   onProjection: (jobs: QuoteWorkspaceProjection) => void
 }): React.JSX.Element {
+  const boundaryRef = useRef<HTMLElement>(null)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    queueMicrotask(() => boundaryRef.current?.focus())
+  }, [])
 
   useEffect(() => {
     let canceled = false
@@ -110,43 +123,50 @@ export function InlineQuoteWorkspace({
     }
   }
 
-  if (error) {
-    return (
-      <section className={styles.state} aria-label="Quote workspace">
-        <div role="alert">
-          <strong>Quote could not be opened here.</strong>
-          <p>The repair order is safe. Retry this tool or use the full quote page.</p>
-        </div>
-        <div className={styles.actions}>
-          <button type="button" onClick={() => setAttempt((current) => current + 1)}>Retry quote</button>
-          <Link href={`/tickets/${ticket.id}/quote`}>Open the full quote page</Link>
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
-      </section>
-    )
-  }
-
-  if (!loaded) {
-    return (
-      <section className={styles.state} aria-label="Quote workspace" aria-busy="true">
-        <p role="status">Opening the current quote…</p>
-      </section>
-    )
-  }
+  const boundaryId = workspaceId ?? inlineQuoteWorkspaceId(ticket.id)
 
   return (
-    <ManualQuoteBuilder
-      ticket={ticket}
-      builder={loaded.builder}
-      cannedJobs={loaded.cannedJobs}
-      cannedCatalogAvailable={loaded.cannedCatalogAvailable}
-      vendorAccounts={loaded.vendorAccounts}
-      vendorCatalogAvailable={loaded.vendorCatalogAvailable}
-      canCreateVendorAccount={canCreateVendorAccount}
-      embedded
-      onClose={onClose}
-      onProjection={onProjection}
-      onReloadCatalog={() => void reloadCatalog()}
-    />
+    <section
+      ref={boundaryRef}
+      id={boundaryId}
+      className={styles.boundary}
+      role="region"
+      aria-label="Inline quote workspace"
+      aria-busy={!error && !loaded ? true : undefined}
+      tabIndex={-1}
+    >
+      {error ? (
+        <div className={styles.state}>
+          <div role="alert">
+            <strong>Quote could not be opened here.</strong>
+            <p>The repair order is safe. Retry this tool or use the full quote page.</p>
+          </div>
+          <div className={styles.actions}>
+            <button type="button" onClick={() => setAttempt((current) => current + 1)}>Retry quote</button>
+            <Link href={`/tickets/${ticket.id}/quote`}>Open the full quote page</Link>
+            <button type="button" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      ) : !loaded ? (
+        <div className={styles.state}>
+          <p role="status">Opening the current quote…</p>
+        </div>
+      ) : (
+        <ManualQuoteBuilder
+          actorId={actorId}
+          ticket={ticket}
+          builder={loaded.builder}
+          cannedJobs={loaded.cannedJobs}
+          cannedCatalogAvailable={loaded.cannedCatalogAvailable}
+          vendorAccounts={loaded.vendorAccounts}
+          vendorCatalogAvailable={loaded.vendorCatalogAvailable}
+          canCreateVendorAccount={canCreateVendorAccount}
+          embedded
+          onClose={onClose}
+          onProjection={onProjection}
+          onReloadCatalog={() => void reloadCatalog()}
+        />
+      )}
+    </section>
   )
 }

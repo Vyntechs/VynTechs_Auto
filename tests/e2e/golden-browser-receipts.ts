@@ -1,6 +1,9 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page, type TestInfo } from '@playwright/test'
-import { isExpectedPageNavigationAbort } from './golden-browser-fault-filter'
+import {
+  isExpectedLocalAnalyticsConsole,
+  isExpectedPageNavigationAbort,
+} from './golden-browser-fault-filter'
 
 type BrowserFaults = {
   consoleErrors: string[]
@@ -11,7 +14,12 @@ type BrowserFaults = {
 export function watchBrowserFaults(page: Page): BrowserFaults {
   const faults: BrowserFaults = { consoleErrors: [], pageErrors: [], failedRequests: [] }
   page.on('console', (message) => {
-    if (message.type() === 'error') faults.consoleErrors.push(message.text())
+    const text = message.text()
+    if (message.type() === 'error' && !isExpectedLocalAnalyticsConsole(
+      page.url(),
+      message.location().url,
+      text,
+    )) faults.consoleErrors.push(text)
   })
   page.on('pageerror', (error) => faults.pageErrors.push(error.message))
   page.on('requestfailed', (request) => {

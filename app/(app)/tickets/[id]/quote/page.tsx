@@ -109,6 +109,7 @@ export default async function QuotePage({
 
   return (
     <ManualQuoteBuilder
+      actorId={ctx.profile.id}
       ticket={quoteTicket}
       builder={builderResult.builder}
       cannedJobs={cannedCatalogAvailable && cannedResult?.ok ? cannedResult.cannedJobs : []}

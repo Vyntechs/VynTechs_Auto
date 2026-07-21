@@ -66,7 +66,15 @@ test('the living repair order survives one complete shop day', async ({ browser,
   const faults = []
   const runId = (process.env.GOLDEN_QA_RUN_ID ?? 'local').replace(/[^a-z0-9-]/gi, '').slice(0, 24)
   const customerName = `Golden QA ${runId}`
-  const concern = `Customer reports a repeating brake squeal during slow stops. Golden run ${runId}.`
+  const concern = [
+    'Customer reports a repeating brake squeal during slow stops, most noticeable after a long highway drive,',
+    'with intermittent vibration but no dashboard warning and no change in pedal height.',
+    `Golden run ${runId}.`,
+  ].join(' ')
+  const laborDescription = [
+    'Front brake inspection and pad replacement, including rotor measurement, hardware cleaning,',
+    'lubrication, final torque verification, and road-test confirmation',
+  ].join(' ')
 
   try {
     for (const role of roles) {
@@ -93,6 +101,8 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const ticketNumber = (await owner.getByText(/^RO \d{6}$/).first().textContent())!.replace(/^RO 0*/, '')
     await expect(owner.getByRole('heading', { name: concern, exact: true })).toBeVisible()
     await expect(owner.getByText('Open — no technician assigned')).toBeVisible()
+    await expect(owner.getByRole('button', { name: 'Build quote' }))
+      .toHaveAttribute('aria-controls', /^inline-quote-workspace-/)
     await checkpoint(owner, testInfo, 'owner-created-ticket')
 
     await owner.getByRole('button', { name: 'Assign work' }).click()
@@ -103,7 +113,11 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const advisor = sessions.get('advisor')!.page
     await openTicketFromToday(advisor, ticketNumber)
     await checkpoint(advisor, testInfo, 'advisor-found-ticket')
-    await advisor.getByRole('button', { name: 'Build quote' }).click()
+    const quoteEntry = advisor.getByRole('button', { name: 'Build quote' })
+    await expect(quoteEntry).toHaveAttribute('aria-controls', /^inline-quote-workspace-/)
+    await quoteEntry.click()
+    const quoteWorkspace = advisor.getByRole('region', { name: 'Inline quote workspace' })
+    await expect(quoteWorkspace).toBeFocused()
     await expect(advisor.getByRole('heading', { name: 'Build quote' })).toBeVisible()
     await expect(advisor).toHaveURL(new RegExp(`${path}$`))
     await advisor.getByLabel('What we found').fill('Front brake pad wear indicators contact the rotors at low speed.')
@@ -111,13 +125,50 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await advisor.getByRole('button', { name: 'Review and save story' }).click()
     await expect(advisor.getByText('Reviewed customer story')).toBeVisible()
     await advisor.getByRole('button', { name: 'Add labor' }).click()
-    await advisor.getByLabel('Description').fill('Front brake inspection and pad replacement')
+    const activeLabor = advisor.getByRole('button', { name: 'Adding labor' })
+    await expect(activeLabor).toHaveAttribute('aria-expanded', 'true')
+    await expect(activeLabor).toHaveAttribute('aria-controls', /^quote-line-editor-/)
+    await expect(advisor.getByRole('form', { name: 'Add labor line' })).toBeInViewport()
+    await advisor.getByLabel('Description').fill(laborDescription)
     await advisor.getByLabel('Hours').fill('1.5')
+    await checkpoint(advisor, testInfo, 'advisor-local-labor-editor')
+
+    advisor.once('dialog', (dialog) => dialog.accept())
+    await advisor.reload()
+    await advisor.getByRole('button', { name: 'Build quote' }).click()
+    await expect(advisor.getByRole('status', { name: 'Quote update' }))
+      .toHaveText('Unsaved labor restored')
+    await expect(advisor.getByRole('form', { name: 'Add labor line' })).toBeInViewport()
+    await expect(advisor.getByLabel('Description')).toHaveValue(laborDescription)
     await advisor.getByRole('button', { name: 'Save line' }).click()
-    await expect(advisor.getByText('Front brake inspection and pad replacement', { exact: true })).toBeVisible()
+    const savedLabor = advisor.getByText(laborDescription, { exact: true })
+    await expect(savedLabor).toBeVisible()
+    await expect(advisor.getByRole('status', { name: 'Quote update' })).toHaveText('Labor added')
+    await expect(savedLabor.locator('xpath=ancestor::li[1]')).toHaveAttribute('data-change-state', 'confirmed')
     await checkpoint(advisor, testInfo, 'advisor-quote-draft')
     await advisor.getByRole('button', { name: 'Prepare quote' }).click()
     await expect(advisor.getByText(/Prepared version V1/)).toBeVisible()
+
+    const quoteViewers: Array<{ role: Role; entry: string; canDecide: boolean }> = [
+      { role: 'owner', entry: 'Record approval', canDecide: true },
+      { role: 'tech', entry: 'View quote', canDecide: false },
+      { role: 'parts', entry: 'View quote', canDecide: false },
+    ]
+    for (const viewer of quoteViewers) {
+      const page = sessions.get(viewer.role)!.page
+      await page.goto(path)
+      await page.getByRole('button', { name: viewer.entry }).click()
+      await expect(page.getByRole('heading', { name: 'Build quote' })).toBeVisible()
+      if (viewer.canDecide) {
+        await expect(page.getByRole('button', { name: 'Phone approval' })).toBeVisible()
+      } else {
+        await expect(page.getByRole('button', { name: 'Phone approval' })).toHaveCount(0)
+        await expect(page.getByText('Advisor or owner records the customer decision.')).toBeVisible()
+      }
+      await checkpoint(page, testInfo, `${viewer.role}-quote-authority`)
+      await page.getByRole('button', { name: 'Close quote' }).click()
+    }
+
     await advisor.getByRole('button', { name: 'Phone approval' }).click()
     const approval = advisor.getByRole('alertdialog', { name: 'Record phone approval?' })
     await approval.getByRole('button', { name: 'Record approval' }).click()
