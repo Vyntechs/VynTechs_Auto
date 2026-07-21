@@ -278,6 +278,14 @@ export function TicketDetailScreen({
               ))
               setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
             }}
+            onInterrupted={(interrupted) => {
+              const jobId = activeTool.jobId
+              setWorkOverrides((current) => new Map(current).set(jobId, {
+                workStatus: interrupted.workStatus,
+              }))
+              setActiveTool(null)
+              setTimeout(() => jobRefs.current.get(jobId)?.focus(), 0)
+            }}
             onClose={() => {
               const jobId = activeTool.jobId
               setActiveTool(null)

@@ -16,7 +16,7 @@ export type InterruptionJobView = {
   updatedAt: string
 }
 
-function parseJob(value: unknown): InterruptionJobView | null {
+export function parseInterruptionJob(value: unknown): InterruptionJobView | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const job = value as Record<string, unknown>
   if (typeof job.id !== 'string'
@@ -59,7 +59,7 @@ export function TicketInterruptionAction({
       })
       const body = await response.json().catch(() => null)
       const job = response.ok && body && typeof body === 'object'
-        ? parseJob((body as { job?: unknown }).job)
+        ? parseInterruptionJob((body as { job?: unknown }).job)
         : null
       if (!job) throw new Error('resolve_failed')
       onApplied(job)

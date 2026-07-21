@@ -217,6 +217,69 @@ describe('simple work workspace', () => {
     expect(screen.getByRole('button', { name: 'Clock back on' })).toBeInTheDocument()
   })
 
+  it('puts work on a durable hold from the mounted work surface without losing a draft', async () => {
+    const onInterrupted = vi.fn()
+    const onClose = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        changed: true,
+        job: {
+          id: JOB, assignedTechId: '00000000-0000-4000-8000-000000000001',
+          workStatus: 'blocked', holdKind: 'parts', holdNote: 'Waiting for the lift-kit hardware.',
+          holdResumeStatus: 'in_progress', heldAt: '2026-07-21T16:00:00.000Z',
+          heldByProfileId: '00000000-0000-4000-8000-000000000001', clockedOnSince: null,
+          activeSeconds: 120, updatedAt: '2026-07-21T16:00:00.000Z',
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, workStatus: 'in_progress' }}
+      embedded
+      onInterrupted={onInterrupted}
+      onClose={onClose}
+    />)
+
+    fireEvent.click(screen.getAllByText('Put work on hold')[0])
+    fireEvent.change(screen.getByLabelText('Reason for hold'), { target: { value: 'parts' } })
+    fireEvent.change(screen.getByLabelText('What needs to happen next?'), {
+      target: { value: 'Waiting for the lift-kit hardware.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Put work on hold' }))
+
+    await waitFor(() => expect(onInterrupted).toHaveBeenCalledWith(expect.objectContaining({
+      id: JOB, workStatus: 'blocked', holdKind: 'parts',
+    })))
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tickets/${TICKET}/jobs/${JOB}/interruption`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'block', requestKey: REQUEST, holdKind: 'parts',
+        holdNote: 'Waiting for the lift-kit hardware.',
+      }),
+    }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a technician lose an unsaved note by putting work on hold', () => {
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={{ ...base, workStatus: 'in_progress' }}
+      embedded
+    />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Work note' }), {
+      target: { value: 'Torque values are still unsaved.' },
+    })
+    fireEvent.click(screen.getAllByText('Put work on hold')[0])
+    fireEvent.change(screen.getByLabelText('Reason for hold'), { target: { value: 'parts' } })
+    fireEvent.change(screen.getByLabelText('What needs to happen next?'), { target: { value: 'Awaiting clips.' } })
+
+    expect(screen.getByRole('button', { name: 'Put work on hold' })).toBeDisabled()
+    expect(screen.getByText('Save or clear the open draft before placing work on hold.')).toBeInTheDocument()
+  })
+
   it('protects long technician-controlled strings from narrow-screen overflow', () => {
     const css = readFileSync(join(process.cwd(), 'components/screens/simple-work-workspace.module.css'), 'utf8')
     expect(css).toMatch(/\.hero h1[^}]*overflow-wrap: anywhere/)

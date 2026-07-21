@@ -10,6 +10,7 @@ import {
 } from '@/lib/shop-os/simple-work-ui'
 import type { PartRequestView } from '@/lib/shop-os/part-requests-ui'
 import { SimpleWorkWorkspace } from './simple-work-workspace'
+import type { InterruptionJobView } from './ticket-interruption-action'
 import styles from './inline-work-workspace.module.css'
 
 type TicketIdentity = {
@@ -30,12 +31,14 @@ export function InlineWorkWorkspace({
   onClose,
   onProjection,
   onEscalation,
+  onInterrupted,
 }: {
   ticket: TicketIdentity
   jobId: string
   onClose: () => void
   onProjection: (work: SimpleWorkProjectionView) => void
   onEscalation?: (job: SimpleWorkEscalationView) => void
+  onInterrupted?: (job: InterruptionJobView) => void
 }): React.JSX.Element {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState(false)
@@ -99,6 +102,7 @@ export function InlineWorkWorkspace({
       onClose={onClose}
       onProjection={onProjection}
       onEscalation={onEscalation}
+      onInterrupted={onInterrupted}
     />
   )
 }
