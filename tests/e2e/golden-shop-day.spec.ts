@@ -185,7 +185,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
 
     await advisor.reload()
     await advisor.getByRole('button', { name: 'Collect & close' }).click()
-    await expect(advisor.getByRole('heading', { name: 'Ring out' })).toBeFocused()
+    await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
     await advisor.getByLabel('Payment amount').fill('194.40')
     await advisor.getByLabel('How paid').selectOption('card')
     await advisor.getByRole('button', { name: 'Record payment' }).click()
@@ -195,7 +195,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(advisor, testInfo, 'advisor-closed-ticket')
 
     await owner.goto(path)
-    await expect(owner.getByText('CLOSED', { exact: true })).toBeVisible()
+    await expect(owner.getByText('Closed · Counter intake', { exact: true })).toBeVisible()
     await expect(owner.getByRole('heading', { name: 'Receipt' })).toBeVisible()
     await owner.goto('/today')
     await expect(owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)

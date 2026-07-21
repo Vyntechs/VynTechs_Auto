@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page, type TestInfo } from '@playwright/test'
+import { isExpectedPageNavigationAbort } from './golden-browser-fault-filter'
 
 type BrowserFaults = {
   consoleErrors: string[]
@@ -15,7 +16,10 @@ export function watchBrowserFaults(page: Page): BrowserFaults {
   page.on('pageerror', (error) => faults.pageErrors.push(error.message))
   page.on('requestfailed', (request) => {
     const failure = request.failure()?.errorText ?? 'unknown failure'
-    faults.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}: ${failure}`)
+    const pathname = new URL(request.url()).pathname
+    if (!isExpectedPageNavigationAbort(request.method(), pathname, failure)) {
+      faults.failedRequests.push(`${request.method()} ${pathname}: ${failure}`)
+    }
   })
   return faults
 }
