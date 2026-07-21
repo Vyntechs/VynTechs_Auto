@@ -7,6 +7,7 @@ import {
   mutateTicketLifecycle,
   type InterruptionActor,
 } from '@/lib/shop-os/interruption'
+import { getTicketDetail } from '@/lib/tickets'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -133,6 +134,33 @@ describe('ShopOS job interruption', () => {
     expect(first).toMatchObject({ ok: true, changed: true, job: { workStatus: 'blocked' } })
     expect(second).toMatchObject({ ok: true, changed: false, job: { workStatus: 'blocked' } })
     expect(await db.select().from(ticketActivity)).toHaveLength(1)
+  })
+
+  it('projects a bounded, human-readable durable interruption record onto the repair order', async () => {
+    await mutateJobInterruption(db, {
+      actor: tech,
+      ticketId,
+      jobId,
+      body: {
+        action: 'block', requestKey: uuid(50), holdKind: 'parts',
+        holdNote: 'Waiting for the brake-pad delivery.',
+      },
+    })
+
+    const detail = await getTicketDetail(db, {
+      actor: { ...tech, skillTier: 2 },
+      ticketId,
+    })
+    expect(detail).toMatchObject({
+      ok: true,
+      ticket: {
+        activities: [expect.objectContaining({
+          kind: 'job_blocked',
+          actorName: 'Taylor Tech',
+          summary: 'Replace front brake pads: Put on hold — Waiting for the brake-pad delivery.',
+        })],
+      },
+    })
   })
 
   it('restores the saved work state when the assigned technician resolves a hold', async () => {

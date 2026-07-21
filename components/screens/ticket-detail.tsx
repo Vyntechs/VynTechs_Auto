@@ -121,6 +121,7 @@ export function TicketDetailScreen({
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
+  const activities = ticket.activities ?? []
   const baseJobs: DisplayJob[] = [
     ...ticket.jobs,
     ...escalatedJobs.map((job) => ({ ...job, assignedTech: null })),
@@ -540,6 +541,25 @@ export function TicketDetailScreen({
           />
         )}
 
+        {activities.length > 0 && (
+          <section className={styles.activity} aria-labelledby="activity-heading">
+            <div className={styles.sectionHeading}>
+              <div>
+                <p className={styles.eyebrow}>Durable record</p>
+                <h2 id="activity-heading">Repair order activity</h2>
+              </div>
+            </div>
+            <ol className={styles.activityList}>
+              {activities.map((activity) => (
+                <li key={activity.id}>
+                  <p>{activity.summary}</p>
+                  <span>{activity.actorName ?? 'Shop team'} · {formatActivityTime(activity.createdAt)}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />
 
         {ringOutState && (
@@ -629,6 +649,12 @@ function formatCents(cents: number): string {
     style: 'currency',
     currency: 'USD',
   }).format(cents / 100)
+}
+
+function formatActivityTime(value: Date): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(value)
 }
 
 type AssignmentOverride = {

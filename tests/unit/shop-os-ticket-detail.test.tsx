@@ -157,6 +157,7 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
       plate: 'TEX-4192',
     },
     jobs: [job()],
+    activities: [],
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
@@ -201,6 +202,19 @@ describe('TicketDetailScreen', () => {
       'href',
       '/vehicles/vehicle-1',
     )
+  })
+
+  it('shows durable interruption truth as a compact repair-order record', () => {
+    render(<TicketDetailScreen ticket={ticket({
+      activities: [{
+        id: 'activity-1', jobId: 'job-1', kind: 'job_blocked', actorName: 'Taylor Tech',
+        summary: 'Diagnose brake vibration: Put on hold — Awaiting pads.', createdAt: timestamp,
+      }],
+    })} />)
+
+    expect(screen.getByRole('heading', { name: 'Repair order activity' })).toBeInTheDocument()
+    expect(screen.getByText('Diagnose brake vibration: Put on hold — Awaiting pads.')).toBeInTheDocument()
+    expect(screen.getByText(/Taylor Tech/)).toBeInTheDocument()
   })
 
   it('renders an honest provisional tech-quick state without invented actions or identity', () => {

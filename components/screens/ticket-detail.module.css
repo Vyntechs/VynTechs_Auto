@@ -504,6 +504,47 @@
   margin-top: 12px;
 }
 
+.activity {
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 22px;
+}
+
+.activityList {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--vt-rule);
+}
+
+.activityList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--vt-rule);
+}
+
+.activityList p,
+.activityList span {
+  min-width: 0;
+  margin: 0;
+}
+
+.activityList p {
+  overflow-wrap: anywhere;
+  color: var(--vt-fg-1);
+  font: 14px/1.45 var(--vt-font-sans);
+}
+
+.activityList span {
+  flex: 0 1 230px;
+  color: var(--vt-fg-3);
+  font: 11px/1.4 var(--vt-font-mono);
+  text-align: right;
+}
+
 .inlineAction {
   min-block-size: 44px;
   border: 1px solid var(--vt-signal-500);
@@ -677,6 +718,17 @@
 
   .assignmentRow {
     padding-top: 4px;
+  }
+
+  .activityList li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .activityList span {
+    flex-basis: auto;
+    text-align: left;
   }
 
   .assignmentChoices {

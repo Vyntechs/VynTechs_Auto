@@ -7,6 +7,7 @@ import {
   profiles,
   sessions,
   shops,
+  ticketActivity,
   ticketJobs,
   tickets,
   vehicles,
@@ -52,6 +53,15 @@ export type AssignmentTierWarning = {
   requiredSkillTier: 1 | 2 | 3
 }
 
+export type TicketActivityView = {
+  id: string
+  jobId: string | null
+  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened'
+  actorName: string | null
+  summary: string
+  createdAt: Date
+}
+
 export type TicketDetail = {
   id: string
   ticketNumber: number
@@ -94,6 +104,7 @@ export type TicketDetail = {
     createdAt: Date
     updatedAt: Date
   }>
+  activities?: TicketActivityView[]
   createdAt: Date
   updatedAt: Date
 }
@@ -812,6 +823,25 @@ async function loadTicketDetail(
     .where(and(eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, ticketId)))
     .orderBy(asc(ticketJobs.createdAt), asc(ticketJobs.id))
 
+  const activityRows = await db
+    .select({
+      id: ticketActivity.id,
+      jobId: ticketActivity.jobId,
+      kind: ticketActivity.kind,
+      payload: ticketActivity.payload,
+      actorName: profiles.fullName,
+      createdAt: ticketActivity.createdAt,
+    })
+    .from(ticketActivity)
+    .leftJoin(profiles, and(
+      eq(ticketActivity.shopId, profiles.shopId),
+      eq(ticketActivity.actorProfileId, profiles.id),
+    ))
+    .where(and(eq(ticketActivity.shopId, shopId), eq(ticketActivity.ticketId, ticketId)))
+    .orderBy(desc(ticketActivity.createdAt), desc(ticketActivity.id))
+    .limit(20)
+  const jobTitles = new Map(jobs.map((job) => [job.id, job.title]))
+
   return {
     id: row.id,
     ticketNumber: row.ticketNumber,
@@ -868,8 +898,39 @@ async function loadTicketDetail(
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     })),
+    activities: activityRows.map((activity) => ({
+      id: activity.id,
+      jobId: activity.jobId,
+      kind: activity.kind,
+      actorName: activity.actorName,
+      summary: ticketActivitySummary(activity.kind, activity.payload, activity.jobId ? jobTitles.get(activity.jobId) ?? null : null),
+      createdAt: activity.createdAt,
+    })),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  }
+}
+
+function ticketActivitySummary(
+  kind: TicketActivityView['kind'],
+  payload: Record<string, unknown>,
+  jobTitle: string | null,
+): string {
+  const subject = jobTitle ? `${jobTitle}: ` : ''
+  const bounded = (value: unknown, max = 500): string | null => (
+    typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max
+      ? value.trim()
+      : null
+  )
+  switch (kind) {
+    case 'work_paused': return `${subject}Clock paused.`
+    case 'work_resumed': return `${subject}Clock resumed.`
+    case 'job_blocked': return `${subject}Put on hold${bounded(payload.holdNote) ? ` — ${bounded(payload.holdNote)}` : '.'}`
+    case 'job_hold_resolved': return `${subject}Hold resolved.`
+    case 'job_reassigned': return `${subject}Assignment changed.`
+    case 'job_handed_off': return `${subject}Handed off.`
+    case 'ticket_canceled': return `Repair order canceled${bounded(payload.reason) ? ` — ${bounded(payload.reason)}` : '.'}`
+    case 'ticket_reopened': return 'Repair order reopened.'
   }
 }
 
