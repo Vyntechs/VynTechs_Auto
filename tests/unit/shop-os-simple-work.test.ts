@@ -24,6 +24,7 @@ import {
   nextSimpleWorkTimestamp,
   type SimpleWorkActor,
 } from '@/lib/shop-os/simple-work'
+import { mutateJobInterruption } from '@/lib/shop-os/interruption'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -118,6 +119,57 @@ describe('Shop OS approved simple work', () => {
     expect(first).toMatchObject({ ok: true, changed: true, work: { status: 'in_progress' } })
     const second = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
     expect(second).toMatchObject({ ok: true, changed: false, work: { status: 'in_progress' } })
+  })
+
+  it('completes work after an interruption restores it without losing the optimistic-lock timestamp', async () => {
+    const started = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
+    if (!started.ok) throw new Error('clock-on failed')
+    const noted = await mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'save_note',
+        note: 'Installed, torqued, and verified the customer-supplied lift kit.',
+        expectedUpdatedAt: started.work.updatedAt,
+      },
+    })
+    if (!noted.ok) throw new Error('save-note failed')
+
+    const interruptionActor = {
+      ...actor,
+      role: 'tech',
+      membershipStatus: 'active',
+      deactivatedAt: null,
+    }
+    const blocked = await mutateJobInterruption(db, {
+      actor: interruptionActor,
+      ticketId,
+      jobId,
+      body: {
+        action: 'block',
+        requestKey: uuid(901),
+        holdKind: 'parts',
+        holdNote: 'Waiting for the final hardware kit.',
+      },
+    })
+    expect(blocked).toMatchObject({ ok: true, job: { workStatus: 'blocked' } })
+    const resumed = await mutateJobInterruption(db, {
+      actor: interruptionActor,
+      ticketId,
+      jobId,
+      body: { action: 'resolve_hold', requestKey: uuid(902) },
+    })
+    expect(resumed).toMatchObject({ ok: true, job: { workStatus: 'in_progress' } })
+
+    const restored = await getSimpleWorkWorkspace(db, { actor, ticketId, jobId })
+    if (!restored.ok) throw new Error('restored workspace unavailable')
+    await expect(mutateSimpleWork(db, {
+      actor,
+      ticketId,
+      jobId,
+      body: { action: 'complete', expectedUpdatedAt: restored.workspace.updatedAt },
+    })).resolves.toMatchObject({ ok: true, changed: true, work: { status: 'done' } })
   })
 
   it('opens and starts an approved sessionless diagnostic only while diagnostics are unavailable', async () => {

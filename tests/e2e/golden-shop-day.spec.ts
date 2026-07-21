@@ -238,7 +238,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(tech, testInfo, 'tech-work-and-part-request')
 
     await owner.goto(path)
-    await owner.getByText('Cancel repair order', { exact: true }).click()
+    await owner.locator('summary').filter({ hasText: 'Cancel repair order' }).click()
     await owner.getByLabel('Cancellation reason').fill('Customer asked us to pause while they confirm the repair timing.')
     await owner.getByRole('button', { name: 'Cancel repair order' }).click()
     await expect(owner.getByText('Canceled · Counter intake', { exact: true })).toBeVisible()
@@ -270,7 +270,12 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(relief.getByRole('button', { name: 'Continue work' })).toBeVisible()
     await relief.getByRole('button', { name: 'Continue work' }).click()
     await expect(relief.getByText('Got it')).toBeVisible()
+    const completionResponsePromise = relief.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
+    ))
     await relief.getByRole('button', { name: 'Complete work' }).click()
+    expect((await completionResponsePromise).status(), 'relief completion API status').toBe(200)
     await expect(relief.getByRole('heading', { name: 'Work complete' })).toBeVisible()
     await relief.getByRole('button', { name: 'Close work' }).click()
     await expect(relief.getByText('Work · Done')).toBeVisible()

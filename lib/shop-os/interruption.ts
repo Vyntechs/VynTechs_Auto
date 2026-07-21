@@ -4,6 +4,7 @@ import type { AppDb } from '@/lib/db/queries'
 import { profiles, ticketActivity, ticketJobs, ticketPayments, tickets } from '@/lib/db/schema'
 import { canAssignWork, isShopRole } from '@/lib/shop-os/capabilities'
 import { isLockUnavailable } from '@/lib/shop-os/quotes'
+import { nextSimpleWorkTimestamp } from '@/lib/shop-os/simple-work'
 import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
 
 export type InterruptionActor = {
@@ -296,7 +297,7 @@ export async function mutateJobInterruption(
             claimedAt: null,
             activeSeconds: bankClock(),
             clockedOnSince: null,
-            updatedAt: sql`clock_timestamp()`,
+            updatedAt: nextSimpleWorkTimestamp(),
           })
           .where(and(
             eq(ticketJobs.shopId, actor.data.shopId),
@@ -337,7 +338,7 @@ export async function mutateJobInterruption(
             holdResumeStatus: job.workStatus,
             heldAt: sql`clock_timestamp()`,
             heldByProfileId: profile.id,
-            updatedAt: sql`clock_timestamp()`,
+            updatedAt: nextSimpleWorkTimestamp(),
           })
           .where(and(
             eq(ticketJobs.shopId, actor.data.shopId),
@@ -378,7 +379,7 @@ export async function mutateJobInterruption(
           holdResumeStatus: null,
           heldAt: null,
           heldByProfileId: null,
-          updatedAt: sql`clock_timestamp()`,
+          updatedAt: nextSimpleWorkTimestamp(),
         })
         .where(and(
           eq(ticketJobs.shopId, actor.data.shopId),
@@ -500,7 +501,7 @@ export async function mutateTicketLifecycle(
             holdResumeStatus: saved.holdResumeStatus,
             heldAt: saved.heldAt ? new Date(saved.heldAt) : null,
             heldByProfileId: saved.heldByProfileId,
-            updatedAt: sql`clock_timestamp()`,
+            updatedAt: nextSimpleWorkTimestamp(),
           }).where(and(
             eq(ticketJobs.shopId, actor.data.shopId),
             eq(ticketJobs.id, saved.id),
@@ -553,7 +554,7 @@ export async function mutateTicketLifecycle(
             workStatus: 'canceled',
             activeSeconds: bankClock(),
             clockedOnSince: null,
-            updatedAt: sql`clock_timestamp()`,
+            updatedAt: nextSimpleWorkTimestamp(),
           }).where(and(
             eq(ticketJobs.shopId, actor.data.shopId),
             eq(ticketJobs.ticketId, ticket.id),
