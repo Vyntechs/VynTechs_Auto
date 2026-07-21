@@ -52,3 +52,8 @@ Reason: Successful persistence without a durable return path feels exactly like 
 Trigger: A monolithic sequential Vitest process lost its controller output and remained idle after its worker exited.
 Rule: Use the documented sequential shards and record each shard exit; terminate idle runners before starting another verification command.
 Reason: A hanging aggregate runner provides neither a trustworthy pass nor a usable failure report.
+
+### durable-save-must-unblock-next-action
+Trigger: A saved part request briefly left the mounted work surface's local-draft guard active.
+Rule: When child work becomes durable, synchronously clear parent draft guards and prove the next action is enabled.
+Reason: Effect-timing races turn a successful save into an unnecessary technician retry.
