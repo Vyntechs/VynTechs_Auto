@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 import type { TicketPaymentMethod, TicketRingOut } from '@/lib/shop-os/ring-out'
 import { parseRingOutResponse } from '@/lib/shop-os/ring-out-ui'
@@ -17,14 +18,6 @@ const METHOD_ORDER: TicketPaymentMethod[] = ['cash', 'card', 'check', 'other']
 
 function balanceDollars(cents: number): string {
   return (Math.max(0, cents) / 100).toFixed(2)
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 function humanizeError(error: unknown): string {
@@ -150,7 +143,7 @@ export function RingOutSection({
           <h2 id="ringout-heading">{isClosed ? 'Receipt' : 'Ring out'}</h2>
         </div>
         {isClosed && ringOut.closedAt && (
-          <span className={styles.closedStamp}>Closed {formatDate(ringOut.closedAt)}</span>
+          <span className={styles.closedStamp}>Closed <LocalizedTimestamp value={ringOut.closedAt} kind="date" /></span>
         )}
       </div>
 
@@ -186,7 +179,7 @@ export function RingOutSection({
               <span className={styles.payMethod}>{METHOD_LABELS[payment.method]}</span>
               <span className={styles.payAmount}>{formatMoneyCents(payment.amountCents)}</span>
               {payment.note && <span className={styles.payNote}>{payment.note}</span>}
-              <span className={styles.payDate}>{formatDate(payment.recordedAt)}</span>
+              <LocalizedTimestamp className={styles.payDate} value={payment.recordedAt} kind="date" />
             </li>
           ))}
         </ul>

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/vt'
+import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import {
   activeDurationSeconds,
   formatDurationSeconds,
@@ -552,10 +553,6 @@ function ReadOnlyState({ title, copy }: { title: string; copy: string }) {
   return <section className={styles.state}><p className={styles.stateMark}>Hold</p><h2>{title}</h2><p>{copy}</p></section>
 }
 
-function formatClockTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-}
-
 // The job's own time: total actual time the tech has clocked on it (banked
 // intervals plus the interval running right now), whether the clock is running
 // or paused, and — once done — when it was finished. No money, just the time.
@@ -568,16 +565,26 @@ function JobClock({
   activeSeconds: number
   completedAt: string | null
 }) {
-  const total = activeDurationSeconds(activeSeconds, clockedOnSince, Date.now())
+  const [now, setNow] = useState<number | null>(null)
+  const total = activeDurationSeconds(activeSeconds, clockedOnSince, now ?? new Date(clockedOnSince ?? 0).getTime())
   const done = completedAt !== null
+
+  useEffect(() => {
+    if (!clockedOnSince) return
+    const tick = () => setNow(Date.now())
+    tick()
+    const interval = window.setInterval(tick, 1_000)
+    return () => window.clearInterval(interval)
+  }, [clockedOnSince])
+
   if (total === 0 && !clockedOnSince && !done) return null
   return (
     <dl className={styles.clock}>
       <div><dt>On the job</dt><dd>{formatDurationSeconds(total)}</dd></div>
       {done ? (
-        <div><dt>Finished</dt><dd>{formatClockTime(completedAt)}</dd></div>
+        <div><dt>Finished</dt><dd><LocalizedTimestamp value={completedAt} kind="time" /></dd></div>
       ) : (
-        <div><dt>Clock</dt><dd>{clockedOnSince ? `Running since ${formatClockTime(clockedOnSince)}` : 'Paused'}</dd></div>
+        <div><dt>Clock</dt><dd>{clockedOnSince ? <>Running since <LocalizedTimestamp value={clockedOnSince} kind="time" /></> : 'Paused'}</dd></div>
       )}
     </dl>
   )

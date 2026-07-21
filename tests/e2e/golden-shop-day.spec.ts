@@ -80,7 +80,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     for (const role of roles) {
       const session = await signedInPage(browser, baseURL, role, viewport, mobile)
       sessions.set(role, session)
-      faults.push(watchBrowserFaults(session.page))
+      faults.push(watchBrowserFaults(session.page, role))
     }
 
     const owner = sessions.get('owner')!.page
