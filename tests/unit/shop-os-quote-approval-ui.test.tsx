@@ -115,6 +115,7 @@ describe('Shop OS exact-version approval UI', () => {
     expect(css).toMatch(/@media \(max-width:\s*600px\)/)
     expect(css).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)/)
     expect(css).toMatch(/max-height:\s*calc\(100dvh - 36px\)/)
+    expect(css).toMatch(/\.decisionDialog textarea[\s\S]*?min-height:\s*96px/)
   })
 
   it('keeps a deferred job on the mounted quote so its decision can resume without a new page', async () => {

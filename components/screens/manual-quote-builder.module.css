@@ -1014,6 +1014,33 @@
   line-height: 1.5;
 }
 
+.decisionDialog label {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.decisionDialog textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  padding: 12px;
+  background: var(--vt-bone-50);
+  color: var(--vt-fg);
+  font: 16px/1.5 var(--vt-font-sans);
+}
+
+.decisionDialog textarea:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
 @media (min-width: 801px) and (max-width: 1290px) {
   .screenWithSourcing .workspace {
     grid-template-columns: minmax(0, 1fr);
