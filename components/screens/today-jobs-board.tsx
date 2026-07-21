@@ -15,7 +15,10 @@ import {
   type TodayJobOverride,
 } from '@/lib/shop-os/today-board'
 import { parsePartRequestResponse } from '@/lib/shop-os/part-requests-ui'
+import type { SimpleWorkProjectionView } from '@/lib/shop-os/simple-work-ui'
 import { TicketAssignmentControl } from './ticket-assignment-control'
+import { InlineQuoteWorkspace, type QuoteWorkspaceProjection } from './inline-quote-workspace'
+import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './today-jobs-board.module.css'
 
 type Props = {
@@ -25,6 +28,7 @@ type Props = {
   createdJobs?: TodayTicketJob[]
   partsJobs?: TodayTicketJob[]
   canDispatchWork?: boolean
+  canBuildQuote?: boolean
   currentProfileId?: string
   team?: TeamMember[]
   hasMore?: boolean
@@ -70,6 +74,7 @@ export function TodayJobsBoard({
   createdJobs = emptyJobs,
   partsJobs = emptyJobs,
   canDispatchWork = false,
+  canBuildQuote = false,
   currentProfileId,
   team = emptyTeam,
   hasMore = false,
@@ -98,6 +103,9 @@ export function TodayJobsBoard({
   const [resolvedPartRequests, setResolvedPartRequests] = useState<Map<string, string>>(
     () => new Map(),
   )
+  const [activeQuoteJob, setActiveQuoteJob] = useState<TodayTicketJob | null>(null)
+  const [activeWorkJob, setActiveWorkJob] = useState<TodayTicketJob | null>(null)
+  const activeWorkspaceRef = useRef(false)
   const [focusRequest, setFocusRequest] = useState<{
     kind: 'board' | 'row' | 'claim'
     jobId: string
@@ -117,6 +125,10 @@ export function TodayJobsBoard({
     })
   }, [myJobs, openJobs, teamJobs, createdJobs, partsJobs, hasMore])
 
+  useEffect(() => {
+    activeWorkspaceRef.current = activeQuoteJob !== null || activeWorkJob !== null
+  }, [activeQuoteJob, activeWorkJob])
+
   const refreshTodayJobs = useCallback(async () => {
     try {
       const response = await fetch('/api/today/jobs', {
@@ -125,7 +137,7 @@ export function TodayJobsBoard({
       })
       const body: unknown = await response.json().catch(() => null)
       const fresh = response.ok ? parseTodayJobsResponse(body) : null
-      if (!fresh) return
+      if (!fresh || activeWorkspaceRef.current) return
       setServerJobs(fresh)
       setResolvedPartRequests((current) => {
         if (current.size === 0) return current
@@ -372,6 +384,60 @@ export function TodayJobsBoard({
     void refreshTodayJobs()
   }
 
+  function applyQuoteProjection(projection: QuoteWorkspaceProjection) {
+    const byJobId = new Map(projection.map((job) => [job.id, job]))
+    const update = (job: TodayTicketJob) => {
+      const next = byJobId.get(job.id)
+      return next ? { ...job, workStatus: next.workStatus, approvalState: next.approvalState } : job
+    }
+    setServerJobs((current) => ({
+      ...current,
+      myJobs: current.myJobs.map(update),
+      openJobs: current.openJobs.map(update),
+      teamJobs: current.teamJobs.map(update),
+      createdJobs: current.createdJobs.map(update),
+      partsJobs: current.partsJobs.map(update),
+    }))
+    setActiveQuoteJob((current) => current ? update(current) : current)
+    void refreshTodayJobs()
+  }
+
+  function applyWorkProjection(job: TodayTicketJob, work: SimpleWorkProjectionView) {
+    // A completed job naturally leaves Today on the next refresh. Keep the
+    // mounted workspace stable until the technician closes it, rather than
+    // making the confirmation disappear mid-task.
+    if (work.status === 'open' || work.status === 'in_progress') {
+      const workStatus: TodayTicketJob['workStatus'] = work.status
+      setServerJobs((current) => {
+        const update = (candidate: TodayTicketJob) => candidate.id === job.id
+          ? { ...candidate, workStatus }
+          : candidate
+        return {
+          ...current,
+          myJobs: current.myJobs.map(update),
+          openJobs: current.openJobs.map(update),
+          teamJobs: current.teamJobs.map(update),
+          createdJobs: current.createdJobs.map(update),
+          partsJobs: current.partsJobs.map(update),
+        }
+      })
+    }
+  }
+
+  function closeQuote(job: TodayTicketJob) {
+    activeWorkspaceRef.current = false
+    setActiveQuoteJob(null)
+    setFocusRequest({ kind: 'row', jobId: job.id })
+    void refreshTodayJobs()
+  }
+
+  function closeWork(job: TodayTicketJob) {
+    activeWorkspaceRef.current = false
+    setActiveWorkJob(null)
+    setFocusRequest({ kind: 'board', jobId: job.id })
+    void refreshTodayJobs()
+  }
+
   async function startDiagnostic(
     job: TodayTicketJob,
     confirmAmbiguousRetry = false,
@@ -485,6 +551,18 @@ export function TodayJobsBoard({
     }
   }
 
+  const inlineWorkspaceProps = {
+    canBuildQuote,
+    onOpenQuote: setActiveQuoteJob,
+    activeQuoteJobId: activeQuoteJob?.id,
+    onCloseQuote: closeQuote,
+    onQuoteProjection: applyQuoteProjection,
+    activeWorkJobId: activeWorkJob?.id,
+    onOpenWork: setActiveWorkJob,
+    onCloseWork: closeWork,
+    onWorkProjection: applyWorkProjection,
+  }
+
   return (
     <section
       ref={boardRef}
@@ -523,6 +601,7 @@ export function TodayJobsBoard({
           onAssignmentConflict={applyAssignmentConflict}
           onResolvePart={resolvePart}
           partsDisabled={pendingJobId !== null}
+          {...inlineWorkspaceProps}
         />
       )}
       {board.open.length > 0 && (
@@ -544,6 +623,7 @@ export function TodayJobsBoard({
           onAssignmentConflict={applyAssignmentConflict}
           onResolvePart={resolvePart}
           partsDisabled={pendingJobId !== null}
+          {...inlineWorkspaceProps}
         />
       )}
       {board.team.length > 0 && (
@@ -558,6 +638,7 @@ export function TodayJobsBoard({
           onAssignmentConflict={applyAssignmentConflict}
           onResolvePart={resolvePart}
           partsDisabled={pendingJobId !== null}
+          {...inlineWorkspaceProps}
         />
       )}
       {board.created.length > 0 && (
@@ -572,6 +653,7 @@ export function TodayJobsBoard({
           onAssignmentConflict={applyAssignmentConflict}
           onResolvePart={resolvePart}
           partsDisabled={pendingJobId !== null}
+          {...inlineWorkspaceProps}
         />
       )}
       {board.parts.length > 0 && (
@@ -586,6 +668,7 @@ export function TodayJobsBoard({
           onAssignmentConflict={applyAssignmentConflict}
           onResolvePart={resolvePart}
           partsDisabled={pendingJobId !== null}
+          {...inlineWorkspaceProps}
         />
       )}
       {serverJobs.hasMore && (
@@ -629,6 +712,15 @@ function JobSection({
   onAssignmentConflict,
   onResolvePart,
   partsDisabled = false,
+  canBuildQuote = false,
+  onOpenQuote,
+  activeQuoteJobId,
+  onCloseQuote,
+  onQuoteProjection,
+  activeWorkJobId,
+  onOpenWork,
+  onCloseWork,
+  onWorkProjection,
 }: {
   label: string
   jobs: TodayTicketJob[]
@@ -656,6 +748,15 @@ function JobSection({
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
   partsDisabled?: boolean
+  canBuildQuote?: boolean
+  onOpenQuote?: (job: TodayTicketJob) => void
+  activeQuoteJobId?: string
+  onCloseQuote?: (job: TodayTicketJob) => void
+  onQuoteProjection?: (projection: QuoteWorkspaceProjection) => void
+  activeWorkJobId?: string
+  onOpenWork?: (job: TodayTicketJob) => void
+  onCloseWork?: (job: TodayTicketJob) => void
+  onWorkProjection?: (job: TodayTicketJob, work: SimpleWorkProjectionView) => void
 }) {
   return (
     <div className={styles.group}>
@@ -665,32 +766,69 @@ function JobSection({
       </div>
       <div className={styles.ledger}>
         {jobs.map((job) => (
-          <JobRow
-            key={job.id}
-            job={job}
-            mode={mode}
-            pending={pendingJobId === job.id}
-            claimDisabled={claimsDisabled}
-            onClaim={onClaim}
-            setClaimButton={setClaimButton}
-            diagnosticPending={pendingDiagnosticJobId === job.id}
-            diagnosticDisabled={diagnosticsDisabled}
-            diagnosticsEntitled={diagnosticsEntitled}
-            forceAmbiguous={
-              ambiguousJobStates.get(job.id) === (job.diagnosticStartState ?? 'idle')
-            }
-            onStartDiagnostic={onStartDiagnostic}
-            onRefreshDiagnostic={onRefreshDiagnostic}
-            onCheckDiagnostic={onCheckDiagnostic}
-            setDiagnosticButton={setDiagnosticButton}
-            canDispatchWork={canDispatchWork}
-            currentProfileId={currentProfileId}
-            team={team}
-            onAssignment={onAssignment}
-            onAssignmentConflict={onAssignmentConflict}
-            onResolvePart={onResolvePart}
-            partsDisabled={partsDisabled}
-          />
+          <div key={job.id} className={styles.jobSlot}>
+            <JobRow
+              job={job}
+              mode={mode}
+              pending={pendingJobId === job.id}
+              claimDisabled={claimsDisabled}
+              onClaim={onClaim}
+              setClaimButton={setClaimButton}
+              diagnosticPending={pendingDiagnosticJobId === job.id}
+              diagnosticDisabled={diagnosticsDisabled}
+              diagnosticsEntitled={diagnosticsEntitled}
+              forceAmbiguous={
+                ambiguousJobStates.get(job.id) === (job.diagnosticStartState ?? 'idle')
+              }
+              onStartDiagnostic={onStartDiagnostic}
+              onRefreshDiagnostic={onRefreshDiagnostic}
+              onCheckDiagnostic={onCheckDiagnostic}
+              setDiagnosticButton={setDiagnosticButton}
+              canDispatchWork={canDispatchWork}
+              currentProfileId={currentProfileId}
+              team={team}
+              onAssignment={onAssignment}
+              onAssignmentConflict={onAssignmentConflict}
+              onResolvePart={onResolvePart}
+              partsDisabled={partsDisabled}
+              canBuildQuote={canBuildQuote}
+              onOpenQuote={onOpenQuote}
+              commandBusy={activeQuoteJobId !== undefined || activeWorkJobId !== undefined}
+              onOpenWork={onOpenWork}
+            />
+            {activeQuoteJobId === job.id && currentProfileId && (
+              <div className={styles.workspacePanel}>
+                <InlineQuoteWorkspace
+                  actorId={currentProfileId}
+                  ticket={{
+                    id: job.ticketId,
+                    ticketNumber: job.ticketNumber,
+                    concern: job.concern,
+                    customer: job.customerName ? { name: job.customerName } : null,
+                    vehicle: job.vehicle,
+                  }}
+                  onProjection={onQuoteProjection ?? (() => {})}
+                  onClose={() => onCloseQuote?.(job)}
+                />
+              </div>
+            )}
+            {activeWorkJobId === job.id && currentProfileId && job.customerName && job.vehicle && (
+              <div className={styles.workspacePanel}>
+                <InlineWorkWorkspace
+                  actorProfileId={currentProfileId}
+                  ticket={{
+                    id: job.ticketId,
+                    number: job.ticketNumber,
+                    customerName: job.customerName,
+                    vehicle: `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`,
+                  }}
+                  jobId={job.id}
+                  onProjection={(work) => onWorkProjection?.(job, work)}
+                  onClose={() => onCloseWork?.(job)}
+                />
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -719,6 +857,10 @@ function JobRow({
   onAssignmentConflict,
   onResolvePart,
   partsDisabled,
+  canBuildQuote,
+  onOpenQuote,
+  commandBusy,
+  onOpenWork,
 }: {
   job: TodayTicketJob
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
@@ -745,6 +887,10 @@ function JobRow({
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
   partsDisabled?: boolean
+  canBuildQuote?: boolean
+  onOpenQuote?: (job: TodayTicketJob) => void
+  commandBusy?: boolean
+  onOpenWork?: (job: TodayTicketJob) => void
 }) {
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
@@ -846,6 +992,16 @@ function JobRow({
           >
             Review parts
           </Link>
+        ) : canBuildQuote && (mode === 'mine' || mode === 'created')
+          && job.approvalState === 'pending_quote' && job.concern ? (
+          <button
+            type="button"
+            className={`${styles.control} ${styles.claim}`}
+            disabled={commandBusy}
+            onClick={() => onOpenQuote?.(job)}
+          >
+            Build quote
+          </button>
         ) : mode === 'created' || mode === 'team' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
@@ -854,7 +1010,12 @@ function JobRow({
             View ticket
           </Link>
         ) : manualDiagnosticWorkAvailable ? (
-          <SimpleWorkAction job={job} />
+          <SimpleWorkAction
+            job={job}
+            inPlace={mode === 'mine' && Boolean(currentProfileId)}
+            disabled={commandBusy}
+            onOpen={onOpenWork}
+          />
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
             job={job}
@@ -868,16 +1029,43 @@ function JobRow({
             setButton={setDiagnosticButton}
           />
         ) : (
-          <SimpleWorkAction job={job} />
+          <SimpleWorkAction
+            job={job}
+            inPlace={mode === 'mine' && Boolean(currentProfileId)}
+            disabled={commandBusy}
+            onOpen={onOpenWork}
+          />
         )}
       </div>
     </article>
   )
 }
 
-function SimpleWorkAction({ job }: { job: TodayTicketJob }) {
+function SimpleWorkAction({
+  job,
+  inPlace = false,
+  disabled = false,
+  onOpen,
+}: {
+  job: TodayTicketJob
+  inPlace?: boolean
+  disabled?: boolean
+  onOpen?: (job: TodayTicketJob) => void
+}) {
   const identityComplete = job.customerName !== null && job.vehicle !== null
   const workAvailable = identityComplete && job.workStatus !== 'blocked' && job.sessionId === null
+  if (workAvailable && inPlace && onOpen) {
+    return (
+      <button
+        type="button"
+        className={`${styles.control} ${styles.openDiagnosis}`}
+        disabled={disabled}
+        onClick={() => onOpen(job)}
+      >
+        {job.workStatus === 'in_progress' ? 'Continue work' : 'Open work'}
+      </button>
+    )
+  }
   return (
     <Link
       href={workAvailable

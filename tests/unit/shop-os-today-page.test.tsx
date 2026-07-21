@@ -96,6 +96,7 @@ const jobs: TodayTicketJobs = {
       id: 'job-1',
       ticketId: 'ticket-1',
       ticketNumber: 77,
+      concern: 'Customer reports a no-crank condition.',
       customerName: 'Safe Customer',
       vehicle: { year: 2020, make: 'Ford', model: 'Transit' },
       title: 'Diagnose no crank',

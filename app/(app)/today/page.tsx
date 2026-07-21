@@ -5,7 +5,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { listDueFollowUpsForTech } from '@/lib/comeback/list'
 import { canCurate } from '@/lib/curator/can-curate'
 import { TodayHome } from '@/components/screens/today-home'
-import { canAssignWork, canCreateTickets } from '@/lib/shop-os/capabilities'
+import { canAssignWork, canBuildQuotes, canCreateTickets } from '@/lib/shop-os/capabilities'
 import { getShopTeam } from '@/lib/intake/team'
 import { listTodayTicketJobs, ticketActorFromProfile } from '@/lib/tickets'
 
@@ -35,6 +35,7 @@ export default async function TodayPage() {
       canWriteCounterOrder={canAssignWork(ctx.profile.role)}
       canCreateTickets={canCreateTickets(ctx.profile.role)}
       canDispatchWork={canDispatchWork}
+      canBuildQuote={canBuildQuotes(ctx.profile.role)}
       currentProfileId={ctx.profile.id}
       team={shopTeam.members}
       todayJobs={todayJobs}

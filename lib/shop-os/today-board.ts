@@ -80,6 +80,7 @@ const todayJobSchema = z.strictObject({
   id: z.uuid(),
   ticketId: z.uuid(),
   ticketNumber: z.number().int().positive(),
+  concern: z.string().min(1).max(5_000),
   customerName: z.string().max(500).nullable(),
   vehicle: z.strictObject({
     year: z.number().int().min(1886).max(9999),

@@ -332,6 +332,7 @@ export type TodayTicketJob = {
   id: string
   ticketId: string
   ticketNumber: number
+  concern: string
   customerName: string | null
   vehicle: { year: number; make: string; model: string } | null
   title: string
@@ -493,6 +494,7 @@ export async function listTodayTicketJobs(
       id: ticketJobs.id,
       ticketId: tickets.id,
       ticketNumber: tickets.ticketNumber,
+      concern: tickets.concern,
       customerName: customers.name,
       vehicleYear: vehicles.year,
       vehicleMake: vehicles.make,
@@ -582,6 +584,7 @@ export async function listTodayTicketJobs(
       id: row.id,
       ticketId: row.ticketId,
       ticketNumber: row.ticketNumber,
+      concern: row.concern,
       customerName: row.customerName,
       vehicle:
         row.vehicleYear !== null && row.vehicleMake !== null && row.vehicleModel !== null

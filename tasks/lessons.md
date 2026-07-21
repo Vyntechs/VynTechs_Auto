@@ -57,3 +57,8 @@ Reason: A hanging aggregate runner provides neither a trustworthy pass nor a usa
 Trigger: A saved part request briefly left the mounted work surface's local-draft guard active.
 Rule: When child work becomes durable, synchronously clear parent draft guards and prove the next action is enabled.
 Reason: Effect-timing races turn a successful save into an unnecessary technician retry.
+
+### command-must-reveal-workspace-at-tap
+Trigger: A mobile quote/work command appeared inert because its editor mounted far from the tapped row.
+Rule: Mount an in-place workspace directly after its command and keep it stable until the operator closes it.
+Reason: Spatial continuity makes a successful action immediately legible without a page transition or hunt.

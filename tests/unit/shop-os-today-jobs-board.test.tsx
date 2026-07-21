@@ -27,6 +27,7 @@ const linkedDiagnostic: TodayTicketJob = {
   id: 'job-linked',
   ticketId: 'ticket-41',
   ticketNumber: 41,
+  concern: 'Intermittent no-start after overnight parking',
   customerName: 'Morgan Lee',
   vehicle: { year: 2018, make: 'Honda', model: 'Accord' },
   title: 'Trace intermittent no-start',
@@ -149,6 +150,74 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
     expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+  })
+
+  it('opens a pending quote in the mounted board instead of navigating away', async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          concern: 'Customer hears a brake squeal when stopping.',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        openJobs={[]}
+        canBuildQuote
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Build quote' }))
+
+    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening the current quote…')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/quote',
+      { cache: 'no-store' },
+    ))
+    expect(screen.queryByRole('link', { name: 'Open the full quote page' })).toBeNull()
+  })
+
+  it('does not expose the quote workspace without the server-resolved role capability', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          concern: 'Customer hears a brake squeal when stopping.',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+  })
+
+  it('opens assigned simple work directly beneath its command instead of navigating away', async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[maintenance]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open work' }))
+
+    expect(screen.getByLabelText('Work workspace')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/jobs/job-maintenance/work',
+      { method: 'GET', cache: 'no-store' },
+    ))
+    expect(screen.queryByRole('link', { name: 'Open the full work page' })).toBeNull()
   })
 
   it('fails closed when an open-queue row is not actually open', () => {

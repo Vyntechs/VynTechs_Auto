@@ -52,6 +52,11 @@
   font-family: var(--vt-font-mono);
 }
 
+.workspacePanel {
+  border-top: var(--vt-stroke-strong);
+  background: var(--vt-surface);
+}
+
 .heading {
   font-size: var(--vt-fs-12);
   font-weight: 600;
@@ -75,7 +80,7 @@
   border-bottom: var(--vt-stroke-hair);
 }
 
-.row:last-child {
+.jobSlot:last-child .row {
   border-bottom: 0;
 }
 

@@ -216,6 +216,7 @@ describe('Today ticket jobs read model', () => {
       id: uuid(41),
       ticketId,
       ticketNumber: 7,
+      concern: 'Persisted concern is not a Today card label',
       customerName: 'Ada Driver',
       vehicle: { year: 2020, make: 'Honda', model: 'Civic' },
       title: 'Diagnose no start',
