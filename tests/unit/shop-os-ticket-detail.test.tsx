@@ -213,6 +213,7 @@ describe('TicketDetailScreen', () => {
     })} />)
 
     expect(screen.getByRole('heading', { name: 'Repair order activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Repair order activity' }).closest('details')).not.toHaveAttribute('open')
     expect(screen.getByText('Diagnose brake vibration: Put on hold — Awaiting pads.')).toBeInTheDocument()
     expect(screen.getByText(/Taylor Tech/)).toBeInTheDocument()
   })

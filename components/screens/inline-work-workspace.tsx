@@ -26,6 +26,7 @@ type Loaded = {
 }
 
 export function InlineWorkWorkspace({
+  actorProfileId,
   ticket,
   jobId,
   onClose,
@@ -33,6 +34,7 @@ export function InlineWorkWorkspace({
   onEscalation,
   onInterrupted,
 }: {
+  actorProfileId?: string
   ticket: TicketIdentity
   jobId: string
   onClose: () => void
@@ -95,6 +97,7 @@ export function InlineWorkWorkspace({
 
   return (
     <SimpleWorkWorkspace
+      actorProfileId={actorProfileId}
       ticket={ticket}
       initialWorkspace={loaded.workspace}
       initialPartRequests={loaded.partRequests}

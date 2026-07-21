@@ -509,6 +509,26 @@
   padding-top: 22px;
 }
 
+.activitySummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.activitySummary::-webkit-details-marker {
+  display: none;
+}
+
+.activitySummary > span {
+  color: var(--vt-fg-3);
+  font: 11px/1.4 var(--vt-font-mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .activityList {
   display: grid;
   gap: 0;

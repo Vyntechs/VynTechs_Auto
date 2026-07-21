@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SimpleWorkWorkspace } from '@/components/screens/simple-work-workspace'
 import type { SimpleWorkWorkspaceView } from '@/lib/shop-os/simple-work-ui'
+import { encodeSimpleWorkDraft, simpleWorkDraftStorageKey } from '@/lib/shop-os/simple-work-draft'
 
 const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }))
 vi.mock('next/navigation', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/components/vt', () => ({
 const TICKET = '00000000-0000-4000-8000-000000000020'
 const JOB = '00000000-0000-4000-8000-000000000030'
 const REQUEST = '00000000-0000-4000-8000-000000000080'
+const ACTOR = '00000000-0000-4000-8000-000000000001'
 const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' }
 const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
@@ -27,7 +29,46 @@ const base: SimpleWorkWorkspaceView = {
 describe('simple work workspace', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => REQUEST) })
+  })
+
+  it('restores the current technician draft after a reload without changing the repair-order route', async () => {
+    const workspace = { ...base, workStatus: 'in_progress' as const }
+    const scope = {
+      actorProfileId: ACTOR,
+      ticketId: TICKET,
+      jobId: JOB,
+      workspaceUpdatedAt: workspace.updatedAt,
+      workStatus: workspace.workStatus,
+      authorization: workspace.authorization,
+    }
+    const encoded = encodeSimpleWorkDraft(scope, {
+      note: 'Front-left bolts are ready for final torque.',
+      concern: 'Rear brake squeal after road test',
+      tier: '2',
+      parts: { description: 'Pad hardware kit', preference: 'Motorcraft', quantity: '1', requestKey: REQUEST },
+      hold: { kind: 'parts', note: 'Waiting for the pad hardware.' },
+    })
+    expect(encoded).not.toBeNull()
+    sessionStorage.setItem(simpleWorkDraftStorageKey(scope), encoded as string)
+
+    render(<SimpleWorkWorkspace
+      actorProfileId={ACTOR}
+      ticket={ticket}
+      initialWorkspace={workspace}
+      embedded
+    />)
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Work note' }))
+      .toHaveValue('Front-left bolts are ready for final torque.'))
+    fireEvent.click(screen.getByText('Found another concern'))
+    expect(screen.getByRole('textbox', { name: 'Concern' })).toHaveValue('Rear brake squeal after road test')
+    expect(screen.getByLabelText('Required skill tier')).toHaveValue('2')
+    expect(screen.getByLabelText('What part do you need?')).toHaveValue('Pad hardware kit')
+    fireEvent.click(screen.getAllByText('Put work on hold')[0])
+    expect(screen.getByLabelText('Reason for hold')).toHaveValue('parts')
+    expect(screen.getByLabelText('What needs to happen next?')).toHaveValue('Waiting for the pad hardware.')
   })
 
   it('renders distinct not-approved and declined states without mutation controls', () => {
@@ -112,9 +153,9 @@ describe('simple work workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).not.toHaveBeenCalled()
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'What part do you need?' }), {
-      target: { value: '' },
-    })
+    fireEvent.click(screen.getByRole('button', { name: 'Discard local draft' }))
+    expect(screen.getByRole('textbox', { name: 'Work note' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'What part do you need?' })).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })

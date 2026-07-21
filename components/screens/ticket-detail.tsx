@@ -259,6 +259,7 @@ export function TicketDetailScreen({
 
         {activeTool?.kind === 'work' && ticket.customer && ticket.vehicle && (
           <InlineWorkWorkspace
+            actorProfileId={currentProfileId ?? undefined}
             ticket={{
               id: ticket.id,
               number: ticket.ticketNumber,
@@ -542,13 +543,14 @@ export function TicketDetailScreen({
         )}
 
         {activities.length > 0 && (
-          <section className={styles.activity} aria-labelledby="activity-heading">
-            <div className={styles.sectionHeading}>
+          <details className={styles.activity}>
+            <summary className={styles.activitySummary}>
               <div>
                 <p className={styles.eyebrow}>Durable record</p>
                 <h2 id="activity-heading">Repair order activity</h2>
               </div>
-            </div>
+              <span>{activities.length} {activities.length === 1 ? 'entry' : 'entries'}</span>
+            </summary>
             <ol className={styles.activityList}>
               {activities.map((activity) => (
                 <li key={activity.id}>
@@ -557,7 +559,7 @@ export function TicketDetailScreen({
                 </li>
               ))}
             </ol>
-          </section>
+          </details>
         )}
 
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />

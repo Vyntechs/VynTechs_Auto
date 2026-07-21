@@ -47,6 +47,7 @@ export default async function SimpleWorkPage({
 
   return (
     <SimpleWorkWorkspace
+      actorProfileId={ctx.profile.id}
       ticket={{
         id: ticket.id,
         number: ticket.ticketNumber,
