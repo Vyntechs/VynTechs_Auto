@@ -91,6 +91,17 @@ const cancellationSnapshot = z.strictObject({
 
 const mutationBody = z.discriminatedUnion('action', [blockBody, resolveHoldBody, handoffBody])
 
+const JOB_ACTIVITY_KIND = {
+  block: 'job_blocked',
+  resolve_hold: 'job_hold_resolved',
+  handoff: 'job_handed_off',
+} as const
+
+const LIFECYCLE_ACTIVITY_KIND = {
+  cancel: 'ticket_canceled',
+  reopen: 'ticket_reopened',
+} as const
+
 function failure(error: InterruptionError, retryable = false): InterruptionResult {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
 }
@@ -130,6 +141,13 @@ function bankClock() {
 
 function lifecycleFailure(error: InterruptionError, retryable = false): TicketLifecycleResult {
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
+}
+
+function lifecycleProjection(ticket: { id: string; status: string }): { id: string; status: 'open' | 'closed' | 'canceled' } | null {
+  if (ticket.status === 'open' || ticket.status === 'closed' || ticket.status === 'canceled') {
+    return { id: ticket.id, status: ticket.status }
+  }
+  return null
 }
 
 export async function mutateJobInterruption(
@@ -198,6 +216,29 @@ export async function mutateJobInterruption(
       if (!job) return failure('not_found')
       if (!canAssignWork(profile.role) && (profile.role !== 'tech' || job.assignedTechId !== profile.id)) {
         return failure('forbidden')
+      }
+
+      const [receipt] = await tx
+        .select({
+          ticketId: ticketActivity.ticketId,
+          jobId: ticketActivity.jobId,
+          actorProfileId: ticketActivity.actorProfileId,
+          kind: ticketActivity.kind,
+        })
+        .from(ticketActivity)
+        .where(and(
+          eq(ticketActivity.shopId, actor.data.shopId),
+          eq(ticketActivity.requestKey, body.data.requestKey),
+        ))
+        .limit(1)
+      if (receipt) {
+        if (receipt.ticketId !== ticket.id
+          || receipt.jobId !== job.id
+          || receipt.actorProfileId !== profile.id
+          || receipt.kind !== JOB_ACTIVITY_KIND[body.data.action]) {
+          return failure('conflict')
+        }
+        return { ok: true, changed: false, job: projection(job) }
       }
 
       if (body.data.action === 'handoff') {
@@ -387,6 +428,30 @@ export async function mutateTicketLifecycle(
           eq(tickets.id, ticketId.data),
         )).limit(1).for('update', { noWait: true })
       if (!ticket) return lifecycleFailure('not_found')
+      const [receipt] = await tx
+        .select({
+          ticketId: ticketActivity.ticketId,
+          jobId: ticketActivity.jobId,
+          actorProfileId: ticketActivity.actorProfileId,
+          kind: ticketActivity.kind,
+        })
+        .from(ticketActivity)
+        .where(and(
+          eq(ticketActivity.shopId, actor.data.shopId),
+          eq(ticketActivity.requestKey, body.data.requestKey),
+        ))
+        .limit(1)
+      if (receipt) {
+        const projected = lifecycleProjection(ticket)
+        if (!projected
+          || receipt.ticketId !== ticket.id
+          || receipt.jobId !== null
+          || receipt.actorProfileId !== profile.id
+          || receipt.kind !== LIFECYCLE_ACTIVITY_KIND[body.data.action]) {
+          return lifecycleFailure('conflict')
+        }
+        return { ok: true, changed: false, ticket: projected }
+      }
       if (body.data.action === 'reopen') {
         if (ticket.status !== 'canceled') return lifecycleFailure('not_ready')
         const [cancellation] = await tx.select({ payload: ticketActivity.payload })

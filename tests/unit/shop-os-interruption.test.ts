@@ -120,6 +120,21 @@ describe('ShopOS job interruption', () => {
     })
   })
 
+  it('treats a repeated hold request as one durable action', async () => {
+    const body = {
+      action: 'block' as const,
+      requestKey: uuid(46),
+      holdKind: 'parts' as const,
+      holdNote: 'Waiting on the confirmed part number.',
+    }
+    const first = await mutateJobInterruption(db, { actor: tech, ticketId, jobId, body })
+    const second = await mutateJobInterruption(db, { actor: tech, ticketId, jobId, body })
+
+    expect(first).toMatchObject({ ok: true, changed: true, job: { workStatus: 'blocked' } })
+    expect(second).toMatchObject({ ok: true, changed: false, job: { workStatus: 'blocked' } })
+    expect(await db.select().from(ticketActivity)).toHaveLength(1)
+  })
+
   it('restores the saved work state when the assigned technician resolves a hold', async () => {
     await db.update(ticketJobs).set({
       workStatus: 'blocked',
@@ -132,12 +147,14 @@ describe('ShopOS job interruption', () => {
       activeSeconds: 120,
     }).where(eq(ticketJobs.id, jobId))
 
+    const body = { action: 'resolve_hold' as const, requestKey: uuid(41) }
     const result = await mutateJobInterruption(db, {
       actor: tech,
       ticketId,
       jobId,
-      body: { action: 'resolve_hold', requestKey: uuid(41) },
+      body,
     })
+    const repeated = await mutateJobInterruption(db, { actor: tech, ticketId, jobId, body })
     const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
     const events = await db.select().from(ticketActivity)
 
@@ -152,6 +169,11 @@ describe('ShopOS job interruption', () => {
         clockedOnSince: null,
         activeSeconds: 120,
       },
+    })
+    expect(repeated).toMatchObject({
+      ok: true,
+      changed: false,
+      job: { workStatus: 'in_progress' },
     })
     expect(job).toMatchObject({
       workStatus: 'in_progress',
@@ -224,6 +246,19 @@ describe('ShopOS job interruption', () => {
         workStatus: 'in_progress',
       },
     })
+  })
+
+  it('treats a repeated active handoff as one durable action', async () => {
+    const advisor: InterruptionActor = {
+      profileId: advisorId, shopId, role: 'advisor', membershipStatus: 'active', deactivatedAt: null,
+    }
+    const body = { action: 'handoff' as const, requestKey: uuid(47), assignedTechId: reliefTechId }
+    const first = await mutateJobInterruption(db, { actor: advisor, ticketId, jobId, body })
+    const second = await mutateJobInterruption(db, { actor: advisor, ticketId, jobId, body })
+
+    expect(first).toMatchObject({ ok: true, changed: true, job: { assignedTechId: reliefTechId } })
+    expect(second).toMatchObject({ ok: true, changed: false, job: { assignedTechId: reliefTechId } })
+    expect(await db.select().from(ticketActivity)).toHaveLength(1)
   })
 
   it('lets an advisor cancel an unpaid repair order while preserving interrupted-work recovery truth', async () => {
@@ -321,5 +356,23 @@ describe('ShopOS job interruption', () => {
       requestKey: uuid(45),
       payload: { restoredJobIds: [jobId] },
     })
+  })
+
+  it('treats repeated cancel and reopen requests as their original lifecycle actions', async () => {
+    const advisor: InterruptionActor = {
+      profileId: advisorId, shopId, role: 'advisor', membershipStatus: 'active', deactivatedAt: null,
+    }
+    const cancel = { action: 'cancel' as const, requestKey: uuid(48), reason: 'Customer asked us to wait.' }
+    const firstCancel = await mutateTicketLifecycle(db, { actor: advisor, ticketId, body: cancel })
+    const secondCancel = await mutateTicketLifecycle(db, { actor: advisor, ticketId, body: cancel })
+    const reopen = { action: 'reopen' as const, requestKey: uuid(49) }
+    const firstReopen = await mutateTicketLifecycle(db, { actor: advisor, ticketId, body: reopen })
+    const secondReopen = await mutateTicketLifecycle(db, { actor: advisor, ticketId, body: reopen })
+
+    expect(firstCancel).toMatchObject({ ok: true, changed: true, ticket: { status: 'canceled' } })
+    expect(secondCancel).toMatchObject({ ok: true, changed: false, ticket: { status: 'canceled' } })
+    expect(firstReopen).toMatchObject({ ok: true, changed: true, ticket: { status: 'open' } })
+    expect(secondReopen).toMatchObject({ ok: true, changed: false, ticket: { status: 'open' } })
+    expect(await db.select().from(ticketActivity)).toHaveLength(2)
   })
 })
