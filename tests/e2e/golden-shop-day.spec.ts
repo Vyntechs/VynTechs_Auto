@@ -138,8 +138,13 @@ test('the living repair order survives one complete shop day', async ({ browser,
     expect(workResponse.status(), 'mounted work API status').toBe(200)
     await expect(tech.getByRole('heading', { name: 'Approved and ready' })).toBeVisible()
     await expect(tech).toHaveURL(new RegExp(`${path}$`))
+    const clockResponsePromise = tech.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
+    ))
     await tech.getByRole('button', { name: 'Clock on' }).click()
-    await expect(tech.getByRole('status').filter({ hasText: 'Clocked on.' })).toBeVisible()
+    expect((await clockResponsePromise).status(), 'clock-on API status').toBe(200)
+    await expect(tech.getByRole('heading', { name: 'Work in progress' })).toBeVisible()
     const note = tech.getByLabel('Work note')
     await note.fill('Confirmed pad wear, replaced front pads, torqued hardware, and completed a quiet road test.')
     await tech.getByRole('button', { name: 'Close work' }).click()

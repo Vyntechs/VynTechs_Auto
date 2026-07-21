@@ -117,7 +117,8 @@ export function validateBaseUrl(raw, allowLocalhost = false, allowVercelPreview 
     return normalized
   }
   if (allowVercelPreview && url.protocol === 'https:'
-    && url.hostname.startsWith('vyntechs-dev-') && url.hostname.endsWith('.vercel.app')) {
+    && url.hostname.startsWith('vyntechs-')
+    && url.hostname.endsWith('-brandon-nichols-projects-f7e6d2a9.vercel.app')) {
     return normalized
   }
   if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {

@@ -173,8 +173,8 @@ async function lockContext(
   return { ticket, job, versions, decisions }
 }
 
-function nextTimestamp(previous: Date) {
-  return sql`greatest(clock_timestamp(), ${previous}::timestamptz + interval '1 millisecond')`
+export function nextSimpleWorkTimestamp() {
+  return sql`greatest(clock_timestamp(), ${ticketJobs.updatedAt} + interval '1 millisecond')`
 }
 
 // Bank the currently-open on-interval into active_seconds: add (now - since)
@@ -226,7 +226,7 @@ export async function mutateSimpleWork(
               workStatus: 'in_progress',
               workStartedAt: sql`clock_timestamp()`,
               clockedOnSince: sql`clock_timestamp()`,
-              updatedAt: nextTimestamp(job.updatedAt),
+              updatedAt: nextSimpleWorkTimestamp(),
             })
             .where(and(
               eq(ticketJobs.shopId, parsedActor.data.shopId),
@@ -246,7 +246,7 @@ export async function mutateSimpleWork(
           .update(ticketJobs)
           .set({
             clockedOnSince: sql`clock_timestamp()`,
-            updatedAt: nextTimestamp(job.updatedAt),
+            updatedAt: nextSimpleWorkTimestamp(),
           })
           .where(and(
             eq(ticketJobs.shopId, parsedActor.data.shopId),
@@ -271,7 +271,7 @@ export async function mutateSimpleWork(
           .set({
             activeSeconds: settledActiveSeconds(),
             clockedOnSince: null,
-            updatedAt: nextTimestamp(job.updatedAt),
+            updatedAt: nextSimpleWorkTimestamp(),
           })
           .where(and(
             eq(ticketJobs.shopId, parsedActor.data.shopId),
@@ -296,7 +296,7 @@ export async function mutateSimpleWork(
         }
         const [updated] = await (tx as AppDb)
           .update(ticketJobs)
-          .set({ workNotes: action.note, updatedAt: nextTimestamp(job.updatedAt) })
+          .set({ workNotes: action.note, updatedAt: nextSimpleWorkTimestamp() })
           .where(and(
             eq(ticketJobs.shopId, parsedActor.data.shopId),
             eq(ticketJobs.id, job.id),
@@ -319,7 +319,7 @@ export async function mutateSimpleWork(
           workCompletedAt: sql`clock_timestamp()`,
           activeSeconds: settledActiveSeconds(),
           clockedOnSince: null,
-          updatedAt: nextTimestamp(job.updatedAt),
+          updatedAt: nextSimpleWorkTimestamp(),
         })
         .where(and(
           eq(ticketJobs.shopId, parsedActor.data.shopId),

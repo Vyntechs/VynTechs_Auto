@@ -97,7 +97,7 @@ describe('Golden browser QA control', () => {
   })
 
   it('accepts only an explicitly enabled Vyntechs preview deployment', () => {
-    const preview = 'https://vyntechs-dev-golden-shop-day.vercel.app'
+    const preview = 'https://vyntechs-golden-shop-day-brandon-nichols-projects-f7e6d2a9.vercel.app'
     expect(() => validateBaseUrl(preview, false, false)).toThrow(/Vyntechs/i)
     expect(validateBaseUrl(preview, false, true)).toBe(preview)
     expect(() => validateBaseUrl('https://unrelated-project.vercel.app', false, true)).toThrow(/Vyntechs/i)

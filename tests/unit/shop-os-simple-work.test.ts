@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { readFileSync } from 'node:fs'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 import {
@@ -16,7 +17,12 @@ import {
   tickets,
   vehicles,
 } from '@/lib/db/schema'
-import { getSimpleWorkWorkspace, mutateSimpleWork, type SimpleWorkActor } from '@/lib/shop-os/simple-work'
+import {
+  getSimpleWorkWorkspace,
+  mutateSimpleWork,
+  nextSimpleWorkTimestamp,
+  type SimpleWorkActor,
+} from '@/lib/shop-os/simple-work'
 
 const uuid = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -97,6 +103,13 @@ describe('Shop OS approved simple work', () => {
   })
 
   afterEach(async () => close())
+
+  it('generates monotonic timestamps from the locked database row without runtime Date parameters', () => {
+    const query = new PgDialect().sqlToQuery(nextSimpleWorkTimestamp())
+    expect(query.sql).toContain('"ticket_jobs"."updated_at"')
+    expect(query.sql).toContain("interval '1 millisecond'")
+    expect(query.params).toEqual([])
+  })
 
   it('starts exact approved assigned simple work and replays without another write', async () => {
     const first = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_on' } })
