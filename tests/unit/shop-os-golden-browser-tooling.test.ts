@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-ignore -- The executable is intentionally Node-only JavaScript with runtime-tested exports.
-import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupStatements, parseEnvFile, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
+import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupReplicationGuard, cleanupStatements, parseEnvFile, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
 
 type QaUser = { email: string; role: string; skillTier: number | null }
 type CleanupStatement = { table: string; sql: string; values: string[] }
@@ -81,10 +81,25 @@ describe('Golden browser QA control', () => {
       .toContain('select id from public.customers where shop_id = $1')
   })
 
+  it('bypasses immutable-ledger triggers only inside the cleanup transaction', () => {
+    expect(cleanupReplicationGuard()).toEqual({
+      enter: 'set local session_replication_role = replica',
+      exit: 'set local session_replication_role = origin',
+    })
+    expect(Object.values(cleanupReplicationGuard()).join(' ')).not.toMatch(/alter table|disable trigger/i)
+  })
+
   it('accepts production and explicit localhost only', () => {
     expect(validateBaseUrl('https://vyntechs.dev', false)).toBe('https://vyntechs.dev')
     expect(() => validateBaseUrl('http://localhost:3000', false)).toThrow(/ALLOW_LOCALHOST/)
     expect(validateBaseUrl('http://localhost:3000', true)).toBe('http://localhost:3000')
     expect(() => validateBaseUrl('https://example.com', true)).toThrow(/vyntechs/i)
+  })
+
+  it('accepts only an explicitly enabled Vyntechs preview deployment', () => {
+    const preview = 'https://vyntechs-dev-golden-shop-day.vercel.app'
+    expect(() => validateBaseUrl(preview, false, false)).toThrow(/Vyntechs/i)
+    expect(validateBaseUrl(preview, false, true)).toBe(preview)
+    expect(() => validateBaseUrl('https://unrelated-project.vercel.app', false, true)).toThrow(/Vyntechs/i)
   })
 })

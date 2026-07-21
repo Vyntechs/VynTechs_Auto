@@ -44,6 +44,13 @@ describe('Shop OS simple-work UI contract', () => {
     expect(parseInlineSimpleWorkResponse({ workspace, partRequests: [{ ...request, priceCents: 100 }] })).toBeNull()
   })
 
+  it('accepts a diagnostic workspace when diagnostics is off and manual work owns the job', () => {
+    expect(parseInlineSimpleWorkResponse({
+      workspace: { ...workspace, kind: 'diagnostic' },
+      partRequests: [],
+    })).toMatchObject({ workspace: { kind: 'diagnostic', authorization: 'approved' } })
+  })
+
   it('fails closed on extra private fields or malformed persisted values', () => {
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, shopId: uuid(9) } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, attachments: [] } })).toBeNull()

@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 const baseURL = process.env.GOLDEN_QA_BASE_URL ?? 'https://vyntechs.dev'
+const retainEvidence = process.env.GOLDEN_QA_RETAIN_EVIDENCE === '1'
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -15,8 +16,8 @@ export default defineConfig({
     baseURL,
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
-    screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    screenshot: retainEvidence ? 'only-on-failure' : 'off',
+    trace: retainEvidence ? 'retain-on-failure' : 'off',
     video: 'off',
   },
   projects: [
@@ -24,6 +25,7 @@ export default defineConfig({
       name: 'golden-phone',
       use: {
         browserName: 'chromium',
+        channel: 'chrome',
         viewport: { width: 390, height: 844 },
         deviceScaleFactor: 1,
         hasTouch: true,
@@ -34,6 +36,7 @@ export default defineConfig({
       name: 'golden-desktop',
       use: {
         browserName: 'chromium',
+        channel: 'chrome',
         viewport: { width: 1440, height: 900 },
         deviceScaleFactor: 1,
         hasTouch: false,

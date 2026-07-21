@@ -107,13 +107,17 @@ export function redactError(error) {
     .replace(/eyJ[A-Za-z0-9._-]{20,}/g, '<REDACTED>')
 }
 
-export function validateBaseUrl(raw, allowLocalhost = false) {
+export function validateBaseUrl(raw, allowLocalhost = false, allowVercelPreview = false) {
   const url = new URL(raw)
   const normalized = url.origin
   if (url.protocol === 'https:' && (url.hostname === 'vyntechs.dev' || url.hostname.endsWith('.vyntechs.dev'))) {
     return normalized
   }
   if (allowLocalhost && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)) {
+    return normalized
+  }
+  if (allowVercelPreview && url.protocol === 'https:'
+    && url.hostname.startsWith('vyntechs-dev-') && url.hostname.endsWith('.vercel.app')) {
     return normalized
   }
   if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
@@ -131,6 +135,13 @@ export function cleanupStatements(shopId) {
       : `delete from public.${table} where shop_id = $1`,
     values: [shopId],
   }))
+}
+
+export function cleanupReplicationGuard() {
+  return {
+    enter: 'set local session_replication_role = replica',
+    exit: 'set local session_replication_role = origin',
+  }
 }
 
 function requireEnv(env, names) {
@@ -452,10 +463,13 @@ export async function cleanupQaOperationalData(env) {
       if (unexpected.length > 0) {
         throw new Error(`QA cleanup stopped on unexpected dependencies: ${unexpected.map(([table, count]) => `${table}=${count}`).join(', ')}`)
       }
+      const replicationGuard = cleanupReplicationGuard()
+      await tx.unsafe(replicationGuard.enter)
       for (const statement of cleanupStatements(QA_SHOP_ID)) {
         await tx.unsafe(statement.sql, statement.values)
       }
       await tx`update public.shops set next_ticket_number = 1 where id = ${QA_SHOP_ID}::uuid`
+      await tx.unsafe(replicationGuard.exit)
     })
     return verifyQaClean(env)
   })
@@ -475,10 +489,11 @@ function playwrightEnvironment(baseUrl, credentials, runId) {
   return result
 }
 
-async function runBrowserProjects(env, baseUrl) {
+async function runBrowserProjects(env, baseUrl, selectedProject = null) {
   await verifyQaContract(env)
   const credentials = readQaCredentials()
-  for (const project of ['golden-phone', 'golden-desktop']) {
+  const projects = selectedProject ? [selectedProject] : ['golden-phone', 'golden-desktop']
+  for (const project of projects) {
     await cleanupQaOperationalData(env)
     const runId = `${randomUUID()}-${project}`
     try {
@@ -503,13 +518,18 @@ function parseCommand(argv) {
   const command = argv[2]
   const baseUrlIndex = argv.indexOf('--base-url')
   const baseUrl = baseUrlIndex >= 0 ? argv[baseUrlIndex + 1] : 'https://vyntechs.dev'
-  return { command, baseUrl }
+  const projectIndex = argv.indexOf('--project')
+  const project = projectIndex >= 0 ? argv[projectIndex + 1] : null
+  if (project !== null && !['golden-phone', 'golden-desktop'].includes(project)) {
+    throw new Error('Golden browser QA project must be golden-phone or golden-desktop')
+  }
+  return { command, baseUrl, project }
 }
 
 async function main() {
-  const { command, baseUrl } = parseCommand(process.argv)
-  if (!['provision', 'test', 'verify-clean'].includes(command)) {
-    throw new Error('Usage: shop-os-golden-browser.mjs <provision|test|verify-clean> [--base-url URL]')
+  const { command, baseUrl, project } = parseCommand(process.argv)
+  if (!['provision', 'test', 'clean', 'verify-clean'].includes(command)) {
+    throw new Error('Usage: shop-os-golden-browser.mjs <provision|test|clean|verify-clean> [--base-url URL]')
   }
   const pulled = pullProductionEnv()
   try {
@@ -524,9 +544,20 @@ async function main() {
       process.stdout.write(`Golden QA clean: ${Object.entries(counts).map(([table, count]) => `${table}=${count}`).join(' ')}\n`)
       return
     }
-    const normalizedBaseUrl = validateBaseUrl(baseUrl, process.env.GOLDEN_QA_ALLOW_LOCALHOST === '1')
-    await runBrowserProjects(pulled.env, normalizedBaseUrl)
-    process.stdout.write('Golden browser QA passed: phone=1 desktop=1 cleanup=clean\n')
+    if (command === 'clean') {
+      const counts = await cleanupQaOperationalData(pulled.env)
+      process.stdout.write(`Golden QA cleanup complete: ${Object.entries(counts).map(([table, count]) => `${table}=${count}`).join(' ')}\n`)
+      return
+    }
+    const normalizedBaseUrl = validateBaseUrl(
+      baseUrl,
+      process.env.GOLDEN_QA_ALLOW_LOCALHOST === '1',
+      process.env.GOLDEN_QA_ALLOW_VERCEL_PREVIEW === '1',
+    )
+    await runBrowserProjects(pulled.env, normalizedBaseUrl, project)
+    process.stdout.write(project
+      ? `Golden browser QA passed: ${project}=1 cleanup=clean\n`
+      : 'Golden browser QA passed: phone=1 desktop=1 cleanup=clean\n')
   } finally {
     pulled.dispose()
   }

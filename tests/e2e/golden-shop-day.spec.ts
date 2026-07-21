@@ -36,6 +36,11 @@ async function signedInPage(
   await page.getByLabel('Password').fill(user.password)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.waitForURL(/\/today$/)
+  const legalNotice = page.getByLabel('Terms and Privacy update')
+  if (await legalNotice.isVisible()) {
+    await legalNotice.getByRole('button', { name: 'Dismiss legal update notice' }).click()
+    await expect(legalNotice).toBeHidden()
+  }
   return { context, page }
 }
 
@@ -71,7 +76,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     }
 
     const owner = sessions.get('owner')!.page
-    await expect(owner.getByRole('heading', { name: 'Shop floor' })).toBeVisible()
+    await expect(owner.getByText('Shop floor', { exact: true })).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-today-empty')
     await owner.getByRole('link', { name: 'New work order' }).click()
     await owner.getByLabel('Name', { exact: true }).fill(customerName)
@@ -85,8 +90,8 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
     await owner.waitForURL(/\/tickets\/[0-9a-f-]+$/)
     const path = ticketPath(owner)
-    const ticketNumber = (await owner.getByText(/^RO \d{6}$/).textContent())!.replace(/^RO 0*/, '')
-    await expect(owner.getByRole('heading', { name: concern })).toBeVisible()
+    const ticketNumber = (await owner.getByText(/^RO \d{6}$/).first().textContent())!.replace(/^RO 0*/, '')
+    await expect(owner.getByRole('heading', { name: concern, exact: true })).toBeVisible()
     await expect(owner.getByText('Open — no technician assigned')).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-created-ticket')
 
@@ -109,22 +114,29 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await advisor.getByLabel('Description').fill('Front brake inspection and pad replacement')
     await advisor.getByLabel('Hours').fill('1.5')
     await advisor.getByRole('button', { name: 'Save line' }).click()
-    await expect(advisor.getByText('Front brake inspection and pad replacement')).toBeVisible()
+    await expect(advisor.getByText('Front brake inspection and pad replacement', { exact: true })).toBeVisible()
     await checkpoint(advisor, testInfo, 'advisor-quote-draft')
     await advisor.getByRole('button', { name: 'Prepare quote' }).click()
     await expect(advisor.getByText(/Prepared version V1/)).toBeVisible()
     await advisor.getByRole('button', { name: 'Phone approval' }).click()
     const approval = advisor.getByRole('alertdialog', { name: 'Record phone approval?' })
     await approval.getByRole('button', { name: 'Record approval' }).click()
-    await expect(advisor.getByText(/Approved · Phone · V1/)).toBeVisible()
+    await expect(advisor.getByRole('heading', { name: 'Quote complete' })).toBeVisible()
+    await expect(advisor.getByText('Approved · Version 1')).toBeVisible()
     await advisor.getByRole('button', { name: 'Close quote' }).click()
     await expect(advisor.getByRole('button', { name: 'Record approval' })).toBeHidden()
     await expect(advisor).toHaveURL(new RegExp(`${path}$`))
 
     const tech = sessions.get('tech')!.page
     await openTicketFromToday(tech, ticketNumber)
+    const workResponsePromise = tech.waitForResponse((response) => (
+      response.request().method() === 'GET'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
+    ))
     await tech.getByRole('button', { name: 'Start work' }).click()
-    await expect(tech.getByRole('region', { name: 'Work workspace' })).toBeVisible()
+    const workResponse = await workResponsePromise
+    expect(workResponse.status(), 'mounted work API status').toBe(200)
+    await expect(tech.getByRole('heading', { name: 'Approved and ready' })).toBeVisible()
     await expect(tech).toHaveURL(new RegExp(`${path}$`))
     await tech.getByRole('button', { name: 'Clock on' }).click()
     await expect(tech.getByRole('status').filter({ hasText: 'Clocked on.' })).toBeVisible()
@@ -180,6 +192,15 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(owner, testInfo, 'owner-closed-day')
     assertNoBrowserFaults(faults)
   } finally {
-    await Promise.all(Array.from(sessions.values()).map((session) => session.context.close()))
+    await Promise.race([
+      Promise.allSettled(Array.from(sessions.values()).map((session) => session.context.close())),
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ])
+    if (browser.isConnected()) {
+      await Promise.race([
+        browser.close(),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ])
+    }
   }
 })

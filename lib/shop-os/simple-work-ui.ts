@@ -6,7 +6,7 @@ const timestamp = z.string().datetime({ offset: true })
 const workspace = z.strictObject({
   id: uuid,
   title: z.string().min(1).max(500),
-  kind: z.enum(['repair', 'maintenance']),
+  kind: z.enum(['diagnostic', 'repair', 'maintenance']),
   workStatus: z.enum(['open', 'in_progress', 'done']),
   workNotes: z.string().max(2_000).nullable(),
   startedAt: timestamp.nullable(),
