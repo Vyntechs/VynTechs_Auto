@@ -115,5 +115,37 @@ describe('Shop OS exact-version approval UI', () => {
     expect(css).toMatch(/@media \(max-width:\s*600px\)/)
     expect(css).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)/)
     expect(css).toMatch(/max-height:\s*calc\(100dvh - 36px\)/)
+    expect(css).toMatch(/\.decisionDialog textarea[\s\S]*?min-height:\s*96px/)
+  })
+
+  it('keeps a deferred job on the mounted quote so its decision can resume without a new page', async () => {
+    const deferred = builder(true, { state: 'deferred', quoteVersionId: null })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({
+        changed: true,
+        event: { id: '00000000-0000-4000-8000-000000000501', kind: 'deferred', quoteVersionId: VERSION, jobId: JOB, approvedVia: null },
+        projection: { approvalState: 'deferred', approvedQuoteVersionId: null },
+      }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: deferred }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Defer decision' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Defer customer decision?' })
+    fireEvent.change(within(dialog).getByLabelText('What are we waiting for?'), {
+      target: { value: 'Customer is reviewing the estimate with their spouse.' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Defer decision' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      requestKey: REQUEST,
+      jobId: JOB,
+      quoteVersionId: VERSION,
+      decision: 'deferred',
+      reason: 'Customer is reviewing the estimate with their spouse.',
+    })
+    expect(screen.getByText('Deferred · follow up · V3')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Phone approval' })).toBeInTheDocument()
   })
 })

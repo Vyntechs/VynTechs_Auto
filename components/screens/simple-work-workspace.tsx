@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/vt'
 import {
@@ -17,10 +17,21 @@ import {
   type SimpleWorkWorkspaceView,
 } from '@/lib/shop-os/simple-work-ui'
 import type { PartRequestView } from '@/lib/shop-os/part-requests-ui'
-import { PartsNeededPanel } from './parts-needed-panel'
+import {
+  decodeSimpleWorkDraft,
+  encodeSimpleWorkDraft,
+  simpleWorkDraftStorageKey,
+  type SimpleWorkDraftValues,
+} from '@/lib/shop-os/simple-work-draft'
+import { PartsNeededPanel, type PartRequestDraft } from './parts-needed-panel'
+import {
+  parseInterruptionJob,
+  type InterruptionJobView,
+} from './ticket-interruption-action'
 import styles from './simple-work-workspace.module.css'
 
 type Props = {
+  actorProfileId?: string
   ticket: { id: string; number: number; customerName: string; vehicle: string }
   initialWorkspace: SimpleWorkWorkspaceView
   initialPartRequests?: PartRequestView[]
@@ -28,10 +39,11 @@ type Props = {
   onClose?: () => void
   onProjection?: (work: SimpleWorkProjectionView) => void
   onEscalation?: (job: SimpleWorkEscalationView) => void
+  onInterrupted?: (job: InterruptionJobView) => void
 }
 
 type Notice = { kind: 'status' | 'error'; text: string }
-type Pending = 'clock' | 'note' | 'complete' | 'escalation' | null
+type Pending = 'clock' | 'note' | 'complete' | 'escalation' | 'hold' | null
 
 const WORK_KIND_LABEL: Record<SimpleWorkWorkspaceView['kind'], string> = {
   diagnostic: 'Diagnostic',
@@ -39,7 +51,36 @@ const WORK_KIND_LABEL: Record<SimpleWorkWorkspaceView['kind'], string> = {
   maintenance: 'Maintenance',
 }
 
+const EMPTY_PARTS_DRAFT: PartRequestDraft = {
+  description: '', preference: '', quantity: '1', requestKey: null,
+}
+
+function readLocalDraft(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function clearLocalDraft(key: string): void {
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // Local draft recovery is best-effort and never blocks work.
+  }
+}
+
+function writeLocalDraft(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value)
+  } catch {
+    // A full or unavailable browser store must not interrupt repair work.
+  }
+}
+
 export function SimpleWorkWorkspace({
+  actorProfileId,
   ticket,
   initialWorkspace,
   initialPartRequests = [],
@@ -47,6 +88,7 @@ export function SimpleWorkWorkspace({
   onClose,
   onProjection,
   onEscalation,
+  onInterrupted,
 }: Props) {
   const router = useRouter()
   const [workspace, setWorkspace] = useState(initialWorkspace)
@@ -54,15 +96,127 @@ export function SimpleWorkWorkspace({
   const [pending, setPending] = useState<Pending>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [concern, setConcern] = useState('')
-  const [tier, setTier] = useState('')
+  const [tier, setTier] = useState<SimpleWorkDraftValues['tier']>('')
   const [createdConcern, setCreatedConcern] = useState(false)
   const [partsDraftDirty, setPartsDraftDirty] = useState(false)
+  const [partsDraft, setPartsDraft] = useState<PartRequestDraft>(EMPTY_PARTS_DRAFT)
+  const [holdKind, setHoldKind] = useState('')
+  const [holdNote, setHoldNote] = useState('')
+  const [draftReady, setDraftReady] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
+  const restoredDraftScope = useRef<string | null>(null)
   const basePath = `/api/tickets/${ticket.id}/jobs/${workspace.id}`
+  const hasOtherUnsavedDraft = note !== (workspace.workNotes ?? '')
+    || concern.trim().length > 0
+    || tier !== ''
+    || partsDraftDirty
+  const hasHoldDraft = holdKind !== '' || holdNote.trim().length > 0
   const hasAuxiliaryDraft = concern.trim().length > 0
     || tier !== ''
     || partsDraftDirty
-  const hasUnsavedDraft = note !== (workspace.workNotes ?? '') || hasAuxiliaryDraft
+    || hasHoldDraft
+  const hasUnsavedDraft = hasOtherUnsavedDraft || hasHoldDraft
+  const draftScope = actorProfileId ? {
+    actorProfileId,
+    ticketId: ticket.id,
+    jobId: workspace.id,
+    workspaceUpdatedAt: workspace.updatedAt,
+    workStatus: workspace.workStatus,
+    authorization: workspace.authorization,
+  } : null
+  const draftScopeKey = draftScope ? simpleWorkDraftStorageKey(draftScope) : null
+  const draftRevision = draftScopeKey ? `${draftScopeKey}:${workspace.updatedAt}` : null
+
+  useEffect(() => {
+    if (!draftScope || !draftScopeKey) {
+      restoredDraftScope.current = null
+      setDraftReady(true)
+      return
+    }
+    const restored = decodeSimpleWorkDraft(readLocalDraft(draftScopeKey), draftScope)
+    if (!restored) {
+      clearLocalDraft(draftScopeKey)
+    } else {
+      setNote(restored.note)
+      setConcern(restored.concern)
+      setTier(restored.tier)
+      setPartsDraft(restored.parts)
+      setHoldKind(restored.hold.kind)
+      setHoldNote(restored.hold.note)
+    }
+    restoredDraftScope.current = draftRevision
+    setDraftReady(true)
+  }, [
+    actorProfileId,
+    draftRevision,
+    draftScopeKey,
+    ticket.id,
+    workspace.authorization,
+    workspace.id,
+    workspace.updatedAt,
+    workspace.workStatus,
+  ])
+
+  useEffect(() => {
+    if (!draftScope || !draftScopeKey || !draftRevision || !draftReady || restoredDraftScope.current !== draftRevision) return
+    if (workspace.workStatus !== 'in_progress' || workspace.authorization !== 'approved') {
+      clearLocalDraft(draftScopeKey)
+      return
+    }
+    const values: SimpleWorkDraftValues = {
+      note,
+      concern,
+      tier,
+      parts: partsDraft,
+      hold: { kind: holdKind as SimpleWorkDraftValues['hold']['kind'], note: holdNote },
+    }
+    const hasDraft = note !== (workspace.workNotes ?? '')
+      || concern.trim().length > 0
+      || tier !== ''
+      || partsDraft.description.trim().length > 0
+      || partsDraft.preference.trim().length > 0
+      || partsDraft.quantity !== '1'
+      || partsDraft.requestKey !== null
+      || holdKind !== ''
+      || holdNote.trim().length > 0
+      || partsDraftDirty
+    const encoded = hasDraft ? encodeSimpleWorkDraft(draftScope, values) : null
+    if (encoded) writeLocalDraft(draftScopeKey, encoded)
+    else clearLocalDraft(draftScopeKey)
+  }, [
+    concern,
+    draftReady,
+    draftScope,
+    draftScopeKey,
+    draftRevision,
+    holdKind,
+    holdNote,
+    note,
+    partsDraft,
+    partsDraftDirty,
+    tier,
+    workspace.authorization,
+    workspace.workNotes,
+    workspace.workStatus,
+  ])
+
+  function clearDraft(): void {
+    if (draftScopeKey) clearLocalDraft(draftScopeKey)
+  }
+
+  function discardLocalDraft(): void {
+    setNote(workspace.workNotes ?? '')
+    setConcern('')
+    setTier('')
+    setCreatedConcern(false)
+    setPartsDraft(EMPTY_PARTS_DRAFT)
+    setPartsDraftDirty(false)
+    setHoldKind('')
+    setHoldNote('')
+    escalationAttempt.current = null
+    clearDraft()
+    setNotice({ kind: 'status', text: 'Local draft discarded. Saved repair-order work is unchanged.' })
+  }
 
   function requestClose(): void {
     if (pending !== null || hasUnsavedDraft) {
@@ -105,7 +259,6 @@ export function SimpleWorkWorkspace({
     const next = response.ok ? parseSimpleWorkWorkspaceResponse(body) : null
     if (!next) return null
     setWorkspace(next)
-    setNote(next.workNotes ?? '')
     return next
   }
 
@@ -184,11 +337,53 @@ export function SimpleWorkWorkspace({
       if (!result) throw new Error('escalation_failed')
       escalationAttempt.current = null
       setCreatedConcern(true)
+      setConcern('')
+      setTier('')
       onEscalation?.(result.job)
       setNotice({ kind: 'status', text: 'Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.' })
     } catch {
       setNotice({ kind: 'error', text: 'Not saved — check your connection and retry.' })
     } finally {
+      setPending(null)
+    }
+  }
+
+  async function placeOnHold(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (pending) return
+    const normalizedNote = holdNote.trim()
+    if (!['parts', 'customer', 'schedule', 'shop'].includes(holdKind) || normalizedNote.length < 1) {
+      setNotice({ kind: 'error', text: 'Choose why work is paused and say what needs to happen next.' })
+      return
+    }
+    if (hasOtherUnsavedDraft) {
+      setNotice({ kind: 'error', text: 'Save or clear the open draft before placing work on hold.' })
+      return
+    }
+    setPending('hold')
+    setNotice({ kind: 'status', text: 'Placing work on hold…' })
+    try {
+      const response = await fetch(`${basePath}/interruption`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'block',
+          requestKey: crypto.randomUUID(),
+          holdKind,
+          holdNote: normalizedNote,
+        }),
+      })
+      const body = await response.json().catch(() => null)
+      const job = response.ok && body && typeof body === 'object'
+        ? parseInterruptionJob((body as { job?: unknown }).job)
+        : null
+      if (!job) throw new Error('hold_failed')
+      clearDraft()
+      onInterrupted?.(job)
+      if (embedded) onClose?.()
+      else router.replace(`/tickets/${ticket.id}`)
+    } catch {
+      setNotice({ kind: 'error', text: 'Work was not put on hold. Check the connection and retry.' })
       setPending(null)
     }
   }
@@ -287,7 +482,29 @@ export function SimpleWorkWorkspace({
               jobId={workspace.id}
               initialRequests={initialPartRequests}
               onDraftChange={setPartsDraftDirty}
+              initialDraft={partsDraft}
+              onDraft={setPartsDraft}
             />
+            <details className={styles.concern}>
+              <summary>Put work on hold</summary>
+              <form onSubmit={placeOnHold}>
+                <p className={styles.helper}>Your saved time stays with this work. The repair order keeps the next thing that must happen.</p>
+                <label className={styles.label} htmlFor="hold-kind">Reason for hold</label>
+                <select id="hold-kind" value={holdKind} onChange={(event) => setHoldKind(event.target.value)}>
+                  <option value="">Choose reason</option>
+                  <option value="parts">Waiting on parts</option>
+                  <option value="customer">Waiting on customer</option>
+                  <option value="schedule">Schedule or availability</option>
+                  <option value="shop">Shop decision</option>
+                </select>
+                <label className={styles.label} htmlFor="hold-note">What needs to happen next?</label>
+                <textarea id="hold-note" value={holdNote} maxLength={500} onChange={(event) => setHoldNote(event.target.value)} />
+                {hasOtherUnsavedDraft && <p className={styles.helper}>Save or clear the open draft before placing work on hold.</p>}
+                <button className={styles.secondary} type="submit" disabled={pending !== null || hasOtherUnsavedDraft || holdKind === '' || holdNote.trim().length < 1}>
+                  {pending === 'hold' ? 'Placing on hold…' : 'Put work on hold'}
+                </button>
+              </form>
+            </details>
             <details className={styles.concern}>
               <summary>Found another concern</summary>
               {createdConcern ? (
@@ -302,7 +519,7 @@ export function SimpleWorkWorkspace({
                   }} />
                   <label className={styles.label} htmlFor="concern-tier">Required skill tier</label>
                   <select id="concern-tier" value={tier} onChange={(event) => {
-                    setTier(event.target.value); escalationAttempt.current = null
+                    setTier(event.target.value as SimpleWorkDraftValues['tier']); escalationAttempt.current = null
                   }}>
                     <option value="">Choose tier</option><option value="1">C-tech · Tier 1</option>
                     <option value="2">B-tech · Tier 2</option><option value="3">A-tech · Tier 3</option>
@@ -320,6 +537,11 @@ export function SimpleWorkWorkspace({
           role={notice.kind === 'error' ? 'alert' : 'status'} aria-live={notice.kind === 'error' ? 'assertive' : 'polite'}>
           {notice.text}
         </p>}
+        {hasUnsavedDraft && (
+          <button className={styles.secondary} type="button" onClick={discardLocalDraft}>
+            Discard local draft
+          </button>
+        )}
         {!embedded && <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>View repair order</Link>}
       </div>
     </Root>

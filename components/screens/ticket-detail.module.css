@@ -455,6 +455,116 @@
   margin-top: 10px;
 }
 
+.lifecycleControl {
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 18px;
+}
+
+.lifecycleControl > p,
+.lifecycleControl form > p {
+  margin: 10px 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.lifecycleControl summary {
+  min-block-size: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--vt-fg-2);
+  font: 600 14px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.lifecycleControl label {
+  display: block;
+  margin: 14px 0 7px;
+  color: var(--vt-fg-3);
+  font: 600 11px/1.3 var(--vt-font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lifecycleControl textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-50);
+  color: var(--vt-fg);
+  padding: 10px 12px;
+  font: inherit;
+  resize: vertical;
+}
+
+.lifecycleControl form .inlineAction {
+  margin-top: 12px;
+}
+
+.activity {
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 22px;
+}
+
+.activitySummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.activitySummary::-webkit-details-marker {
+  display: none;
+}
+
+.activitySummary > span {
+  color: var(--vt-fg-3);
+  font: 11px/1.4 var(--vt-font-mono);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.activityList {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--vt-rule);
+}
+
+.activityList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--vt-rule);
+}
+
+.activityList p,
+.activityList span {
+  min-width: 0;
+  margin: 0;
+}
+
+.activityList p {
+  overflow-wrap: anywhere;
+  color: var(--vt-fg-1);
+  font: 14px/1.45 var(--vt-font-sans);
+}
+
+.activityList span {
+  flex: 0 1 230px;
+  color: var(--vt-fg-3);
+  font: 11px/1.4 var(--vt-font-mono);
+  text-align: right;
+}
+
 .inlineAction {
   min-block-size: 44px;
   border: 1px solid var(--vt-signal-500);
@@ -468,7 +578,9 @@
 
 .inlineAction:focus-visible,
 .assignmentChoices button:focus-visible,
-.tierConfirmation button:focus-visible {
+.tierConfirmation button:focus-visible,
+.lifecycleControl summary:focus-visible,
+.lifecycleControl textarea:focus-visible {
   outline: 2px solid var(--vt-signal-500);
   outline-offset: 3px;
 }
@@ -626,6 +738,17 @@
 
   .assignmentRow {
     padding-top: 4px;
+  }
+
+  .activityList li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .activityList span {
+    flex-basis: auto;
+    text-align: left;
   }
 
   .assignmentChoices {

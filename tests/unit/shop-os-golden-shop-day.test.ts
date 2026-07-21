@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { jobPartRequests, ticketPayments } from '@/lib/db/schema'
+import { jobPartRequests, quoteEvents, ticketActivity, ticketPayments } from '@/lib/db/schema'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
 import { saveReviewedCustomerStory } from '@/lib/shop-os/customer-stories'
 import { projectLivingTicketCommands } from '@/lib/shop-os/living-ticket'
@@ -8,7 +8,8 @@ import { createPartRequest, resolvePartRequest } from '@/lib/shop-os/part-reques
 import { createDraftLine, createQuoteVersion, recordQuoteDecision } from '@/lib/shop-os/quotes'
 import { closeTicket, getTicketRingOut, recordTicketPayment } from '@/lib/shop-os/ring-out'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
-import { getTicketDetail, listTodayTicketJobs, mutateTicketJobAssignment } from '@/lib/tickets'
+import { mutateJobInterruption } from '@/lib/shop-os/interruption'
+import { addTicketJob, getTicketDetail, listTodayTicketJobs, mutateTicketJobAssignment } from '@/lib/tickets'
 import { createGoldenShopDay, GOLDEN_KEYS } from '@/tests/helpers/golden-shop-day'
 
 function commandKinds(
@@ -31,6 +32,93 @@ function commandKinds(
 }
 
 describe('Golden Shop Day release gate', () => {
+  it('keeps a partial customer answer mounted until a deferred job gets its durable final decision', async () => {
+    const golden = await createGoldenShopDay()
+    try {
+      const created = await createCounterTicket(golden.db, {
+        actor: golden.actors.advisor,
+        body: {
+          vehicleMode: 'new', customer: golden.customer, vehicle: golden.vehicle,
+          concern: 'Customer wants us to address braking and a separate maintenance item.',
+          whenStarted: 'This week', howOften: 'Every drive',
+          diagnosticAuthorization: { amountDollars: '120', note: 'Synthetic only' },
+          assignedTechId: golden.people.tech.id,
+        },
+      })
+      expect(created).toMatchObject({ ok: true })
+      if (!created.ok) throw new Error('counter intake failed')
+      const firstJob = created.ticket.jobs[0]
+      const added = await addTicketJob(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: created.ticket.id,
+        body: {
+          title: 'Replace cabin air filter', kind: 'maintenance', requiredSkillTier: 1,
+          assignedTechId: null,
+        },
+      })
+      expect(added).toMatchObject({ ok: true })
+      if (!added.ok) throw new Error('second job failed')
+      const secondJob = added.ticket.jobs.find((job) => job.id !== firstJob.id)
+      if (!secondJob) throw new Error('second job missing')
+      expect(await saveReviewedCustomerStory(golden.db, {
+        actor: { profileId: golden.people.tech.id }, ticketId: created.ticket.id, jobId: firstJob.id,
+        clientKey: GOLDEN_KEYS.story, expectedStoryRevision: 0,
+        whatWeFound: 'Brake pads are worn below service recommendation.',
+        whatWeRecommend: 'Replace pads and verify the brake system.',
+      })).toMatchObject({ ok: true, changed: true })
+
+      for (const [job, key, description] of [
+        [firstJob, GOLDEN_KEYS.line, 'Brake repair labor'],
+        [secondJob, GOLDEN_KEYS.secondLine, 'Cabin filter labor'],
+      ] as const) {
+        expect(await createDraftLine(golden.db, {
+          actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id, jobId: job.id, clientKey: key,
+          body: { kind: 'labor', description, taxable: false, laborHours: '1' },
+        })).toMatchObject({ ok: true, changed: true })
+      }
+      const version = await createQuoteVersion(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+      })
+      expect(version).toMatchObject({ ok: true, changed: true })
+      if (!version.ok) throw new Error('quote version failed')
+
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.approval, jobId: firstJob.id, quoteVersionId: version.version.id,
+          decision: 'approved', approvedVia: 'phone',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'approved' } })
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.deferred, jobId: secondJob.id, quoteVersionId: version.version.id,
+          decision: 'deferred', reason: 'Customer will decide after their next paycheck.',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'deferred', approvedQuoteVersionId: null } })
+
+      const partial = await getTicketDetail(golden.db, { actor: golden.actors.advisor, ticketId: created.ticket.id })
+      expect(partial).toMatchObject({ ok: true, ticket: { jobs: expect.arrayContaining([
+        expect.objectContaining({ id: firstJob.id, approvalState: 'approved' }),
+        expect.objectContaining({ id: secondJob.id, approvalState: 'deferred' }),
+      ]) } })
+      if (!partial.ok) throw new Error('partial ticket unavailable')
+      expect(commandKinds(golden.actors.advisor, partial.ticket)).toContain('quote')
+
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.deferredApproval, jobId: secondJob.id, quoteVersionId: version.version.id,
+          decision: 'approved', approvedVia: 'in_person',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'approved', approvedQuoteVersionId: version.version.id } })
+      const decisions = await golden.db.select().from(quoteEvents)
+      expect(decisions.map((event) => event.kind)).toEqual(['approved', 'deferred', 'approved'])
+    } finally {
+      await golden.close()
+    }
+  })
+
   it.each([1, 2])('moves one synthetic repair order through every role without losing truth (run %s)', async () => {
     const golden = await createGoldenShopDay()
     try {
@@ -66,7 +154,11 @@ describe('Golden Shop Day release gate', () => {
         actor: golden.actors.advisor,
         ticketId,
         jobId: job.id,
-        body: { action: 'reassign', assignedTechId: golden.people.tech.id },
+        body: {
+          action: 'reassign',
+          requestKey: '00000000-0000-4000-8000-000000000401',
+          assignedTechId: golden.people.tech.id,
+        },
       })
       expect(assigned).toMatchObject({ ok: true })
 
@@ -217,6 +309,68 @@ describe('Golden Shop Day release gate', () => {
       expect(await golden.db.select().from(jobPartRequests)
         .where(eq(jobPartRequests.ticketId, ticketId))).toHaveLength(1)
 
+      const paused = await mutateSimpleWork(golden.db, {
+        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        ticketId,
+        jobId: job.id,
+        body: { action: 'clock_off' },
+      })
+      expect(paused).toMatchObject({ ok: true, work: { status: 'in_progress', clockedOnSince: null } })
+
+      const held = await mutateJobInterruption(golden.db, {
+        actor: {
+          profileId: golden.people.tech.id, shopId: golden.shop.id, role: 'tech',
+          membershipStatus: 'active', deactivatedAt: null,
+        },
+        ticketId,
+        jobId: job.id,
+        body: {
+          action: 'block', requestKey: GOLDEN_KEYS.hold, holdKind: 'parts',
+          holdNote: 'Parts request is with the parts desk.',
+        },
+      })
+      expect(held).toMatchObject({ ok: true, job: { workStatus: 'blocked', holdKind: 'parts' } })
+      const handedOff = await mutateJobInterruption(golden.db, {
+        actor: {
+          profileId: golden.people.advisor.id, shopId: golden.shop.id, role: 'advisor',
+          membershipStatus: 'active', deactivatedAt: null,
+        },
+        ticketId,
+        jobId: job.id,
+        body: { action: 'handoff', requestKey: GOLDEN_KEYS.handoff, assignedTechId: golden.people.relief.id },
+      })
+      expect(handedOff).toMatchObject({ ok: true, job: { assignedTechId: golden.people.relief.id, workStatus: 'blocked' } })
+      const reliefHeldTicket = await getTicketDetail(golden.db, { actor: golden.actors.relief, ticketId })
+      expect(reliefHeldTicket).toMatchObject({ ok: true, ticket: { jobs: [expect.objectContaining({ workStatus: 'blocked' })] } })
+      if (!reliefHeldTicket.ok) throw new Error('relief ticket unavailable')
+      expect(commandKinds(golden.actors.relief, reliefHeldTicket.ticket)[0]).toBe('resolve_hold')
+      expect(commandKinds(golden.actors.tech, reliefHeldTicket.ticket)).not.toContain('resolve_hold')
+      const resolved = await mutateJobInterruption(golden.db, {
+        actor: {
+          profileId: golden.people.relief.id, shopId: golden.shop.id, role: 'tech',
+          membershipStatus: 'active', deactivatedAt: null,
+        },
+        ticketId,
+        jobId: job.id,
+        body: { action: 'resolve_hold', requestKey: GOLDEN_KEYS.resolveHold },
+      })
+      expect(resolved).toMatchObject({ ok: true, job: { workStatus: 'in_progress', assignedTechId: golden.people.relief.id } })
+      const resumed = await mutateSimpleWork(golden.db, {
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
+        ticketId,
+        jobId: job.id,
+        body: { action: 'clock_on' },
+      })
+      expect(resumed).toMatchObject({ ok: true, work: { status: 'in_progress', clockedOnSince: expect.any(String) } })
+      expect(await golden.db.select().from(ticketActivity).where(eq(ticketActivity.ticketId, ticketId)))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ kind: 'work_paused' }),
+          expect.objectContaining({ kind: 'job_blocked' }),
+          expect.objectContaining({ kind: 'job_handed_off' }),
+          expect.objectContaining({ kind: 'job_hold_resolved' }),
+          expect.objectContaining({ kind: 'work_resumed' }),
+        ]))
+
       const partsQueue = await listTodayTicketJobs(golden.db, { actor: golden.actors.parts })
       expect((partsQueue as typeof partsQueue & { partsJobs?: typeof partsQueue.myJobs }).partsJobs)
         .toEqual([expect.objectContaining({ id: job.id })])
@@ -243,19 +397,19 @@ describe('Golden Shop Day release gate', () => {
       })).partsJobs).toEqual([])
 
       const noted = await mutateSimpleWork(golden.db, {
-        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
         body: {
           action: 'save_note',
           note: 'Alternator replaced; charging output verified at idle and under load.',
-          expectedUpdatedAt: started.work.updatedAt,
+          expectedUpdatedAt: resumed.ok ? resumed.work.updatedAt : started.work.updatedAt,
         },
       })
       expect(noted).toMatchObject({ ok: true, changed: true })
       if (!noted.ok) throw new Error('work note failed')
       expect(await mutateSimpleWork(golden.db, {
-        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
         body: {
@@ -265,7 +419,7 @@ describe('Golden Shop Day release gate', () => {
         },
       })).toEqual({ ok: false, error: 'conflict', retryable: true })
       expect(await getSimpleWorkWorkspace(golden.db, {
-        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
       })).toMatchObject({
@@ -275,7 +429,7 @@ describe('Golden Shop Day release gate', () => {
         },
       })
       expect(await mutateSimpleWork(golden.db, {
-        actor: { profileId: golden.people.tech.id, shopId: golden.shop.id },
+        actor: { profileId: golden.people.relief.id, shopId: golden.shop.id },
         ticketId,
         jobId: job.id,
         body: { action: 'complete', expectedUpdatedAt: noted.work.updatedAt },

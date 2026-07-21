@@ -98,6 +98,13 @@ vi.mock('@/components/screens/inline-work-workspace', () => ({
   ),
 }))
 
+vi.mock('@/components/screens/ticket-interruption-action', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/screens/ticket-interruption-action')>(),
+  TicketInterruptionAction: ({ onApplied }: { onApplied: (job: { workStatus: 'in_progress' }) => void }) => (
+    <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
+  ),
+}))
+
 const timestamp = new Date('2026-07-10T14:30:00Z')
 
 type TicketJob = TicketDetail['jobs'][number]
@@ -150,6 +157,7 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
       plate: 'TEX-4192',
     },
     jobs: [job()],
+    activities: [],
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides,
@@ -194,6 +202,20 @@ describe('TicketDetailScreen', () => {
       'href',
       '/vehicles/vehicle-1',
     )
+  })
+
+  it('shows durable interruption truth as a compact repair-order record', () => {
+    render(<TicketDetailScreen ticket={ticket({
+      activities: [{
+        id: 'activity-1', jobId: 'job-1', kind: 'job_blocked', actorName: 'Taylor Tech',
+        summary: 'Diagnose brake vibration: Put on hold — Awaiting pads.', createdAt: timestamp,
+      }],
+    })} />)
+
+    expect(screen.getByRole('heading', { name: 'Repair order activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Repair order activity' }).closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('Diagnose brake vibration: Put on hold — Awaiting pads.')).toBeInTheDocument()
+    expect(screen.getByText(/Taylor Tech/)).toBeInTheDocument()
   })
 
   it('renders an honest provisional tech-quick state without invented actions or identity', () => {
@@ -485,6 +507,28 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')).toHaveFocus()
   })
 
+  it('keeps a technician’s blocked assigned work on the mounted repair order until it is resolved', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      ticket={ticket({ jobs: [job({
+        id: 'blocked-repair',
+        title: 'Install lift kit',
+        kind: 'repair',
+        assignedTechId: 'tech-1',
+        approvalState: 'approved',
+        workStatus: 'blocked',
+      })] })}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    expect(within(row).getByRole('button', { name: 'Resolve hold' })).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'Resolve hold' }))
+    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
+  })
+
   it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {
     render(<TicketDetailScreen
       role="tech"
@@ -583,7 +627,7 @@ describe('TicketDetailScreen', () => {
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ action: 'reassign', assignedTechId: 'tech-1' }),
+        body: expect.stringMatching(/^\{"action":"reassign","assignedTechId":"tech-1","requestKey":"[0-9a-f-]+"\}$/),
       }),
     )
     expect(within(target).getByText('Assigned · Angel Rivera')).toBeInTheDocument()
@@ -618,7 +662,7 @@ describe('TicketDetailScreen', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
-      expect.objectContaining({ body: JSON.stringify({ action: 'claim' }) }),
+      expect.objectContaining({ body: expect.stringMatching(/^\{"action":"claim","requestKey":"[0-9a-f-]+"\}$/) }),
     )
     expect(screen.getByText('Assigned · Toni Tech')).toBeInTheDocument()
     expect(screen.queryByText('Not visible')).toBeNull()
@@ -654,13 +698,82 @@ describe('TicketDetailScreen', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
       expect.objectContaining({
-        body: JSON.stringify({
-          action: 'reassign',
-          assignedTechId: 'tech-1',
-          confirmBelowTier: true,
-        }),
+        body: expect.stringMatching(/^\{"action":"reassign","assignedTechId":"tech-1","confirmBelowTier":true,"requestKey":"[0-9a-f-]+"\}$/),
       }),
     )
+  })
+
+  it('hands active work to an eligible relief technician without making a new page or discarding its state', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      changed: true,
+      job: {
+        id: 'repair-active', assignedTechId: 'relief-1', workStatus: 'in_progress',
+        holdKind: null, holdNote: null, holdResumeStatus: null, heldAt: null,
+        heldByProfileId: null, clockedOnSince: null, activeSeconds: 180,
+        updatedAt: '2026-07-21T17:00:00.000Z',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000099' })
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      currentProfileName="Avery Advisor"
+      team={[{ id: 'relief-1', name: 'Riley Relief', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({
+        id: 'repair-active', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2,
+        assignedTechId: 'tech-1', workStatus: 'in_progress', approvalState: 'approved',
+      })] })}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Hand off' }))
+    await user.click(within(row).getByRole('button', { name: /Riley Relief.*B-tech/i }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-active/interruption',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    const options = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0][1]
+    expect(JSON.parse(String(options.body))).toEqual({
+      action: 'handoff', assignedTechId: 'relief-1', requestKey: '00000000-0000-4000-8000-000000000099',
+    })
+    expect(within(row).getByText('Assigned · Riley Relief')).toBeInTheDocument()
+    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
+  })
+
+  it('lets an advisor cancel and reopen the mounted repair order while reconciling every returned job state', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000098' })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        ticket: { id: 'ticket-1', status: 'canceled', jobs: [{ id: 'repair-active', workStatus: 'canceled' }] },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        ticket: { id: 'ticket-1', status: 'open', jobs: [{ id: 'repair-active', workStatus: 'in_progress' }] },
+      })))
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      ticket={ticket({ jobs: [job({
+        id: 'repair-active', title: 'Install lift kit', kind: 'repair', assignedTechId: 'tech-1',
+        approvalState: 'approved', workStatus: 'in_progress',
+      })] })}
+    />)
+
+    await user.click(screen.getAllByText('Cancel repair order')[0])
+    await user.type(screen.getByLabelText('Cancellation reason'), 'Customer rescheduled.')
+    await user.click(screen.getByRole('button', { name: 'Cancel repair order' }))
+    expect(await screen.findByText('Canceled · Counter intake')).toBeInTheDocument()
+    expect(screen.getByText('Work · Canceled')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Reopen repair order' }))
+    expect(await screen.findByText('Open · Counter intake')).toBeInTheDocument()
+    expect(screen.getByText('Work · In progress')).toBeInTheDocument()
   })
 
   it('keeps the row mounted and shows only the safe winner after a claim race', async () => {

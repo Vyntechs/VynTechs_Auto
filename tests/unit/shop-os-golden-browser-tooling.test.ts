@@ -7,7 +7,7 @@ type QaUser = { email: string; role: string; skillTier: number | null }
 type CleanupStatement = { table: string; sql: string; values: string[] }
 
 describe('Golden browser QA control', () => {
-  it('uses one fixed synthetic shop and the four intended roles', () => {
+  it('uses one fixed synthetic shop and both technicians needed for Chaos Shop Day', () => {
     const users = Object.values(QA_USERS as Record<string, QaUser>)
 
     expect(QA_SHOP_ID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/)
@@ -16,10 +16,12 @@ describe('Golden browser QA control', () => {
       'owner',
       'advisor',
       'tech',
+      'tech',
       'parts',
     ])
     expect(users.every((user) => user.email.endsWith('.invalid'))).toBe(true)
     expect(QA_USERS.tech.skillTier).toBe(3)
+    expect(QA_USERS.relief.skillTier).toBe(3)
     expect(QA_USERS.owner.skillTier).toBeNull()
   })
 
@@ -57,6 +59,7 @@ describe('Golden browser QA control', () => {
 
   it('keeps every cleanup statement bound to the fixed QA shop', () => {
     expect(CLEANUP_TABLES).toEqual([
+      'ticket_activity',
       'ticket_payments',
       'quote_events',
       'job_part_requests',

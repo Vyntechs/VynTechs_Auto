@@ -70,6 +70,8 @@ export async function createTestDb(): Promise<{
   await ensureStripeWebhookOrderingMigration(client)
   await ensurePublicSchemaClientAclMigration(client)
   await ensureTicketJobHistoryBoundMigration(client)
+  await ensureTicketActivityMigration(client)
+  await ensureShopOsQuoteDeferralMigration(client)
   return {
     db,
     client,
@@ -107,6 +109,110 @@ export async function ensureTicketJobHistoryBoundMigration(client: PGlite): Prom
   `)
   if (!applied.rows[0]?.indexdef.includes('created_at DESC, id DESC')) {
     throw new Error('ticket job history migration failed')
+  }
+}
+
+export async function ensureTicketActivityMigration(client: PGlite): Promise<void> {
+  const result = await client.query<{
+    table_count: number
+    hold_columns: number
+    immutable_triggers: number
+  }>(`
+    select
+      (select count(*)::int
+       from information_schema.tables
+       where table_schema = 'public' and table_name = 'ticket_activity') as table_count,
+      (select count(*)::int
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'ticket_jobs'
+         and column_name in ('hold_kind', 'hold_note', 'hold_resume_status', 'held_at', 'held_by_profile_id')) as hold_columns,
+      (select count(*)::int
+       from pg_trigger
+       where tgrelid = to_regclass('public.ticket_activity')
+         and tgname in ('ticket_activity_reject_update', 'ticket_activity_reject_delete')
+         and not tgisinternal) as immutable_triggers
+  `)
+  const markers = result.rows[0]
+  if (markers?.table_count === 1
+    && markers.hold_columns === 5
+    && markers.immutable_triggers === 2) return
+  if (markers?.table_count !== 0 || markers.hold_columns !== 0 || markers.immutable_triggers !== 0) {
+    throw new Error('partial ticket activity schema in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0045_shop_os_interruption_ledger.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const applied = await client.query<{
+    table_count: number
+    hold_columns: number
+    immutable_triggers: number
+  }>(`
+    select
+      (select count(*)::int
+       from information_schema.tables
+       where table_schema = 'public' and table_name = 'ticket_activity') as table_count,
+      (select count(*)::int
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'ticket_jobs'
+         and column_name in ('hold_kind', 'hold_note', 'hold_resume_status', 'held_at', 'held_by_profile_id')) as hold_columns,
+      (select count(*)::int
+       from pg_trigger
+       where tgrelid = to_regclass('public.ticket_activity')
+         and tgname in ('ticket_activity_reject_update', 'ticket_activity_reject_delete')
+         and not tgisinternal) as immutable_triggers
+  `)
+  const appliedMarkers = applied.rows[0]
+  if (appliedMarkers?.table_count !== 1
+    || appliedMarkers.hold_columns !== 5
+    || appliedMarkers.immutable_triggers !== 2) {
+    throw new Error('ticket activity migration failed in ephemeral database')
+  }
+}
+
+export async function ensureShopOsQuoteDeferralMigration(client: PGlite): Promise<void> {
+  const constraints = await client.query<{ conname: string; definition: string }>(`
+    select conname, pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid in (to_regclass('public.ticket_jobs'), to_regclass('public.quote_events'))
+      and conname in (
+        'ticket_jobs_approval_state_valid',
+        'quote_events_kind_valid',
+        'quote_events_decision_job_consistent',
+        'quote_events_deferred_reason_consistent'
+      )
+  `)
+  const definitions = new Map(constraints.rows.map((row) => [row.conname, row.definition]))
+  const ready = definitions.size === 4
+    && Array.from(definitions.values()).every((definition) => definition.includes('deferred'))
+  if (ready) return
+  const expectedOld = definitions.size === 3
+    && !definitions.has('quote_events_deferred_reason_consistent')
+    && Array.from(definitions.values()).every((definition) => !definition.includes('deferred'))
+  if (!expectedOld) throw new Error('partial ShopOS quote deferral schema in ephemeral database')
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0046_shop_os_quote_deferral.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const applied = await client.query<{ conname: string; definition: string }>(`
+    select conname, pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid in (to_regclass('public.ticket_jobs'), to_regclass('public.quote_events'))
+      and conname in (
+        'ticket_jobs_approval_state_valid',
+        'quote_events_kind_valid',
+        'quote_events_decision_job_consistent',
+        'quote_events_deferred_reason_consistent'
+      )
+  `)
+  if (applied.rows.length !== 4 || applied.rows.some((row) => !row.definition.includes('deferred'))) {
+    throw new Error('ShopOS quote deferral migration failed in ephemeral database')
   }
 }
 

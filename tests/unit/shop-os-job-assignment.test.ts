@@ -6,7 +6,7 @@ import {
   mutateTicketJobAssignment,
   type TicketActor,
 } from '@/lib/tickets'
-import { profiles, shops, ticketJobs, tickets } from '@/lib/db/schema'
+import { profiles, shops, ticketActivity, ticketJobs, tickets } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
 const userId = (suffix: number) =>
@@ -74,22 +74,28 @@ describe('ticket-job assignment mutations', () => {
   let otherShopId: string
   let ticketId: string
   let jobId: string
+  let requestSequence: number
   let actor: Record<'tech' | 'otherTech' | 'advisor' | 'owner' | 'parts', TicketActor>
 
   const call = (
     who: TicketActor,
     body: unknown,
     ids: { ticketId?: unknown; jobId?: unknown } = {},
-    dependencies?: { beforeReassignUpdate?: () => Promise<void> },
+    dependencies?: unknown,
   ) =>
     mutateTicketJobAssignment(db, {
       actor: who,
       ticketId: ids.ticketId ?? ticketId,
       jobId: ids.jobId ?? jobId,
-      body,
-    }, dependencies)
+      body: typeof body === 'object' && body !== null && !Array.isArray(body)
+        && typeof (body as Record<string, unknown>).action === 'string'
+        && !('requestKey' in body)
+        ? { ...body as Record<string, unknown>, requestKey: userId(requestSequence++) }
+        : body,
+    }, dependencies as never)
 
   beforeEach(async () => {
+    requestSequence = 100
     const testDb = await createTestDb()
     db = testDb.db
     close = testDb.close
@@ -141,6 +147,41 @@ describe('ticket-job assignment mutations', () => {
   })
 
   afterEach(async () => close())
+
+  it('records one durable receipt when a regular claim is retried with the same request key', async () => {
+    const body = {
+      action: 'claim',
+      requestKey: userId(70),
+    }
+
+    const first = await call(actor.tech, body)
+    const replay = await call(actor.tech, body)
+    const receipts = await db.select().from(ticketActivity)
+
+    expect(first).toMatchObject({
+      ok: true,
+      changed: true,
+      ticket: { jobs: [{ id: jobId, assignedTechId: actor.tech.profileId }] },
+    })
+    expect(replay).toMatchObject({
+      ok: true,
+      changed: false,
+      ticket: { jobs: [{ id: jobId, assignedTechId: actor.tech.profileId }] },
+    })
+    expect(receipts).toEqual([expect.objectContaining({
+      shopId,
+      ticketId,
+      jobId,
+      actorProfileId: actor.tech.profileId,
+      kind: 'job_reassigned',
+      requestKey: body.requestKey,
+      payload: expect.objectContaining({
+        action: 'claim',
+        fromAssignedTechId: null,
+        toAssignedTechId: actor.tech.profileId,
+      }),
+    })])
+  })
 
   it('self-claims an eligible open job with a database timestamp and returns the safe ticket', async () => {
     const before = new Date()
@@ -256,8 +297,8 @@ describe('ticket-job assignment mutations', () => {
         { action: 'reassign', assignedTechId: actor.otherTech.profileId },
         {},
         {
-          beforeReassignUpdate: async () => {
-            await db.update(ticketJobs).set({
+          beforeReassignUpdate: async (database: TestDb) => {
+            await database.update(ticketJobs).set({
               diagnosticStartState: 'initializing',
               diagnosticStartAttemptKey: userId(92),
               diagnosticStartLeaseUntil: new Date('2099-01-01T00:00:00Z'),
@@ -347,8 +388,8 @@ describe('ticket-job assignment mutations', () => {
       { action: 'reassign', assignedTechId: actor.otherTech.profileId },
       {},
       {
-        beforeReassignUpdate: async () => {
-          await db.update(profiles).set({ skillTier: 1 })
+        beforeReassignUpdate: async (database: TestDb) => {
+          await database.update(profiles).set({ skillTier: 1 })
             .where(eq(profiles.id, actor.otherTech.profileId))
         },
       },
@@ -376,8 +417,8 @@ describe('ticket-job assignment mutations', () => {
       { action: 'reassign', assignedTechId: actor.otherTech.profileId },
       {},
       {
-        beforeReassignUpdate: async () => {
-          await db.update(profiles).set({ role: 'curator' })
+        beforeReassignUpdate: async (database: TestDb) => {
+          await database.update(profiles).set({ role: 'curator' })
             .where(eq(profiles.id, actor.otherTech.profileId))
         },
       },

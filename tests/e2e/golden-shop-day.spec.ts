@@ -1,10 +1,10 @@
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
 import { assertNoBrowserFaults, checkpoint, watchBrowserFaults } from './golden-browser-receipts'
 
-type Role = 'owner' | 'advisor' | 'tech' | 'parts'
+type Role = 'owner' | 'advisor' | 'tech' | 'relief' | 'parts'
 type Credential = { email: string; password: string }
 
-const roles: Role[] = ['owner', 'advisor', 'tech', 'parts']
+const roles: Role[] = ['owner', 'advisor', 'tech', 'relief', 'parts']
 
 function credential(role: Role): Credential {
   const prefix = `GOLDEN_QA_${role.toUpperCase()}`
@@ -152,6 +152,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const quoteViewers: Array<{ role: Role; entry: string; canDecide: boolean }> = [
       { role: 'owner', entry: 'Record approval', canDecide: true },
       { role: 'tech', entry: 'View quote', canDecide: false },
+      { role: 'relief', entry: 'View quote', canDecide: false },
       { role: 'parts', entry: 'View quote', canDecide: false },
     ]
     for (const viewer of quoteViewers) {
@@ -168,6 +169,14 @@ test('the living repair order survives one complete shop day', async ({ browser,
       await checkpoint(page, testInfo, `${viewer.role}-quote-authority`)
       await page.getByRole('button', { name: 'Close quote' }).click()
     }
+
+    await advisor.getByRole('button', { name: 'Defer decision' }).click()
+    const deferral = advisor.getByRole('alertdialog', { name: 'Defer customer decision?' })
+    await deferral.getByLabel('What are we waiting for?').fill('Customer is confirming the timing of the repair.')
+    await deferral.getByRole('button', { name: 'Defer decision' }).click()
+    await expect(advisor.getByText('Deferred · follow up · V1')).toBeVisible()
+    await expect(advisor.getByRole('button', { name: 'Phone approval' })).toBeVisible()
+    await checkpoint(advisor, testInfo, 'advisor-deferred-then-resumed-decision')
 
     await advisor.getByRole('button', { name: 'Phone approval' }).click()
     const approval = advisor.getByRole('alertdialog', { name: 'Record phone approval?' })
@@ -198,6 +207,10 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(tech.getByRole('heading', { name: 'Work in progress' })).toBeVisible()
     const note = tech.getByRole('textbox', { name: 'Work note' })
     await note.fill('Confirmed pad wear, replaced front pads, torqued hardware, and completed a quiet road test.')
+    await tech.reload()
+    await expect(tech.getByRole('button', { name: 'Continue work' })).toBeVisible()
+    await tech.getByRole('button', { name: 'Continue work' }).click()
+    await expect(tech.getByRole('textbox', { name: 'Work note' })).toHaveValue(/Confirmed pad wear/)
     await tech.getByRole('button', { name: 'Close work' }).click()
     await expect(tech.getByRole('alert').filter({ hasText: 'Finish or clear the draft' })).toBeVisible()
     await expect(note).toHaveValue(/Confirmed pad wear/)
@@ -212,7 +225,28 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await tech.getByLabel('Brand or where to get it').fill('OE-equivalent')
     await tech.getByRole('button', { name: 'Send to parts' }).click()
     await expect(tech.getByText('Waiting on parts')).toBeVisible()
+    await tech.getByText('Put work on hold', { exact: true }).click()
+    await tech.getByLabel('Reason for hold').selectOption('parts')
+    await tech.getByLabel('What needs to happen next?').fill('Wait for the parts desk to source the pad set.')
+    await tech.getByRole('button', { name: 'Put work on hold' }).click()
+    await expect(tech.getByText('Work · Blocked')).toBeVisible()
     await checkpoint(tech, testInfo, 'tech-work-and-part-request')
+
+    await owner.goto(path)
+    await owner.getByText('Cancel repair order', { exact: true }).click()
+    await owner.getByLabel('Cancellation reason').fill('Customer asked us to pause while they confirm the repair timing.')
+    await owner.getByRole('button', { name: 'Cancel repair order' }).click()
+    await expect(owner.getByText('Canceled · Counter intake', { exact: true })).toBeVisible()
+    await owner.getByRole('button', { name: 'Reopen repair order' }).click()
+    await expect(owner.getByText('Open · Counter intake', { exact: true })).toBeVisible()
+    await expect(owner.getByText('Work · Blocked')).toBeVisible()
+    await checkpoint(owner, testInfo, 'owner-cancel-reopen-blocked-work')
+
+    await advisor.goto(path)
+    await advisor.getByRole('button', { name: 'Hand off' }).click()
+    await advisor.getByLabel('Choose technician').getByRole('button', { name: /Golden QA Relief Technician/ }).click()
+    await expect(advisor.getByRole('status').filter({ hasText: /Assigned to Golden QA Relief Technician/ })).toBeVisible()
+    await checkpoint(advisor, testInfo, 'advisor-handoff-relief-tech')
 
     const parts = sessions.get('parts')!.page
     await parts.goto('/today')
@@ -224,15 +258,18 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(parts.getByText('Got it')).toBeVisible()
     await expect(parts).toHaveURL(new RegExp(`${path}(?:#.*)?$`))
 
-    await tech.reload()
-    await expect(tech.getByRole('button', { name: 'Continue work' })).toBeVisible()
-    await tech.getByRole('button', { name: 'Continue work' }).click()
-    await expect(tech.getByText('Got it')).toBeVisible()
-    await tech.getByRole('button', { name: 'Complete work' }).click()
-    await expect(tech.getByRole('heading', { name: 'Work complete' })).toBeVisible()
-    await tech.getByRole('button', { name: 'Close work' }).click()
-    await expect(tech.getByText('Work · Done')).toBeVisible()
-    await checkpoint(tech, testInfo, 'tech-complete-ticket')
+    const relief = sessions.get('relief')!.page
+    await openTicketFromToday(relief, ticketNumber)
+    await expect(relief.getByRole('button', { name: 'Resolve hold' })).toBeVisible()
+    await relief.getByRole('button', { name: 'Resolve hold' }).click()
+    await expect(relief.getByRole('button', { name: 'Continue work' })).toBeVisible()
+    await relief.getByRole('button', { name: 'Continue work' }).click()
+    await expect(relief.getByText('Got it')).toBeVisible()
+    await relief.getByRole('button', { name: 'Complete work' }).click()
+    await expect(relief.getByRole('heading', { name: 'Work complete' })).toBeVisible()
+    await relief.getByRole('button', { name: 'Close work' }).click()
+    await expect(relief.getByText('Work · Done')).toBeVisible()
+    await checkpoint(relief, testInfo, 'relief-complete-ticket')
 
     await advisor.reload()
     await advisor.getByRole('button', { name: 'Collect & close' }).click()

@@ -645,7 +645,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'claim' }),
+        body: JSON.stringify({ action: 'claim', requestKey: ATTEMPT_ONE }),
       },
     ))
     expect(screen.getAllByRole('button')).toHaveLength(1)

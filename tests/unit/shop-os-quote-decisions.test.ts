@@ -52,6 +52,14 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
   const declinedBody = (requestKey = uuid(101), overrides: Record<string, unknown> = {}) => ({
     requestKey, jobId, quoteVersionId: versionId, decision: 'declined', ...overrides,
   })
+  const deferredBody = (requestKey = uuid(102), overrides: Record<string, unknown> = {}) => ({
+    requestKey,
+    jobId,
+    quoteVersionId: versionId,
+    decision: 'deferred',
+    reason: 'Customer will decide after discussing the repair at home.',
+    ...overrides,
+  })
   const decide = (body: unknown = approvedBody(), overrides: Record<string, unknown> = {}, dependencies = {}) =>
     recordQuoteDecision(db, { actor, ticketId, body, ...overrides }, dependencies)
   const overwriteSnapshot = async (value: unknown) => {
@@ -124,6 +132,8 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     await expect(decide({ ...approvedBody(), approvedVia: 'page' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
     await expect(decide({ ...approvedBody(), extra: true })).resolves.toEqual({ ok: false, error: 'invalid_input' })
     await expect(decide({ ...declinedBody(), approvedVia: 'phone' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    await expect(decide({ ...deferredBody(), reason: '' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    await expect(decide({ ...deferredBody(), approvedVia: 'phone' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
     await expect(decide({ ...declinedBody(), decision: 'sent' })).resolves.toEqual({ ok: false, error: 'invalid_input' })
     const upper = approvedBody('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'.toUpperCase())
     const first = await decide({ ...upper, jobId: jobId.toUpperCase(), quoteVersionId: versionId.toUpperCase() })
@@ -157,6 +167,25 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     expect(result).not.toHaveProperty('event.userAgent')
   })
 
+  it('records a durable customer deferral that can later be replaced by an approval', async () => {
+    const deferred = await decide(deferredBody())
+    expect(deferred).toMatchObject({
+      ok: true,
+      changed: true,
+      event: { kind: 'deferred', jobId, quoteVersionId: versionId, approvedVia: null },
+      projection: { approvalState: 'deferred', approvedQuoteVersionId: null },
+    })
+    expect(await decide(approvedBody(uuid(103)))).toMatchObject({
+      ok: true,
+      changed: true,
+      event: { kind: 'approved', approvedVia: 'phone' },
+      projection: { approvalState: 'approved', approvedQuoteVersionId: versionId },
+    })
+    const events = await db.select().from(quoteEvents)
+    expect(events.map((event) => event.kind)).toEqual(['deferred', 'approved'])
+    expect(events[0]?.body).toBe('Customer will decide after discussing the repair at home.')
+  })
+
   it('returns an actor-bound exact retry before stale-version rejection and includes the latest projection', async () => {
     const first = await decide(approvedBody(uuid(120)))
     await expect(decide(declinedBody(uuid(121)))).resolves.toMatchObject({ ok: true, changed: true })
@@ -175,6 +204,7 @@ describe('Shop OS exact-version phone/in-person decisions', () => {
     await decide(approvedBody(uuid(130)))
     await expect(decide(approvedBody(uuid(130), { approvedVia: 'in_person' }))).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await expect(decide(declinedBody(uuid(130)))).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await expect(decide(deferredBody(uuid(130)))).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
     await expect(decide(approvedBody(uuid(130)), { actor: { profileId: uuid(2) } })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
   })
 

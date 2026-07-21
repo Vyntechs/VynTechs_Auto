@@ -11,6 +11,14 @@ export const GOLDEN_KEYS = {
   approval: uuid(203),
   part: uuid(204),
   payment: uuid(205),
+  hold: uuid(206),
+  handoff: uuid(207),
+  resolveHold: uuid(208),
+  cancel: uuid(209),
+  reopen: uuid(210),
+  secondLine: uuid(211),
+  deferred: uuid(212),
+  deferredApproval: uuid(213),
 } as const
 
 export async function createGoldenShopDay() {
@@ -22,7 +30,7 @@ export async function createGoldenShopDay() {
     taxRateBps: 800,
   }).returning()
 
-  const [owner, advisor, tech, parts] = await testDb.db.insert(profiles).values([
+  const [owner, advisor, tech, relief, parts] = await testDb.db.insert(profiles).values([
     {
       id: uuid(10), userId: uuid(110), shopId: shop.id, role: 'owner',
       skillTier: 3, fullName: 'Golden Owner',
@@ -36,6 +44,10 @@ export async function createGoldenShopDay() {
       skillTier: 3, fullName: 'Golden Technician',
     },
     {
+      id: uuid(14), userId: uuid(114), shopId: shop.id, role: 'tech',
+      skillTier: 3, fullName: 'Golden Relief Technician',
+    },
+    {
       id: uuid(13), userId: uuid(113), shopId: shop.id, role: 'parts',
       skillTier: null, fullName: 'Golden Parts',
     },
@@ -46,7 +58,7 @@ export async function createGoldenShopDay() {
     diagnostics: false,
   })
 
-  const people = { owner, advisor, tech, parts }
+  const people = { owner, advisor, tech, relief, parts }
   const actors = Object.fromEntries(
     Object.entries(people).map(([role, profile]) => [role, ticketActorFromProfile(profile)]),
   ) as Record<keyof typeof people, TicketActor>

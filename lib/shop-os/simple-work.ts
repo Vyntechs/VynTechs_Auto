@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
@@ -17,6 +17,7 @@ import {
 } from '@/lib/shop-os/quotes'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
+import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
 
 export type SimpleWorkActor = { profileId: string; shopId: string }
 export type SimpleWorkError = 'invalid_input' | 'not_found' | 'not_authorized' | 'not_ready' | 'conflict' | 'job_limit_reached'
@@ -167,7 +168,7 @@ async function lockContext(
       eq(quoteEvents.shopId, input.actor.shopId),
       eq(quoteEvents.ticketId, ticket.id),
       eq(quoteEvents.jobId, job.id),
-      inArray(quoteEvents.kind, ['approved', 'declined']),
+      inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     ))
     .orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
   return { ticket, job, versions, decisions }
@@ -258,9 +259,18 @@ export async function mutateSimpleWork(
             isNull(ticketJobs.clockedOnSince),
           ))
           .returning()
-        return updated
-          ? { ok: true, changed: true, work: safeWork(updated) }
-          : failure('conflict', true)
+        if (!updated) return failure('conflict', true)
+        const activity = await appendTicketActivity(tx as AppDb, {
+          shopId: parsedActor.data.shopId,
+          ticketId: context.ticket.id,
+          jobId: job.id,
+          actorProfileId: parsedActor.data.profileId,
+          kind: 'work_resumed',
+          requestKey: randomUUID(),
+          payload: { from: 'in_progress', clock: 'running' },
+        })
+        if (!activity.ok) throw new Error('ticket_activity_conflict')
+        return { ok: true, changed: true, work: safeWork(updated) }
       }
 
       // Clock off: bank the open interval and stop the timer. Stopping needs no
@@ -282,9 +292,18 @@ export async function mutateSimpleWork(
             isNotNull(ticketJobs.clockedOnSince),
           ))
           .returning()
-        return updated
-          ? { ok: true, changed: true, work: safeWork(updated) }
-          : failure('conflict', true)
+        if (!updated) return failure('conflict', true)
+        const activity = await appendTicketActivity(tx as AppDb, {
+          shopId: parsedActor.data.shopId,
+          ticketId: context.ticket.id,
+          jobId: job.id,
+          actorProfileId: parsedActor.data.profileId,
+          kind: 'work_paused',
+          requestKey: randomUUID(),
+          payload: { from: 'in_progress', clock: 'paused' },
+        })
+        if (!activity.ok) throw new Error('ticket_activity_conflict')
+        return { ok: true, changed: true, work: safeWork(updated) }
       }
 
       if (job.workStatus !== 'in_progress') return failure('not_ready')
@@ -400,7 +419,7 @@ export async function getSimpleWorkWorkspace(
       eq(quoteEvents.shopId, parsedActor.data.shopId),
       eq(quoteEvents.ticketId, parsedTicket.data),
       eq(quoteEvents.jobId, job.id),
-      inArray(quoteEvents.kind, ['approved', 'declined']),
+      inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     )).orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
     const context: LockedContext = { ticket, job, versions, decisions }
     const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')

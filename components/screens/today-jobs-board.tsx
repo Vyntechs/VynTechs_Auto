@@ -82,6 +82,7 @@ export function TodayJobsBoard({
   } | null>(null)
   const claimButtons = useRef(new Map<string, HTMLButtonElement>())
   const diagnosticButtons = useRef(new Map<string, HTMLButtonElement>())
+  const claimAttempts = useRef(new Map<string, string>())
   const board = useMemo(() => projectTodayBoard({
     myJobs,
     openJobs,
@@ -115,6 +116,8 @@ export function TodayJobsBoard({
 
   async function claim(job: TodayTicketJob) {
     if (pendingJobId) return
+    const requestKey = claimAttempts.current.get(job.id) ?? crypto.randomUUID()
+    claimAttempts.current.set(job.id, requestKey)
     let returnFocusToBoard = false
     let returnFocusToRow = false
 
@@ -127,7 +130,7 @@ export function TodayJobsBoard({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'claim' }),
+          body: JSON.stringify({ action: 'claim', requestKey }),
         },
       )
 
@@ -154,6 +157,7 @@ export function TodayJobsBoard({
           canClaim: false,
         }
         applyJobTruth(job, updatedJob)
+        claimAttempts.current.delete(job.id)
         setAnnouncement({
           kind: 'status',
           text: assignment.state === 'mine'

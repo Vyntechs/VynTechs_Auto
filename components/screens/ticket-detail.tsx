@@ -23,6 +23,8 @@ import {
   type QuoteWorkspaceProjection,
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
+import { TicketInterruptionAction } from './ticket-interruption-action'
+import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './ticket-detail.module.css'
@@ -66,6 +68,7 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
   sent: 'Sent',
   approved: 'Approved',
   declined: 'Declined',
+  deferred: 'Deferred',
 }
 
 export function TicketDetailScreen({
@@ -119,6 +122,7 @@ export function TicketDetailScreen({
   const emailTarget = ticket.customer?.email
     ? emailHref(ticket.customer.email)
     : null
+  const activities = ticket.activities ?? []
   const baseJobs: DisplayJob[] = [
     ...ticket.jobs,
     ...escalatedJobs.map((job) => ({ ...job, assignedTech: null })),
@@ -256,6 +260,7 @@ export function TicketDetailScreen({
 
         {activeTool?.kind === 'work' && ticket.customer && ticket.vehicle && (
           <InlineWorkWorkspace
+            actorProfileId={currentProfileId ?? undefined}
             ticket={{
               id: ticket.id,
               number: ticket.ticketNumber,
@@ -276,6 +281,14 @@ export function TicketDetailScreen({
                 current.some((existing) => existing.id === job.id) ? current : [...current, job]
               ))
               setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+            }}
+            onInterrupted={(interrupted) => {
+              const jobId = activeTool.jobId
+              setWorkOverrides((current) => new Map(current).set(jobId, {
+                workStatus: interrupted.workStatus,
+              }))
+              setActiveTool(null)
+              setTimeout(() => jobRefs.current.get(jobId)?.focus(), 0)
             }}
             onClose={() => {
               const jobId = activeTool.jobId
@@ -423,7 +436,21 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
+                    {resolveHoldCommandFor(allCommands, job.id) ? (
+                      <TicketInterruptionAction
+                        ticketId={ticket.id}
+                        jobId={job.id}
+                        className={styles.inlineAction}
+                        onApplied={(interrupted) => {
+                          setWorkOverrides((current) => {
+                            const existing = current.get(job.id)
+                            if (existing?.workStatus === interrupted.workStatus) return current
+                            return new Map(current).set(job.id, { workStatus: interrupted.workStatus })
+                          })
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    ) : workCommandFor(allCommands, job.id) && ticket.customer && ticket.vehicle ? (
                       <button
                         ref={(element) => {
                           if (element) workOpenerRefs.current.set(job.id, element)
@@ -451,6 +478,7 @@ export function TicketDetailScreen({
                       job={{
                         id: job.id,
                         requiredSkillTier: job.requiredSkillTier,
+                        workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
                         assignedTechId: assignmentOverrides.has(job.id)
                           ? assignmentOverrides.get(job.id)?.assignedTechId ?? null
                           : job.assignedTechId,
@@ -498,6 +526,42 @@ export function TicketDetailScreen({
             ))}
           </ol>
         </section>
+
+        {(role === 'advisor' || role === 'owner') && (
+          <TicketLifecycleControl
+            ticketId={ticket.id}
+            status={ticketStatus as 'open' | 'closed' | 'canceled'}
+            onApplied={(next) => {
+              setTicketStatus(next.status)
+              setActiveTool(null)
+              setWorkOverrides((current) => {
+                const updated = new Map(current)
+                for (const job of next.jobs) updated.set(job.id, { workStatus: job.workStatus })
+                return updated
+              })
+            }}
+          />
+        )}
+
+        {activities.length > 0 && (
+          <details className={styles.activity}>
+            <summary className={styles.activitySummary}>
+              <div>
+                <p className={styles.eyebrow}>Durable record</p>
+                <h2 id="activity-heading">Repair order activity</h2>
+              </div>
+              <span>{activities.length} {activities.length === 1 ? 'entry' : 'entries'}</span>
+            </summary>
+            <ol className={styles.activityList}>
+              {activities.map((activity) => (
+                <li key={activity.id}>
+                  <p>{activity.summary}</p>
+                  <span>{activity.actorName ?? 'Shop team'} · {formatActivityTime(activity.createdAt)}</span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
 
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />
 
@@ -590,6 +654,12 @@ function formatCents(cents: number): string {
   }).format(cents / 100)
 }
 
+function formatActivityTime(value: Date): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(value)
+}
+
 type AssignmentOverride = {
   state: 'mine' | 'team' | 'unassigned'
   assignedTechId: string | null
@@ -600,11 +670,11 @@ type AssignmentOverride = {
 
 type QuoteOverride = {
   workStatus: 'open' | 'in_progress' | 'blocked'
-  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
 }
 
 type WorkOverride = {
-  workStatus: SimpleWorkProjectionView['status']
+  workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
 }
 
 type DisplayJob = Pick<TicketDetail['jobs'][number],
@@ -651,4 +721,14 @@ function workCommandFor(
     candidate.kind === 'work' && candidate.jobId === jobId
   ))
   return command ? command as LivingTicketCommand & { kind: 'work' } : null
+}
+
+function resolveHoldCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'resolve_hold' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'resolve_hold' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'resolve_hold' } : null
 }

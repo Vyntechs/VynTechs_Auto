@@ -14,6 +14,7 @@ import {
   shopEntitlements,
   shops,
   ticketJobs,
+  ticketActivity,
   tickets,
   vehicles,
 } from '@/lib/db/schema'
@@ -354,6 +355,13 @@ describe('Shop OS approved simple work', () => {
     expect(off.work.clockedOnSince).toBeNull()
     expect(off.work.activeSeconds).toBeGreaterThanOrEqual(89)
     expect(off.work.activeSeconds).toBeLessThanOrEqual(100)
+    expect(await db.select().from(ticketActivity)).toContainEqual(expect.objectContaining({
+      kind: 'work_paused',
+      ticketId,
+      jobId,
+      actorProfileId: techId,
+      payload: { from: 'in_progress', clock: 'paused' },
+    }))
 
     // Clocking off again with nothing running is a harmless no-op.
     const offAgain = await mutateSimpleWork(db, { actor, ticketId, jobId, body: { action: 'clock_off' } })

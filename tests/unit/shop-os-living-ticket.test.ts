@@ -167,11 +167,20 @@ describe('living repair order next-move projection', () => {
     }).primary).toBeNull()
   })
 
-  it('does not invent commands for unsupported roles, blocked work, or missing identity', () => {
-    expect(project({ role: 'curator' })).toEqual({ primary: null, secondary: [] })
-    expect(project({ profileId: null })).toEqual({ primary: null, secondary: [] })
+  it('makes a technician’s assigned blocked job the one obvious recovery action', () => {
     expect(project({
       jobs: [job({ workStatus: 'blocked', assignedTechId: PROFILE, approvalState: 'approved' })],
-    }).primary).toBeNull()
+    }).primary).toMatchObject({ kind: 'resolve_hold', label: 'Resolve hold' })
+
+    expect(project({
+      role: 'advisor',
+      skillTier: null,
+      jobs: [job({ workStatus: 'blocked', assignedTechId: '00000000-0000-0000-0000-000000000999' })],
+    }).primary).toMatchObject({ kind: 'handoff', label: 'Hand off' })
+  })
+
+  it('does not invent commands for unsupported roles or missing identity', () => {
+    expect(project({ role: 'curator' })).toEqual({ primary: null, secondary: [] })
+    expect(project({ profileId: null })).toEqual({ primary: null, secondary: [] })
   })
 })

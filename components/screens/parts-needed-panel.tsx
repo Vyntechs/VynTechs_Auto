@@ -1,14 +1,19 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { parsePartRequestResponse, type PartRequestView } from '@/lib/shop-os/part-requests-ui'
+import type { SimpleWorkDraftValues } from '@/lib/shop-os/simple-work-draft'
 import styles from './parts-needed-panel.module.css'
+
+export type PartRequestDraft = SimpleWorkDraftValues['parts']
 
 type Props = {
   ticketId: string
   jobId: string
   initialRequests: PartRequestView[]
+  initialDraft?: PartRequestDraft
   onDraftChange?: (dirty: boolean) => void
+  onDraft?: (draft: PartRequestDraft) => void
 }
 
 const STATUS_LABEL: Record<PartRequestView['status'], string> = {
@@ -17,23 +22,44 @@ const STATUS_LABEL: Record<PartRequestView['status'], string> = {
   dismissed: 'Not needed',
 }
 
-export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChange }: Props) {
+const EMPTY_DRAFT: PartRequestDraft = {
+  description: '', preference: '', quantity: '1', requestKey: null,
+}
+
+export function PartsNeededPanel({
+  ticketId,
+  jobId,
+  initialRequests,
+  initialDraft = EMPTY_DRAFT,
+  onDraftChange,
+  onDraft,
+}: Props) {
   const [requests, setRequests] = useState(initialRequests)
-  const [description, setDescription] = useState('')
-  const [preference, setPreference] = useState('')
-  const [quantity, setQuantity] = useState('1')
+  const [description, setDescription] = useState(initialDraft.description)
+  const [preference, setPreference] = useState(initialDraft.preference)
+  const [quantity, setQuantity] = useState(initialDraft.quantity)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const requestKey = useRef<string | null>(null)
+  const [requestKey, setRequestKey] = useState<string | null>(initialDraft.requestKey)
+
+  useEffect(() => {
+    if (pending) return
+    setDescription(initialDraft.description)
+    setPreference(initialDraft.preference)
+    setQuantity(initialDraft.quantity)
+    setRequestKey(initialDraft.requestKey)
+  }, [initialDraft, pending])
 
   useEffect(() => {
     onDraftChange?.(
       pending
       || description.trim().length > 0
       || preference.trim().length > 0
-      || quantity !== '1',
+      || quantity !== '1'
+      || requestKey !== null,
     )
-  }, [description, onDraftChange, pending, preference, quantity])
+    onDraft?.({ description, preference, quantity, requestKey })
+  }, [description, onDraft, onDraftChange, pending, preference, quantity, requestKey])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -49,7 +75,8 @@ export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChan
       setError('Keep the brand or supplier note short.')
       return
     }
-    if (!requestKey.current) requestKey.current = crypto.randomUUID()
+    const stableRequestKey = requestKey ?? crypto.randomUUID()
+    if (!requestKey) setRequestKey(stableRequestKey)
     setPending(true)
     setError(null)
     try {
@@ -57,7 +84,7 @@ export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChan
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          requestKey: requestKey.current,
+          requestKey: stableRequestKey,
           description: part,
           preference: pref ? pref : null,
           quantity: qty,
@@ -72,7 +99,7 @@ export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChan
       setDescription('')
       setPreference('')
       setQuantity('1')
-      requestKey.current = null
+      setRequestKey(null)
     } catch {
       setError('Not sent — check your connection and try again.')
     } finally {
@@ -108,16 +135,16 @@ export function PartsNeededPanel({ ticketId, jobId, initialRequests, onDraftChan
         <label className={styles.label} htmlFor="part-desc">What part do you need?</label>
         <input id="part-desc" type="text" value={description} maxLength={200}
           placeholder="e.g. water pump"
-          onChange={(event) => { setDescription(event.target.value); requestKey.current = null }} />
+          onChange={(event) => { setDescription(event.target.value); setRequestKey(null) }} />
 
         <label className={styles.label} htmlFor="part-pref">Brand or where to get it <span>(optional)</span></label>
         <input id="part-pref" type="text" value={preference} maxLength={200}
           placeholder="e.g. Motorcraft, AC Delco, dealer, or a supplier"
-          onChange={(event) => { setPreference(event.target.value); requestKey.current = null }} />
+          onChange={(event) => { setPreference(event.target.value); setRequestKey(null) }} />
 
         <label className={styles.label} htmlFor="part-qty">How many?</label>
         <input id="part-qty" type="number" inputMode="numeric" min={1} max={99} value={quantity}
-          onChange={(event) => { setQuantity(event.target.value); requestKey.current = null }} />
+          onChange={(event) => { setQuantity(event.target.value); setRequestKey(null) }} />
 
         <button className={styles.submit} type="submit" disabled={pending || description.trim().length < 1}>
           {pending ? 'Sending…' : 'Send to parts'}
