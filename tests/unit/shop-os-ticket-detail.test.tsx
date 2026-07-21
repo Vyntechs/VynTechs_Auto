@@ -98,7 +98,8 @@ vi.mock('@/components/screens/inline-work-workspace', () => ({
   ),
 }))
 
-vi.mock('@/components/screens/ticket-interruption-action', () => ({
+vi.mock('@/components/screens/ticket-interruption-action', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/screens/ticket-interruption-action')>(),
   TicketInterruptionAction: ({ onApplied }: { onApplied: (job: { workStatus: 'in_progress' }) => void }) => (
     <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
   ),
@@ -689,6 +690,47 @@ describe('TicketDetailScreen', () => {
         }),
       }),
     )
+  })
+
+  it('hands active work to an eligible relief technician without making a new page or discarding its state', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async () => Response.json({
+      changed: true,
+      job: {
+        id: 'repair-active', assignedTechId: 'relief-1', workStatus: 'in_progress',
+        holdKind: null, holdNote: null, holdResumeStatus: null, heldAt: null,
+        heldByProfileId: null, clockedOnSince: null, activeSeconds: 180,
+        updatedAt: '2026-07-21T17:00:00.000Z',
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000099' })
+
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      currentProfileName="Avery Advisor"
+      team={[{ id: 'relief-1', name: 'Riley Relief', skillTier: 2, isCurrentUser: false }]}
+      ticket={ticket({ jobs: [job({
+        id: 'repair-active', title: 'Install lift kit', kind: 'repair', requiredSkillTier: 2,
+        assignedTechId: 'tech-1', workStatus: 'in_progress', approvalState: 'approved',
+      })] })}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Hand off' }))
+    await user.click(within(row).getByRole('button', { name: /Riley Relief.*B-tech/i }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-1/jobs/repair-active/interruption',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    const options = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0][1]
+    expect(JSON.parse(String(options.body))).toEqual({
+      action: 'handoff', assignedTechId: 'relief-1', requestKey: '00000000-0000-4000-8000-000000000099',
+    })
+    expect(within(row).getByText('Assigned · Riley Relief')).toBeInTheDocument()
+    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
   })
 
   it('keeps the row mounted and shows only the safe winner after a claim race', async () => {

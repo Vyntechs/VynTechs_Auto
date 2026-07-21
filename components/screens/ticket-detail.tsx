@@ -474,6 +474,7 @@ export function TicketDetailScreen({
                       job={{
                         id: job.id,
                         requiredSkillTier: job.requiredSkillTier,
+                        workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
                         assignedTechId: assignmentOverrides.has(job.id)
                           ? assignmentOverrides.get(job.id)?.assignedTechId ?? null
                           : job.assignedTechId,

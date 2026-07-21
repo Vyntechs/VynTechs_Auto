@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import type { TeamMember } from '@/lib/intake/team'
 import type { LivingTicketCommand } from '@/lib/shop-os/living-ticket'
 import { parseAssignmentEnvelope, type AssignmentEnvelope } from '@/lib/shop-os/today-board'
+import { parseInterruptionJob } from './ticket-interruption-action'
 import styles from './ticket-detail.module.css'
 
 type AssignmentCommand = LivingTicketCommand & {
@@ -20,6 +21,7 @@ type Props = {
     id: string
     requiredSkillTier: number
     assignedTechId: string | null
+    workStatus: 'open' | 'in_progress' | 'blocked'
   }
   command: AssignmentCommand
   team: TeamMember[]
@@ -57,6 +59,7 @@ export function TicketAssignmentControl({
   const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [notice, setNotice] = useState<{ kind: 'status' | 'error'; text: string } | null>(null)
   const invokerRef = useRef<HTMLButtonElement>(null)
+  const isActiveHandoff = command.kind === 'handoff' && job.workStatus !== 'open'
 
   async function mutate(
     body: Record<string, unknown>,
@@ -68,7 +71,7 @@ export function TicketAssignmentControl({
     setNotice({ kind: 'status', text: 'Saving handoff…' })
     try {
       const response = await fetch(
-        `/api/tickets/${ticketId}/jobs/${job.id}/assignment`,
+        `/api/tickets/${ticketId}/jobs/${job.id}/${isActiveHandoff ? 'interruption' : 'assignment'}`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -89,10 +92,39 @@ export function TicketAssignmentControl({
         throw new Error('assignment_failed')
       }
 
-      const assignment = parseAssignmentEnvelope(responseBody, {
-        ticketId,
-        jobId: job.id,
-      })
+      const interrupted = isActiveHandoff ? parseInterruptionJob(
+        responseBody && typeof responseBody === 'object'
+          ? (responseBody as { job?: unknown }).job
+          : null,
+      ) : null
+      const activeWorkStatus = interrupted && ['open', 'in_progress', 'blocked'].includes(interrupted.workStatus)
+        ? interrupted.workStatus as 'open' | 'in_progress' | 'blocked'
+        : null
+      if (isActiveHandoff && (!interrupted || !activeWorkStatus || interrupted.assignedTechId !== assignedTechId)) {
+        throw new Error('invalid_active_handoff_response')
+      }
+      const assignment = isActiveHandoff && interrupted
+        ? (() => {
+            const state = interrupted.assignedTechId === currentProfileId
+              ? 'mine' as const
+              : interrupted.assignedTechId === null
+                ? 'unassigned' as const
+                : 'team' as const
+            const assignedTechName = interrupted.assignedTechId === currentProfileId
+              ? team.find((member) => member.id === currentProfileId)?.name ?? null
+              : team.find((member) => member.id === interrupted.assignedTechId)?.name ?? null
+            return {
+              ticketId,
+              jobId: job.id,
+              workStatus: activeWorkStatus as 'open' | 'in_progress' | 'blocked',
+              state,
+              assignedTechName,
+            }
+          })()
+        : parseAssignmentEnvelope(responseBody, {
+            ticketId,
+            jobId: job.id,
+          })
       if (!assignment) throw new Error('invalid_assignment_response')
 
       const safeAssignedTechId = assignment.state === 'unassigned'
@@ -118,10 +150,19 @@ export function TicketAssignmentControl({
 
   function select(member: TeamMember): void {
     if (member.skillTier < job.requiredSkillTier) {
+      if (isActiveHandoff) {
+        setNotice({ kind: 'error', text: 'Active work can only be handed to a technician at the required tier.' })
+        return
+      }
       setCandidate({ ...member, confirmBelowTier: true })
       return
     }
-    void mutate({ action: 'reassign', assignedTechId: member.id }, member.id)
+    void mutate(
+      isActiveHandoff
+        ? { action: 'handoff', requestKey: crypto.randomUUID(), assignedTechId: member.id }
+        : { action: 'reassign', assignedTechId: member.id },
+      member.id,
+    )
   }
 
   if (command.kind === 'claim') {
@@ -176,7 +217,7 @@ export function TicketAssignmentControl({
                   <small>{tierLabel(member.skillTier)}</small>
                 </button>
               ))}
-              {job.assignedTechId !== null && (
+              {job.assignedTechId !== null && !isActiveHandoff && (
                 <button
                   type="button"
                   disabled={pending}
