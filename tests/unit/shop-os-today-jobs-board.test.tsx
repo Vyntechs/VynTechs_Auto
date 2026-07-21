@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -100,6 +100,7 @@ describe('TodayJobsBoard persisted ledger', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -732,16 +733,24 @@ describe('TodayJobsBoard persisted ledger', () => {
         myJobs={[]}
         openJobs={[availableDiagnostic]}
         canDispatchWork
+        currentProfileId="00000000-0000-4000-8000-000000000095"
+        team={[{
+          id: '00000000-0000-4000-8000-000000000096',
+          name: 'Avery Tech',
+          skillTier: 3,
+          isCurrentUser: false,
+        }]}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Assign work' }))
+    fireEvent.click(screen.getByRole('button', { name: /Avery Tech/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Already claimed by Winner Tech')
+      expect(screen.getByRole('status')).toHaveTextContent('Already assigned to Winner Tech')
       expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument()
       expect(screen.getByText('Winner Tech')).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Assign work' })).toBeNull()
       expect(refreshMock).not.toHaveBeenCalled()
     })
     await waitFor(() => {
@@ -889,20 +898,80 @@ describe('TodayJobsBoard persisted ledger', () => {
 })
 
 describe('TodayJobsBoard parts handoff', () => {
-  it('mounts requested parts in one Today lane that jumps to the repair-order control', () => {
+  it('lets the parts desk finish its next request without leaving Today', async () => {
+    const requestId = '00000000-0000-4000-8000-000000000091'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        request: {
+          id: requestId,
+          jobId: '00000000-0000-4000-8000-000000000092',
+          description: 'Front brake pads',
+          preference: null,
+          quantity: 1,
+          status: 'sourced',
+          requestedAt: '2026-07-21T12:00:00.000Z',
+          resolvedAt: '2026-07-21T12:01:00.000Z',
+        },
+      }),
+    }))
     render(
       <TodayJobsBoard
         myJobs={[]}
         openJobs={[]}
-        partsJobs={[unlinkedDiagnostic]}
+        partsJobs={[{
+          ...unlinkedDiagnostic,
+          partRequest: {
+            id: requestId,
+            description: 'Front brake pads',
+            preference: null,
+            quantity: 1,
+          },
+        }]}
       />,
     )
 
     expect(screen.getByRole('heading', { name: 'Parts needed' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Source parts' })).toHaveAttribute(
-      'href',
-      '/tickets/ticket-42#parts-requested-heading',
+    expect(screen.getByText('Needs 1× Front brake pads')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Got it' })).toBeNull())
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/tickets/ticket-42/part-requests/00000000-0000-4000-8000-000000000091',
+      expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('lets a dispatcher assign directly from the open queue', async () => {
+    const currentProfileId = '00000000-0000-4000-8000-000000000093'
+    const assigneeId = '00000000-0000-4000-8000-000000000094'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        assignment: {
+          ticketId: 'ticket-42',
+          jobId: 'job-unlinked',
+          workStatus: 'open',
+          state: 'team',
+          assignedTechName: 'Avery Tech',
+        },
+      }),
+    }))
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[availableDiagnostic]}
+        canDispatchWork
+        currentProfileId={currentProfileId}
+        team={[{ id: assigneeId, name: 'Avery Tech', skillTier: 3, isCurrentUser: false }]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign work' }))
+    fireEvent.click(screen.getByRole('button', { name: /Avery Tech/ }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'With the team' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Hand off' })).toBeInTheDocument()
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 })
 

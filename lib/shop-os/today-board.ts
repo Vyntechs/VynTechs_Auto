@@ -1,4 +1,5 @@
 import type { TodayTicketJob } from '@/lib/tickets'
+import { z } from 'zod'
 
 export type TodayBoardLane = 'mine' | 'open' | 'team' | 'created' | 'parts' | 'hidden'
 
@@ -73,6 +74,71 @@ export type TodayBoardLanes = {
   team: TodayTicketJob[]
   created: TodayTicketJob[]
   parts: TodayTicketJob[]
+}
+
+const todayJobSchema = z.strictObject({
+  id: z.uuid(),
+  ticketId: z.uuid(),
+  ticketNumber: z.number().int().positive(),
+  customerName: z.string().max(500).nullable(),
+  vehicle: z.strictObject({
+    year: z.number().int().min(1886).max(9999),
+    make: z.string().min(1).max(120),
+    model: z.string().min(1).max(120),
+  }).nullable(),
+  title: z.string().min(1).max(500),
+  kind: z.enum(['diagnostic', 'repair', 'maintenance']),
+  requiredSkillTier: z.number().int().min(1).max(3),
+  sessionId: z.uuid().nullable(),
+  workStatus: z.enum(['open', 'in_progress', 'blocked']),
+  approvalState: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred']),
+  canClaim: z.boolean(),
+  assignmentState: z.enum(['mine', 'team', 'unassigned']),
+  assignedTechName: z.string().min(1).max(120).nullable(),
+  createdByMe: z.boolean(),
+  partRequest: z.strictObject({
+    id: z.uuid(),
+    description: z.string().min(1).max(200),
+    preference: z.string().max(200).nullable(),
+    quantity: z.number().int().min(1).max(99),
+  }).nullable().optional(),
+  diagnosticStartState: z.enum(['idle', 'initializing', 'ready', 'failed', 'ambiguous']).optional(),
+  diagnosticStartErrorCode: z.enum([
+    'rate_limited',
+    'open_session_limit',
+    'initializer_outcome_uncertain',
+    'lease_expired',
+  ]).nullable().optional(),
+})
+
+const todayJobsResponseSchema = z.strictObject({
+  todayJobs: z.strictObject({
+    myJobs: z.array(todayJobSchema).max(200),
+    openJobs: z.array(todayJobSchema).max(200),
+    createdJobs: z.array(todayJobSchema).max(200),
+    teamJobs: z.array(todayJobSchema).max(200),
+    partsJobs: z.array(todayJobSchema).max(200),
+    linkedSessionIds: z.array(z.uuid()).max(200),
+    hasMore: z.boolean().optional(),
+  }),
+})
+
+/**
+ * The Today client consumes a bounded, server-authorized projection. Parse it
+ * before replacing what the operator is currently looking at: a malformed
+ * response must never turn into a false "live" board.
+ */
+export function parseTodayJobsResponse(value: unknown): {
+  myJobs: TodayTicketJob[]
+  openJobs: TodayTicketJob[]
+  createdJobs: TodayTicketJob[]
+  teamJobs: TodayTicketJob[]
+  partsJobs: TodayTicketJob[]
+  linkedSessionIds: string[]
+  hasMore?: boolean
+} | null {
+  const parsed = todayJobsResponseSchema.safeParse(value)
+  return parsed.success ? parsed.data.todayJobs : null
 }
 
 type TodayBoardProjectionInput = {

@@ -466,9 +466,20 @@ describe('Today ticket jobs read model', () => {
 
     const waiting = await listTodayTicketJobs(db, { actor: partsActor })
     expect(waiting.partsJobs).toEqual([
-      expect.objectContaining({ id: job.id, title: 'Charging repair' }),
+      expect.objectContaining({
+        id: job.id,
+        title: 'Charging repair',
+        partRequest: {
+          id: request.id,
+          description: 'Alternator',
+          preference: null,
+          quantity: 1,
+        },
+      }),
     ])
     expect(waiting.myJobs).toEqual([])
+    const technicianView = await listTodayTicketJobs(db, { actor })
+    expect(technicianView.myJobs.find((item) => item.id === job.id)).not.toHaveProperty('partRequest')
 
     await db.update(jobPartRequests).set({
       status: 'sourced',

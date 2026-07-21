@@ -1,17 +1,21 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { TodayTicketJob } from '@/lib/tickets'
+import type { TodayTicketJob, TodayTicketJobs } from '@/lib/tickets'
+import type { TeamMember } from '@/lib/intake/team'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
+  parseTodayJobsResponse,
   placeTodayJob,
   projectTodayBoard,
   type TodayJobOverride,
 } from '@/lib/shop-os/today-board'
+import { parsePartRequestResponse } from '@/lib/shop-os/part-requests-ui'
+import { TicketAssignmentControl } from './ticket-assignment-control'
 import styles from './today-jobs-board.module.css'
 
 type Props = {
@@ -21,6 +25,8 @@ type Props = {
   createdJobs?: TodayTicketJob[]
   partsJobs?: TodayTicketJob[]
   canDispatchWork?: boolean
+  currentProfileId?: string
+  team?: TeamMember[]
   hasMore?: boolean
   // Resolved server-side release availability. Fail closed so a missing prop
   // can never reopen a diagnostic-engine entrance.
@@ -42,6 +48,8 @@ const duplicateCostWarning =
   'This diagnostic may already have used a paid provider call. Starting again could create a duplicate cost.'
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const emptyJobs: TodayTicketJob[] = []
+const emptyTeam: TeamMember[] = []
 
 const titleCase: Record<TodayTicketJob['kind'], string> = {
   diagnostic: 'Diagnostic',
@@ -58,10 +66,12 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
 export function TodayJobsBoard({
   myJobs,
   openJobs,
-  teamJobs = [],
-  createdJobs = [],
-  partsJobs = [],
+  teamJobs = emptyJobs,
+  createdJobs = emptyJobs,
+  partsJobs = emptyJobs,
   canDispatchWork = false,
+  currentProfileId,
+  team = emptyTeam,
   hasMore = false,
   diagnosticsEntitled = false,
 }: Props) {
@@ -76,6 +86,18 @@ export function TodayJobsBoard({
   const [jobOverrides, setJobOverrides] = useState<Map<string, TodayJobOverride>>(
     () => new Map(),
   )
+  const [serverJobs, setServerJobs] = useState<TodayTicketJobs>(() => ({
+    myJobs,
+    openJobs,
+    teamJobs,
+    createdJobs,
+    partsJobs,
+    linkedSessionIds: [],
+    hasMore,
+  }))
+  const [resolvedPartRequests, setResolvedPartRequests] = useState<Map<string, string>>(
+    () => new Map(),
+  )
   const [focusRequest, setFocusRequest] = useState<{
     kind: 'board' | 'row' | 'claim'
     jobId: string
@@ -83,15 +105,66 @@ export function TodayJobsBoard({
   const claimButtons = useRef(new Map<string, HTMLButtonElement>())
   const diagnosticButtons = useRef(new Map<string, HTMLButtonElement>())
   const claimAttempts = useRef(new Map<string, string>())
+  useEffect(() => {
+    setServerJobs({
+      myJobs,
+      openJobs,
+      teamJobs,
+      createdJobs,
+      partsJobs,
+      linkedSessionIds: [],
+      hasMore,
+    })
+  }, [myJobs, openJobs, teamJobs, createdJobs, partsJobs, hasMore])
+
+  const refreshTodayJobs = useCallback(async () => {
+    try {
+      const response = await fetch('/api/today/jobs', {
+        headers: { accept: 'application/json' },
+        cache: 'no-store',
+      })
+      const body: unknown = await response.json().catch(() => null)
+      const fresh = response.ok ? parseTodayJobsResponse(body) : null
+      if (!fresh) return
+      setServerJobs(fresh)
+      setResolvedPartRequests((current) => {
+        if (current.size === 0) return current
+        const active = new Map(fresh.partsJobs.map((job) => [job.id, job.partRequest?.id ?? null]))
+        const next = new Map(current)
+        for (const [jobId, requestId] of current) {
+          if (active.get(jobId) !== requestId) next.delete(jobId)
+        }
+        return next
+      })
+    } catch {
+      // The displayed server truth remains useful when a background refresh
+      // misses. Do not interrupt a technician with a transient network toast.
+    }
+  }, [])
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshTodayJobs()
+    }
+    const interval = window.setInterval(refreshWhenVisible, 20_000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [refreshTodayJobs])
+
   const board = useMemo(() => projectTodayBoard({
-    myJobs,
-    openJobs,
-    teamJobs,
-    createdJobs,
-    partsJobs,
+    myJobs: serverJobs.myJobs,
+    openJobs: serverJobs.openJobs,
+    teamJobs: serverJobs.teamJobs,
+    createdJobs: serverJobs.createdJobs,
+    partsJobs: serverJobs.partsJobs.filter((job) => (
+      !job.partRequest || resolvedPartRequests.get(job.id) !== job.partRequest.id
+    )),
     canDispatchWork,
     overrides: jobOverrides,
-  }), [myJobs, openJobs, teamJobs, createdJobs, partsJobs, canDispatchWork, jobOverrides])
+  }), [serverJobs, resolvedPartRequests, canDispatchWork, jobOverrides])
 
   useEffect(() => {
     if (!focusRequest) return
@@ -221,6 +294,82 @@ export function TodayJobsBoard({
         jobId: job.id,
       })
     }
+  }
+
+  async function resolvePart(job: TodayTicketJob) {
+    const request = job.partRequest
+    if (!request) return
+    if (pendingJobId) return
+
+    setPendingJobId(job.id)
+    setAnnouncement({ kind: 'status', text: `Marking parts found for ticket ${job.ticketNumber}.` })
+    try {
+      const response = await fetch(
+        `/api/tickets/${job.ticketId}/part-requests/${request.id}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'sourced' }),
+        },
+      )
+      const body: unknown = await response.json().catch(() => null)
+      const resolved = response.ok ? parsePartRequestResponse(body) : null
+      if (!resolved || resolved.id !== request.id || resolved.status !== 'sourced') {
+        throw new Error('part_request_not_resolved')
+      }
+      setResolvedPartRequests((current) => new Map(current).set(job.id, request.id))
+      setAnnouncement({ kind: 'status', text: `Parts found for ticket ${job.ticketNumber}.` })
+      void refreshTodayJobs()
+    } catch {
+      setAnnouncement({
+        kind: 'error',
+        text: `Couldn't mark parts found for ticket ${job.ticketNumber}. Try again.`,
+      })
+    } finally {
+      setPendingJobId(null)
+    }
+  }
+
+  function applyAssignment(job: TodayTicketJob, assignment: {
+    workStatus: TodayTicketJob['workStatus']
+    state: TodayTicketJob['assignmentState']
+    assignedTechName: string | null
+  }) {
+    const updatedJob: TodayTicketJob = {
+      ...job,
+      workStatus: assignment.workStatus,
+      assignmentState: assignment.state,
+      assignedTechName: assignment.assignedTechName,
+      canClaim: false,
+    }
+    applyJobTruth(job, updatedJob)
+    setAnnouncement({
+      kind: 'status',
+      text: assignment.state === 'unassigned'
+        ? `Ticket ${job.ticketNumber} is available.`
+        : `Ticket ${job.ticketNumber} handoff saved.`,
+    })
+    setFocusRequest({
+      kind: placeTodayJob(updatedJob, canDispatchWork) === 'hidden' ? 'board' : 'row',
+      jobId: job.id,
+    })
+    void refreshTodayJobs()
+  }
+
+  function applyAssignmentConflict(job: TodayTicketJob, assignedTechName: string) {
+    const updatedJob: TodayTicketJob = {
+      ...job,
+      assignmentState: 'team',
+      assignedTechName,
+      canClaim: false,
+    }
+    applyJobTruth(job, updatedJob)
+    setAnnouncement({ kind: 'status', text: `Already assigned to ${assignedTechName}.` })
+    setFocusRequest({
+      kind: placeTodayJob(updatedJob, canDispatchWork) === 'hidden' ? 'board' : 'row',
+      jobId: job.id,
+    })
+    void refreshTodayJobs()
   }
 
   async function startDiagnostic(
@@ -367,6 +516,13 @@ export function TodayJobsBoard({
             if (element) diagnosticButtons.current.set(jobId, element)
             else diagnosticButtons.current.delete(jobId)
           }}
+          canDispatchWork={canDispatchWork}
+          currentProfileId={currentProfileId}
+          team={team}
+          onAssignment={applyAssignment}
+          onAssignmentConflict={applyAssignmentConflict}
+          onResolvePart={resolvePart}
+          partsDisabled={pendingJobId !== null}
         />
       )}
       {board.open.length > 0 && (
@@ -381,6 +537,13 @@ export function TodayJobsBoard({
             if (element) claimButtons.current.set(jobId, element)
             else claimButtons.current.delete(jobId)
           }}
+          canDispatchWork={canDispatchWork}
+          currentProfileId={currentProfileId}
+          team={team}
+          onAssignment={applyAssignment}
+          onAssignmentConflict={applyAssignmentConflict}
+          onResolvePart={resolvePart}
+          partsDisabled={pendingJobId !== null}
         />
       )}
       {board.team.length > 0 && (
@@ -388,6 +551,13 @@ export function TodayJobsBoard({
           label="With the team"
           jobs={board.team}
           mode="team"
+          canDispatchWork={canDispatchWork}
+          currentProfileId={currentProfileId}
+          team={team}
+          onAssignment={applyAssignment}
+          onAssignmentConflict={applyAssignmentConflict}
+          onResolvePart={resolvePart}
+          partsDisabled={pendingJobId !== null}
         />
       )}
       {board.created.length > 0 && (
@@ -395,6 +565,13 @@ export function TodayJobsBoard({
           label="Created by me"
           jobs={board.created}
           mode="created"
+          canDispatchWork={canDispatchWork}
+          currentProfileId={currentProfileId}
+          team={team}
+          onAssignment={applyAssignment}
+          onAssignmentConflict={applyAssignmentConflict}
+          onResolvePart={resolvePart}
+          partsDisabled={pendingJobId !== null}
         />
       )}
       {board.parts.length > 0 && (
@@ -402,9 +579,16 @@ export function TodayJobsBoard({
           label="Parts needed"
           jobs={board.parts}
           mode="parts"
+          canDispatchWork={canDispatchWork}
+          currentProfileId={currentProfileId}
+          team={team}
+          onAssignment={applyAssignment}
+          onAssignmentConflict={applyAssignmentConflict}
+          onResolvePart={resolvePart}
+          partsDisabled={pendingJobId !== null}
         />
       )}
-      {hasMore && (
+      {serverJobs.hasMore && (
         <p className={styles.announcement} role="status">
           Showing the first 200 active jobs. Assigned work appears first; remaining work stays stored.
         </p>
@@ -438,6 +622,13 @@ function JobSection({
   onRefreshDiagnostic,
   onCheckDiagnostic,
   setDiagnosticButton,
+  canDispatchWork = false,
+  currentProfileId,
+  team = [],
+  onAssignment,
+  onAssignmentConflict,
+  onResolvePart,
+  partsDisabled = false,
 }: {
   label: string
   jobs: TodayTicketJob[]
@@ -454,6 +645,17 @@ function JobSection({
   onRefreshDiagnostic?: () => void
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
+  canDispatchWork?: boolean
+  currentProfileId?: string
+  team?: TeamMember[]
+  onAssignment?: (job: TodayTicketJob, assignment: {
+    workStatus: TodayTicketJob['workStatus']
+    state: TodayTicketJob['assignmentState']
+    assignedTechName: string | null
+  }) => void
+  onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
+  onResolvePart?: (job: TodayTicketJob) => void
+  partsDisabled?: boolean
 }) {
   return (
     <div className={styles.group}>
@@ -481,6 +683,13 @@ function JobSection({
             onRefreshDiagnostic={onRefreshDiagnostic}
             onCheckDiagnostic={onCheckDiagnostic}
             setDiagnosticButton={setDiagnosticButton}
+            canDispatchWork={canDispatchWork}
+            currentProfileId={currentProfileId}
+            team={team}
+            onAssignment={onAssignment}
+            onAssignmentConflict={onAssignmentConflict}
+            onResolvePart={onResolvePart}
+            partsDisabled={partsDisabled}
           />
         ))}
       </div>
@@ -503,6 +712,13 @@ function JobRow({
   onRefreshDiagnostic,
   onCheckDiagnostic,
   setDiagnosticButton,
+  canDispatchWork,
+  currentProfileId,
+  team,
+  onAssignment,
+  onAssignmentConflict,
+  onResolvePart,
+  partsDisabled,
 }: {
   job: TodayTicketJob
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
@@ -518,6 +734,17 @@ function JobRow({
   onRefreshDiagnostic?: () => void
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
+  canDispatchWork?: boolean
+  currentProfileId?: string
+  team?: TeamMember[]
+  onAssignment?: (job: TodayTicketJob, assignment: {
+    workStatus: TodayTicketJob['workStatus']
+    state: TodayTicketJob['assignmentState']
+    assignedTechName: string | null
+  }) => void
+  onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
+  onResolvePart?: (job: TodayTicketJob) => void
+  partsDisabled?: boolean
 }) {
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
@@ -550,6 +777,12 @@ function JobRow({
           <span>{vehicle}</span>
         </div>
         <h3 className={styles.title}>{job.title}</h3>
+        {mode === 'parts' && job.partRequest && (
+          <p className={styles.partsNote}>
+            Needs {job.partRequest.quantity}× {job.partRequest.description}
+            {job.partRequest.preference ? ` · ${job.partRequest.preference}` : ''}
+          </p>
+        )}
         <div className={styles.facts}>
           <span>{titleCase[job.kind]}</span>
           <span>Tier {job.requiredSkillTier}</span>
@@ -560,7 +793,8 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.workStatus === 'open' && job.canClaim ? (
+        {mode === 'open' && job.workStatus === 'open' && job.canClaim
+          && (!canDispatchWork || !currentProfileId) ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
             type="button"
@@ -570,6 +804,25 @@ function JobRow({
           >
             {pending ? 'Claiming…' : 'Claim job'}
           </button>
+        ) : canDispatchWork && currentProfileId && (mode === 'open' || mode === 'team') ? (
+          <TicketAssignmentControl
+            ticketId={job.ticketId}
+            job={{
+              id: job.id,
+              requiredSkillTier: job.requiredSkillTier,
+              hasAssignee: job.assignmentState !== 'unassigned',
+              workStatus: job.workStatus,
+            }}
+            command={{
+              kind: mode === 'open' ? 'assign' : 'handoff',
+              jobId: job.id,
+              label: mode === 'open' ? 'Assign work' : 'Hand off',
+            }}
+            team={team ?? []}
+            currentProfileId={currentProfileId}
+            onApplied={(assignment) => onAssignment?.(job, assignment)}
+            onConflict={({ assignedTechName }) => onAssignmentConflict?.(job, assignedTechName)}
+          />
         ) : mode === 'open' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
@@ -577,12 +830,21 @@ function JobRow({
           >
             View ticket
           </Link>
+        ) : mode === 'parts' && job.partRequest ? (
+          <button
+            type="button"
+            className={`${styles.control} ${styles.claim}`}
+            disabled={pending || partsDisabled}
+            onClick={() => onResolvePart?.(job)}
+          >
+            {pending ? 'Saving…' : 'Got it'}
+          </button>
         ) : mode === 'parts' ? (
           <Link
             href={`/tickets/${job.ticketId}#parts-requested-heading`}
-            className={`${styles.control} ${styles.claim}`}
+            className={`${styles.control} ${styles.secondary}`}
           >
-            Source parts
+            Review parts
           </Link>
         ) : mode === 'created' || mode === 'team' ? (
           <Link

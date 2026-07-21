@@ -33,6 +33,15 @@
   color: var(--vt-fg);
 }
 
+.partsNote {
+  margin: var(--vt-space-2) 0 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-mono);
+  font-size: var(--vt-fs-12);
+  line-height: var(--vt-lh-normal);
+  overflow-wrap: anywhere;
+}
+
 .heading,
 .count,
 .partyLine,
