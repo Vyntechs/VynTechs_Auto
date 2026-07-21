@@ -39,7 +39,7 @@ describe('ShopOS ticket lifecycle route', () => {
       reason: 'Customer rescheduled.',
     }
     vi.mocked(mutateTicketLifecycle).mockResolvedValue({
-      ok: true, changed: true, ticket: { id: TICKET_ID, status: 'canceled' },
+      ok: true, changed: true, ticket: { id: TICKET_ID, status: 'canceled', jobs: [] },
     })
 
     const response = await POST(new Request(`http://localhost/api/tickets/${TICKET_ID}/lifecycle`, {
@@ -57,7 +57,7 @@ describe('ShopOS ticket lifecycle route', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       changed: true,
-      ticket: { id: TICKET_ID, status: 'canceled' },
+      ticket: { id: TICKET_ID, status: 'canceled', jobs: [] },
     })
   })
 

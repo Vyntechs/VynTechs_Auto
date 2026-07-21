@@ -733,6 +733,38 @@ describe('TicketDetailScreen', () => {
     expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
   })
 
+  it('lets an advisor cancel and reopen the mounted repair order while reconciling every returned job state', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000098' })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        ticket: { id: 'ticket-1', status: 'canceled', jobs: [{ id: 'repair-active', workStatus: 'canceled' }] },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        ticket: { id: 'ticket-1', status: 'open', jobs: [{ id: 'repair-active', workStatus: 'in_progress' }] },
+      })))
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      ticket={ticket({ jobs: [job({
+        id: 'repair-active', title: 'Install lift kit', kind: 'repair', assignedTechId: 'tech-1',
+        approvalState: 'approved', workStatus: 'in_progress',
+      })] })}
+    />)
+
+    await user.click(screen.getAllByText('Cancel repair order')[0])
+    await user.type(screen.getByLabelText('Cancellation reason'), 'Customer rescheduled.')
+    await user.click(screen.getByRole('button', { name: 'Cancel repair order' }))
+    expect(await screen.findByText('Canceled · Counter intake')).toBeInTheDocument()
+    expect(screen.getByText('Work · Canceled')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Reopen repair order' }))
+    expect(await screen.findByText('Open · Counter intake')).toBeInTheDocument()
+    expect(screen.getByText('Work · In progress')).toBeInTheDocument()
+  })
+
   it('keeps the row mounted and shows only the safe winner after a claim race', async () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({

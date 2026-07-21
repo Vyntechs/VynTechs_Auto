@@ -40,8 +40,14 @@ export type InterruptionResult =
   | { ok: true; changed: boolean; job: InterruptionJobProjection }
   | { ok: false; error: InterruptionError; retryable?: true }
 
+export type TicketLifecycleProjection = {
+  id: string
+  status: 'open' | 'closed' | 'canceled'
+  jobs: Array<{ id: string; workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled' }>
+}
+
 export type TicketLifecycleResult =
-  | { ok: true; changed: boolean; ticket: { id: string; status: 'open' | 'closed' | 'canceled' } }
+  | { ok: true; changed: boolean; ticket: TicketLifecycleProjection }
   | { ok: false; error: InterruptionError; retryable?: true }
 
 const uuid = z.uuid().transform((value) => value.toLowerCase())
@@ -143,11 +149,23 @@ function lifecycleFailure(error: InterruptionError, retryable = false): TicketLi
   return retryable ? { ok: false, error, retryable: true } : { ok: false, error }
 }
 
-function lifecycleProjection(ticket: { id: string; status: string }): { id: string; status: 'open' | 'closed' | 'canceled' } | null {
-  if (ticket.status === 'open' || ticket.status === 'closed' || ticket.status === 'canceled') {
-    return { id: ticket.id, status: ticket.status }
+async function lifecycleProjection(
+  db: AppDb,
+  shopId: string,
+  ticket: { id: string; status: string },
+): Promise<TicketLifecycleProjection> {
+  if (ticket.status !== 'open' && ticket.status !== 'closed' && ticket.status !== 'canceled') {
+    throw new Error('invalid_ticket_lifecycle_status')
   }
-  return null
+  const jobs = await db.select({ id: ticketJobs.id, workStatus: ticketJobs.workStatus })
+    .from(ticketJobs)
+    .where(and(eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, ticket.id)))
+    .orderBy(ticketJobs.createdAt, ticketJobs.id)
+  return {
+    id: ticket.id,
+    status: ticket.status,
+    jobs: jobs.map((job) => ({ id: job.id, workStatus: job.workStatus })),
+  }
 }
 
 export async function mutateJobInterruption(
@@ -442,14 +460,13 @@ export async function mutateTicketLifecycle(
         ))
         .limit(1)
       if (receipt) {
-        const projected = lifecycleProjection(ticket)
-        if (!projected
-          || receipt.ticketId !== ticket.id
+        if (receipt.ticketId !== ticket.id
           || receipt.jobId !== null
           || receipt.actorProfileId !== profile.id
           || receipt.kind !== LIFECYCLE_ACTIVITY_KIND[body.data.action]) {
           return lifecycleFailure('conflict')
         }
+        const projected = await lifecycleProjection(tx, actor.data.shopId, ticket)
         return { ok: true, changed: false, ticket: projected }
       }
       if (body.data.action === 'reopen') {
@@ -512,7 +529,7 @@ export async function mutateTicketLifecycle(
           payload: { restoredJobIds: snapshot.data.interruptedJobs.map((job) => job.id) },
         })
         if (!activity.ok) throw new Error('ticket_activity_conflict')
-        return { ok: true, changed: true, ticket: reopened }
+        return { ok: true, changed: true, ticket: await lifecycleProjection(tx, actor.data.shopId, reopened) }
       }
 
       if (ticket.status !== 'open') return lifecycleFailure('not_ready')
@@ -579,7 +596,7 @@ export async function mutateTicketLifecycle(
         payload: { reason: body.data.reason, interruptedJobs },
       })
       if (!activity.ok) throw new Error('ticket_activity_conflict')
-      return { ok: true, changed: true, ticket: updated }
+      return { ok: true, changed: true, ticket: await lifecycleProjection(tx, actor.data.shopId, updated) }
     })
   } catch (error) {
     if (isLockUnavailable(error) || error instanceof Error && error.message === 'ticket_activity_conflict') {

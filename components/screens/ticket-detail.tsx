@@ -24,6 +24,7 @@ import {
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
 import { TicketInterruptionAction } from './ticket-interruption-action'
+import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import { InlineWorkWorkspace } from './inline-work-workspace'
 import styles from './ticket-detail.module.css'
@@ -522,6 +523,22 @@ export function TicketDetailScreen({
             ))}
           </ol>
         </section>
+
+        {(role === 'advisor' || role === 'owner') && (
+          <TicketLifecycleControl
+            ticketId={ticket.id}
+            status={ticketStatus as 'open' | 'closed' | 'canceled'}
+            onApplied={(next) => {
+              setTicketStatus(next.status)
+              setActiveTool(null)
+              setWorkOverrides((current) => {
+                const updated = new Map(current)
+                for (const job of next.jobs) updated.set(job.id, { workStatus: job.workStatus })
+                return updated
+              })
+            }}
+          />
+        )}
 
         <TicketPartRequests ticketId={ticket.id} requests={partRequests} />
 

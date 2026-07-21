@@ -455,6 +455,55 @@
   margin-top: 10px;
 }
 
+.lifecycleControl {
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 18px;
+}
+
+.lifecycleControl > p,
+.lifecycleControl form > p {
+  margin: 10px 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.lifecycleControl summary {
+  min-block-size: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--vt-fg-2);
+  font: 600 14px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.lifecycleControl label {
+  display: block;
+  margin: 14px 0 7px;
+  color: var(--vt-fg-3);
+  font: 600 11px/1.3 var(--vt-font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lifecycleControl textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-50);
+  color: var(--vt-fg);
+  padding: 10px 12px;
+  font: inherit;
+  resize: vertical;
+}
+
+.lifecycleControl form .inlineAction {
+  margin-top: 12px;
+}
+
 .inlineAction {
   min-block-size: 44px;
   border: 1px solid var(--vt-signal-500);
@@ -468,7 +517,9 @@
 
 .inlineAction:focus-visible,
 .assignmentChoices button:focus-visible,
-.tierConfirmation button:focus-visible {
+.tierConfirmation button:focus-visible,
+.lifecycleControl summary:focus-visible,
+.lifecycleControl textarea:focus-visible {
   outline: 2px solid var(--vt-signal-500);
   outline-offset: 3px;
 }
