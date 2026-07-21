@@ -14,7 +14,7 @@ type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
 export type QuoteWorkspaceProjection = Array<{
   id: string
   workStatus: 'open' | 'in_progress' | 'blocked'
-  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
 }>
 
 export function inlineQuoteWorkspaceId(ticketId: string): string {

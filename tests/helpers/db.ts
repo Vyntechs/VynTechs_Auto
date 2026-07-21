@@ -71,6 +71,7 @@ export async function createTestDb(): Promise<{
   await ensurePublicSchemaClientAclMigration(client)
   await ensureTicketJobHistoryBoundMigration(client)
   await ensureTicketActivityMigration(client)
+  await ensureShopOsQuoteDeferralMigration(client)
   return {
     db,
     client,
@@ -169,6 +170,49 @@ export async function ensureTicketActivityMigration(client: PGlite): Promise<voi
     || appliedMarkers.hold_columns !== 5
     || appliedMarkers.immutable_triggers !== 2) {
     throw new Error('ticket activity migration failed in ephemeral database')
+  }
+}
+
+export async function ensureShopOsQuoteDeferralMigration(client: PGlite): Promise<void> {
+  const constraints = await client.query<{ conname: string; definition: string }>(`
+    select conname, pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid in (to_regclass('public.ticket_jobs'), to_regclass('public.quote_events'))
+      and conname in (
+        'ticket_jobs_approval_state_valid',
+        'quote_events_kind_valid',
+        'quote_events_decision_job_consistent',
+        'quote_events_deferred_reason_consistent'
+      )
+  `)
+  const definitions = new Map(constraints.rows.map((row) => [row.conname, row.definition]))
+  const ready = definitions.size === 4
+    && Array.from(definitions.values()).every((definition) => definition.includes('deferred'))
+  if (ready) return
+  const expectedOld = definitions.size === 3
+    && !definitions.has('quote_events_deferred_reason_consistent')
+    && Array.from(definitions.values()).every((definition) => !definition.includes('deferred'))
+  if (!expectedOld) throw new Error('partial ShopOS quote deferral schema in ephemeral database')
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0046_shop_os_quote_deferral.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const applied = await client.query<{ conname: string; definition: string }>(`
+    select conname, pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid in (to_regclass('public.ticket_jobs'), to_regclass('public.quote_events'))
+      and conname in (
+        'ticket_jobs_approval_state_valid',
+        'quote_events_kind_valid',
+        'quote_events_decision_job_consistent',
+        'quote_events_deferred_reason_consistent'
+      )
+  `)
+  if (applied.rows.length !== 4 || applied.rows.some((row) => !row.definition.includes('deferred'))) {
+    throw new Error('ShopOS quote deferral migration failed in ephemeral database')
   }
 }
 

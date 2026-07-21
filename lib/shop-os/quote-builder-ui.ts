@@ -125,7 +125,7 @@ const quoteBuilderSchema = z.strictObject({
     ]).nullable(),
     decisionEligible: z.boolean(),
     approval: z.strictObject({
-      state: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
+      state: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred']),
       quoteVersionId: uuidSchema.nullable(),
     }).superRefine((approval, context) => {
       if ((approval.state === 'approved') !== (approval.quoteVersionId !== null)) {
@@ -200,7 +200,7 @@ const quoteDecisionResponseSchema = z.strictObject({
   changed: z.boolean(),
   event: z.strictObject({
     id: uuidSchema,
-    kind: z.enum(['approved', 'declined']),
+    kind: z.enum(['approved', 'declined', 'deferred']),
     quoteVersionId: uuidSchema,
     jobId: uuidSchema,
     approvedVia: z.enum(['phone', 'in_person']).nullable(),
@@ -210,7 +210,7 @@ const quoteDecisionResponseSchema = z.strictObject({
     }
   }),
   projection: z.strictObject({
-    approvalState: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined']),
+    approvalState: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred']),
     approvedQuoteVersionId: uuidSchema.nullable(),
   }).superRefine((projection, context) => {
     if ((projection.approvalState === 'approved') !== (projection.approvedQuoteVersionId !== null)) {
@@ -232,6 +232,9 @@ export function parseQuoteDecisionResponse(
     && parsed.data.projection.approvedQuoteVersionId !== parsed.data.event.quoteVersionId) return null
   if (status === 201 && parsed.data.event.kind === 'declined'
     && (parsed.data.projection.approvalState !== 'declined'
+      || parsed.data.projection.approvedQuoteVersionId !== null)) return null
+  if (status === 201 && parsed.data.event.kind === 'deferred'
+    && (parsed.data.projection.approvalState !== 'deferred'
       || parsed.data.projection.approvedQuoteVersionId !== null)) return null
   return parsed.data
 }

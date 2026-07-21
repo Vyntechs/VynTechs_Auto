@@ -168,7 +168,7 @@ async function lockContext(
       eq(quoteEvents.shopId, input.actor.shopId),
       eq(quoteEvents.ticketId, ticket.id),
       eq(quoteEvents.jobId, job.id),
-      inArray(quoteEvents.kind, ['approved', 'declined']),
+      inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     ))
     .orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
   return { ticket, job, versions, decisions }
@@ -419,7 +419,7 @@ export async function getSimpleWorkWorkspace(
       eq(quoteEvents.shopId, parsedActor.data.shopId),
       eq(quoteEvents.ticketId, parsedTicket.data),
       eq(quoteEvents.jobId, job.id),
-      inArray(quoteEvents.kind, ['approved', 'declined']),
+      inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     )).orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id))
     const context: LockedContext = { ticket, job, versions, decisions }
     const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')

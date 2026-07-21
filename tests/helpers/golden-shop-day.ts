@@ -16,6 +16,9 @@ export const GOLDEN_KEYS = {
   resolveHold: uuid(208),
   cancel: uuid(209),
   reopen: uuid(210),
+  secondLine: uuid(211),
+  deferred: uuid(212),
+  deferredApproval: uuid(213),
 } as const
 
 export async function createGoldenShopDay() {

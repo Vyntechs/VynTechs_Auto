@@ -68,6 +68,7 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
   sent: 'Sent',
   approved: 'Approved',
   declined: 'Declined',
+  deferred: 'Deferred',
 }
 
 export function TicketDetailScreen({
@@ -669,7 +670,7 @@ type AssignmentOverride = {
 
 type QuoteOverride = {
   workStatus: 'open' | 'in_progress' | 'blocked'
-  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
 }
 
 type WorkOverride = {

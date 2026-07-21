@@ -86,9 +86,17 @@ const quoteDeclineDecisionSchema = z.strictObject({
   quoteVersionId: uuidSchema,
   decision: z.literal('declined'),
 })
+const quoteDeferredDecisionSchema = z.strictObject({
+  requestKey: uuidSchema,
+  jobId: uuidSchema,
+  quoteVersionId: uuidSchema,
+  decision: z.literal('deferred'),
+  reason: z.string().trim().min(1).max(500),
+})
 const quoteDecisionSchema = z.discriminatedUnion('decision', [
   quoteApprovalDecisionSchema,
   quoteDeclineDecisionSchema,
+  quoteDeferredDecisionSchema,
 ])
 
 export type QuoteActor = { profileId: string }
@@ -165,7 +173,7 @@ export type QuoteBuilderResult =
         storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'manual_findings' | 'published_wizard_unsupported' | 'unavailable' | null
         decisionEligible: boolean
         approval: {
-          state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+          state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
           quoteVersionId: string | null
         }
         lines: Array<
@@ -199,13 +207,13 @@ export type QuoteDecisionResult =
     changed: boolean
     event: {
       id: string
-      kind: 'approved' | 'declined'
+      kind: 'approved' | 'declined' | 'deferred'
       quoteVersionId: string
       jobId: string
       approvedVia: 'phone' | 'in_person' | null
     }
     projection: {
-      approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+      approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
       approvedQuoteVersionId: string | null
     }
   }
@@ -569,7 +577,7 @@ export async function getQuoteBuilder(
       }).from(quoteEvents).where(and(
         eq(quoteEvents.shopId, actor.shopId as string),
         eq(quoteEvents.ticketId, ticket.id),
-        inArray(quoteEvents.kind, ['approved', 'declined']),
+        inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
       )).orderBy(quoteEvents.createdAt, quoteEvents.id)
 
       try {
@@ -998,7 +1006,7 @@ function safeBuilderApproval(
   pinnedApprovalValid: boolean,
 ): NonNullable<Extract<QuoteBuilderResult, { ok: true }>['builder']['jobs'][number]['approval']> {
   if (state !== 'pending_quote' && state !== 'quote_ready' && state !== 'sent'
-    && state !== 'approved' && state !== 'declined') {
+    && state !== 'approved' && state !== 'declined' && state !== 'deferred') {
     throw new TypeError('quote approval state is invalid')
   }
   const safeVersionId = quoteVersionId === null ? null
@@ -1434,7 +1442,9 @@ function safeDecisionResult(
   job: Pick<typeof ticketJobs.$inferSelect, 'approvalState' | 'approvedQuoteVersionId'>,
   changed: boolean,
 ): QuoteDecisionResult {
-  if (event.kind !== 'approved' && event.kind !== 'declined') throw new TypeError('invalid decision event')
+  if (event.kind !== 'approved' && event.kind !== 'declined' && event.kind !== 'deferred') {
+    throw new TypeError('invalid decision event')
+  }
   return {
     ok: true,
     changed,
@@ -1464,6 +1474,7 @@ function isMatchingDecisionEvent(
     && event.quoteVersionId === input.quoteVersionId
     && event.kind === input.decision
     && event.approvedVia === (input.decision === 'approved' ? input.approvedVia : null)
+    && event.body === (input.decision === 'deferred' ? input.reason : null)
 }
 
 function snapshotContainsDecisionJob(
@@ -1620,6 +1631,7 @@ export async function recordQuoteDecision(
         actorProfileId: freshActor.id,
         approvedVia,
         requestKey: parsedDecision.data.requestKey,
+        body: parsedDecision.data.decision === 'deferred' ? parsedDecision.data.reason : null,
       }).returning()
 
       await dependencies.afterEventInsert?.()

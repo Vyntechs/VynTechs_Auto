@@ -82,6 +82,7 @@ function classifyAccess(input: {
     job.approvalState === 'pending_quote'
     || job.approvalState === 'quote_ready'
     || job.approvalState === 'sent'
+    || job.approvalState === 'deferred'
   ) {
     return job.approvedQuoteVersionId === null
       ? { state: 'awaiting_approval', ...base }
@@ -134,7 +135,7 @@ async function loadDecisionTruth(db: AppDb, input: { shopId: string; ticketId: s
       eq(quoteEvents.shopId, input.shopId),
       eq(quoteEvents.ticketId, input.ticketId),
       eq(quoteEvents.jobId, input.jobId),
-      inArray(quoteEvents.kind, ['approved', 'declined']),
+      inArray(quoteEvents.kind, ['approved', 'declined', 'deferred']),
     ))
     .orderBy(asc(quoteEvents.createdAt), asc(quoteEvents.id)) as Promise<DecisionTruth[]>
 }

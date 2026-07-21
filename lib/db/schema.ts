@@ -390,7 +390,7 @@ export const ticketJobs = pgTable(
       enum: ['open', 'in_progress', 'blocked', 'done', 'canceled'],
     }).default('open').notNull(),
     approvalState: text('approval_state', {
-      enum: ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined'],
+      enum: ['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred'],
     }).default('pending_quote').notNull(),
     customerStory: jsonb('customer_story').$type<CustomerStory>(),
     storyMeta: jsonb('story_meta').$type<CustomerStoryMeta>(),
@@ -484,7 +484,7 @@ export const ticketJobs = pgTable(
     ),
     check(
       'ticket_jobs_approval_state_valid',
-      sql`${table.approvalState} in ('pending_quote', 'quote_ready', 'sent', 'approved', 'declined')`,
+      sql`${table.approvalState} in ('pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred')`,
     ),
     check(
       'ticket_jobs_diagnostic_start_state_valid',
@@ -1023,7 +1023,7 @@ export const quoteEvents = pgTable(
     quoteVersionId: uuid('quote_version_id').notNull(),
     quoteSendId: uuid('quote_send_id'),
     kind: text('kind', {
-      enum: ['sent', 'delivered', 'viewed', 'approved', 'declined', 'question'],
+      enum: ['sent', 'delivered', 'viewed', 'approved', 'declined', 'deferred', 'question'],
     }).notNull(),
     actorProfileId: uuid('actor_profile_id'),
     approvedVia: text('approved_via', { enum: ['page', 'phone', 'in_person'] }),
@@ -1071,7 +1071,7 @@ export const quoteEvents = pgTable(
       .where(sql`${table.quoteSendId} is not null`),
     check(
       'quote_events_kind_valid',
-      sql`${table.kind} in ('sent', 'delivered', 'viewed', 'approved', 'declined', 'question')`,
+      sql`${table.kind} in ('sent', 'delivered', 'viewed', 'approved', 'declined', 'deferred', 'question')`,
     ),
     check(
       'quote_events_approved_via_valid',
@@ -1084,7 +1084,12 @@ export const quoteEvents = pgTable(
     ),
     check(
       'quote_events_decision_job_consistent',
-      sql`${table.kind} not in ('approved', 'declined') or ${table.jobId} is not null`,
+      sql`${table.kind} not in ('approved', 'declined', 'deferred') or ${table.jobId} is not null`,
+    ),
+    check(
+      'quote_events_deferred_reason_consistent',
+      sql`(${table.kind} = 'deferred' and char_length(${table.body}) between 1 and 500)
+        or ${table.kind} <> 'deferred'`,
     ),
     check(
       'quote_events_offline_approval_actor_consistent',

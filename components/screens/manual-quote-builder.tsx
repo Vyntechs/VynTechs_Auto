@@ -75,7 +75,7 @@ export function ManualQuoteBuilder({
   onProjection?: (jobs: Array<{
     id: string
     workStatus: 'open' | 'in_progress' | 'blocked'
-    approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+    approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
   }>) => void
   onReloadCatalog?: () => void
 }): React.JSX.Element {
@@ -654,7 +654,7 @@ export function ManualQuoteBuilder({
 
   function openDecision(
     job: QuoteBuilder['jobs'][number],
-    kind: 'phone' | 'in_person' | 'declined',
+    kind: 'phone' | 'in_person' | 'declined' | 'deferred',
     invoker: HTMLButtonElement,
   ): void {
     const version = current.activeVersion
@@ -665,7 +665,7 @@ export function ManualQuoteBuilder({
       jobId: job.id, title: job.title, kind, requestKey: crypto.randomUUID(),
       versionId: version.id, versionNumber: version.versionNumber,
       jobSubtotalCents: versionJob.subtotalCents, totalCents: version.totalCents,
-      busy: false, error: null, invoker,
+      busy: false, error: null, reason: '', invoker,
     })
   }
 
@@ -679,8 +679,12 @@ export function ManualQuoteBuilder({
         body: JSON.stringify({
           requestKey: pending.requestKey, jobId: pending.jobId,
           quoteVersionId: pending.versionId,
-          decision: pending.kind === 'declined' ? 'declined' : 'approved',
-          ...(pending.kind === 'declined' ? {} : { approvedVia: pending.kind }),
+          decision: pending.kind === 'declined' || pending.kind === 'deferred' ? pending.kind : 'approved',
+          ...(pending.kind === 'deferred'
+            ? { reason: pending.reason.trim() }
+            : pending.kind === 'declined'
+              ? {}
+              : { approvedVia: pending.kind }),
         }),
       })
       const body = await readJson(response)
@@ -704,8 +708,14 @@ export function ManualQuoteBuilder({
         && parsed.event.quoteVersionId === pending.versionId
         && parsed.projection.approvalState === 'declined'
         && parsed.projection.approvedQuoteVersionId === null
+      const changedDeferralMatches = parsed?.changed === true
+        && pending.kind === 'deferred'
+        && parsed.event.kind === 'deferred'
+        && parsed.event.quoteVersionId === pending.versionId
+        && parsed.projection.approvalState === 'deferred'
+        && parsed.projection.approvedQuoteVersionId === null
       if (!parsed || parsed.event.jobId !== pending.jobId
-        || (parsed.changed && !changedApprovalMatches && !changedDeclineMatches)) {
+        || (parsed.changed && !changedApprovalMatches && !changedDeclineMatches && !changedDeferralMatches)) {
         setDecision({ ...pending, busy: false, error: 'Server truth did not match this decision. Refresh and retry.' })
         return
       }
@@ -723,6 +733,8 @@ export function ManualQuoteBuilder({
         const next = { ...verdicts }
         if (changedDeclineMatches) {
           next[pending.jobId] = `Declined · V${pending.versionNumber}`
+        } else if (changedDeferralMatches) {
+          next[pending.jobId] = `Deferred · follow up · V${pending.versionNumber}`
         } else if (changedApprovalMatches) {
           next[pending.jobId] = `Approved · ${parsed.event.approvedVia === 'phone' ? 'Phone' : 'In person'} · V${pending.versionNumber}`
         } else {
@@ -1384,6 +1396,9 @@ export function ManualQuoteBuilder({
             setTimeout(() => invoker.focus(), 0)
           }}
           onConfirm={submitDecision}
+          onReasonChange={(reason) => setDecision((current) => (
+            current?.kind === 'deferred' ? { ...current, reason, error: null } : current
+          ))}
         />
       )}
     </Root>
@@ -1395,7 +1410,7 @@ type BuilderJob = QuoteBuilder['jobs'][number]
 type DecisionState = {
   jobId: string
   title: string
-  kind: 'phone' | 'in_person' | 'declined'
+  kind: 'phone' | 'in_person' | 'declined' | 'deferred'
   requestKey: string
   versionId: string
   versionNumber: number
@@ -1403,6 +1418,7 @@ type DecisionState = {
   totalCents: number
   busy: boolean
   error: string | null
+  reason: string
   invoker: HTMLButtonElement
 }
 
@@ -1563,36 +1579,45 @@ function AuthorizationStrip({ job, versionNumber, jobSubtotalCents, totalCents, 
   canDecide: boolean
   immediateVerdict?: string
   focusRef: (element: HTMLElement | null) => void
-  onDecision: (kind: 'phone' | 'in_person' | 'declined', invoker: HTMLButtonElement) => void
+  onDecision: (kind: 'phone' | 'in_person' | 'declined' | 'deferred', invoker: HTMLButtonElement) => void
 }): React.JSX.Element {
   const verdict = immediateVerdict ?? (job.approval.state === 'approved'
     ? `Approved · V${versionNumber}`
-    : job.approval.state === 'declined' ? `Declined · V${versionNumber}` : null)
+    : job.approval.state === 'declined' ? `Declined · V${versionNumber}`
+      : job.approval.state === 'deferred' ? `Deferred · follow up · V${versionNumber}` : null)
   return (
     <section className={styles.authorizationStrip} role="region" aria-label={`Authorization for ${job.title}`} tabIndex={-1} ref={focusRef}>
       <p className={styles.eyebrow}>Quote V{versionNumber} · immutable</p>
       <p className={styles.authorizationTitle}>{job.title}</p>
       <dl><div><dt>Job subtotal before tax</dt><dd className={styles.money}>{formatMoneyCents(jobSubtotalCents)}</dd></div><div><dt>Ticket total</dt><dd className={styles.money}>{formatMoneyCents(totalCents)}</dd></div></dl>
-      {verdict ? <p className={styles.verdict} role="status" aria-live="polite">{verdict}</p> : canDecide && job.decisionEligible ? (
+      {verdict && <p className={styles.verdict} role="status" aria-live="polite">{verdict}</p>}
+      {canDecide && job.decisionEligible && job.approval.state !== 'approved' && job.approval.state !== 'declined' ? (
         <div className={styles.decisionActions}>
           <button type="button" onClick={(event) => onDecision('phone', event.currentTarget)}>Phone approval</button>
           <button type="button" onClick={(event) => onDecision('in_person', event.currentTarget)}>In-person approval</button>
           <button type="button" onClick={(event) => onDecision('declined', event.currentTarget)}>Record declined</button>
+          <button type="button" onClick={(event) => onDecision('deferred', event.currentTarget)}>Defer decision</button>
         </div>
-      ) : <p className={styles.storyTruth}>{canDecide
+      ) : !verdict && <p className={styles.storyTruth}>{canDecide
         ? 'Customer decision is unavailable for this job’s current state.'
         : 'Advisor or owner records the customer decision.'}</p>}
     </section>
   )
 }
 
-function DecisionDialog({ decision, onCancel, onConfirm }: { decision: DecisionState; onCancel: () => void; onConfirm: () => void }): React.JSX.Element {
+function DecisionDialog({ decision, onCancel, onConfirm, onReasonChange }: {
+  decision: DecisionState
+  onCancel: () => void
+  onConfirm: () => void
+  onReasonChange: (reason: string) => void
+}): React.JSX.Element {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => cancelRef.current?.focus(), [])
   useEffect(() => { if (decision.busy) dialogRef.current?.focus() }, [decision.busy])
   const channel = decision.kind === 'phone' ? 'phone' : decision.kind === 'in_person' ? 'in-person' : null
-  const title = channel ? `Record ${channel} approval?` : 'Record declined?'
+  const title = channel ? `Record ${channel} approval?`
+    : decision.kind === 'deferred' ? 'Defer customer decision?' : 'Record declined?'
   return (
     <div ref={dialogRef} className={styles.decisionDialog} role="alertdialog" tabIndex={-1} aria-modal="true" aria-label={title} onKeyDown={(event) => {
       if (event.key === 'Escape' && !decision.busy) { event.preventDefault(); onCancel(); return }
@@ -1606,10 +1631,13 @@ function DecisionDialog({ decision, onCancel, onConfirm }: { decision: DecisionS
       <p className={styles.eyebrow}>Authorization strip</p><h2>{title}</h2>
       <p>{decision.title} · V{decision.versionNumber}</p>
       <dl><div><dt>Job subtotal before tax</dt><dd>{formatMoneyCents(decision.jobSubtotalCents)}</dd></div><div><dt>Ticket total</dt><dd>{formatMoneyCents(decision.totalCents)}</dd></div></dl>
+      {decision.kind === 'deferred' && <label>What are we waiting for?
+        <textarea value={decision.reason} maxLength={500} onChange={(event) => onReasonChange(event.target.value)} />
+      </label>}
       {decision.error && <p className={styles.storyError} role="alert">{decision.error}</p>}
       <div className={styles.decisionActions}>
         <button ref={cancelRef} type="button" disabled={decision.busy} onClick={onCancel}>Cancel</button>
-        <button type="button" disabled={decision.busy} onClick={onConfirm}>{decision.busy ? 'Recording…' : channel ? 'Record approval' : 'Record declined'}</button>
+        <button type="button" disabled={decision.busy || (decision.kind === 'deferred' && decision.reason.trim().length < 1)} onClick={onConfirm}>{decision.busy ? 'Recording…' : channel ? 'Record approval' : decision.kind === 'deferred' ? 'Defer decision' : 'Record declined'}</button>
       </div>
     </div>
   )

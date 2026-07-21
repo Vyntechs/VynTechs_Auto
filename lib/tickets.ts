@@ -121,7 +121,7 @@ export type VehicleHistoryJob = {
   ticketNumber: number
   title: string
   kind: 'diagnostic' | 'repair' | 'maintenance'
-  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
   workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
 }
 
@@ -339,7 +339,7 @@ export type TodayTicketJob = {
   requiredSkillTier: number
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
-  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined'
+  approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
   canClaim: boolean
   assignmentState: 'mine' | 'team' | 'unassigned'
   assignedTechName: string | null

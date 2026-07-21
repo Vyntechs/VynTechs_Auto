@@ -59,7 +59,7 @@ function quoteCommand(input: Input, activeJobs: LivingTicketJob[]): RankedComman
   if (needsDraft) return { kind: 'quote', label: 'Build quote', rank: 30 }
 
   const awaitsDecision = activeJobs.some((job) => (
-    job.approvalState === 'quote_ready' || job.approvalState === 'sent'
+    job.approvalState === 'quote_ready' || job.approvalState === 'sent' || job.approvalState === 'deferred'
   ))
   if (!awaitsDecision) return null
   return {

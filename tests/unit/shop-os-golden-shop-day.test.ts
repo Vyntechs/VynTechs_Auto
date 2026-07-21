@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { jobPartRequests, ticketActivity, ticketPayments } from '@/lib/db/schema'
+import { jobPartRequests, quoteEvents, ticketActivity, ticketPayments } from '@/lib/db/schema'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
 import { saveReviewedCustomerStory } from '@/lib/shop-os/customer-stories'
 import { projectLivingTicketCommands } from '@/lib/shop-os/living-ticket'
@@ -9,7 +9,7 @@ import { createDraftLine, createQuoteVersion, recordQuoteDecision } from '@/lib/
 import { closeTicket, getTicketRingOut, recordTicketPayment } from '@/lib/shop-os/ring-out'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
 import { mutateJobInterruption } from '@/lib/shop-os/interruption'
-import { getTicketDetail, listTodayTicketJobs, mutateTicketJobAssignment } from '@/lib/tickets'
+import { addTicketJob, getTicketDetail, listTodayTicketJobs, mutateTicketJobAssignment } from '@/lib/tickets'
 import { createGoldenShopDay, GOLDEN_KEYS } from '@/tests/helpers/golden-shop-day'
 
 function commandKinds(
@@ -32,6 +32,93 @@ function commandKinds(
 }
 
 describe('Golden Shop Day release gate', () => {
+  it('keeps a partial customer answer mounted until a deferred job gets its durable final decision', async () => {
+    const golden = await createGoldenShopDay()
+    try {
+      const created = await createCounterTicket(golden.db, {
+        actor: golden.actors.advisor,
+        body: {
+          vehicleMode: 'new', customer: golden.customer, vehicle: golden.vehicle,
+          concern: 'Customer wants us to address braking and a separate maintenance item.',
+          whenStarted: 'This week', howOften: 'Every drive',
+          diagnosticAuthorization: { amountDollars: '120', note: 'Synthetic only' },
+          assignedTechId: golden.people.tech.id,
+        },
+      })
+      expect(created).toMatchObject({ ok: true })
+      if (!created.ok) throw new Error('counter intake failed')
+      const firstJob = created.ticket.jobs[0]
+      const added = await addTicketJob(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: created.ticket.id,
+        body: {
+          title: 'Replace cabin air filter', kind: 'maintenance', requiredSkillTier: 1,
+          assignedTechId: null,
+        },
+      })
+      expect(added).toMatchObject({ ok: true })
+      if (!added.ok) throw new Error('second job failed')
+      const secondJob = added.ticket.jobs.find((job) => job.id !== firstJob.id)
+      if (!secondJob) throw new Error('second job missing')
+      expect(await saveReviewedCustomerStory(golden.db, {
+        actor: { profileId: golden.people.tech.id }, ticketId: created.ticket.id, jobId: firstJob.id,
+        clientKey: GOLDEN_KEYS.story, expectedStoryRevision: 0,
+        whatWeFound: 'Brake pads are worn below service recommendation.',
+        whatWeRecommend: 'Replace pads and verify the brake system.',
+      })).toMatchObject({ ok: true, changed: true })
+
+      for (const [job, key, description] of [
+        [firstJob, GOLDEN_KEYS.line, 'Brake repair labor'],
+        [secondJob, GOLDEN_KEYS.secondLine, 'Cabin filter labor'],
+      ] as const) {
+        expect(await createDraftLine(golden.db, {
+          actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id, jobId: job.id, clientKey: key,
+          body: { kind: 'labor', description, taxable: false, laborHours: '1' },
+        })).toMatchObject({ ok: true, changed: true })
+      }
+      const version = await createQuoteVersion(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+      })
+      expect(version).toMatchObject({ ok: true, changed: true })
+      if (!version.ok) throw new Error('quote version failed')
+
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.approval, jobId: firstJob.id, quoteVersionId: version.version.id,
+          decision: 'approved', approvedVia: 'phone',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'approved' } })
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.deferred, jobId: secondJob.id, quoteVersionId: version.version.id,
+          decision: 'deferred', reason: 'Customer will decide after their next paycheck.',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'deferred', approvedQuoteVersionId: null } })
+
+      const partial = await getTicketDetail(golden.db, { actor: golden.actors.advisor, ticketId: created.ticket.id })
+      expect(partial).toMatchObject({ ok: true, ticket: { jobs: expect.arrayContaining([
+        expect.objectContaining({ id: firstJob.id, approvalState: 'approved' }),
+        expect.objectContaining({ id: secondJob.id, approvalState: 'deferred' }),
+      ]) } })
+      if (!partial.ok) throw new Error('partial ticket unavailable')
+      expect(commandKinds(golden.actors.advisor, partial.ticket)).toContain('quote')
+
+      expect(await recordQuoteDecision(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        body: {
+          requestKey: GOLDEN_KEYS.deferredApproval, jobId: secondJob.id, quoteVersionId: version.version.id,
+          decision: 'approved', approvedVia: 'in_person',
+        },
+      })).toMatchObject({ ok: true, projection: { approvalState: 'approved', approvedQuoteVersionId: version.version.id } })
+      const decisions = await golden.db.select().from(quoteEvents)
+      expect(decisions.map((event) => event.kind)).toEqual(['approved', 'deferred', 'approved'])
+    } finally {
+      await golden.close()
+    }
+  })
+
   it.each([1, 2])('moves one synthetic repair order through every role without losing truth (run %s)', async () => {
     const golden = await createGoldenShopDay()
     try {
