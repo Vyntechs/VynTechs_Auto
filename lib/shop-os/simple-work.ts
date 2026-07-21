@@ -174,7 +174,10 @@ async function lockContext(
 }
 
 export function nextSimpleWorkTimestamp() {
-  return sql`greatest(clock_timestamp(), ${ticketJobs.updatedAt} + interval '1 millisecond')`
+  return sql`greatest(
+    date_trunc('milliseconds', clock_timestamp()),
+    date_trunc('milliseconds', ${ticketJobs.updatedAt}) + interval '1 millisecond'
+  )`
 }
 
 // Bank the currently-open on-interval into active_seconds: add (now - since)

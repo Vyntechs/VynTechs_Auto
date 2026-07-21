@@ -148,10 +148,15 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const note = tech.getByRole('textbox', { name: 'Work note' })
     await note.fill('Confirmed pad wear, replaced front pads, torqued hardware, and completed a quiet road test.')
     await tech.getByRole('button', { name: 'Close work' }).click()
-    await expect(tech.getByRole('alert')).toContainText('Finish or clear the draft')
+    await expect(tech.getByRole('alert').filter({ hasText: 'Finish or clear the draft' })).toBeVisible()
     await expect(note).toHaveValue(/Confirmed pad wear/)
+    const noteResponsePromise = tech.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
+    ))
     await tech.getByRole('button', { name: 'Save note' }).click()
-    await expect(tech.getByRole('status').filter({ hasText: 'Work note saved.' })).toBeVisible()
+    expect((await noteResponsePromise).status(), 'save-note API status').toBe(200)
+    await expect(tech.getByRole('button', { name: 'Complete work' })).toBeEnabled()
     await tech.getByLabel('What part do you need?').fill('Front brake pad set')
     await tech.getByLabel('Brand or where to get it').fill('OE-equivalent')
     await tech.getByRole('button', { name: 'Send to parts' }).click()

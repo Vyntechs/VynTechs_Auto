@@ -107,6 +107,7 @@ describe('Shop OS approved simple work', () => {
   it('generates monotonic timestamps from the locked database row without runtime Date parameters', () => {
     const query = new PgDialect().sqlToQuery(nextSimpleWorkTimestamp())
     expect(query.sql).toContain('"ticket_jobs"."updated_at"')
+    expect(query.sql).toContain("date_trunc('milliseconds'")
     expect(query.sql).toContain("interval '1 millisecond'")
     expect(query.params).toEqual([])
   })
