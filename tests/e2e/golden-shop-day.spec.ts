@@ -224,11 +224,16 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await tech.getByLabel('What part do you need?').fill('Front brake pad set')
     await tech.getByLabel('Brand or where to get it').fill('OE-equivalent')
     await tech.getByRole('button', { name: 'Send to parts' }).click()
-    await expect(tech.getByText('Waiting on parts')).toBeVisible()
-    await tech.getByText('Put work on hold', { exact: true }).click()
+    await expect(tech.getByLabel('Parts I need').getByText('Waiting on parts', { exact: true })).toBeVisible()
+    await tech.locator('summary').filter({ hasText: 'Put work on hold' }).click()
     await tech.getByLabel('Reason for hold').selectOption('parts')
     await tech.getByLabel('What needs to happen next?').fill('Wait for the parts desk to source the pad set.')
+    const holdResponsePromise = tech.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/interruption$/i.test(new URL(response.url()).pathname)
+    ))
     await tech.getByRole('button', { name: 'Put work on hold' }).click()
+    expect((await holdResponsePromise).status(), 'put-work-on-hold API status').toBe(200)
     await expect(tech.getByText('Work · Blocked')).toBeVisible()
     await checkpoint(tech, testInfo, 'tech-work-and-part-request')
 

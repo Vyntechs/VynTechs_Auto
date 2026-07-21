@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-ignore -- The executable is intentionally Node-only JavaScript with runtime-tested exports.
-import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupReplicationGuard, cleanupStatements, parseEnvFile, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
+import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupReplicationGuard, cleanupStatements, parseEnvFile, qaIdentityKey, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
 
-type QaUser = { email: string; role: string; skillTier: number | null }
+type QaUser = { email: string; profileId: string; role: string; skillTier: number | null }
 type CleanupStatement = { table: string; sql: string; values: string[] }
 
 describe('Golden browser QA control', () => {
@@ -23,6 +23,7 @@ describe('Golden browser QA control', () => {
     expect(QA_USERS.tech.skillTier).toBe(3)
     expect(QA_USERS.relief.skillTier).toBe(3)
     expect(QA_USERS.owner.skillTier).toBeNull()
+    expect(new Set(users.map(qaIdentityKey))).toHaveLength(users.length)
   })
 
   it('uses only browser-public Supabase configuration for QA auth provisioning', () => {

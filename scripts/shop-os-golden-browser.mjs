@@ -66,6 +66,12 @@ export const QA_USERS = Object.freeze({
   }),
 })
 
+// Roles are intentionally not unique: the Chaos Shop Day has two technicians.
+// Use the fixed profile ID when binding an auth user to a QA profile.
+export function qaIdentityKey(user) {
+  return user.profileId
+}
+
 export const CLEANUP_TABLES = Object.freeze([
   'ticket_activity',
   'ticket_payments',
@@ -312,7 +318,7 @@ async function ensureQaAuthUsers(databaseUrl) {
             )
         where id = ${authUserId}::uuid and lower(email) = ${user.email}
       `
-      ids[user.role] = authUserId
+      ids[qaIdentityKey(user)] = authUserId
       writeKeychainPassword(user, password)
     }
     return ids
@@ -364,7 +370,7 @@ export async function ensureQaTenant(env) {
             membership_status, membership_activated_at, is_comp, is_curator, deactivated_at
           ) values (
             ${user.profileId}::uuid,
-            ${authUserIds[user.role]}::uuid,
+            ${authUserIds[qaIdentityKey(user)]}::uuid,
             ${QA_SHOP_ID}::uuid,
             ${user.fullName},
             ${user.role},

@@ -420,7 +420,8 @@
 
 .stamp[data-state='blocked'] {
   border-color: var(--vt-risk-high);
-  color: var(--vt-risk-high);
+  background: color-mix(in oklch, var(--vt-risk-high) 14%, var(--vt-bone-50));
+  color: var(--vt-fg-1);
 }
 
 .stamp[data-state='done'],
