@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: CLI commands `provision`, `test`, and `verify-clean`.
 - Produces: fixed `QA_SHOP_ID`, `QA_SHOP_NAME`, role/profile IDs, `.invalid` emails, Keychain service names, `loadVercelEnv()`, `ensureQaTenant()`, `readQaCredentials()`, and `verifyQaClean()`.
-- Consumes: Vercel CLI login plus existing `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `DATABASE_URL` values pulled into a mode-0600 temporary file and removed in `finally`.
+- Consumes: Vercel CLI login plus the existing `DATABASE_URL` pulled into a mode-0600 temporary file and removed in `finally`; signup uses the project’s public URL and publishable key only.
 
 - [ ] **Step 1: Add the official browser accessibility dependency**
 

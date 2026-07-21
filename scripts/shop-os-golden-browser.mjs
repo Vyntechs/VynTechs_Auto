@@ -267,8 +267,8 @@ async function assertQaIdentityPreflight(sql) {
 async function ensureQaAuthUsers(databaseUrl) {
   return withDatabase(databaseUrl, async (sql) => {
     const ids = {}
-  for (const user of Object.values(QA_USERS)) {
-    const password = randomBytes(36).toString('base64url')
+    for (const user of Object.values(QA_USERS)) {
+      const password = randomBytes(36).toString('base64url')
       let rows = await sql`
         select id::text
         from auth.users
