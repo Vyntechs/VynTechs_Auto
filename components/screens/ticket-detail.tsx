@@ -382,21 +382,6 @@ export function TicketDetailScreen({
               )}
             </dl>
           )}
-          {(ticket.diagnosticAuthorizedCents !== null || ticket.diagnosticAuthorizationNote) && (
-            <div className={styles.authorization}>
-              <p className={styles.authorizationLabel}>Diagnostic authorization</p>
-              {ticket.diagnosticAuthorizedCents !== null && (
-                <p className={styles.authorizationAmount}>
-                  {formatCents(ticket.diagnosticAuthorizedCents)}
-                </p>
-              )}
-              {ticket.diagnosticAuthorizationNote && (
-                <p className={styles.authorizationNote}>
-                  {ticket.diagnosticAuthorizationNote}
-                </p>
-              )}
-            </div>
-          )}
         </section>
 
         <section className={styles.jobs} aria-labelledby="jobs-heading">
@@ -646,13 +631,6 @@ function emailHref(email: string): string | null {
   const value = email.trim()
   if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return null
   return `mailto:${value}`
-}
-
-function formatCents(cents: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(cents / 100)
 }
 
 type AssignmentOverride = {

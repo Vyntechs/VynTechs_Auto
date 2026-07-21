@@ -198,6 +198,28 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
   })
 
+  it('makes a pending quote the dispatch role’s next action for assigned team work', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[]}
+        openJobs={[]}
+        teamJobs={[{
+          ...maintenance,
+          assignmentState: 'team',
+          assignedTechName: 'Avery Tech',
+          approvalState: 'pending_quote',
+          workStatus: 'open',
+        }]}
+        canDispatchWork
+        canBuildQuote
+        currentProfileId="advisor-1"
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Build quote' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Hand off' })).toBeNull()
+  })
+
   it('opens assigned simple work directly beneath its command instead of navigating away', async () => {
     const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
     vi.stubGlobal('fetch', fetchMock)
@@ -218,6 +240,47 @@ describe('TodayJobsBoard persisted ledger', () => {
       { method: 'GET', cache: 'no-store' },
     ))
     expect(screen.queryByRole('link', { name: 'Open the full work page' })).toBeNull()
+  })
+
+  it('resolves an assigned approved work hold in place and reveals the next action', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      job: {
+        id: 'job-maintenance',
+        assignedTechId: 'profile-1',
+        workStatus: 'open',
+        holdKind: null,
+        holdNote: null,
+        holdResumeStatus: null,
+        heldAt: null,
+        heldByProfileId: null,
+        clockedOnSince: null,
+        activeSeconds: 0,
+        updatedAt: '2026-07-21T00:00:00.000Z',
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <TodayJobsBoard
+        myJobs={[{
+          ...maintenance,
+          workStatus: 'blocked',
+          approvalState: 'approved',
+        }]}
+        openJobs={[]}
+        currentProfileId="profile-1"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve hold' }))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      'Hold resolved for ticket 44.',
+    ))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(screen.getByRole('button', { name: 'Open work' })).toBeEnabled()
   })
 
   it('fails closed when an open-queue row is not actually open', () => {

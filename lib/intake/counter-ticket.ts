@@ -4,7 +4,6 @@ import type { AppDb } from '@/lib/db/queries'
 import { customers, vehicles } from '@/lib/db/schema'
 import { canCreateTickets } from '@/lib/shop-os/capabilities'
 import {
-  addTicketJob,
   createTicket,
   type CreateTicketResult,
   type TicketActor,
@@ -18,19 +17,6 @@ const optionalTrimmedText = (max: number) =>
 const PG_INTEGER_MAX = 2_147_483_647
 const mileageSchema = z.number().int().nonnegative().max(PG_INTEGER_MAX)
 
-const dollarAmountSchema = z
-  .string()
-  .regex(/^\d+(?:\.\d{1,2})?$/)
-  .refine((value) => dollarsToCents(value) !== null)
-
-const diagnosticAuthorizationSchema = z
-  .object({
-    amountDollars: dollarAmountSchema.nullable().optional(),
-    note: optionalTrimmedText(2_000),
-  })
-  .strict()
-  .optional()
-
 const requestedServiceSchema = z
   .object({
     kind: z.enum(['repair', 'maintenance']),
@@ -43,7 +29,6 @@ const commonShape = {
   concern: z.string().trim().min(1).max(5_000),
   whenStarted: optionalTrimmedText(1_000),
   howOften: optionalTrimmedText(1_000),
-  diagnosticAuthorization: diagnosticAuthorizationSchema,
   requestedService: requestedServiceSchema,
   assignedTechId: z.uuid().nullable(),
   confirmBelowTier: z.boolean().optional(),
@@ -96,13 +81,6 @@ class CounterTicketRollback extends Error {
   }
 }
 
-function dollarsToCents(value: string): number | null {
-  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null
-  const [whole, fraction = ''] = value.split('.')
-  const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'))
-  return cents <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cents) : null
-}
-
 function actorDenied(actor: TicketActor): Exclude<CreateTicketResult, { ok: true }> | null {
   if (!actor.shopId) return { ok: false, error: 'no_shop' }
   if (actor.membershipStatus !== 'active' || actor.deactivatedAt) {
@@ -117,8 +95,11 @@ function ticketBody(
   customerId: string,
   vehicleId: string,
 ): Record<string, unknown> {
-  const amount = body.diagnosticAuthorization?.amountDollars
-  const diagnosticAuthorizedCents = amount ? dollarsToCents(amount) : null
+  // AutoEye diagnostics is deliberately dark. A counter visit still needs one
+  // clear, ordinary work item. When the advisor knows the requested service,
+  // that becomes the job; otherwise the customer's concern is the work title.
+  const service = body.requestedService
+  const kind = service?.kind ?? 'repair'
   return {
     source: 'counter',
     customerId,
@@ -126,13 +107,11 @@ function ticketBody(
     concern: body.concern,
     whenStarted: body.whenStarted ?? null,
     howOften: body.howOften ?? null,
-    diagnosticAuthorizedCents,
-    diagnosticAuthorizationNote: body.diagnosticAuthorization?.note ?? null,
     jobs: [
       {
-        title: `Diagnose: ${body.concern}`.slice(0, 200),
-        kind: 'diagnostic',
-        requiredSkillTier: 3,
+        title: (service?.description ?? `Customer request: ${body.concern}`).slice(0, 200),
+        kind,
+        requiredSkillTier: kind === 'repair' ? 2 : 1,
         assignedTechId: body.assignedTechId,
         confirmBelowTier: body.confirmBelowTier,
       },
@@ -204,20 +183,6 @@ export async function createCounterTicket(
       })
       if (!result.ok) throw new CounterTicketRollback(result)
 
-      if (body.requestedService) {
-        result = await addTicketJob(tx as AppDb, {
-          actor: input.actor,
-          ticketId: result.ticket.id,
-          body: {
-            title: body.requestedService.description,
-            kind: body.requestedService.kind,
-            requiredSkillTier: body.requestedService.kind === 'repair' ? 2 : 1,
-            assignedTechId: body.assignedTechId,
-            confirmBelowTier: body.confirmBelowTier,
-          },
-        })
-        if (!result.ok) throw new CounterTicketRollback(result)
-      }
       return result
     })
   } catch (error) {

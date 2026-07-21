@@ -644,7 +644,16 @@ export function ManualQuoteBuilder({
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return
       }
-      await refreshQuote('prepared', false, true, prepared.version)
+      // Preparation changes the operator's next decision. Move focus to the
+      // first authorization strip, rather than leaving it on a passive status
+      // message below a long mobile quote workspace.
+      const firstDecisionJob = current.jobs.find((job) => job.workStatus === 'open')
+      await refreshQuote(
+        firstDecisionJob ? `decision:${firstDecisionJob.id}` : 'prepared',
+        false,
+        true,
+        prepared.version,
+      )
     } catch {
       setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
     } finally {

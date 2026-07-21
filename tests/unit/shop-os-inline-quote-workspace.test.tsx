@@ -128,6 +128,26 @@ describe('InlineQuoteWorkspace', () => {
     expect(screen.getByText('Vendors false · 0')).toBeInTheDocument()
   })
 
+  it('quietly retries one transient quote-builder contention before showing recovery UI', async () => {
+    let quoteAttempts = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/tickets/ticket-1/quote') {
+        quoteAttempts += 1
+        return quoteAttempts === 1
+          ? response({ error: 'contention' }, 409)
+          : response({ builder: quoteBuilder })
+      }
+      if (url === '/api/shop/canned-jobs') return response({ cannedJobs: [], taxRateBps: 825 })
+      return response({ vendorAccounts: [] })
+    }))
+
+    render(<InlineQuoteWorkspace actorId={ACTOR_ID} ticket={ticket} onClose={vi.fn()} onProjection={vi.fn()} />)
+
+    expect(await screen.findByText('Quote loaded ticket-1')).toBeInTheDocument()
+    expect(quoteAttempts).toBe(2)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('fails closed without replacing the repair order when required quote truth is malformed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ builder: { unsafe: true } })))
 

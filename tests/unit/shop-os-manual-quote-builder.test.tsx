@@ -1572,7 +1572,9 @@ describe('ManualQuoteBuilder preparation', () => {
     const preparedStatus = await screen.findByRole('status')
     expect(preparedStatus).toHaveTextContent('Prepared version V4')
     expect(preparedStatus).toHaveAttribute('aria-live', 'polite')
-    expect(document.activeElement).toBe(preparedStatus)
+    expect(document.activeElement).toBe(
+      screen.getByRole('region', { name: /Authorization for Replace front brakes/i }),
+    )
 
     expect(fetchMock.mock.calls[0][0]).toBe(`/api/tickets/${TICKET_ID}/quote/versions`)
     expect(fetchMock.mock.calls[0][1]).toEqual({

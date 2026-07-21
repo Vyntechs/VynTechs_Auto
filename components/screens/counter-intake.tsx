@@ -36,7 +36,6 @@ type CounterBody = {
   concern: string
   whenStarted: string | null
   howOften: string | null
-  diagnosticAuthorization: { amountDollars: string | null; note: string | null }
   requestedService?: { kind: 'repair' | 'maintenance'; description: string }
   assignedTechId: string | null
   confirmBelowTier?: boolean
@@ -62,7 +61,7 @@ function ticketErrorMessage(error?: string): string {
     case 'not_found':
       return 'The selected customer or vehicle is no longer available. Choose it again.'
     case 'invalid_input':
-      return 'Check the customer, vehicle, mileage, and authorization fields.'
+      return 'Check the customer, vehicle, mileage, and requested-work fields.'
     case 'invalid_assignee':
       return 'That technician is no longer available for assignment. Choose Open or another technician.'
     case 'forbidden':
@@ -102,8 +101,6 @@ export function CounterIntake({
   const [description, setDescription] = useState('')
   const [whenStarted, setWhenStarted] = useState('')
   const [howOften, setHowOften] = useState('')
-  const [authorizationAmount, setAuthorizationAmount] = useState('')
-  const [authorizationNote, setAuthorizationNote] = useState('')
   const [requestedServiceKind, setRequestedServiceKind] = useState<'repair' | 'maintenance'>(
     'repair',
   )
@@ -205,10 +202,6 @@ export function CounterIntake({
       concern: description.trim(),
       whenStarted: optionalText(whenStarted),
       howOften: optionalText(howOften),
-      diagnosticAuthorization: {
-        amountDollars: optionalText(authorizationAmount),
-        note: optionalText(authorizationNote),
-      },
       requestedService,
       assignedTechId,
       ...(confirmBelowTier ? { confirmBelowTier: true } : {}),
@@ -578,40 +571,12 @@ export function CounterIntake({
               </FormGroup>
 
               <FormGroup
-                name="Authorization & requested work"
-                hint="Diagnostic authorization is optional and does not approve repairs."
+                name="Work requested"
+                hint="Optional — name the work now. Otherwise, the customer’s concern becomes one repair job."
                 last
               >
                 <FormRow>
-                  <Field
-                    label="Diagnostic authorization amount"
-                    htmlFor="ci-authorization-amount"
-                    hint="Dollars, optional"
-                  >
-                    <Input
-                      id="ci-authorization-amount"
-                      name="authorizationAmount"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      placeholder="0.00"
-                      mono
-                      value={authorizationAmount}
-                      onChange={(e) => setAuthorizationAmount(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Authorization note" htmlFor="ci-authorization-note">
-                    <Input
-                      id="ci-authorization-note"
-                      name="authorizationNote"
-                      placeholder="optional"
-                      value={authorizationNote}
-                      onChange={(e) => setAuthorizationNote(e.target.value)}
-                    />
-                  </Field>
-                </FormRow>
-                <FormRow>
-                  <Field label="Requested service kind" htmlFor="ci-service-kind">
+                  <Field label="Work type" htmlFor="ci-service-kind">
                     <select
                       id="ci-service-kind"
                       name="requestedServiceKind"
@@ -626,9 +591,9 @@ export function CounterIntake({
                     </select>
                   </Field>
                   <Field
-                    label="Requested service description"
+                    label="Requested work"
                     htmlFor="ci-service-description"
-                    hint="Optional — adds one separate service job"
+                    hint="Optional — becomes this repair order’s one work item"
                   >
                     <Input
                       id="ci-service-description"
@@ -655,7 +620,7 @@ export function CounterIntake({
                   }}
                 >
                   <div>
-                    This technician is below the A-tier required for diagnostic work. Review the
+                    This technician is below the required tier for this work. Review the
                     assignment before continuing.
                   </div>
                   <button

@@ -62,3 +62,13 @@ Reason: Effect-timing races turn a successful save into an unnecessary technicia
 Trigger: A mobile quote/work command appeared inert because its editor mounted far from the tapped row.
 Rule: Mount an in-place workspace directly after its command and keep it stable until the operator closes it.
 Reason: Spatial continuity makes a successful action immediately legible without a page transition or hunt.
+
+### command-state-must-follow-interruption
+Trigger: An embedded work tool closed after a hold without updating Today to its blocked next action.
+Rule: Project a completed in-place mutation into its parent command surface before closing the workspace.
+Reason: Stale state feels like lost work and hides the operator's next action.
+
+### reads-must-not-take-work-locks
+Trigger: Quote viewers conflicted because display reads locked the repair order.
+Rule: Use a consistent read-only snapshot for views; reserve NOWAIT locks for mutations.
+Reason: Concurrent roles must see shared work without blocking one another.

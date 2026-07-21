@@ -19,6 +19,7 @@ import type { SimpleWorkProjectionView } from '@/lib/shop-os/simple-work-ui'
 import { TicketAssignmentControl } from './ticket-assignment-control'
 import { InlineQuoteWorkspace, type QuoteWorkspaceProjection } from './inline-quote-workspace'
 import { InlineWorkWorkspace } from './inline-work-workspace'
+import { TicketInterruptionAction, type InterruptionJobView } from './ticket-interruption-action'
 import styles from './today-jobs-board.module.css'
 
 type Props = {
@@ -359,7 +360,9 @@ export function TodayJobsBoard({
       kind: 'status',
       text: assignment.state === 'unassigned'
         ? `Ticket ${job.ticketNumber} is available.`
-        : `Ticket ${job.ticketNumber} handoff saved.`,
+        : assignment.assignedTechName
+          ? `Ticket ${job.ticketNumber} assigned to ${assignment.assignedTechName}.`
+          : `Ticket ${job.ticketNumber} handoff saved.`,
     })
     setFocusRequest({
       kind: placeTodayJob(updatedJob, canDispatchWork) === 'hidden' ? 'board' : 'row',
@@ -384,23 +387,32 @@ export function TodayJobsBoard({
     void refreshTodayJobs()
   }
 
-  function applyQuoteProjection(projection: QuoteWorkspaceProjection) {
+  const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
     const byJobId = new Map(projection.map((job) => [job.id, job]))
     const update = (job: TodayTicketJob) => {
       const next = byJobId.get(job.id)
-      return next ? { ...job, workStatus: next.workStatus, approvalState: next.approvalState } : job
+      if (!next || (
+        job.workStatus === next.workStatus && job.approvalState === next.approvalState
+      )) return job
+      return { ...job, workStatus: next.workStatus, approvalState: next.approvalState }
     }
-    setServerJobs((current) => ({
-      ...current,
-      myJobs: current.myJobs.map(update),
-      openJobs: current.openJobs.map(update),
-      teamJobs: current.teamJobs.map(update),
-      createdJobs: current.createdJobs.map(update),
-      partsJobs: current.partsJobs.map(update),
-    }))
+    setServerJobs((current) => {
+      const myJobs = current.myJobs.map(update)
+      const openJobs = current.openJobs.map(update)
+      const teamJobs = current.teamJobs.map(update)
+      const createdJobs = current.createdJobs.map(update)
+      const partsJobs = current.partsJobs.map(update)
+      const changed = myJobs.some((job, index) => job !== current.myJobs[index])
+        || openJobs.some((job, index) => job !== current.openJobs[index])
+        || teamJobs.some((job, index) => job !== current.teamJobs[index])
+        || createdJobs.some((job, index) => job !== current.createdJobs[index])
+        || partsJobs.some((job, index) => job !== current.partsJobs[index])
+      return changed
+        ? { ...current, myJobs, openJobs, teamJobs, createdJobs, partsJobs }
+        : current
+    })
     setActiveQuoteJob((current) => current ? update(current) : current)
-    void refreshTodayJobs()
-  }
+  }, [])
 
   function applyWorkProjection(job: TodayTicketJob, work: SimpleWorkProjectionView) {
     // A completed job naturally leaves Today on the next refresh. Keep the
@@ -422,6 +434,46 @@ export function TodayJobsBoard({
         }
       })
     }
+  }
+
+  function applyResolvedHold(job: TodayTicketJob, resolved: InterruptionJobView) {
+    if (resolved.id !== job.id || (
+      resolved.workStatus !== 'open' && resolved.workStatus !== 'in_progress'
+    )) return
+    const workStatus: TodayTicketJob['workStatus'] = resolved.workStatus
+    const update = (candidate: TodayTicketJob) => candidate.id === job.id
+      ? { ...candidate, workStatus }
+      : candidate
+    setServerJobs((current) => ({
+      ...current,
+      myJobs: current.myJobs.map(update),
+      openJobs: current.openJobs.map(update),
+      teamJobs: current.teamJobs.map(update),
+      createdJobs: current.createdJobs.map(update),
+      partsJobs: current.partsJobs.map(update),
+    }))
+    setAnnouncement({ kind: 'status', text: `Hold resolved for ticket ${job.ticketNumber}.` })
+    void refreshTodayJobs()
+  }
+
+  function applyInterruptedWork(job: TodayTicketJob, interrupted: InterruptionJobView) {
+    if (interrupted.id !== job.id || interrupted.workStatus !== 'blocked') return
+    const update = (candidate: TodayTicketJob) => candidate.id === job.id
+      ? { ...candidate, workStatus: 'blocked' as const }
+      : candidate
+    setServerJobs((current) => ({
+      ...current,
+      myJobs: current.myJobs.map(update),
+      openJobs: current.openJobs.map(update),
+      teamJobs: current.teamJobs.map(update),
+      createdJobs: current.createdJobs.map(update),
+      partsJobs: current.partsJobs.map(update),
+    }))
+    activeWorkspaceRef.current = false
+    setActiveWorkJob(null)
+    setAnnouncement({ kind: 'status', text: `Work on hold for ticket ${job.ticketNumber}.` })
+    setFocusRequest({ kind: 'row', jobId: job.id })
+    void refreshTodayJobs()
   }
 
   function closeQuote(job: TodayTicketJob) {
@@ -561,6 +613,8 @@ export function TodayJobsBoard({
     onOpenWork: setActiveWorkJob,
     onCloseWork: closeWork,
     onWorkProjection: applyWorkProjection,
+    onInterrupted: applyInterruptedWork,
+    onResolveHold: applyResolvedHold,
   }
 
   return (
@@ -721,6 +775,8 @@ function JobSection({
   onOpenWork,
   onCloseWork,
   onWorkProjection,
+  onInterrupted,
+  onResolveHold,
 }: {
   label: string
   jobs: TodayTicketJob[]
@@ -757,6 +813,8 @@ function JobSection({
   onOpenWork?: (job: TodayTicketJob) => void
   onCloseWork?: (job: TodayTicketJob) => void
   onWorkProjection?: (job: TodayTicketJob, work: SimpleWorkProjectionView) => void
+  onInterrupted?: (job: TodayTicketJob, interrupted: InterruptionJobView) => void
+  onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
 }) {
   return (
     <div className={styles.group}>
@@ -795,6 +853,7 @@ function JobSection({
               onOpenQuote={onOpenQuote}
               commandBusy={activeQuoteJobId !== undefined || activeWorkJobId !== undefined}
               onOpenWork={onOpenWork}
+              onResolveHold={onResolveHold}
             />
             {activeQuoteJobId === job.id && currentProfileId && (
               <div className={styles.workspacePanel}>
@@ -824,6 +883,7 @@ function JobSection({
                   }}
                   jobId={job.id}
                   onProjection={(work) => onWorkProjection?.(job, work)}
+                  onInterrupted={(interrupted) => onInterrupted?.(job, interrupted)}
                   onClose={() => onCloseWork?.(job)}
                 />
               </div>
@@ -861,6 +921,7 @@ function JobRow({
   onOpenQuote,
   commandBusy,
   onOpenWork,
+  onResolveHold,
 }: {
   job: TodayTicketJob
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
@@ -891,6 +952,7 @@ function JobRow({
   onOpenQuote?: (job: TodayTicketJob) => void
   commandBusy?: boolean
   onOpenWork?: (job: TodayTicketJob) => void
+  onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
 }) {
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
@@ -950,7 +1012,11 @@ function JobRow({
           >
             {pending ? 'Claiming…' : 'Claim job'}
           </button>
-        ) : canDispatchWork && currentProfileId && (mode === 'open' || mode === 'team') ? (
+        ) : canDispatchWork && currentProfileId && (
+          mode === 'open' || (mode === 'team' && (
+            job.approvalState !== 'pending_quote' || !canBuildQuote
+          ))
+        ) ? (
           <TicketAssignmentControl
             ticketId={job.ticketId}
             job={{
@@ -992,7 +1058,20 @@ function JobRow({
           >
             Review parts
           </Link>
-        ) : canBuildQuote && (mode === 'mine' || mode === 'created')
+        ) : mode === 'mine' && job.workStatus === 'blocked'
+          && job.approvalState === 'approved'
+          && canUseManualWork({
+            kind: job.kind,
+            sessionId: job.sessionId,
+            diagnosticsEntitled: diagnosticsEntitled ?? true,
+          }) ? (
+          <TicketInterruptionAction
+            ticketId={job.ticketId}
+            jobId={job.id}
+            className={`${styles.control} ${styles.claim}`}
+            onApplied={(resolved) => onResolveHold?.(job, resolved)}
+          />
+        ) : canBuildQuote && (mode === 'mine' || mode === 'created' || mode === 'team')
           && job.approvalState === 'pending_quote' && job.concern ? (
           <button
             type="button"

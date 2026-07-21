@@ -489,6 +489,9 @@ export async function getQuoteBuilder(
         shopId: actor.shopId as string,
         isComp: actor.isComp,
       })
+      // Opening a quote is a read. A repeatable, read-only snapshot keeps all
+      // of its related rows internally consistent without making another
+      // role's read contend with an assignment, quote edit, or decision.
       const [ticket] = await transactionDb.select({
         id: tickets.id,
         ticketNumber: tickets.ticketNumber,
@@ -499,7 +502,7 @@ export async function getQuoteBuilder(
       }).from(tickets).where(and(
         eq(tickets.shopId, actor.shopId as string),
         eq(tickets.id, parsedTicket.data),
-      )).limit(1).for('update', { noWait: true })
+      )).limit(1)
       if (!ticket || ticket.status !== 'open') return { ok: false as const, error: 'not_found' as const }
       await dependencies.afterTicketLock?.()
 
@@ -689,7 +692,7 @@ export async function getQuoteBuilder(
         }
         throw error
       }
-    })
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
   } catch (error) {
     if (error instanceof BuilderDataError) {
       return { ok: false, error: 'conflict', retryable: false }
