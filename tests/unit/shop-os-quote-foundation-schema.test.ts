@@ -161,10 +161,13 @@ describe('Shop OS quote foundation source schema', () => {
       customerStory: expect.anything(),
       storyMeta: expect.anything(),
       approvedQuoteVersionId: expect.anything(),
+      customerSuppliedPartsNote: expect.anything(),
     })
     expect(jobColumns.customerStory.getSQLType()).toBe('jsonb')
     expect(jobColumns.storyMeta.getSQLType()).toBe('jsonb')
     expect(jobColumns.approvedQuoteVersionId.getSQLType()).toBe('uuid')
+    expect(jobColumns.customerSuppliedPartsNote.getSQLType()).toBe('text')
+    expect(names(ticketJobs).checks).toContain('ticket_jobs_customer_supplied_parts_note_valid')
   })
 
   it('declares approved money and precision column types', () => {

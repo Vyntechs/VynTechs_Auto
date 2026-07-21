@@ -80,6 +80,26 @@ describe('canned job client contracts', () => {
     })
   })
 
+  it('accepts a labor-backed diagnostic template as safe client truth', () => {
+    const diagnostic = {
+      ...job,
+      title: 'Initial diagnostic testing',
+      kind: 'diagnostic',
+      lines: [{ kind: 'labor', description: 'Diagnostic testing', sort: 0, hours: '1', priceCents: 15_000, taxable: false }],
+      summary: { subtotalCents: 15_000, taxableSubtotalCents: 0, taxCents: 0, totalCents: 15_000 },
+    }
+    expect(parseCannedJobListResponse({ cannedJobs: [diagnostic], taxRateBps: 800 }))
+      .toEqual({ cannedJobs: [diagnostic], taxRateBps: 800 })
+    expect(parseCannedJobListResponse({
+      cannedJobs: [{ ...diagnostic, lines: [{ ...job.lines[0] }] }],
+      taxRateBps: 800,
+    })).toBeNull()
+    expect(normalizeCannedJobDraft({
+      title: 'Initial diagnostic testing', kind: 'diagnostic', tier: '2', sort: '0',
+      lines: [{ key: '1', kind: 'labor', description: 'Diagnostic testing', sort: '0', price: '150', taxable: false, quantity: '1', partNumber: '', brand: '', hours: '1', laborRate: '' }],
+    } as never)).toMatchObject({ kind: 'diagnostic' })
+  })
+
   it.each([
     { field: 'quantity', value: '0' }, { field: 'quantity', value: '1.0001' },
     { field: 'price', value: '1.001' }, { field: 'sort', value: '1000001' },

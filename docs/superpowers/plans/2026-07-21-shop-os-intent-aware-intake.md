@@ -29,6 +29,7 @@
 - Modify: `lib/shop-os/canned-jobs.ts`
 - Modify: `lib/shop-os/canned-jobs-ui.ts`
 - Modify: `components/vt/canned-jobs-section.tsx`
+- Modify: `tests/helpers/db.ts`
 - Test: `tests/unit/shop-os-quote-foundation-schema.test.ts`
 - Test: `tests/unit/shop-os-canned-jobs.test.ts`
 - Test: `tests/unit/shop-os-canned-jobs-ui.test.ts`

@@ -213,6 +213,43 @@ describe('createTicket', () => {
     }
   })
 
+  it('preserves bounded customer-supplied item truth only on known work', async () => {
+    const result = await createTicket(db, {
+      actor: actors.advisor,
+      body: body({
+        diagnosticAuthorizedCents: null,
+        diagnosticAuthorizationNote: null,
+        jobs: [{
+          title: 'Install lift kit',
+          kind: 'repair',
+          requiredSkillTier: 2,
+          customerSuppliedPartsNote: '  Rough Country four-inch lift kit  ',
+        }],
+      }),
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      ticket: { jobs: [{ customerSuppliedPartsNote: 'Rough Country four-inch lift kit' }] },
+    })
+
+    for (const customerSuppliedPartsNote of ['x'.repeat(501), '   ']) {
+      await expect(createTicket(db, {
+        actor: actors.advisor,
+        body: body({ jobs: [{
+          title: 'Install part', kind: 'repair', requiredSkillTier: 2,
+          customerSuppliedPartsNote,
+        }] }),
+      })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    }
+    await expect(createTicket(db, {
+      actor: actors.advisor,
+      body: body({ jobs: [{
+        title: 'Diagnose noise', kind: 'diagnostic', requiredSkillTier: 2,
+        customerSuppliedPartsNote: 'Customer scanner',
+      }] }),
+    })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+  })
+
   it('rejects unsupported, pending, deactivated, and no-shop actors without mutation', async () => {
     const denied: Array<[TicketActor, string]> = [
       [{ ...actors.tech, role: 'curator' }, 'forbidden'],

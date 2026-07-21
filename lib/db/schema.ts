@@ -394,6 +394,7 @@ export const ticketJobs = pgTable(
     }).default('pending_quote').notNull(),
     customerStory: jsonb('customer_story').$type<CustomerStory>(),
     storyMeta: jsonb('story_meta').$type<CustomerStoryMeta>(),
+    customerSuppliedPartsNote: text('customer_supplied_parts_note'),
     workNotes: text('work_notes'),
     approvedQuoteVersionId: uuid('approved_quote_version_id'),
     diagnosticStartState: text('diagnostic_start_state', {
@@ -502,6 +503,14 @@ export const ticketJobs = pgTable(
       'ticket_jobs_story_json_objects',
       sql`(${table.customerStory} is null or jsonb_typeof(${table.customerStory}) = 'object')
         and (${table.storyMeta} is null or jsonb_typeof(${table.storyMeta}) = 'object')`,
+    ),
+    check(
+      'ticket_jobs_customer_supplied_parts_note_valid',
+      sql`${table.customerSuppliedPartsNote} is null or (
+        ${table.kind} in ('repair', 'maintenance')
+        and ${table.customerSuppliedPartsNote} = btrim(${table.customerSuppliedPartsNote})
+        and length(${table.customerSuppliedPartsNote}) between 1 and 500
+      )`,
     ),
   ],
 )
@@ -848,7 +857,7 @@ export const cannedJobs = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     shopId: uuid('shop_id').references(() => shops.id, { onDelete: 'cascade' }).notNull(),
     title: text('title').notNull(),
-    kind: text('kind', { enum: ['repair', 'maintenance'] }).notNull(),
+    kind: text('kind', { enum: ['diagnostic', 'repair', 'maintenance'] }).notNull(),
     defaultRequiredSkillTier: integer('default_required_skill_tier').notNull(),
     defaultLines: jsonb('default_lines').$type<CannedJobDefaultLine[]>().default([]).notNull(),
     sort: integer('sort').default(0).notNull(),
@@ -858,7 +867,7 @@ export const cannedJobs = pgTable(
   },
   (table) => [
     index('canned_jobs_shop_sort_idx').on(table.shopId, table.retiredAt, table.sort),
-    check('canned_jobs_kind_valid', sql`${table.kind} in ('repair', 'maintenance')`),
+    check('canned_jobs_kind_valid', sql`${table.kind} in ('diagnostic', 'repair', 'maintenance')`),
     check(
       'canned_jobs_skill_tier_range',
       sql`${table.defaultRequiredSkillTier} between 1 and 3`,

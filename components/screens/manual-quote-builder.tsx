@@ -768,6 +768,10 @@ export function ManualQuoteBuilder({
 
   async function applyCannedJob(): Promise<void> {
     if (!selectedCannedJob || !cannedClientKey || editor || modal || sourcingJobId || inFlightRef.current) return
+    if (selectedCannedJob.kind === 'diagnostic') {
+      setError({ message: 'Diagnostic authorization templates are selected during intake.', refresh: false })
+      return
+    }
     if (!beginOperation('canned')) return
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/quote/canned-jobs`, {
@@ -814,7 +818,13 @@ export function ManualQuoteBuilder({
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return
       }
-      const refreshed = await refreshQuote(`job:${applied.job.id}`, false, true, undefined, applied.job)
+      const expectedAppliedJob = {
+        id: applied.job.id,
+        title: selectedCannedJob.title,
+        kind: selectedCannedJob.kind,
+        lineCount: selectedCannedJob.lines.length,
+      }
+      const refreshed = await refreshQuote(`job:${applied.job.id}`, false, true, undefined, expectedAppliedJob)
       if (refreshed) {
         setSelectedCannedId(null)
         setCannedClientKey(null)

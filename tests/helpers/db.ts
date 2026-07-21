@@ -72,12 +72,57 @@ export async function createTestDb(): Promise<{
   await ensureTicketJobHistoryBoundMigration(client)
   await ensureTicketActivityMigration(client)
   await ensureShopOsQuoteDeferralMigration(client)
+  await ensureIntentAwareIntakeMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+export async function ensureIntentAwareIntakeMigration(client: PGlite): Promise<void> {
+  const inspect = async () => {
+    const result = await client.query<{
+      supplied_column_count: number
+      supplied_constraint_count: number
+      canned_diagnostic_count: number
+    }>(`
+      select
+        (select count(*)::int from information_schema.columns
+         where table_schema = 'public' and table_name = 'ticket_jobs'
+           and column_name = 'customer_supplied_parts_note') as supplied_column_count,
+        (select count(*)::int from pg_constraint
+         where conrelid = to_regclass('public.ticket_jobs')
+           and conname = 'ticket_jobs_customer_supplied_parts_note_valid') as supplied_constraint_count,
+        (select count(*)::int from pg_constraint
+         where conrelid = to_regclass('public.canned_jobs')
+           and conname = 'canned_jobs_kind_valid'
+           and pg_get_constraintdef(oid) like '%diagnostic%') as canned_diagnostic_count
+    `)
+    return result.rows[0]
+  }
+  const before = await inspect()
+  if (!before) throw new Error('intent-aware intake schema inspection failed')
+  if (before.supplied_column_count === 1
+    && before.supplied_constraint_count === 1
+    && before.canned_diagnostic_count === 1) return
+  if (before.supplied_column_count !== 0
+    || before.supplied_constraint_count !== 0
+    || before.canned_diagnostic_count !== 0) {
+    throw new Error('partial intent-aware intake schema in ephemeral database')
+  }
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0048_shop_os_intent_aware_intake.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  const after = await inspect()
+  if (after?.supplied_column_count !== 1
+    || after.supplied_constraint_count !== 1
+    || after.canned_diagnostic_count !== 1) {
+    throw new Error('intent-aware intake migration failed in ephemeral database')
   }
 }
 
