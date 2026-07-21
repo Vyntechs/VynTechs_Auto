@@ -24,7 +24,10 @@ vi.mock('@/components/vt/whats-new-badge', () => ({
 }))
 
 vi.mock('@/components/screens/inline-quote-workspace', () => ({
-  InlineQuoteWorkspace: ({ onClose, onProjection }: {
+  inlineQuoteWorkspaceId: (ticketId: string) => `inline-quote-workspace-${ticketId}`,
+  InlineQuoteWorkspace: ({ actorId, workspaceId, onClose, onProjection }: {
+    actorId: string
+    workspaceId: string
     onClose: () => void
     onProjection: (jobs: Array<{
       id: string
@@ -32,7 +35,11 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
       approvalState: 'quote_ready'
     }>) => void
   }) => (
-    <section aria-label="Inline quote workspace">
+    <section
+      id={workspaceId}
+      aria-label="Inline quote workspace"
+      data-actor-id={actorId}
+    >
       <button type="button" onClick={() => onProjection([{
         id: 'job-1',
         workStatus: 'open',
@@ -258,9 +265,12 @@ describe('TicketDetailScreen', () => {
 
     const opener = screen.getByRole('button', { name: 'Build quote' })
     expect(screen.queryByRole('link', { name: 'Build quote' })).toBeNull()
+    expect(opener).toHaveAttribute('aria-controls', 'inline-quote-workspace-ticket-1')
     await user.click(opener)
 
-    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    const workspace = screen.getByRole('region', { name: 'Inline quote workspace' })
+    expect(workspace).toHaveAttribute('id', 'inline-quote-workspace-ticket-1')
+    expect(workspace).toHaveAttribute('data-actor-id', 'advisor-1')
     expect(opener).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Publish quote state' }))

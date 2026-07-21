@@ -1,3 +1,13 @@
+.boundary {
+  min-width: 0;
+  scroll-margin-block: 24px;
+}
+
+.boundary:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 4px;
+}
+
 .state {
   border: 1px solid var(--vt-rule-strong);
   border-radius: var(--vt-radius-3);

@@ -1,13 +1,19 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { InlineQuoteWorkspace } from '@/components/screens/inline-quote-workspace'
+import {
+  InlineQuoteWorkspace,
+  inlineQuoteWorkspaceId,
+} from '@/components/screens/inline-quote-workspace'
 
 const quoteBuilder = {
   ticket: { id: 'ticket-1', status: 'open', reconciled: true },
   configuration: { taxRateBps: 825 },
   jobs: [],
 }
+const ACTOR_ID = '00000000-0000-4000-8000-000000000101'
 
 vi.mock('@/lib/shop-os/quote-builder-ui', () => ({
   parseQuoteBuilderProjection: (value: unknown) => (
@@ -36,6 +42,7 @@ vi.mock('@/lib/shop-os/parts-sourcing-ui', () => ({
 
 vi.mock('@/components/screens/manual-quote-builder', () => ({
   ManualQuoteBuilder: (props: {
+    actorId: string
     builder: typeof quoteBuilder
     cannedJobs: unknown[]
     cannedCatalogAvailable: boolean
@@ -50,6 +57,7 @@ vi.mock('@/components/screens/manual-quote-builder', () => ({
       <p>Canned {String(props.cannedCatalogAvailable)} · {props.cannedJobs.length}</p>
       <p>Vendors {String(props.vendorCatalogAvailable)} · {props.vendorAccounts.length}</p>
       <p>Embedded {String(props.embedded)}</p>
+      <p>Actor {props.actorId}</p>
       <button type="button" onClick={props.onClose}>Close quote</button>
       <button type="button" onClick={() => props.onProjection([{ id: 'job-1' }])}>Publish quote state</button>
     </section>
@@ -87,6 +95,7 @@ describe('InlineQuoteWorkspace', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(<InlineQuoteWorkspace
+      actorId={ACTOR_ID}
       ticket={ticket}
       canCreateVendorAccount
       onClose={onClose}
@@ -97,6 +106,7 @@ describe('InlineQuoteWorkspace', () => {
     expect(screen.getByText('Canned true · 1')).toBeInTheDocument()
     expect(screen.getByText('Vendors true · 1')).toBeInTheDocument()
     expect(screen.getByText('Embedded true')).toBeInTheDocument()
+    expect(screen.getByText(`Actor ${ACTOR_ID}`)).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(3)
 
     await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
@@ -111,7 +121,7 @@ describe('InlineQuoteWorkspace', () => {
       return response({ error: 'unavailable' }, 503)
     }))
 
-    render(<InlineQuoteWorkspace ticket={ticket} onClose={vi.fn()} onProjection={vi.fn()} />)
+    render(<InlineQuoteWorkspace actorId={ACTOR_ID} ticket={ticket} onClose={vi.fn()} onProjection={vi.fn()} />)
 
     expect(await screen.findByText('Quote loaded ticket-1')).toBeInTheDocument()
     expect(screen.getByText('Canned false · 0')).toBeInTheDocument()
@@ -121,7 +131,7 @@ describe('InlineQuoteWorkspace', () => {
   it('fails closed without replacing the repair order when required quote truth is malformed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ builder: { unsafe: true } })))
 
-    render(<InlineQuoteWorkspace ticket={ticket} onClose={vi.fn()} onProjection={vi.fn()} />)
+    render(<InlineQuoteWorkspace actorId={ACTOR_ID} ticket={ticket} onClose={vi.fn()} onProjection={vi.fn()} />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Quote could not be opened here')
     expect(screen.getByRole('link', { name: 'Open the full quote page' })).toHaveAttribute(
@@ -129,5 +139,44 @@ describe('InlineQuoteWorkspace', () => {
       '/tickets/ticket-1/quote',
     )
     await waitFor(() => expect(screen.queryByText(/Quote loaded/)).toBeNull())
+  })
+
+  it('keeps one controlled focus boundary mounted from loading through loaded truth', async () => {
+    let resolveQuote!: (value: Response) => void
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url === '/api/tickets/ticket-1/quote') {
+        return new Promise<Response>((resolvePromise) => { resolveQuote = resolvePromise })
+      }
+      if (url === '/api/shop/canned-jobs') return Promise.resolve(response({ cannedJobs: [], taxRateBps: 825 }))
+      return Promise.resolve(response({ vendorAccounts: [] }))
+    }))
+
+    render(<InlineQuoteWorkspace
+      actorId={ACTOR_ID}
+      workspaceId={inlineQuoteWorkspaceId(ticket.id)}
+      ticket={ticket}
+      onClose={vi.fn()}
+      onProjection={vi.fn()}
+    />)
+
+    const boundary = screen.getByRole('region', { name: 'Inline quote workspace' })
+    expect(boundary).toHaveAttribute('id', 'inline-quote-workspace-ticket-1')
+    expect(boundary).toHaveAttribute('aria-busy', 'true')
+    await waitFor(() => expect(boundary).toHaveFocus())
+
+    resolveQuote(response({ builder: quoteBuilder }))
+    expect(await screen.findByText('Quote loaded ticket-1')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBe(boundary)
+    expect(boundary).not.toHaveAttribute('aria-busy')
+    expect(boundary).toHaveFocus()
+  })
+
+  it('passes the authenticated actor to the existing direct quote fallback', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'app/(app)/tickets/[id]/quote/page.tsx'),
+      'utf8',
+    )
+
+    expect(source).toMatch(/<ManualQuoteBuilder[\s\S]*actorId=\{ctx\.profile\.id\}/)
   })
 })

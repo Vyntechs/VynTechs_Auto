@@ -19,6 +19,7 @@ import type {
 import { RingOutSection } from './ring-out-section'
 import {
   InlineQuoteWorkspace,
+  inlineQuoteWorkspaceId,
   type QuoteWorkspaceProjection,
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
@@ -203,6 +204,7 @@ export function TicketDetailScreen({
                 type="button"
                 className={styles.quoteAction}
                 aria-expanded={activeTool?.kind === 'quote'}
+                aria-controls={inlineQuoteWorkspaceId(ticket.id)}
                 disabled={activeTool !== null}
                 onClick={() => setActiveTool({ kind: 'quote' })}
               >
@@ -228,8 +230,10 @@ export function TicketDetailScreen({
           </div>
         )}
 
-        {activeTool?.kind === 'quote' && (
+        {activeTool?.kind === 'quote' && currentProfileId && (
           <InlineQuoteWorkspace
+            actorId={currentProfileId}
+            workspaceId={inlineQuoteWorkspaceId(ticket.id)}
             ticket={{
               id: ticket.id,
               ticketNumber: ticket.ticketNumber,
@@ -244,7 +248,7 @@ export function TicketDetailScreen({
             canCreateVendorAccount={canCreateVendorAccount}
             onProjection={applyQuoteProjection}
             onClose={() => {
-                      setActiveTool(null)
+              setActiveTool(null)
               setTimeout(() => quoteOpenerRef.current?.focus(), 0)
             }}
           />
