@@ -19,6 +19,7 @@ import {
   isShopRole,
 } from '@/lib/shop-os/capabilities'
 import { MAX_TICKET_JOBS_PER_TICKET, ticketAtJobLimit } from '@/lib/shop-os/job-limits'
+import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
 
 export type TicketActor = {
   profileId: string
@@ -620,11 +621,12 @@ const ticketJobBodySchema = z
   .strict()
 
 const assignmentBodySchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('claim') }).strict(),
-  z.object({ action: z.literal('unclaim') }).strict(),
+  z.object({ action: z.literal('claim'), requestKey: z.uuid() }).strict(),
+  z.object({ action: z.literal('unclaim'), requestKey: z.uuid() }).strict(),
   z
     .object({
       action: z.literal('reassign'),
+      requestKey: z.uuid(),
       assignedTechId: z.uuid(),
       confirmBelowTier: z.boolean().optional(),
     })
@@ -1153,7 +1155,7 @@ export async function addTicketJob(
 export type SafeTicketAssignee = NonNullable<TicketDetail['jobs'][number]['assignedTech']>
 
 export type TicketJobAssignmentResult =
-  | { ok: true; ticket: TicketDetail }
+  | { ok: true; changed: boolean; ticket: TicketDetail }
   | {
       ok: false
       error: TicketDomainError
@@ -1162,7 +1164,7 @@ export type TicketJobAssignmentResult =
     }
 
 export type TicketJobAssignmentDependencies = {
-  beforeReassignUpdate?: () => Promise<void>
+  beforeReassignUpdate?: (db: AppDb) => Promise<void>
 }
 
 type AssignmentContext = {
@@ -1303,10 +1305,47 @@ async function updatedAssignmentTicket(
   db: AppDb,
   shopId: string,
   ticketId: string,
+  changed = true,
 ): Promise<TicketJobAssignmentResult> {
   const ticket = await loadTicketDetail(db, shopId, ticketId)
   if (!ticket) throw new Error('updated_ticket_not_found')
-  return { ok: true, ticket }
+  return { ok: true, changed, ticket }
+}
+
+type AssignmentBody = z.infer<typeof assignmentBodySchema>
+
+type AssignmentReceiptIntent = {
+  action: AssignmentBody['action']
+  requestedAssignedTechId: string | null
+  confirmBelowTier: boolean
+}
+
+function assignmentReceiptIntent(
+  body: AssignmentBody,
+  actorProfileId: string,
+): AssignmentReceiptIntent {
+  if (body.action === 'claim') {
+    return { action: body.action, requestedAssignedTechId: actorProfileId, confirmBelowTier: false }
+  }
+  if (body.action === 'unclaim') {
+    return { action: body.action, requestedAssignedTechId: null, confirmBelowTier: false }
+  }
+  return {
+    action: body.action,
+    requestedAssignedTechId: body.assignedTechId,
+    confirmBelowTier: body.confirmBelowTier === true,
+  }
+}
+
+function receiptMatchesAssignmentIntent(
+  payload: unknown,
+  intent: AssignmentReceiptIntent,
+): boolean {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return false
+  const record = payload as Record<string, unknown>
+  return record.action === intent.action
+    && record.requestedAssignedTechId === intent.requestedAssignedTechId
+    && record.confirmBelowTier === intent.confirmBelowTier
 }
 
 async function claimTicketJob(
@@ -1459,7 +1498,7 @@ async function reassignTicketJob(
   })
   if (!assignment.ok) return assignment
 
-  await dependencies.beforeReassignUpdate?.()
+  await dependencies.beforeReassignUpdate?.(db)
 
   const [reassigned] = await db
     .update(ticketJobs)
@@ -1557,31 +1596,73 @@ export async function mutateTicketJobAssignment(
   }
 
   const shopId = input.actor.shopId as string
-  if (parsedBody.data.action === 'claim') {
-    return claimTicketJob(
-      db,
-      input.actor,
+  const body = parsedBody.data
+  const intent = assignmentReceiptIntent(body, input.actor.profileId)
+
+  return db.transaction(async (txRaw) => {
+    const tx = txRaw as AppDb
+    const actorError = await persistedActorError(tx, input.actor)
+    if (actorError) return actorError
+
+    const [receipt] = await tx
+      .select({
+        ticketId: ticketActivity.ticketId,
+        jobId: ticketActivity.jobId,
+        actorProfileId: ticketActivity.actorProfileId,
+        kind: ticketActivity.kind,
+        payload: ticketActivity.payload,
+      })
+      .from(ticketActivity)
+      .where(and(
+        eq(ticketActivity.shopId, shopId),
+        eq(ticketActivity.requestKey, body.requestKey),
+      ))
+      .limit(1)
+    if (receipt) {
+      if (receipt.ticketId !== parsedTicketId.data
+        || receipt.jobId !== parsedJobId.data
+        || receipt.actorProfileId !== input.actor.profileId
+        || receipt.kind !== 'job_reassigned'
+        || !receiptMatchesAssignmentIntent(receipt.payload, intent)) {
+        return { ok: false, error: 'conflict' }
+      }
+      return updatedAssignmentTicket(tx, shopId, parsedTicketId.data, false)
+    }
+
+    const before = await loadAssignmentContext(tx, shopId, parsedTicketId.data, parsedJobId.data)
+    const result = body.action === 'claim'
+      ? await claimTicketJob(tx, input.actor, shopId, parsedTicketId.data, parsedJobId.data)
+      : body.action === 'unclaim'
+        ? await unclaimTicketJob(tx, input.actor, shopId, parsedTicketId.data, parsedJobId.data)
+        : await reassignTicketJob(
+            tx,
+            input.actor,
+            shopId,
+            parsedTicketId.data,
+            parsedJobId.data,
+            body,
+            dependencies,
+          )
+    if (!result.ok) return result
+
+    const assigned = result.ticket.jobs.find((job) => job.id === parsedJobId.data)?.assignedTechId
+    if (!before || assigned === undefined) throw new Error('assignment_projection_missing')
+    const activity = await appendTicketActivity(tx, {
       shopId,
-      parsedTicketId.data,
-      parsedJobId.data,
-    )
-  }
-  if (parsedBody.data.action === 'unclaim') {
-    return unclaimTicketJob(
-      db,
-      input.actor,
-      shopId,
-      parsedTicketId.data,
-      parsedJobId.data,
-    )
-  }
-  return reassignTicketJob(
-    db,
-    input.actor,
-    shopId,
-    parsedTicketId.data,
-    parsedJobId.data,
-    parsedBody.data,
-    dependencies,
-  )
+      ticketId: parsedTicketId.data,
+      jobId: parsedJobId.data,
+      actorProfileId: input.actor.profileId,
+      kind: 'job_reassigned',
+      requestKey: body.requestKey,
+      payload: {
+        action: intent.action,
+        requestedAssignedTechId: intent.requestedAssignedTechId,
+        confirmBelowTier: intent.confirmBelowTier,
+        fromAssignedTechId: before.assignedTechId,
+        toAssignedTechId: assigned,
+      },
+    })
+    if (!activity.ok) throw new Error('ticket_activity_conflict')
+    return result
+  })
 }

@@ -59,13 +59,22 @@ export function TicketAssignmentControl({
   const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [notice, setNotice] = useState<{ kind: 'status' | 'error'; text: string } | null>(null)
   const invokerRef = useRef<HTMLButtonElement>(null)
+  const assignmentAttempts = useRef(new Map<string, string>())
   const isActiveHandoff = command.kind === 'handoff' && job.workStatus !== 'open'
+
+  function retainAssignmentAttempt(body: Record<string, unknown>) {
+    const signature = JSON.stringify(body)
+    const requestKey = assignmentAttempts.current.get(signature) ?? crypto.randomUUID()
+    assignmentAttempts.current.set(signature, requestKey)
+    return { signature, body: { ...body, requestKey } }
+  }
 
   async function mutate(
     body: Record<string, unknown>,
     assignedTechId: string | null,
   ): Promise<void> {
     if (pending) return
+    const attempt = retainAssignmentAttempt(body)
     let restoreInvoker = true
     setPending(true)
     setNotice({ kind: 'status', text: 'Saving handoff…' })
@@ -75,7 +84,7 @@ export function TicketAssignmentControl({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify(attempt.body),
         },
       )
       const responseBody = await response.json().catch(() => null)
@@ -136,6 +145,7 @@ export function TicketAssignmentControl({
         throw new Error('missing_assignment_identity')
       }
       onApplied({ ...assignment, assignedTechId: safeAssignedTechId })
+      assignmentAttempts.current.delete(attempt.signature)
       restoreInvoker = false
       setOpen(false)
       setCandidate(null)
@@ -159,7 +169,7 @@ export function TicketAssignmentControl({
     }
     void mutate(
       isActiveHandoff
-        ? { action: 'handoff', requestKey: crypto.randomUUID(), assignedTechId: member.id }
+        ? { action: 'handoff', assignedTechId: member.id }
         : { action: 'reassign', assignedTechId: member.id },
       member.id,
     )

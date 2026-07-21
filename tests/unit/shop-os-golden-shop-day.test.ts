@@ -67,7 +67,11 @@ describe('Golden Shop Day release gate', () => {
         actor: golden.actors.advisor,
         ticketId,
         jobId: job.id,
-        body: { action: 'reassign', assignedTechId: golden.people.tech.id },
+        body: {
+          action: 'reassign',
+          requestKey: '00000000-0000-4000-8000-000000000401',
+          assignedTechId: golden.people.tech.id,
+        },
       })
       expect(assigned).toMatchObject({ ok: true })
 

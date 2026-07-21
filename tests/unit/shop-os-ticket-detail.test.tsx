@@ -626,7 +626,7 @@ describe('TicketDetailScreen', () => {
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ action: 'reassign', assignedTechId: 'tech-1' }),
+        body: expect.stringMatching(/^\{"action":"reassign","assignedTechId":"tech-1","requestKey":"[0-9a-f-]+"\}$/),
       }),
     )
     expect(within(target).getByText('Assigned · Angel Rivera')).toBeInTheDocument()
@@ -661,7 +661,7 @@ describe('TicketDetailScreen', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
-      expect.objectContaining({ body: JSON.stringify({ action: 'claim' }) }),
+      expect.objectContaining({ body: expect.stringMatching(/^\{"action":"claim","requestKey":"[0-9a-f-]+"\}$/) }),
     )
     expect(screen.getByText('Assigned · Toni Tech')).toBeInTheDocument()
     expect(screen.queryByText('Not visible')).toBeNull()
@@ -697,11 +697,7 @@ describe('TicketDetailScreen', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
       expect.objectContaining({
-        body: JSON.stringify({
-          action: 'reassign',
-          assignedTechId: 'tech-1',
-          confirmBelowTier: true,
-        }),
+        body: expect.stringMatching(/^\{"action":"reassign","assignedTechId":"tech-1","confirmBelowTier":true,"requestKey":"[0-9a-f-]+"\}$/),
       }),
     )
   })
