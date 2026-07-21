@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
+import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import type { TeamMember } from '@/lib/intake/team'
 import {
   projectLivingTicketCommands,
@@ -556,7 +557,7 @@ export function TicketDetailScreen({
               {activities.map((activity) => (
                 <li key={activity.id}>
                   <p>{activity.summary}</p>
-                  <span>{activity.actorName ?? 'Shop team'} · {formatActivityTime(activity.createdAt)}</span>
+                  <span>{activity.actorName ?? 'Shop team'} · <LocalizedTimestamp value={activity.createdAt} kind="dateTime" /></span>
                 </li>
               ))}
             </ol>
@@ -652,12 +653,6 @@ function formatCents(cents: number): string {
     style: 'currency',
     currency: 'USD',
   }).format(cents / 100)
-}
-
-function formatActivityTime(value: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-  }).format(value)
 }
 
 type AssignmentOverride = {

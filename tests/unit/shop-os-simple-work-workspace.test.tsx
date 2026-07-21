@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { renderToString } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SimpleWorkWorkspace } from '@/components/screens/simple-work-workspace'
 import type { SimpleWorkWorkspaceView } from '@/lib/shop-os/simple-work-ui'
@@ -246,6 +247,17 @@ describe('simple work workspace', () => {
     expect(screen.getByText(/Running since/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clock off' })).toBeInTheDocument()
     expect(screen.queryByText('Finished')).toBeNull()
+  })
+
+  it('server-renders the persisted running total before the browser starts ticking', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-11T10:14:00.000Z').getTime())
+    const html = renderToString(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base, workStatus: 'in_progress', clockedOnSince: '2026-07-11T09:14:00.000Z', activeSeconds: 600,
+    }} />)
+
+    expect(html).toContain('10m')
+    expect(html).not.toContain('1h 10m')
+    now.mockRestore()
   })
 
   it('shows a paused total and a clock-back-on control while clocked off', () => {

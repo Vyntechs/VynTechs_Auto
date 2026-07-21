@@ -11,7 +11,7 @@ type BrowserFaults = {
   failedRequests: string[]
 }
 
-export function watchBrowserFaults(page: Page): BrowserFaults {
+export function watchBrowserFaults(page: Page, label = 'browser'): BrowserFaults {
   const faults: BrowserFaults = { consoleErrors: [], pageErrors: [], failedRequests: [] }
   page.on('console', (message) => {
     const text = message.text()
@@ -21,7 +21,9 @@ export function watchBrowserFaults(page: Page): BrowserFaults {
       text,
     )) faults.consoleErrors.push(text)
   })
-  page.on('pageerror', (error) => faults.pageErrors.push(error.message))
+  page.on('pageerror', (error) => {
+    faults.pageErrors.push(`[${label}] ${new URL(page.url()).pathname}: ${error.message}`)
+  })
   page.on('requestfailed', (request) => {
     const failure = request.failure()?.errorText ?? 'unknown failure'
     const pathname = new URL(request.url()).pathname
