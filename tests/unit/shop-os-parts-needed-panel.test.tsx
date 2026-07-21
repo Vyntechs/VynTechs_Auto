@@ -34,7 +34,8 @@ describe('PartsNeededPanel', () => {
     }
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({ request: created }) })
     vi.stubGlobal('fetch', fetchMock)
-    render(<PartsNeededPanel ticketId={TICKET} jobId={JOB} initialRequests={[]} />)
+    const onRequestSaved = vi.fn()
+    render(<PartsNeededPanel ticketId={TICKET} jobId={JOB} initialRequests={[]} onRequestSaved={onRequestSaved} />)
     fireEvent.change(screen.getByLabelText('What part do you need?'), { target: { value: ' Water pump ' } })
     fireEvent.change(screen.getByLabelText(/Brand or where/), { target: { value: 'Motorcraft' } })
     fireEvent.change(screen.getByLabelText('How many?'), { target: { value: '2' } })
@@ -47,6 +48,7 @@ describe('PartsNeededPanel', () => {
       requestKey: KEY, description: 'Water pump', preference: 'Motorcraft', quantity: 2,
     })
     expect(await screen.findByText('Water pump')).toBeInTheDocument()
+    expect(onRequestSaved).toHaveBeenCalledTimes(1)
   })
 
   it('blocks submit until a part is named', () => {

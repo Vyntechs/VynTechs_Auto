@@ -161,6 +161,30 @@ describe('simple work workspace', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('makes hold available as soon as a parts request is saved', async () => {
+    const created = {
+      id: '00000000-0000-4000-8000-000000000041', jobId: JOB, description: 'Front brake pad set',
+      preference: 'OE-equivalent', quantity: 1, status: 'requested', requestedAt: '2026-07-19T12:01:00.000Z', resolvedAt: null,
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 201, json: async () => ({ request: created }),
+    }))
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
+      ...base, workStatus: 'in_progress', workNotes: 'Pads verified for replacement.',
+    }} />)
+
+    fireEvent.change(screen.getByLabelText('What part do you need?'), { target: { value: created.description } })
+    fireEvent.change(screen.getByLabelText(/Brand or where to get it/), { target: { value: created.preference } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to parts' }))
+    await screen.findByText(created.description)
+    fireEvent.click(screen.getByText('Put work on hold', { selector: 'summary' }))
+    fireEvent.change(screen.getByLabelText('Reason for hold'), { target: { value: 'parts' } })
+    fireEvent.change(screen.getByLabelText('What needs to happen next?'), { target: { value: 'Wait for the parts desk.' } })
+
+    const holdForm = screen.getByLabelText('Reason for hold').closest('form') as HTMLFormElement
+    expect(within(holdForm).getByRole('button', { name: 'Put work on hold' })).toBeEnabled()
+  })
+
   it('enables completion immediately after the server confirms a non-empty saved note', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true, status: 200,
