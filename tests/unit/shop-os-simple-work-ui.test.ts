@@ -17,6 +17,11 @@ const workspace = {
   workNotes: 'Started', startedAt: '2026-07-11T11:30:00.000Z', completedAt: null,
   clockedOnSince: '2026-07-11T11:30:00.000Z', activeSeconds: 0,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+  approvedScope: {
+    authorizationPurpose: null,
+    customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
+    lines: [{ kind: 'labor', description: 'Install lift kit', hours: '2' }],
+  },
 }
 
 describe('Shop OS simple-work UI contract', () => {
@@ -46,7 +51,10 @@ describe('Shop OS simple-work UI contract', () => {
 
   it('accepts a diagnostic workspace when diagnostics is off and manual work owns the job', () => {
     expect(parseInlineSimpleWorkResponse({
-      workspace: { ...workspace, kind: 'diagnostic' },
+      workspace: { ...workspace, kind: 'diagnostic', approvedScope: {
+        authorizationPurpose: 'diagnosis', customerSuppliedPartsNote: null,
+        lines: [{ kind: 'labor', description: 'Test and isolate concern', hours: '1' }],
+      } },
       partRequests: [],
     })).toMatchObject({ workspace: { kind: 'diagnostic', authorization: 'approved' } })
   })
@@ -55,6 +63,11 @@ describe('Shop OS simple-work UI contract', () => {
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, shopId: uuid(9) } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, attachments: [] } })).toBeNull()
     expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, hasCompletionProof: false } })).toBeNull()
+    expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, approvedScope: undefined } })).toBeNull()
+    expect(parseSimpleWorkWorkspaceResponse({ workspace: { ...workspace, approvedScope: {
+      ...workspace.approvedScope,
+      lines: [{ ...workspace.approvedScope.lines[0], priceCents: 60_000 }],
+    } } })).toBeNull()
     expect(parseEscalationResponse({ changed: true, job: { id: 'bad' } })).toBeNull()
   })
 

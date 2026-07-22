@@ -16,6 +16,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
 import { listPartRequestsForJob } from '@/lib/shop-os/part-requests'
+import type { SimpleWorkWorkspaceView } from '@/lib/shop-os/simple-work-ui'
 
 const TICKET_ID = '00000000-0000-4000-8000-000000000020'
 const JOB_ID = '00000000-0000-4000-8000-000000000030'
@@ -75,11 +76,13 @@ describe('Shop OS simple work routes', () => {
   })
 
   it('loads assigned work and its text-only part requests in one bounded GET', async () => {
-    const workspace = {
+    const workspace: SimpleWorkWorkspaceView = {
       id: JOB_ID, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
       startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
       updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
-    } as const
+      approvedScope: { authorizationPurpose: null, customerSuppliedPartsNote: null,
+        lines: [{ kind: 'labor', description: 'Install lift kit', hours: '2' }] },
+    }
     const partRequests = [{
       id: '00000000-0000-4000-8000-000000000080', jobId: JOB_ID,
       description: 'Track bar', preference: null, quantity: 1, status: 'requested',

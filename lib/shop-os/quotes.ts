@@ -364,6 +364,47 @@ export function readApprovedJobBreakdown(
   }
 }
 
+export type ApprovedJobScope = {
+  authorizationPurpose: 'diagnosis' | null
+  customerSuppliedPartsNote: string | null
+  lines: Array<
+    | { kind: 'part'; description: string; quantity: string; partNumber: string | null; brand: string | null }
+    | { kind: 'labor'; description: string; hours: string }
+    | { kind: 'fee'; description: string }
+  >
+}
+
+/** Technician-safe projection of the immutable version the customer approved. */
+export function readApprovedJobScope(snapshot: unknown, jobId: string): ApprovedJobScope | null {
+  let safe: QuoteSnapshotV1
+  try {
+    safe = validatedQuoteSnapshot(snapshot)
+  } catch {
+    return null
+  }
+  const job = safe.jobs.find((candidate) => candidate.id === jobId)
+  if (!job) return null
+  return {
+    authorizationPurpose: job.authorizationPurpose ?? null,
+    customerSuppliedPartsNote: job.customerSuppliedPartsNote ?? null,
+    lines: job.lines.map((line) => {
+      if (line.kind === 'part') return {
+        kind: 'part' as const,
+        description: line.description,
+        quantity: line.quantity,
+        partNumber: line.partNumber,
+        brand: line.brand,
+      }
+      if (line.kind === 'labor') return {
+        kind: 'labor' as const,
+        description: line.description,
+        hours: line.laborHours as string,
+      }
+      return { kind: 'fee' as const, description: line.description }
+    }),
+  }
+}
+
 function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus' | 'sessionId'>,
 ): boolean {

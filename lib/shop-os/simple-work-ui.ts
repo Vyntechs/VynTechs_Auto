@@ -3,6 +3,15 @@ import { parsePartRequestListResponse, type PartRequestView } from './part-reque
 
 const uuid = z.uuid().transform((value) => value.toLowerCase())
 const timestamp = z.string().datetime({ offset: true })
+const approvedScope = z.strictObject({
+  authorizationPurpose: z.literal('diagnosis').nullable(),
+  customerSuppliedPartsNote: z.string().min(1).max(500).nullable(),
+  lines: z.array(z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('part'), description: z.string().min(1).max(500), quantity: z.string().min(1).max(64), partNumber: z.string().min(1).max(200).nullable(), brand: z.string().min(1).max(200).nullable() }),
+    z.strictObject({ kind: z.literal('labor'), description: z.string().min(1).max(500), hours: z.string().min(1).max(64) }),
+    z.strictObject({ kind: z.literal('fee'), description: z.string().min(1).max(500) }),
+  ])).min(1).max(500),
+})
 const workspace = z.strictObject({
   id: uuid,
   title: z.string().min(1).max(500),
@@ -15,6 +24,11 @@ const workspace = z.strictObject({
   activeSeconds: z.number().int().min(0),
   updatedAt: timestamp,
   authorization: z.enum(['approved', 'declined', 'awaiting_approval']),
+  approvedScope: approvedScope.optional(),
+}).superRefine((value, context) => {
+  if ((value.authorization === 'approved') !== (value.approvedScope !== undefined)) {
+    context.addIssue({ code: 'custom', message: 'approved scope is inconsistent' })
+  }
 })
 const work = z.strictObject({
   status: z.enum(['open', 'in_progress', 'done']),

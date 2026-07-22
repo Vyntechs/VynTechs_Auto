@@ -418,6 +418,8 @@ export function SimpleWorkWorkspace({
           {embedded && <button className={styles.closeEmbedded} type="button" onClick={requestClose}>Close work</button>}
         </header>
 
+        {workspace.approvedScope && <ApprovedScope scope={workspace.approvedScope} />}
+
         {workspace.workStatus === 'done' ? (
           <section className={styles.state} aria-labelledby="work-complete">
             <p className={styles.stateMark}>Complete</p>
@@ -556,6 +558,30 @@ export function SimpleWorkWorkspace({
         {!embedded && <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>View repair order</Link>}
       </div>
     </Root>
+  )
+}
+
+function ApprovedScope({ scope }: { scope: NonNullable<SimpleWorkWorkspaceView['approvedScope']> }) {
+  return (
+    <section className={styles.approvedScope} aria-labelledby="approved-scope-heading">
+      <div>
+        <p className={styles.eyebrow}>{scope.authorizationPurpose === 'diagnosis' ? 'Diagnostic authorization' : 'Approved scope'}</p>
+        <h2 id="approved-scope-heading">Exactly what is approved</h2>
+      </div>
+      <ul>
+        {scope.lines.map((line, index) => (
+          <li key={`${line.kind}:${index}:${line.description}`}>
+            <span>{line.kind}</span>
+            <strong>{line.description}</strong>
+            {line.kind === 'labor' && <small>{line.hours} labor {line.hours === '1' ? 'hour' : 'hours'}</small>}
+            {line.kind === 'part' && <small>{line.quantity} × {[line.brand, line.partNumber].filter(Boolean).join(' · ') || 'specified part'}</small>}
+          </li>
+        ))}
+      </ul>
+      {scope.customerSuppliedPartsNote && (
+        <p className={styles.customerSupplied}>Customer supplied: {scope.customerSuppliedPartsNote}</p>
+      )}
+    </section>
   )
 }
 
