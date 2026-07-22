@@ -286,6 +286,7 @@ export function ManualQuoteBuilder({
   })
   const pendingStory = !current.activeVersion && current.jobs.some((job) =>
     job.kind === 'diagnostic' && job.lines.length > 0
+      && job.storyMode !== 'authorization_only'
       && (job.story.content === null || job.story.reviewStatus !== 'reviewed'))
   const preparation = basePreparation.kind === 'ready' && pendingStory
     ? { kind: 'blocked' as const, reasons: ['Review every diagnostic story.'] }
@@ -1061,6 +1062,11 @@ export function ManualQuoteBuilder({
                       </div>
                       <p>{job.lines.length} {job.lines.length === 1 ? 'line' : 'lines'}</p>
                     </div>
+                    {job.customerSuppliedPartsNote && (
+                      <p className={styles.storyTruth}>
+                        Customer supplied: {job.customerSuppliedPartsNote}
+                      </p>
+                    )}
 
                     {job.lines.length === 0 ? (
                       <p className={styles.empty}>No quote lines yet.</p>
@@ -1550,6 +1556,9 @@ function StoryCard({
 
   if (job.storyMode === 'published_wizard_unsupported') {
     return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Published-wizard stories are not supported yet.</p></section>
+  }
+  if (job.storyMode === 'authorization_only') {
+    return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic authorization for ${job.title}`}><p className={styles.storyTruth}>Diagnostic labor only. Findings are recorded after the technician performs the approved testing.</p></section>
   }
   if (job.storyMode === 'unavailable') {
     return <section ref={focusRef} tabIndex={-1} className={styles.storyCard} aria-label={`Diagnostic story for ${job.title}`}><p className={styles.storyTruth}>Finish and lock this diagnosis before preparing its customer story.</p></section>

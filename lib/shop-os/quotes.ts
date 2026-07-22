@@ -163,6 +163,7 @@ export type QuoteBuilderResult =
         id: string
         title: string
         kind: 'diagnostic' | 'repair' | 'maintenance'
+        customerSuppliedPartsNote?: string | null
         workStatus: 'open' | 'in_progress' | 'blocked'
         story: {
           content: QuoteCustomerStoryV1 | null
@@ -170,7 +171,7 @@ export type QuoteBuilderResult =
           reviewStatus: 'pending' | 'reviewed' | null
           revision: number
         }
-        storyMode: 'ordinary_locked_tree' | 'topology_manual' | 'manual_findings' | 'published_wizard_unsupported' | 'unavailable' | null
+        storyMode: 'authorization_only' | 'ordinary_locked_tree' | 'topology_manual' | 'manual_findings' | 'published_wizard_unsupported' | 'unavailable' | null
         decisionEligible: boolean
         approval: {
           state: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
@@ -275,6 +276,8 @@ const quoteSnapshotSchema = z.strictObject({
     id: uuidSchema,
     title: boundedText(500),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
+    authorizationPurpose: z.literal('diagnosis').optional(),
+    customerSuppliedPartsNote: boundedText(500).optional(),
     customerStory: customerStorySchema.nullable(),
     storyMeta: quoteStoryMetaSchema.nullable(),
     lines: z.array(z.strictObject({
@@ -362,9 +365,10 @@ export function readApprovedJobBreakdown(
 }
 
 function isPinnedSimpleWork(
-  job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus'>,
+  job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus' | 'sessionId'>,
 ): boolean {
-  return (job.kind === 'repair' || job.kind === 'maintenance')
+  return (job.kind === 'repair' || job.kind === 'maintenance'
+      || (job.kind === 'diagnostic' && job.sessionId === null))
     && (job.workStatus === 'in_progress' || job.workStatus === 'done')
 }
 
@@ -591,6 +595,7 @@ export async function getQuoteBuilder(
         const wizardSessionIds = new Set(wizardEvents.map((event) => event.sessionId))
         const storyMode = (job: typeof eligibleJobs[number]) => {
           if (job.kind !== 'diagnostic') return null
+          if (!job.sessionId && job.customerStory === null) return 'authorization_only' as const
           if (!job.sessionId) {
             return entitlements.diagnostics
               ? 'unavailable' as const
@@ -666,6 +671,9 @@ export async function getQuoteBuilder(
               id: safeUuid(job.id),
               title: job.title,
               kind: job.kind,
+              ...(job.customerSuppliedPartsNote === null
+                ? {}
+                : { customerSuppliedPartsNote: job.customerSuppliedPartsNote }),
               workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
               story: safeBuilderStory(job.customerStory, job.storyMeta),
               storyMode: storyMode(job),
@@ -753,7 +761,7 @@ async function lockDraftContext(
   if (!ticket || ticket.status !== 'open') return null
 
   const jobRows = await db
-    .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
+    .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus, sessionId: ticketJobs.sessionId })
     .from(ticketJobs)
     .where(and(eq(ticketJobs.shopId, input.shopId), eq(ticketJobs.ticketId, input.ticketId)))
     .orderBy(ticketJobs.id)
@@ -841,7 +849,7 @@ export async function invalidateActiveQuoteVersion(
   if (!superseded) return conflict(true)
   if (includedJobIds.length > 0) {
     const resetJobIds = (await db
-      .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus })
+      .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus, sessionId: ticketJobs.sessionId })
       .from(ticketJobs)
       .where(and(
         eq(ticketJobs.shopId, input.shopId),
@@ -1003,7 +1011,7 @@ function safeBuilderStory(
 function safeBuilderApproval(
   state: unknown,
   quoteVersionId: unknown,
-  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus'>,
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus' | 'sessionId'>,
   activeVersion: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'],
   activeSnapshotJobIds: ReadonlySet<string>,
   pinnedApprovalValid: boolean,
@@ -1033,7 +1041,7 @@ function safeBuilderApproval(
 }
 
 function pinnedBuilderApprovalIsValid(
-  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus' | 'approvedQuoteVersionId'>,
+  job: Pick<typeof ticketJobs.$inferSelect, 'id' | 'kind' | 'workStatus' | 'sessionId' | 'approvedQuoteVersionId'>,
   ticketId: string,
   versions: ReadonlyArray<Pick<typeof quoteVersions.$inferSelect, 'id' | 'snapshot'>>,
   events: ReadonlyArray<Pick<typeof quoteEvents.$inferSelect, 'id' | 'kind' | 'jobId' | 'quoteVersionId' | 'createdAt'>>,
@@ -1056,9 +1064,10 @@ function requireVersionableStory(
   kind: 'diagnostic' | 'repair' | 'maintenance',
   story: unknown,
   meta: unknown,
+  authorizationOnly = false,
 ): void {
   if (story === null) {
-    if (meta !== null || kind === 'diagnostic') {
+    if (meta !== null || (kind === 'diagnostic' && !authorizationOnly)) {
       throw new TypeError('diagnostic customer story is required')
     }
     return
@@ -1129,7 +1138,17 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
       && (linesByJob.get(job.id)?.length ?? 0) > 0)
     .map((job) => {
       if (!job.title) throw new TypeError('job title is empty')
-      requireVersionableStory(job.kind, job.customerStory, job.storyMeta)
+      const authorizationOnly = job.kind === 'diagnostic'
+        && job.sessionId === null
+        && job.customerStory === null
+        && job.storyMeta === null
+      requireVersionableStory(job.kind, job.customerStory, job.storyMeta, authorizationOnly)
+      if (job.customerSuppliedPartsNote !== null && (
+        job.kind === 'diagnostic'
+        || job.customerSuppliedPartsNote !== job.customerSuppliedPartsNote.trim()
+        || job.customerSuppliedPartsNote.length < 1
+        || job.customerSuppliedPartsNote.length > 500
+      )) throw new TypeError('customer-supplied-part truth is invalid')
       const totalsInput: Array<{ extendedCents: number; taxable: boolean }> = []
       const lines = sortBySnapshotOrder(linesByJob.get(job.id) ?? []).map((line) => {
         if (!line.description) throw new TypeError('line description is empty')
@@ -1172,11 +1191,19 @@ function buildQuoteSnapshot(context: VersionContext): QuoteSnapshotV1 {
           vendorContext: null,
         }
       })
+      if (authorizationOnly && (
+        !lines.some((line) => line.kind === 'labor')
+        || lines.some((line) => line.kind === 'part')
+      )) throw new TypeError('diagnostic authorization scope is invalid')
       const totals = calculateTicketTotals(totalsInput, 0)
       return {
         id: safeUuid(job.id),
         title: job.title,
         kind: job.kind,
+        ...(authorizationOnly ? { authorizationPurpose: 'diagnosis' as const } : {}),
+        ...(job.customerSuppliedPartsNote === null
+          ? {}
+          : { customerSuppliedPartsNote: job.customerSuppliedPartsNote }),
         customerStory: safeCustomerStory(job.customerStory),
         storyMeta: buildQuoteStoryMeta(job.storyMeta),
         lines,
@@ -1261,7 +1288,18 @@ function validatedQuoteSnapshot(
     if ((job.customerStory === null) !== (job.storyMeta === null)) {
       throw new TypeError('quote snapshot story metadata is inconsistent')
     }
-    if (job.kind === 'diagnostic' && (
+    const diagnosticAuthorization = job.kind === 'diagnostic'
+      && job.authorizationPurpose === 'diagnosis'
+    if ((job.authorizationPurpose !== undefined && job.kind !== 'diagnostic')
+      || (job.customerSuppliedPartsNote !== undefined && job.kind === 'diagnostic')) {
+      throw new TypeError('quote snapshot job purpose is invalid')
+    }
+    if (diagnosticAuthorization ? (
+      job.customerStory !== null
+      || job.storyMeta !== null
+      || !job.lines.some((line) => line.kind === 'labor')
+      || job.lines.some((line) => line.kind === 'part')
+    ) : job.kind === 'diagnostic' && (
       job.customerStory === null
       || job.storyMeta === null
       || (job.storyMeta.source !== 'ai' && job.storyMeta.source !== 'manual')

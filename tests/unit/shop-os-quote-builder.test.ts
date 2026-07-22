@@ -335,7 +335,7 @@ describe('Shop OS quote builder read model', () => {
   it('derives a bounded diagnostic story mode without exposing raw engine state', async () => {
     await db.update(ticketJobs).set({ kind: 'diagnostic' }).where(eq(ticketJobs.id, uuid(30)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
-      ok: true, builder: { jobs: [{ storyMode: 'unavailable' }] },
+      ok: true, builder: { jobs: [{ storyMode: 'authorization_only' }] },
     })
     await db.insert(sessions).values({
       id: uuid(60), shopId, techId: uuid(1), vehicleId: uuid(11),

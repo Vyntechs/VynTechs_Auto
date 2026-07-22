@@ -39,6 +39,8 @@ export interface QuoteSnapshotJobV1 {
   id: string
   title: string
   kind: 'diagnostic' | 'repair' | 'maintenance'
+  authorizationPurpose?: 'diagnosis'
+  customerSuppliedPartsNote?: string
   customerStory: QuoteCustomerStoryV1 | null
   storyMeta: QuoteStoryMetaV1 | null
   lines: QuoteSnapshotLineV1[]
