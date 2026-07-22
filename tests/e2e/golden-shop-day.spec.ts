@@ -97,7 +97,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByRole('button', { name: /^Perform known work/ }).click()
     const scopeSource = owner.getByLabel('Scope source')
     if (await scopeSource.count()) await scopeSource.selectOption('manual')
-    await owner.getByLabel('Work requested').fill('Inspect and repair the front brake concern')
+    await owner.getByLabel('Requested work').fill('Inspect and repair the front brake concern')
     await checkpoint(owner, testInfo, 'owner-intake-complete')
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
     await owner.waitForURL(/\/tickets\/[0-9a-f-]+$/)
@@ -269,7 +269,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const advisorHandoffRow = advisor.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
     await advisorHandoffRow.getByRole('button', { name: 'Hand off' }).click()
     await advisor.getByLabel('Choose technician').getByRole('button', { name: /Golden QA Relief Technician/ }).click()
-    await expect(advisor.getByRole('status').filter({ hasText: /Assigned to Golden QA Relief Technician/ })).toBeVisible()
+    await expect(advisor.getByRole('status').filter({ hasText: /assigned to Golden QA Relief Technician/i })).toBeVisible()
     await checkpoint(advisor, testInfo, 'advisor-handoff-relief-tech')
 
     const parts = sessions.get('parts')!.page
@@ -288,8 +288,8 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(reliefTodayRow.getByRole('button', { name: 'Resolve hold' })).toBeVisible()
     await reliefTodayRow.getByRole('button', { name: 'Resolve hold' }).click()
     await expect(relief.getByRole('status').filter({ hasText: /Hold resolved/ })).toBeVisible()
-    await reliefTodayRow.getByRole('button', { name: 'Open work' }).click()
-    await expect(relief.getByRole('heading', { name: 'Approved and ready' })).toBeVisible()
+    await reliefTodayRow.getByRole('button', { name: 'Continue work' }).click()
+    await expect(relief.getByRole('heading', { name: 'Work in progress' })).toBeVisible()
     const completionResponsePromise = relief.waitForResponse((response) => (
       response.request().method() === 'POST'
       && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
@@ -301,7 +301,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(relief.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
     await checkpoint(relief, testInfo, 'relief-complete-ticket')
 
-    await advisor.reload()
+    await advisor.goto(path)
     await advisor.getByRole('button', { name: 'Collect & close' }).click()
     await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
     await advisor.getByLabel('Payment amount').fill('194.40')

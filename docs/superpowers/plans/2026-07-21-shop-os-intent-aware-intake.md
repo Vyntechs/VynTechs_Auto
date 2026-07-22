@@ -295,7 +295,7 @@ git commit -m "feat(shop-os): show technicians approved work scope"
 
 Add one run that creates a diagnostic authorization from a saved template, verifies its labor before assignment, approves the exact version, and verifies the tech scope before clock-on. Add a known-work case whose customer-supplied note survives the same path.
 
-- [ ] **Step 2: Expand browser assertions without creating retained data**
+- [x] **Step 2: Expand browser assertions without creating retained data**
 
 Exercise the intent control and approved-scope module at phone and desktop widths using the existing synthetic QA provision/cleanup lifecycle. Assert zero horizontal overflow and no serious/critical Axe findings.
 
@@ -311,7 +311,7 @@ pnpm vitest run tests/unit/shop-os-counter-ticket.test.ts tests/unit/shop-os-can
 
 Expected: all pass.
 
-- [ ] **Step 5: Run the repository release gates**
+- [x] **Step 5: Run the repository release gates**
 
 Run the documented serialized Vitest shards, then:
 
@@ -322,8 +322,12 @@ pnpm test:e2e:golden
 git diff --check
 ```
 
-Expected: all tests and 64-page build pass; synthetic cleanup retains zero operational rows.
+Expected: all tests and the production build pass; synthetic cleanup retains zero operational rows.
 
-- [ ] **Step 6: Review and ship**
+- [x] **Step 6: Review and ship**
 
 Review the complete diff for tenant/authz failures, transaction rollback, malformed snapshot acceptance, engine/media regressions, mobile containment, and unrelated changes. Push the branch, open the PR, wait for required checks, merge only after the migration/application order is safe, deploy, rerun health/authenticated Golden proof, and record exact receipts in the active plan.
+
+**Release receipt (2026-07-21):** PR #194 merged to `main` as `af79e54e6da41afd0d84a6b2066250c9aa00159e` after GitGuardian, Vercel, and repository CI passed. Additive migration `0048_shop_os_intent_aware_intake` was applied first and preserved all seven existing ticket jobs. Eight serialized Vitest shards passed 3,604 tests; TypeScript, the 65-route production build, diff/secret guards, and consolidated static/security/runtime review passed. The exact production revision reached Vercel `READY`; health returned `200 {"ok":true}`, sign-in returned 200, protected Today redirected to sign-in, and no runtime error cluster appeared. The authenticated Golden Shop Day then passed at 390×844 and 1440×900, including intent selection, quote approval, exact technician scope, handoff, completion, payment, closure, accessibility, overflow, browser-fault, and zero-retained-QA-data gates.
+
+The production proof also exposed a separate next-slice gap: after all work is complete, Today no longer surfaces the open repair order for ring-out. The stable repair-order route works and was used to finish the release proof; a dedicated in-place `Ready to collect` queue is intentionally deferred to the next goal rather than hidden inside this intake release.
