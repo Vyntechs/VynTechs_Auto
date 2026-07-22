@@ -9,6 +9,11 @@ const workspace = {
   id: JOB, title: 'Install lift kit', kind: 'repair' as const, workStatus: 'open' as const,
   workNotes: null, startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved' as const,
+  approvedScope: {
+    authorizationPurpose: null,
+    customerSuppliedPartsNote: null,
+    lines: [{ kind: 'labor' as const, description: 'Install lift kit', hours: '4.0' }],
+  },
 }
 const ticket = { id: TICKET, number: 7, customerName: 'Morgan Lee', vehicle: '2020 Jeep Wrangler' }
 

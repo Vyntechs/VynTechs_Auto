@@ -94,6 +94,10 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByLabel('Model').fill('F-150')
     await owner.getByLabel('Mileage today').first().fill('48120')
     await owner.getByLabel('What brought them in?').fill(concern)
+    await owner.getByRole('button', { name: /^Perform known work/ }).click()
+    const scopeSource = owner.getByLabel('Scope source')
+    if (await scopeSource.count()) await scopeSource.selectOption('manual')
+    await owner.getByLabel('Work requested').fill('Inspect and repair the front brake concern')
     await checkpoint(owner, testInfo, 'owner-intake-complete')
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
     await owner.waitForURL(/\/tickets\/[0-9a-f-]+$/)
@@ -204,6 +208,8 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const workResponse = await workResponsePromise
     expect(workResponse.status(), 'mounted work API status').toBe(200)
     await expect(tech.getByRole('heading', { name: 'Approved and ready' })).toBeVisible()
+    await expect(tech.getByRole('heading', { name: 'Exactly what is approved' })).toBeVisible()
+    await expect(tech.getByText(laborDescription, { exact: true })).toBeVisible()
     await expect(tech).toHaveURL(/\/today$/)
     const clockResponsePromise = tech.waitForResponse((response) => (
       response.request().method() === 'POST'

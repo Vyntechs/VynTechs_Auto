@@ -40,6 +40,7 @@ describe('Golden Shop Day release gate', () => {
           vehicleMode: 'new', customer: golden.customer, vehicle: golden.vehicle,
           concern: 'Customer wants us to address braking and a separate maintenance item.',
           whenStarted: 'This week', howOften: 'Every drive',
+          work: { mode: 'manual', kind: 'repair', description: 'Inspect and repair braking concern' },
           assignedTechId: golden.people.tech.id,
         },
       })
@@ -122,6 +123,7 @@ describe('Golden Shop Day release gate', () => {
           concern: 'Charging warning appears at idle.',
           whenStarted: 'This morning',
           howOften: 'Intermittent',
+          work: { mode: 'manual', kind: 'repair', description: 'Inspect charging system concern' },
           assignedTechId: null,
         },
       })

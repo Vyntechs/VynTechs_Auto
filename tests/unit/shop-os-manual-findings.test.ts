@@ -186,7 +186,7 @@ describe('manual findings — sessionless diagnostic story path', () => {
   })
 
   describe('storyMode in the quote builder', () => {
-    it('stays "unavailable" for entitled shops with no session (grandfathered UI unchanged)', async () => {
+    it('offers authorization-only scope before an entitled shop records findings', async () => {
       const seed = await seedDiagnosticTicket(db)
       // No entitlement row: DIAGNOSTICS_DEFAULT_UNTIL_PRICED keeps the shop entitled.
       const builder = await getQuoteBuilder(db, {
@@ -195,10 +195,10 @@ describe('manual findings — sessionless diagnostic story path', () => {
       })
       expect(builder.ok).toBe(true)
       if (!builder.ok) throw new Error('expected ok')
-      expect(builder.builder.jobs[0].storyMode).toBe('unavailable')
+      expect(builder.builder.jobs[0].storyMode).toBe('authorization_only')
     })
 
-    it('offers "manual_findings" for unentitled shops with no session', async () => {
+    it('offers authorization-only scope before an unentitled shop records findings', async () => {
       const seed = await seedDiagnosticTicket(db)
       await db.insert(shopEntitlements).values({
         shopId: seed.shop.id,
@@ -210,7 +210,7 @@ describe('manual findings — sessionless diagnostic story path', () => {
       })
       expect(builder.ok).toBe(true)
       if (!builder.ok) throw new Error('expected ok')
-      expect(builder.builder.jobs[0].storyMode).toBe('manual_findings')
+      expect(builder.builder.jobs[0].storyMode).toBe('authorization_only')
     })
 
     it('keeps comp actors entitled even when the shop row says false', async () => {
@@ -227,7 +227,7 @@ describe('manual findings — sessionless diagnostic story path', () => {
       })
       expect(builder.ok).toBe(true)
       if (!builder.ok) throw new Error('expected ok')
-      expect(builder.builder.jobs[0].storyMode).toBe('unavailable')
+      expect(builder.builder.jobs[0].storyMode).toBe('authorization_only')
     })
 
     it('parses the saved manual findings story into the builder projection', async () => {

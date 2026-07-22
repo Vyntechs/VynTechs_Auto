@@ -201,6 +201,30 @@ describe('createCounterTicket', () => {
     })
   })
 
+  it('reauthorizes the persisted advisor role before any counter-intake write', async () => {
+    await db.update(profiles).set({ role: 'tech' }).where(eq(profiles.id, actor.profileId))
+
+    await expect(createCounterTicket(db, { actor, body: newBody() })).resolves.toEqual({
+      ok: false,
+      error: 'forbidden',
+    })
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
+  it('reauthorizes active membership before any counter-intake write', async () => {
+    await db.update(profiles).set({
+      deactivatedAt: new Date('2026-07-21T12:00:00.000Z'),
+    }).where(eq(profiles.id, actor.profileId))
+
+    await expect(createCounterTicket(db, { actor, body: newBody() })).resolves.toEqual({
+      ok: false,
+      error: 'inactive_profile',
+    })
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
   it('uses manual maintenance as the one work item instead of creating duplicate work', async () => {
     const result = await createCounterTicket(db, {
       actor,

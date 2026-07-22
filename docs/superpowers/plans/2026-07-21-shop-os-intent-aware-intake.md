@@ -40,11 +40,11 @@
 - Produces: canned-job kind `diagnostic`; `ticketJobs.customerSuppliedPartsNote: string | null`; ticket/job projections carrying the note.
 - Invariant: diagnostic templates contain at least one labor line and no part lines.
 
-- [ ] **Step 1: Write failing schema and domain tests**
+- [x] **Step 1: Write failing schema and domain tests**
 
 Add tests proving the migration drops/recreates `canned_jobs_kind_valid`, adds `ticket_jobs_customer_supplied_parts_note_valid`, diagnostic template creation accepts labor/fee but rejects no-labor or part templates, and ticket creation rejects supplied-item notes on diagnostic jobs.
 
-- [ ] **Step 2: Run the focused tests and observe the intended failures**
+- [x] **Step 2: Run the focused tests and observe the intended failures**
 
 Run:
 
@@ -54,7 +54,7 @@ pnpm vitest run tests/unit/shop-os-quote-foundation-schema.test.ts tests/unit/sh
 
 Expected: failures show `diagnostic` is rejected and the supplied-item field is absent.
 
-- [ ] **Step 3: Add the migration and source schema**
+- [x] **Step 3: Add the migration and source schema**
 
 Use this migration contract:
 
@@ -77,7 +77,7 @@ alter table canned_jobs
 
 Mirror it in Drizzle and add the bounded optional field to `ticketJobBodySchema`, transaction inserts, and ticket detail projection.
 
-- [ ] **Step 4: Extend canned-job contracts and management UI**
+- [x] **Step 4: Extend canned-job contracts and management UI**
 
 Extend every safe kind union to `diagnostic`, add the Diagnostic option to the existing settings editor, and enforce:
 
@@ -89,11 +89,11 @@ if (body.kind === 'diagnostic'
 
 Extend applied canned-job projections to accept diagnostic jobs while leaving Quick Quote filtering to Task 2.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run the Step 2 command. Expected: all pass.
 
-- [ ] **Step 6: Commit the independently testable data contract**
+- [x] **Step 6: Commit the independently testable data contract**
 
 ```bash
 git add drizzle/migrations/0048_shop_os_intent_aware_intake.sql lib/db/schema.ts lib/tickets.ts lib/shop-os/canned-jobs.ts lib/shop-os/canned-jobs-ui.ts components/vt/canned-jobs-section.tsx tests/unit/shop-os-quote-foundation-schema.test.ts tests/unit/shop-os-canned-jobs.test.ts tests/unit/shop-os-canned-jobs-ui.test.ts tests/unit/shop-os-canned-job-settings.test.tsx tests/unit/shop-os-tickets-create.test.ts
@@ -118,11 +118,11 @@ git commit -m "feat(shop-os): add diagnostic intake templates"
 - Consumes: `loadStrictCannedJobCopy`, `cannedJobLineInsertValues`, diagnostic/known canned templates, and `customerSuppliedPartsNote`.
 - Produces: a discriminated `work` input with `diagnosis`, `canned`, and `manual` modes.
 
-- [ ] **Step 1: Write failing counter-domain tests**
+- [x] **Step 1: Write failing counter-domain tests**
 
 Cover new/existing customers, stale/cross-shop templates, transaction rollback, diagnosis with exact copied labor, known canned work, manual known work, supplied-item note, and rejection of supplied-item truth on diagnosis.
 
-- [ ] **Step 2: Replace the ambiguous request shape**
+- [x] **Step 2: Replace the ambiguous request shape**
 
 Use this boundary:
 
@@ -140,15 +140,15 @@ const workSchema = z.discriminatedUnion('mode', [
 
 Load template truth before customer mutation, create exactly one matching job, and insert copied lines before the outer transaction commits.
 
-- [ ] **Step 3: Wire saved work into the existing intake page**
+- [x] **Step 3: Wire saved work into the existing intake page**
 
 Load `listCannedJobs` alongside recent customers and team. Pass the privacy-safe templates and tax-rate fingerprint into `CounterIntake`. Filter diagnostic templates out of Quick Quote so it remains known-work-only.
 
-- [ ] **Step 4: Replace Work type with one inline decision**
+- [x] **Step 4: Replace Work type with one inline decision**
 
 Render `Find the cause` and `Perform known work` as two 44px radio cards. For diagnosis, default to the first sorted diagnostic template and block with a direct configuration message if none exists. For known work, allow saved work or custom work; show one optional `Customer-supplied item` field only there.
 
-- [ ] **Step 5: Run focused domain and component tests**
+- [x] **Step 5: Run focused domain and component tests**
 
 ```bash
 pnpm vitest run tests/unit/shop-os-counter-ticket.test.ts tests/unit/counter-intake.test.tsx tests/unit/intake-page-wiring.test.tsx tests/unit/shop-os-quick-ticket-ui.test.tsx --maxWorkers=1 --reporter=dot
@@ -156,7 +156,7 @@ pnpm vitest run tests/unit/shop-os-counter-ticket.test.ts tests/unit/counter-int
 
 Expected: all pass with exact request envelopes and no full-page transition added.
 
-- [ ] **Step 6: Commit the intake flow**
+- [x] **Step 6: Commit the intake flow**
 
 ```bash
 git add lib/intake/counter-ticket.ts app/'(app)'/intake/page.tsx components/screens/counter-intake.tsx components/screens/counter-intake.module.css app/'(app)'/tickets/new/page.tsx components/screens/quick-ticket.tsx tests/unit/shop-os-counter-ticket.test.ts tests/unit/counter-intake.test.tsx tests/unit/intake-page-wiring.test.tsx tests/unit/shop-os-quick-ticket-ui.test.tsx
@@ -180,11 +180,11 @@ git commit -m "feat(shop-os): make intake intent aware"
 - Produces: optional snapshot `authorizationPurpose: 'diagnosis'`; builder story mode `authorization_only`.
 - Invariant: only a sessionless diagnostic with no story and at least one labor line may use diagnosis authorization.
 
-- [ ] **Step 1: Write failing quote-contract tests**
+- [x] **Step 1: Write failing quote-contract tests**
 
 Prove a sessionless diagnostic labor template can prepare a quote without findings, linked diagnostics still fail without reviewed findings, malformed authorization snapshots fail, and started manual diagnostics retain their pinned version.
 
-- [ ] **Step 2: Add explicit snapshot truth**
+- [x] **Step 2: Add explicit snapshot truth**
 
 Extend `QuoteSnapshotJobV1` and the strict parser with:
 
@@ -195,15 +195,15 @@ customerSuppliedPartsNote?: string | null
 
 Require `authorizationPurpose === 'diagnosis'` exactly when a diagnostic snapshot has no story. Require at least one labor line and reject part lines for that authorization.
 
-- [ ] **Step 3: Split authorization from findings in the builder**
+- [x] **Step 3: Split authorization from findings in the builder**
 
 Project `authorization_only` for an open, sessionless diagnostic with no story. Exclude that mode from the diagnostic-story preparation blocker and render calm read-only copy explaining that findings are recorded after authorized testing.
 
-- [ ] **Step 4: Pin started manual diagnosis**
+- [x] **Step 4: Pin started manual diagnosis**
 
 Replace the repair/maintenance-only pinned-work helper with a helper that also recognizes sessionless diagnostic work in progress or done. Use it consistently for version creation, invalidation, approval projection, and builder filtering.
 
-- [ ] **Step 5: Run focused quote tests**
+- [x] **Step 5: Run focused quote tests**
 
 ```bash
 pnpm vitest run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-versions.test.ts tests/unit/shop-os-quote-decisions.test.ts tests/unit/shop-os-quote-builder-ui.test.ts tests/unit/shop-os-manual-quote-builder.test.tsx --maxWorkers=1 --reporter=dot
@@ -211,7 +211,7 @@ pnpm vitest run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quot
 
 Expected: all pass; legacy/linked diagnostic story guards remain green.
 
-- [ ] **Step 6: Commit the authorization contract**
+- [x] **Step 6: Commit the authorization contract**
 
 ```bash
 git add lib/shop-os/quote-math.ts lib/shop-os/quotes.ts lib/shop-os/quote-builder-ui.ts components/screens/manual-quote-builder.tsx tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-versions.test.ts tests/unit/shop-os-quote-decisions.test.ts tests/unit/shop-os-quote-builder-ui.test.ts tests/unit/shop-os-manual-quote-builder.test.tsx
@@ -233,11 +233,11 @@ git commit -m "feat(shop-os): separate diagnosis authorization from findings"
 - Produces: `readApprovedJobScope(snapshot, jobId)` and workspace `approvedScope` plus `customerSuppliedPartsNote`.
 - Invariant: only the exact approved immutable snapshot may populate technician scope.
 
-- [ ] **Step 1: Write failing scope tests**
+- [x] **Step 1: Write failing scope tests**
 
 Cover labor hours, part quantity/identity, customer-supplied note, diagnostic purpose, malformed snapshot refusal, superseded approval refusal, and the absence of prices/cost/vendor data.
 
-- [ ] **Step 2: Add a strict scope reader**
+- [x] **Step 2: Add a strict scope reader**
 
 Return the minimum technician projection:
 
@@ -256,15 +256,15 @@ type ApprovedJobScope = {
 }
 ```
 
-- [ ] **Step 3: Project scope from the pinned version**
+- [x] **Step 3: Project scope from the pinned version**
 
 In `getSimpleWorkWorkspace`, resolve the exact approved version already validated by `hasPinnedApproval`. If its scope cannot be parsed, return a safe conflict instead of mutable lines or an empty ready state.
 
-- [ ] **Step 4: Render scope before Clock on**
+- [x] **Step 4: Render scope before Clock on**
 
 Add one compact `Approved scope` module directly beneath the work title. Show diagnostic authorization, operations/hours, and customer-supplied truth. Do not render money. Keep the module mounted in open, in-progress, and done states.
 
-- [ ] **Step 5: Run focused work tests**
+- [x] **Step 5: Run focused work tests**
 
 ```bash
 pnpm vitest run tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple-work-workspace.test.tsx --maxWorkers=1 --reporter=dot
@@ -272,7 +272,7 @@ pnpm vitest run tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple
 
 Expected: all pass; tech cannot start when scope truth is missing or malformed.
 
-- [ ] **Step 6: Commit technician scope**
+- [x] **Step 6: Commit technician scope**
 
 ```bash
 git add lib/shop-os/quotes.ts lib/shop-os/simple-work.ts lib/shop-os/simple-work-ui.ts components/screens/simple-work-workspace.tsx components/screens/simple-work-workspace.module.css tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-simple-work-workspace.test.tsx
@@ -291,7 +291,7 @@ git commit -m "feat(shop-os): show technicians approved work scope"
 - Consumes: all prior contracts.
 - Produces: one hermetic advisor → approval → technician proof for diagnosis and one supplied-item known-work proof.
 
-- [ ] **Step 1: Expand the hermetic Golden Shop Day**
+- [x] **Step 1: Expand the hermetic Golden Shop Day**
 
 Add one run that creates a diagnostic authorization from a saved template, verifies its labor before assignment, approves the exact version, and verifies the tech scope before clock-on. Add a known-work case whose customer-supplied note survives the same path.
 
@@ -299,11 +299,11 @@ Add one run that creates a diagnostic authorization from a saved template, verif
 
 Exercise the intent control and approved-scope module at phone and desktop widths using the existing synthetic QA provision/cleanup lifecycle. Assert zero horizontal overflow and no serious/critical Axe findings.
 
-- [ ] **Step 3: Update durable project truth**
+- [x] **Step 3: Update durable project truth**
 
 Mark Row 58 complete at PR #193, append the next ShopOS row for intent-aware intake, add its implementation correction, and update `docs/flow.md` with the new two-branch intake/authorization flow.
 
-- [ ] **Step 4: Run final focused regression**
+- [x] **Step 4: Run final focused regression**
 
 ```bash
 pnpm vitest run tests/unit/shop-os-counter-ticket.test.ts tests/unit/shop-os-canned-jobs.test.ts tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-versions.test.ts tests/unit/shop-os-quote-decisions.test.ts tests/unit/shop-os-simple-work.test.ts tests/unit/shop-os-golden-shop-day.test.ts tests/unit/counter-intake.test.tsx tests/unit/shop-os-manual-quote-builder.test.tsx tests/unit/shop-os-simple-work-workspace.test.tsx --maxWorkers=1 --reporter=dot

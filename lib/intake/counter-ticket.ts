@@ -1,8 +1,8 @@
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { customers, jobLines, vehicles } from '@/lib/db/schema'
-import { canCreateTickets } from '@/lib/shop-os/capabilities'
+import { customers, jobLines, profiles, vehicles } from '@/lib/db/schema'
+import { canAssignWork } from '@/lib/shop-os/capabilities'
 import {
   cannedJobLineInsertValues,
   loadStrictCannedJobCopy,
@@ -100,7 +100,7 @@ function actorDenied(actor: TicketActor): Exclude<CreateTicketResult, { ok: true
   if (actor.membershipStatus !== 'active' || actor.deactivatedAt) {
     return { ok: false, error: 'inactive_profile' }
   }
-  if (!canCreateTickets(actor.role)) return { ok: false, error: 'forbidden' }
+  if (!canAssignWork(actor.role)) return { ok: false, error: 'forbidden' }
   return null
 }
 
@@ -145,10 +145,30 @@ export async function createCounterTicket(
   const parsed = counterBodySchema.safeParse(input.body)
   if (!parsed.success) return { ok: false, error: 'invalid_input' }
   const body = parsed.data
-  const shopId = input.actor.shopId as string
 
   try {
     return await db.transaction(async (tx) => {
+      const [profile] = await tx.select({
+        id: profiles.id,
+        shopId: profiles.shopId,
+        role: profiles.role,
+        skillTier: profiles.skillTier,
+        membershipStatus: profiles.membershipStatus,
+        deactivatedAt: profiles.deactivatedAt,
+      }).from(profiles).where(eq(profiles.id, input.actor.profileId)).limit(1).for('update')
+      if (!profile) return { ok: false, error: 'inactive_profile' as const }
+      const persistedActor: TicketActor = {
+        profileId: profile.id,
+        shopId: profile.shopId,
+        role: profile.role,
+        skillTier: profile.skillTier,
+        membershipStatus: profile.membershipStatus,
+        deactivatedAt: profile.deactivatedAt,
+      }
+      const persistedDenied = actorDenied(persistedActor)
+      if (persistedDenied) return persistedDenied
+      const shopId = persistedActor.shopId as string
+
       let work: {
         title: string
         kind: 'diagnostic' | 'repair' | 'maintenance'
@@ -235,7 +255,7 @@ export async function createCounterTicket(
       }
 
       let result = await createTicket(tx as AppDb, {
-        actor: input.actor,
+        actor: persistedActor,
         body: ticketBody(body, customerId, vehicleId, work),
       })
       if (!result.ok) throw new CounterTicketRollback(result)
