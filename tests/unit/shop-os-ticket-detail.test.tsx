@@ -120,6 +120,7 @@ function job(overrides: Partial<TicketJob> = {}): TicketJob {
     sessionId: null,
     workStatus: 'open',
     approvalState: 'pending_quote',
+    customerSuppliedPartsNote: null,
     workNotes: null,
     diagnosticStartState: 'idle',
     diagnosticStartErrorCode: null,

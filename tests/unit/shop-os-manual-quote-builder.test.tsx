@@ -179,6 +179,25 @@ function reviewedDiagnosis(recommendation: string): Builder['jobs'][number] {
   }
 }
 
+function diagnosticAuthorization(): Builder['jobs'][number] {
+  return {
+    id: '00000000-0000-4000-8000-000000000204',
+    title: 'Initial diagnosis',
+    kind: 'diagnostic',
+    workStatus: 'open',
+    story: { content: null, source: null, reviewStatus: null, revision: 0 },
+    storyMode: 'authorization_only',
+    decisionEligible: false,
+    approval: { state: 'pending_quote', quoteVersionId: null },
+    lines: [line({
+      id: '00000000-0000-4000-8000-000000000205', kind: 'labor',
+      description: 'Test and isolate concern', quantity: '1', priceCents: 18_750,
+      taxable: false, partNumber: null, brand: null, coreChargeCents: null,
+      fitment: null, laborHours: '1', laborRateCents: 18_750,
+    })],
+  }
+}
+
 function capturedOfferResponse(lineId = SOURCED_LINE_ID) {
   return {
     changed: true,
@@ -198,6 +217,16 @@ function capturedOfferResponse(lineId = SOURCED_LINE_ID) {
 }
 
 describe('ManualQuoteBuilder', () => {
+  it('prepares diagnostic authorization without demanding findings before testing occurs', () => {
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({ activeVersion: null, jobs: [diagnosticAuthorization()] })}
+    />)
+    expect(screen.getByRole('region', { name: /diagnostic authorization for initial diagnosis/i }))
+      .toHaveTextContent(/findings are recorded after/i)
+    expect(screen.queryByLabelText(/what we found/i)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+  })
   beforeEach(() => {
     vi.restoreAllMocks()
     sessionStorage.clear()

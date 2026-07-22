@@ -99,6 +99,7 @@ export type TicketDetail = {
     sessionId: string | null
     workStatus: string
     approvalState: string
+    customerSuppliedPartsNote: string | null
     workNotes: string | null
     diagnosticStartState: string
     diagnosticStartErrorCode: string | null
@@ -684,8 +685,14 @@ const ticketJobBodySchema = z
     requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     assignedTechId: z.uuid().nullable().optional(),
     confirmBelowTier: z.boolean().optional(),
+    customerSuppliedPartsNote: z.string().trim().min(1).max(500).nullable().optional(),
   })
   .strict()
+  .superRefine((job, context) => {
+    if (job.kind === 'diagnostic' && job.customerSuppliedPartsNote != null) {
+      context.addIssue({ code: 'custom', message: 'diagnostic jobs cannot carry supplied-part truth' })
+    }
+  })
 
 const assignmentBodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('claim'), requestKey: z.uuid() }).strict(),
@@ -724,6 +731,7 @@ type TransactionTicketJob = {
   kind: 'diagnostic' | 'repair' | 'maintenance'
   requiredSkillTier: 1 | 2 | 3
   assignedTechId: string | null
+  customerSuppliedPartsNote?: string | null
   sessionId?: string | null
 }
 
@@ -778,6 +786,7 @@ async function insertTicketInTransaction(db: AppDb, input: TransactionTicketInpu
         kind: job.kind,
         requiredSkillTier: job.requiredSkillTier,
         assignedTechId: job.assignedTechId,
+        customerSuppliedPartsNote: job.customerSuppliedPartsNote,
         sessionId: job.sessionId,
       })),
     )
@@ -881,6 +890,7 @@ async function loadTicketDetail(
       sessionId: ticketJobs.sessionId,
       workStatus: ticketJobs.workStatus,
       approvalState: ticketJobs.approvalState,
+      customerSuppliedPartsNote: ticketJobs.customerSuppliedPartsNote,
       workNotes: ticketJobs.workNotes,
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
@@ -961,6 +971,7 @@ async function loadTicketDetail(
       sessionId: job.sessionId,
       workStatus: job.workStatus,
       approvalState: job.approvalState,
+      customerSuppliedPartsNote: job.customerSuppliedPartsNote,
       workNotes: job.workNotes,
       diagnosticStartState: job.diagnosticStartState,
       diagnosticStartErrorCode: job.diagnosticStartErrorCode,
@@ -1136,6 +1147,7 @@ export async function createTicket(
         kind: job.kind,
         requiredSkillTier: job.requiredSkillTier,
         assignedTechId: assignments[index],
+        customerSuppliedPartsNote: job.customerSuppliedPartsNote,
       })),
     })
     if (!created) return { ok: false, error: 'not_found' as const }

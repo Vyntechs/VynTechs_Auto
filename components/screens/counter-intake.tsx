@@ -17,6 +17,7 @@ import { PredictiveIntakeSearch } from '@/components/vt/intake-search'
 import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
+import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
 import styles from './counter-intake.module.css'
 
 type CounterBody = {
@@ -36,7 +37,10 @@ type CounterBody = {
   concern: string
   whenStarted: string | null
   howOften: string | null
-  requestedService?: { kind: 'repair' | 'maintenance'; description: string }
+  work:
+    | { mode: 'diagnosis'; cannedJobId: string; expectedFingerprint: string; expectedTaxRateBps: number | null }
+    | { mode: 'canned'; cannedJobId: string; expectedFingerprint: string; expectedTaxRateBps: number | null; customerSuppliedPartsNote?: string | null }
+    | { mode: 'manual'; kind: 'repair' | 'maintenance'; description: string; customerSuppliedPartsNote?: string | null }
   assignedTechId: string | null
   confirmBelowTier?: boolean
 }
@@ -64,6 +68,8 @@ function ticketErrorMessage(error?: string): string {
       return 'Check the customer, vehicle, mileage, and requested-work fields.'
     case 'invalid_assignee':
       return 'That technician is no longer available for assignment. Choose Open or another technician.'
+    case 'conflict':
+      return 'The shop work menu changed. Refresh this page and choose the scope again.'
     case 'forbidden':
     case 'inactive_profile':
     case 'no_shop':
@@ -78,11 +84,17 @@ export function CounterIntake({
   recentCustomers = [],
   team = [],
   workloadFailed = false,
+  cannedJobs = [],
+  cannedTaxRateBps = null,
+  cannedCatalogAvailable = true,
 }: {
   userEmail?: string
   recentCustomers?: RecentCustomer[]
   team?: TeamMember[]
   workloadFailed?: boolean
+  cannedJobs?: SafeCannedJobTemplate[]
+  cannedTaxRateBps?: number | null
+  cannedCatalogAvailable?: boolean
 }) {
   const router = useRouter()
   const [assignedTechId, setAssignedTechId] = useState<string | null>(null)
@@ -101,10 +113,19 @@ export function CounterIntake({
   const [description, setDescription] = useState('')
   const [whenStarted, setWhenStarted] = useState('')
   const [howOften, setHowOften] = useState('')
-  const [requestedServiceKind, setRequestedServiceKind] = useState<'repair' | 'maintenance'>(
-    'repair',
+  const diagnosticJobs = cannedJobs.filter((job) => job.kind === 'diagnostic')
+  const knownWorkJobs = cannedJobs.filter((job) => job.kind !== 'diagnostic')
+  const [intent, setIntent] = useState<'diagnosis' | 'known'>(
+    diagnosticJobs.length > 0 ? 'diagnosis' : 'known',
   )
+  const [knownMode, setKnownMode] = useState<'canned' | 'manual'>(
+    knownWorkJobs.length > 0 ? 'canned' : 'manual',
+  )
+  const [selectedDiagnosticId, setSelectedDiagnosticId] = useState(diagnosticJobs[0]?.id ?? '')
+  const [selectedKnownId, setSelectedKnownId] = useState(knownWorkJobs[0]?.id ?? '')
+  const [requestedServiceKind, setRequestedServiceKind] = useState<'repair' | 'maintenance'>('repair')
   const [requestedServiceDescription, setRequestedServiceDescription] = useState('')
+  const [customerSuppliedPartsNote, setCustomerSuppliedPartsNote] = useState('')
   const [vinBusy, setVinBusy] = useState(false)
   const [vinStatus, setVinStatus] = useState<string | null>(null)
   const [vinStatusKind, setVinStatusKind] = useState<'success' | 'error' | null>(null)
@@ -115,9 +136,17 @@ export function CounterIntake({
   const isPickExisting = pickedVehicleId !== null
   // Mirror the counter-ticket requirements. VIN remains optional for walk-ins;
   // customer contact, year/make/model, and concern are required.
+  const selectedDiagnostic = diagnosticJobs.find((job) => job.id === selectedDiagnosticId) ?? null
+  const selectedKnown = knownWorkJobs.find((job) => job.id === selectedKnownId) ?? null
+  const workReady = intent === 'diagnosis'
+    ? cannedCatalogAvailable && selectedDiagnostic !== null
+    : knownMode === 'canned'
+      ? cannedCatalogAvailable && selectedKnown !== null
+      : requestedServiceDescription.trim() !== ''
   const canSubmit =
     !busy &&
     description.trim() !== '' &&
+    workReady &&
     (isPickExisting ||
       (name.trim() !== '' &&
         phone.trim() !== '' &&
@@ -195,14 +224,33 @@ export function CounterIntake({
     setBusy(true)
     setError(null)
     setTierWarning(null)
-    const requestedService = requestedServiceDescription.trim()
-      ? { kind: requestedServiceKind, description: requestedServiceDescription.trim() }
-      : undefined
+    const suppliedNote = optionalText(customerSuppliedPartsNote)
+    const work: CounterBody['work'] = intent === 'diagnosis' && selectedDiagnostic
+      ? {
+          mode: 'diagnosis',
+          cannedJobId: selectedDiagnostic.id,
+          expectedFingerprint: selectedDiagnostic.fingerprint,
+          expectedTaxRateBps: cannedTaxRateBps,
+        }
+      : knownMode === 'canned' && selectedKnown
+        ? {
+            mode: 'canned',
+            cannedJobId: selectedKnown.id,
+            expectedFingerprint: selectedKnown.fingerprint,
+            expectedTaxRateBps: cannedTaxRateBps,
+            ...(suppliedNote ? { customerSuppliedPartsNote: suppliedNote } : {}),
+          }
+        : {
+            mode: 'manual',
+            kind: requestedServiceKind,
+            description: requestedServiceDescription.trim(),
+            ...(suppliedNote ? { customerSuppliedPartsNote: suppliedNote } : {}),
+          }
     const common = {
       concern: description.trim(),
       whenStarted: optionalText(whenStarted),
       howOften: optionalText(howOften),
-      requestedService,
+      work,
       assignedTechId,
       ...(confirmBelowTier ? { confirmBelowTier: true } : {}),
     }
@@ -570,12 +618,86 @@ export function CounterIntake({
                 </FormRow>
               </FormGroup>
 
-              <FormGroup
-                name="Work requested"
-                hint="Optional — name the work now. Otherwise, the customer’s concern becomes one repair job."
-                last
-              >
+              <FormGroup name="What happens next?" hint="Choose the smallest honest scope before this reaches a technician.">
                 <FormRow>
+                  <button
+                    type="button"
+                    className={`${styles.intentChoice} ${intent === 'diagnosis' ? styles.intentChoiceActive : ''}`}
+                    aria-pressed={intent === 'diagnosis'}
+                    onClick={() => { setIntent('diagnosis'); setTierWarning(null) }}
+                  >
+                    <strong>Find the cause</strong>
+                    <span>Authorize the shop’s diagnostic labor before assignment.</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.intentChoice} ${intent === 'known' ? styles.intentChoiceActive : ''}`}
+                    aria-pressed={intent === 'known'}
+                    onClick={() => { setIntent('known'); setTierWarning(null) }}
+                  >
+                    <strong>Perform known work</strong>
+                    <span>The requested repair or maintenance is already known.</span>
+                  </button>
+                </FormRow>
+              </FormGroup>
+
+              {intent === 'diagnosis' ? (
+                <FormGroup
+                  name="Diagnostic authorization"
+                  hint={cannedCatalogAvailable
+                    ? 'This exact labor scope will be visible to the assigned technician.'
+                    : 'The shop’s diagnostic menu is temporarily unavailable.'}
+                  last
+                >
+                  {diagnosticJobs.length > 0 ? (
+                    <Field label="Diagnostic labor" htmlFor="ci-diagnostic-template">
+                      <select
+                        id="ci-diagnostic-template"
+                        className="vt-field__input"
+                        value={selectedDiagnosticId}
+                        onChange={(event) => setSelectedDiagnosticId(event.target.value)}
+                      >
+                        {diagnosticJobs.map((job) => (
+                          <option key={job.id} value={job.id}>{job.title}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : (
+                    <p role="alert" className={styles.scopeNotice}>
+                      No diagnostic authorization is configured. An owner can add one in Shop settings.
+                    </p>
+                  )}
+                </FormGroup>
+              ) : (
+                <FormGroup name="Known work" hint="Use a saved service or describe this one request." last>
+                  {knownWorkJobs.length > 0 && (
+                    <Field label="Scope source" htmlFor="ci-known-mode">
+                      <select
+                        id="ci-known-mode"
+                        className="vt-field__input"
+                        value={knownMode}
+                        onChange={(event) => setKnownMode(event.target.value as 'canned' | 'manual')}
+                      >
+                        <option value="canned">Saved work</option>
+                        <option value="manual">Custom request</option>
+                      </select>
+                    </Field>
+                  )}
+                  {knownMode === 'canned' && knownWorkJobs.length > 0 ? (
+                    <Field label="Saved work" htmlFor="ci-known-template">
+                      <select
+                        id="ci-known-template"
+                        className="vt-field__input"
+                        value={selectedKnownId}
+                        onChange={(event) => setSelectedKnownId(event.target.value)}
+                      >
+                        {knownWorkJobs.map((job) => (
+                          <option key={job.id} value={job.id}>{job.title}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : (
+                    <FormRow>
                   <Field label="Work type" htmlFor="ci-service-kind">
                     <select
                       id="ci-service-kind"
@@ -603,8 +725,23 @@ export function CounterIntake({
                       onChange={(e) => setRequestedServiceDescription(e.target.value)}
                     />
                   </Field>
-                </FormRow>
-              </FormGroup>
+                    </FormRow>
+                  )}
+                  <Field
+                    label="Customer-supplied item"
+                    htmlFor="ci-customer-supplied"
+                    hint="Optional — record what the customer is providing; this is not a shop-supplied part."
+                  >
+                    <Input
+                      id="ci-customer-supplied"
+                      value={customerSuppliedPartsNote}
+                      maxLength={500}
+                      placeholder="e.g. customer supplied unopened lift kit"
+                      onChange={(event) => setCustomerSuppliedPartsNote(event.target.value)}
+                    />
+                  </Field>
+                </FormGroup>
+              )}
 
               {tierWarning && (
                 <div

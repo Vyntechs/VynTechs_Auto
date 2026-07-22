@@ -170,12 +170,12 @@ describe('Shop OS quote draft mutations', () => {
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
-  it('freezes started simple-work scope while preserving in-progress diagnostic quoting', async () => {
+  it('freezes started known-work and sessionless diagnostic-authorization scope', async () => {
     await db.update(ticketJobs).set({ workStatus: 'in_progress' }).where(eq(ticketJobs.id, jobId))
     await expect(create()).resolves.toEqual({ ok: false, error: 'not_found' })
 
     await db.update(ticketJobs).set({ kind: 'diagnostic' }).where(eq(ticketJobs.id, jobId))
-    await expect(create(uuid(108))).resolves.toMatchObject({ ok: true, changed: true })
+    await expect(create(uuid(108))).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('accepts strict discriminated manual-only line inputs and rejects lifecycle or projection smuggling', async () => {

@@ -29,7 +29,7 @@ export default async function QuickTicketPage() {
   try {
     const library = await listCannedJobs(db, { actor: cannedJobActorFromProfile(ctx.profile) })
     if (library.ok) {
-      cannedJobs = library.cannedJobs.map(publicCannedJob)
+      cannedJobs = library.cannedJobs.filter((job) => job.kind !== 'diagnostic').map(publicCannedJob)
       cannedTaxRateBps = library.taxRateBps
       cannedCatalogAvailable = true
     }

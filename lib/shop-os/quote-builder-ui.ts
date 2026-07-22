@@ -102,6 +102,7 @@ const quoteBuilderSchema = z.strictObject({
     id: uuidSchema,
     title: z.string().min(1).max(500),
     kind: z.enum(['diagnostic', 'repair', 'maintenance']),
+    customerSuppliedPartsNote: z.string().min(1).max(500).nullable().optional(),
     workStatus: z.enum(['open', 'in_progress', 'blocked']),
     story: z.strictObject({
       content: customerStorySchema.nullable(),
@@ -120,7 +121,7 @@ const quoteBuilderSchema = z.strictObject({
       }
     }),
     storyMode: z.enum([
-      'ordinary_locked_tree', 'topology_manual', 'manual_findings',
+      'authorization_only', 'ordinary_locked_tree', 'topology_manual', 'manual_findings',
       'published_wizard_unsupported', 'unavailable',
     ]).nullable(),
     decisionEligible: z.boolean(),

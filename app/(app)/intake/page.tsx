@@ -5,6 +5,7 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
 import { getShopTeam } from '@/lib/intake/team'
 import { CounterIntake } from '@/components/screens/counter-intake'
+import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
 
 export default async function IntakePage() {
   const supabase = await getServerSupabase()
@@ -24,6 +25,19 @@ export default async function IntakePage() {
       ? getShopTeam({ db, shopId: ctx.profile.shopId, currentUserId: ctx.profile.id })
       : Promise.resolve({ members: [], workloadFailed: false }),
   ])
+  let cannedJobs: ReturnType<typeof publicCannedJob>[] = []
+  let cannedTaxRateBps: number | null = null
+  let cannedCatalogAvailable = false
+  try {
+    const library = await listCannedJobs(db, { actor: cannedJobActorFromProfile(ctx.profile) })
+    if (library.ok) {
+      cannedJobs = library.cannedJobs.map(publicCannedJob)
+      cannedTaxRateBps = library.taxRateBps
+      cannedCatalogAvailable = true
+    }
+  } catch {
+    // Intake stays usable for explicit known work; diagnosis fails visibly closed.
+  }
 
   return (
     <CounterIntake
@@ -31,6 +45,9 @@ export default async function IntakePage() {
       recentCustomers={recentCustomers}
       team={team.members}
       workloadFailed={team.workloadFailed}
+      cannedJobs={cannedJobs}
+      cannedTaxRateBps={cannedTaxRateBps}
+      cannedCatalogAvailable={cannedCatalogAvailable}
     />
   )
 }

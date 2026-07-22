@@ -112,7 +112,9 @@ export default async function QuotePage({
       actorId={ctx.profile.id}
       ticket={quoteTicket}
       builder={builderResult.builder}
-      cannedJobs={cannedCatalogAvailable && cannedResult?.ok ? cannedResult.cannedJobs : []}
+      cannedJobs={cannedCatalogAvailable && cannedResult?.ok
+        ? cannedResult.cannedJobs.filter((job) => job.kind !== 'diagnostic')
+        : []}
       cannedCatalogAvailable={cannedCatalogAvailable}
       vendorAccounts={vendorAccounts}
       vendorCatalogAvailable={vendorCatalogAvailable}

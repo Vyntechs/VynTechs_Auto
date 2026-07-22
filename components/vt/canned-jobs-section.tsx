@@ -108,7 +108,7 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
     <Module num="03" label="Canned jobs" status={<span className={styles.count}>{jobs.length} active</span>}>
       <div className={styles.library} inert={retiring || discardAction ? true : undefined}>
         <header className={styles.intro}>
-          <p>Keep priced repair and maintenance work ready for fast quotes.</p>
+          <p>Keep diagnostic authorization, repair, and maintenance work ready for fast quotes.</p>
           <div className={styles.actions}>
             <button ref={newButton} className="btn btn-primary" disabled={busy} onClick={() => requestSwitch(() => setEditor({ mode: 'create', draft: newCannedJobDraft() }))}>New canned job</button>
             <button className="btn" disabled={busy} onClick={refresh}>Refresh</button>
@@ -150,7 +150,7 @@ function EditorForm({ editor, busy, setEditor, onSave, onClose, titleRef }: { ed
     <header><div><span className={styles.kind}>{editor.mode === 'create' ? 'New library entry' : 'Replace saved entry'}</span><h3>{editor.mode === 'create' ? 'Build a canned job' : `Edit ${editor.original.title}`}</h3></div><button className="btn" disabled={busy} onClick={onClose}>Close</button></header>
     <div className={styles.grid}>
       <label>Title<input ref={titleRef} value={draft.title} maxLength={200} disabled={busy} onChange={(e) => update({ title: e.target.value })} /></label>
-      <label>Work type<select value={draft.kind} disabled={busy} onChange={(e) => update({ kind: e.target.value as CannedJobDraft['kind'] })}><option value="repair">Repair</option><option value="maintenance">Maintenance</option></select></label>
+      <label>Work type<select value={draft.kind} disabled={busy} onChange={(e) => update({ kind: e.target.value as CannedJobDraft['kind'] })}><option value="diagnostic">Diagnostic</option><option value="repair">Repair</option><option value="maintenance">Maintenance</option></select></label>
       <label>Required skill tier<select value={draft.tier} disabled={busy} onChange={(e) => update({ tier: e.target.value })}><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></label>
       <label>Library order<input inputMode="numeric" value={draft.sort} disabled={busy} onChange={(e) => update({ sort: e.target.value })} /></label>
     </div>

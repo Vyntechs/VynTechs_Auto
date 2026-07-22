@@ -55,6 +55,15 @@ const cannedJob = {
   fingerprint: 'a'.repeat(64),
   summary: { subtotalCents: 6_750, taxableSubtotalCents: 1_750, taxCents: 144, totalCents: 6_894 },
 }
+const diagnosticCannedJob = {
+  ...cannedJob,
+  id: '55555555-5555-4555-8555-555555555555',
+  title: 'Initial diagnosis',
+  kind: 'diagnostic' as const,
+  fingerprint: 'd'.repeat(64),
+  lines: [{ kind: 'labor' as const, description: 'Test and isolate', sort: 10, hours: '1', priceCents: 18_750, taxable: false, laborRateCents: 18_750 }],
+  summary: { subtotalCents: 18_750, taxableSubtotalCents: 0, taxCents: 0, totalCents: 18_750 },
+}
 const recentCustomers = [
   {
     id: 'customer-1',
@@ -523,7 +532,7 @@ describe('/tickets/new page', () => {
       profile: { id: 'profile-1', shopId: 'shop-1', role: 'advisor' },
     })
     mockRecents.mockResolvedValue(recentCustomers)
-    mockCannedList.mockResolvedValue({ ok: true, cannedJobs: [cannedJob], taxRateBps: 825 })
+    mockCannedList.mockResolvedValue({ ok: true, cannedJobs: [diagnosticCannedJob, cannedJob], taxRateBps: 825 })
 
     const result = await QuickTicketPage()
 

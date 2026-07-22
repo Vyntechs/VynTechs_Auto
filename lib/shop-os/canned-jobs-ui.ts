@@ -25,7 +25,7 @@ const line = z.discriminatedUnion('kind', [
 export const cannedJobProjectionSchema = z.strictObject({
   id: uuid,
   title: canonicalText(200),
-  kind: z.enum(['repair', 'maintenance']),
+  kind: z.enum(['diagnostic', 'repair', 'maintenance']),
   defaultRequiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   sort,
   lines: z.array(line).min(1).max(25),
@@ -50,7 +50,7 @@ export type CannedJobDraftLine = {
 }
 export type CannedJobDraft = {
   title: string
-  kind: 'repair' | 'maintenance'
+  kind: 'diagnostic' | 'repair' | 'maintenance'
   tier: string
   sort: string
   lines: CannedJobDraftLine[]
@@ -62,7 +62,7 @@ const mutationEnvelope = z.strictObject({ changed: z.boolean(), cannedJob })
 const appliedEnvelope = z.strictObject({
   changed: z.boolean(),
   job: z.strictObject({
-    id: uuid, title: canonicalText(200), kind: z.enum(['repair', 'maintenance']),
+    id: uuid, title: canonicalText(200), kind: z.enum(['diagnostic', 'repair', 'maintenance']),
     requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     lineCount: z.number().int().min(1).max(25),
   }),
@@ -111,6 +111,9 @@ export const parseCannedJobList = parseCannedJobListResponse
 export const parseCannedJobMutation = parseManagementCannedJobMutationResponse
 
 function validJobTruth(job: CannedJobProjection, taxRateBps?: number | null) {
+  if (job.kind === 'diagnostic'
+    && (!job.lines.some((item) => item.kind === 'labor')
+      || job.lines.some((item) => item.kind === 'part'))) return false
   let subtotal = 0n
   let taxable = 0n
   let previousSort = -1
@@ -171,6 +174,11 @@ export function normalizeCannedJobDraft(draft: CannedJobDraft) {
     if (item.kind === 'labor') return { ...base, kind: 'labor' as const, hours: canonicalDecimal(item.hours, 2, 99_999_999n), ...(item.laborRate.trim() ? { laborRateCents: parseMoneyToCents(item.laborRate) } : {}) }
     return { ...base, kind: 'fee' as const }
   })
+  if (draft.kind === 'diagnostic'
+    && (!lines.some((item) => item.kind === 'labor')
+      || lines.some((item) => item.kind === 'part'))) {
+    throw new RangeError('Diagnostic templates require labor and cannot include parts.')
+  }
   return { title: bounded(draft.title, 200), kind: draft.kind, defaultRequiredSkillTier: tier as 1 | 2 | 3, sort: templateSort, lines }
 }
 

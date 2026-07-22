@@ -49,6 +49,7 @@ describe('Shop OS approved simple work', () => {
       },
       jobs: [{
         id: jobId, title: 'Install customer-supplied lift kit', kind,
+        customerSuppliedPartsNote: kind === 'diagnostic' ? undefined : 'Customer supplied unopened lift kit.',
         customerStory: null, storyMeta: null,
         lines: [{
           id: uuid(40), kind: 'labor', description: 'Install lift kit', quantity: '1',
@@ -112,6 +113,21 @@ describe('Shop OS approved simple work', () => {
     expect(query.sql).toContain("date_trunc('milliseconds'")
     expect(query.sql).toContain("interval '1 millisecond'")
     expect(query.params).toEqual([])
+  })
+
+  it('returns only the exact approved technician scope without prices or vendor data', async () => {
+    const result = await getSimpleWorkWorkspace(db, { actor, ticketId, jobId })
+    expect(result).toMatchObject({
+      ok: true,
+      workspace: {
+        approvedScope: {
+          authorizationPurpose: null,
+          customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
+          lines: [{ kind: 'labor', description: 'Install lift kit', hours: '4' }],
+        },
+      },
+    })
+    expect(JSON.stringify(result)).not.toMatch(/price|cost|vendor/i)
   })
 
   it('starts exact approved assigned simple work and replays without another write', async () => {

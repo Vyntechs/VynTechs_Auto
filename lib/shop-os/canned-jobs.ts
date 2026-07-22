@@ -61,7 +61,7 @@ const feeLineSchema = z.strictObject({
 const cannedLineSchema = z.discriminatedUnion('kind', [partLineSchema, laborLineSchema, feeLineSchema])
 const cannedJobBodySchema = z.strictObject({
   title: boundedText(200),
-  kind: z.enum(['repair', 'maintenance']),
+  kind: z.enum(['diagnostic', 'repair', 'maintenance']),
   defaultRequiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   sort: sortSchema,
   lines: z.array(cannedLineSchema).min(1).max(25),
@@ -72,7 +72,7 @@ export type SafeCannedJobLine = z.output<typeof cannedLineSchema>
 export type SafeCannedJob = {
   id: string
   title: string
-  kind: 'repair' | 'maintenance'
+  kind: 'diagnostic' | 'repair' | 'maintenance'
   defaultRequiredSkillTier: 1 | 2 | 3
   sort: number
   lines: SafeCannedJobLine[]
@@ -95,7 +95,7 @@ type MutationResult = { ok: true; changed: boolean; cannedJob: SafeCannedJob } |
 export type SafeAppliedCannedJob = {
   id: string
   title: string
-  kind: 'repair' | 'maintenance'
+  kind: 'diagnostic' | 'repair' | 'maintenance'
   requiredSkillTier: 1 | 2 | 3
   lineCount: number
 }
@@ -138,6 +138,9 @@ function parseBody(body: unknown): z.output<typeof cannedJobBodySchema> | null {
   if (byteLength > MAX_TEMPLATE_BYTES) return null
   const parsed = cannedJobBodySchema.safeParse(body)
   if (!parsed.success) return null
+  if (parsed.data.kind === 'diagnostic'
+    && (!parsed.data.lines.some((line) => line.kind === 'labor')
+      || parsed.data.lines.some((line) => line.kind === 'part'))) return null
   const subtotal = parsed.data.lines.reduce((sum, line) => sum + BigInt(line.priceCents), 0n)
   const taxableSubtotal = parsed.data.lines.reduce(
     (sum, line) => sum + (line.taxable ? BigInt(line.priceCents) : 0n),
@@ -363,7 +366,7 @@ function projectAppliedJob(
 ): SafeAppliedCannedJob | null {
   if (
     !uuidSchema.safeParse(row.id).success
-    || (row.kind !== 'repair' && row.kind !== 'maintenance')
+    || (row.kind !== 'diagnostic' && row.kind !== 'repair' && row.kind !== 'maintenance')
     || (row.requiredSkillTier !== 1 && row.requiredSkillTier !== 2 && row.requiredSkillTier !== 3)
     || typeof row.title !== 'string'
     || row.title.length < 1

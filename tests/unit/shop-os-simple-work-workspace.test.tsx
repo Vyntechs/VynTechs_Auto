@@ -25,6 +25,10 @@ const base: SimpleWorkWorkspaceView = {
   id: JOB, title: 'Install lift kit', kind: 'repair', workStatus: 'open', workNotes: null,
   startedAt: null, completedAt: null, clockedOnSince: null, activeSeconds: 0,
   updatedAt: '2026-07-11T12:00:00.000Z', authorization: 'approved',
+  approvedScope: {
+    authorizationPurpose: null, customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
+    lines: [{ kind: 'labor', description: 'Install lift kit', hours: '2' }],
+  },
 }
 
 describe('simple work workspace', () => {
@@ -32,6 +36,17 @@ describe('simple work workspace', () => {
     vi.clearAllMocks()
     sessionStorage.clear()
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => REQUEST) })
+  })
+
+  it('shows the immutable approved scope before work actions without exposing prices', () => {
+    const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} />)
+    const scope = screen.getByRole('region', { name: /exactly what is approved/i })
+    expect(scope).toHaveTextContent('Install lift kit')
+    expect(scope).toHaveTextContent('2 labor hours')
+    expect(scope).toHaveTextContent('Customer supplied unopened lift kit.')
+    expect(scope.compareDocumentPosition(screen.getByRole('heading', { name: /approved and ready/i })))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(container.textContent).not.toMatch(/\$|price|cost|vendor/i)
   })
 
   it('restores the current technician draft after a reload without changing the repair-order route', async () => {

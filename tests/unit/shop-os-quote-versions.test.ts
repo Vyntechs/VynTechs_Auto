@@ -184,6 +184,107 @@ describe('Shop OS immutable quote version creation', () => {
     expect(jobs.find((job) => job.id === canceledJobId)?.approvalState).toBe('pending_quote')
   })
 
+  it('prepares sessionless diagnostic labor as authorization without inventing findings', async () => {
+    const diagnosticJobId = uuid(33)
+    await db.insert(ticketJobs).values({
+      id: diagnosticJobId, shopId, ticketId, title: 'Initial diagnosis', kind: 'diagnostic',
+      requiredSkillTier: 3, sessionId: null,
+    })
+    await db.insert(jobLines).values({
+      id: uuid(45), shopId, jobId: diagnosticJobId, kind: 'labor',
+      description: 'Test and isolate concern', quantity: 1, priceCents: 18_750,
+      taxable: false, laborHours: 1, laborRateCents: 18_750,
+    })
+
+    const builder = await getQuoteBuilder(db, { actor, ticketId })
+    expect(builder).toMatchObject({
+      ok: true,
+      builder: { jobs: expect.arrayContaining([expect.objectContaining({
+        id: diagnosticJobId,
+        storyMode: 'authorization_only',
+        story: { content: null, source: null, reviewStatus: null, revision: 0 },
+      })]) },
+    })
+
+    const result = await create()
+    expect(result).toMatchObject({ ok: true, changed: true })
+    if (!result.ok) return
+    const [version] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, result.version.id))
+    const diagnostic = (version.snapshot as { jobs: Array<Record<string, unknown>> }).jobs
+      .find((job) => job.id === diagnosticJobId)
+    expect(diagnostic).toMatchObject({
+      kind: 'diagnostic',
+      authorizationPurpose: 'diagnosis',
+      customerStory: null,
+      storyMeta: null,
+      attachments: [],
+    })
+  })
+
+  it('preserves customer-supplied-part truth in the immutable approved scope', async () => {
+    await db.update(ticketJobs).set({
+      customerSuppliedPartsNote: 'Customer supplied unopened pad kit.',
+    }).where(eq(ticketJobs.id, jobId))
+    const result = await create()
+    expect(result).toMatchObject({ ok: true })
+    if (!result.ok) return
+    const [version] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, result.version.id))
+    expect((version.snapshot as { jobs: Array<Record<string, unknown>> }).jobs[0]).toMatchObject({
+      customerSuppliedPartsNote: 'Customer supplied unopened pad kit.',
+    })
+  })
+
+  it('rejects a diagnostic authorization that contains a part or no labor', async () => {
+    const diagnosticJobId = uuid(33)
+    await db.insert(ticketJobs).values({
+      id: diagnosticJobId, shopId, ticketId, title: 'Invalid diagnosis', kind: 'diagnostic',
+      requiredSkillTier: 3, sessionId: null,
+    })
+    await db.insert(jobLines).values({
+      id: uuid(45), shopId, jobId: diagnosticJobId, kind: 'part', description: 'Guessed sensor',
+      quantity: 1, priceCents: 10_000, taxable: true,
+    })
+    await expect(create()).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect(await db.select().from(quoteVersions)).toEqual([])
+  })
+
+  it('pins an approved sessionless diagnostic authorization once technician work starts', async () => {
+    const diagnosticJobId = uuid(33)
+    await db.insert(ticketJobs).values({
+      id: diagnosticJobId, shopId, ticketId, title: 'Initial diagnosis', kind: 'diagnostic',
+      requiredSkillTier: 3, sessionId: null,
+    })
+    await db.insert(jobLines).values({
+      id: uuid(45), shopId, jobId: diagnosticJobId, kind: 'labor', description: 'Test and isolate',
+      quantity: 1, priceCents: 18_750, taxable: false, laborHours: 1, laborRateCents: 18_750,
+    })
+    const first = await create()
+    expect(first).toMatchObject({ ok: true })
+    if (!first.ok) return
+    await db.update(ticketJobs).set({
+      workStatus: 'in_progress', approvalState: 'approved', approvedQuoteVersionId: first.version.id,
+    }).where(eq(ticketJobs.id, diagnosticJobId))
+    await db.insert(quoteEvents).values({
+      id: uuid(62), shopId, ticketId, jobId: diagnosticJobId, quoteVersionId: first.version.id,
+      kind: 'approved', actorProfileId: uuid(1), approvedVia: 'in_person', requestKey: uuid(63),
+    })
+    await db.insert(jobLines).values({
+      id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee',
+      description: 'Alignment check', priceCents: 5_000, taxable: false,
+    })
+
+    const second = await create()
+    expect(second).toMatchObject({ ok: true, changed: true, version: { versionNumber: 2 } })
+    if (!second.ok) return
+    const [diagnostic] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, diagnosticJobId))
+    expect(diagnostic).toMatchObject({
+      workStatus: 'in_progress', approvalState: 'approved', approvedQuoteVersionId: first.version.id,
+    })
+    const [version] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, second.version.id))
+    expect((version.snapshot as { jobs: Array<{ id: string }> }).jobs.map((job) => job.id))
+      .not.toContain(diagnosticJobId)
+  })
+
   it.each(['in_progress', 'done'] as const)(
     'preserves %s simple-work approval and excludes its totals from a later version',
     async (workStatus) => {

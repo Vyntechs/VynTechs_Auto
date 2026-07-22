@@ -172,6 +172,40 @@ describe('Shop OS canned jobs domain', () => {
     })).resolves.toEqual({ ok: false, error: 'invalid_input' })
   })
 
+  it('accepts labor-backed diagnostic authorization templates and rejects invented diagnostic scope', async () => {
+    const diagnostic = await createCannedJob(db, {
+      actor,
+      clientKey: uuid(149),
+      body: body({
+        title: 'Initial diagnostic testing',
+        kind: 'diagnostic',
+        defaultRequiredSkillTier: 2,
+        lines: [
+          { kind: 'labor', description: 'Diagnostic testing', sort: 0, hours: '1', priceCents: 15_000, taxable: false },
+          { kind: 'fee', description: 'Shop supplies', sort: 1, priceCents: 500, taxable: true },
+        ],
+      }),
+    })
+    expect(diagnostic).toMatchObject({
+      ok: true,
+      cannedJob: { kind: 'diagnostic', title: 'Initial diagnostic testing' },
+    })
+
+    for (const [index, invalidLines] of [
+      [{ kind: 'fee', description: 'Diagnostic fee only', sort: 0, priceCents: 15_000, taxable: false }],
+      [
+        { kind: 'labor', description: 'Testing', sort: 0, hours: '1', priceCents: 15_000, taxable: false },
+        { kind: 'part', description: 'Guessed part', sort: 1, quantity: '1', priceCents: 1, taxable: true },
+      ],
+    ].entries()) {
+      await expect(createCannedJob(db, {
+        actor,
+        clientKey: uuid(160 + index),
+        body: body({ title: 'Unsafe diagnosis', kind: 'diagnostic', lines: invalidLines }),
+      })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    }
+  })
+
   it('rejects aggregate money that cannot produce a safe exact total before writing', async () => {
     const priceCents = Math.ceil(Number.MAX_SAFE_INTEGER / 2)
     await expect(createCannedJob(db, {

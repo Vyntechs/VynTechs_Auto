@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
-import { customers, profiles, shops, ticketJobs, tickets, vehicles } from '@/lib/db/schema'
+import { customers, jobLines, profiles, shops, ticketJobs, tickets, vehicles } from '@/lib/db/schema'
+import { cannedJobActorFromProfile, createCannedJob } from '@/lib/shop-os/canned-jobs'
 import type { TicketActor } from '@/lib/tickets'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -19,6 +20,8 @@ describe('createCounterTicket', () => {
   let existingCustomer: typeof customers.$inferSelect
   let existingVehicle: typeof vehicles.$inferSelect
   let crossShopVehicle: typeof vehicles.$inferSelect
+  let diagnosticTemplate: { id: string; fingerprint: string }
+  let maintenanceTemplate: { id: string; fingerprint: string }
 
   beforeEach(async () => {
     const created = await createTestDb()
@@ -64,6 +67,25 @@ describe('createCounterTicket', () => {
       membershipStatus: owner.membershipStatus,
       deactivatedAt: owner.deactivatedAt,
     }
+    const diagnostic = await createCannedJob(db, {
+      actor: cannedJobActorFromProfile(owner),
+      clientKey: crypto.randomUUID(),
+      body: {
+        title: 'Initial diagnosis', kind: 'diagnostic', defaultRequiredSkillTier: 3, sort: 10,
+        lines: [{ kind: 'labor', description: 'Test and isolate concern', sort: 10, hours: '1', priceCents: 18_750, taxable: false, laborRateCents: 18_750 }],
+      },
+    })
+    const maintenance = await createCannedJob(db, {
+      actor: cannedJobActorFromProfile(owner),
+      clientKey: crypto.randomUUID(),
+      body: {
+        title: 'Oil service', kind: 'maintenance', defaultRequiredSkillTier: 1, sort: 20,
+        lines: [{ kind: 'labor', description: 'Change engine oil', sort: 10, hours: '0.5', priceCents: 5_000, taxable: false, laborRateCents: 10_000 }],
+      },
+    })
+    if (!diagnostic.ok || !maintenance.ok) throw new Error('fixture setup failed')
+    diagnosticTemplate = diagnostic.cannedJob
+    maintenanceTemplate = maintenance.cannedJob
     tierOneTechId = tierOneTech.id
     tierTwoTechId = tierTwoTech.id
 
@@ -116,6 +138,11 @@ describe('createCounterTicket', () => {
       whenStarted: '  two weeks ago  ',
       howOften: '  daily  ',
       assignedTechId: null,
+      work: {
+        mode: 'manual',
+        kind: 'repair',
+        description: 'Inspect loss of power concern',
+      },
       ...overrides,
     }
   }
@@ -126,11 +153,16 @@ describe('createCounterTicket', () => {
       existingVehicleId: existingVehicle.id,
       concern: 'Brake vibration at highway speed',
       assignedTechId: null,
+      work: {
+        mode: 'manual',
+        kind: 'repair',
+        description: 'Inspect brake vibration concern',
+      },
       ...overrides,
     }
   }
 
-  it('creates one ordinary repair job from a new customer concern while diagnostics are dark', async () => {
+  it('creates one explicit known-work job from a new customer concern', async () => {
     const result = await createCounterTicket(db, { actor, body: newBody() })
 
     expect(result).toMatchObject({
@@ -157,7 +189,7 @@ describe('createCounterTicket', () => {
         },
         jobs: [
           {
-            title: 'Customer request: Loss of power on hills',
+            title: 'Inspect loss of power concern',
             kind: 'repair',
             requiredSkillTier: 2,
             assignedTechId: null,
@@ -169,11 +201,35 @@ describe('createCounterTicket', () => {
     })
   })
 
-  it('uses requested maintenance as the one work item instead of creating duplicate work', async () => {
+  it('reauthorizes the persisted advisor role before any counter-intake write', async () => {
+    await db.update(profiles).set({ role: 'tech' }).where(eq(profiles.id, actor.profileId))
+
+    await expect(createCounterTicket(db, { actor, body: newBody() })).resolves.toEqual({
+      ok: false,
+      error: 'forbidden',
+    })
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
+  it('reauthorizes active membership before any counter-intake write', async () => {
+    await db.update(profiles).set({
+      deactivatedAt: new Date('2026-07-21T12:00:00.000Z'),
+    }).where(eq(profiles.id, actor.profileId))
+
+    await expect(createCounterTicket(db, { actor, body: newBody() })).resolves.toEqual({
+      ok: false,
+      error: 'inactive_profile',
+    })
+    expect(await db.select().from(tickets)).toEqual([])
+    expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
+  it('uses manual maintenance as the one work item instead of creating duplicate work', async () => {
     const result = await createCounterTicket(db, {
       actor,
       body: newBody({
-        requestedService: { kind: 'maintenance', description: 'Rotate tires' },
+        work: { mode: 'manual', kind: 'maintenance', description: 'Rotate tires' },
       }),
     })
 
@@ -195,7 +251,7 @@ describe('createCounterTicket', () => {
       body: newBody({
         assignedTechId: tierTwoTechId,
         confirmBelowTier: true,
-        requestedService: { kind: 'repair', description: 'Replace boost hose' },
+        work: { mode: 'manual', kind: 'repair', description: 'Replace boost hose' },
       }),
     })
 
@@ -207,6 +263,68 @@ describe('createCounterTicket', () => {
         requiredSkillTier: 2,
         assignedTechId: tierTwoTechId,
       }),
+    ])
+  })
+
+  it('atomically creates a diagnostic job with the shop diagnostic labor line before technician assignment', async () => {
+    const result = await createCounterTicket(db, {
+      actor,
+      body: existingBody({
+        assignedTechId: tierTwoTechId,
+        confirmBelowTier: true,
+        work: {
+          mode: 'diagnosis',
+          cannedJobId: diagnosticTemplate.id,
+          expectedFingerprint: diagnosticTemplate.fingerprint,
+          expectedTaxRateBps: null,
+        },
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.ticket.jobs).toEqual([
+      expect.objectContaining({
+        title: 'Initial diagnosis',
+        kind: 'diagnostic',
+        requiredSkillTier: 3,
+        assignedTechId: tierTwoTechId,
+      }),
+    ])
+    expect(await db.select().from(jobLines)).toEqual([
+      expect.objectContaining({
+        jobId: result.ticket.jobs[0].id,
+        kind: 'labor',
+        description: 'Test and isolate concern',
+        priceCents: 18_750,
+        laborHours: 1,
+      }),
+    ])
+  })
+
+  it('copies a selected known-work template and preserves customer-supplied-part truth on the job', async () => {
+    const result = await createCounterTicket(db, {
+      actor,
+      body: existingBody({
+        work: {
+          mode: 'canned',
+          cannedJobId: maintenanceTemplate.id,
+          expectedFingerprint: maintenanceTemplate.fingerprint,
+          expectedTaxRateBps: null,
+          customerSuppliedPartsNote: 'Customer supplied sealed oil filter.',
+        },
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.ticket.jobs[0]).toMatchObject({
+      title: 'Oil service',
+      kind: 'maintenance',
+      customerSuppliedPartsNote: 'Customer supplied sealed oil filter.',
+    })
+    expect(await db.select().from(jobLines)).toEqual([
+      expect.objectContaining({ jobId: result.ticket.jobs[0].id, description: 'Change engine oil' }),
     ])
   })
 
@@ -286,7 +404,8 @@ describe('createCounterTicket', () => {
       newBody({ concern: ' ' }),
       newBody({ assignedTechId: undefined }),
       newBody({ diagnosticAuthorization: { amountDollars: '120', note: 'legacy field' } }),
-      newBody({ requestedService: { kind: 'diagnostic', description: 'extra' } }),
+      newBody({ work: { mode: 'manual', kind: 'diagnostic', description: 'extra' } }),
+      newBody({ work: { mode: 'manual', kind: 'repair', description: 'Install lift kit', customerSuppliedPartsNote: ' ' } }),
       existingBody({ mileage: -1 }),
       { ...newBody(), status: 'closed' },
     ]
@@ -320,6 +439,14 @@ describe('createCounterTicket', () => {
     expect(await db.select().from(vehicles)).toEqual(beforeVehicles)
     expect(await db.select().from(tickets)).toEqual([])
     expect(await db.select().from(ticketJobs)).toEqual([])
+  })
+
+  it('fails closed when diagnosis points at a non-diagnostic template', async () => {
+    await expect(createCounterTicket(db, {
+      actor,
+      body: newBody({ work: { mode: 'diagnosis', cannedJobId: maintenanceTemplate.id, expectedFingerprint: maintenanceTemplate.fingerprint, expectedTaxRateBps: null } }),
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(tickets)).toEqual([])
   })
 
   it('rolls back an existing mileage change when nested ticket creation fails', async () => {

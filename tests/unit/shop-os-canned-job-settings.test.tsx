@@ -75,6 +75,12 @@ describe('CannedJobsSection', () => {
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+  it('offers diagnostic authorization in the existing work-type control', async () => {
+    render(<CannedJobsSection initialJobs={[]} initialTaxRateBps={800} />)
+    await userEvent.click(screen.getByRole('button', { name: 'New canned job' }))
+    expect(screen.getByRole('option', { name: 'Diagnostic' })).toBeInTheDocument()
+  })
+
   it('keeps one create key across a network retry and rotates when normalized input changes', async () => {
     const fetchMock = vi.mocked(fetch)
       .mockRejectedValueOnce(new Error('offline'))

@@ -13,6 +13,7 @@ import {
 import { isShopRole } from '@/lib/shop-os/capabilities'
 import {
   isLockUnavailable,
+  readApprovedJobScope,
   quoteSnapshotContainsExactJob,
 } from '@/lib/shop-os/quotes'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
@@ -425,6 +426,12 @@ export async function getSimpleWorkWorkspace(
     const authorization: 'approved' | 'declined' | 'awaiting_approval' = hasPinnedApproval(context, job.workStatus === 'open')
       ? 'approved'
       : job.approvalState === 'declined' ? 'declined' : 'awaiting_approval'
+    let approvedScope = null
+    if (authorization === 'approved') {
+      const version = versions.find((candidate) => candidate.id === job.approvedQuoteVersionId)
+      approvedScope = version ? readApprovedJobScope(version.snapshot, job.id) : null
+      if (!approvedScope) return failure('conflict')
+    }
     return {
       ok: true as const,
       workspace: {
@@ -439,6 +446,7 @@ export async function getSimpleWorkWorkspace(
         activeSeconds: job.activeSeconds,
         updatedAt: job.updatedAt.toISOString(),
         authorization,
+        ...(approvedScope ? { approvedScope } : {}),
       },
     }
   }, { isolationLevel: 'repeatable read', accessMode: 'read only' })

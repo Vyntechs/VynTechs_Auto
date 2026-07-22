@@ -183,6 +183,9 @@ export async function createQuickTicket(
             ...(copy.retryable === undefined ? {} : { retryable: copy.retryable }),
           }
         }
+        if (copy.cannedJob.kind === 'diagnostic') {
+          return { ok: false, error: 'not_found' as const }
+        }
         title = copy.cannedJob.title
         kind = copy.cannedJob.kind
         requiredSkillTier = copy.cannedJob.defaultRequiredSkillTier
