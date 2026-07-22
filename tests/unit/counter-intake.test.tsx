@@ -11,6 +11,28 @@ vi.mock('next/navigation', () => ({
 
 import { CounterIntake } from '@/components/screens/counter-intake'
 
+const diagnosticTemplate = {
+  id: '11111111-1111-4111-8111-111111111111', title: 'Initial diagnosis', kind: 'diagnostic' as const,
+  defaultRequiredSkillTier: 3 as const, sort: 10, fingerprint: 'a'.repeat(64),
+  lines: [{ kind: 'labor' as const, description: 'Test and isolate concern', sort: 10, hours: '1', priceCents: 18_750, taxable: false, laborRateCents: 18_750 }],
+  summary: { subtotalCents: 18_750, taxableSubtotalCents: 0, taxCents: 0, totalCents: 18_750 },
+}
+const knownTemplate = {
+  id: '22222222-2222-4222-8222-222222222222', title: 'Install customer lift kit', kind: 'repair' as const,
+  defaultRequiredSkillTier: 2 as const, sort: 20, fingerprint: 'b'.repeat(64),
+  lines: [{ kind: 'labor' as const, description: 'Install lift kit', sort: 10, hours: '4', priceCents: 60_000, taxable: false, laborRateCents: 15_000 }],
+  summary: { subtotalCents: 60_000, taxableSubtotalCents: 0, taxCents: 0, totalCents: 60_000 },
+}
+
+function fillRequiredNewVehicle() {
+  fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Customer' } })
+  fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555-0100' } })
+  fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
+  fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
+  fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
+  fireEvent.change(screen.getByLabelText(/what brought them in/i), { target: { value: 'Warning light' } })
+}
+
 describe('CounterIntake', () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -31,6 +53,43 @@ describe('CounterIntake', () => {
   it('renders the screen title', () => {
     render(<CounterIntake userEmail="test@example.com" />)
     expect(screen.getByRole('heading', { name: /who's at the counter/i })).toBeInTheDocument()
+  })
+
+  it('defaults to the shop diagnostic authorization and submits its exact immutable identity', async () => {
+    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText(/diagnostic labor/i)).toHaveValue(diagnosticTemplate.id)
+    expect(screen.queryByLabelText(/customer-supplied item/i)).toBeNull()
+    fillRequiredNewVehicle()
+    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
+    expect(body.work).toEqual({
+      mode: 'diagnosis',
+      cannedJobId: diagnosticTemplate.id,
+      expectedFingerprint: diagnosticTemplate.fingerprint,
+      expectedTaxRateBps: 825,
+    })
+  })
+
+  it('keeps customer-supplied truth only in known work and submits the selected saved scope once', async () => {
+    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
+    expect(screen.getByLabelText(/saved work/i)).toHaveValue(knownTemplate.id)
+    fireEvent.change(screen.getByLabelText(/customer-supplied item/i), {
+      target: { value: ' Customer supplied unopened lift kit. ' },
+    })
+    fillRequiredNewVehicle()
+    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
+    expect(body.work).toEqual({
+      mode: 'canned',
+      cannedJobId: knownTemplate.id,
+      expectedFingerprint: knownTemplate.fingerprint,
+      expectedTaxRateBps: 825,
+      customerSuppliedPartsNote: 'Customer supplied unopened lift kit.',
+    })
   })
 
   it('protects the counter form at 375px with a single-column responsive contract and 44px controls', () => {
@@ -173,6 +232,9 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'Crank-no-start' },
     })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
     // NOTE: VIN intentionally left blank.
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     submits.forEach((btn) => expect(btn).toBeEnabled())
@@ -191,6 +253,9 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Ford' } })
     fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
     fireEvent.change(complaint, { target: { value: 'No-start' } })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
     fireEvent.keyDown(complaint, { key: 'Enter', metaKey: true })
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
@@ -263,7 +328,7 @@ describe('CounterIntake', () => {
       concern: 'Crank-no-start',
       whenStarted: 'Yesterday',
       howOften: 'Every time',
-      requestedService: { kind: 'repair', description: 'Replace rear brake pads' },
+      work: { mode: 'manual', kind: 'repair', description: 'Replace rear brake pads' },
       assignedTechId: null,
     })
 
@@ -272,7 +337,7 @@ describe('CounterIntake', () => {
     })
   })
 
-  it('sends numeric year and mileage while omitting an empty optional service', async () => {
+  it('sends numeric year and mileage with an explicit known-work scope', async () => {
     render(<CounterIntake userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
@@ -283,13 +348,16 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'No-start' },
     })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
     expect(body.vehicle.year).toBe(2020)
     expect(body.vehicle.mileage).toBe(123456)
-    expect(body.requestedService).toBeUndefined()
+    expect(body.work).toEqual({ mode: 'manual', kind: 'repair', description: 'Inspect no-start concern' })
     expect(body.concern).toBe('No-start')
     expect(body.jobs).toBeUndefined()
   })
@@ -307,6 +375,9 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'F-150' } })
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'No-start' },
+    })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
     })
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
 
@@ -360,6 +431,9 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'No-start' },
     })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/below.*required tier/i))
@@ -402,6 +476,9 @@ describe('CounterIntake', () => {
       fireEvent.change(screen.getByLabelText(/model/i), { target: { value: 'Y' } })
       fireEvent.change(screen.getByLabelText(/what brought them in/i), {
         target: { value: 'noise' },
+      })
+      fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+        target: { value: 'Inspect noise concern' },
       })
     }
 

@@ -1,8 +1,13 @@
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { customers, vehicles } from '@/lib/db/schema'
+import { customers, jobLines, vehicles } from '@/lib/db/schema'
 import { canCreateTickets } from '@/lib/shop-os/capabilities'
+import {
+  cannedJobLineInsertValues,
+  loadStrictCannedJobCopy,
+  type SafeCannedJobLine,
+} from '@/lib/shop-os/canned-jobs'
 import {
   createTicket,
   type CreateTicketResult,
@@ -17,19 +22,28 @@ const optionalTrimmedText = (max: number) =>
 const PG_INTEGER_MAX = 2_147_483_647
 const mileageSchema = z.number().int().nonnegative().max(PG_INTEGER_MAX)
 
-const requestedServiceSchema = z
-  .object({
+const cannedSelection = {
+  cannedJobId: z.uuid(),
+  expectedFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  expectedTaxRateBps: z.number().int().min(0).max(10_000).nullable(),
+}
+const suppliedNote = z.string().trim().min(1).max(500).nullable().optional()
+const workSchema = z.discriminatedUnion('mode', [
+  z.strictObject({ mode: z.literal('diagnosis'), ...cannedSelection }),
+  z.strictObject({ mode: z.literal('canned'), ...cannedSelection, customerSuppliedPartsNote: suppliedNote }),
+  z.strictObject({
+    mode: z.literal('manual'),
     kind: z.enum(['repair', 'maintenance']),
     description: z.string().trim().min(1).max(200),
-  })
-  .strict()
-  .optional()
+    customerSuppliedPartsNote: suppliedNote,
+  }),
+])
 
 const commonShape = {
   concern: z.string().trim().min(1).max(5_000),
   whenStarted: optionalTrimmedText(1_000),
   howOften: optionalTrimmedText(1_000),
-  requestedService: requestedServiceSchema,
+  work: workSchema,
   assignedTechId: z.uuid().nullable(),
   confirmBelowTier: z.boolean().optional(),
 }
@@ -94,12 +108,13 @@ function ticketBody(
   body: CounterBody,
   customerId: string,
   vehicleId: string,
+  work: {
+    title: string
+    kind: 'diagnostic' | 'repair' | 'maintenance'
+    requiredSkillTier: 1 | 2 | 3
+    customerSuppliedPartsNote: string | null
+  },
 ): Record<string, unknown> {
-  // AutoEye diagnostics is deliberately dark. A counter visit still needs one
-  // clear, ordinary work item. When the advisor knows the requested service,
-  // that becomes the job; otherwise the customer's concern is the work title.
-  const service = body.requestedService
-  const kind = service?.kind ?? 'repair'
   return {
     source: 'counter',
     customerId,
@@ -109,9 +124,10 @@ function ticketBody(
     howOften: body.howOften ?? null,
     jobs: [
       {
-        title: (service?.description ?? `Customer request: ${body.concern}`).slice(0, 200),
-        kind,
-        requiredSkillTier: kind === 'repair' ? 2 : 1,
+        title: work.title,
+        kind: work.kind,
+        requiredSkillTier: work.requiredSkillTier,
+        customerSuppliedPartsNote: work.customerSuppliedPartsNote,
         assignedTechId: body.assignedTechId,
         confirmBelowTier: body.confirmBelowTier,
       },
@@ -133,6 +149,47 @@ export async function createCounterTicket(
 
   try {
     return await db.transaction(async (tx) => {
+      let work: {
+        title: string
+        kind: 'diagnostic' | 'repair' | 'maintenance'
+        requiredSkillTier: 1 | 2 | 3
+        customerSuppliedPartsNote: string | null
+      }
+      let cannedLines: SafeCannedJobLine[] = []
+      if (body.work.mode === 'manual') {
+        work = {
+          title: body.work.description,
+          kind: body.work.kind,
+          requiredSkillTier: body.work.kind === 'repair' ? 2 : 1,
+          customerSuppliedPartsNote: body.work.customerSuppliedPartsNote ?? null,
+        }
+      } else {
+        const copy = await loadStrictCannedJobCopy(tx, {
+          shopId,
+          cannedJobId: body.work.cannedJobId,
+          expectedFingerprint: body.work.expectedFingerprint,
+          expectedTaxRateBps: body.work.expectedTaxRateBps,
+        })
+        if (!copy.ok) return {
+          ok: false,
+          error: copy.error === 'not_found' ? 'not_found' as const : 'conflict' as const,
+          ...(copy.retryable === undefined ? {} : { retryable: copy.retryable }),
+        }
+        const expectsDiagnosis = body.work.mode === 'diagnosis'
+        if ((copy.cannedJob.kind === 'diagnostic') !== expectsDiagnosis) {
+          return { ok: false, error: 'not_found' as const }
+        }
+        work = {
+          title: copy.cannedJob.title,
+          kind: copy.cannedJob.kind,
+          requiredSkillTier: copy.cannedJob.defaultRequiredSkillTier,
+          customerSuppliedPartsNote: body.work.mode === 'canned'
+            ? body.work.customerSuppliedPartsNote ?? null
+            : null,
+        }
+        cannedLines = copy.cannedJob.lines
+      }
+
       let customerId: string
       let vehicleId: string
 
@@ -179,9 +236,17 @@ export async function createCounterTicket(
 
       let result = await createTicket(tx as AppDb, {
         actor: input.actor,
-        body: ticketBody(body, customerId, vehicleId),
+        body: ticketBody(body, customerId, vehicleId, work),
       })
       if (!result.ok) throw new CounterTicketRollback(result)
+
+      if (cannedLines.length > 0) {
+        await tx.insert(jobLines).values(cannedJobLineInsertValues(
+          shopId,
+          result.ticket.jobs[0].id,
+          cannedLines,
+        ))
+      }
 
       return result
     })

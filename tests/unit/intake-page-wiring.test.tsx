@@ -164,7 +164,8 @@ describe('CounterIntake page wiring (search + form)', () => {
       concern: 'Oil service due',
       whenStarted: null,
       howOften: null,
-      requestedService: {
+      work: {
+        mode: 'manual',
         kind: 'maintenance',
         description: 'Change engine oil and filter',
       },

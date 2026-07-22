@@ -28,6 +28,49 @@
   align-items: center;
 }
 
+.intentChoice {
+  min-block-size: 76px;
+  padding: 14px 16px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: 3px;
+  background: var(--vt-bone-50);
+  color: var(--vt-fg-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.intentChoice strong,
+.intentChoice span {
+  display: block;
+}
+
+.intentChoice strong {
+  color: var(--vt-fg);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+}
+
+.intentChoice span,
+.scopeNotice {
+  margin-top: 5px;
+  font-family: var(--vt-font-serif);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.intentChoiceActive {
+  border-color: var(--vt-signal-500);
+  box-shadow: inset 3px 0 0 var(--vt-signal-500);
+  background: var(--vt-bone-100);
+}
+
+.scopeNotice {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--vt-risk-medium);
+  color: var(--vt-fg-2);
+}
+
 .screen :global(.pis__input) {
   min-block-size: 44px;
 }
