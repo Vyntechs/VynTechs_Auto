@@ -92,6 +92,29 @@ describe('CounterIntake', () => {
     })
   })
 
+  it('submits a writer-typed custom diagnostic labor line as diagnosis-manual', async () => {
+    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(screen.getByLabelText(/scope source/i), { target: { value: 'manual' } })
+    fireEvent.change(screen.getByLabelText(/^description$/i), {
+      target: { value: 'Diagnose intermittent no-start' },
+    })
+    fireEvent.change(screen.getByLabelText(/^hours$/i), { target: { value: '2.5' } })
+    fireEvent.change(screen.getByLabelText(/^price/i), { target: { value: '187.50' } })
+    fillRequiredNewVehicle()
+    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]
+    expect(url).toBe('/api/tickets/counter')
+    const body = JSON.parse(init!.body as string)
+    expect(body.work).toEqual({
+      mode: 'diagnosis-manual',
+      description: 'Diagnose intermittent no-start',
+      laborHours: 2.5,
+      priceCents: 18_750,
+    })
+  })
+
   it('protects the counter form at 375px with a single-column responsive contract and 44px controls', () => {
     const css = readFileSync(
       resolve(process.cwd(), 'components/screens/counter-intake.module.css'),

@@ -302,6 +302,57 @@ describe('createCounterTicket', () => {
     ])
   })
 
+  it('creates a custom diagnostic job from writer-typed labor hours and price', async () => {
+    const result = await createCounterTicket(db, {
+      actor,
+      body: existingBody({
+        work: {
+          mode: 'diagnosis-manual',
+          description: 'Diagnose intermittent no-start',
+          laborHours: 2.5,
+          priceCents: 46_875,
+        },
+      }),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.ticket.jobs).toEqual([
+      expect.objectContaining({
+        title: 'Diagnose intermittent no-start',
+        kind: 'diagnostic',
+        requiredSkillTier: 2,
+        sessionId: null,
+      }),
+    ])
+    expect(await db.select().from(jobLines)).toEqual([
+      expect.objectContaining({
+        jobId: result.ticket.jobs[0].id,
+        kind: 'labor',
+        description: 'Diagnose intermittent no-start',
+        priceCents: 46_875,
+        laborHours: 2.5,
+      }),
+    ])
+  })
+
+  it('rejects a custom diagnostic with non-positive hours before any write', async () => {
+    for (const badHours of [0, -1]) {
+      await expect(createCounterTicket(db, {
+        actor,
+        body: existingBody({
+          work: {
+            mode: 'diagnosis-manual',
+            description: 'Diagnose intermittent no-start',
+            laborHours: badHours,
+            priceCents: 46_875,
+          },
+        }),
+      })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    }
+    expect(await db.select().from(tickets)).toEqual([])
+  })
+
   it('copies a selected known-work template and preserves customer-supplied-part truth on the job', async () => {
     const result = await createCounterTicket(db, {
       actor,
