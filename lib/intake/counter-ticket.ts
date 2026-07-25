@@ -37,6 +37,12 @@ const workSchema = z.discriminatedUnion('mode', [
     description: z.string().trim().min(1).max(200),
     customerSuppliedPartsNote: suppliedNote,
   }),
+  z.strictObject({
+    mode: z.literal('diagnosis-manual'),
+    description: z.string().trim().min(1).max(200),
+    laborHours: z.number().positive().max(9999),
+    priceCents: z.number().int().nonnegative().max(99_999_999),
+  }),
 ])
 
 const commonShape = {
@@ -183,6 +189,21 @@ export async function createCounterTicket(
           requiredSkillTier: body.work.kind === 'repair' ? 2 : 1,
           customerSuppliedPartsNote: body.work.customerSuppliedPartsNote ?? null,
         }
+      } else if (body.work.mode === 'diagnosis-manual') {
+        work = {
+          title: body.work.description,
+          kind: 'diagnostic',
+          requiredSkillTier: 2,
+          customerSuppliedPartsNote: null,
+        }
+        cannedLines = [{
+          kind: 'labor',
+          description: body.work.description,
+          sort: 0,
+          priceCents: body.work.priceCents,
+          taxable: false,
+          hours: String(body.work.laborHours),
+        }]
       } else {
         const copy = await loadStrictCannedJobCopy(tx, {
           shopId,

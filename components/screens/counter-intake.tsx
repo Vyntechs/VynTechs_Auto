@@ -39,6 +39,7 @@ type CounterBody = {
   howOften: string | null
   work:
     | { mode: 'diagnosis'; cannedJobId: string; expectedFingerprint: string; expectedTaxRateBps: number | null }
+    | { mode: 'diagnosis-manual'; description: string; laborHours: number; priceCents: number }
     | { mode: 'canned'; cannedJobId: string; expectedFingerprint: string; expectedTaxRateBps: number | null; customerSuppliedPartsNote?: string | null }
     | { mode: 'manual'; kind: 'repair' | 'maintenance'; description: string; customerSuppliedPartsNote?: string | null }
   assignedTechId: string | null
@@ -121,6 +122,12 @@ export function CounterIntake({
   const [knownMode, setKnownMode] = useState<'canned' | 'manual'>(
     knownWorkJobs.length > 0 ? 'canned' : 'manual',
   )
+  const [diagMode, setDiagMode] = useState<'canned' | 'manual'>(
+    diagnosticJobs.length > 0 ? 'canned' : 'manual',
+  )
+  const [customDiagDescription, setCustomDiagDescription] = useState('')
+  const [customDiagHours, setCustomDiagHours] = useState('')
+  const [customDiagPrice, setCustomDiagPrice] = useState('')
   const [selectedDiagnosticId, setSelectedDiagnosticId] = useState(diagnosticJobs[0]?.id ?? '')
   const [selectedKnownId, setSelectedKnownId] = useState(knownWorkJobs[0]?.id ?? '')
   const [requestedServiceKind, setRequestedServiceKind] = useState<'repair' | 'maintenance'>('repair')
@@ -139,7 +146,9 @@ export function CounterIntake({
   const selectedDiagnostic = diagnosticJobs.find((job) => job.id === selectedDiagnosticId) ?? null
   const selectedKnown = knownWorkJobs.find((job) => job.id === selectedKnownId) ?? null
   const workReady = intent === 'diagnosis'
-    ? cannedCatalogAvailable && selectedDiagnostic !== null
+    ? (diagMode === 'canned'
+        ? cannedCatalogAvailable && selectedDiagnostic !== null
+        : customDiagDescription.trim() !== '' && Number(customDiagHours) > 0 && customDiagPrice.trim() !== '' && Number(customDiagPrice) >= 0)
     : knownMode === 'canned'
       ? cannedCatalogAvailable && selectedKnown !== null
       : requestedServiceDescription.trim() !== ''
@@ -225,7 +234,14 @@ export function CounterIntake({
     setError(null)
     setTierWarning(null)
     const suppliedNote = optionalText(customerSuppliedPartsNote)
-    const work: CounterBody['work'] = intent === 'diagnosis' && selectedDiagnostic
+    const work: CounterBody['work'] = intent === 'diagnosis' && diagMode === 'manual'
+      ? {
+          mode: 'diagnosis-manual',
+          description: customDiagDescription.trim(),
+          laborHours: Number(customDiagHours),
+          priceCents: Math.round(Number(customDiagPrice) * 100),
+        }
+      : intent === 'diagnosis' && selectedDiagnostic
       ? {
           mode: 'diagnosis',
           cannedJobId: selectedDiagnostic.id,
@@ -649,23 +665,73 @@ export function CounterIntake({
                     : 'The shop’s diagnostic menu is temporarily unavailable.'}
                   last
                 >
-                  {diagnosticJobs.length > 0 ? (
-                    <Field label="Diagnostic labor" htmlFor="ci-diagnostic-template">
+                  {diagnosticJobs.length > 0 && (
+                    <Field label="Scope source" htmlFor="ci-diag-mode">
                       <select
-                        id="ci-diagnostic-template"
+                        id="ci-diag-mode"
                         className="vt-field__input"
-                        value={selectedDiagnosticId}
-                        onChange={(event) => setSelectedDiagnosticId(event.target.value)}
+                        value={diagMode}
+                        onChange={(event) => setDiagMode(event.target.value as 'canned' | 'manual')}
                       >
-                        {diagnosticJobs.map((job) => (
-                          <option key={job.id} value={job.id}>{job.title}</option>
-                        ))}
+                        <option value="canned">Preset diagnostic</option>
+                        <option value="manual">Custom</option>
                       </select>
                     </Field>
+                  )}
+                  {diagMode === 'canned' ? (
+                    diagnosticJobs.length > 0 ? (
+                      <Field label="Diagnostic labor" htmlFor="ci-diagnostic-template">
+                        <select
+                          id="ci-diagnostic-template"
+                          className="vt-field__input"
+                          value={selectedDiagnosticId}
+                          onChange={(event) => setSelectedDiagnosticId(event.target.value)}
+                        >
+                          {diagnosticJobs.map((job) => (
+                            <option key={job.id} value={job.id}>{job.title}</option>
+                          ))}
+                        </select>
+                      </Field>
+                    ) : (
+                      <p role="alert" className={styles.scopeNotice}>
+                        No diagnostic authorization is configured. An owner can add one in Shop settings.
+                      </p>
+                    )
                   ) : (
-                    <p role="alert" className={styles.scopeNotice}>
-                      No diagnostic authorization is configured. An owner can add one in Shop settings.
-                    </p>
+                    <>
+                      <Field label="Description" htmlFor="ci-diag-description">
+                        <Input
+                          id="ci-diag-description"
+                          name="customDiagDescription"
+                          maxLength={200}
+                          placeholder="e.g. diagnose intermittent no-start"
+                          value={customDiagDescription}
+                          onChange={(event) => setCustomDiagDescription(event.target.value)}
+                        />
+                      </Field>
+                      <FormRow>
+                        <Field label="Hours" htmlFor="ci-diag-hours">
+                          <Input
+                            id="ci-diag-hours"
+                            name="customDiagHours"
+                            inputMode="decimal"
+                            mono
+                            value={customDiagHours}
+                            onChange={(event) => setCustomDiagHours(event.target.value)}
+                          />
+                        </Field>
+                        <Field label="Price (USD)" htmlFor="ci-diag-price">
+                          <Input
+                            id="ci-diag-price"
+                            name="customDiagPrice"
+                            inputMode="decimal"
+                            mono
+                            value={customDiagPrice}
+                            onChange={(event) => setCustomDiagPrice(event.target.value)}
+                          />
+                        </Field>
+                      </FormRow>
+                    </>
                   )}
                 </FormGroup>
               ) : (
