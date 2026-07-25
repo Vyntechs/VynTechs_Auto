@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
   customers,
+  jobLines,
   jobPartRequests,
   profiles,
   sessions,
@@ -18,6 +19,10 @@ import {
   canCreateTickets,
   isShopRole,
 } from '@/lib/shop-os/capabilities'
+import {
+  cannedJobLineInsertValues,
+  type SafeCannedJobLine,
+} from '@/lib/shop-os/canned-jobs'
 import { MAX_TICKET_JOBS_PER_TICKET, ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
 
@@ -1224,6 +1229,114 @@ export async function addTicketJob(
       requiredSkillTier: parsedBody.data.requiredSkillTier,
       assignedTechId: assignment.assignedTechId,
     })
+
+    const detail = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
+    if (!detail) throw new Error('updated_ticket_not_found')
+    return { ok: true, ticket: detail }
+  })
+}
+
+export const SUPPLEMENTAL_DIAGNOSTIC_TITLE = 'Additional diagnostic time'
+const SUPPLEMENTAL_DIAGNOSTIC_TIER = 2
+
+const supplementalDiagnosticBodySchema = z
+  .object({
+    description: z.string().trim().min(1).max(200).optional(),
+    laborHours: z.number().positive().max(9999),
+    priceCents: z.number().int().nonnegative().max(99_999_999),
+    confirmBelowTier: z.boolean().optional(),
+  })
+  .strict()
+
+/**
+ * Records customer-approved diagnostic overage as a brand-new open job on an
+ * OPEN ticket, so it flows through the normal quote → approval → authorization
+ * path without touching any in-progress job's frozen scope. The supplemental
+ * job carries one writer-typed labor line and defaults its assignment to the
+ * technician already on the ticket's diagnostic job, keeping that tech
+ * authorized for the extra time.
+ */
+export async function addSupplementalDiagnosticTime(
+  db: AppDb,
+  input: { actor: TicketActor; ticketId: unknown; body: unknown },
+): Promise<
+  | { ok: true; ticket: TicketDetail }
+  | {
+      ok: false
+      error: TicketDomainError
+      warning?: AssignmentTierWarning
+    }
+> {
+  const denied = actorGate(input.actor)
+  if (denied) return denied
+
+  const parsedTicketId = z.uuid().safeParse(input.ticketId)
+  const parsedBody = supplementalDiagnosticBodySchema.safeParse(input.body)
+  if (!parsedTicketId.success || !parsedBody.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  const title = parsedBody.data.description ?? SUPPLEMENTAL_DIAGNOSTIC_TITLE
+  const shopId = input.actor.shopId as string
+  return db.transaction(async (tx) => {
+    const [lockedTicket] = await tx
+      .select({ id: tickets.id, status: tickets.status })
+      .from(tickets)
+      .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data)))
+      .limit(1)
+      .for('update')
+    if (!lockedTicket) return { ok: false, error: 'not_found' as const }
+    if (lockedTicket.status !== 'open') {
+      return { ok: false, error: 'ticket_not_open' as const }
+    }
+    if (await ticketAtJobLimit(tx as AppDb, { shopId, ticketId: parsedTicketId.data })) {
+      return { ok: false, error: 'job_limit_reached' as const }
+    }
+
+    const [existingDiagnostic] = await tx
+      .select({ assignedTechId: ticketJobs.assignedTechId })
+      .from(ticketJobs)
+      .where(and(
+        eq(ticketJobs.shopId, shopId),
+        eq(ticketJobs.ticketId, parsedTicketId.data),
+        eq(ticketJobs.kind, 'diagnostic'),
+        isNotNull(ticketJobs.assignedTechId),
+      ))
+      .orderBy(asc(ticketJobs.createdAt), asc(ticketJobs.id))
+      .limit(1)
+
+    const assignment = await validateAssignment(tx as AppDb, input.actor, {
+      title,
+      kind: 'diagnostic',
+      requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
+      assignedTechId: existingDiagnostic?.assignedTechId ?? null,
+      confirmBelowTier: parsedBody.data.confirmBelowTier,
+    })
+    if (!assignment.ok) return assignment
+
+    const [createdJob] = await tx
+      .insert(ticketJobs)
+      .values({
+        shopId,
+        ticketId: parsedTicketId.data,
+        title,
+        kind: 'diagnostic',
+        requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
+        assignedTechId: assignment.assignedTechId,
+      })
+      .returning()
+
+    const supplementalLine: SafeCannedJobLine = {
+      kind: 'labor',
+      description: title,
+      sort: 0,
+      priceCents: parsedBody.data.priceCents,
+      taxable: false,
+      hours: String(parsedBody.data.laborHours),
+    }
+    await tx.insert(jobLines).values(
+      cannedJobLineInsertValues(shopId, createdJob.id, [supplementalLine]),
+    )
 
     const detail = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
     if (!detail) throw new Error('updated_ticket_not_found')

@@ -35,6 +35,7 @@ import {
 } from '@/lib/shop-os/quote-editor-draft'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
+import { AddDiagnosticTime } from './add-diagnostic-time'
 import { ManualPartSourcing } from './manual-part-sourcing'
 import styles from './manual-quote-builder.module.css'
 
@@ -1035,6 +1036,11 @@ export function ManualQuoteBuilder({
               )}
             </section>
           )}
+
+          <AddDiagnosticTime
+            ticketId={ticket.id}
+            onAdded={() => { void refreshQuote() }}
+          />
 
           {current.jobs.length === 0 ? (
             <p className={styles.empty}>No eligible jobs on this ticket.</p>
