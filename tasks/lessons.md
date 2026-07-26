@@ -72,3 +72,18 @@ Reason: Stale state feels like lost work and hides the operator's next action.
 Trigger: Quote viewers conflicted because display reads locked the repair order.
 Rule: Use a consistent read-only snapshot for views; reserve NOWAIT locks for mutations.
 Reason: Concurrent roles must see shared work without blocking one another.
+
+### market-only-production-truth
+Trigger: A marketing example reaches for unfinished or production-disabled Vyntechs functionality.
+Rule: Exclude it entirely; demonstrate only shipped production truth or use an explicitly unrelated neutral product.
+Reason: Hypothetical promotion can misstate availability and distort the exercise around unapproved scope.
+
+### suite-noise-is-config-not-code
+Trigger: Full-suite shards failed on macOS `._*` sidecar files and a 5s pglite timeout under load.
+Rule: Prove a suite failure is real before blaming code; fix glob/timeout config so the gate reports truth.
+Reason: This volume regenerates AppleDouble junk, and load-driven timeouts read as phantom regressions.
+
+### verify-exit-code-not-pipeline
+Trigger: A backgrounded `pnpm test:shards | tail` reported exit 0 while two shards had actually failed.
+Rule: Never judge pass/fail from a piped command's status; read the real summary or capture to a file.
+Reason: The pipeline returns the last command's code, silently converting a failed gate into a green one.

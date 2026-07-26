@@ -12,6 +12,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -32,6 +33,11 @@ jobs:
 
       - name: Typecheck
         run: pnpm exec tsc --noEmit
+
+      # Eight serialized shards, two workers — the documented suite policy.
+      # A monolithic run is database-heavy enough to exit without a result.
+      - name: Test
+        run: pnpm test:shards
 
       - name: Build
         run: pnpm build
