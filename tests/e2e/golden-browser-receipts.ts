@@ -66,6 +66,16 @@ export async function checkpoint(
     }, null, 2),
     contentType: 'application/json',
   })
+
+  // The overflow and accessibility gates above are machine truth. When a human
+  // needs to review the same checkpoint by eye, retained evidence also keeps
+  // the rendered page at the exact project viewport.
+  if (process.env.GOLDEN_QA_RETAIN_EVIDENCE === '1') {
+    await testInfo.attach(`${label}.png`, {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    })
+  }
   expect(blocking, `${label} has serious or critical accessibility violations`).toEqual([])
 }
 

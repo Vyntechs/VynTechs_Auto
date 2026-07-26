@@ -515,8 +515,8 @@ async function runBrowserProjects(env, baseUrl, selectedProject = null) {
     const runId = `${randomUUID()}-${project}`
     try {
       const result = spawnSync(
-        'pnpm',
-        ['exec', 'playwright', 'test', '--config', 'playwright.golden.config.ts', '--project', project],
+        join(REPO_ROOT, 'node_modules', '.bin', 'playwright'),
+        ['test', '--config', 'playwright.golden.config.ts', '--project', project],
         {
           cwd: REPO_ROOT,
           env: playwrightEnvironment(baseUrl, credentials, runId),

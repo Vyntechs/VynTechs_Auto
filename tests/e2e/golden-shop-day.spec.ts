@@ -138,9 +138,13 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const activeLabor = advisor.getByRole('button', { name: 'Adding labor' })
     await expect(activeLabor).toHaveAttribute('aria-expanded', 'true')
     await expect(activeLabor).toHaveAttribute('aria-controls', /^quote-line-editor-/)
-    await expect(advisor.getByRole('form', { name: 'Add labor line' })).toBeInViewport()
-    await advisor.getByLabel('Description').fill(laborDescription)
-    await advisor.getByLabel('Hours').fill('1.5')
+    // Scope the fields to the labor editor: the write-up also carries the
+    // supplemental "Diagnostic description"/"Diagnostic hours" inputs, which a
+    // page-wide label lookup would match too.
+    const laborEditor = advisor.getByRole('form', { name: 'Add labor line' })
+    await expect(laborEditor).toBeInViewport()
+    await laborEditor.getByLabel('Description').fill(laborDescription)
+    await laborEditor.getByLabel('Hours').fill('1.5')
     await checkpoint(advisor, testInfo, 'advisor-local-labor-editor')
 
     advisor.once('dialog', (dialog) => dialog.accept())
@@ -149,7 +153,8 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(advisor.getByRole('status', { name: 'Quote update' }))
       .toHaveText('Unsaved labor restored')
     await expect(advisor.getByRole('form', { name: 'Add labor line' })).toBeInViewport()
-    await expect(advisor.getByLabel('Description')).toHaveValue(laborDescription)
+    await expect(advisor.getByRole('form', { name: 'Add labor line' }).getByLabel('Description'))
+      .toHaveValue(laborDescription)
     await advisor.getByRole('button', { name: 'Save line' }).click()
     const savedLabor = advisor.getByText(laborDescription, { exact: true })
     await expect(savedLabor).toBeVisible()
@@ -299,17 +304,32 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(relief.getByRole('heading', { name: 'Work complete' })).toBeVisible()
     await relief.getByRole('button', { name: 'Close work' }).click()
     await expect(relief.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
+    await expect(relief.getByRole('heading', { name: 'Ready to collect' })).toHaveCount(0)
     await checkpoint(relief, testInfo, 'relief-complete-ticket')
 
-    await advisor.goto(path)
-    await advisor.getByRole('button', { name: 'Collect & close' }).click()
+    // The finished repair order is still open and still owes money, so it stays
+    // findable on Today and rings out in place — no deep link, no lost counter.
+    await advisor.goto('/today')
+    const collectCard = advisor.getByRole('article', {
+      name: `Ticket ${ticketNumber}: ready to collect`,
+    })
+    await expect(advisor.getByRole('heading', { name: 'Ready to collect' })).toBeVisible()
+    await expect(collectCard).toContainText('Work complete')
+    await expect(collectCard).toContainText('$194.40 due')
+    await checkpoint(advisor, testInfo, 'advisor-ready-to-collect')
+    await collectCard.getByRole('button', { name: 'Collect & close' }).click()
     await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
     await advisor.getByLabel('Payment amount').fill('194.40')
     await advisor.getByLabel('How paid').selectOption('card')
     await advisor.getByRole('button', { name: 'Record payment' }).click()
     await expect(advisor.getByText('$0.00').last()).toBeVisible()
+    await checkpoint(advisor, testInfo, 'advisor-ring-out-in-place')
     await advisor.getByRole('button', { name: 'Mark paid & close ticket' }).click()
-    await expect(advisor.getByRole('heading', { name: 'Receipt' })).toBeVisible()
+    await expect(advisor.getByRole('status').filter({
+      hasText: `Ticket ${ticketNumber} is closed and off the board.`,
+    })).toBeVisible()
+    await expect(collectCard).toHaveCount(0)
+    await expect(advisor).toHaveURL(/\/today$/)
     await checkpoint(advisor, testInfo, 'advisor-closed-ticket')
 
     await owner.goto(path)

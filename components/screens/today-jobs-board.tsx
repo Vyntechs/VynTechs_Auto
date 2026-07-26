@@ -812,6 +812,30 @@ export function TodayJobsBoard({
   )
 }
 
+// Revealing the payment tool has to move the operator into it, the same way the
+// inline quote and work workspaces do. Without this, the counter tool opens
+// below the button and a keyboard or screen-reader user is left behind it.
+function MountedRingOut({
+  card,
+  onRingOut,
+}: {
+  card: ReadyToCollectTicket
+  onRingOut: (card: ReadyToCollectTicket, next: TicketRingOut) => void
+}) {
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    queueMicrotask(() => sectionRef.current?.focus())
+  }, [])
+  return (
+    <RingOutSection
+      ticketId={card.ticketId}
+      initialRingOut={card.ringOut}
+      sectionRef={sectionRef}
+      onChange={(next) => onRingOut(card, next)}
+    />
+  )
+}
+
 function ReadyToCollectSection({
   cards,
   activeTicketId,
@@ -889,11 +913,10 @@ function ReadyToCollectSection({
               </article>
               {open && (
                 <div className={styles.workspacePanel}>
-                  <RingOutSection
+                  <MountedRingOut
                     key={card.ticketId}
-                    ticketId={card.ticketId}
-                    initialRingOut={card.ringOut}
-                    onChange={(next) => onRingOut(card, next)}
+                    card={card}
+                    onRingOut={onRingOut}
                   />
                 </div>
               )}
