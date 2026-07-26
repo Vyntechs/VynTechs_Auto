@@ -11,14 +11,19 @@ import {
   parseAssignmentEnvelope,
   parseTodayJobsResponse,
   placeTodayJob,
+  projectReadyToCollect,
   projectTodayBoard,
   type TodayJobOverride,
 } from '@/lib/shop-os/today-board'
 import { parsePartRequestResponse } from '@/lib/shop-os/part-requests-ui'
 import type { SimpleWorkProjectionView } from '@/lib/shop-os/simple-work-ui'
+import type { ReadyToCollectTicket } from '@/lib/shop-os/ready-to-collect'
+import type { TicketRingOut } from '@/lib/shop-os/ring-out'
+import { formatMoneyCents } from '@/lib/shop-os/quote-builder-ui'
 import { TicketAssignmentControl } from './ticket-assignment-control'
 import { InlineQuoteWorkspace, type QuoteWorkspaceProjection } from './inline-quote-workspace'
 import { InlineWorkWorkspace } from './inline-work-workspace'
+import { RingOutSection } from './ring-out-section'
 import { TicketInterruptionAction, type InterruptionJobView } from './ticket-interruption-action'
 import styles from './today-jobs-board.module.css'
 
@@ -28,6 +33,9 @@ type Props = {
   teamJobs?: TodayTicketJob[]
   createdJobs?: TodayTicketJob[]
   partsJobs?: TodayTicketJob[]
+  // Server-selected and server-role-gated: this arrives empty for anyone who
+  // cannot close tickets, so no money reaches a technician's board.
+  readyToCollect?: ReadyToCollectTicket[]
   canDispatchWork?: boolean
   canBuildQuote?: boolean
   currentProfileId?: string
@@ -55,6 +63,7 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const emptyJobs: TodayTicketJob[] = []
 const emptyTeam: TeamMember[] = []
+const emptyReadyToCollect: ReadyToCollectTicket[] = []
 
 const titleCase: Record<TodayTicketJob['kind'], string> = {
   diagnostic: 'Diagnostic',
@@ -74,6 +83,7 @@ export function TodayJobsBoard({
   teamJobs = emptyJobs,
   createdJobs = emptyJobs,
   partsJobs = emptyJobs,
+  readyToCollect = emptyReadyToCollect,
   canDispatchWork = false,
   canBuildQuote = false,
   currentProfileId,
@@ -98,6 +108,7 @@ export function TodayJobsBoard({
     teamJobs,
     createdJobs,
     partsJobs,
+    readyToCollect,
     linkedSessionIds: [],
     hasMore,
   }))
@@ -106,6 +117,10 @@ export function TodayJobsBoard({
   )
   const [activeQuoteJob, setActiveQuoteJob] = useState<TodayTicketJob | null>(null)
   const [activeWorkJob, setActiveWorkJob] = useState<TodayTicketJob | null>(null)
+  const [activeRingOutTicketId, setActiveRingOutTicketId] = useState<string | null>(null)
+  const [ringOutUpdates, setRingOutUpdates] = useState<Map<string, TicketRingOut>>(
+    () => new Map(),
+  )
   const activeWorkspaceRef = useRef(false)
   const [focusRequest, setFocusRequest] = useState<{
     kind: 'board' | 'row' | 'claim'
@@ -121,14 +136,19 @@ export function TodayJobsBoard({
       teamJobs,
       createdJobs,
       partsJobs,
+      readyToCollect,
       linkedSessionIds: [],
       hasMore,
     })
-  }, [myJobs, openJobs, teamJobs, createdJobs, partsJobs, hasMore])
+  }, [myJobs, openJobs, teamJobs, createdJobs, partsJobs, readyToCollect, hasMore])
 
+  // A mounted ring-out holds a half-typed payment amount. The quiet refresh
+  // must not replace it underneath the advisor.
   useEffect(() => {
-    activeWorkspaceRef.current = activeQuoteJob !== null || activeWorkJob !== null
-  }, [activeQuoteJob, activeWorkJob])
+    activeWorkspaceRef.current = activeQuoteJob !== null
+      || activeWorkJob !== null
+      || activeRingOutTicketId !== null
+  }, [activeQuoteJob, activeWorkJob, activeRingOutTicketId])
 
   const refreshTodayJobs = useCallback(async () => {
     try {
@@ -140,6 +160,9 @@ export function TodayJobsBoard({
       const fresh = response.ok ? parseTodayJobsResponse(body) : null
       if (!fresh || activeWorkspaceRef.current) return
       setServerJobs(fresh)
+      // Fresh server truth supersedes the local echo of a payment or closure;
+      // another advisor may have collected against the same repair order.
+      setRingOutUpdates((current) => (current.size === 0 ? current : new Map()))
       setResolvedPartRequests((current) => {
         if (current.size === 0) return current
         const active = new Map(fresh.partsJobs.map((job) => [job.id, job.partRequest?.id ?? null]))
@@ -178,6 +201,11 @@ export function TodayJobsBoard({
     canDispatchWork,
     overrides: jobOverrides,
   }), [serverJobs, resolvedPartRequests, canDispatchWork, jobOverrides])
+
+  const readyToCollectCards = useMemo(
+    () => projectReadyToCollect(serverJobs.readyToCollect, ringOutUpdates),
+    [serverJobs.readyToCollect, ringOutUpdates],
+  )
 
   useEffect(() => {
     if (!focusRequest) return
@@ -490,6 +518,33 @@ export function TodayJobsBoard({
     void refreshTodayJobs()
   }
 
+  function openRingOut(card: ReadyToCollectTicket) {
+    activeWorkspaceRef.current = true
+    setActiveRingOutTicketId(card.ticketId)
+  }
+
+  function closeRingOut(card: ReadyToCollectTicket) {
+    activeWorkspaceRef.current = false
+    setActiveRingOutTicketId(null)
+    setFocusRequest({ kind: 'row', jobId: card.ticketId })
+    void refreshTodayJobs()
+  }
+
+  // The only money truth the board ever holds comes straight back from the
+  // payment/close routes. A repair order leaves the lane when — and only when —
+  // the server says it is no longer open.
+  function applyRingOut(card: ReadyToCollectTicket, next: TicketRingOut) {
+    setRingOutUpdates((current) => new Map(current).set(card.ticketId, next))
+    if (next.status === 'open') return
+    activeWorkspaceRef.current = false
+    setActiveRingOutTicketId(null)
+    setAnnouncement({
+      kind: 'status',
+      text: `Ticket ${card.ticketNumber} is closed and off the board.`,
+    })
+    setFocusRequest({ kind: 'board', jobId: card.ticketId })
+  }
+
   async function startDiagnostic(
     job: TodayTicketJob,
     confirmAmbiguousRetry = false,
@@ -629,9 +684,23 @@ export function TodayJobsBoard({
         board.team.length === 0 &&
         board.created.length === 0 &&
         board.parts.length === 0 &&
+        readyToCollectCards.length === 0 &&
         !announcement
       }
     >
+      {/* First on the board: a finished repair order is a customer waiting at
+          the counter and money the shop has not taken in yet. Only advisors and
+          owners ever receive these cards. */}
+      {readyToCollectCards.length > 0 && (
+        <ReadyToCollectSection
+          cards={readyToCollectCards}
+          activeTicketId={activeRingOutTicketId}
+          commandBusy={activeQuoteJob !== null || activeWorkJob !== null}
+          onOpen={openRingOut}
+          onClose={closeRingOut}
+          onRingOut={applyRingOut}
+        />
+      )}
       {board.mine.length > 0 && (
         <JobSection
           label="My work"
@@ -740,6 +809,99 @@ export function TodayJobsBoard({
         </p>
       )}
     </section>
+  )
+}
+
+function ReadyToCollectSection({
+  cards,
+  activeTicketId,
+  commandBusy,
+  onOpen,
+  onClose,
+  onRingOut,
+}: {
+  cards: ReadyToCollectTicket[]
+  activeTicketId: string | null
+  commandBusy: boolean
+  onOpen: (card: ReadyToCollectTicket) => void
+  onClose: (card: ReadyToCollectTicket) => void
+  onRingOut: (card: ReadyToCollectTicket, next: TicketRingOut) => void
+}) {
+  return (
+    <div className={styles.group}>
+      <div className={styles.groupHeader}>
+        <h2 className={styles.heading}>Ready to collect</h2>
+        <span className={styles.count}>{cards.length}</span>
+      </div>
+      <div className={styles.ledger}>
+        {cards.map((card) => {
+          const open = activeTicketId === card.ticketId
+          const owes = card.ringOut.balanceCents > 0
+          const vehicle = card.vehicle
+            ? `${card.vehicle.year} ${card.vehicle.make} ${card.vehicle.model}`
+            : 'Vehicle not recorded'
+          return (
+            <div key={card.ticketId} className={styles.jobSlot}>
+              <article
+                className={styles.row}
+                aria-label={`Ticket ${card.ticketNumber}: ready to collect`}
+                data-job-id={card.ticketId}
+                tabIndex={-1}
+              >
+                <Link
+                  href={`/tickets/${card.ticketId}`}
+                  className={styles.ticketStamp}
+                  aria-label={`Open ticket ${card.ticketNumber}`}
+                >
+                  #{String(card.ticketNumber).padStart(4, '0')}
+                </Link>
+                <div className={styles.details}>
+                  <div className={styles.partyLine}>
+                    <span>{card.customerName ?? 'Customer not recorded'}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{vehicle}</span>
+                  </div>
+                  <h3 className={styles.title}>{card.concern}</h3>
+                  <div className={styles.facts}>
+                    <span>Work complete</span>
+                    <span className={styles.balanceFact}>
+                      {owes
+                        ? `${formatMoneyCents(card.ringOut.balanceCents)} due`
+                        : 'Paid in full'}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.action}>
+                  <button
+                    type="button"
+                    className={styles.control}
+                    disabled={commandBusy}
+                    aria-expanded={open}
+                    onClick={() => (open ? onClose(card) : onOpen(card))}
+                  >
+                    {open
+                      ? 'Close panel'
+                      : owes
+                        ? 'Collect & close'
+                        : 'Close repair order'}
+                  </button>
+                </div>
+              </article>
+              {open && (
+                <div className={styles.workspacePanel}>
+                  <RingOutSection
+                    key={card.ticketId}
+                    ticketId={card.ticketId}
+                    initialRingOut={card.ringOut}
+                    onChange={(next) => onRingOut(card, next)}
+                  />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

@@ -114,6 +114,7 @@ const jobs: TodayTicketJobs = {
   createdJobs: [],
   teamJobs: [],
   partsJobs: [],
+  readyToCollect: [],
   linkedSessionIds: ['linked-open', 'linked-closed'],
 }
 

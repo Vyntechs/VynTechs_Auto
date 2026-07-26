@@ -24,6 +24,10 @@ import {
   type SafeCannedJobLine,
 } from '@/lib/shop-os/canned-jobs'
 import { MAX_TICKET_JOBS_PER_TICKET, ticketAtJobLimit } from '@/lib/shop-os/job-limits'
+import {
+  listReadyToCollectTickets,
+  type ReadyToCollectTicket,
+} from '@/lib/shop-os/ready-to-collect'
 import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
 
 export type TicketActor = {
@@ -388,6 +392,10 @@ export type TodayTicketJobs = {
   createdJobs: TodayTicketJob[]
   teamJobs: TodayTicketJob[]
   partsJobs: TodayTicketJob[]
+  // Repair orders whose work is finished but which are still open and still
+  // owed. Ticket-level, not job-level, and empty for anyone who cannot close
+  // tickets. See `lib/shop-os/ready-to-collect.ts`.
+  readyToCollect: ReadyToCollectTicket[]
   linkedSessionIds: string[]
   hasMore?: boolean
 }
@@ -400,6 +408,7 @@ const emptyTodayTicketJobs = (): TodayTicketJobs => ({
   createdJobs: [],
   teamJobs: [],
   partsJobs: [],
+  readyToCollect: [],
   linkedSessionIds: [],
 })
 
@@ -577,6 +586,10 @@ export async function listTodayTicketJobs(
     )
     .limit(TODAY_JOB_LIMIT + 1)
 
+  // Finished-but-open repair orders are ticket-level and role-gated, so they
+  // are selected separately rather than squeezed through the job lanes.
+  const readyToCollect = await listReadyToCollectTickets(db, { actor })
+
   const myJobs: TodayTicketJob[] = []
   const openJobs: TodayTicketJob[] = []
   const createdJobs: TodayTicketJob[] = []
@@ -646,6 +659,7 @@ export async function listTodayTicketJobs(
     createdJobs,
     teamJobs,
     partsJobs,
+    readyToCollect,
     linkedSessionIds,
     ...(hasMore ? { hasMore: true } : {}),
   }

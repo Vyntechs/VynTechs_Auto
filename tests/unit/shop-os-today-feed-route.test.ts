@@ -25,7 +25,7 @@ const profile = {
   deactivatedAt: null,
 }
 const emptyToday = {
-  myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [], linkedSessionIds: [],
+  myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [], readyToCollect: [], linkedSessionIds: [],
 }
 
 describe('Today live projection route', () => {

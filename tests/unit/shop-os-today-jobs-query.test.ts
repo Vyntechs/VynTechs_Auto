@@ -311,6 +311,7 @@ describe('Today ticket jobs read model', () => {
       createdJobs: [],
       teamJobs: [],
       partsJobs: [],
+      readyToCollect: [],
       linkedSessionIds: [],
     })
     expect(JSON.stringify(result)).not.toMatch(
@@ -398,6 +399,7 @@ describe('Today ticket jobs read model', () => {
         createdJobs: [],
         teamJobs: [],
         partsJobs: [],
+        readyToCollect: [],
         linkedSessionIds: [],
       })
     }

@@ -1,4 +1,10 @@
 import type { TodayTicketJob } from '@/lib/tickets'
+import type { TicketRingOut } from '@/lib/shop-os/ring-out'
+import {
+  READY_TO_COLLECT_LIMIT,
+  type ReadyToCollectTicket,
+} from '@/lib/shop-os/ready-to-collect'
+import { ringOutSchema } from '@/lib/shop-os/ring-out-ui'
 import { z } from 'zod'
 
 export type TodayBoardLane = 'mine' | 'open' | 'team' | 'created' | 'parts' | 'hidden'
@@ -112,6 +118,19 @@ const todayJobSchema = z.strictObject({
   ]).nullable().optional(),
 })
 
+const readyToCollectSchema = z.strictObject({
+  ticketId: z.uuid(),
+  ticketNumber: z.number().int().positive(),
+  concern: z.string().min(1).max(5_000),
+  customerName: z.string().max(500).nullable(),
+  vehicle: z.strictObject({
+    year: z.number().int().min(1886).max(9999),
+    make: z.string().min(1).max(120),
+    model: z.string().min(1).max(120),
+  }).nullable(),
+  ringOut: ringOutSchema,
+})
+
 const todayJobsResponseSchema = z.strictObject({
   todayJobs: z.strictObject({
     myJobs: z.array(todayJobSchema).max(200),
@@ -119,6 +138,7 @@ const todayJobsResponseSchema = z.strictObject({
     createdJobs: z.array(todayJobSchema).max(200),
     teamJobs: z.array(todayJobSchema).max(200),
     partsJobs: z.array(todayJobSchema).max(200),
+    readyToCollect: z.array(readyToCollectSchema).max(READY_TO_COLLECT_LIMIT),
     linkedSessionIds: z.array(z.uuid()).max(200),
     hasMore: z.boolean().optional(),
   }),
@@ -135,11 +155,32 @@ export function parseTodayJobsResponse(value: unknown): {
   createdJobs: TodayTicketJob[]
   teamJobs: TodayTicketJob[]
   partsJobs: TodayTicketJob[]
+  readyToCollect: ReadyToCollectTicket[]
   linkedSessionIds: string[]
   hasMore?: boolean
 } | null {
   const parsed = todayJobsResponseSchema.safeParse(value)
   return parsed.success ? parsed.data.todayJobs : null
+}
+
+/**
+ * A `Ready to collect` card is only gone once the server says the repair order
+ * left 'open'. Local ring-out results from the mounted payment/close tool are
+ * layered over server truth so a just-closed card leaves immediately and a
+ * partly-paid one keeps its exact new balance until the next refresh.
+ */
+export function projectReadyToCollect(
+  cards: ReadyToCollectTicket[],
+  ringOutUpdates: ReadonlyMap<string, TicketRingOut>,
+): ReadyToCollectTicket[] {
+  const projected: ReadyToCollectTicket[] = []
+  for (const card of cards) {
+    const update = ringOutUpdates.get(card.ticketId)
+    const ringOut = update ?? card.ringOut
+    if (ringOut.status !== 'open') continue
+    projected.push(update ? { ...card, ringOut: update } : card)
+  }
+  return projected
 }
 
 type TodayBoardProjectionInput = {

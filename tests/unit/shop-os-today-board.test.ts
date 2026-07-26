@@ -4,9 +4,48 @@ import {
   parseAssignmentEnvelope,
   parseTodayJobsResponse,
   placeTodayJob,
+  projectReadyToCollect,
   projectTodayBoard,
 } from '@/lib/shop-os/today-board'
+import type { ReadyToCollectTicket } from '@/lib/shop-os/ready-to-collect'
 import type { TodayTicketJob } from '@/lib/tickets'
+
+const NOW = '2026-07-26T15:04:05.000Z'
+
+const liveCard: ReadyToCollectTicket = {
+  ticketId: '00000000-0000-4000-8000-000000000003',
+  ticketNumber: 12,
+  concern: 'Brake pedal pulses at highway speed.',
+  customerName: 'Morgan Lee',
+  vehicle: { year: 2024, make: 'Ford', model: 'F-350' },
+  ringOut: {
+    ticketId: '00000000-0000-4000-8000-000000000003',
+    status: 'open',
+    owed: {
+      subtotalCents: 10_000,
+      taxCents: 800,
+      totalCents: 10_800,
+      jobs: [{
+        jobId: '00000000-0000-4000-8000-000000000004',
+        title: 'Replace brake pads',
+        subtotalCents: 10_000,
+      }],
+    },
+    paidCents: 0,
+    balanceCents: 10_800,
+    payments: [],
+    canRecordPayment: true,
+    canClose: false,
+    closedAt: null,
+  },
+}
+
+const secondCard: ReadyToCollectTicket = {
+  ...liveCard,
+  ticketId: '00000000-0000-4000-8000-000000000005',
+  ticketNumber: 13,
+  ringOut: { ...liveCard.ringOut, ticketId: '00000000-0000-4000-8000-000000000005' },
+}
 
 const baseJob: TodayTicketJob = {
   id: 'job-1',
@@ -190,7 +229,7 @@ describe('Today live-feed parsing', () => {
     expect(parseTodayJobsResponse({
       todayJobs: {
         myJobs: [], openJobs: [liveJob], createdJobs: [], teamJobs: [], partsJobs: [],
-        linkedSessionIds: [], hasMore: false,
+        readyToCollect: [], linkedSessionIds: [], hasMore: false,
       },
     })).toMatchObject({ openJobs: [liveJob] })
   })
@@ -199,14 +238,78 @@ describe('Today live-feed parsing', () => {
     expect(parseTodayJobsResponse({
       todayJobs: {
         myJobs: [], openJobs: [{ ...liveJob, id: 'not-a-uuid' }], createdJobs: [], teamJobs: [], partsJobs: [],
-        linkedSessionIds: [],
+        readyToCollect: [], linkedSessionIds: [],
       },
     })).toBeNull()
     expect(parseTodayJobsResponse({
       todayJobs: {
         myJobs: [], openJobs: [liveJob], createdJobs: [], teamJobs: [], partsJobs: [],
-        linkedSessionIds: [], privateField: 'do not merge',
+        readyToCollect: [], linkedSessionIds: [], privateField: 'do not merge',
       },
     })).toBeNull()
+  })
+
+  it('accepts a ready-to-collect card only with a fully-formed ring-out', () => {
+    const parsed = parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+        readyToCollect: [liveCard], linkedSessionIds: [],
+      },
+    })
+    expect(parsed?.readyToCollect).toEqual([liveCard])
+
+    for (const broken of [
+      { ...liveCard, ringOut: { ...liveCard.ringOut, balanceCents: '10800' } },
+      { ...liveCard, ringOut: { ...liveCard.ringOut, status: 'refunded' } },
+      { ...liveCard, ringOut: { ...liveCard.ringOut, secretMargin: 4_200 } },
+      { ...liveCard, ticketNumber: 0 },
+    ]) {
+      expect(parseTodayJobsResponse({
+        todayJobs: {
+          myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+          readyToCollect: [broken], linkedSessionIds: [],
+        },
+      })).toBeNull()
+    }
+  })
+})
+
+describe('Ready to collect lane', () => {
+  it('holds a card until the server confirms the repair order left open', () => {
+    const cards = [liveCard, secondCard]
+
+    expect(projectReadyToCollect(cards, new Map())).toEqual(cards)
+
+    const closed = projectReadyToCollect(cards, new Map([
+      [liveCard.ticketId, { ...liveCard.ringOut, status: 'closed' as const, closedAt: NOW }],
+    ]))
+    expect(closed).toEqual([secondCard])
+  })
+
+  it('shows the exact new balance after a partial payment without dropping the card', () => {
+    const partlyPaid = {
+      ...liveCard.ringOut,
+      paidCents: 5_000,
+      balanceCents: 5_800,
+      canRecordPayment: true,
+      canClose: false,
+    }
+
+    const projected = projectReadyToCollect(
+      [liveCard],
+      new Map([[liveCard.ticketId, partlyPaid]]),
+    )
+
+    expect(projected).toHaveLength(1)
+    expect(projected[0].ringOut).toEqual(partlyPaid)
+    expect(projected[0].ticketNumber).toBe(liveCard.ticketNumber)
+  })
+
+  it('drops a card the server itself already reports as no longer open', () => {
+    const alreadyClosed = {
+      ...liveCard,
+      ringOut: { ...liveCard.ringOut, status: 'canceled' as const },
+    }
+    expect(projectReadyToCollect([alreadyClosed], new Map())).toEqual([])
   })
 })

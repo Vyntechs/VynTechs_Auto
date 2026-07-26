@@ -5,7 +5,10 @@ const uuid = z.uuid().transform((value) => value.toLowerCase())
 const timestamp = z.string().datetime({ offset: true })
 const money = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 
-const ringOut = z.strictObject({
+// Exported so every surface that carries a ring-out over the wire — the
+// payment/close responses and the Today `Ready to collect` projection — parses
+// the exact same money shape instead of describing it twice.
+export const ringOutSchema = z.strictObject({
   ticketId: uuid,
   status: z.enum(['open', 'closed', 'canceled']),
   owed: z.strictObject({
@@ -33,6 +36,6 @@ const ringOut = z.strictObject({
 })
 
 export function parseRingOutResponse(value: unknown): TicketRingOut | null {
-  const parsed = z.strictObject({ ringOut }).safeParse(value)
+  const parsed = z.strictObject({ ringOut: ringOutSchema }).safeParse(value)
   return parsed.success ? parsed.data.ringOut : null
 }
