@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
+    "test:shards": "node scripts/test-shards.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "qa:golden:provision": "node scripts/shop-os-golden-browser.mjs provision",
