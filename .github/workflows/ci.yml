@@ -10,9 +10,11 @@ permissions:
   contents: read
 
 jobs:
+  # Typecheck and build stay on one runner: both are single commands and the
+  # build is the route-count proof.
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -34,10 +36,40 @@ jobs:
       - name: Typecheck
         run: pnpm exec tsc --noEmit
 
-      # Eight serialized shards, two workers — the documented suite policy.
-      # A monolithic run is database-heavy enough to exit without a result.
-      - name: Test
-        run: pnpm test:shards
-
       - name: Build
         run: pnpm build
+
+  # The suite is sharded because it is database-heavy and contends with itself,
+  # not because it must run in order. Locally that means eight serialized shards
+  # on one machine (`pnpm test:shards`); in CI each shard gets its own runner,
+  # so they run at once with no contention and wall clock is the slowest shard
+  # rather than the sum of all eight.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.18.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: pnpm exec vitest run --shard="$SHARD/8" --maxWorkers=2 --reporter=dot
