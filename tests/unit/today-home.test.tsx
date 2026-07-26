@@ -111,6 +111,7 @@ const todayJobs: TodayTicketJobs = {
   createdJobs: [],
   teamJobs: [],
   partsJobs: [],
+  readyToCollect: [],
   linkedSessionIds: ['session-linked'],
 }
 
@@ -187,6 +188,7 @@ describe('TodayHome', () => {
       createdJobs: [],
       teamJobs: [],
       partsJobs: [],
+      readyToCollect: [],
       linkedSessionIds: [],
     }
 
@@ -279,6 +281,7 @@ describe('TodayHome', () => {
       }],
       teamJobs: [],
       partsJobs: [],
+      readyToCollect: [],
       linkedSessionIds: [],
     }
 
@@ -323,6 +326,7 @@ describe('TodayHome', () => {
         createdJobs: [],
         teamJobs: [],
         partsJobs: [],
+        readyToCollect: [],
         linkedSessionIds: [],
       }
       const emptyJobs: TodayTicketJobs = {
@@ -331,6 +335,7 @@ describe('TodayHome', () => {
         createdJobs: [],
         teamJobs: [],
         partsJobs: [],
+        readyToCollect: [],
         linkedSessionIds: [],
       }
       const { rerender } = render(

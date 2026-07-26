@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TodayJobsBoard as TodayJobsBoardComponent } from '@/components/screens/today-jobs-board'
+import type { ReadyToCollectTicket } from '@/lib/shop-os/ready-to-collect'
+import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TodayTicketJob } from '@/lib/tickets'
 import type { ComponentProps } from 'react'
 
@@ -1176,5 +1178,189 @@ describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
 
     expect(screen.queryByText('Record findings')).not.toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: /Open work|Review blocked work|Review work order/ })).toHaveLength(2)
+  })
+})
+
+const READY_TICKET = '00000000-0000-4000-8000-000000000201'
+const READY_JOB = '00000000-0000-4000-8000-000000000202'
+const PAYMENT_KEY = '00000000-0000-4000-8000-000000000203'
+
+const readyRingOut: TicketRingOut = {
+  ticketId: READY_TICKET,
+  status: 'open',
+  owed: {
+    subtotalCents: 15_000,
+    taxCents: 800,
+    totalCents: 15_800,
+    jobs: [{ jobId: READY_JOB, title: 'Front brakes', subtotalCents: 15_000 }],
+  },
+  paidCents: 0,
+  balanceCents: 15_800,
+  payments: [],
+  canRecordPayment: true,
+  canClose: false,
+  closedAt: null,
+}
+
+const readyCard: ReadyToCollectTicket = {
+  ticketId: READY_TICKET,
+  ticketNumber: 77,
+  concern: 'Grinding noise when braking',
+  customerName: 'Ada Driver',
+  vehicle: { year: 2020, make: 'Ford', model: 'F-150' },
+  ringOut: readyRingOut,
+}
+
+describe('TodayJobsBoard ready to collect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('crypto', { randomUUID: vi.fn().mockReturnValue(PAYMENT_KEY) })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps a finished repair order on the board with its exact balance', () => {
+    render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[readyCard]} />)
+
+    expect(screen.getByRole('heading', { name: 'Ready to collect' })).toBeInTheDocument()
+    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    expect(within(card).getByText('#0077')).toBeInTheDocument()
+    expect(within(card).getByText('Ada Driver')).toBeInTheDocument()
+    expect(within(card).getByText('2020 Ford F-150')).toBeInTheDocument()
+    expect(within(card).getByText('Grinding noise when braking')).toBeInTheDocument()
+    // Exactly the server's balance, not a recomputation.
+    expect(within(card).getByText('$158.00 due')).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: 'Open ticket 77' }))
+      .toHaveAttribute('href', `/tickets/${READY_TICKET}`)
+    expect(screen.getByRole('button', { name: 'Collect & close' })).toBeInTheDocument()
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('rings out in place without leaving Today', () => {
+    render(
+      <TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[readyCard]} />,
+    )
+
+    expect(screen.queryByRole('heading', { name: 'Ring out' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Collect & close' }))
+
+    // The existing payment/close tool, mounted inside the same card.
+    const ringOut = screen.getByRole('region', { name: 'Ring out' })
+    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    expect(card.parentElement).toContainElement(ringOut)
+    expect(within(ringOut).getByText('Front brakes')).toBeInTheDocument()
+    expect(within(ringOut).getByLabelText('Payment amount')).toHaveValue('158.00')
+
+    // Still Today: no navigation, and the rest of the board stayed mounted.
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(refreshMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'My work' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close panel' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+  })
+
+  it('keeps the card and the exact new balance after a partial payment', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ringOut: {
+          ...readyRingOut,
+          paidCents: 5_000,
+          balanceCents: 10_800,
+          payments: [{
+            id: '00000000-0000-4000-8000-000000000204',
+            amountCents: 5_000,
+            method: 'cash',
+            note: null,
+            recordedAt: '2026-07-26T10:00:00.000Z',
+          }],
+        },
+      }),
+    }))
+    render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[readyCard]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collect & close' }))
+    fireEvent.change(screen.getByLabelText('Payment amount'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Payment amount')).toHaveValue('108.00'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }))
+
+    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    expect(within(card).getByText('$108.00 due')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/tickets/${READY_TICKET}/payments`,
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('removes the card only once the server confirms the repair order closed', async () => {
+    const paidInFull: ReadyToCollectTicket = {
+      ...readyCard,
+      ringOut: {
+        ...readyRingOut,
+        paidCents: 15_800,
+        balanceCents: 0,
+        canRecordPayment: false,
+        canClose: true,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ringOut: {
+          ...paidInFull.ringOut,
+          status: 'closed',
+          canClose: false,
+          closedAt: '2026-07-26T10:05:00.000Z',
+        },
+      }),
+    }))
+    render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[paidInFull]} />)
+
+    expect(screen.getByRole('article', { name: 'Ticket 77: ready to collect' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close repair order' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paid & close ticket' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('article', { name: 'Ticket 77: ready to collect' })).toBeNull()
+    })
+    expect(screen.queryByRole('heading', { name: 'Ready to collect' })).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('Ticket 77 is closed and off the board.')
+    expect(fetch).toHaveBeenCalledWith(`/api/tickets/${READY_TICKET}/close`, { method: 'POST' })
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+  it('shows a technician no lane and no money at all', () => {
+    // The server sends an empty projection to anyone who cannot close tickets.
+    render(<TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[]} />)
+
+    expect(screen.queryByRole('heading', { name: 'Ready to collect' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collect & close' })).toBeNull()
+    expect(document.body.textContent).not.toMatch(/\$/)
+  })
+
+  it('lays the card out on the shared row grid that collapses at phone width', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'components/screens/today-jobs-board.module.css'),
+      'utf8',
+    )
+    render(
+      <TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[readyCard]} />,
+    )
+
+    // Reusing .row/.details/.action means the audited 375px rules already apply.
+    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    const jobRow = screen.getByRole('article', { name: 'Ticket 41: Trace intermittent no-start' })
+    expect(card.className).toBe(jobRow.className)
+    const narrowRules = css.slice(css.indexOf('@media (max-width: 375px)'))
+    expect(narrowRules).toMatch(/\.row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s)
+    expect(css).toMatch(/\.balanceFact\s*{[^}]*font-weight:\s*700/s)
+    expect(css).toMatch(/\.facts span\s*{[^}]*overflow-wrap:\s*anywhere/s)
   })
 })

@@ -149,6 +149,12 @@
   color: var(--vt-rule-strong);
 }
 
+/* The one number an advisor is looking for on a finished repair order. */
+.balanceFact {
+  color: var(--vt-fg);
+  font-weight: 700;
+}
+
 .action {
   display: flex;
   align-items: center;
