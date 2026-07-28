@@ -48,6 +48,18 @@ export async function checkpoint(
     scroll: page.viewportSize()?.width,
   }))
 
+  // Capture the page as the journey left it, before anything else runs in it.
+  // axe-core injects into the document to analyze it, so a screenshot taken
+  // afterwards is a picture of the page plus the tool, not the page.
+  // Capture the viewport, not the full page. A full-page capture composites
+  // `position: fixed` elements into the stitched image at a scroll-dependent
+  // offset, which drew the app shell's off-screen skip link over the content
+  // and read as a layout defect that does not exist. The viewport is also the
+  // honest answer to "what does this look like at this width."
+  const evidence = process.env.GOLDEN_QA_RETAIN_EVIDENCE === '1'
+    ? await page.screenshot()
+    : null
+
   const accessibility = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze()
@@ -70,11 +82,8 @@ export async function checkpoint(
   // The overflow and accessibility gates above are machine truth. When a human
   // needs to review the same checkpoint by eye, retained evidence also keeps
   // the rendered page at the exact project viewport.
-  if (process.env.GOLDEN_QA_RETAIN_EVIDENCE === '1') {
-    await testInfo.attach(`${label}.png`, {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: 'image/png',
-    })
+  if (evidence) {
+    await testInfo.attach(`${label}.png`, { body: evidence, contentType: 'image/png' })
   }
   expect(blocking, `${label} has serious or critical accessibility violations`).toEqual([])
 }

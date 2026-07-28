@@ -321,10 +321,21 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
     await advisor.getByLabel('Payment amount').fill('194.40')
     await advisor.getByLabel('How paid').selectOption('card')
-    await advisor.getByRole('button', { name: 'Record payment' }).click()
-    await expect(advisor.getByText('$0.00').last()).toBeVisible()
+    // Review the mounted tool while it is actionable. Checkpointing after the
+    // click instead would audit whatever transient busy state the request
+    // happened to be in.
     await checkpoint(advisor, testInfo, 'advisor-ring-out-in-place')
-    await advisor.getByRole('button', { name: 'Mark paid & close ticket' }).click()
+    const paymentResponsePromise = advisor.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/payments$/i.test(new URL(response.url()).pathname)
+    ))
+    await advisor.getByRole('button', { name: 'Record payment' }).click()
+    expect((await paymentResponsePromise).status(), 'in-place payment API status').toBe(200)
+    // Named, enabled, and no longer "Closing…": the payment landed and the
+    // balance it reported is zero.
+    const closeButton = advisor.getByRole('button', { name: 'Mark paid & close ticket' })
+    await expect(closeButton).toBeEnabled()
+    await closeButton.click()
     await expect(advisor.getByRole('status').filter({
       hasText: `Ticket ${ticketNumber} is closed and off the board.`,
     })).toBeVisible()

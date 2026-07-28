@@ -12,6 +12,15 @@ describe('Golden browser fault receipts', () => {
     expect(isExpectedPageNavigationAbort('GET', '/tickets/new', 'net::ERR_FAILED')).toBe(false)
   })
 
+  it('allows the Today background poll to be canceled by leaving the page', () => {
+    expect(isExpectedPageNavigationAbort('GET', '/api/today/jobs', 'net::ERR_ABORTED')).toBe(true)
+    // Only that one read, only that one way.
+    expect(isExpectedPageNavigationAbort('POST', '/api/today/jobs', 'net::ERR_ABORTED')).toBe(false)
+    expect(isExpectedPageNavigationAbort('GET', '/api/today/jobs', 'net::ERR_FAILED')).toBe(false)
+    expect(isExpectedPageNavigationAbort('GET', '/api/today/jobs/extra', 'net::ERR_ABORTED')).toBe(false)
+    expect(isExpectedPageNavigationAbort('GET', '/api/tickets/abc/payments', 'net::ERR_ABORTED')).toBe(false)
+  })
+
   it('ignores only the missing Vercel Analytics script on local hosts', () => {
     const missing = 'Failed to load resource: the server responded with a status of 404 (Not Found)'
     const refused = [
