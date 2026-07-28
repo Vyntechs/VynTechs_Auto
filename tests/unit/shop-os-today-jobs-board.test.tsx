@@ -1239,7 +1239,7 @@ describe('TodayJobsBoard ready to collect', () => {
     expect(pushMock).not.toHaveBeenCalled()
   })
 
-  it('rings out in place without leaving Today', () => {
+  it('rings out in place without leaving Today', async () => {
     render(
       <TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[readyCard]} />,
     )
@@ -1251,6 +1251,9 @@ describe('TodayJobsBoard ready to collect', () => {
     const ringOut = screen.getByRole('region', { name: 'Ring out' })
     const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
     expect(card.parentElement).toContainElement(ringOut)
+    // The operator lands in the revealed tool, like every other inline
+    // workspace on this board.
+    await waitFor(() => expect(ringOut).toHaveFocus())
     expect(within(ringOut).getByText('Front brakes')).toBeInTheDocument()
     expect(within(ringOut).getByLabelText('Payment amount')).toHaveValue('158.00')
 
