@@ -1,11 +1,18 @@
+// Today keeps itself current with a background poll. Leaving the page while
+// one is in flight cancels it, which is the browser doing exactly the right
+// thing — the answer was about to be thrown away. That single read is the only
+// API request allowed to abort; every mutation and every other endpoint still
+// counts as a fault.
+const CANCELLABLE_BACKGROUND_READS = new Set(['/api/today/jobs'])
+
 export function isExpectedPageNavigationAbort(
   method: string,
   pathname: string,
   failure: string,
 ): boolean {
-  return method === 'GET'
-    && !pathname.startsWith('/api/')
-    && failure === 'net::ERR_ABORTED'
+  if (method !== 'GET' || failure !== 'net::ERR_ABORTED') return false
+  if (!pathname.startsWith('/api/')) return true
+  return CANCELLABLE_BACKGROUND_READS.has(pathname)
 }
 
 export function isExpectedLocalAnalyticsConsole(
