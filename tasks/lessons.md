@@ -87,3 +87,28 @@ Reason: This volume regenerates AppleDouble junk, and load-driven timeouts read 
 Trigger: A backgrounded `pnpm test:shards | tail` reported exit 0 while two shards had actually failed.
 Rule: Never judge pass/fail from a piped command's status; read the real summary or capture to a file.
 Reason: The pipeline returns the last command's code, silently converting a failed gate into a green one.
+
+### measure-mechanisms-before-recording-them
+Trigger: Wrote "Drizzle re-runs edited migrations" and "the skip link renders over the page" into durable docs unverified.
+Rule: Before recording a mechanism as fact, read the source or measure it in the running page.
+Reason: Both were wrong; one invented a production gate, the other invented a defect.
+
+### screenshots-must-predate-the-tooling
+Trigger: A fullPage capture composited a fixed, off-screen skip link over content and read as a layout bug.
+Rule: Capture the viewport, before axe or any injected tool runs; verify oddities against the live DOM.
+Reason: Full-page stitching relocates fixed elements, so the evidence lies about the page.
+
+### checkpoint-only-settled-states
+Trigger: A ring-out checkpoint fired mid-POST, auditing a transient disabled button; its $0.00 wait was vacuous.
+Rule: Assert on a value that changes, then checkpoint; never gate on text present before the action.
+Reason: Racing an in-flight request makes a gate pass or fail by timing, not by truth.
+
+### owner-gates-are-business-not-implementation
+Trigger: Escalated "re-journal Drizzle or not" to Brandon as an owner gate; it was an engineering choice.
+Rule: Gate only money, authority, destruction, or business judgment. Engineer the risk away instead.
+Reason: He is non-technical and directs outcomes; handing him implementation risk is passing the buck.
+
+### measure-the-obvious-fix-before-committing
+Trigger: Assumed making migrations idempotent would enable re-journaling; 45 of 51 turned out not re-runnable.
+Rule: Cheaply measure the assumption the plan rests on before designing around it.
+Reason: The measurement inverted the design — a ledger, not idempotency.
