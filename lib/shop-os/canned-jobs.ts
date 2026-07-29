@@ -5,7 +5,7 @@ import type { AppDb } from '@/lib/db/queries'
 import { cannedJobs, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets } from '@/lib/db/schema'
 import { canBuildQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, formatScaledDecimal, parseScaledDecimal, stableStringify } from '@/lib/shop-os/quote-math'
-import { invalidateActiveQuoteVersion } from '@/lib/shop-os/quotes'
+import { invalidateActiveQuoteVersion, readApprovedJobPricing } from '@/lib/shop-os/quotes'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
@@ -507,6 +507,106 @@ export async function createCannedJob(
     return stableStringify(storedContent(persisted)) === stableStringify(body)
       ? { ok: true, changed: false, cannedJob: safe }
       : conflict()
+  })
+}
+
+// ---- Save a worked job as a canned job -------------------------------------
+//
+// The library only ever filled by hand, so a shop that priced a job perfectly
+// re-priced it from scratch the next time. This turns a job that has already
+// been through the counter into a template, so the library fills itself as a
+// byproduct of working.
+//
+// The lines come from the immutable quote version the customer approved, not
+// from the job's current `job_lines`. That is the same row `getTicketRingOut`
+// bills from — `ticket_jobs.approved_quote_version_id`, read whether or not a
+// later version has superseded it, exactly as `computeOwed` reads it. Saving
+// the live lines instead would be a different number than the shop actually
+// charged: lines stay editable after approval, a re-quote resets the job to
+// `pending_quote`, and a completed repair keeps its approval pinned to the
+// version that authorized the work. A template built from anything but that
+// pinned version would quote the next customer a price this shop never agreed
+// to charge. It also means a job that was never approved has nothing to save,
+// which is a `conflict` rather than a missing job — the surface hides the
+// action until a job is approved, so this refusal is the race guard behind it.
+//
+// Money is copied, never recomputed: part prices, labor hours, labor rates and
+// fees carry across cents-exact, and tax is applied only by the existing
+// `projectRow` projection at the shop's current rate. The persist itself goes
+// through `createCannedJob`, so the audited tenant gate, owner-or-founder
+// manage rule and client-key idempotency are the ones already proven here.
+//
+// Line order is preserved as the approved snapshot ordered it, re-numbered in
+// tens so an owner can insert between lines later. The new template sorts to 0
+// and therefore falls to the library's title ordering, which keeps an
+// auto-filling library alphabetical instead of ordered by whichever job
+// happened to be rung out first.
+export async function saveTicketJobAsCannedJob(
+  db: AppDb,
+  input: { actor: CannedJobActor; jobId: unknown; clientKey: unknown; title?: unknown },
+): Promise<MutationResult> {
+  const jobId = uuidSchema.safeParse(input.jobId)
+  if (!jobId.success) return invalidInput()
+  const prepared = await db.transaction(async (tx) => {
+    const actor = await loadActor(tx, input.actor, 'manage')
+    if (!actor) return notFound()
+    const [job] = await tx.select({
+      id: ticketJobs.id,
+      ticketId: ticketJobs.ticketId,
+      requiredSkillTier: ticketJobs.requiredSkillTier,
+      approvalState: ticketJobs.approvalState,
+      approvedQuoteVersionId: ticketJobs.approvedQuoteVersionId,
+    }).from(ticketJobs).where(and(
+      eq(ticketJobs.shopId, actor.shopId),
+      eq(ticketJobs.id, jobId.data),
+    )).limit(1)
+    if (!job) return notFound()
+    if (job.approvalState !== 'approved' || !job.approvedQuoteVersionId) return conflict()
+    if (job.requiredSkillTier !== 1 && job.requiredSkillTier !== 2 && job.requiredSkillTier !== 3) {
+      return conflict()
+    }
+    const [version] = await tx.select({ snapshot: quoteVersions.snapshot })
+      .from(quoteVersions).where(and(
+        eq(quoteVersions.shopId, actor.shopId),
+        eq(quoteVersions.ticketId, job.ticketId),
+        eq(quoteVersions.id, job.approvedQuoteVersionId),
+      )).limit(1)
+    if (!version) return conflict()
+    const authorized = readApprovedJobPricing(version.snapshot, job.id)
+    if (!authorized || authorized.lines.length === 0) return conflict()
+    return {
+      ok: true as const,
+      body: {
+        title: input.title === undefined ? authorized.title : input.title,
+        kind: authorized.kind,
+        defaultRequiredSkillTier: job.requiredSkillTier,
+        sort: 0,
+        lines: authorized.lines.map((line, index) => {
+          const sort = index * 10
+          if (line.kind === 'part') return {
+            kind: 'part', description: line.description, sort,
+            quantity: line.quantity, priceCents: line.priceCents, taxable: line.taxable,
+            ...(line.partNumber === null ? {} : { partNumber: line.partNumber }),
+            ...(line.brand === null ? {} : { brand: line.brand }),
+          }
+          if (line.kind === 'labor') return {
+            kind: 'labor', description: line.description, sort,
+            hours: line.hours, priceCents: line.priceCents, taxable: line.taxable,
+            ...(line.laborRateCents === null ? {} : { laborRateCents: line.laborRateCents }),
+          }
+          return {
+            kind: 'fee', description: line.description, sort,
+            priceCents: line.priceCents, taxable: line.taxable,
+          }
+        }),
+      },
+    }
+  }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
+  if (!prepared.ok) return prepared
+  return createCannedJob(db, {
+    actor: input.actor,
+    clientKey: input.clientKey,
+    body: prepared.body,
   })
 }
 
