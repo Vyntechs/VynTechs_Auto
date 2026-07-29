@@ -58,8 +58,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, currentProfileId, role, team, diagnosticsEntitled }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean }) => (
-    <div>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean }) => (
+    <div data-canned-library={String(canManageCannedJobs)}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
   ),
 }))
 
@@ -180,6 +180,21 @@ describe('TicketPage', () => {
 
     expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1; diagnostics false`)).toBeInTheDocument()
     expect(checkAccessMock).toHaveBeenCalledWith({}, profile.userId)
+  })
+
+  it.each([
+    ['owner', 'true'],
+    ['advisor', 'false'],
+    ['tech', 'false'],
+  ])('hands canned-library authority to a %s as %s', async (role, granted) => {
+    requireUserMock.mockResolvedValue({
+      ...authContext,
+      profile: { ...profile, role: role as typeof profile.role },
+    })
+
+    render(await TicketPage(pageProps()))
+
+    expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-canned-library', granted)
   })
 
   it('keeps the ticket readable but omits quote entry for an unsupported role', async () => {

@@ -456,6 +456,10 @@
   margin-top: 10px;
 }
 
+.cannedJobAction {
+  margin-top: 10px;
+}
+
 .lifecycleControl {
   border-top: 1px solid var(--vt-rule);
   padding-top: 18px;
