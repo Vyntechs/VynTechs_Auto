@@ -86,6 +86,9 @@ skills/
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/git-context.sh
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/*.md
 
 # Visual brainstorming companion (skill: superpowers:brainstorming)
 .superpowers/

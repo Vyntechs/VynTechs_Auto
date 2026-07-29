@@ -175,6 +175,24 @@ be the sole system in the shop, and it starts with a decision, not a commit.
 
 ---
 
+## Who builds what
+
+Four resident specialists now live in `.claude/agents/` and travel with the
+repository. They encode this codebase's actual conventions rather than generic
+advice, and each owns a disjoint set of files so two can work at once without
+colliding.
+
+| Seat | Owns | Takes on this list |
+|---|---|---|
+| `shop-os-domain-engineer` | `lib/shop-os/*`, `lib/tickets.ts`, schema, migrations, money | 1, 3, 6, 7 (the projections and the write paths) |
+| `shop-os-surface-engineer` | `app/**`, `components/screens/*`, `components/vt/*` | 1, 2, 3, 4, 6, 7 (the screens and routes) |
+| `shop-floor-interaction-designer` | decides the flow; writes the spec, no code | 5 first, then 1 and 4 |
+| `golden-evidence-engineer` | the hosted journey, the shard suite, receipts | every item, before it is called done |
+
+The existing global bench — product advocate, legal counsel, security reviewer,
+release engineer, finance — stays advisory and read-only. It was a boardroom with no
+build crew; this is the build crew.
+
 ## Open owner decisions
 
 - What your repair-order document says — shop identity, authorization language,
