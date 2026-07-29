@@ -24,6 +24,7 @@ import {
   type QuoteWorkspaceProjection,
 } from './inline-quote-workspace'
 import { TicketAssignmentControl } from './ticket-assignment-control'
+import { TicketCannedJobAction } from './ticket-canned-job-action'
 import { TicketInterruptionAction } from './ticket-interruption-action'
 import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
@@ -76,6 +77,7 @@ export function TicketDetailScreen({
   ticket,
   canBuildQuote = false,
   canCreateVendorAccount = false,
+  canManageCannedJobs = false,
   currentProfileId = null,
   currentProfileName = null,
   role = '',
@@ -88,6 +90,7 @@ export function TicketDetailScreen({
   ticket: TicketDetail
   canBuildQuote?: boolean
   canCreateVendorAccount?: boolean
+  canManageCannedJobs?: boolean
   currentProfileId?: string | null
   currentProfileName?: string | null
   role?: string
@@ -506,6 +509,12 @@ export function TicketDetailScreen({
                     <p className={styles.assignmentNotice} role="status" aria-live="polite">
                       {assignmentOverrides.get(job.id)?.notice}
                     </p>
+                  )}
+                  {activeTool === null && canManageCannedJobs && job.approvalState === 'approved' && (
+                    <TicketCannedJobAction
+                      jobId={job.id}
+                      onSaved={() => setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)}
+                    />
                   )}
                 </div>
               </li>

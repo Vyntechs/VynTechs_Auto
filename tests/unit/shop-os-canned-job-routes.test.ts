@@ -14,12 +14,15 @@ vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => {
     replaceCannedJob: vi.fn(),
     retireCannedJob: vi.fn(),
     applyCannedJobToTicket: vi.fn(),
+    saveTicketJobAsCannedJob: vi.fn(),
   }
 })
+vi.mock('@/lib/rate-limit', () => ({ rateLimitReject: vi.fn(async () => null) }))
 
 import { GET, POST } from '@/app/api/shop/canned-jobs/route'
 import { PUT, DELETE } from '@/app/api/shop/canned-jobs/[id]/route'
 import { POST as applyCanned } from '@/app/api/tickets/[id]/quote/canned-jobs/route'
+import { POST as saveFromJob } from '@/app/api/shop/canned-jobs/from-job/route'
 import { isFounder, requireUserAndProfile } from '@/lib/auth'
 import { paywallReject } from '@/lib/auth-access'
 import {
@@ -28,6 +31,7 @@ import {
   listCannedJobs,
   replaceCannedJob,
   retireCannedJob,
+  saveTicketJobAsCannedJob,
 } from '@/lib/shop-os/canned-jobs'
 
 const PROFILE_ID = '00000000-0000-4000-8000-000000000001'
@@ -35,7 +39,9 @@ const USER_ID = '00000000-0000-4000-8000-000000000101'
 const CANNED_ID = '00000000-0000-4000-8000-000000000201'
 const CLIENT_KEY = '00000000-0000-4000-8000-000000000301'
 const FINGERPRINT = 'a'.repeat(64)
-const profile = { id: PROFILE_ID, userId: USER_ID, role: 'owner' }
+const SHOP_ID = '00000000-0000-4000-8000-000000000601'
+const JOB_ID = '00000000-0000-4000-8000-000000000701'
+const profile = { id: PROFILE_ID, userId: USER_ID, role: 'owner', shopId: SHOP_ID }
 const authContext = { profile, user: { id: USER_ID, email: 'owner@shop.test' } }
 const cannedJob = {
   id: CANNED_ID,
@@ -70,6 +76,7 @@ const createMock = vi.mocked(createCannedJob)
 const replaceMock = vi.mocked(replaceCannedJob)
 const retireMock = vi.mocked(retireCannedJob)
 const applyMock = vi.mocked(applyCannedJobToTicket)
+const saveFromJobMock = vi.mocked(saveTicketJobAsCannedJob)
 
 function request(method: string, body?: unknown, raw?: string) {
   return new Request('http://localhost/api/shop/canned-jobs', {
@@ -103,6 +110,7 @@ describe('Shop OS canned-job routes', () => {
     { invoke: () => PUT(request('PUT', { expectedFingerprint: FINGERPRINT, cannedJob: input }), params()), mock: replaceMock },
     { invoke: () => DELETE(request('DELETE', { expectedFingerprint: FINGERPRINT }), params()), mock: retireMock },
     { invoke: () => applyCanned(request('POST', applyBody), ticketParams()), mock: applyMock },
+    { invoke: () => saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID })), mock: saveFromJobMock },
   ]
 
   it.each(calls())('authenticates and checks paywall before domain access', async ({ invoke, mock }) => {
@@ -122,6 +130,7 @@ describe('Shop OS canned-job routes', () => {
     { invoke: () => PUT(request('PUT', undefined, 'bad{'), params()), mock: replaceMock },
     { invoke: () => DELETE(request('DELETE', undefined, 'bad{'), params()), mock: retireMock },
     { invoke: () => applyCanned(request('POST', undefined, 'bad{'), ticketParams()), mock: applyMock },
+    { invoke: () => saveFromJob(request('POST', undefined, 'bad{')), mock: saveFromJobMock },
   ])('rejects malformed JSON before mutation', async ({ invoke, mock }) => {
     const response = await invoke()
     expect(response.status).toBe(400)
@@ -137,6 +146,42 @@ describe('Shop OS canned-job routes', () => {
     expect(replaceMock).not.toHaveBeenCalled()
     expect(retireMock).not.toHaveBeenCalled()
     expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('turns a worked job into a library row on the same envelope as a hand-authored one', async () => {
+    founderMock.mockReturnValue(true)
+    saveFromJobMock.mockResolvedValue({
+      ok: true,
+      changed: true,
+      cannedJob: { ...cannedJob, shopId: 'SECRET_SHOP', createdByProfileId: 'SECRET_PROFILE' },
+    } as never)
+
+    const created = await saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID }))
+    expect(created.status).toBe(201)
+    expect(saveFromJobMock).toHaveBeenCalledWith({}, {
+      actor: { profileId: PROFILE_ID, founderOverride: true },
+      jobId: JOB_ID,
+      clientKey: CLIENT_KEY,
+    })
+    const serialized = JSON.stringify(await created.json())
+    expect(serialized).toContain('Front brake service')
+    expect(serialized).not.toMatch(/SECRET_|shopId|ProfileId/)
+
+    saveFromJobMock.mockResolvedValue({ ok: true, changed: false, cannedJob } as never)
+    expect((await saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID }))).status).toBe(200)
+  })
+
+  it('refuses an unapproved job and an off-shop job with the shared canned mapping', async () => {
+    saveFromJobMock.mockResolvedValue({ ok: false, error: 'conflict', retryable: false } as never)
+    const stale = await saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID }))
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toEqual({ error: 'conflict' })
+
+    saveFromJobMock.mockResolvedValue({ ok: false, error: 'not_found' } as never)
+    expect((await saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID }))).status).toBe(404)
+
+    expect((await saveFromJob(request('POST', { clientKey: CLIENT_KEY, jobId: JOB_ID, extra: true }))).status).toBe(422)
+    expect(saveFromJobMock).toHaveBeenCalledTimes(2)
   })
 
   it('forwards the exact canned-apply envelope and serializes only safe job truth', async () => {

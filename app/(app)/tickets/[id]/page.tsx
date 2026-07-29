@@ -9,6 +9,7 @@ import {
   canBuildQuotes,
   canCloseTickets,
   canManageIntegrations,
+  canManageTeam,
   canPlacePartsOrders,
 } from '@/lib/shop-os/capabilities'
 import { getTicketRingOut } from '@/lib/shop-os/ring-out'
@@ -62,6 +63,10 @@ export default async function TicketPage({
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
       canCreateVendorAccount={canManageIntegrations(
+        ctx.profile.role,
+        isFounder(ctx.user.email),
+      )}
+      canManageCannedJobs={canManageTeam(
         ctx.profile.role,
         isFounder(ctx.user.email),
       )}

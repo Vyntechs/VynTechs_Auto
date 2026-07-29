@@ -846,4 +846,138 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Close repair order' })).toBeNull()
   })
+
+  const CANNED_JOB_ID = '00000000-0000-4000-8000-000000000040'
+  const CANNED_CLIENT_KEY = '00000000-0000-4000-8000-000000000041'
+  const cannedTemplate = {
+    id: '00000000-0000-4000-8000-000000000042',
+    title: 'Front brake service',
+    kind: 'repair',
+    defaultRequiredSkillTier: 2,
+    sort: 0,
+    lines: [{ kind: 'fee', description: 'Shop supplies', sort: 0, priceCents: 500, taxable: true }],
+    fingerprint: 'a'.repeat(64),
+    summary: { subtotalCents: 500, taxableSubtotalCents: 500, taxCents: 41, totalCents: 541 },
+  }
+  const cannedTicket = () => ticket({
+    jobs: [
+      job({
+        id: CANNED_JOB_ID, title: 'Front brake service', kind: 'repair',
+        requiredSkillTier: 2, approvalState: 'approved', workStatus: 'done',
+      }),
+      job({
+        id: 'unapproved-job', title: 'Replace wipers', kind: 'maintenance',
+        requiredSkillTier: 1, approvalState: 'quote_ready',
+      }),
+    ],
+  })
+
+  it('offers the canned-library save only on the approved job, and never to a technician', () => {
+    const { rerender } = render(<TicketDetailScreen
+      role="owner"
+      canManageCannedJobs
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      ticket={cannedTicket()}
+    />)
+
+    const approved = screen.getByRole('heading', { name: 'Front brake service' }).closest('li')!
+    const unapproved = screen.getByRole('heading', { name: 'Replace wipers' }).closest('li')!
+    expect(within(approved).getByRole('button', { name: 'Save as canned job' })).toBeInTheDocument()
+    expect(within(unapproved).queryByRole('button', { name: 'Save as canned job' })).toBeNull()
+
+    rerender(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      currentProfileName="Toni Tech"
+      ticket={cannedTicket()}
+    />)
+    expect(screen.queryByRole('button', { name: 'Save as canned job' })).toBeNull()
+  })
+
+  it('files the approved job into the canned library without leaving the repair order', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('crypto', { randomUUID: () => CANNED_CLIENT_KEY })
+    const fetchMock = vi.fn(async () => Response.json(
+      { changed: true, cannedJob: cannedTemplate },
+      { status: 201 },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="owner"
+      canManageCannedJobs
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      ticket={cannedTicket()}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Front brake service' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Save as canned job' }))
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/shop/canned-jobs/from-job', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ clientKey: CANNED_CLIENT_KEY, jobId: CANNED_JOB_ID }),
+    }))
+    expect(await within(row).findByText('Saved to the canned library as “Front brake service”.'))
+      .toHaveAttribute('role', 'status')
+    expect(within(row).queryByRole('button', { name: 'Save as canned job' })).toBeNull()
+    expect(screen.getAllByText('RO 000042').length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: 'Replace wipers' })).toBeInTheDocument()
+    expect(row).toHaveFocus()
+  })
+
+  it('replays one key so a repeat save reads as already saved instead of a second template', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('crypto', { randomUUID: () => CANNED_CLIENT_KEY })
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(Response.json({ changed: false, cannedJob: cannedTemplate }, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TicketDetailScreen
+      role="owner"
+      canManageCannedJobs
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      ticket={cannedTicket()}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Front brake service' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Save as canned job' }))
+    expect(await within(row).findByText(
+      'Could not reach the server. The repair order is unchanged; try again.',
+    )).toBeInTheDocument()
+
+    await user.click(within(row).getByRole('button', { name: 'Save as canned job' }))
+    expect(await within(row).findByText('Already saved to the canned library as “Front brake service”.'))
+      .toBeInTheDocument()
+
+    const keys = (fetchMock.mock.calls as unknown as [string, RequestInit][])
+      .map((call) => JSON.parse(String(call[1].body)).clientKey)
+    expect(keys).toEqual([CANNED_CLIENT_KEY, CANNED_CLIENT_KEY])
+  })
+
+  it('states an owner-only refusal without disturbing the mounted repair order', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('crypto', { randomUUID: () => CANNED_CLIENT_KEY })
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'not_found' }, { status: 404 })))
+
+    render(<TicketDetailScreen
+      role="owner"
+      canManageCannedJobs
+      currentProfileId="owner-1"
+      currentProfileName="Olivia Owner"
+      ticket={cannedTicket()}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Front brake service' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Save as canned job' }))
+
+    expect(await within(row).findByRole('alert'))
+      .toHaveTextContent('Only an owner can add to the canned library.')
+    expect(within(row).getByRole('button', { name: 'Save as canned job' })).toBeEnabled()
+    expect(screen.getByRole('heading', { name: 'Front brake service' })).toBeInTheDocument()
+  })
 })

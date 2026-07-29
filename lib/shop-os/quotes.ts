@@ -405,6 +405,77 @@ export function readApprovedJobScope(snapshot: unknown, jobId: string): Approved
   }
 }
 
+export type ApprovedJobPricing = {
+  title: string
+  kind: 'diagnostic' | 'repair' | 'maintenance'
+  lines: Array<
+    | {
+      kind: 'part'
+      description: string
+      quantity: string
+      priceCents: number
+      taxable: boolean
+      partNumber: string | null
+      brand: string | null
+    }
+    | {
+      kind: 'labor'
+      description: string
+      hours: string
+      priceCents: number
+      taxable: boolean
+      laborRateCents: number | null
+    }
+    | { kind: 'fee'; description: string; priceCents: number; taxable: boolean }
+  >
+}
+
+// The priced sibling of `readApprovedJobScope`: the same immutable version the
+// customer approved, but carrying the money as well as the work. Callers that
+// need to re-use an authorized price — not just show a technician the scope —
+// read it here so the snapshot stays the one place a stored quote is decoded.
+// Vendor binding, cost, and core charges are deliberately absent: they are
+// internal, and today's bill never includes a core charge either.
+export function readApprovedJobPricing(snapshot: unknown, jobId: string): ApprovedJobPricing | null {
+  let safe: QuoteSnapshotV1
+  try {
+    safe = validatedQuoteSnapshot(snapshot)
+  } catch {
+    return null
+  }
+  const job = safe.jobs.find((candidate) => candidate.id === jobId)
+  if (!job) return null
+  return {
+    title: job.title,
+    kind: job.kind,
+    lines: job.lines.map((line) => {
+      if (line.kind === 'part') return {
+        kind: 'part' as const,
+        description: line.description,
+        quantity: line.quantity,
+        priceCents: line.priceCents,
+        taxable: line.taxable,
+        partNumber: line.partNumber,
+        brand: line.brand,
+      }
+      if (line.kind === 'labor') return {
+        kind: 'labor' as const,
+        description: line.description,
+        hours: line.laborHours as string,
+        priceCents: line.priceCents,
+        taxable: line.taxable,
+        laborRateCents: line.laborRateCents,
+      }
+      return {
+        kind: 'fee' as const,
+        description: line.description,
+        priceCents: line.priceCents,
+        taxable: line.taxable,
+      }
+    }),
+  }
+}
+
 function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus' | 'sessionId'>,
 ): boolean {
