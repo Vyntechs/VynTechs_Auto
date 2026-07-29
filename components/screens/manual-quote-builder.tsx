@@ -158,7 +158,7 @@ export function ManualQuoteBuilder({
       line,
       values: draft.values,
       dirty: true,
-      hoursChanged: draft.hoursChanged,
+      laborChanged: draft.laborChanged,
       clientKey: draft.clientKey,
       invokerKey: editorInvokerKey({
         mode: draft.mode,
@@ -182,7 +182,7 @@ export function ManualQuoteBuilder({
         kind: editor.kind,
         lineId: editor.line?.id ?? null,
         values: editor.values,
-        hoursChanged: editor.hoursChanged,
+        laborChanged: editor.laborChanged,
         clientKey: editor.clientKey,
         savedAt: Date.now(),
       }))
@@ -332,9 +332,9 @@ export function ManualQuoteBuilder({
     return {
       ...target,
       dirty: false,
-      hoursChanged: false,
+      laborChanged: false,
       clientKey: target.mode === 'create' ? crypto.randomUUID() : null,
-      values: line ? valuesFromLine(line) : emptyValues(),
+      values: line ? valuesFromLine(line) : emptyValues(current.configuration.laborRateCents),
       invokerKey: editorInvokerKey(target),
     }
   }
@@ -365,7 +365,7 @@ export function ManualQuoteBuilder({
     setEditor((active) => active ? {
       ...active,
       dirty: true,
-      hoursChanged: active.hoursChanged || key === 'hours',
+      laborChanged: active.laborChanged || key === 'hours' || key === 'laborRate',
       clientKey: active.mode === 'create' ? crypto.randomUUID() : active.clientKey,
       values: { ...active.values, [key]: value },
     } : null)
@@ -501,7 +501,7 @@ export function ManualQuoteBuilder({
       if (
         editor.mode === 'edit'
         && editor.line?.kind === 'labor'
-        && !editor.hoursChanged
+        && !editor.laborChanged
       ) {
         line.priceCents = editor.line.priceCents
       }
@@ -1687,7 +1687,7 @@ type EditorTarget = {
 type EditorState = EditorTarget & {
   values: ManualLineFormValues
   dirty: boolean
-  hoursChanged: boolean
+  laborChanged: boolean
   clientKey: string | null
   invokerKey: string
 }
@@ -1760,14 +1760,20 @@ function LineEditor({
       {editor.kind === 'labor' && (
         <label>Hours<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.hours} onChange={(event) => onChange('hours', event.target.value)} /></label>
       )}
+      {editor.kind === 'labor' && effectiveLaborRate !== null && (
+        // Prefilled with the rate already in effect. An advisor overtypes it for
+        // the few customers still billed at an older rate; the line keeps the
+        // rate it was quoted at, so hours × rate always reconciles.
+        <label>Rate per hour<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.laborRate} onChange={(event) => onChange('laborRate', event.target.value)} /></label>
+      )}
       {(editor.kind !== 'labor' || effectiveLaborRate === null) && (
         <label>Line price<input inputMode="decimal" autoComplete="off" maxLength={64} value={editor.values.price} onChange={(event) => onChange('price', event.target.value)} /></label>
       )}
       {editor.kind === 'labor' && effectiveLaborRate !== null && (
         <p className={styles.calculated}>
-          {editor.mode === 'edit' && !editor.hoursChanged
+          {editor.mode === 'edit' && !editor.laborChanged
             ? `Stored line price · ${safeMoney(editor.line?.priceCents ?? 0)}`
-            : `Calculated line price · ${calculated ?? 'Enter valid hours'}`}
+            : `Calculated line price · ${calculated ?? 'Enter valid hours and rate'}`}
         </p>
       )}
       <label className={styles.checkbox}>
@@ -1869,9 +1875,10 @@ function ConfirmationModal({
   )
 }
 
-function emptyValues(): ManualLineFormValues {
+function emptyValues(shopLaborRateCents: number | null): ManualLineFormValues {
   return {
-    description: '', quantity: '1', hours: '1', price: '', taxable: true,
+    description: '', quantity: '1', hours: '1',
+    laborRate: moneyInput(shopLaborRateCents), price: '', taxable: true,
     partNumber: '', brand: '', fitment: '',
   }
 }
@@ -1881,6 +1888,7 @@ function valuesFromLine(line: BuilderLine): ManualLineFormValues {
     description: line.description,
     quantity: line.quantity,
     hours: line.laborHours ?? '1',
+    laborRate: moneyInput(line.kind === 'labor' ? line.laborRateCents : null),
     price: formatMoneyCents(line.priceCents).slice(1).replace(/,/g, ''),
     taxable: line.taxable,
     partNumber: line.partNumber ?? '',
@@ -1927,6 +1935,16 @@ function safeMoney(cents: number): string {
     return formatMoneyCents(cents)
   } catch {
     return 'Unavailable'
+  }
+}
+
+/** Cents to a typeable money field. Corrupt or absent money leaves it empty. */
+function moneyInput(cents: number | null): string {
+  if (cents === null) return ''
+  try {
+    return formatMoneyCents(cents).slice(1).replace(/,/g, '')
+  } catch {
+    return ''
   }
 }
 

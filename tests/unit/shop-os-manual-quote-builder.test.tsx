@@ -1412,6 +1412,109 @@ describe('ManualQuoteBuilder line mutations', () => {
     })
   })
 
+  it('prefills the shop rate and bills a legacy customer at the corrected rate', async () => {
+    const empty = builder({ activeVersion: null, jobs: [{
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [],
+    }] })
+    const corrected = line({
+      id: NEW_LINE_ID, kind: 'labor', description: 'Brake labor', priceCents: 20_000,
+      partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+      laborHours: '2', laborRateCents: 10_000, taxable: false,
+    })
+    const refreshed = builder({ activeVersion: null, jobs: [{
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open',
+      ...jobFacts, lines: [corrected],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: NEW_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={empty} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))
+    expect(screen.getByLabelText('Rate per hour')).toHaveValue('150.00')
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Brake labor' } })
+    fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '2' } })
+    expect(screen.getByText('Calculated line price · $300.00')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Rate per hour'), { target: { value: '100.00' } })
+    expect(screen.getByText('Calculated line price · $200.00')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    await screen.findByText('Rate · $100.00/hr')
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      line: { kind: 'labor', laborHours: '2', laborRateCents: 10_000, priceCents: 20_000 },
+    })
+    expect(screen.getByText('Labor · 2 hr')).toBeInTheDocument()
+    expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
+  })
+
+  it('corrects a saved labor line to the old rate without touching its hours', async () => {
+    const pinned = line({
+      id: PINNED_LINE_ID, kind: 'labor', description: 'Pinned labor', sort: 7,
+      laborHours: '1.25', laborRateCents: 15_000, priceCents: 18_750,
+      partNumber: null, brand: null, coreChargeCents: null, fitment: null, taxable: false,
+    })
+    const state = builder({ activeVersion: null, jobs: [{
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [pinned],
+    }] })
+    const refreshed = builder({ activeVersion: null, jobs: [{
+      ...state.jobs[0],
+      lines: [{ ...pinned, laborRateCents: 10_000, priceCents: 12_500 }],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, { changed: true, line: { id: pinned.id } }))
+      .mockResolvedValueOnce(response(200, { builder: refreshed }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={state} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Pinned labor' }))
+    expect(screen.getByText('Stored line price · $187.50')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Rate per hour'), { target: { value: '100.00' } })
+    expect(screen.getByText('Calculated line price · $125.00')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    await screen.findByText('Rate · $100.00/hr')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      sort: 7, laborHours: '1.25', laborRateCents: 10_000, priceCents: 12_500,
+    })
+    expect(screen.queryByText('Rate · $150.00/hr')).toBeNull()
+  })
+
+  it('refuses an impossible corrected rate instead of quoting it', async () => {
+    const empty = builder({ activeVersion: null, jobs: [{
+      id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    render(<ManualQuoteBuilder ticket={ticket} builder={empty} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Brake labor' } })
+    fireEvent.change(screen.getByLabelText('Rate per hour'), { target: { value: '-100' } })
+    expect(screen.getByText('Calculated line price · Enter valid hours and rate')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Rate per hour')).toHaveValue('-100')
+  })
+
+  it('keeps the explicit-price editor for a shop with no labor rate', () => {
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder({
+      configuration: {
+        laborRateCents: null, taxRateBps: 825,
+        partsMarkupBps: null, laborRateConfigured: false, taxRateConfigured: true,
+      },
+      activeVersion: null,
+      jobs: [{
+        id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [],
+      }],
+    })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))
+    expect(screen.queryByLabelText('Rate per hour')).toBeNull()
+    expect(screen.getByLabelText('Line price')).toBeInTheDocument()
+    expect(screen.queryByText(/line price ·/i)).toBeNull()
+  })
+
   it('maps retryable conflict and privacy/access boundaries without server-detail leakage', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true, secret: 'NO' }))

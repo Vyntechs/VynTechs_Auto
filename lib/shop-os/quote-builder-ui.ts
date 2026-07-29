@@ -437,6 +437,8 @@ export type ManualLineFormValues = {
   description: string
   quantity: string
   hours: string
+  /** Typed dollars per hour. Empty means "bill at the rate already in effect". */
+  laborRate: string
   price: string
   taxable: boolean
   partNumber: string
@@ -469,13 +471,17 @@ export function buildManualLineInput(
   if (kind === 'labor') {
     const hours = parseScaledDecimal(values.hours, 2)
     if (hours === 0n || hours > 99_999_999n) throw new RangeError('labor hours are invalid')
-    const priceCents = shopLaborRateCents === null
+    // A typed rate corrects this one line for a customer who is not on the shop
+    // rate. It throws rather than truncating, so a bad rate never reaches money.
+    const typedRate = values.laborRate.trim()
+    const rateCents = typedRate ? parseMoneyToCents(typedRate) : shopLaborRateCents
+    const priceCents = rateCents === null
       ? parseMoneyToCents(values.price)
-      : calculateLaborPriceCents(hours, shopLaborRateCents)
+      : calculateLaborPriceCents(hours, rateCents)
     return {
       ...common,
       laborHours: formatScaledDecimal(hours, 2),
-      laborRateCents: shopLaborRateCents,
+      laborRateCents: rateCents,
       priceCents,
     }
   }

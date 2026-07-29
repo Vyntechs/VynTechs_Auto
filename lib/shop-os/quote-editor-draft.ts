@@ -19,7 +19,8 @@ export type QuoteEditorDraft = {
   kind: ManualLineKind
   lineId: string | null
   values: ManualLineFormValues
-  hoursChanged: boolean
+  /** True once hours or the per-hour rate were typed, so the price must recalculate. */
+  laborChanged: boolean
   clientKey: string | null
   savedAt: number
 }
@@ -33,7 +34,7 @@ const DRAFT_KEYS = [
   'kind',
   'lineId',
   'values',
-  'hoursChanged',
+  'laborChanged',
   'clientKey',
   'savedAt',
 ] as const
@@ -42,6 +43,7 @@ const VALUE_KEYS = [
   'description',
   'quantity',
   'hours',
+  'laborRate',
   'price',
   'taxable',
   'partNumber',
@@ -110,7 +112,7 @@ function normalizeDraft(value: unknown): QuoteEditorDraft | null {
     || (value.clientKey !== null && !clientKey)
     || (value.mode !== 'create' && value.mode !== 'edit')
     || (value.kind !== 'part' && value.kind !== 'labor' && value.kind !== 'fee')
-    || typeof value.hoursChanged !== 'boolean'
+    || typeof value.laborChanged !== 'boolean'
     || typeof value.savedAt !== 'number'
     || !Number.isFinite(value.savedAt)
     || !Number.isSafeInteger(value.savedAt)
@@ -128,7 +130,7 @@ function normalizeDraft(value: unknown): QuoteEditorDraft | null {
     kind: value.kind,
     lineId,
     values,
-    hoursChanged: value.hoursChanged,
+    laborChanged: value.laborChanged,
     clientKey,
     savedAt: value.savedAt,
   }
@@ -140,6 +142,7 @@ function normalizeValues(value: unknown): ManualLineFormValues | null {
     !boundedString(value.description, 500)
     || !boundedString(value.quantity, 64)
     || !boundedString(value.hours, 64)
+    || !boundedString(value.laborRate, 64)
     || !boundedString(value.price, 64)
     || typeof value.taxable !== 'boolean'
     || !boundedString(value.partNumber, 200)
@@ -150,6 +153,7 @@ function normalizeValues(value: unknown): ManualLineFormValues | null {
     description: value.description,
     quantity: value.quantity,
     hours: value.hours,
+    laborRate: value.laborRate,
     price: value.price,
     taxable: value.taxable,
     partNumber: value.partNumber,

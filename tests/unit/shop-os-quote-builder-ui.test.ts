@@ -342,7 +342,7 @@ describe('quote builder UI money', () => {
 
 describe('quote builder UI mutation inputs', () => {
   const common = {
-    description: '  Brake service  ', quantity: '1', hours: '1.25',
+    description: '  Brake service  ', quantity: '1', hours: '1.25', laborRate: '',
     price: '187.50', taxable: true, partNumber: '', brand: '', fitment: '',
   }
 
@@ -369,6 +369,27 @@ describe('quote builder UI mutation inputs', () => {
     expect(buildManualLineInput('labor', common, null)).toMatchObject({
       laborRateCents: null, priceCents: 18_750,
     })
+  })
+
+  it('bills a corrected rate exactly and pins that rate to the line', () => {
+    expect(buildManualLineInput('labor', { ...common, laborRate: '100.00' }, 15_000)).toEqual({
+      kind: 'labor', description: 'Brake service', sort: 0, taxable: true,
+      laborHours: '1.25', laborRateCents: 10_000, priceCents: 12_500,
+    })
+    // A blank correction is not a $0 rate — it bills at the rate already in effect.
+    expect(buildManualLineInput('labor', { ...common, laborRate: '   ' }, 15_000)).toMatchObject({
+      laborRateCents: 15_000, priceCents: 18_750,
+    })
+    // Half-up at the cent, never a truncated fraction: 0.33 hr × $100.99.
+    expect(buildManualLineInput('labor', {
+      ...common, hours: '0.33', laborRate: '100.99',
+    }, 15_000)).toMatchObject({ laborRateCents: 10_099, priceCents: 3_333 })
+  })
+
+  it('refuses a negative, over-precise, or non-numeric corrected rate', () => {
+    for (const laborRate of ['-100.00', '100.005', '1e2', 'abc', '$100', '100,00']) {
+      expect(() => buildManualLineInput('labor', { ...common, laborRate }, 15_000)).toThrow()
+    }
   })
 
   it('rejects hostile decimals and builds fee input', () => {

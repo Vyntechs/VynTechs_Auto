@@ -30,13 +30,14 @@ function draft(overrides: Partial<QuoteEditorDraft> = {}): QuoteEditorDraft {
       description: 'Premium pad set',
       quantity: '1',
       hours: '1',
+      laborRate: '155.00',
       price: '129.95',
       taxable: true,
       partNumber: 'PAD-1',
       brand: 'ACME',
       fitment: 'Front axle',
     },
-    hoursChanged: false,
+    laborChanged: false,
     clientKey: CLIENT_KEY,
     savedAt: NOW,
     ...overrides,
@@ -71,7 +72,7 @@ describe('quote editor draft codec', () => {
       kind: 'labor',
       lineId: LINE_ID,
       clientKey: null,
-      hoursChanged: true,
+      laborChanged: true,
     })
 
     expect(parseQuoteEditorDraft(encodeQuoteEditorDraft(edit, NOW), scope)).toEqual(edit)
@@ -102,7 +103,7 @@ describe('quote editor draft codec', () => {
   it('rejects extra keys, wrong types, invalid UUIDs, and inconsistent modes', () => {
     const candidates = [
       { ...draft(), secret: 'hidden' },
-      { ...draft(), hoursChanged: 'false' },
+      { ...draft(), laborChanged: 'false' },
       { ...draft(), actorId: 'not-a-uuid' },
       { ...draft(), kind: 'diagnostic' },
       { ...draft(), mode: 'create', lineId: LINE_ID },
@@ -119,6 +120,7 @@ describe('quote editor draft codec', () => {
       { description: 'x'.repeat(501) },
       { quantity: 'x'.repeat(65) },
       { hours: 'x'.repeat(65) },
+      { laborRate: 'x'.repeat(65) },
       { price: 'x'.repeat(65) },
       { partNumber: 'x'.repeat(201) },
       { brand: 'x'.repeat(201) },
@@ -139,7 +141,7 @@ describe('quote editor draft codec', () => {
     expect(encoded).not.toMatch(/customer|vehicle|concern|total|cookie|password|token/i)
     expect(Object.keys(JSON.parse(encoded))).toEqual([
       'version', 'actorId', 'ticketId', 'jobId', 'mode', 'kind', 'lineId',
-      'values', 'hoursChanged', 'clientKey', 'savedAt',
+      'values', 'laborChanged', 'clientKey', 'savedAt',
     ])
   })
 })
