@@ -57,6 +57,13 @@ type TierWarning = {
 // first thing still missing, in the order the writer reads the form, so pressing
 // Create repair order can always name it and move focus to it instead of leaving
 // a dead button on a long scrolling form.
+/**
+ * The last option in either scope picker. Choosing it swaps the saved-work
+ * dropdown for typed fields, so the writer never has to answer a separate
+ * question about where the scope is coming from.
+ */
+const CUSTOM_SCOPE = 'custom'
+
 type MissingRequirement = { fieldId: string; message: string }
 
 function firstMissingRequirement(form: {
@@ -95,8 +102,8 @@ function firstMissingRequirement(form: {
       return form.cannedCatalogAvailable && form.selectedDiagnostic !== null
         ? null
         : {
-            fieldId: 'ci-diag-mode',
-            message: 'Pick the diagnostic labor to authorize, or set Scope source to Custom and type it.',
+            fieldId: 'ci-diagnostic-template',
+            message: 'Pick the diagnostic labor to authorize, or choose to type it.',
           }
     }
     if (form.customDiagDescription.trim() === '') {
@@ -114,8 +121,8 @@ function firstMissingRequirement(form: {
     return form.cannedCatalogAvailable && form.selectedKnown !== null
       ? null
       : {
-          fieldId: 'ci-known-mode',
-          message: 'Pick the saved work, or set Scope source to Custom request and type it.',
+          fieldId: 'ci-known-template',
+          message: 'Pick the saved work, or choose to type it.',
         }
   }
   if (form.requestedServiceDescription.trim() === '') {
@@ -192,8 +199,6 @@ export function CounterIntake({
   const [mileage, setMileage] = useState('')
   const [plate, setPlate] = useState('')
   const [description, setDescription] = useState('')
-  const [whenStarted, setWhenStarted] = useState('')
-  const [howOften, setHowOften] = useState('')
   const diagnosticJobs = cannedJobs.filter((job) => job.kind === 'diagnostic')
   const knownWorkJobs = cannedJobs.filter((job) => job.kind !== 'diagnostic')
   const [intent, setIntent] = useState<'diagnosis' | 'known'>(
@@ -372,8 +377,11 @@ export function CounterIntake({
           }
     const common = {
       concern: description.trim(),
-      whenStarted: optionalText(whenStarted),
-      howOften: optionalText(howOften),
+      // Onset and frequency are no longer asked for separately — the writer
+      // records them in the customer's own words in the concern. The columns
+      // stay so existing repair orders keep what was captured before.
+      whenStarted: null,
+      howOften: null,
       work,
       assignedTechId,
       ...(confirmBelowTier ? { confirmBelowTier: true } : {}),
@@ -728,8 +736,18 @@ export function CounterIntake({
                 </FormGroup>
               )}
 
-              <FormGroup name="Complaint" hint="Record the customer's own words.">
-                <Field label="What brought them in?" htmlFor="ci-description">
+              <FormGroup
+                name="Complaint"
+                hint={cannedCatalogAvailable
+                  ? 'The customer’s own words, then what the shop is authorized to do.'
+                  : 'The shop’s work menu is temporarily unavailable — type the scope.'}
+                last
+              >
+                <Field
+                  label="What brought them in?"
+                  htmlFor="ci-description"
+                  hint="Their words. Include when it started and how often if they said."
+                >
                   <Textarea
                     id="ci-description"
                     name="description"
@@ -741,27 +759,7 @@ export function CounterIntake({
                   />
                   {missingNote('ci-description')}
                 </Field>
-                <FormRow>
-                  <Field label="When did it start?" htmlFor="ci-when-started">
-                    <Input
-                      id="ci-when-started"
-                      name="whenStarted"
-                      value={whenStarted}
-                      onChange={(e) => setWhenStarted(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="How often?" htmlFor="ci-how-often">
-                    <Input
-                      id="ci-how-often"
-                      name="howOften"
-                      value={howOften}
-                      onChange={(e) => setHowOften(e.target.value)}
-                    />
-                  </Field>
-                </FormRow>
-              </FormGroup>
 
-              <FormGroup name="What happens next?" hint="Choose the smallest honest scope before this reaches a technician.">
                 <FormRow>
                   <button
                     type="button"
@@ -782,51 +780,34 @@ export function CounterIntake({
                     <span>The requested repair or maintenance is already known.</span>
                   </button>
                 </FormRow>
-              </FormGroup>
 
-              {intent === 'diagnosis' ? (
-                <FormGroup
-                  name="Diagnostic authorization"
-                  hint={cannedCatalogAvailable
-                    ? 'This exact labor scope will be visible to the assigned technician.'
-                    : 'The shop’s diagnostic menu is temporarily unavailable.'}
-                  last
-                >
-                  {diagnosticJobs.length > 0 && (
-                    <Field label="Scope source" htmlFor="ci-diag-mode">
-                      <select
-                        id="ci-diag-mode"
-                        className="vt-field__input"
-                        value={diagMode}
-                        onChange={(event) => setDiagMode(event.target.value as 'canned' | 'manual')}
-                        {...missingProps('ci-diag-mode')}
-                      >
-                        <option value="canned">Preset diagnostic</option>
-                        <option value="manual">Custom</option>
-                      </select>
-                      {missingNote('ci-diag-mode')}
-                    </Field>
-                  )}
-                  {diagMode === 'canned' ? (
-                    diagnosticJobs.length > 0 ? (
-                      <Field label="Diagnostic labor" htmlFor="ci-diagnostic-template">
+                {intent === 'diagnosis' ? (
+                  <>
+                    {diagnosticJobs.length > 0 && (
+                      <Field label="Diagnostic labor to authorize" htmlFor="ci-diagnostic-template">
                         <select
                           id="ci-diagnostic-template"
                           className="vt-field__input"
-                          value={selectedDiagnosticId}
-                          onChange={(event) => setSelectedDiagnosticId(event.target.value)}
+                          value={diagMode === 'manual' ? CUSTOM_SCOPE : selectedDiagnosticId}
+                          onChange={(event) => {
+                            if (event.target.value === CUSTOM_SCOPE) {
+                              setDiagMode('manual')
+                              return
+                            }
+                            setDiagMode('canned')
+                            setSelectedDiagnosticId(event.target.value)
+                          }}
+                          {...missingProps('ci-diagnostic-template')}
                         >
                           {diagnosticJobs.map((job) => (
                             <option key={job.id} value={job.id}>{job.title}</option>
                           ))}
+                          <option value={CUSTOM_SCOPE}>Something else — type it</option>
                         </select>
+                        {missingNote('ci-diagnostic-template')}
                       </Field>
-                    ) : (
-                      <p role="alert" className={styles.scopeNotice}>
-                        No diagnostic authorization is configured. An owner can add one in Shop settings.
-                      </p>
-                    )
-                  ) : (
+                    )}
+                    {diagMode === 'manual' && (
                     <>
                       <Field label="Description" htmlFor="ci-diag-description">
                         <Input
@@ -867,39 +848,35 @@ export function CounterIntake({
                         </Field>
                       </FormRow>
                     </>
-                  )}
-                </FormGroup>
-              ) : (
-                <FormGroup name="Known work" hint="Use a saved service or describe this one request." last>
-                  {knownWorkJobs.length > 0 && (
-                    <Field label="Scope source" htmlFor="ci-known-mode">
-                      <select
-                        id="ci-known-mode"
-                        className="vt-field__input"
-                        value={knownMode}
-                        onChange={(event) => setKnownMode(event.target.value as 'canned' | 'manual')}
-                        {...missingProps('ci-known-mode')}
-                      >
-                        <option value="canned">Saved work</option>
-                        <option value="manual">Custom request</option>
-                      </select>
-                      {missingNote('ci-known-mode')}
-                    </Field>
-                  )}
-                  {knownMode === 'canned' && knownWorkJobs.length > 0 ? (
-                    <Field label="Saved work" htmlFor="ci-known-template">
-                      <select
-                        id="ci-known-template"
-                        className="vt-field__input"
-                        value={selectedKnownId}
-                        onChange={(event) => setSelectedKnownId(event.target.value)}
-                      >
-                        {knownWorkJobs.map((job) => (
-                          <option key={job.id} value={job.id}>{job.title}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  ) : (
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {knownWorkJobs.length > 0 && (
+                      <Field label="Work to perform" htmlFor="ci-known-template">
+                        <select
+                          id="ci-known-template"
+                          className="vt-field__input"
+                          value={knownMode === 'manual' ? CUSTOM_SCOPE : selectedKnownId}
+                          onChange={(event) => {
+                            if (event.target.value === CUSTOM_SCOPE) {
+                              setKnownMode('manual')
+                              return
+                            }
+                            setKnownMode('canned')
+                            setSelectedKnownId(event.target.value)
+                          }}
+                          {...missingProps('ci-known-template')}
+                        >
+                          {knownWorkJobs.map((job) => (
+                            <option key={job.id} value={job.id}>{job.title}</option>
+                          ))}
+                          <option value={CUSTOM_SCOPE}>Something else — type it</option>
+                        </select>
+                        {missingNote('ci-known-template')}
+                      </Field>
+                    )}
+                    {knownMode === 'manual' && (
                     <FormRow>
                   <Field label="Work type" htmlFor="ci-service-kind">
                     <select
@@ -933,22 +910,23 @@ export function CounterIntake({
                     {missingNote('ci-service-description')}
                   </Field>
                     </FormRow>
-                  )}
-                  <Field
-                    label="Customer-supplied item"
-                    htmlFor="ci-customer-supplied"
-                    hint="Optional — record what the customer is providing; this is not a shop-supplied part."
-                  >
-                    <Input
-                      id="ci-customer-supplied"
-                      value={customerSuppliedPartsNote}
-                      maxLength={500}
-                      placeholder="e.g. customer supplied unopened lift kit"
-                      onChange={(event) => setCustomerSuppliedPartsNote(event.target.value)}
-                    />
-                  </Field>
-                </FormGroup>
-              )}
+                    )}
+                    <Field
+                      label="Customer-supplied item"
+                      htmlFor="ci-customer-supplied"
+                      hint="Optional — record what the customer is providing; this is not a shop-supplied part."
+                    >
+                      <Input
+                        id="ci-customer-supplied"
+                        value={customerSuppliedPartsNote}
+                        maxLength={500}
+                        placeholder="e.g. customer supplied unopened lift kit"
+                        onChange={(event) => setCustomerSuppliedPartsNote(event.target.value)}
+                      />
+                    </Field>
+                  </>
+                )}
+              </FormGroup>
 
               {tierWarning && (
                 <div
