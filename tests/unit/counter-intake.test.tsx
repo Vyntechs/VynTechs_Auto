@@ -75,7 +75,7 @@ describe('CounterIntake', () => {
   it('keeps customer-supplied truth only in known work and submits the selected saved scope once', async () => {
     render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
-    expect(screen.getByLabelText(/saved work/i)).toHaveValue(knownTemplate.id)
+    expect(screen.getByLabelText(/work to perform/i)).toHaveValue(knownTemplate.id)
     fireEvent.change(screen.getByLabelText(/customer-supplied item/i), {
       target: { value: ' Customer supplied unopened lift kit. ' },
     })
@@ -95,7 +95,7 @@ describe('CounterIntake', () => {
   it('submits a writer-typed custom diagnostic labor line as diagnosis-manual', async () => {
     render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.change(screen.getByLabelText(/scope source/i), { target: { value: 'manual' } })
+    fireEvent.change(screen.getByLabelText(/diagnostic labor/i), { target: { value: 'custom' } })
     fireEvent.change(screen.getByLabelText(/^description$/i), {
       target: { value: 'Diagnose intermittent no-start' },
     })
@@ -149,6 +149,47 @@ describe('CounterIntake', () => {
     expect(screen.getByLabelText(/make/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/model/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/what brought them in/i)).toBeInTheDocument()
+  })
+
+  // The complaint used to be four stacked sections — Complaint, What happens
+  // next?, and one of Diagnostic authorization / Known work — carrying two
+  // optional free-text boxes and a "Scope source" dropdown whose only job was
+  // to reveal a different control. Writing up one truck should be one section.
+  describe('the complaint reads as a single section', () => {
+    it('asks for the customer story once instead of splitting it across three boxes', () => {
+      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      expect(screen.getByLabelText(/what brought them in/i)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/when did it start/i)).not.toBeInTheDocument()
+      expect(screen.queryByLabelText(/how often/i)).not.toBeInTheDocument()
+    })
+
+    it('never asks where the scope is coming from, in either intent', () => {
+      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
+      expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
+    })
+
+    it('reveals typed known work from the same dropdown that lists saved work', () => {
+      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
+      expect(screen.queryByLabelText(/^requested work$/i)).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText(/work to perform/i), { target: { value: 'custom' } })
+      expect(screen.getByLabelText(/^requested work$/i)).toBeInTheDocument()
+    })
+
+    it('leaves the whole complaint under one heading', () => {
+      const { container } = render(
+        <CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />,
+      )
+      const headings = Array.from(container.querySelectorAll('.vt-form__group-name'))
+        .map((node) => node.textContent)
+      expect(headings).toContain('Complaint')
+      expect(headings).not.toContain('What happens next?')
+      expect(headings).not.toContain('Diagnostic authorization')
+      expect(headings).not.toContain('Known work')
+    })
   })
 
   it('auto-uppercases VIN as the writer types', () => {
@@ -383,10 +424,6 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/what brought them in/i), {
       target: { value: 'Crank-no-start' },
     })
-    fireEvent.change(screen.getByLabelText(/when did it start/i), {
-      target: { value: 'Yesterday' },
-    })
-    fireEvent.change(screen.getByLabelText(/how often/i), { target: { value: 'Every time' } })
     fireEvent.change(screen.getByLabelText(/^requested work$/i), {
       target: { value: 'Replace rear brake pads' },
     })
@@ -424,8 +461,10 @@ describe('CounterIntake', () => {
         plate: null,
       },
       concern: 'Crank-no-start',
-      whenStarted: 'Yesterday',
-      howOften: 'Every time',
+      // Onset and frequency are no longer separate boxes on the counter form —
+      // the writer records them inside the customer's own words.
+      whenStarted: null,
+      howOften: null,
       work: { mode: 'manual', kind: 'repair', description: 'Replace rear brake pads' },
       assignedTechId: null,
     })

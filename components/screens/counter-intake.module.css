@@ -50,8 +50,7 @@
   font-size: 14px;
 }
 
-.intentChoice span,
-.scopeNotice {
+.intentChoice span {
   margin-top: 5px;
   font-family: var(--vt-font-serif);
   font-size: 14px;
@@ -62,13 +61,6 @@
   border-color: var(--vt-signal-500);
   box-shadow: inset 3px 0 0 var(--vt-signal-500);
   background: var(--vt-bone-100);
-}
-
-.scopeNotice {
-  margin: 0;
-  padding: 12px 14px;
-  border-left: 2px solid var(--vt-risk-medium);
-  color: var(--vt-fg-2);
 }
 
 .missingNote {
