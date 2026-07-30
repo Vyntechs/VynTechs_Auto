@@ -87,10 +87,13 @@ describe('CounterIntake page wiring (search + form)', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('disables Send to Techs initially (no name, no vin, no complaint)', () => {
+  it('refuses an empty form by naming the first missing field, not by going dead', () => {
     render(<CounterIntake userEmail="test@example.com" recentCustomers={[]} />)
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
-    submits.forEach((b) => expect(b).toBeDisabled())
+    submits.forEach((b) => expect(b).toBeEnabled())
+    fireEvent.click(submits[0])
+    expect(screen.getByRole('alert')).toHaveTextContent('Add the customer’s name.')
+    expect(screen.getByLabelText(/^name$/i)).toHaveFocus()
   })
 
   it('passes recentCustomers={[]} when prop is omitted (no crash)', () => {

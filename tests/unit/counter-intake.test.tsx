@@ -234,19 +234,92 @@ describe('CounterIntake', () => {
     expect(screen.queryByText(/auto-saved/i)).not.toBeInTheDocument()
   })
 
-  it('disables submit when required fields are empty', () => {
+  // 2026-07-28 field report, master technician writing up a real customer:
+  // "it would not let us resume without entering what brought them in but it's
+  // very confusing" — the submit button was disabled with no message and no
+  // focus move, on a form long enough that the missing field was off-screen.
+  // A dead control that explains nothing is the defect.
+  it('never leaves the writer tapping a dead Create repair order button', () => {
     render(<CounterIntake userEmail="test@example.com" />)
-    // The screen has two submit buttons (header + form footer); both must be disabled.
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     expect(submits.length).toBeGreaterThan(0)
-    submits.forEach((btn) => expect(btn).toBeDisabled())
+    submits.forEach((btn) => expect(btn).toBeEnabled())
   })
 
-  it('enables submit once name, phone, year, make, model, and complaint are filled (VIN optional)', () => {
+  it('names and focuses the complaint when it is the only thing missing', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Chevrolet' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'Tahoe' } })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
+
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Add what brought them in.')
+    const complaint = screen.getByLabelText(/what brought them in/i)
+    expect(complaint).toHaveFocus()
+    expect(complaint).toHaveAttribute('aria-invalid', 'true')
+    expect(complaint).toHaveAccessibleDescription('Add what brought them in.')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('names and focuses the phone when a new customer has no number yet', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Chevrolet' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'Tahoe' } })
+    fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+      target: { value: 'Crank-no-start' },
+    })
+    fireEvent.change(screen.getByLabelText(/^requested work$/i), {
+      target: { value: 'Inspect no-start concern' },
+    })
+
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/add a phone number/i)
+    expect(screen.getByLabelText(/phone/i)).toHaveFocus()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('names and focuses the requested work when known work is chosen and it is blank', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
+    fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
+    fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
+    fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Chevrolet' } })
+    fireEvent.change(screen.getByLabelText(/^model$/i), { target: { value: 'Tahoe' } })
+    fireEvent.change(screen.getByLabelText(/what brought them in/i), {
+      target: { value: 'Crank-no-start' },
+    })
+
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Add the work they are asking for.')
+    expect(screen.getByLabelText(/^requested work$/i)).toHaveFocus()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('calls Requested work required, because the counter route rejects it empty', () => {
+    render(<CounterIntake userEmail="test@example.com" />)
+    expect(screen.getByText(/^Required · 200 characters maximum/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Optional — becomes/)).toBeNull()
+  })
+
+  it('clears the blocked message and submits once the named field is filled (VIN optional)', async () => {
     // Real PR-27 preview bug: previously required VIN at the UI gate even
     // though /api/intake/submit doesn't. Counter staff with no VIN in hand
     // were locked out with no hint why.
     render(<CounterIntake userEmail="test@example.com" />)
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+    expect(screen.getByRole('alert')).toHaveTextContent('Add the customer’s name.')
+
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
@@ -259,8 +332,10 @@ describe('CounterIntake', () => {
       target: { value: 'Inspect no-start concern' },
     })
     // NOTE: VIN intentionally left blank.
-    const submits = screen.getAllByRole('button', { name: /create repair order/i })
-    submits.forEach((btn) => expect(btn).toBeEnabled())
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
   })
 
   it('submits with Command-Enter from the complaint without bypassing the form gate', async () => {

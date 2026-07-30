@@ -268,3 +268,12 @@
     white-space: normal;
   }
 }
+
+.missingNote {
+  display: block;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--vt-risk-high);
+  color: var(--vt-fg-2);
+  font: 14px/1.35 var(--vt-font-serif);
+}

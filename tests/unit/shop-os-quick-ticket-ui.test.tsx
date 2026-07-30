@@ -154,13 +154,29 @@ describe('QuickTicket', () => {
     expect(screen.queryByText(/auto.?save|\bAI\b|send quote|assign technician|start work/i)).toBeNull()
   })
 
-  it('requires one requested repair or maintenance description before creation', () => {
+  // Same defect the counter intake had on 2026-07-28: the writer pressed a
+  // disabled Create button with no message and no focus move, on a form long
+  // enough that the missing field was off-screen.
+  it('requires one requested repair or maintenance description, and names it at the point of action', async () => {
     render(<QuickTicket />)
     const createButtons = screen.getAllByRole('button', { name: /^Create quote/i })
-    createButtons.forEach((button) => expect(button).toBeDisabled())
+    createButtons.forEach((button) => expect(button).toBeEnabled())
+
+    fireEvent.click(createButtons[0])
+    expect(screen.getByRole('alert')).toHaveTextContent('Add the customer’s name.')
+    expect(screen.getByLabelText(/^name$/i)).toHaveFocus()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
 
     fillNewTicket('maintenance')
-    createButtons.forEach((button) => expect(button).toBeEnabled())
+    fireEvent.change(screen.getByLabelText(/requested work/i), { target: { value: '' } })
+    fireEvent.click(createButtons[0])
+    expect(screen.getByRole('alert')).toHaveTextContent('Add the work they are asking for.')
+    expect(screen.getByLabelText(/requested work/i)).toHaveFocus()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+
+    fillNewTicket('maintenance')
+    fireEvent.click(createButtons[0])
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
   })
 
   it.each([

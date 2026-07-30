@@ -19,6 +19,7 @@
 .line legend { padding-inline: 5px; font: 500 11px/1.4 var(--vt-font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--vt-fg-3); }
 .check { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 10px !important; min-height: 44px; }
 .check input { width: 22px; min-height: 22px; }
+.saveError { flex: 1 1 100%; margin: 0 0 4px; padding: 10px 12px; border-left: 3px solid var(--vt-risk-high); background: var(--vt-surface); color: var(--vt-fg-2); font: 14px/1.45 var(--vt-font-serif); }
 .editorFooter { position: sticky; bottom: 0; z-index: 2; padding: 12px 0 max(4px, env(safe-area-inset-bottom)); background: var(--vt-surface-2); border-top: 1px solid var(--vt-border); }
 .backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: color-mix(in oklch, var(--vt-fg) 45%, transparent); }
 .dialog { width: min(440px, 100%); padding: 22px; border-top: 4px solid var(--vt-signal-500); background: var(--vt-bg); box-shadow: 0 18px 50px color-mix(in oklch, var(--vt-fg) 24%, transparent); }

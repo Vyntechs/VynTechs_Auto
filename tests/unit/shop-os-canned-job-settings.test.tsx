@@ -81,6 +81,59 @@ describe('CannedJobsSection', () => {
     expect(screen.getByRole('option', { name: 'Diagnostic' })).toBeInTheDocument()
   })
 
+  // 2026-07-30 field report, shop owner in Settings: "it's making me attach a
+  // part... it will not let us save." The draft seeded a part line, the
+  // diagnostic rule forbids parts, and the reason was printed at the top of the
+  // panel — off-screen from the Save button he was pressing.
+  it('saves a labor-only diagnostic template without ever handing the writer a part line', async () => {
+    const diagnostic: CannedJobProjection = {
+      ...job, id: '00000000-0000-4000-8000-000000000002', title: 'Initial diagnosis', kind: 'diagnostic',
+      lines: [{ kind: 'labor', description: 'Test and isolate concern', sort: 0, priceCents: 18_750, taxable: false, hours: '1' }],
+      summary: { subtotalCents: 18_750, taxableSubtotalCents: 0, taxCents: 0, totalCents: 18_750 },
+    }
+    const fetchMock = vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ changed: true, cannedJob: diagnostic }), { status: 201 }))
+    render(<CannedJobsSection initialJobs={[]} initialTaxRateBps={800} />)
+    await userEvent.click(screen.getByRole('button', { name: 'New canned job' }))
+    await userEvent.selectOptions(screen.getByLabelText('Work type'), 'diagnostic')
+
+    expect(screen.getByRole('group', { name: /Line 1: labor/i })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add line' }))
+    expect(screen.getByRole('group', { name: /Line 2: labor/i })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Remove line 2' }))
+
+    await userEvent.type(screen.getByLabelText('Title'), 'Initial diagnosis')
+    await userEvent.type(screen.getByLabelText('Line 1 description'), 'Test and isolate concern')
+    await userEvent.type(screen.getByLabelText('Line 1 customer price'), '187.50')
+    await userEvent.click(screen.getByRole('button', { name: 'Save canned job' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(body.cannedJob.kind).toBe('diagnostic')
+    expect(body.cannedJob.lines).toEqual([expect.objectContaining({ kind: 'labor', description: 'Test and isolate concern', priceCents: 18_750 })])
+    expect(await screen.findByText('Canned job saved.')).toBeInTheDocument()
+  })
+
+  it('refuses a diagnostic template holding a part, and says why at the Save button that refused it', async () => {
+    const fetchMock = vi.mocked(fetch)
+    render(<CannedJobsSection initialJobs={[]} initialTaxRateBps={800} />)
+    await userEvent.click(screen.getByRole('button', { name: 'New canned job' }))
+    await userEvent.selectOptions(screen.getByLabelText('Work type'), 'diagnostic')
+    await userEvent.selectOptions(screen.getByLabelText('Line 1 type'), 'part')
+    await userEvent.type(screen.getByLabelText('Title'), 'Initial diagnosis')
+    await userEvent.type(screen.getByLabelText('Line 1 description'), 'Reductant injector')
+    await userEvent.type(screen.getByLabelText('Line 1 customer price'), '187.50')
+    await userEvent.click(screen.getByRole('button', { name: 'Save canned job' }))
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Diagnostic templates require labor and cannot include parts.')
+    expect(screen.getByRole('button', { name: 'Save canned job' }).closest('footer')).toContainElement(alert)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // The reason clears as soon as the writer acts on it, and the save goes through.
+    await userEvent.selectOptions(screen.getByLabelText('Line 1 type'), 'labor')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('keeps one create key across a network retry and rotates when normalized input changes', async () => {
     const fetchMock = vi.mocked(fetch)
       .mockRejectedValueOnce(new Error('offline'))
