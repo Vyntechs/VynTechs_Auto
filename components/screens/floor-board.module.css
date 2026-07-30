@@ -1,0 +1,266 @@
+/* Shop-floor wall display. Read at 10–20 feet, never touched, never scrolled.
+   Everything is expressed in viewport units so one route serves a 65" panel
+   and a laptop preview; nothing here may introduce a fixed pixel canvas. */
+
+.floor {
+  /* `--floor-weight` and `--floor-empty` are set inline from the projection.
+     Empty lanes cost a flat 4.6vh; everything left is divided by the total fr
+     weight, so one weight unit is the height every row and every type size
+     derives from. No measurement pass, no layout thrash on refresh. */
+  --floor-line: calc((86vh - (var(--floor-empty) * 4.6vh)) / var(--floor-weight));
+  --floor-ink: var(--vt-graphite-100);
+  --floor-ink-dim: var(--vt-graphite-500);
+  --floor-rule: var(--vt-graphite-850);
+  --floor-accent: var(--vt-amber-500);
+
+  display: grid;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  padding: 2.2vh 2.4vw 2.6vh;
+  gap: 1.6vh;
+  background: var(--vt-graphite-1000);
+  color: var(--floor-ink);
+  font-family: var(--vt-font-sans);
+}
+
+/* ---- Masthead ---- */
+
+.masthead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: 2vw;
+  padding-bottom: 1.4vh;
+  border-bottom: 1px solid var(--floor-rule);
+}
+
+.shop {
+  margin: 0;
+  font-family: var(--vt-font-sans);
+  font-weight: 600;
+  font-size: clamp(1rem, 1.5vh, 2.2rem);
+  letter-spacing: var(--vt-tr-eyebrow);
+  text-transform: uppercase;
+  color: var(--floor-ink-dim);
+}
+
+.count {
+  grid-row: 2;
+  grid-column: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.8vw;
+  margin: 0.4vh 0 0;
+}
+
+.countNumber {
+  font-family: var(--vt-font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(1.6rem, 4.4vh, 5rem);
+  line-height: 1;
+  color: var(--floor-ink);
+}
+
+.countWord {
+  font-size: clamp(0.8rem, 1.7vh, 2rem);
+  color: var(--floor-ink-dim);
+}
+
+.clock {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  align-self: center;
+  margin: 0;
+  font-family: var(--vt-font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(1.6rem, 5vh, 5.4rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--floor-ink-dim);
+  /* The wall runs for days. A minute hand that keeps moving is the only proof
+     a technician needs that the board is live rather than frozen. */
+}
+
+/* ---- Lanes ---- */
+
+.lanes {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  row-gap: 1.2vh;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 0.34vw 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 1.4vw;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The signature move: each lane is exactly as tall as the work piled in it,
+   and the spine down its left edge turns those heights into a bar chart that
+   reads from across the bay before a single word does. One hue, stepped by
+   intensity — the three waiting lanes carry the accent, moving work does not. */
+.spine {
+  grid-row: 1 / 3;
+  grid-column: 1;
+  background: var(--floor-accent);
+  border-radius: var(--vt-radius-1);
+}
+
+.lane[data-lane='held'] .spine { opacity: 0.62; }
+.lane[data-lane='customer'] .spine { opacity: 0.38; }
+.lane[data-lane='with_tech'] .spine { background: var(--vt-graphite-700); opacity: 1; }
+.lane[data-empty='true'] .spine { background: var(--vt-graphite-850); opacity: 1; }
+
+.laneLabel {
+  grid-column: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 0.9vw;
+  margin: 0;
+  font-family: var(--vt-font-sans);
+  font-weight: 600;
+  font-size: clamp(0.75rem, 1.6vh, 1.9rem);
+  line-height: 1.1;
+  letter-spacing: var(--vt-tr-eyebrow);
+  text-transform: uppercase;
+  color: var(--floor-ink-dim);
+}
+
+.laneCount {
+  font-family: var(--vt-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--vt-graphite-600);
+}
+
+.lane[data-empty='false'] .laneLabel { color: var(--vt-graphite-300); }
+
+.rows {
+  grid-column: 2;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 1.6vw;
+  min-width: 0;
+  border-top: 1px solid var(--floor-rule);
+}
+
+.row:first-child { border-top: 0; }
+
+.ticket {
+  font-family: var(--vt-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(0.7rem, calc(var(--floor-line) * 0.20), 1.8rem);
+  color: var(--vt-graphite-600);
+}
+
+.subject {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 1.2vw;
+}
+
+.vehicle,
+.customer,
+.concern {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vehicle {
+  font-weight: 600;
+  font-size: clamp(1.15rem, calc(var(--floor-line) * 0.46), 8rem);
+  line-height: 1.05;
+  letter-spacing: var(--vt-tr-tight);
+  color: var(--floor-ink);
+}
+
+.customer {
+  font-weight: 400;
+  font-size: clamp(0.8rem, calc(var(--floor-line) * 0.26), 3.2rem);
+  line-height: 1.1;
+  color: var(--vt-graphite-400);
+}
+
+.concern {
+  font-family: var(--vt-font-serif);
+  font-size: clamp(0.8rem, calc(var(--floor-line) * 0.20), 2.6rem);
+  line-height: 1.2;
+  color: var(--vt-graphite-500);
+}
+
+/* A quiet board has room to say why each vehicle is here; a full one does not,
+   so the concern line is dropped rather than crushed. */
+.floor[data-dense='true'] .concern { display: none; }
+
+/* Stacked, the three lines plus their gaps must stay inside one row height:
+   0.40 + 0.20 + 0.17 against their line-heights, plus two 0.04 gaps, comes to
+   0.92 of a row. Nothing here may total more than 1. */
+.floor[data-dense='false'] .subject {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--floor-line) * 0.04);
+}
+
+.floor[data-dense='false'] .vehicle {
+  font-size: clamp(1.15rem, calc(var(--floor-line) * 0.40), 8rem);
+}
+
+.floor[data-dense='false'] .customer {
+  font-size: clamp(0.8rem, calc(var(--floor-line) * 0.20), 3.2rem);
+}
+
+.floor[data-dense='false'] .concern {
+  font-size: clamp(0.8rem, calc(var(--floor-line) * 0.17), 2.6rem);
+}
+
+.right {
+  justify-self: end;
+  font-family: var(--vt-font-mono);
+  font-weight: 500;
+  font-size: clamp(0.75rem, calc(var(--floor-line) * 0.22), 1.9rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--vt-graphite-300);
+}
+
+.tail {
+  display: flex;
+  align-items: center;
+  font-family: var(--vt-font-mono);
+  font-size: clamp(0.7rem, calc(var(--floor-line) * 0.22), 2rem);
+  letter-spacing: 0.04em;
+  color: var(--vt-graphite-600);
+  border-top: 1px solid var(--floor-rule);
+}
+
+/* ---- Empty building ---- */
+
+.quiet {
+  align-self: center;
+  justify-self: center;
+  margin: 0;
+  font-family: var(--vt-font-serif);
+  font-size: clamp(2rem, 9vh, 8rem);
+  letter-spacing: var(--vt-tr-display);
+  color: var(--vt-graphite-800);
+}
