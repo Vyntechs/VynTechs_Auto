@@ -142,6 +142,51 @@ describe('Shop OS diagnostic story UI', () => {
     expect(screen.getByRole('button', { name: 'Review and save story' })).toBeInTheDocument()
   })
 
+  it('lets a shop write the FIRST findings on a sessionless diagnostic job', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder('manual_findings')} />)
+
+    const card = screen.getByRole('region', { name: 'Diagnostic story for Charging system diagnosis' })
+    expect(within(card).getByText('Recorded findings')).toBeInTheDocument()
+    expect(within(card).getByText(ticket.concern)).toBeInTheDocument()
+    expect(within(card).getByLabelText('What we found')).toHaveValue('')
+    expect(within(card).getByLabelText('What we recommend')).toHaveValue('')
+    expect(within(card).getByRole('button', { name: 'Review and save story' })).toBeDisabled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still sends a diagnostic-time quote before any findings are written', () => {
+    const authorization = builder('manual_findings')
+    authorization.jobs[0].lines = [{ id: '00000000-0000-4000-8000-000000000703', kind: 'labor', description: 'Diagnostic time', sort: 0, quantity: '1', priceCents: 18000, taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null, laborHours: '1.5', laborRateCents: 12000, source: 'manual', mutable: true }]
+    render(<ManualQuoteBuilder ticket={ticket} builder={authorization} />)
+    expect(screen.queryByText('Review every diagnostic story.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+  })
+
+  it('offers one motion for adding the diagnosed repair to the quote', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({
+        changed: true,
+        job: { id: '00000000-0000-4000-8000-000000000204', title: 'Replace alternator', kind: 'repair', requiredSkillTier: 2 },
+      }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: builder('manual_findings') }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder('manual_findings')} />)
+
+    const form = screen.getByRole('region', { name: 'Add repair' })
+    expect(within(form).getByRole('button', { name: 'Add repair' })).toBeDisabled()
+    fireEvent.change(within(form).getByLabelText('What are we doing'), { target: { value: 'Replace alternator' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Add repair' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/tickets/${TICKET}/quote/jobs`)
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST')
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      clientKey: '00000000-0000-4000-8000-000000000901',
+      job: { title: 'Replace alternator', kind: 'repair' },
+    })
+  })
+
   it('declares story-editor mobile overlay demotion', () => {
     const css = readFileSync(resolve(process.cwd(), 'components/screens/manual-quote-builder.module.css'), 'utf8')
     expect(css).toMatch(/\.workspace:has\(\.storyEditor:focus-within\) \.prepareAction/)

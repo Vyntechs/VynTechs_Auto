@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '../helpers/db'
 import { createShop, createProfile } from '@/lib/db/queries'
@@ -198,7 +198,7 @@ describe('manual findings — sessionless diagnostic story path', () => {
       expect(builder.builder.jobs[0].storyMode).toBe('authorization_only')
     })
 
-    it('offers authorization-only scope before an unentitled shop records findings', async () => {
+    it('offers the findings editor to an unentitled shop before the FIRST story exists', async () => {
       const seed = await seedDiagnosticTicket(db)
       await db.insert(shopEntitlements).values({
         shopId: seed.shop.id,
@@ -210,7 +210,47 @@ describe('manual findings — sessionless diagnostic story path', () => {
       })
       expect(builder.ok).toBe(true)
       if (!builder.ok) throw new Error('expected ok')
-      expect(builder.builder.jobs[0].storyMode).toBe('authorization_only')
+      // No diagnostics add-on means no session will ever write this story. The
+      // editor has to be reachable with nothing recorded yet, or nothing can
+      // ever author the first one.
+      expect(builder.builder.jobs[0].storyMode).toBe('manual_findings')
+      expect(builder.builder.jobs[0].story.content).toBeNull()
+    })
+
+    it('offers the findings editor with diagnostics released off, as production runs', async () => {
+      vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+      try {
+        const seed = await seedDiagnosticTicket(db)
+        const builder = await getQuoteBuilder(db, {
+          actor: { profileId: seed.profile.id },
+          ticketId: seed.ticket.id,
+        })
+        expect(builder.ok).toBe(true)
+        if (!builder.ok) throw new Error('expected ok')
+        expect(builder.builder.jobs[0].storyMode).toBe('manual_findings')
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    })
+
+    it('records the first story from that state and keeps it editable', async () => {
+      vi.stubEnv('DIAGNOSTICS_RELEASE', 'off')
+      try {
+        const seed = await seedDiagnosticTicket(db)
+        const saved = await saveReviewedCustomerStory(db, reviewInput(seed))
+        expect(saved.ok).toBe(true)
+        const builder = await getQuoteBuilder(db, {
+          actor: { profileId: seed.profile.id },
+          ticketId: seed.ticket.id,
+        })
+        expect(builder.ok).toBe(true)
+        if (!builder.ok) throw new Error('expected ok')
+        expect(builder.builder.jobs[0].storyMode).toBe('manual_findings')
+        expect(builder.builder.jobs[0].story.content?.whatWeFound)
+          .toBe('Corroded ground strap at the engine block.')
+      } finally {
+        vi.unstubAllEnvs()
+      }
     })
 
     it('keeps comp actors entitled even when the shop row says false', async () => {
