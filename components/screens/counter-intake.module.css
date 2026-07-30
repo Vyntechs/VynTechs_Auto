@@ -71,6 +71,17 @@
   color: var(--vt-fg-2);
 }
 
+.missingNote {
+  display: block;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--vt-risk-high);
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-serif);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
 .screen :global(.pis__input) {
   min-block-size: 44px;
 }

@@ -60,6 +60,103 @@ function vinWithinBounds(value: string): boolean {
   return trimmed === '' || trimmed.length === 17
 }
 
+// The one place that decides whether this form can be sent. It answers with the
+// first thing still missing, in the order the writer reads the form, so pressing
+// Create quote can always name it and move focus to it instead of leaving a dead
+// button on a long scrolling form.
+type MissingRequirement = { fieldId: string; message: string }
+
+function shorten(what: string, max: number): string {
+  return `Shorten the ${what} to ${max} characters or less.`
+}
+
+const MILEAGE_MESSAGE = 'Enter the mileage as whole numbers only, or leave it blank.'
+
+function firstMissingRequirement(form: {
+  isExisting: boolean
+  name: string
+  phone: string
+  email: string
+  year: string
+  make: string
+  model: string
+  engine: string
+  vin: string
+  mileage: string
+  plate: string
+  quoteMode: 'canned' | 'manual'
+  selectedCannedJob: SafeCannedJobTemplate | null
+  requestedWork: string
+}): MissingRequirement | null {
+  if (form.isExisting) {
+    if (!mileageWithinBounds(form.mileage)) {
+      return { fieldId: 'qt-existing-mileage', message: MILEAGE_MESSAGE }
+    }
+  } else {
+    if (form.name.trim() === '') return { fieldId: 'qt-name', message: 'Add the customer’s name.' }
+    if (!requiredTextWithin(form.name, 200)) {
+      return { fieldId: 'qt-name', message: shorten('name', 200) }
+    }
+    if (form.phone.trim() === '') {
+      return { fieldId: 'qt-phone', message: 'Add a phone number — that is how the shop reaches them.' }
+    }
+    if (!requiredTextWithin(form.phone, 100)) {
+      return { fieldId: 'qt-phone', message: shorten('phone number', 100) }
+    }
+    if (!optionalTextWithin(form.email, 320)) {
+      return { fieldId: 'qt-email', message: shorten('email', 320) }
+    }
+    if (form.year.trim() === '') return { fieldId: 'qt-year', message: 'Add the vehicle year.' }
+    if (!yearWithinBounds(form.year)) {
+      return { fieldId: 'qt-year', message: `Enter a year between 1886 and ${MAX_VEHICLE_YEAR}.` }
+    }
+    if (form.make.trim() === '') return { fieldId: 'qt-make', message: 'Add the make.' }
+    if (!requiredTextWithin(form.make, 100)) {
+      return { fieldId: 'qt-make', message: shorten('make', 100) }
+    }
+    if (form.model.trim() === '') return { fieldId: 'qt-model', message: 'Add the model.' }
+    if (!requiredTextWithin(form.model, 100)) {
+      return { fieldId: 'qt-model', message: shorten('model', 100) }
+    }
+    if (!optionalTextWithin(form.engine, 200)) {
+      return { fieldId: 'qt-engine', message: shorten('engine', 200) }
+    }
+    if (!vinWithinBounds(form.vin)) {
+      return { fieldId: 'qt-vin', message: 'A VIN is 17 characters. Finish it or clear it.' }
+    }
+    if (!mileageWithinBounds(form.mileage)) {
+      return { fieldId: 'qt-mileage', message: MILEAGE_MESSAGE }
+    }
+    if (!optionalTextWithin(form.plate, 32)) {
+      return { fieldId: 'qt-plate', message: shorten('license plate', 32) }
+    }
+  }
+  if (form.quoteMode === 'canned') {
+    return form.selectedCannedJob !== null
+      ? null
+      : {
+          fieldId: 'qt-quote-source',
+          message: 'Pick the canned job, or set Source to Manual draft and type the request.',
+        }
+  }
+  if (form.requestedWork.trim() === '') {
+    return { fieldId: 'qt-requested-work', message: 'Add the work they are asking for.' }
+  }
+  if (!requiredTextWithin(form.requestedWork, 200)) {
+    return { fieldId: 'qt-requested-work', message: shorten('requested work', 200) }
+  }
+  return null
+}
+
+function focusMissing(fieldId: string) {
+  const field = document.getElementById(fieldId)
+  if (!field) return
+  if (typeof field.scrollIntoView === 'function') {
+    field.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+  field.focus({ preventScroll: true })
+}
+
 function quickTicketError(error?: string): string {
   switch (error) {
     case 'not_found':
@@ -122,6 +219,7 @@ export function QuickTicket({
   const [workKind, setWorkKind] = useState<WorkKind>('repair')
   const [requestedWork, setRequestedWork] = useState('')
   const [busy, setBusy] = useState(false)
+  const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [catalogRefreshRequired, setCatalogRefreshRequired] = useState(false)
   const inFlightRef = useRef(false)
@@ -145,24 +243,35 @@ export function QuickTicket({
     setError(null)
     setTimeout(() => sourceSelectRef.current?.focus(), 0)
   }, [cannedCatalogAvailable, cannedJobs, cannedTaxRateBps])
-  const requestedWorkValid = requiredTextWithin(requestedWork, 200)
-  const quoteValid = quoteMode === 'canned' ? selectedCannedJob !== null : requestedWorkValid
-  const newVehicleValid =
-    requiredTextWithin(name, 200) &&
-    requiredTextWithin(phone, 100) &&
-    optionalTextWithin(email, 320) &&
-    yearWithinBounds(year) &&
-    requiredTextWithin(make, 100) &&
-    requiredTextWithin(model, 100) &&
-    optionalTextWithin(engine, 200) &&
-    vinWithinBounds(vin) &&
-    mileageWithinBounds(mileage) &&
-    optionalTextWithin(plate, 32)
-  const canSubmit =
-    !busy &&
-    !catalogRefreshRequired &&
-    quoteValid &&
-    (isExisting ? mileageWithinBounds(mileage) : newVehicleValid)
+  const missing = firstMissingRequirement({
+    isExisting,
+    name,
+    phone,
+    email,
+    year,
+    make,
+    model,
+    engine,
+    vin,
+    mileage,
+    plate,
+    quoteMode,
+    selectedCannedJob,
+    requestedWork,
+  })
+
+  // Rendered right where focus lands, so the writer never has to guess which
+  // field the form is waiting on.
+  const missingNote = (fieldId: string) =>
+    attempted && missing && missing.fieldId === fieldId ? (
+      <span id={`${fieldId}-missing`} role="alert" className={styles.missingNote}>
+        {missing.message}
+      </span>
+    ) : null
+  const missingProps = (fieldId: string) =>
+    attempted && missing && missing.fieldId === fieldId
+      ? { 'aria-invalid': true, 'aria-describedby': `${fieldId}-missing` }
+      : {}
 
   const pickVehicle = (vehicleId: string) => {
     setPickedVehicleId(vehicleId)
@@ -183,7 +292,12 @@ export function QuickTicket({
   }
 
   const submit = async () => {
-    if (!canSubmit || inFlightRef.current) return
+    if (busy || catalogRefreshRequired || inFlightRef.current) return
+    if (missing) {
+      setAttempted(true)
+      focusMissing(missing.fieldId)
+      return
+    }
     inFlightRef.current = true
     setBusy(true)
     setError(null)
@@ -270,7 +384,7 @@ export function QuickTicket({
     if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
     event.stopPropagation()
-    if (canSubmit) event.currentTarget.requestSubmit()
+    event.currentTarget.requestSubmit()
   }
 
   const refreshCatalog = () => {
@@ -300,7 +414,7 @@ export function QuickTicket({
                   kind="primary"
                   type="submit"
                   form="quick-ticket-form"
-                  disabled={!canSubmit}
+                  disabled={busy || catalogRefreshRequired}
                   kbd="⌘ ↵"
                 >
                   Create quote
@@ -316,6 +430,11 @@ export function QuickTicket({
               onSubmit={handleSubmit}
               onKeyDownCapture={handleKeyDown}
               aria-busy={busy}
+              // The browser's own validation bubble blocks submit before this
+              // form can name the missing field in shop language, and it never
+              // fires at all for the quote-source requirement. This screen owns
+              // the message; `required` stays for assistive tech.
+              noValidate
             >
               <fieldset className={styles.formLock} disabled={busy}>
               <div className={styles.search}>
@@ -352,13 +471,16 @@ export function QuickTicket({
                   <FormGroup name="Customer" hint="Name and phone are required. Email is optional.">
                     <FormRow>
                       <Field label="Name" htmlFor="qt-name">
-                        <Input id="qt-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required />
+                        <Input id="qt-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required {...missingProps('qt-name')} />
+                        {missingNote('qt-name')}
                       </Field>
                       <Field label="Phone" htmlFor="qt-phone">
-                        <Input id="qt-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={100} required />
+                        <Input id="qt-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={100} required {...missingProps('qt-phone')} />
+                        {missingNote('qt-phone')}
                       </Field>
                       <Field label="Email" htmlFor="qt-email">
-                        <Input id="qt-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} placeholder="optional" />
+                        <Input id="qt-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} placeholder="optional" {...missingProps('qt-email')} />
+                        {missingNote('qt-email')}
                       </Field>
                     </FormRow>
                   </FormGroup>
@@ -366,27 +488,34 @@ export function QuickTicket({
                   <FormGroup name="Vehicle" hint="Enter the vehicle details you can verify now.">
                     <FormRow>
                       <Field label="Year" htmlFor="qt-year">
-                        <Input id="qt-year" type="number" min={1886} max={MAX_VEHICLE_YEAR} step={1} value={year} onChange={(event) => setYear(event.target.value)} required mono />
+                        <Input id="qt-year" type="number" min={1886} max={MAX_VEHICLE_YEAR} step={1} value={year} onChange={(event) => setYear(event.target.value)} required mono {...missingProps('qt-year')} />
+                        {missingNote('qt-year')}
                       </Field>
                       <Field label="Make" htmlFor="qt-make">
-                        <Input id="qt-make" value={make} onChange={(event) => setMake(event.target.value)} maxLength={100} required />
+                        <Input id="qt-make" value={make} onChange={(event) => setMake(event.target.value)} maxLength={100} required {...missingProps('qt-make')} />
+                        {missingNote('qt-make')}
                       </Field>
                       <Field label="Model" htmlFor="qt-model">
-                        <Input id="qt-model" value={model} onChange={(event) => setModel(event.target.value)} maxLength={100} required />
+                        <Input id="qt-model" value={model} onChange={(event) => setModel(event.target.value)} maxLength={100} required {...missingProps('qt-model')} />
+                        {missingNote('qt-model')}
                       </Field>
                       <Field label="Engine" htmlFor="qt-engine">
-                        <Input id="qt-engine" value={engine} onChange={(event) => setEngine(event.target.value)} maxLength={200} placeholder="optional" />
+                        <Input id="qt-engine" value={engine} onChange={(event) => setEngine(event.target.value)} maxLength={200} placeholder="optional" {...missingProps('qt-engine')} />
+                        {missingNote('qt-engine')}
                       </Field>
                     </FormRow>
                     <FormRow>
                       <Field label="VIN" htmlFor="qt-vin" hint="Optional · 17 characters">
-                        <Input id="qt-vin" value={vin} onChange={(event) => setVin(event.target.value.toUpperCase())} pattern=".{17}" maxLength={17} mono />
+                        <Input id="qt-vin" value={vin} onChange={(event) => setVin(event.target.value.toUpperCase())} pattern=".{17}" maxLength={17} mono {...missingProps('qt-vin')} />
+                        {missingNote('qt-vin')}
                       </Field>
                       <Field label="Mileage today" htmlFor="qt-mileage">
-                        <Input id="qt-mileage" type="number" min={0} max={MAX_MILEAGE} step={1} value={mileage} onChange={(event) => setMileage(event.target.value)} mono />
+                        <Input id="qt-mileage" type="number" min={0} max={MAX_MILEAGE} step={1} value={mileage} onChange={(event) => setMileage(event.target.value)} mono {...missingProps('qt-mileage')} />
+                        {missingNote('qt-mileage')}
                       </Field>
                       <Field label="License plate" htmlFor="qt-plate">
-                        <Input id="qt-plate" value={plate} onChange={(event) => setPlate(event.target.value)} maxLength={32} mono />
+                        <Input id="qt-plate" value={plate} onChange={(event) => setPlate(event.target.value)} maxLength={32} mono {...missingProps('qt-plate')} />
+                        {missingNote('qt-plate')}
                       </Field>
                     </FormRow>
                   </FormGroup>
@@ -396,7 +525,8 @@ export function QuickTicket({
               {isExisting && (
                 <FormGroup name="This visit" hint="Optional — update the current odometer reading.">
                   <Field label="Mileage today" htmlFor="qt-existing-mileage">
-                    <Input id="qt-existing-mileage" type="number" min={0} max={MAX_MILEAGE} step={1} value={mileage} onChange={(event) => setMileage(event.target.value)} mono />
+                    <Input id="qt-existing-mileage" type="number" min={0} max={MAX_MILEAGE} step={1} value={mileage} onChange={(event) => setMileage(event.target.value)} mono {...missingProps('qt-existing-mileage')} />
+                    {missingNote('qt-existing-mileage')}
                   </Field>
                 </FormGroup>
               )}
@@ -413,10 +543,12 @@ export function QuickTicket({
                         setQuoteMode(event.target.value as 'canned' | 'manual')
                         setError(null)
                       }}
+                      {...missingProps('qt-quote-source')}
                     >
                       {cannedJobs.length > 0 && <option value="canned">Canned job</option>}
                       <option value="manual">Manual draft</option>
                     </select>
+                    {missingNote('qt-quote-source')}
                   </Field>
                   {quoteMode === 'canned' ? (
                     <Field label="Canned job" htmlFor="qt-canned-job">
@@ -453,7 +585,9 @@ export function QuickTicket({
                           value={requestedWork}
                           onChange={(event) => setRequestedWork(event.target.value)}
                           required
+                          {...missingProps('qt-requested-work')}
                         />
+                        {missingNote('qt-requested-work')}
                       </Field>
                     </>
                   )}
@@ -512,13 +646,17 @@ export function QuickTicket({
               )}
 
               <FormFooter
-                meta={busy ? 'Creating quote draft…' : 'Explicit Prepare happens on the quote page'}
+                meta={busy
+                  ? 'Creating quote draft…'
+                  : attempted && missing
+                    ? missing.message
+                    : 'Explicit Prepare happens on the quote page'}
                 actions={
                   <>
                     <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>
                       Cancel
                     </Btn>
-                    <Btn kind="primary" type="submit" disabled={!canSubmit} kbd="⌘ ↵">
+                    <Btn kind="primary" type="submit" disabled={busy || catalogRefreshRequired} kbd="⌘ ↵">
                       Create quote
                     </Btn>
                   </>

@@ -53,6 +53,86 @@ type TierWarning = {
   requiredSkillTier: 1 | 2 | 3
 }
 
+// The one place that decides whether this form can be sent. It answers with the
+// first thing still missing, in the order the writer reads the form, so pressing
+// Create repair order can always name it and move focus to it instead of leaving
+// a dead button on a long scrolling form.
+type MissingRequirement = { fieldId: string; message: string }
+
+function firstMissingRequirement(form: {
+  isPickExisting: boolean
+  name: string
+  phone: string
+  year: string
+  make: string
+  model: string
+  description: string
+  intent: 'diagnosis' | 'known'
+  diagMode: 'canned' | 'manual'
+  knownMode: 'canned' | 'manual'
+  cannedCatalogAvailable: boolean
+  selectedDiagnostic: SafeCannedJobTemplate | null
+  selectedKnown: SafeCannedJobTemplate | null
+  customDiagDescription: string
+  customDiagHours: string
+  customDiagPrice: string
+  requestedServiceDescription: string
+}): MissingRequirement | null {
+  if (!form.isPickExisting) {
+    if (form.name.trim() === '') return { fieldId: 'ci-name', message: 'Add the customer’s name.' }
+    if (form.phone.trim() === '') {
+      return { fieldId: 'ci-phone', message: 'Add a phone number — that is how the shop reaches them.' }
+    }
+    if (form.year.trim() === '') return { fieldId: 'ci-year', message: 'Add the vehicle year.' }
+    if (form.make.trim() === '') return { fieldId: 'ci-make', message: 'Add the make.' }
+    if (form.model.trim() === '') return { fieldId: 'ci-model', message: 'Add the model.' }
+  }
+  if (form.description.trim() === '') {
+    return { fieldId: 'ci-description', message: 'Add what brought them in.' }
+  }
+  if (form.intent === 'diagnosis') {
+    if (form.diagMode === 'canned') {
+      return form.cannedCatalogAvailable && form.selectedDiagnostic !== null
+        ? null
+        : {
+            fieldId: 'ci-diag-mode',
+            message: 'Pick the diagnostic labor to authorize, or set Scope source to Custom and type it.',
+          }
+    }
+    if (form.customDiagDescription.trim() === '') {
+      return { fieldId: 'ci-diag-description', message: 'Say what the diagnostic time covers.' }
+    }
+    if (!(Number(form.customDiagHours) > 0)) {
+      return { fieldId: 'ci-diag-hours', message: 'Add the diagnostic hours.' }
+    }
+    if (form.customDiagPrice.trim() === '' || !(Number(form.customDiagPrice) >= 0)) {
+      return { fieldId: 'ci-diag-price', message: 'Add the diagnostic price in dollars.' }
+    }
+    return null
+  }
+  if (form.knownMode === 'canned') {
+    return form.cannedCatalogAvailable && form.selectedKnown !== null
+      ? null
+      : {
+          fieldId: 'ci-known-mode',
+          message: 'Pick the saved work, or set Scope source to Custom request and type it.',
+        }
+  }
+  if (form.requestedServiceDescription.trim() === '') {
+    return { fieldId: 'ci-service-description', message: 'Add the work they are asking for.' }
+  }
+  return null
+}
+
+function focusMissing(fieldId: string) {
+  const field = document.getElementById(fieldId)
+  if (!field) return
+  if (typeof field.scrollIntoView === 'function') {
+    field.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+  field.focus({ preventScroll: true })
+}
+
 function optionalText(value: string): string | null {
   return value.trim() || null
 }
@@ -137,6 +217,7 @@ export function CounterIntake({
   const [vinStatus, setVinStatus] = useState<string | null>(null)
   const [vinStatusKind, setVinStatusKind] = useState<'success' | 'error' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tierWarning, setTierWarning] = useState<TierWarning | null>(null)
 
@@ -145,23 +226,38 @@ export function CounterIntake({
   // customer contact, year/make/model, and concern are required.
   const selectedDiagnostic = diagnosticJobs.find((job) => job.id === selectedDiagnosticId) ?? null
   const selectedKnown = knownWorkJobs.find((job) => job.id === selectedKnownId) ?? null
-  const workReady = intent === 'diagnosis'
-    ? (diagMode === 'canned'
-        ? cannedCatalogAvailable && selectedDiagnostic !== null
-        : customDiagDescription.trim() !== '' && Number(customDiagHours) > 0 && customDiagPrice.trim() !== '' && Number(customDiagPrice) >= 0)
-    : knownMode === 'canned'
-      ? cannedCatalogAvailable && selectedKnown !== null
-      : requestedServiceDescription.trim() !== ''
-  const canSubmit =
-    !busy &&
-    description.trim() !== '' &&
-    workReady &&
-    (isPickExisting ||
-      (name.trim() !== '' &&
-        phone.trim() !== '' &&
-        year.trim() !== '' &&
-        make.trim() !== '' &&
-        model.trim() !== ''))
+  const missing = firstMissingRequirement({
+    isPickExisting,
+    name,
+    phone,
+    year,
+    make,
+    model,
+    description,
+    intent,
+    diagMode,
+    knownMode,
+    cannedCatalogAvailable,
+    selectedDiagnostic,
+    selectedKnown,
+    customDiagDescription,
+    customDiagHours,
+    customDiagPrice,
+    requestedServiceDescription,
+  })
+
+  // Rendered right where focus lands, so the writer never has to guess which
+  // field the form is waiting on.
+  const missingNote = (fieldId: string) =>
+    attempted && missing && missing.fieldId === fieldId ? (
+      <span id={`${fieldId}-missing`} role="alert" className={styles.missingNote}>
+        {missing.message}
+      </span>
+    ) : null
+  const missingProps = (fieldId: string) =>
+    attempted && missing && missing.fieldId === fieldId
+      ? { 'aria-invalid': true, 'aria-describedby': `${fieldId}-missing` }
+      : {}
 
   const handlePickVehicle = (vehicleId: string) => {
     setPickedVehicleId(vehicleId)
@@ -229,7 +325,12 @@ export function CounterIntake({
   }
 
   const submitTicket = async (confirmBelowTier = false) => {
-    if (!canSubmit) return
+    if (busy) return
+    if (missing) {
+      setAttempted(true)
+      focusMissing(missing.fieldId)
+      return
+    }
     setBusy(true)
     setError(null)
     setTierWarning(null)
@@ -327,7 +428,6 @@ export function CounterIntake({
   const handleFormKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
     if (e.key !== 'Enter' || (!e.metaKey && !e.ctrlKey)) return
     e.preventDefault()
-    if (!canSubmit) return
     e.currentTarget.requestSubmit()
   }
 
@@ -367,7 +467,7 @@ export function CounterIntake({
                   type="submit"
                   form="counter-intake-form"
                   kbd="⌘ ↵"
-                  disabled={!canSubmit}
+                  disabled={busy}
                 >
                   Create repair order
                 </Btn>
@@ -381,6 +481,11 @@ export function CounterIntake({
               className="vt-form"
               onSubmit={handleSubmit}
               onKeyDown={handleFormKeyDown}
+              // The browser's own validation bubble blocks submit before this
+              // form can name the missing field in shop language, and it never
+              // fires at all for the work-scope requirements. This screen owns
+              // the message; `required` stays for assistive tech.
+              noValidate
             >
               <div className={styles.search}>
                 <PredictiveIntakeSearch
@@ -441,7 +546,9 @@ export function CounterIntake({
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           required
+                          {...missingProps('ci-name')}
                         />
+                        {missingNote('ci-name')}
                       </Field>
                       <Field label="Phone" htmlFor="ci-phone" hint="Used for completion text">
                         <Input
@@ -452,7 +559,9 @@ export function CounterIntake({
                           value={phone}
                           onChange={(e) => setPhone(e.target.value)}
                           required
+                          {...missingProps('ci-phone')}
                         />
+                        {missingNote('ci-phone')}
                       </Field>
                       <Field label="Email" htmlFor="ci-email">
                         <Input
@@ -532,7 +641,10 @@ export function CounterIntake({
                           mono
                           value={year}
                           onChange={(e) => setYear(e.target.value)}
+                          required
+                          {...missingProps('ci-year')}
                         />
+                        {missingNote('ci-year')}
                       </Field>
                       <Field label="Make" htmlFor="ci-make">
                         <Input
@@ -540,7 +652,10 @@ export function CounterIntake({
                           name="make"
                           value={make}
                           onChange={(e) => setMake(e.target.value)}
+                          required
+                          {...missingProps('ci-make')}
                         />
+                        {missingNote('ci-make')}
                       </Field>
                       <Field label="Model" htmlFor="ci-model">
                         <Input
@@ -548,7 +663,10 @@ export function CounterIntake({
                           name="model"
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
+                          required
+                          {...missingProps('ci-model')}
                         />
+                        {missingNote('ci-model')}
                       </Field>
                       <Field label="Engine" htmlFor="ci-engine">
                         <Input
@@ -612,7 +730,9 @@ export function CounterIntake({
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     required
+                    {...missingProps('ci-description')}
                   />
+                  {missingNote('ci-description')}
                 </Field>
                 <FormRow>
                   <Field label="When did it start?" htmlFor="ci-when-started">
@@ -672,10 +792,12 @@ export function CounterIntake({
                         className="vt-field__input"
                         value={diagMode}
                         onChange={(event) => setDiagMode(event.target.value as 'canned' | 'manual')}
+                        {...missingProps('ci-diag-mode')}
                       >
                         <option value="canned">Preset diagnostic</option>
                         <option value="manual">Custom</option>
                       </select>
+                      {missingNote('ci-diag-mode')}
                     </Field>
                   )}
                   {diagMode === 'canned' ? (
@@ -707,7 +829,9 @@ export function CounterIntake({
                           placeholder="e.g. diagnose intermittent no-start"
                           value={customDiagDescription}
                           onChange={(event) => setCustomDiagDescription(event.target.value)}
+                          {...missingProps('ci-diag-description')}
                         />
+                        {missingNote('ci-diag-description')}
                       </Field>
                       <FormRow>
                         <Field label="Hours" htmlFor="ci-diag-hours">
@@ -718,7 +842,9 @@ export function CounterIntake({
                             mono
                             value={customDiagHours}
                             onChange={(event) => setCustomDiagHours(event.target.value)}
+                            {...missingProps('ci-diag-hours')}
                           />
+                          {missingNote('ci-diag-hours')}
                         </Field>
                         <Field label="Price (USD)" htmlFor="ci-diag-price">
                           <Input
@@ -728,7 +854,9 @@ export function CounterIntake({
                             mono
                             value={customDiagPrice}
                             onChange={(event) => setCustomDiagPrice(event.target.value)}
+                            {...missingProps('ci-diag-price')}
                           />
+                          {missingNote('ci-diag-price')}
                         </Field>
                       </FormRow>
                     </>
@@ -743,10 +871,12 @@ export function CounterIntake({
                         className="vt-field__input"
                         value={knownMode}
                         onChange={(event) => setKnownMode(event.target.value as 'canned' | 'manual')}
+                        {...missingProps('ci-known-mode')}
                       >
                         <option value="canned">Saved work</option>
                         <option value="manual">Custom request</option>
                       </select>
+                      {missingNote('ci-known-mode')}
                     </Field>
                   )}
                   {knownMode === 'canned' && knownWorkJobs.length > 0 ? (
@@ -781,15 +911,19 @@ export function CounterIntake({
                   <Field
                     label="Requested work"
                     htmlFor="ci-service-description"
-                    hint="Optional — becomes this repair order’s one work item"
+                    hint="Required · 200 characters maximum — becomes this repair order’s one work item"
                   >
                     <Input
                       id="ci-service-description"
                       name="requestedServiceDescription"
+                      maxLength={200}
                       placeholder="e.g. replace rear brake pads"
                       value={requestedServiceDescription}
                       onChange={(e) => setRequestedServiceDescription(e.target.value)}
+                      required
+                      {...missingProps('ci-service-description')}
                     />
+                    {missingNote('ci-service-description')}
                   </Field>
                     </FormRow>
                   )}
@@ -868,13 +1002,13 @@ export function CounterIntake({
               )}
 
               <FormFooter
-                meta={busy ? 'Submitting…' : ''}
+                meta={busy ? 'Submitting…' : attempted && missing ? missing.message : ''}
                 actions={
                   <>
                     <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>
                       Cancel
                     </Btn>
-                    <Btn kind="primary" type="submit" disabled={!canSubmit} kbd="⌘ ↵">
+                    <Btn kind="primary" type="submit" disabled={busy} kbd="⌘ ↵">
                       Create repair order
                     </Btn>
                   </>
