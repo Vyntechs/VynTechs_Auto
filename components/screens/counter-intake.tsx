@@ -303,10 +303,17 @@ export function CounterIntake({
         | { error: string }
       if (!response.ok || 'error' in payload) {
         setVinStatusKind('error')
+        // `invalid_vin` is the route refusing the characters we sent, and
+        // `invalid` is NHTSA refusing the VIN itself. Both are the writer's VIN,
+        // not the service — reporting them as an outage sent the writer looking
+        // for a problem that was not there.
+        const reason = 'error' in payload ? payload.error : null
         setVinStatus(
-          'error' in payload && payload.error === 'invalid'
-            ? 'VIN was not recognized. Enter the vehicle details manually.'
-            : 'VIN lookup is unavailable. Enter the vehicle details manually.',
+          reason === 'invalid_vin'
+            ? 'That VIN is not 17 valid characters — check for a space or a typo.'
+            : reason === 'invalid'
+              ? 'VIN was not recognized. Enter the vehicle details manually.'
+              : 'VIN lookup is unavailable. Enter the vehicle details manually.',
         )
         return
       }
