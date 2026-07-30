@@ -19,6 +19,10 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  // Whatever the Save button itself refused, shown at the Save button. The
+  // panel-top status is far above the fold on a phone, so a save that failed
+  // validation there read as the product silently refusing.
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [retiring, setRetiring] = useState<CannedJobProjection | null>(null)
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null)
   const keyRef = useRef<{ signature: string; key: string } | null>(null)
@@ -35,13 +39,13 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
   function requestSwitch(action: () => void) {
     if (inFlightRef.current) return
     if (dirty) { returnFocus.current = document.activeElement as HTMLElement; setDiscardAction(() => action) }
-    else action()
+    else { setSaveError(null); action() }
   }
 
   async function refresh() {
     if (inFlightRef.current) return
     inFlightRef.current = true
-    setBusy(true); setMessage(null)
+    setBusy(true); setMessage(null); setSaveError(null)
     try {
       const response = await fetch('/api/shop/canned-jobs')
       const parsed = response.ok ? parseCannedJobListResponse(await response.json().catch(() => null)) : null
@@ -67,8 +71,8 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
     if (!editor || inFlightRef.current) return
     let body: ReturnType<typeof normalizeCannedJobDraft>; let signature: string
     try { body = normalizeCannedJobDraft(editor.draft); signature = JSON.stringify(body) }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Check every field.'); return }
-    inFlightRef.current = true; setBusy(true); setMessage(null)
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'Check every field.'); return }
+    inFlightRef.current = true; setBusy(true); setMessage(null); setSaveError(null)
     try {
       const creating = editor.mode === 'create'
       if (creating && keyRef.current?.signature !== signature) keyRef.current = { signature, key: crypto.randomUUID() }
@@ -80,13 +84,13 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
       const parsed = response.ok ? (creating
         ? parseCannedJobMutationResponse(response.status, payload)
         : parseManagementCannedJobMutationResponse(payload)) : null
-      if (!response.ok) setMessage(classifyCannedJobFailure(response.status))
-      else if (!parsed || (!creating && parsed.cannedJob.id !== editor.original.id)) setMessage('The saved response was incomplete. Refresh before making another change.')
+      if (!response.ok) setSaveError(classifyCannedJobFailure(response.status))
+      else if (!parsed || (!creating && parsed.cannedJob.id !== editor.original.id)) setSaveError('The saved response was incomplete. Refresh before making another change.')
       else {
         setJobs((current) => [...current.filter((job) => job.id !== parsed.cannedJob.id), parsed.cannedJob].sort(compareJobs))
         keyRef.current = null; setEditor(null); setMessage(parsed.changed ? 'Canned job saved.' : 'Canned job already matched.')
       }
-    } catch { setMessage('Could not reach the server. Your form is still open; try again.') }
+    } catch { setSaveError('Could not reach the server. Your form is still open; try again.') }
     finally { inFlightRef.current = false; setBusy(false) }
   }
 
@@ -126,7 +130,7 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
             </li>)}
           </ul>
         )}
-        {editor && <EditorForm editor={editor} busy={busy} setEditor={setEditor} onSave={save} onClose={() => requestSwitch(() => setEditor(null))} titleRef={editorFirstField} />}
+        {editor && <EditorForm editor={editor} busy={busy} setEditor={setEditor} onSave={save} onClose={() => requestSwitch(() => setEditor(null))} titleRef={editorFirstField} saveError={saveError} onDraftChange={() => setSaveError(null)} />}
       </div>
       {(retiring || discardAction) && <div className={styles.backdrop} onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) { const target = retiring ? returnFocus.current : editorFirstField.current ?? returnFocus.current; setRetiring(null); setDiscardAction(null); queueMicrotask(() => target?.focus()) } }}>
         <div role="alertdialog" aria-modal="true" aria-labelledby="canned-confirm-title" className={styles.dialog} onKeyDown={(e) => {
@@ -142,19 +146,24 @@ export function CannedJobsSection({ initialJobs, initialTaxRateBps }: Props) {
   )
 }
 
-function EditorForm({ editor, busy, setEditor, onSave, onClose, titleRef }: { editor: Editor; busy: boolean; setEditor: React.Dispatch<React.SetStateAction<Editor | null>>; onSave: () => void; onClose: () => void; titleRef: React.RefObject<HTMLInputElement | null> }) {
+function EditorForm({ editor, busy, setEditor, onSave, onClose, titleRef, saveError, onDraftChange }: { editor: Editor; busy: boolean; setEditor: React.Dispatch<React.SetStateAction<Editor | null>>; onSave: () => void; onClose: () => void; titleRef: React.RefObject<HTMLInputElement | null>; saveError: string | null; onDraftChange: () => void }) {
   const draft = editor.draft
-  const update = (next: Partial<CannedJobDraft>) => setEditor({ ...editor, draft: { ...draft, ...next } })
+  const update = (next: Partial<CannedJobDraft>) => { onDraftChange(); setEditor({ ...editor, draft: { ...draft, ...next } }) }
   const updateLine = (index: number, next: Partial<CannedJobDraft['lines'][number]>) => update({ lines: draft.lines.map((line, position) => position === index ? { ...line, ...next } : line) })
+  // A part is invalid on a diagnostic template by rule, so the editor must not
+  // hand the writer one and then refuse to save it.
+  const changeKind = (kind: CannedJobDraft['kind']) => update(kind === 'diagnostic'
+    ? { kind, lines: draft.lines.map((line) => line.kind === 'part' ? { ...line, kind: 'labor' as const } : line) }
+    : { kind })
   return <section className={styles.editor} aria-label={editor.mode === 'create' ? 'Create canned job' : `Edit ${editor.original.title}`}>
     <header><div><span className={styles.kind}>{editor.mode === 'create' ? 'New library entry' : 'Replace saved entry'}</span><h3>{editor.mode === 'create' ? 'Build a canned job' : `Edit ${editor.original.title}`}</h3></div><button className="btn" disabled={busy} onClick={onClose}>Close</button></header>
     <div className={styles.grid}>
       <label>Title<input ref={titleRef} value={draft.title} maxLength={200} disabled={busy} onChange={(e) => update({ title: e.target.value })} /></label>
-      <label>Work type<select value={draft.kind} disabled={busy} onChange={(e) => update({ kind: e.target.value as CannedJobDraft['kind'] })}><option value="diagnostic">Diagnostic</option><option value="repair">Repair</option><option value="maintenance">Maintenance</option></select></label>
+      <label>Work type<select value={draft.kind} disabled={busy} onChange={(e) => changeKind(e.target.value as CannedJobDraft['kind'])}><option value="diagnostic">Diagnostic</option><option value="repair">Repair</option><option value="maintenance">Maintenance</option></select></label>
       <label>Required skill tier<select value={draft.tier} disabled={busy} onChange={(e) => update({ tier: e.target.value })}><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></label>
       <label>Library order<input inputMode="numeric" value={draft.sort} disabled={busy} onChange={(e) => update({ sort: e.target.value })} /></label>
     </div>
-    <div className={styles.linesHeader}><h4>Priced lines</h4><button className="btn" disabled={busy || draft.lines.length >= 25} onClick={() => update({ lines: [...draft.lines, newCannedLine()] })}>Add line</button></div>
+    <div className={styles.linesHeader}><h4>Priced lines</h4><button className="btn" disabled={busy || draft.lines.length >= 25} onClick={() => update({ lines: [...draft.lines, newCannedLine(draft.kind === 'diagnostic' ? 'labor' : 'part')] })}>Add line</button></div>
     <ol className={styles.lines}>{draft.lines.map((line, index) => <li key={line.key}><fieldset className={styles.line}><legend>Line {index + 1}: {line.kind}</legend>
       <div className={styles.grid}>
         <label>Line type<select aria-label={`Line ${index + 1} type`} value={line.kind} disabled={busy} onChange={(e) => updateLine(index, { kind: e.target.value as typeof line.kind })}><option value="part">Part</option><option value="labor">Labor</option><option value="fee">Fee</option></select></label>
@@ -167,7 +176,7 @@ function EditorForm({ editor, busy, setEditor, onSave, onClose, titleRef }: { ed
       </div>
       <button className="btn" aria-label={`Remove line ${index + 1}`} disabled={busy || draft.lines.length === 1} onClick={() => update({ lines: draft.lines.filter((_, position) => position !== index) })}>Remove line</button>
     </fieldset></li>)}</ol>
-    <footer className={styles.editorFooter}><button className="btn" disabled={busy} onClick={onClose}>Discard</button><button className="btn btn-primary" disabled={busy} onClick={onSave}>{busy ? 'Saving…' : 'Save canned job'}</button></footer>
+    <footer className={styles.editorFooter}>{saveError && <p className={styles.saveError} role="alert">{saveError}</p>}<button className="btn" disabled={busy} onClick={onClose}>Discard</button><button className="btn btn-primary" disabled={busy} onClick={onSave}>{busy ? 'Saving…' : 'Save canned job'}</button></footer>
   </section>
 }
 
