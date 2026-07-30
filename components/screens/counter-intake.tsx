@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Btn,
@@ -225,6 +225,10 @@ export function CounterIntake({
   const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tierWarning, setTierWarning] = useState<TierWarning | null>(null)
+  // Held across retries so a repeat of the same submission is a replay, not a
+  // second repair order. Rotated when the writer changes what they are sending,
+  // and cleared once the server has recorded this one.
+  const requestIdentityRef = useRef<{ signature: string; clientKey: string } | null>(null)
 
   const isPickExisting = pickedVehicleId !== null
   // Mirror the counter-ticket requirements. VIN remains optional for walk-ins;
@@ -407,11 +411,15 @@ export function CounterIntake({
           },
           ...common,
         }
+    const signature = JSON.stringify(body)
+    if (requestIdentityRef.current?.signature !== signature) {
+      requestIdentityRef.current = { signature, clientKey: crypto.randomUUID() }
+    }
     try {
       const res = await fetch('/api/tickets/counter', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, clientKey: requestIdentityRef.current.clientKey }),
       })
       const payload = (await res.json()) as {
         ticket?: { id?: string }
@@ -428,6 +436,7 @@ export function CounterIntake({
         setBusy(false)
         return
       }
+      requestIdentityRef.current = null
       router.push(`/tickets/${payload.ticket.id}`)
     } catch {
       setError('The counter service could not be reached. Try again.')

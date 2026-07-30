@@ -119,6 +119,7 @@ describe('createCounterTicket', () => {
 
   function newBody(overrides: Record<string, unknown> = {}) {
     return {
+      clientKey: crypto.randomUUID(),
       vehicleMode: 'new',
       customer: {
         name: '  Maria Lopez  ',
@@ -149,6 +150,7 @@ describe('createCounterTicket', () => {
 
   function existingBody(overrides: Record<string, unknown> = {}) {
     return {
+      clientKey: crypto.randomUUID(),
       vehicleMode: 'existing',
       existingVehicleId: existingVehicle.id,
       concern: 'Brake vibration at highway speed',
@@ -497,6 +499,91 @@ describe('createCounterTicket', () => {
       actor,
       body: newBody({ work: { mode: 'diagnosis', cannedJobId: maintenanceTemplate.id, expectedFingerprint: maintenanceTemplate.fingerprint, expectedTaxRateBps: null } }),
     })).resolves.toEqual({ ok: false, error: 'not_found' })
+    expect(await db.select().from(tickets)).toEqual([])
+  })
+
+  async function nextTicketNumber(): Promise<number> {
+    const [shop] = await db
+      .select({ next: shops.nextTicketNumber })
+      .from(shops)
+      .where(eq(shops.id, shopA.id))
+    return shop.next
+  }
+
+  it('returns the first repair order for a replayed client key without burning a second number', async () => {
+    const body = newBody()
+    const before = await nextTicketNumber()
+
+    const first = await createCounterTicket(db, { actor, body })
+    const replay = await createCounterTicket(db, { actor, body })
+
+    expect(first.ok).toBe(true)
+    if (!first.ok || !replay.ok) throw new Error('counter ticket failed')
+    expect(replay.ticket.id).toBe(first.ticket.id)
+    expect(replay).toEqual(first)
+    expect(await db.select().from(tickets)).toHaveLength(1)
+    expect(await db.select().from(ticketJobs)).toHaveLength(1)
+    expect(await db.select().from(customers).where(eq(customers.shopId, shopA.id))).toHaveLength(2)
+    expect(await db.select().from(vehicles)).toHaveLength(3)
+    expect(await nextTicketNumber()).toBe(before + 1)
+  })
+
+  it('creates a second repair order when the same details carry a new client key', async () => {
+    const first = await createCounterTicket(db, { actor, body: newBody() })
+    const second = await createCounterTicket(db, { actor, body: newBody() })
+
+    expect(first.ok).toBe(true)
+    if (!first.ok || !second.ok) throw new Error('counter ticket failed')
+    expect(second.ticket.id).not.toBe(first.ticket.id)
+    expect(await db.select().from(tickets)).toHaveLength(2)
+  })
+
+  it('binds a client key to the writer who used it', async () => {
+    const [otherProfile] = await db.insert(profiles).values({
+      userId: uuid(4), shopId: shopA.id, role: 'advisor', skillTier: 2, fullName: 'Avery Advisor',
+    }).returning()
+    const otherActor: TicketActor = {
+      profileId: otherProfile.id,
+      shopId: otherProfile.shopId,
+      role: otherProfile.role,
+      skillTier: otherProfile.skillTier,
+      membershipStatus: otherProfile.membershipStatus,
+      deactivatedAt: otherProfile.deactivatedAt,
+    }
+    const sharedKey = crypto.randomUUID()
+
+    const first = await createCounterTicket(db, { actor, body: newBody({ clientKey: sharedKey }) })
+    const other = await createCounterTicket(db, {
+      actor: otherActor,
+      body: newBody({ clientKey: sharedKey }),
+    })
+
+    expect(first.ok).toBe(true)
+    if (!first.ok || !other.ok) throw new Error('counter ticket failed')
+    expect(other.ticket.id).not.toBe(first.ticket.id)
+    expect(await db.select().from(tickets)).toHaveLength(2)
+  })
+
+  it('does not disclose or reuse a derived identity that belongs to other work', async () => {
+    const body = newBody()
+    const first = await createCounterTicket(db, { actor, body })
+    if (!first.ok) throw new Error('counter ticket failed')
+    await db.update(tickets).set({ source: 'quick_quote' }).where(eq(tickets.id, first.ticket.id))
+
+    await expect(createCounterTicket(db, { actor, body })).resolves.toEqual({
+      ok: false,
+      error: 'not_found',
+    })
+    expect(await db.select().from(tickets)).toHaveLength(1)
+  })
+
+  it('rejects a missing or malformed client key before any write', async () => {
+    for (const clientKey of [undefined, null, '', 'not-a-uuid', 12]) {
+      await expect(createCounterTicket(db, {
+        actor,
+        body: newBody({ clientKey }),
+      })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    }
     expect(await db.select().from(tickets)).toEqual([])
   })
 

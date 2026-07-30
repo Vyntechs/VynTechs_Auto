@@ -161,6 +161,9 @@ describe('CounterIntake page wiring (search + form)', () => {
       ([url]) => url === '/api/tickets/counter',
     )
     expect(JSON.parse(ticketCall![1]!.body as string)).toEqual({
+      clientKey: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      ),
       vehicleMode: 'existing',
       existingVehicleId: '11111111-1111-4111-8111-111111111111',
       mileage: 121000,
