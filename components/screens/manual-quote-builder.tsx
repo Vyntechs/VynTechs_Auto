@@ -36,6 +36,7 @@ import {
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
 import { AddDiagnosticTime } from './add-diagnostic-time'
+import { AddRepairJob } from './add-repair-job'
 import { ManualPartSourcing } from './manual-part-sourcing'
 import styles from './manual-quote-builder.module.css'
 
@@ -290,9 +291,14 @@ export function ManualQuoteBuilder({
     modalOpen: modal !== null,
     busy,
   })
+  // Findings that exist must be reviewed before the quote goes out. Findings
+  // that do not exist yet do not block it: a hand-written diagnostic job with
+  // no story is authorization to spend the time, which is exactly what the
+  // snapshot builder already lets through as authorization-only scope.
   const pendingStory = !current.activeVersion && current.jobs.some((job) =>
     job.kind === 'diagnostic' && job.lines.length > 0
       && job.storyMode !== 'authorization_only'
+      && !(job.storyMode === 'manual_findings' && job.story.content === null)
       && (job.story.content === null || job.story.reviewStatus !== 'reviewed'))
   const preparation = basePreparation.kind === 'ready' && pendingStory
     ? { kind: 'blocked' as const, reasons: ['Review every diagnostic story.'] }
@@ -1041,6 +1047,11 @@ export function ManualQuoteBuilder({
               )}
             </section>
           )}
+
+          <AddRepairJob
+            ticketId={ticket.id}
+            onAdded={() => { void refreshQuote() }}
+          />
 
           <AddDiagnosticTime
             ticketId={ticket.id}

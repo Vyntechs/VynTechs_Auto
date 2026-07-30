@@ -197,6 +197,28 @@ export function parsePreparedVersionResponse(
   return parsed.data
 }
 
+const addedJobResponseSchema = z.strictObject({
+  changed: z.boolean(),
+  job: z.strictObject({
+    id: uuidSchema,
+    title: z.string().min(1).max(200),
+    kind: z.enum(['repair', 'maintenance']),
+    requiredSkillTier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  }),
+})
+
+export function parseAddedJobResponse(
+  status: number,
+  value: unknown,
+): z.infer<typeof addedJobResponseSchema> | null {
+  const parsed = addedJobResponseSchema.safeParse(value)
+  if (!parsed.success) return null
+  if (status === 201 && parsed.data.changed !== true) return null
+  if (status === 200 && parsed.data.changed !== false) return null
+  if (status !== 200 && status !== 201) return null
+  return parsed.data
+}
+
 const quoteDecisionResponseSchema = z.strictObject({
   changed: z.boolean(),
   event: z.strictObject({

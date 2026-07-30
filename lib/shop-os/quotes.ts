@@ -26,6 +26,7 @@ import {
   type QuoteSnapshotV1,
 } from '@/lib/shop-os/quote-math'
 import { validateStoredManualOfferLine } from '@/lib/shop-os/parts-adapters'
+import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
@@ -707,11 +708,19 @@ export async function getQuoteBuilder(
         const wizardSessionIds = new Set(wizardEvents.map((event) => event.sessionId))
         const storyMode = (job: typeof eligibleJobs[number]) => {
           if (job.kind !== 'diagnostic') return null
-          if (!job.sessionId && job.customerStory === null) return 'authorization_only' as const
           if (!job.sessionId) {
-            return entitlements.diagnostics
-              ? 'unavailable' as const
-              : 'manual_findings' as const
+            // A shop without the diagnostics add-on has no session coming that
+            // could ever write this story, so the manual editor is offered from
+            // the start — including for the FIRST story. Ordering this ahead of
+            // the authorization-only case is the fix for a closed loop: the
+            // editor used to appear only once a story existed, and nothing on
+            // this screen could write one.
+            if (!entitlements.diagnostics) return 'manual_findings' as const
+            // An entitled shop keeps today's behavior: authorization only until
+            // the diagnostic session it is entitled to run produces findings.
+            return job.customerStory === null
+              ? 'authorization_only' as const
+              : 'unavailable' as const
           }
           if (job.sessionId && wizardSessionIds.has(job.sessionId)) return 'published_wizard_unsupported' as const
           const linkedSession = sessionById.get(job.sessionId)
@@ -2060,4 +2069,157 @@ export async function deleteDraftLine(
     if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
     return { ok: true, changed: true }
   })
+}
+
+// ---- Ad-hoc repair or maintenance job --------------------------------------
+//
+// After a diagnosis the shop knows what the repair is, and that repair is
+// usually not already in the canned library. Until this existed, the only work
+// a writer could append to an open repair order was a saved template or more
+// diagnostic time, so a diagnosed vehicle could not be quoted for its repair at
+// all. This creates the job itself; the per-job Add part / Add labor / Add fee
+// editors already on the screen price it, and it then flows through the same
+// quote → approval → work path a canned job does.
+//
+// The job is created with no lines on purpose. It therefore changes no money,
+// so the active quote version is deliberately left alone: superseding it here
+// would reset every already-approved job on the ticket back to pending_quote
+// for a job that quotes nothing. The first line added through createDraftLine
+// supersedes the active version exactly as it does for any other edit.
+//
+// Skill tier is derived from the work kind by the same rule counter intake uses
+// for hand-typed work (lib/intake/counter-ticket.ts): repair is tier 2,
+// maintenance tier 1. That keeps the writer's motion to two fields, and the
+// existing assignment surface still moves the job to a named technician.
+const adHocJobBodySchema = z.strictObject({
+  title: z.string().trim().min(1).max(200),
+  kind: z.enum(['repair', 'maintenance']),
+})
+
+export type SafeAdHocJob = {
+  id: string
+  title: string
+  kind: 'repair' | 'maintenance'
+  requiredSkillTier: 1 | 2 | 3
+}
+export type AdHocJobResult =
+  | { ok: true; changed: boolean; job: SafeAdHocJob }
+  | { ok: false; error: QuoteDraftError | 'job_limit_reached'; retryable?: boolean }
+export type AdHocJobDependencies = {
+  afterTicketLock?: () => Promise<void>
+}
+
+function persistedAdHocJobId(
+  shopId: string,
+  ticketId: string,
+  profileId: string,
+  clientKey: string,
+): string {
+  const bytes = createHash('sha256')
+    .update('shop-os-ad-hoc-job-v1\0')
+    .update(shopId).update('\0')
+    .update(ticketId).update('\0')
+    .update(profileId).update('\0')
+    .update(clientKey)
+    .digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+export async function createAdHocJob(
+  db: AppDb,
+  input: { actor: QuoteActor; ticketId: unknown; clientKey: unknown; body: unknown },
+  dependencies: AdHocJobDependencies = {},
+): Promise<AdHocJobResult> {
+  const parsedTicket = uuidSchema.safeParse(input.ticketId)
+  const parsedClientKey = uuidSchema.safeParse(input.clientKey)
+  const parsedBody = adHocJobBodySchema.safeParse(input.body)
+  if (!parsedTicket.success || !parsedClientKey.success || !parsedBody.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
+  const body = parsedBody.data
+  const requiredSkillTier: 1 | 2 = body.kind === 'repair' ? 2 : 1
+  const persistedActor = await loadActiveActor(db, input.actor)
+  if (!persistedActor?.shopId) return notFound()
+  const shopId = persistedActor.shopId as string
+
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const [ticket] = await transactionDb
+        .select({ id: tickets.id, status: tickets.status })
+        .from(tickets)
+        .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicket.data)))
+        .limit(1)
+        .for('update', { noWait: true })
+      if (!ticket || ticket.status !== 'open') return notFound()
+      await dependencies.afterTicketLock?.()
+
+      const jobRows = await transactionDb
+        .select({
+          id: ticketJobs.id,
+          title: ticketJobs.title,
+          kind: ticketJobs.kind,
+          requiredSkillTier: ticketJobs.requiredSkillTier,
+        })
+        .from(ticketJobs)
+        .where(and(eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, parsedTicket.data)))
+        .orderBy(ticketJobs.id)
+        .for('update', { noWait: true })
+
+      const [freshActor] = await transactionDb
+        .select({ id: profiles.id, role: profiles.role })
+        .from(profiles)
+        .where(and(
+          eq(profiles.id, persistedActor.id),
+          eq(profiles.shopId, shopId),
+          eq(profiles.membershipStatus, 'active'),
+          isNull(profiles.deactivatedAt),
+        ))
+        .limit(1)
+        .for('update', { noWait: true })
+      if (!freshActor || !canBuildQuotes(freshActor.role)) return notFound()
+
+      const jobId = persistedAdHocJobId(shopId, parsedTicket.data, freshActor.id, parsedClientKey.data)
+      const existing = jobRows.find((job) => job.id === jobId)
+      if (existing) {
+        // Same-key replay is first-success-wins, and only while the persisted
+        // job is still exactly what this key created.
+        if (existing.title !== body.title || existing.kind !== body.kind
+          || existing.requiredSkillTier !== requiredSkillTier) return conflict()
+        return {
+          ok: true as const,
+          changed: false,
+          job: { id: existing.id, title: existing.title, kind: body.kind, requiredSkillTier },
+        }
+      }
+      if (await ticketAtJobLimit(transactionDb, { shopId, ticketId: parsedTicket.data })) {
+        return { ok: false as const, error: 'job_limit_reached' as const, retryable: false }
+      }
+      const [created] = await transactionDb.insert(ticketJobs).values({
+        id: jobId,
+        shopId,
+        ticketId: parsedTicket.data,
+        title: body.title,
+        kind: body.kind,
+        requiredSkillTier,
+        assignedTechId: null,
+        workStatus: 'open',
+        approvalState: 'pending_quote',
+      }).returning()
+      if (!created) throw new AbortDraftMutation(conflict(true))
+      return {
+        ok: true as const,
+        changed: true,
+        job: { id: created.id, title: created.title, kind: body.kind, requiredSkillTier },
+      }
+    })
+  } catch (error) {
+    if (error instanceof AbortDraftMutation) return error.failure
+    if (isLockUnavailable(error)) return conflict(true)
+    if (isUniqueViolation(error)) return conflict()
+    throw error
+  }
 }
