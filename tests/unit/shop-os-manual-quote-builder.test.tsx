@@ -556,6 +556,59 @@ describe('ManualQuoteBuilder canned application', () => {
     router.refresh.mockReset()
   })
 
+  // A diagnostic template used to appear in this picker labelled "Maintenance"
+  // and then refuse to apply, because a diagnostic job carries authorization and
+  // is always written as its own approvable job. It now belongs to Add
+  // diagnostic time, which can actually use it.
+  it('keeps a saved diagnostic out of the canned picker and offers it as diagnostic time', () => {
+    const diagnosticTemplate = {
+      id: '00000000-0000-4000-8000-000000000505',
+      title: 'NVH DIAGNOSTICS',
+      kind: 'diagnostic',
+      defaultRequiredSkillTier: 2,
+      sort: 0,
+      lines: [{
+        kind: 'labor', description: 'DIAGNOSTIC FOR NOISE VIBRATION AND HARSHNESS',
+        sort: 0, hours: '1', priceCents: 15_500, taxable: false,
+      }],
+      fingerprint: 'd'.repeat(64),
+      summary: { subtotalCents: 15_500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 15_500 },
+    } satisfies SafeCannedJobTemplate
+    render(
+      <ManualQuoteBuilder
+        ticket={ticket}
+        builder={builder()}
+        cannedJobs={[cannedJob, diagnosticTemplate]}
+      />,
+    )
+
+    const picker = screen.getByLabelText('Canned job')
+    expect(within(picker).getByRole('option', { name: 'Oil service' })).toBeInTheDocument()
+    expect(within(picker).queryByRole('option', { name: 'NVH DIAGNOSTICS' })).not.toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText('Saved diagnostic')).getByRole('option', { name: 'NVH DIAGNOSTICS' }),
+    ).toBeInTheDocument()
+  })
+
+  it('tells the writer the library holds no repair work when only diagnostics are saved', () => {
+    const diagnosticOnly = {
+      ...cannedJob,
+      id: '00000000-0000-4000-8000-000000000506',
+      title: 'NVH DIAGNOSTICS',
+      kind: 'diagnostic' as const,
+      lines: [{
+        kind: 'labor' as const, description: 'NVH', sort: 0, hours: '1',
+        priceCents: 15_500, taxable: false,
+      }],
+      summary: { subtotalCents: 15_500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 15_500 },
+    } satisfies SafeCannedJobTemplate
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[diagnosticOnly]} />)
+
+    expect(screen.queryByLabelText('Canned job')).not.toBeInTheDocument()
+    expect(screen.getByText(/No saved repair or maintenance work/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Saved diagnostic')).toBeInTheDocument()
+  })
+
   it('previews exact selected lines and totals before an explicit add', () => {
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} cannedJobs={[cannedJob]} />)
     fireEvent.change(screen.getByLabelText('Canned job'), { target: { value: CANNED_ID } })
