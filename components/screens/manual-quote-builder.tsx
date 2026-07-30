@@ -276,7 +276,12 @@ export function ManualQuoteBuilder({
     ? current.jobs.find((job) => job.id === sourcingJobId) ?? null
     : null
   const diagnosisSeed = selectLockedDiagnosisSeed(current.jobs)
-  const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
+  // A saved diagnostic is priced through Add diagnostic time, which writes it as
+  // its own approvable job. This picker applies work to the quote directly and
+  // refuses diagnostic kinds, so offering one here is a dead end.
+  const quoteCannedJobs = cannedJobs.filter((job) => job.kind !== 'diagnostic')
+  const diagnosticTemplates = cannedJobs.filter((job) => job.kind === 'diagnostic')
+  const selectedCannedJob = quoteCannedJobs.find((job) => job.id === selectedCannedId) ?? null
   const totals = summarizeQuoteMoney(lines, current.configuration.taxRateBps)
   const basePreparation = getQuotePreparationState({
     builder: current,
@@ -982,8 +987,8 @@ export function ManualQuoteBuilder({
                 Refresh canned jobs
               </button>
             </div>
-          ) : cannedJobs.length === 0 ? (
-            <p className={styles.cannedEmpty}>No canned jobs saved. Manual quote lines remain available.</p>
+          ) : quoteCannedJobs.length === 0 ? (
+            <p className={styles.cannedEmpty}>No saved repair or maintenance work. Manual quote lines remain available.</p>
           ) : (
             <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
               <div>
@@ -999,12 +1004,12 @@ export function ManualQuoteBuilder({
                 onChange={(event) => {
                   setSelectedCannedId(event.target.value || null)
                   setCannedClientKey(crypto.randomUUID())
-                  selectedFingerprintRef.current = cannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
+                  selectedFingerprintRef.current = quoteCannedJobs.find((job) => job.id === event.target.value)?.fingerprint ?? null
                   setError(null)
                 }}
               >
                 <option value="">Choose saved work</option>
-                {cannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+                {quoteCannedJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
               </select>
               {selectedCannedJob && (
                 <div className={styles.cannedPreview} aria-live="polite">
@@ -1039,6 +1044,7 @@ export function ManualQuoteBuilder({
 
           <AddDiagnosticTime
             ticketId={ticket.id}
+            templates={diagnosticTemplates}
             onAdded={() => { void refreshQuote() }}
           />
 
