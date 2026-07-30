@@ -33,14 +33,20 @@ function bumpLru(key: string, value: VinDecodeResult): void {
   }
 }
 
-type NhtsaVar = { Variable: string; Value: string | null }
+// `DecodeVinValues` answers with ONE flat row — `{ ErrorCode, ModelYear, Make, … }`
+// — not the `{ Variable, Value }` pairs that the sibling `DecodeVin` endpoint
+// returns. Reading it as pairs found nothing, so every VIN fell through to
+// `error: 'invalid'` and the counter never filled a single field. The unit tests
+// had mocked the pair shape, so they proved the parser against a payload the
+// provider does not send. Both fixtures now carry a real response body.
+type NhtsaRow = Record<string, string | number | null | undefined>
 
-function extract(results: NhtsaVar[], variable: string): string | null {
-  const row = results.find((r) => r.Variable === variable)
-  if (!row) return null
-  const v = row.Value
-  if (v === null || v === '' || v === 'Not Applicable') return null
-  return v
+function extract(row: NhtsaRow, key: string): string | null {
+  const v = row[key]
+  if (v === null || v === undefined) return null
+  const text = String(v).trim()
+  if (text === '' || text === 'Not Applicable') return null
+  return text
 }
 
 async function fetchVin(vin: string): Promise<VinDecodeResult> {
@@ -54,20 +60,28 @@ async function fetchVin(vin: string): Promise<VinDecodeResult> {
     )
     if (!response.ok) return { error: 'unavailable' }
 
-    const body = (await response.json()) as { Results?: NhtsaVar[] }
-    const results = body.Results ?? []
-
-    const errorCode = extract(results, 'Error Code')
-    if (errorCode === null || errorCode !== '0') {
+    const body = (await response.json()) as { Results?: NhtsaRow[] }
+    const row = body.Results?.[0]
+    if (!row) {
       const invalid: VinDecodeResult = { error: 'invalid' }
       bumpLru(vin, invalid)
       return invalid
     }
 
-    const yearRaw = extract(results, 'Model Year')
-    const make = extract(results, 'Make')
-    const model = extract(results, 'Model')
-    const engine = extract(results, 'Engine Model') ?? extract(results, 'Displacement (L)') ?? ''
+    // NHTSA reports several codes at once, comma-separated — `0` alone means a
+    // clean decode, and anything containing a non-zero code is a VIN we refuse
+    // to fill fields from rather than half-trusting.
+    const errorCode = extract(row, 'ErrorCode')
+    if (errorCode === null || errorCode.split(',').some((code) => code.trim() !== '0')) {
+      const invalid: VinDecodeResult = { error: 'invalid' }
+      bumpLru(vin, invalid)
+      return invalid
+    }
+
+    const yearRaw = extract(row, 'ModelYear')
+    const make = extract(row, 'Make')
+    const model = extract(row, 'Model')
+    const engine = extract(row, 'EngineModel') ?? extract(row, 'DisplacementL') ?? ''
     const year = yearRaw !== null ? Number.parseInt(yearRaw, 10) : Number.NaN
 
     if (!Number.isFinite(year) || !make || !model) {
