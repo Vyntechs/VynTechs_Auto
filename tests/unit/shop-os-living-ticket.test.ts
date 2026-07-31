@@ -179,6 +179,24 @@ describe('living repair order next-move projection', () => {
     }).primary).toMatchObject({ kind: 'handoff', label: 'Hand off' })
   })
 
+  it('makes retiring a declined line the counter’s next move and hides it from the floor', () => {
+    const declined = [job({ approvalState: 'declined', assignedTechId: PROFILE })]
+
+    for (const role of ['advisor', 'owner']) {
+      expect(project({ role, skillTier: null, jobs: declined }).primary).toMatchObject({
+        kind: 'cancel_job',
+        jobId: '00000000-0000-0000-0000-000000000201',
+        label: 'Retire declined work',
+      })
+    }
+
+    for (const role of ['tech', 'parts']) {
+      const result = project({ role, jobs: declined })
+      const all = result.primary ? [result.primary, ...result.secondary] : result.secondary
+      expect(all.some((command) => command.kind === 'cancel_job')).toBe(false)
+    }
+  })
+
   it('does not invent commands for unsupported roles or missing identity', () => {
     expect(project({ role: 'curator' })).toEqual({ primary: null, secondary: [] })
     expect(project({ profileId: null })).toEqual({ primary: null, secondary: [] })

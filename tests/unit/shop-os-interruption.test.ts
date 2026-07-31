@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
-import { profiles, shops, ticketActivity, ticketJobs, tickets } from '@/lib/db/schema'
+import { profiles, shops, ticketActivity, ticketJobs, ticketPayments, tickets } from '@/lib/db/schema'
 import {
   mutateJobInterruption,
   mutateTicketLifecycle,
   type InterruptionActor,
 } from '@/lib/shop-os/interruption'
+import { closeTicket } from '@/lib/shop-os/ring-out'
 import { getTicketDetail } from '@/lib/tickets'
 
 const uuid = (suffix: number) =>
@@ -287,6 +288,134 @@ describe('ShopOS job interruption', () => {
     expect(first).toMatchObject({ ok: true, changed: true, job: { assignedTechId: reliefTechId } })
     expect(second).toMatchObject({ ok: true, changed: false, job: { assignedTechId: reliefTechId } })
     expect(await db.select().from(ticketActivity)).toHaveLength(1)
+  })
+
+  describe('declined work the customer will not pay for', () => {
+    const declinedJobId = uuid(31)
+    let advisor: InterruptionActor
+
+    beforeEach(async () => {
+      // The brakes are approved and finished; the tires were declined and still
+      // sit open. The brakes have already been paid for.
+      await db.update(ticketJobs).set({ workStatus: 'done', clockedOnSince: null })
+        .where(eq(ticketJobs.id, jobId))
+      await db.insert(ticketJobs).values({
+        id: declinedJobId,
+        shopId,
+        ticketId,
+        title: 'Replace all four tires',
+        kind: 'repair',
+        requiredSkillTier: 1,
+        approvalState: 'declined',
+        workStatus: 'open',
+      })
+      await db.insert(ticketPayments).values({
+        shopId,
+        ticketId,
+        amountCents: 80000,
+        method: 'card',
+        recordedByProfileId: advisorId,
+        requestKey: uuid(60),
+      })
+      advisor = {
+        profileId: advisorId, shopId, role: 'advisor', membershipStatus: 'active', deactivatedAt: null,
+      }
+    })
+
+    it('retires the declined line even though the ticket has already taken money', async () => {
+      const body = { action: 'cancel_job' as const, requestKey: uuid(61) }
+      const result = await mutateJobInterruption(db, {
+        actor: advisor, ticketId, jobId: declinedJobId, body,
+      })
+      const repeated = await mutateJobInterruption(db, {
+        actor: advisor, ticketId, jobId: declinedJobId, body,
+      })
+      const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, declinedJobId))
+      const events = await db.select().from(ticketActivity)
+
+      expect(result).toMatchObject({ ok: true, changed: true, job: { workStatus: 'canceled' } })
+      expect(repeated).toMatchObject({ ok: true, changed: false, job: { workStatus: 'canceled' } })
+      expect(job).toMatchObject({ workStatus: 'canceled', clockedOnSince: null })
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        kind: 'ticket_canceled',
+        ticketId,
+        jobId: declinedJobId,
+        actorProfileId: advisorId,
+        requestKey: uuid(61),
+        payload: { from: 'open', to: 'canceled', approvalState: 'declined' },
+      })
+    })
+
+    it('unblocks closing the paid repair order that the declined line was holding open', async () => {
+      const closeActor = {
+        profileId: advisorId,
+        shopId,
+        role: 'advisor',
+        skillTier: 3,
+        membershipStatus: 'active',
+        deactivatedAt: null,
+      }
+      const jammed = await closeTicket(db, { actor: closeActor, ticketId })
+      expect(jammed).toMatchObject({ ok: false, error: 'unfinished_work' })
+
+      const retired = await mutateJobInterruption(db, {
+        actor: advisor,
+        ticketId,
+        jobId: declinedJobId,
+        body: { action: 'cancel_job', requestKey: uuid(62) },
+      })
+      expect(retired).toMatchObject({ ok: true, changed: true })
+
+      const closed = await closeTicket(db, { actor: closeActor, ticketId })
+      const [ticket] = await db.select().from(tickets).where(eq(tickets.id, ticketId))
+
+      expect(closed).toMatchObject({ ok: true })
+      expect(ticket.status).toBe('closed')
+    })
+
+    it('keeps retiring a line a counter decision, and only for work the customer declined', async () => {
+      const byTech = await mutateJobInterruption(db, {
+        actor: tech,
+        ticketId,
+        jobId: declinedJobId,
+        body: { action: 'cancel_job', requestKey: uuid(63) },
+      })
+      const stillApproved = await mutateJobInterruption(db, {
+        actor: advisor,
+        ticketId,
+        jobId,
+        body: { action: 'cancel_job', requestKey: uuid(64) },
+      })
+
+      expect(byTech).toEqual({ ok: false, error: 'forbidden' })
+      expect(stillApproved).toEqual({ ok: false, error: 'not_ready' })
+      expect(await db.select().from(ticketActivity)).toHaveLength(0)
+    })
+
+    it('reads the retired line as one declined line, not a canceled repair order', async () => {
+      await mutateJobInterruption(db, {
+        actor: advisor,
+        ticketId,
+        jobId: declinedJobId,
+        body: { action: 'cancel_job', requestKey: uuid(65) },
+      })
+
+      const detail = await getTicketDetail(db, {
+        actor: { ...advisor, skillTier: 3 },
+        ticketId,
+      })
+      expect(detail).toMatchObject({
+        ok: true,
+        ticket: {
+          activities: [expect.objectContaining({
+            kind: 'ticket_canceled',
+            jobId: declinedJobId,
+            summary: 'Replace all four tires: Retired — the customer declined this work.',
+          })],
+        },
+      })
+    })
   })
 
   it('lets an advisor cancel an unpaid repair order while preserving interrupted-work recovery truth', async () => {

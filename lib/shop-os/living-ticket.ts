@@ -2,6 +2,7 @@ import {
   canAssignWork,
   canBuildQuotes,
   canCloseTickets,
+  canRecordCustomerApproval,
   isShopRole,
 } from '@/lib/shop-os/capabilities'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
@@ -18,7 +19,7 @@ export type LivingTicketJob = {
 }
 
 export type LivingTicketCommand = {
-  kind: 'assign' | 'claim' | 'handoff' | 'quote' | 'work' | 'resolve_hold' | 'ring_out' | 'close'
+  kind: 'assign' | 'claim' | 'handoff' | 'quote' | 'work' | 'resolve_hold' | 'cancel_job' | 'ring_out' | 'close'
   label: string
   jobId?: string
 }
@@ -104,6 +105,16 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
         label: job.workStatus === 'in_progress' ? 'Continue work' : 'Start work',
         rank: job.workStatus === 'in_progress' ? 0 : 20,
       })
+    }
+  }
+
+  // Declined work still sitting on the board is what keeps a paid repair order
+  // from closing, so retiring it outranks moving it around.
+  if (canRecordCustomerApproval(input.role)) {
+    for (const job of activeJobs) {
+      if (job.approvalState === 'declined') {
+        commands.push({ kind: 'cancel_job', jobId: job.id, label: 'Retire declined work', rank: 5 })
+      }
     }
   }
 

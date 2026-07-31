@@ -77,6 +77,15 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
   blocked: 'Blocked',
 }
 
+const approvalLabel: Record<TodayTicketJob['approvalState'], string> = {
+  pending_quote: 'Not quoted',
+  quote_ready: 'Quote ready',
+  sent: 'Quote sent',
+  approved: 'Approved',
+  declined: 'Declined',
+  deferred: 'Deferred',
+}
+
 export function TodayJobsBoard({
   myJobs,
   openJobs,
@@ -1180,6 +1189,7 @@ function JobRow({
           <span>{titleCase[job.kind]}</span>
           <span>Tier {job.requiredSkillTier}</span>
           <span>{statusLabel[job.workStatus]}</span>
+          <span>{approvalLabel[job.approvalState]}</span>
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
           )}
@@ -1317,7 +1327,9 @@ function SimpleWorkAction({
   onOpen?: (job: TodayTicketJob) => void
 }) {
   const identityComplete = job.customerName !== null && job.vehicle !== null
-  const workAvailable = identityComplete && job.workStatus !== 'blocked' && job.sessionId === null
+  // Declined work is not the tech's to open — the counter has to retire it first.
+  const workAvailable = identityComplete && job.workStatus !== 'blocked'
+    && job.approvalState !== 'declined' && job.sessionId === null
   if (workAvailable && inPlace && onOpen) {
     return (
       <button

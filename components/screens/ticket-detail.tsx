@@ -425,7 +425,22 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {resolveHoldCommandFor(allCommands, job.id) ? (
+                    {cancelJobCommandFor(allCommands, job.id) ? (
+                      <TicketInterruptionAction
+                        ticketId={ticket.id}
+                        jobId={job.id}
+                        action="cancel_job"
+                        className={styles.inlineAction}
+                        onApplied={(retired) => {
+                          setWorkOverrides((current) => {
+                            const existing = current.get(job.id)
+                            if (existing?.workStatus === retired.workStatus) return current
+                            return new Map(current).set(job.id, { workStatus: retired.workStatus })
+                          })
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    ) : resolveHoldCommandFor(allCommands, job.id) ? (
                       <TicketInterruptionAction
                         ticketId={ticket.id}
                         jobId={job.id}
@@ -713,4 +728,14 @@ function resolveHoldCommandFor(
     candidate.kind === 'resolve_hold' && candidate.jobId === jobId
   ))
   return command ? command as LivingTicketCommand & { kind: 'resolve_hold' } : null
+}
+
+function cancelJobCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'cancel_job' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'cancel_job' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'cancel_job' } : null
 }
