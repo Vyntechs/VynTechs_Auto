@@ -519,6 +519,12 @@ export const SUITES = Object.freeze({
     config: 'playwright.post-diagnosis.config.ts',
     projects: Object.freeze(['post-diagnosis-phone', 'post-diagnosis-desktop']),
   }),
+  // Kept apart from the journeys above because it depends on a third party: an
+  // NHTSA outage must report itself plainly, not take a release gate down.
+  'vin-decode': Object.freeze({
+    config: 'playwright.vin-decode.config.ts',
+    projects: Object.freeze(['vin-decode-phone', 'vin-decode-desktop']),
+  }),
 })
 
 async function runBrowserProjects(env, baseUrl, selectedProject = null, suiteName = 'golden') {
