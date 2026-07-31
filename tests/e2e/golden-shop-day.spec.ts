@@ -349,6 +349,19 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.goto('/today')
     await expect(owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
     await checkpoint(owner, testInfo, 'owner-closed-day')
+
+    // Off the board is where a closed repair order used to leave the product
+    // entirely — no list, no search, no way back but a deep link somebody
+    // already had. The lookup is the door back: found by the number on the
+    // paperwork, opened in place of a second write-up on a new number.
+    await owner.getByLabel('Find a repair order').fill(`RO ${ticketNumber}`)
+    const foundClosed = owner.getByRole('link', { name: new RegExp(`RO ${ticketNumber}\\b`) })
+    await expect(foundClosed).toBeVisible()
+    await expect(foundClosed).toContainText('Closed')
+    await checkpoint(owner, testInfo, 'owner-closed-repair-order-found')
+    await foundClosed.click()
+    await owner.waitForURL(new RegExp(`${path}$`))
+    await expect(owner.getByRole('heading', { name: 'Receipt' })).toBeVisible()
     assertNoBrowserFaults(faults)
   } finally {
     await Promise.race([
