@@ -445,6 +445,9 @@ describe('CounterIntake', () => {
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0]
     expect(JSON.parse(init!.body as string)).toEqual({
+      clientKey: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      ),
       vehicleMode: 'new',
       customer: {
         name: 'Robert Sandoval',

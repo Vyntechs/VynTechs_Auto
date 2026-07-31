@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
-import { customers, jobLines, profiles, vehicles } from '@/lib/db/schema'
+import { customers, jobLines, profiles, tickets, vehicles } from '@/lib/db/schema'
 import { canAssignWork } from '@/lib/shop-os/capabilities'
 import {
   cannedJobLineInsertValues,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/shop-os/canned-jobs'
 import {
   createTicket,
+  getTicketDetail,
   type CreateTicketResult,
   type TicketActor,
 } from '@/lib/tickets'
@@ -45,7 +47,10 @@ const workSchema = z.discriminatedUnion('mode', [
   }),
 ])
 
+const clientKeySchema = z.uuid().transform((value) => value.toLowerCase())
+
 const commonShape = {
+  clientKey: clientKeySchema,
   concern: z.string().trim().min(1).max(5_000),
   whenStarted: optionalTrimmedText(1_000),
   howOften: optionalTrimmedText(1_000),
@@ -108,6 +113,41 @@ function actorDenied(actor: TicketActor): Exclude<CreateTicketResult, { ok: true
   }
   if (!canAssignWork(actor.role)) return { ok: false, error: 'forbidden' }
   return null
+}
+
+// Namespaced apart from the quick door so the same client key sent to both
+// doors can never derive the same repair order.
+function deterministicTicketId(shopId: string, profileId: string, clientKey: string): string {
+  const bytes = createHash('sha256')
+    .update('shop-os-counter-ticket-v1\0')
+    .update(shopId).update('\0')
+    .update(profileId).update('\0')
+    .update(clientKey)
+    .digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+async function existingFirstSuccess(
+  db: AppDb,
+  actor: TicketActor,
+  ticketId: string,
+): Promise<CreateTicketResult | null> {
+  const [row] = await db.select({
+    id: tickets.id,
+    source: tickets.source,
+    createdByProfileId: tickets.createdByProfileId,
+  }).from(tickets).where(and(
+    eq(tickets.shopId, actor.shopId as string),
+    eq(tickets.id, ticketId),
+  )).limit(1)
+  if (!row) return null
+  if (row.source !== 'counter' || row.createdByProfileId !== actor.profileId) {
+    return { ok: false, error: 'not_found' }
+  }
+  return getTicketDetail(db, { actor, ticketId })
 }
 
 function ticketBody(
@@ -174,6 +214,9 @@ export async function createCounterTicket(
       const persistedDenied = actorDenied(persistedActor)
       if (persistedDenied) return persistedDenied
       const shopId = persistedActor.shopId as string
+      const ticketId = deterministicTicketId(shopId, persistedActor.profileId, body.clientKey)
+      const existing = await existingFirstSuccess(tx, persistedActor, ticketId)
+      if (existing) return existing
 
       let work: {
         title: string
@@ -277,6 +320,7 @@ export async function createCounterTicket(
 
       let result = await createTicket(tx as AppDb, {
         actor: persistedActor,
+        internal: { ticketId },
         body: ticketBody(body, customerId, vehicleId, work),
       })
       if (!result.ok) throw new CounterTicketRollback(result)
