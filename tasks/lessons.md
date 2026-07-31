@@ -87,3 +87,8 @@ Reason: This volume regenerates AppleDouble junk, and load-driven timeouts read 
 Trigger: A backgrounded `pnpm test:shards | tail` reported exit 0 while two shards had actually failed.
 Rule: Never judge pass/fail from a piped command's status; read the real summary or capture to a file.
 Reason: The pipeline returns the last command's code, silently converting a failed gate into a green one.
+
+### widened-contract-needs-full-suite
+Trigger: A required `clientKey` field broke two test files a delegated agent never found.
+Rule: Widening a shared contract means grepping every call site, then running the whole suite CI runs.
+Reason: A hand-picked subset passes while unrelated fixtures still build the old body shape.
