@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
+import { defaultLineTaxable, formatMoneyCents, parseMoneyToCents } from '@/lib/shop-os/quote-builder-ui'
 
 export { formatMoneyCents }
 
@@ -141,7 +141,7 @@ function validJobTruth(job: CannedJobProjection, taxRateBps?: number | null) {
 }
 
 export function newCannedLine(kind: CannedJobDraftLine['kind'] = 'part'): CannedJobDraftLine {
-  return { key: crypto.randomUUID(), kind, description: '', sort: '0', price: '', taxable: true, quantity: '1', partNumber: '', brand: '', hours: '1', laborRate: '' }
+  return { key: crypto.randomUUID(), kind, description: '', sort: '0', price: '', taxable: defaultLineTaxable(kind), quantity: '1', partNumber: '', brand: '', hours: '1', laborRate: '' }
 }
 
 export function newCannedJobDraft(): CannedJobDraft {

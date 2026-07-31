@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   buildManualLineInput,
   classifyQuoteFailure,
+  defaultLineTaxable,
   formatMoneyCents,
   getQuotePreparationState,
   parseCustomerStoryMutationResponse,
@@ -345,7 +346,9 @@ export function ManualQuoteBuilder({
       dirty: false,
       laborChanged: false,
       clientKey: target.mode === 'create' ? crypto.randomUUID() : null,
-      values: line ? valuesFromLine(line) : emptyValues(current.configuration.laborRateCents),
+      values: line
+        ? valuesFromLine(line)
+        : emptyValues(target.kind, current.configuration.laborRateCents),
       invokerKey: editorInvokerKey(target),
     }
   }
@@ -1892,10 +1895,14 @@ function ConfirmationModal({
   )
 }
 
-function emptyValues(shopLaborRateCents: number | null): ManualLineFormValues {
+function emptyValues(
+  kind: ManualLineKind,
+  shopLaborRateCents: number | null,
+): ManualLineFormValues {
   return {
     description: '', quantity: '1', hours: '1',
-    laborRate: moneyInput(shopLaborRateCents), price: '', taxable: true,
+    laborRate: moneyInput(shopLaborRateCents), price: '',
+    taxable: defaultLineTaxable(kind),
     partNumber: '', brand: '', fitment: '',
   }
 }

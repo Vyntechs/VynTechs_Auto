@@ -8,6 +8,7 @@ import {
   parseCannedJobMutationResponse, parseManagementCannedJobMutationResponse,
   type CannedJobDraft, type CannedJobProjection,
 } from '@/lib/shop-os/canned-jobs-ui'
+import { defaultLineTaxable } from '@/lib/shop-os/quote-builder-ui'
 import styles from './canned-jobs-section.module.css'
 
 type Props = { initialJobs: CannedJobProjection[]; initialTaxRateBps: number | null }
@@ -153,7 +154,10 @@ function EditorForm({ editor, busy, setEditor, onSave, onClose, titleRef, saveEr
   // A part is invalid on a diagnostic template by rule, so the editor must not
   // hand the writer one and then refuse to save it.
   const changeKind = (kind: CannedJobDraft['kind']) => update(kind === 'diagnostic'
-    ? { kind, lines: draft.lines.map((line) => line.kind === 'part' ? { ...line, kind: 'labor' as const } : line) }
+    // A converted part must not carry a part's tax treatment onto labor.
+    ? { kind, lines: draft.lines.map((line) => line.kind === 'part'
+        ? { ...line, kind: 'labor' as const, taxable: defaultLineTaxable('labor') }
+        : line) }
     : { kind })
   return <section className={styles.editor} aria-label={editor.mode === 'create' ? 'Create canned job' : `Edit ${editor.original.title}`}>
     <header><div><span className={styles.kind}>{editor.mode === 'create' ? 'New library entry' : 'Replace saved entry'}</span><h3>{editor.mode === 'create' ? 'Build a canned job' : `Edit ${editor.original.title}`}</h3></div><button className="btn" disabled={busy} onClick={onClose}>Close</button></header>
