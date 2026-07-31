@@ -48,7 +48,7 @@ Ranked by what stops the shop getting a car in, worked, billed and out of the do
 
 **Start the A2P 10DLC carrier registration now, in parallel** (§7.8). Customer texting does not exist and its lead time is measured in weeks and is outside anyone's control. It does not block day one, but starting it late blocks the month.
 
-Everything else — appointments, sales-tax reporting, technician efficiency, parts ordering, inventory, warranty, time clock — is in sections 5 through 7 with severities and sizes.
+Everything else — appointments, sales-tax reporting, technician efficiency, parts ordering, warranty, time clock — is in sections 5 through 7 with severities and sizes. Inventory is **not** on that list: the owner has ruled it out (§7.10).
 
 ---
 
@@ -412,7 +412,9 @@ The good news first, because it is genuinely good: **the settings surface is mor
 | Staff, roles, skill tiers | Yes — `components/vt/team-section.tsx:105-113`, real invite emails via `app/api/team/invite/route.ts:40-41` | Partially — see 6.3 | A tech with no skill tier cannot be assigned work (`lib/tickets.ts:1072-1080`) |
 | Suppliers | Yes — `components/vt/suppliers-section.tsx:147-188` | 3 accounts | Manual part entry only |
 
-### 6.1 Parts are configured to sell at cost — **PAINFUL, and it is live right now**
+### 6.1 Parts are configured to sell at cost — **deferred, owner decision 2026-07-31**
+
+**There is no parts-supplier integration yet, so a markup on nothing prices nothing.** The owner has deferred this until supplier ordering exists (§7.9). Do not raise it as a live defect before then; the section below is kept only so the mechanism is understood when that day comes.
 
 **What the shop would experience:** every part the parts person sources is priced to the customer at exactly what the shop paid for it, and on that screen there is no box to change it.
 
@@ -509,11 +511,11 @@ Mitchell's W.I.P. screen, which the migration document describes as what the own
 
 ### 7.5 Sales tax reporting — **computed correctly, never reported** · BLOCKER within the first filing period
 
-Tax is charged right — `calculateTicketTotals` applies the shop rate with a proper taxable/non-taxable split (`lib/shop-os/ring-out.ts:132-144`) and it renders on the ticket (`components/screens/ring-out-section.tsx:162-165`).
+The arithmetic is right — `calculateTicketTotals` applies the shop rate with a proper taxable/non-taxable split (`lib/shop-os/ring-out.ts:132-144`) and it renders on the ticket (`components/screens/ring-out-section.tsx:162-165`).
 
 Adding it up is impossible. There is no report screen. Filing the state return means opening every closed repair order one at a time.
 
-One further caution: there is a **single flat shop-level rate**, with no separate labour and parts rates and no per-jurisdiction rates. If Texas requires the shop to tax labour and parts differently, the computation itself is wrong, not just the reporting. **UNVERIFIED** — that is a question for the shop's accountant, not for this document. **~2–3 days once any report shell exists.**
+**The caution this section carried is now answered, and it was a live defect — owner, 2026-07-31.** Texas does not tax separately stated labour on motor vehicle repair. A single flat shop rate plus a per-line `taxable` flag is therefore the *right* mechanism: labour simply must not carry the flag. The defect was the **default**. Every hand-written line started taxable, in all three places that chose one — the quote builder's blank line editor, a new canned-job line, and the part-to-labour conversion in the canned-job editor. An advisor who forgot to uncheck the box charged 8.25% on labour the state does not levy: **$12.79 on a single $155 hour**, invisible because a quote shows the taxable subtotal and never which lines went into it. Fixed in PR #229 (`defaultLineTaxable`), with the checkbox left untouched so a labour-taxing state still works. What remains open in this section is the **report**, not the computation. **~2–3 days once any report shell exists.**
 
 ### 7.6 Technician efficiency, flag hours, commission — **raw clock only** · PAINFUL
 
@@ -549,9 +551,11 @@ There are no `purchase_orders` or `vendor_invoices` tables in production. Vendor
 
 **~2–3 days for an ordered/received status extension, which buys most of the daily relief. Weeks for a real purchase-order loop.**
 
-### 7.10 Parts inventory — **absent** · PAINFUL
+### 7.10 Parts inventory — **absent, and deliberately so** · NOT A GAP
 
-No inventory or stock table in production; no `on_hand`, `stock_qty` or `reorder` anywhere in the code. Parts exist only as lines on a quote (`job_lines`) or as requests. There is no part master record.
+**Owner decision, 2026-07-31: the shop is not doing inventory and wants nothing to do with it.** This row is closed. Do not raise it again, do not size it, and do not treat its absence as a blocker for any shop this product is aimed at.
+
+For the record only: no inventory or stock table exists in production; no `on_hand`, `stock_qty` or `reorder` anywhere in the code. Parts exist only as lines on a quote (`job_lines`) or as requests. There is no part master record. That is now the intended shape.
 
 Severity depends on the shop: many independents stock almost nothing. **This needs a direct answer from the owner** — if Young Motorsports stocks parts, this becomes a blocker. **Weeks.**
 
@@ -563,7 +567,7 @@ Severity depends on the shop: many independents stock almost nothing. **This nee
 | **Employee time clock** | Absent | PAINFUL | No time-clock table; no `punch_in`/`clock_in` anywhere. Per-*job* clocking exists (§7.6) but there is no clock-in for the workday, so payroll hours have no source. | ~1 week |
 | **Digital inspections with photos** | Absent | PAINFUL | Searches for `inspection`/`dvi` return only an AI prompt and a terms-of-service line. A `job_attachments` table exists with zero rows in production, but no inspection structure. Note the migration document §2.4 warns Mitchell's own photos may not even be in the backup — so this is a missing feature *and* a possible silent data loss. | Weeks |
 | **Fleet / commercial accounts** | Partial shape | PAINFUL | One customer can own many vehicles (`lib/db/schema.ts:163`), so the structure works. There is no company name, no unit numbering, no consolidated statement — and fleets pay on terms, which inherits §7.1. | With §7.1–7.2 |
-| **Labour guide integration** | Absent | ANNOYING | Labour times are typed by hand. The shop probably keeps ProDemand separately — **worth confirming with the owner** before treating this as a gap. | Weeks |
+| ~~**Labour guide integration**~~ | **Struck** | — | This row conflated a labour-time guide with ProDemand, which is a **service manual** and has nothing to do with a shop management system. Owner correction, 2026-07-31. Labour times are typed by hand and that is not a finding. | — |
 | **VIN decode** | **Exists** | — | `app/api/intake/decode-vin/route.ts`, with its own end-to-end test config (`playwright.vin-decode.config.ts`). Plate lookup does not exist; `vehicles.plate` is a hand-typed field. | — |
 
 ---
@@ -590,11 +594,11 @@ Listed so nobody mistakes an unproven thing for a proven one.
 
 4. **Live production environment variables.** The three feature flags in `lib/feature-flags.ts` all fail closed in code, but their actual values on Vercel were not read. None of the gaps in §7 depend on a flag, so this does not change any finding.
 
-5. **Four questions only the owner can answer**, each of which moves a severity:
-   - Does Young Motorsports stock parts on a shelf? If yes, §7.10 becomes a blocker.
-   - Does the shop keep a separate ProDemand subscription? If yes, §7.11's labour-guide gap is a non-issue.
-   - Is `parts_markup_bps = 0` (§6.1) deliberate, or an oversight?
-   - Does Texas require labour and parts to be taxed at different rates (§7.5)? If so, the tax computation is wrong, not just the reporting — that is a question for the shop's accountant.
+5. **These four were asked of the owner and are now answered, 2026-07-31.** Do not re-file them.
+   - **Inventory (§7.10) — closed, not wanted.** The shop is not doing inventory and wants nothing to do with it. Drop it from every list; it is not a blocker and not a gap.
+   - **Parts markup (§6.1) — moot for now.** There is no parts-supplier integration yet, so a markup on nothing prices nothing. Revisit when supplier ordering exists, not before.
+   - **Texas tax (§7.5) — answered, and it was a live defect.** Texas does not tax separately stated labour on motor vehicle repair. The per-line taxable flag and the split in `calculateTicketTotals` were already the right mechanism, but every hand-written line **started taxable**, so forgetting to uncheck the box billed the customer 8.25% on untaxed labour — $12.79 on one $155 hour, invisible because a quote shows only the taxable subtotal. Fixed in PR #229: `defaultLineTaxable` starts labour untaxed in all three places that chose a default, with the checkbox untouched so a labour-taxing state still works. What remains open here is the **reporting**, not the computation.
+   - **ProDemand (§7.11) — was never a real gap.** ProDemand is a service manual. It has nothing to do with a shop management system, and the row conflated it with a labour-time guide. Struck.
 
 **Method note.** No product code was changed, no migration was run, and no production data was written. All database access was `SELECT` and `information_schema`/`pg_indexes`/`EXPLAIN` inspection. No customer information appears anywhere in this document.
 
