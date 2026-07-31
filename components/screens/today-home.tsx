@@ -14,6 +14,7 @@ import type { DueFollowUp } from '@/lib/comeback/list'
 import type { TodayTicketJobs } from '@/lib/tickets'
 import type { TeamMember } from '@/lib/intake/team'
 import { TodayJobsBoard } from '@/components/screens/today-jobs-board'
+import { TicketLookupPanel } from '@/components/screens/ticket-lookup-panel'
 
 type Props = {
   techName: string
@@ -144,6 +145,11 @@ export function TodayHome({
           overflow: 'auto',
         }}
       >
+        {/* The board only ever holds open work. This is the one door back to a
+            repair order that has left it — closed, canceled, or simply older
+            than the lane it used to sit in. */}
+        <TicketLookupPanel />
+
         <TodayJobsBoard
           myJobs={todayJobs.myJobs}
           openJobs={todayJobs.openJobs}
