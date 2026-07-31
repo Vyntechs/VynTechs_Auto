@@ -455,6 +455,25 @@ export function summarizeQuoteMoney(
 }
 
 export type ManualLineKind = 'part' | 'labor' | 'fee'
+
+/**
+ * What a brand-new line starts as, before the writer touches the checkbox.
+ *
+ * Texas does not tax separately stated labor on motor vehicle repair, and the
+ * shops this runs in are in Texas. Starting a labor line taxable meant an
+ * advisor had to remember to uncheck a box on every single one, and forgetting
+ * charged the customer sales tax on labor the state does not tax — quietly,
+ * because the quote only shows the taxable subtotal, never which lines made it.
+ *
+ * This is a starting value and nothing more. The checkbox is unchanged and
+ * still sits on every line, so a shop in a state that does tax labor checks it.
+ * The diagnostic labor both intake doors write already started untaxed
+ * (`lib/tickets.ts`, `lib/intake/counter-ticket.ts`) — this makes the two hand
+ * paths agree with them.
+ */
+export function defaultLineTaxable(kind: ManualLineKind): boolean {
+  return kind !== 'labor'
+}
 export type ManualLineFormValues = {
   description: string
   quantity: string
