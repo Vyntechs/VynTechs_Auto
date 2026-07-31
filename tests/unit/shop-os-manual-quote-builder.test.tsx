@@ -40,6 +40,9 @@ const CANNED_LABOR_LINE_ID = '00000000-0000-4000-8000-000000000504'
 const SOURCED_LINE_ID = '00000000-0000-4000-8000-000000000601'
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000701'
 const SECOND_JOB_ID = '00000000-0000-4000-8000-000000000202'
+// The counter door derives a repair order id from its client key and stamps
+// version 8, so a real ticket id is not always the version 4 shape.
+const DERIVED_TICKET_ID = '00000000-0000-8000-8000-000000000203'
 
 const vendorAccount: SafeManualVendorAccount = {
   id: ACCOUNT_ID,
@@ -324,6 +327,33 @@ describe('ManualQuoteBuilder', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(sessionStorage.getItem(key)).toBeNull()
     expect(screen.getByRole('button', { name: 'Add fee' })).toHaveFocus()
+  })
+
+  it('recovers an unsaved labor line on a client-key-derived repair order', async () => {
+    const user = userEvent.setup()
+    const derivedTicket = { ...ticket, id: DERIVED_TICKET_ID }
+    const derivedBuilder = () => builder({
+      ticket: { id: DERIVED_TICKET_ID, status: 'open', reconciled: true },
+    })
+    const key = quoteEditorDraftKey(ACTOR_ID, DERIVED_TICKET_ID)
+    const view = render(
+      <ManualQuoteBuilder actorId={ACTOR_ID} ticket={derivedTicket} builder={derivedBuilder()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Add labor' }))
+    await user.type(screen.getByLabelText('Description'), 'Front brake pad replacement')
+    expect(sessionStorage.getItem(key)).toContain('Front brake pad replacement')
+
+    view.unmount()
+    render(
+      <ManualQuoteBuilder actorId={ACTOR_ID} ticket={derivedTicket} builder={derivedBuilder()} />,
+    )
+
+    expect(await screen.findByRole('form', { name: 'Add labor line' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Description')).toHaveValue('Front brake pad replacement')
+    expect(screen.getByRole('status', { name: 'Quote update' })).toHaveTextContent(
+      'Unsaved labor restored',
+    )
   })
 
   it('fails closed on corrupt or other-actor draft storage', async () => {

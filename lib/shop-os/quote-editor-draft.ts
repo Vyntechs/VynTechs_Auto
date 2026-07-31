@@ -8,7 +8,12 @@ export const QUOTE_EDITOR_DRAFT_MAX_BYTES = 8192
 export const QUOTE_EDITOR_DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000
 
 const FUTURE_CLOCK_SKEW_MS = 60_000
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+// Repair orders, jobs, and lines reach the browser two ways: gen_random_uuid()
+// mints version 4, and every client-key idempotency derivation in this codebase
+// stamps version 8. Accepting only 1-5 rejected real repair orders and silently
+// disabled the whole reload guard for them, so this admits every RFC 9562
+// version and leaves version policy to whoever mints the id.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export type QuoteEditorDraft = {
   version: 1
