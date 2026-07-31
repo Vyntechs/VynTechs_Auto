@@ -15,6 +15,11 @@ const OTHER_TICKET_ID = '00000000-0000-4000-8000-000000000202'
 const JOB_ID = '00000000-0000-4000-8000-000000000301'
 const LINE_ID = '00000000-0000-4000-8000-000000000401'
 const CLIENT_KEY = '00000000-0000-4000-8000-000000000501'
+// Every client-key idempotency derivation in this codebase hashes its inputs
+// and stamps version 8, so real repair orders, jobs, and lines carry these.
+const DERIVED_TICKET_ID = '00000000-0000-8000-8000-000000000203'
+const DERIVED_JOB_ID = '00000000-0000-8000-8000-000000000303'
+const DERIVED_LINE_ID = '00000000-0000-8000-8000-000000000403'
 const NOW = Date.UTC(2026, 6, 21, 12)
 
 function draft(overrides: Partial<QuoteEditorDraft> = {}): QuoteEditorDraft {
@@ -78,6 +83,23 @@ describe('quote editor draft codec', () => {
     expect(parseQuoteEditorDraft(encodeQuoteEditorDraft(edit, NOW), scope)).toEqual(edit)
     expect(() => encodeQuoteEditorDraft({ ...edit, lineId: null }, NOW)).toThrow()
     expect(() => encodeQuoteEditorDraft({ ...edit, clientKey: CLIENT_KEY }, NOW)).toThrow()
+  })
+
+  it('scopes a draft to a client-key-derived repair order, job, and line', () => {
+    const derived = draft({
+      ticketId: DERIVED_TICKET_ID,
+      jobId: DERIVED_JOB_ID,
+      mode: 'edit',
+      lineId: DERIVED_LINE_ID,
+      clientKey: null,
+    })
+    const derivedScope = { actorId: ACTOR_ID, ticketId: DERIVED_TICKET_ID, now: NOW }
+
+    expect(quoteEditorDraftKey(ACTOR_ID, DERIVED_TICKET_ID)).toBe(
+      `vyntechs:quote-editor-draft:v1:${ACTOR_ID}:${DERIVED_TICKET_ID}`,
+    )
+    expect(parseQuoteEditorDraft(encodeQuoteEditorDraft(derived, NOW), derivedScope))
+      .toEqual(derived)
   })
 
   it('rejects drafts outside the exact actor or ticket scope', () => {
