@@ -506,17 +506,34 @@ function playwrightEnvironment(baseUrl, credentials, runId) {
   return result
 }
 
-async function runBrowserProjects(env, baseUrl, selectedProject = null) {
+// Each suite is one hosted journey with its own Playwright config. They share
+// the QA tenant, so they are never run in the same Playwright invocation — the
+// cleanup between projects is what keeps one journey's repair orders out of the
+// next journey's Today board.
+export const SUITES = Object.freeze({
+  golden: Object.freeze({
+    config: 'playwright.golden.config.ts',
+    projects: Object.freeze(['golden-phone', 'golden-desktop']),
+  }),
+  'post-diagnosis': Object.freeze({
+    config: 'playwright.post-diagnosis.config.ts',
+    projects: Object.freeze(['post-diagnosis-phone', 'post-diagnosis-desktop']),
+  }),
+})
+
+async function runBrowserProjects(env, baseUrl, selectedProject = null, suiteName = 'golden') {
+  const suite = SUITES[suiteName]
+  if (!suite) throw new Error(`Unknown golden browser suite: ${suiteName}`)
   await verifyQaContract(env)
   const credentials = readQaCredentials()
-  const projects = selectedProject ? [selectedProject] : ['golden-phone', 'golden-desktop']
+  const projects = selectedProject ? [selectedProject] : [...suite.projects]
   for (const project of projects) {
     await cleanupQaOperationalData(env)
     const runId = `${randomUUID()}-${project}`
     try {
       const result = spawnSync(
         join(REPO_ROOT, 'node_modules', '.bin', 'playwright'),
-        ['test', '--config', 'playwright.golden.config.ts', '--project', project],
+        ['test', '--config', suite.config, '--project', project],
         {
           cwd: REPO_ROOT,
           env: playwrightEnvironment(baseUrl, credentials, runId),
@@ -535,18 +552,23 @@ function parseCommand(argv) {
   const command = argv[2]
   const baseUrlIndex = argv.indexOf('--base-url')
   const baseUrl = baseUrlIndex >= 0 ? argv[baseUrlIndex + 1] : 'https://vyntechs.dev'
+  const suiteIndex = argv.indexOf('--suite')
+  const suite = suiteIndex >= 0 ? argv[suiteIndex + 1] : 'golden'
+  if (!Object.hasOwn(SUITES, suite)) {
+    throw new Error(`Golden browser QA suite must be one of ${Object.keys(SUITES).join(', ')}`)
+  }
   const projectIndex = argv.indexOf('--project')
   const project = projectIndex >= 0 ? argv[projectIndex + 1] : null
-  if (project !== null && !['golden-phone', 'golden-desktop'].includes(project)) {
-    throw new Error('Golden browser QA project must be golden-phone or golden-desktop')
+  if (project !== null && !SUITES[suite].projects.includes(project)) {
+    throw new Error(`Golden browser QA project must be one of ${SUITES[suite].projects.join(', ')}`)
   }
-  return { command, baseUrl, project }
+  return { command, baseUrl, project, suite }
 }
 
 async function main() {
-  const { command, baseUrl, project } = parseCommand(process.argv)
+  const { command, baseUrl, project, suite } = parseCommand(process.argv)
   if (!['provision', 'test', 'clean', 'verify-clean'].includes(command)) {
-    throw new Error('Usage: shop-os-golden-browser.mjs <provision|test|clean|verify-clean> [--base-url URL]')
+    throw new Error('Usage: shop-os-golden-browser.mjs <provision|test|clean|verify-clean> [--base-url URL] [--suite NAME]')
   }
   const pulled = pullProductionEnv()
   try {
@@ -571,10 +593,10 @@ async function main() {
       process.env.GOLDEN_QA_ALLOW_LOCALHOST === '1',
       process.env.GOLDEN_QA_ALLOW_VERCEL_PREVIEW === '1',
     )
-    await runBrowserProjects(pulled.env, normalizedBaseUrl, project)
+    await runBrowserProjects(pulled.env, normalizedBaseUrl, project, suite)
     process.stdout.write(project
-      ? `Golden browser QA passed: ${project}=1 cleanup=clean\n`
-      : 'Golden browser QA passed: phone=1 desktop=1 cleanup=clean\n')
+      ? `Golden browser QA passed: suite=${suite} ${project}=1 cleanup=clean\n`
+      : `Golden browser QA passed: suite=${suite} phone=1 desktop=1 cleanup=clean\n`)
   } finally {
     pulled.dispose()
   }
