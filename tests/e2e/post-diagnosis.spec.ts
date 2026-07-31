@@ -167,7 +167,7 @@ test('the shop finishes the repair order after the diagnosis', async ({ browser,
       .toContainText('Approved · Version 1')
     await expect(complete.getByRole('listitem').filter({ hasText: repairTitle }))
       .toContainText('Approved · Version 1')
-    await expect(complete).toContainText('$543.80')
+    await expect(complete).toContainText('$515.00')
 
     assertNoBrowserFaults(faults)
   } finally {

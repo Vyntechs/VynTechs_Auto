@@ -315,11 +315,11 @@ test('the living repair order survives one complete shop day', async ({ browser,
     })
     await expect(advisor.getByRole('heading', { name: 'Ready to collect' })).toBeVisible()
     await expect(collectCard).toContainText('Work complete')
-    await expect(collectCard).toContainText('$194.40 due')
+    await expect(collectCard).toContainText('$180.00 due')
     await checkpoint(advisor, testInfo, 'advisor-ready-to-collect')
     await collectCard.getByRole('button', { name: 'Collect & close' }).click()
     await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
-    await advisor.getByLabel('Payment amount').fill('194.40')
+    await advisor.getByLabel('Payment amount').fill('180.00')
     await advisor.getByLabel('How paid').selectOption('card')
     // Review the mounted tool while it is actionable. Checkpointing after the
     // click instead would audit whatever transient busy state the request
