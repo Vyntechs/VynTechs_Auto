@@ -37,6 +37,7 @@ describe('Golden Shop Day release gate', () => {
       const created = await createCounterTicket(golden.db, {
         actor: golden.actors.advisor,
         body: {
+          clientKey: crypto.randomUUID(),
           vehicleMode: 'new', customer: golden.customer, vehicle: golden.vehicle,
           concern: 'Customer wants us to address braking and a separate maintenance item.',
           whenStarted: 'This week', howOften: 'Every drive',
@@ -117,6 +118,7 @@ describe('Golden Shop Day release gate', () => {
       const created = await createCounterTicket(golden.db, {
         actor: golden.actors.advisor,
         body: {
+          clientKey: crypto.randomUUID(),
           vehicleMode: 'new',
           customer: golden.customer,
           vehicle: golden.vehicle,

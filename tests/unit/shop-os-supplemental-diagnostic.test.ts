@@ -19,6 +19,7 @@ async function seedDiagnosticTicket(
   const created = await createCounterTicket(golden.db, {
     actor: golden.actors.advisor,
     body: {
+      clientKey: crypto.randomUUID(),
       vehicleMode: 'new',
       customer: golden.customer,
       vehicle: golden.vehicle,

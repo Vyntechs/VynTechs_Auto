@@ -44,6 +44,7 @@ const actor = {
   deactivatedAt: profile.deactivatedAt,
 }
 const body = {
+  clientKey: crypto.randomUUID(),
   vehicleMode: 'existing',
   existingVehicleId: '00000000-0000-0000-0000-000000000501',
   concern: 'Brake vibration',
