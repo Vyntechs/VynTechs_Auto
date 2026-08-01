@@ -67,7 +67,7 @@ export function TodayHome({
 
   return (
     <main className="app">
-      <AppHeader title={canDispatchWork ? 'Shop floor' : 'My Jobs'} meta={meta} />
+      <AppHeader title={canDispatchWork ? 'Shop floor' : 'My work'} meta={meta} />
       <div
         style={{
           display: 'flex',
@@ -100,7 +100,7 @@ export function TodayHome({
         {canWriteCounterOrder && (
           <Link
             href="/intake"
-            aria-label="New work order"
+            aria-label="New repair order"
             className="btn btn-primary"
             style={{
               display: 'inline-flex',
@@ -112,7 +112,7 @@ export function TodayHome({
             }}
           >
             <Plus size={14} weight="bold" aria-hidden="true" />
-            New work order
+            New repair order
           </Link>
         )}
         {canCreateTickets && (
@@ -212,9 +212,9 @@ export function TodayHome({
           todayJobs.createdJobs.length === 0 &&
           todayJobs.partsJobs.length === 0 &&
           todayJobs.readyToCollect.length === 0 && (
-            <Module num="—" label="My Jobs">
+            <Module num="—" label="My work">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
-                No assigned work yet. New work orders and quick tickets appear here.
+                Nothing assigned to you yet. New repair orders and quick tickets show up here.
               </p>
             </Module>
           )}

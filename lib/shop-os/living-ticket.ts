@@ -113,7 +113,7 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
   if (canRecordCustomerApproval(input.role)) {
     for (const job of activeJobs) {
       if (job.approvalState === 'declined') {
-        commands.push({ kind: 'cancel_job', jobId: job.id, label: 'Retire declined work', rank: 5 })
+        commands.push({ kind: 'cancel_job', jobId: job.id, label: 'Not doing this one', rank: 5 })
       }
     }
   }
@@ -150,8 +150,8 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
   ))
   if (allWorkTerminal && canCloseTickets(input.role) && input.ringOut) {
     commands.push(input.ringOut.balanceCents > 0
-      ? { kind: 'ring_out', label: 'Collect & close', rank: 50 }
-      : { kind: 'close', label: 'Close repair order', rank: 50 })
+      ? { kind: 'ring_out', label: 'Take payment', rank: 50 }
+      : { kind: 'close', label: 'Close it out', rank: 50 })
   }
 
   commands.sort((left, right) => left.rank - right.rank)

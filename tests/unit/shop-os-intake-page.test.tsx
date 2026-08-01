@@ -19,7 +19,7 @@ vi.mock('@/lib/shop-os/canned-jobs', async (importOriginal) => {
 })
 
 import IntakePage from '@/app/(app)/intake/page'
-import { CounterIntake } from '@/components/screens/counter-intake'
+import { WriteUp } from '@/components/screens/write-up'
 
 describe('/intake page', () => {
   it('loads the shop work menu and passes diagnostic authorization context into the existing intake page', async () => {
@@ -38,7 +38,7 @@ describe('/intake page', () => {
     mockCannedList.mockResolvedValue({ ok: true, cannedJobs: [diagnostic], taxRateBps: 825 })
 
     const result = await IntakePage()
-    expect(result.type).toBe(CounterIntake)
+    expect(result.type).toBe(WriteUp)
     expect(result.props).toMatchObject({
       userEmail: 'advisor@shop.test',
       cannedJobs: [diagnostic],

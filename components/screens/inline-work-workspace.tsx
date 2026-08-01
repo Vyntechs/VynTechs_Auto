@@ -73,7 +73,7 @@ export function InlineWorkWorkspace({
 
   if (error) {
     return (
-      <section className={styles.state} aria-label="Work workspace">
+      <section className={styles.state} aria-label="Work on this job">
         <div role="alert">
           <strong>Work could not be opened here.</strong>
           <p>The repair order is safe. Retry this tool or use the full work page.</p>
@@ -89,7 +89,7 @@ export function InlineWorkWorkspace({
 
   if (!loaded) {
     return (
-      <section className={styles.state} aria-label="Work workspace" aria-busy="true">
+      <section className={styles.state} aria-label="Work on this job" aria-busy="true">
         <p role="status">Opening assigned work…</p>
       </section>
     )

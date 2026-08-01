@@ -27,15 +27,15 @@ function humanizeError(error: unknown): string {
     case 'balance_outstanding':
       return 'There’s still a balance to collect before this can close.'
     case 'unfinished_work':
-      return 'Finish or cancel every work item before closing this repair order.'
+      return 'Finish every job, or drop the ones you are not doing, before closing this repair order.'
     case 'ticket_not_open':
-      return 'This ticket is already closed.'
+      return 'This repair order is already closed.'
     case 'forbidden':
     case 'no_shop':
     case 'inactive_profile':
       return 'You don’t have permission to do that.'
     case 'not_found':
-      return 'This ticket couldn’t be found.'
+      return 'This repair order could not be found.'
     default:
       return 'Couldn’t save that. Try again.'
   }
@@ -140,7 +140,7 @@ export function RingOutSection({
       <div className={styles.head}>
         <div>
           <p className={styles.eyebrow}>Getting paid</p>
-          <h2 id="ringout-heading">{isClosed ? 'Receipt' : 'Ring out'}</h2>
+          <h2 id="ringout-heading">{isClosed ? 'Receipt' : 'The bill'}</h2>
         </div>
         {isClosed && ringOut.closedAt && (
           <span className={styles.closedStamp}>Closed <LocalizedTimestamp value={ringOut.closedAt} kind="date" /></span>
@@ -169,7 +169,7 @@ export function RingOutSection({
           </div>
         </dl>
       ) : (
-        <p className={styles.empty}>No approved work to bill on this ticket.</p>
+        <p className={styles.empty}>Nothing approved to bill on this repair order yet.</p>
       )}
 
       {payments.length > 0 && (
@@ -246,8 +246,8 @@ export function RingOutSection({
           {busy
             ? 'Closing…'
             : owed.totalCents > 0
-              ? 'Mark paid & close ticket'
-              : 'Close ticket'}
+              ? 'Mark paid and close'
+              : 'Close repair order'}
         </button>
       )}
 

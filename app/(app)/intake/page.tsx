@@ -4,7 +4,7 @@ import { getServerSupabase } from '@/lib/supabase-server'
 import { requireUserAndProfile } from '@/lib/auth'
 import { getRecentIntakeCustomers } from '@/lib/intake/recent-customers'
 import { getShopTeam } from '@/lib/intake/team'
-import { CounterIntake } from '@/components/screens/counter-intake'
+import { WriteUp } from '@/components/screens/write-up'
 import { cannedJobActorFromProfile, listCannedJobs, publicCannedJob } from '@/lib/shop-os/canned-jobs'
 
 export default async function IntakePage() {
@@ -40,7 +40,7 @@ export default async function IntakePage() {
   }
 
   return (
-    <CounterIntake
+    <WriteUp
       userEmail={ctx.user.email}
       recentCustomers={recentCustomers}
       team={team.members}

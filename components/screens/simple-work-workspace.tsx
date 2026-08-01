@@ -402,12 +402,12 @@ export function SimpleWorkWorkspace({
   return (
     <Root
       className={embedded ? styles.embeddedScreen : `app ${styles.screen}`}
-      {...(embedded ? { 'aria-label': 'Work workspace' } : {})}
+      {...(embedded ? { 'aria-label': 'Work on this job' } : {})}
     >
       {!embedded && <AppHeader
-        title={`Work order ${String(ticket.number).padStart(6, '0')}`}
+        title={`RO ${String(ticket.number).padStart(6, '0')}`}
         meta={<span>{ticket.customerName} · {ticket.vehicle}</span>}
-        back={{ href: `/tickets/${ticket.id}`, label: 'Ticket' }}
+        back={{ href: `/tickets/${ticket.id}`, label: 'Repair order' }}
       />}
       <div className={styles.content}>
         <header className={styles.hero}>
@@ -478,8 +478,8 @@ export function SimpleWorkWorkspace({
               <div className={styles.moduleHeading}><span>02</span><h2 id="complete-heading">Complete work</h2></div>
               <p className={styles.helper}>
                 {hasAuxiliaryDraft
-                  ? 'Finish or clear the open concern or parts draft first.'
-                  : 'Requires a saved work note.'}
+                  ? 'Finish or clear what you started above first.'
+                  : 'Save a work note first.'}
               </p>
               <button className={styles.primary} type="button" disabled={pending !== null || !completeReady || hasAuxiliaryDraft}
                 onClick={() => mutateWork({ action: 'complete', expectedUpdatedAt: workspace.updatedAt }, 'complete', 'Completing…', 'Work completed.')}>
@@ -507,8 +507,8 @@ export function SimpleWorkWorkspace({
                   <option value="">Choose reason</option>
                   <option value="parts">Waiting on parts</option>
                   <option value="customer">Waiting on customer</option>
-                  <option value="schedule">Schedule or availability</option>
-                  <option value="shop">Shop decision</option>
+                  <option value="schedule">No room or time yet</option>
+                  <option value="shop">Shop is deciding</option>
                 </select>
                 <label className={styles.label} htmlFor="hold-note">What needs to happen next?</label>
                 <textarea id="hold-note" value={holdNote} maxLength={500} onChange={(event) => setHoldNote(event.target.value)} />
@@ -530,12 +530,12 @@ export function SimpleWorkWorkspace({
                   <textarea id="found-concern" value={concern} maxLength={500} onChange={(event) => {
                     setConcern(event.target.value); escalationAttempt.current = null
                   }} />
-                  <label className={styles.label} htmlFor="concern-tier">Required skill tier</label>
+                  <label className={styles.label} htmlFor="concern-tier">Who can do it</label>
                   <select id="concern-tier" value={tier} onChange={(event) => {
                     setTier(event.target.value as SimpleWorkDraftValues['tier']); escalationAttempt.current = null
                   }}>
-                    <option value="">Choose tier</option><option value="1">C-tech · Tier 1</option>
-                    <option value="2">B-tech · Tier 2</option><option value="3">A-tech · Tier 3</option>
+                    <option value="">Choose one</option><option value="1">C-tech</option>
+                    <option value="2">B-tech</option><option value="3">A-tech</option>
                   </select>
                   <button className={styles.secondary} type="submit" disabled={pending !== null}>
                     {pending === 'escalation' ? 'Sending…' : 'Send to be quoted'}

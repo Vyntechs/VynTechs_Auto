@@ -55,9 +55,9 @@ describe('counter intake page access', () => {
       user: { id: profile.userId, email: 'avery@shop.test' },
     })
 
-    const result = await IntakeLayout({ children: <span>Counter intake</span> })
+    const result = await IntakeLayout({ children: <span>Written up</span> })
 
-    expect(result.props.children).toEqual(<span>Counter intake</span>)
+    expect(result.props.children).toEqual(<span>Written up</span>)
     expect(notFoundMock).not.toHaveBeenCalled()
   })
 

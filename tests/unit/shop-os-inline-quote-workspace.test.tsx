@@ -179,14 +179,14 @@ describe('InlineQuoteWorkspace', () => {
       onProjection={vi.fn()}
     />)
 
-    const boundary = screen.getByRole('region', { name: 'Inline quote workspace' })
+    const boundary = screen.getByRole('region', { name: 'Quote for this repair order' })
     expect(boundary).toHaveAttribute('id', 'inline-quote-workspace-ticket-1')
     expect(boundary).toHaveAttribute('aria-busy', 'true')
     await waitFor(() => expect(boundary).toHaveFocus())
 
     resolveQuote(response({ builder: quoteBuilder }))
     expect(await screen.findByText('Quote loaded ticket-1')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBe(boundary)
+    expect(screen.getByRole('region', { name: 'Quote for this repair order' })).toBe(boundary)
     expect(boundary).not.toHaveAttribute('aria-busy')
     expect(boundary).toHaveFocus()
   })

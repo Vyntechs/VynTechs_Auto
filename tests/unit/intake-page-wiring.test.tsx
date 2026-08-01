@@ -8,9 +8,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }))
 
-import { CounterIntake } from '@/components/screens/counter-intake'
+import { WriteUp } from '@/components/screens/write-up'
 
-describe('CounterIntake page wiring (search + form)', () => {
+describe('WriteUp page wiring (search + form)', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
@@ -28,7 +28,7 @@ describe('CounterIntake page wiring (search + form)', () => {
 
   it('renders the search combobox above the customer form', () => {
     render(
-      <CounterIntake
+      <WriteUp
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -50,7 +50,7 @@ describe('CounterIntake page wiring (search + form)', () => {
   it('focuses search box → shows recent customers from the prop', async () => {
     const user = userEvent.setup()
     render(
-      <CounterIntake
+      <WriteUp
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -80,7 +80,7 @@ describe('CounterIntake page wiring (search + form)', () => {
   })
 
   it('shows the customer/vehicle form when no pick has been made', () => {
-    render(<CounterIntake userEmail="test@example.com" recentCustomers={[]} />)
+    render(<WriteUp userEmail="test@example.com" recentCustomers={[]} />)
     // Customer + Vehicle groups are visible.
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/vin/i)).toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('CounterIntake page wiring (search + form)', () => {
   })
 
   it('refuses an empty form by naming the first missing field, not by going dead', () => {
-    render(<CounterIntake userEmail="test@example.com" recentCustomers={[]} />)
+    render(<WriteUp userEmail="test@example.com" recentCustomers={[]} />)
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     submits.forEach((b) => expect(b).toBeEnabled())
     fireEvent.click(submits[0])
@@ -97,7 +97,7 @@ describe('CounterIntake page wiring (search + form)', () => {
   })
 
   it('passes recentCustomers={[]} when prop is omitted (no crash)', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(screen.getByPlaceholderText(/customer name, phone, vin/i)).toBeInTheDocument()
   })
 
@@ -108,7 +108,7 @@ describe('CounterIntake page wiring (search + form)', () => {
       json: async () => ({ ticket: { id: 'ticket-existing' } }),
     } as Response)
     render(
-      <CounterIntake
+      <WriteUp
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -182,7 +182,7 @@ describe('CounterIntake page wiring (search + form)', () => {
 
   it('keeps discard and cancel routed to Today and never claims repair approval', async () => {
     const user = userEvent.setup()
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(screen.queryByText(/repair approved|approved repair/i)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /discard/i }))

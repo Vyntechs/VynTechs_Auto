@@ -890,7 +890,7 @@ export function ManualQuoteBuilder({
 
   if (decidedVersion) {
     return (
-      <section className={styles.embeddedProof} aria-label="Quote workspace">
+      <section className={styles.embeddedProof} aria-label="Quote">
         <div className={styles.embeddedProofHead}>
           <div>
             <p className={styles.eyebrow}>Quote V{decidedVersion.versionNumber} · recorded</p>
@@ -920,7 +920,7 @@ export function ManualQuoteBuilder({
   return (
     <Root
       className={`${embedded ? styles.embeddedScreen : `app ${styles.screen}`} ${sourcingJob ? styles.screenWithSourcing : ''}`}
-      aria-label={embedded ? 'Quote workspace' : undefined}
+      aria-label={embedded ? 'Quote' : undefined}
     >
       {statusMessage && (
         <p className={styles.liveStatus} role="status" aria-label="Quote update" aria-live="polite">
@@ -954,27 +954,27 @@ export function ManualQuoteBuilder({
         )}
       </div>
 
-      <section className={styles.truth} aria-label="Quote readiness">
+      <section className={styles.truth} aria-label="Before you price it">
         <p>
           {current.ticket.reconciled
-            ? 'Customer and vehicle · Ready'
-            : 'Customer and vehicle · Still needed'}
+            ? 'Customer and vehicle · On here'
+            : 'Customer and vehicle · Not on here yet'}
         </p>
         <p>
           Labor rate · {current.configuration.laborRateCents === null
-            ? 'Not configured'
+            ? 'Not set'
             : `${formatMoneyCents(current.configuration.laborRateCents)}/hr`}
         </p>
         <p>
           Tax rate · {current.configuration.taxRateBps === null
-            ? 'Not configured'
+            ? 'Not set'
             : formatTaxRate(current.configuration.taxRateBps)}
         </p>
       </section>
 
       {!current.ticket.reconciled && (
         <p className={styles.notice}>
-          Draft quote lines now. Prepare stays blocked until customer and vehicle are added.
+          Price the work now. You cannot send it until the customer and vehicle are on here.
         </p>
       )}
 
@@ -982,8 +982,8 @@ export function ManualQuoteBuilder({
         <section className={styles.ledger} aria-labelledby="quote-jobs-heading">
           <div className={styles.sectionHeading}>
             <div>
-              <p className={styles.eyebrow}>Persisted work</p>
-              <h2 id="quote-jobs-heading">Quote ledger</h2>
+              <p className={styles.eyebrow}>On this repair order</p>
+              <h2 id="quote-jobs-heading">Jobs on this quote</h2>
             </div>
             <p>{current.jobs.length} {current.jobs.length === 1 ? 'job' : 'jobs'}</p>
           </div>
@@ -1035,7 +1035,7 @@ export function ManualQuoteBuilder({
                   </ul>
                   <dl>
                     <div><dt>Subtotal</dt><dd className={styles.money}>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
-                    <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not configured' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
+                    <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
                     <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
                   </dl>
                   <button

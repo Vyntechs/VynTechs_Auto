@@ -1,7 +1,7 @@
 const ROWS = [
   ['Repair-order truth', 'Scattered across tabs and notes', 'One living record'],
   ['Technician handoff', 'Verbal queue or duplicate entry', 'Assignment on the job'],
-  ['Bay notes', 'Free text detached from the quote', 'Manual findings tied to work'],
+  ['Work notes', 'Free text detached from the quote', 'Manual findings tied to work'],
   ['Customer decision', 'Rebuilt in another module', 'Quote and authorization stay connected'],
   ['Daily view', 'A report to interpret', 'My Jobs and open work'],
   ['Price per technician', 'Tiered contract', '$100/month, cancel anytime'],

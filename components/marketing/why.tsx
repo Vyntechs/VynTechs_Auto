@@ -6,7 +6,7 @@ export function Why() {
         <div>
           <h2 className="vm-section-title">The work is hard enough. <em>The software should not add another job.</em></h2>
           <p className="vm-section-lede">
-            Most shop systems make the counter, technician, and owner rebuild
+            Most shop systems make the writer, technician, and owner rebuild
             the same repair story in different places. Vyntechs keeps one
             repair order alive as the work changes: concern, ownership,
             findings, quote, approval, and status stay connected.

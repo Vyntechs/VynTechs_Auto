@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 const OWNER_EMAIL = process.env.OWNER_TEST_EMAIL
 const OWNER_PASSWORD = process.env.OWNER_TEST_PASSWORD
 
-test.describe('Counter intake — advisor write-up persistence', () => {
+test.describe('Written up — advisor write-up persistence', () => {
   test.skip(
     !OWNER_EMAIL || !OWNER_PASSWORD,
     'OWNER_TEST_EMAIL / OWNER_TEST_PASSWORD env vars not set',

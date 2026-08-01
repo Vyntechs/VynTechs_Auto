@@ -103,7 +103,7 @@ export function TechSelector(props: TechSelectorProps) {
 
   return (
     <div ref={rootRef} className="ts" role="group" aria-labelledby={labelId}>
-      <span id={labelId} className="ts__label">Assigned to</span>
+      <span id={labelId} className="ts__label">Who is doing it</span>
       <button
         type="button"
         className="ts__trigger"
@@ -131,7 +131,7 @@ export function TechSelector(props: TechSelectorProps) {
             <TierLabel skillTier={selected.skillTier} />
           </>
         ) : (
-          <span className="ts__name ts__name--placeholder">Open queue</span>
+          <span className="ts__name ts__name--placeholder">Nobody yet</span>
         )}
         <span className="ts__caret" aria-hidden="true">▾</span>
       </button>
@@ -202,14 +202,14 @@ export function TechSelector(props: TechSelectorProps) {
                 id={clearOptionId}
                 role="option"
                 aria-selected="false"
-                aria-label="Clear assignment, return to open queue"
+                aria-label="Clear, leave it for anybody"
                 className={`ts__row ts__row--clear${
                   activeIndex === filteredTeam.length ? ' ts__row--active' : ''
                 }`}
                 onMouseEnter={() => setActiveIndex(filteredTeam.length)}
                 onClick={() => commit(null)}
               >
-                <span className="ts__name">× Clear · Open queue</span>
+                <span className="ts__name">× Clear · Nobody yet</span>
               </li>
             )}
           </ul>
@@ -223,7 +223,7 @@ function TierLabel({ skillTier }: { skillTier: number }) {
   const label = skillTier === 3 ? 'A' : skillTier === 2 ? 'B' : skillTier === 1 ? 'C' : null
   if (!label) return null
   return (
-    <span className="ts__tier" aria-label={`${label}-tech skill tier`}>
+    <span className="ts__tier" aria-label={`${label}-tech`}>
       {label}
     </span>
   )

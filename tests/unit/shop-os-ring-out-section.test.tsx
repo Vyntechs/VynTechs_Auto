@@ -71,7 +71,7 @@ describe('RingOutSection', () => {
 
   it('shows the bill and a prefilled payment form before anything is paid', () => {
     render(<RingOutSection ticketId={TICKET} initialRingOut={OPEN} />)
-    expect(screen.getByRole('heading', { name: 'Ring out' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'The bill' })).toBeInTheDocument()
     expect(screen.getByText('Front brakes')).toBeInTheDocument()
     const total = screen.getByText('Total').closest('div') as HTMLElement
     expect(within(total).getByText('$158.00')).toBeInTheDocument()
@@ -100,12 +100,12 @@ describe('RingOutSection', () => {
     })
 
     // Balance is cleared; the close action replaces the payment form.
-    expect(await screen.findByRole('button', { name: 'Mark paid & close ticket' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Mark paid and close' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Record payment' })).toBeNull()
     const tally = screen.getByText('Balance').closest('div') as HTMLElement
     expect(within(tally).getByText('$0.00')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark paid & close ticket' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paid and close' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(fetchMock.mock.calls[1][0]).toBe(`/api/tickets/${TICKET}/close`)
 
@@ -127,8 +127,8 @@ describe('RingOutSection', () => {
       canClose: true,
     }} />)
 
-    expect(screen.getByRole('button', { name: 'Close ticket' })).toBeInTheDocument()
-    expect(screen.getByText('No approved work to bill on this ticket.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close repair order' })).toBeInTheDocument()
+    expect(screen.getByText('Nothing approved to bill on this repair order yet.')).toBeInTheDocument()
   })
 
   it('surfaces an overpayment rejection without changing the balance', async () => {
@@ -150,10 +150,10 @@ describe('RingOutSection', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(<RingOutSection ticketId={TICKET} initialRingOut={PAID} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Mark paid & close ticket' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paid and close' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Finish or cancel every work item before closing this repair order.',
+      'Finish every job, or drop the ones you are not doing, before closing this repair order.',
     )
     expect(router.refresh).not.toHaveBeenCalled()
     expect(router.push).not.toHaveBeenCalled()

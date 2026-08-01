@@ -11,7 +11,7 @@ export function Footer({ isSignedIn }: FooterProps) {
         <div><h5>Account</h5><ul>{isSignedIn ? <li><a href="/today">Go to app</a></li> : <><li><a href="/sign-in">Sign in</a></li><li><a href="/sign-up">Subscribe</a></li></>}<li><a href="/whats-new">What&rsquo;s new</a></li></ul></div>
         <div><h5>Legal</h5><ul><li><a href="/privacy">Privacy</a></li><li><a href="/terms">Terms</a></li></ul></div>
       </div>
-      <div className="vm-foot-bot"><span>© 2026 Vyntechs &middot; vyntechs.dev</span><a href="/privacy" className="vm-foot-legal">Privacy</a><span className="vm-foot-mark">Built in the bay, not the boardroom.</span><span>Beta &middot; invite-only</span></div>
+      <div className="vm-foot-bot"><span>© 2026 Vyntechs &middot; vyntechs.dev</span><a href="/privacy" className="vm-foot-legal">Privacy</a><span className="vm-foot-mark">Built in a shop, not a boardroom.</span><span>Beta &middot; invite-only</span></div>
     </footer>
   )
 }

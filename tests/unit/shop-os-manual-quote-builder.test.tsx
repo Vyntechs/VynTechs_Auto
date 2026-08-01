@@ -253,7 +253,7 @@ describe('ManualQuoteBuilder', () => {
 
     expect(screen.queryByRole('main')).toBeNull()
     expect(screen.queryByRole('link', { name: 'Back to ticket' })).toBeNull()
-    expect(screen.getByRole('region', { name: 'Quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Quote' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: 'Build quote' })).toBeInTheDocument()
     expect(onProjection).toHaveBeenCalledWith([{
       id: JOB_ID,
@@ -475,8 +475,8 @@ describe('ManualQuoteBuilder', () => {
       activeVersion: null,
     })} />)
 
-    expect(screen.getByText(/Draft quote lines now/)).toBeInTheDocument()
-    expect(screen.getByText('Labor rate · Not configured')).toBeInTheDocument()
+    expect(screen.getByText(/Price the work now/)).toBeInTheDocument()
+    expect(screen.getByText('Labor rate · Not set')).toBeInTheDocument()
     expect(screen.getAllByText('$90.00')).toHaveLength(3)
     expect(screen.queryByText(/Total unavailable/)).toBeNull()
   })
@@ -572,7 +572,7 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/\.cannedApply\s*\{[^}]*min-height:\s*44px/)
     expect(css).toMatch(/\.job:focus\s*\{[^}]*outline:/)
 
-    const ledger = screen.getByRole('region', { name: 'Quote ledger' })
+    const ledger = screen.getByRole('region', { name: 'Jobs on this quote' })
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(ledger.compareDocumentPosition(tape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })

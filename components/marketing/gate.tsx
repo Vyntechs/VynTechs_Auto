@@ -5,21 +5,21 @@ export function Gate() {
         <div className="vm-section-num"><b>§ 02</b>What changes by role</div>
         <div>
           <h2 className="vm-section-title">The record stays put. <em>The next action comes to you.</em></h2>
-          <p className="vm-section-lede">The counter sees intake and authorization. The bay sees assigned work and the shortest honest path to record what happened.</p>
+          <p className="vm-section-lede">Whoever writes it up sees the concern and the authorization. The technician sees assigned work and the shortest honest path to record what happened.</p>
         </div>
       </div>
       <div className="vm-gate">
         <div className="vm-card amber">
-          <div className="vm-card-eyebrow"><span><b>Counter</b> &middot; customer truth</span><span>RO 000127</span></div>
+          <div className="vm-card-eyebrow"><span><b>Write-up</b> &middot; what the customer said</span><span>RO 000127</span></div>
           <p className="vm-card-finding"><em>&ldquo;Cranks normally but will not start after sitting overnight.&rdquo;</em></p>
           <div className="vm-card-meta">
             <div className="vm-card-meta-cell"><div className="vm-card-meta-num">captured</div><div className="vm-card-meta-lab">concern</div></div>
             <div className="vm-card-meta-cell"><div className="vm-card-meta-num">$180</div><div className="vm-card-meta-lab">authorized</div></div>
-            <div className="vm-card-meta-cell"><div className="vm-card-meta-num">Bay 03</div><div className="vm-card-meta-lab">assigned</div></div>
+            <div className="vm-card-meta-cell"><div className="vm-card-meta-num">Marcus</div><div className="vm-card-meta-lab">assigned</div></div>
           </div>
         </div>
         <div className="vm-card red">
-          <div className="vm-card-eyebrow"><span><b>Bay</b> &middot; work truth</span><span>same repair order</span></div>
+          <div className="vm-card-eyebrow"><span><b>Technician</b> &middot; what was actually found</span><span>same repair order</span></div>
           <p className="vm-card-finding"><em>&ldquo;Record findings, add a text work note, or move the job status.&rdquo;</em></p>
           <div className="vm-card-meta">
             <div className="vm-card-meta-cell"><div className="vm-card-meta-num">manual</div><div className="vm-card-meta-lab">findings</div></div>

@@ -24,6 +24,11 @@ type WorkKind = 'repair' | 'maintenance'
 const MAX_MILEAGE = 2_147_483_647
 const MAX_VEHICLE_YEAR = new Date().getFullYear() + 1
 
+// The shop says A-tech, B-tech, C-tech out loud. "Tier 3" is a column name.
+function tierWord(tier: number): string {
+  return tier === 3 ? 'A-tech' : tier === 2 ? 'B-tech' : tier === 1 ? 'C-tech' : `Tier ${tier}`
+}
+
 function optionalText(value: string): string | null {
   return value.trim() || null
 }
@@ -166,9 +171,9 @@ function quickTicketError(error?: string): string {
     case 'forbidden':
     case 'inactive_profile':
     case 'no_shop':
-      return 'This account cannot create a quick quote.'
+      return 'Your account cannot start a quick ticket.'
     default:
-      return 'Could not create the quick quote. Try again.'
+      return 'Could not start the quick ticket. Try again.'
   }
 }
 
@@ -369,7 +374,7 @@ export function QuickTicket({
       }
       router.push(`/tickets/${ticketId}/quote`)
     } catch {
-      setError('The quote service could not be reached. Retry with the same details.')
+      setError('Could not reach the shop. Try again with the same details.')
       setBusy(false)
       inFlightRef.current = false
     }
@@ -396,7 +401,7 @@ export function QuickTicket({
     <div className={`vt-app ${styles.screen}`}>
       <Topbar
         product="Shop"
-        crumbs={[{ label: 'Today' }, { label: 'Quick quote', bold: true }]}
+        crumbs={[{ label: 'Today' }, { label: 'Quick ticket', bold: true }]}
         user={userEmail || '—'}
       />
       <div className="vt-workspace">
@@ -546,7 +551,7 @@ export function QuickTicket({
                       {...missingProps('qt-quote-source')}
                     >
                       {cannedJobs.length > 0 && <option value="canned">Canned job</option>}
-                      <option value="manual">Manual draft</option>
+                      <option value="manual">Type it in</option>
                     </select>
                     {missingNote('qt-quote-source')}
                   </Field>
@@ -601,7 +606,7 @@ export function QuickTicket({
                   <section className={styles.quotePreview} aria-label="Exact quote preview">
                     <header>
                       <div>
-                        <span>{selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · Tier {selectedCannedJob.defaultRequiredSkillTier}</span>
+                        <span>{selectedCannedJob.kind === 'repair' ? 'Repair' : 'Maintenance'} · {tierWord(selectedCannedJob.defaultRequiredSkillTier)}</span>
                         <strong>{selectedCannedJob.title}</strong>
                       </div>
                       <strong>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</strong>
@@ -616,21 +621,21 @@ export function QuickTicket({
                     </ul>
                     <dl>
                       <div><dt>Subtotal</dt><dd>{formatMoneyCents(selectedCannedJob.summary.subtotalCents)}</dd></div>
-                      <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
-                      <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Unavailable' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
+                      <div><dt>Tax</dt><dd>{selectedCannedJob.summary.taxCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.taxCents)}</dd></div>
+                      <div><dt>Total</dt><dd>{selectedCannedJob.summary.totalCents === null ? 'Not set' : formatMoneyCents(selectedCannedJob.summary.totalCents)}</dd></div>
                     </dl>
                     {selectedCannedJob.summary.totalCents === null && (
-                      <p>Tax is not configured. This will remain an incomplete draft.</p>
+                      <p>No tax rate is set, so this quote will be missing tax.</p>
                     )}
                   </section>
                 ) : quoteMode === 'manual' ? (
-                  <p className={styles.draftNotice}>Manual capture creates an incomplete draft with no priced lines.</p>
+                  <p className={styles.draftNotice}>Typing it in starts the repair order with no prices on it yet.</p>
                 ) : null}
-                <aside className={styles.truthStrip} aria-label="Quick ticket boundary">
+                <aside className={styles.truthStrip} aria-label="Where this leaves the repair order">
                   <span>OPEN</span>
-                  <span>UNASSIGNED</span>
-                  <span>NOT PREPARED</span>
-                  <span>NO REPAIR APPROVAL</span>
+                  <span>NOBODY ON IT</span>
+                  <span>NOT SENT</span>
+                  <span>NOT APPROVED</span>
                 </aside>
               </FormGroup>
 
@@ -647,10 +652,10 @@ export function QuickTicket({
 
               <FormFooter
                 meta={busy
-                  ? 'Creating quote draft…'
+                  ? 'Starting…'
                   : attempted && missing
                     ? missing.message
-                    : 'Explicit Prepare happens on the quote page'}
+                    : 'You send it to the customer from the quote.'}
                 actions={
                   <>
                     <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>

@@ -18,7 +18,7 @@ import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
-import styles from './counter-intake.module.css'
+import styles from './write-up.module.css'
 
 type CounterBody = {
   vehicleMode: 'new' | 'existing'
@@ -161,13 +161,13 @@ function ticketErrorMessage(error?: string): string {
     case 'forbidden':
     case 'inactive_profile':
     case 'no_shop':
-      return 'This account cannot create a counter ticket.'
+      return 'Your account cannot start a repair order.'
     default:
       return 'Could not create the ticket. Try again.'
   }
 }
 
-export function CounterIntake({
+export function WriteUp({
   userEmail,
   recentCustomers = [],
   team = [],
@@ -439,7 +439,7 @@ export function CounterIntake({
       requestIdentityRef.current = null
       router.push(`/tickets/${payload.ticket.id}`)
     } catch {
-      setError('The counter service could not be reached. Try again.')
+      setError('Could not reach the shop. Try again.')
       setBusy(false)
     }
   }
@@ -458,14 +458,14 @@ export function CounterIntake({
   return (
     <div className={`vt-app ${styles.screen}`}>
       <Topbar
-        product="Counter"
-        crumbs={[{ label: 'Today' }, { label: 'Intake', bold: true }]}
+        product="Write-up"
+        crumbs={[{ label: 'Today' }, { label: 'Write-up', bold: true }]}
         user={userEmail || '—'}
       />
       <div className="vt-workspace">
         <main className="vt-main">
           <MainHeader
-            eyebrow="New work order"
+            eyebrow="New repair order"
             eyebrowSlot={
               team.length > 0 ? (
                 <TechSelector
@@ -479,7 +479,7 @@ export function CounterIntake({
                 />
               ) : undefined
             }
-            title="Who's at the counter?"
+            title="Who's the customer?"
             sub="Search to find an existing customer or vehicle, or fill in the form below."
             actions={
               <>
@@ -489,7 +489,7 @@ export function CounterIntake({
                 <Btn
                   kind="primary"
                   type="submit"
-                  form="counter-intake-form"
+                  form="write-up-form"
                   kbd="⌘ ↵"
                   disabled={busy}
                 >
@@ -501,7 +501,7 @@ export function CounterIntake({
 
           <div className="vt-main__body">
             <form
-              id="counter-intake-form"
+              id="write-up-form"
               className="vt-form"
               onSubmit={handleSubmit}
               onKeyDown={handleFormKeyDown}
@@ -539,7 +539,7 @@ export function CounterIntake({
                 >
                   <span>
                     Existing vehicle selected{pickedLabel ? ` · ${pickedLabel}` : ''}. Type the
-                    complaint below and submit to start the ticket.
+                    complaint below and submit to start the repair order.
                   </span>
                   <button
                     className={styles.changeButton}
@@ -574,7 +574,7 @@ export function CounterIntake({
                         />
                         {missingNote('ci-name')}
                       </Field>
-                      <Field label="Phone" htmlFor="ci-phone" hint="Used for completion text">
+                      <Field label="Phone" htmlFor="ci-phone" hint="We text this number when the work is done">
                         <Input
                           id="ci-phone"
                           name="phone"
@@ -904,7 +904,7 @@ export function CounterIntake({
                   <Field
                     label="Requested work"
                     htmlFor="ci-service-description"
-                    hint="Required · 200 characters maximum — becomes this repair order’s one work item"
+                    hint="Required. This becomes the one job on the repair order."
                   >
                     <Input
                       id="ci-service-description"

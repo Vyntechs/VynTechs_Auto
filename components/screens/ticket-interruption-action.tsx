@@ -41,10 +41,10 @@ const COPY = {
     failed: 'Hold was not changed. Check the connection and retry.',
   },
   cancel_job: {
-    idle: 'Retire declined work',
-    pending: 'Retiring…',
-    done: 'Declined work retired.',
-    failed: 'The line was not retired. Check the connection and retry.',
+    idle: 'Not doing this one',
+    pending: 'Dropping it…',
+    done: 'Dropped. The customer said no to this one.',
+    failed: 'It was not dropped. Check the connection and retry.',
   },
 } as const
 
