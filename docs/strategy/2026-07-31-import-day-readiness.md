@@ -18,7 +18,7 @@ Three things decide the answer:
 
 2. **The shop cannot find a closed repair order.** There is exactly one search box in the entire product, it lives inside the *"start a new repair order"* screen, and it searches customers and vehicles only. It cannot search by repair-order number, and it never returns a repair order. Every one of the shop's imported historical repair orders is closed. On day one, the shop's ten years of history is technically present and practically unreachable except by a four-step detour.
 
-3. **Money on an open repair order cannot survive the trip.** What a customer owes is not stored anywhere. It is recalculated on demand by summing *approved quote snapshots* (`lib/shop-os/ring-out.ts:85-151`). An imported repair order with no quote snapshot owes **$0.00** — and can then be closed and marked delivered without anyone paying. Importing the 67 open repair orders with correct balances means synthesising a valid quote snapshot for every one of them, matching a strict schema (`lib/shop-os/quotes.ts:266-325`), or the money is silently wrong.
+3. **Money on an open repair order cannot survive the trip.** What a customer owes is not stored anywhere. It is recalculated on demand by summing *approved quote snapshots* (`lib/shop-os/ring-out.ts:85-151`). An imported repair order with no quote snapshot owes **$0.00** — and can then be closed and marked delivered without anyone paying. Importing the shop's open repair orders with correct balances means synthesising a valid quote snapshot for every one of them, matching a strict schema (`lib/shop-os/quotes.ts:266-325`), or the money is silently wrong.
 
 Underneath those three, there is a fourth thing the owner should hear plainly: **Shop OS is not yet a shop management system.** It is an excellent repair-order workflow. It has no accounts receivable, no invoice or statement to hand the customer, no appointment book, no reports, and no way to total a day's sales. Mitchell 1 does all of those. Those gaps are covered in section 7 and they are not import problems — they are product problems that the import will make visible on day one.
 
@@ -35,7 +35,7 @@ Ranked by what stops the shop getting a car in, worked, billed and out of the do
 | **1** | **No importer exists at all** (§1.1) | Nothing lands. Everything below assumes an importer that has not been started. | **Weeks** |
 | **2** | **Decide the columns *before* extraction** (§1.2, §3.3, §3.4, §6.5) | `legacy_ro_number`, odometer-per-visit, customer address, vehicle colour, shop address. If these do not exist when the import runs, the data is dropped and the import has to be redone. | **~1 day of schema**, but it gates everything |
 | **3** | **A closed repair order cannot be found** (§2) | Ten years of history becomes write-only. There is no repair-order list and no way to search by number. | **~1 week** — server half already written in draft PR #202 |
-| **4** | **Open repair orders arrive owing $0.00** (§4.2) | Silently wrong money on all 67. Worse than a crash, because nobody notices. | **~1 week**, inside the importer |
+| **4** | **Open repair orders arrive owing $0.00** (§4.2) | Silently wrong money on every one of them. Worse than a crash, because nobody notices. | **~1 week**, inside the importer |
 | **5** | **A repair order cannot close while money is owed** (§4.4, §7.1) | No accounts receivable at all. Any customer who does not pay in full on pickup strands a repair order open forever. | **1–2 weeks** |
 | **6** | **The counter's "ready to collect" lane shows the 25 *oldest* repair orders** (§5.1) | The lane fills with 2015 paperwork; today's finished car never appears. | **Hours** |
 | **7** | **New repair orders would attach to the wrong customer** (§5.7) | Customer matching is on phone number alone, first match wins. Invisible at four customers, weekly at three thousand. | **Hours** |
@@ -207,7 +207,7 @@ There is also a modelling difference worth flagging: **`vehicles` has no `shop_i
 
 ---
 
-## 4. The 67 open repair orders, and the money
+## 4. The open repair orders, and the money
 
 This is the section the owner should read twice. The machinery here is careful and well-tested — and that carefulness is exactly what makes an import hard, because every guard assumes the repair order was built by a human clicking through the product in order.
 
@@ -287,7 +287,7 @@ A quote covers the whole repair order, and only one version can be live at a tim
 
 There is a partial escape: jobs already `in_progress` or `done` are treated as pinned and left alone (`isPinnedSimpleWork`, `lib/shop-os/quotes.ts:480-486`). So approvals only evaporate for work that has been approved but not started — which, on a shop floor waiting on parts, is most of it.
 
-This matters on import day beyond the everyday friction: the 67 imported repair orders are the ones most likely to have work added mid-stream in week one.
+This matters on import day beyond the everyday friction: the imported open repair orders are the ones most likely to have work added mid-stream in week one.
 
 ### 4.6 Pinned work never gets billed — **PAINFUL, and it is a money bug**
 
@@ -320,7 +320,7 @@ Now the problems.
 
 **What the shop would experience:** the lane at the counter that is supposed to show cars finished and waiting to be paid for fills up with paperwork from 2015, and the truck the customer is standing there to collect is not on it.
 
-Two lines do it. The query is capped at 25 (`READY_TO_COLLECT_LIMIT = 25`, `lib/shop-os/ready-to-collect.ts:30`) and sorted **oldest first** — `.orderBy(asc(tickets.ticketNumber))` (`lib/shop-os/ready-to-collect.ts:88`). The lane holds every open repair order with no active job left on it. Every one of the 67 imported open repair orders whose work was already finished qualifies, and every one of them has a lower repair-order number than anything written after the cutover.
+Two lines do it. The query is capped at 25 (`READY_TO_COLLECT_LIMIT = 25`, `lib/shop-os/ready-to-collect.ts:30`) and sorted **oldest first** — `.orderBy(asc(tickets.ticketNumber))` (`lib/shop-os/ready-to-collect.ts:88`). The lane holds every open repair order with no active job left on it. Every imported open repair order whose work was already finished qualifies, and every one of them has a lower repair-order number than anything written after the cutover.
 
 **Fix:** hours — sort newest first and raise or page the cap. This is the highest ratio of pain-avoided to effort in the entire audit.
 
