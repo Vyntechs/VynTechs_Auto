@@ -89,6 +89,9 @@ const approvalLabel: Record<TodayTicketJob['approvalState'], string> = {
 // The shop says A-tech, B-tech, C-tech out loud. "Tier 3" is a column name.
 const tierLabel: Record<number, string> = { 3: 'A-tech', 2: 'B-tech', 1: 'C-tech' }
 
+// The three states where the customer has actually answered.
+const DECIDED = new Set<TodayTicketJob['approvalState']>(['approved', 'declined', 'deferred'])
+
 export function TodayJobsBoard({
   myJobs,
   openJobs,
@@ -1192,7 +1195,12 @@ function JobRow({
           <span>{titleCase[job.kind]}</span>
           <span>{tierLabel[job.requiredSkillTier] ?? `Tier ${job.requiredSkillTier}`}</span>
           <span>{statusLabel[job.workStatus]}</span>
-          <span>{approvalLabel[job.approvalState]}</span>
+          {/* Four facts at one weight rank nothing. The customer's answer is the
+              only one that changes what you do next, so it is the only one that
+              gets ink. */}
+          <span data-decision={DECIDED.has(job.approvalState) ? job.approvalState : undefined}>
+            {approvalLabel[job.approvalState]}
+          </span>
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
           )}

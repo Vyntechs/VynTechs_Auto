@@ -68,13 +68,18 @@ export function TodayHome({
   return (
     <main className="app">
       <AppHeader title={canDispatchWork ? 'Shop floor' : 'My work'} meta={meta} />
+      {/* One measure for the whole screen. Left full-bleed, a board row on a
+          1440px monitor put three words on the left edge and its button 1300px
+          away, which is unreadable as one row. */}
       <div
         style={{
           display: 'flex',
           gap: 8,
           flexWrap: 'wrap',
           alignItems: 'center',
-          padding: '12px 14px 0',
+          width: 'min(100%, 1120px)',
+          margin: '0 auto',
+          padding: '16px 14px 0',
         }}
       >
         {canCurate && (
@@ -119,7 +124,9 @@ export function TodayHome({
           <Link
             href="/tickets/new"
             aria-label="Quick ticket"
-            className="btn btn-primary"
+            // Secondary on purpose: two filled buttons side by side rank
+            // nothing. Writing up a vehicle is the door this shop uses.
+            className="btn btn-secondary"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -137,10 +144,12 @@ export function TodayHome({
       </div>
       <div
         style={{
-          padding: '14px',
+          width: 'min(100%, 1120px)',
+          margin: '0 auto',
+          padding: '14px 14px 40px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 16,
           flex: 1,
           overflow: 'auto',
         }}
@@ -212,7 +221,7 @@ export function TodayHome({
           todayJobs.createdJobs.length === 0 &&
           todayJobs.partsJobs.length === 0 &&
           todayJobs.readyToCollect.length === 0 && (
-            <Module num="—" label="My work">
+            <Module label="My work">
               <p style={{ margin: 0, color: 'var(--vt-fg-2)', lineHeight: 1.5 }}>
                 Nothing assigned to you yet. New repair orders and quick tickets show up here.
               </p>

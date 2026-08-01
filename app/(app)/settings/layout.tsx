@@ -20,7 +20,7 @@ export default async function SettingsLayout({
 
   return (
     <div className="app">
-      <AppHeader title="Settings" back={{ href: '/today', label: 'My Jobs' }} />
+      <AppHeader title="Settings" back={{ href: '/today', label: 'Today' }} />
       <SettingsGrid list={<SettingsList isAdmin={isAdmin} />}>
         {children}
       </SettingsGrid>

@@ -194,9 +194,13 @@
   font-size: 11px; letter-spacing: 0.06em;
   color: oklch(82% 0.008 260);
 }
+/* Sized to the five rows the script actually plays, plus the caret line. It was
+   reserving 460px for about 235px of content, so the first thing anyone saw of
+   this product was a near-black panel two fifths empty. The height still cannot
+   jump while the rows animate in. */
 .vm-term-body {
   padding: 22px 24px 28px;
-  min-height: 460px;
+  min-height: 270px;
   font-size: 14px;
   line-height: 1.65;
 }
@@ -921,7 +925,7 @@
   .vm-hero-cta .vm-price { width: 100%; margin-left: 0; }
   .vm-hero-meta { grid-template-columns: repeat(3, 1fr); max-width: none; padding-top: 18px; }
   .vm-hero-meta-num { font-size: 22px; }
-  .vm-term-body { min-height: 380px; font-size: 13px; padding: 18px 18px 22px; }
+  .vm-term-body { min-height: 250px; font-size: 13px; padding: 18px 18px 22px; }
   .vm-term-time { min-width: 50px; font-size: 10px; }
   .vm-term-text { font-size: 15px; }
 

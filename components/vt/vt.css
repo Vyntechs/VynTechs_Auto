@@ -4,7 +4,7 @@
 
 /* ====== App shell ====== */
 .app {
-  background: var(--vt-bg);
+  background: var(--vt-canvas);
   color: var(--vt-fg);
   height: 100%;
   font-family: var(--vt-font-serif);
@@ -14,13 +14,18 @@
   box-sizing: border-box;
 }
 
+/* The header is a plate laid on the bench: lit surface, one hairline, and a
+   shadow shallow enough that you read it as a plane rather than a banner. */
 .app-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 0.5px solid var(--vt-rule);
-  background: var(--vt-bone-50);
+  border-bottom: 1px solid var(--vt-rule);
+  background: var(--vt-bg);
+  box-shadow: 0 1px 3px -1px oklch(38% 0.03 70 / 0.10);
 }
 .app-header .title {
   font-family: var(--vt-font-serif);
@@ -257,16 +262,24 @@
   white-space: nowrap;
 }
 .btn:disabled { cursor: not-allowed; opacity: 0.5; }
-.btn-primary { background: var(--vt-bone-900); color: var(--vt-bone-50); }
-.btn-primary:hover:not(:disabled) { background: var(--vt-bone-800); }
+/* One accent, not two. A near-black slab was the darkest thing on an otherwise
+   bone screen and it competed with the signal-navy every other control uses —
+   which is most of why the product read as "just black". */
+.btn-primary {
+  background: var(--vt-accent);
+  color: var(--vt-fg-on-signal);
+  box-shadow: var(--vt-lift-1);
+}
+.btn-primary:hover:not(:disabled) { background: var(--vt-accent-hover); }
 .btn-primary:active:not(:disabled) {
-  background: var(--vt-bone-900);
+  background: var(--vt-accent-press);
   box-shadow: var(--vt-shadow-inset-press);
 }
 .btn-secondary {
-  background: var(--vt-bone-50);
+  background: var(--vt-bg);
   color: var(--vt-fg);
   border: 0.5px solid var(--vt-rule-strong);
+  box-shadow: var(--vt-lift-1);
 }
 .btn-secondary:hover:not(:disabled) { background: var(--vt-bone-100); }
 .btn-ghost {
@@ -1324,13 +1337,14 @@
   line-height: 1.15;
   color: var(--vt-fg);
 }
+/* Sentence case in the chrome face. Set in letterspaced mono caps, four short
+   descriptions read like a system log rather than four places to go. */
 .vt-settings-list-row__desc {
-  font-family: var(--vt-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-family: var(--vt-font-sans);
+  font-size: 12.5px;
+  letter-spacing: 0;
   color: var(--vt-fg-3);
-  text-transform: uppercase;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 .vt-settings-list-row__chevron {
   margin-left: auto;
@@ -1434,6 +1448,11 @@
   .vt-settings-grid[data-mobile-pane='list'] .vt-settings-detail { display: none; }
   .vt-settings-grid[data-mobile-pane='detail'] .vt-settings-list { display: none; }
 
+  /* On a phone the list is the whole screen, so each row is a lit surface on
+     the bench rather than a rule drawn on nothing. */
+  .vt-settings-list-row { background: var(--vt-bg); }
+  .vt-settings-list { box-shadow: var(--vt-lift-1); }
+
   .vt-settings-detail { padding: 12px; gap: 12px; }
 
   .vt-settings-list-row {
@@ -1451,8 +1470,9 @@
     display: grid;
     grid-template-columns: 240px 1fr;
     gap: 0;
+    align-items: stretch;
   }
-  .vt-settings-list { border-right: 0.5px solid var(--vt-rule); }
+  .vt-settings-list { border-right: 1px solid var(--vt-rule); }
   .vt-settings-back { display: none; }
 
   .vt-settings-detail { padding: 24px; gap: 16px; }
@@ -1468,11 +1488,29 @@
    Detail content tops out at 720px so text doesn't sprawl across wide
    monitors. Padding generous; hover transitions refined. */
 @media (min-width: 1024px) {
-  .vt-settings-grid { grid-template-columns: 280px 1fr; }
+  /* Settings used to be a 280px rail against an unbounded field of cream — on a
+     1440px monitor roughly four fifths of the screen was empty, which reads as
+     unfinished rather than calm. The two panes are now one composed object with
+     a measure, resting on the bench. */
+  .vt-settings-grid {
+    width: min(100%, 1040px);
+    margin: 24px auto 40px;
+    grid-template-columns: 280px 1fr;
+    border: var(--vt-stroke-hair);
+    border-radius: var(--vt-radius-2);
+    background: var(--vt-bg);
+    box-shadow: var(--vt-lift-1);
+    overflow: hidden;
+    flex: 0 1 auto;
+    align-items: stretch;
+  }
+
+  .vt-settings-list { background: var(--vt-surface); box-shadow: var(--vt-lift-in); }
 
   .vt-settings-detail {
     padding: 32px 40px;
     gap: 20px;
+    min-height: 30rem;
   }
   .vt-settings-detail > * { max-width: 720px; width: 100%; }
   .vt-settings-detail > .vt-settings-empty { max-width: none; }

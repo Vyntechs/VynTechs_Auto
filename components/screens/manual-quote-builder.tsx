@@ -950,7 +950,7 @@ export function ManualQuoteBuilder({
             Close quote
           </button>
         ) : (
-          <Link href={`/tickets/${ticket.id}`}>Back to ticket</Link>
+          <Link href={`/tickets/${ticket.id}`}>Back to repair order</Link>
         )}
       </div>
 
@@ -991,13 +991,13 @@ export function ManualQuoteBuilder({
           {!cannedCatalogAvailable ? (
             <div className={styles.cannedUnavailable} tabIndex={-1} ref={cannedUnavailableRef}>
               <strong>Canned jobs unavailable</strong>
-              <p>Manual quote lines remain available. Refresh before using the library.</p>
+              <p>You can still type the work in by hand. Refresh before using the library.</p>
               <button type="button" className={styles.lineAction} onClick={reloadCannedPage}>
                 Refresh canned jobs
               </button>
             </div>
           ) : quoteCannedJobs.length === 0 ? (
-            <p className={styles.cannedEmpty}>No saved repair or maintenance work. Manual quote lines remain available.</p>
+            <p className={styles.cannedEmpty}>Nothing saved in the library yet. You can still type the work in by hand.</p>
           ) : (
             <section className={styles.cannedPicker} aria-labelledby="canned-job-heading">
               <div>

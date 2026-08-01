@@ -123,9 +123,15 @@
      Off-manilla paper. No pure white. Graphite ink only.
      =========================================================== */
 
-  --vt-bg:           var(--vt-bone-50);     /* page — warm off-manilla */
-  --vt-surface:      var(--vt-bone-100);    /* card surface */
-  --vt-surface-2:    var(--vt-bone-200);    /* raised / inset */
+  /* Two grounds, not one. The canvas is the bench top: it recedes and never
+     holds content directly. Everything the operator reads or touches sits on
+     --vt-bg, a half-step lighter, so a card is lit and the page behind it is
+     not. Before this the card was DARKER than the page, which is why the
+     product read as one flat plane. */
+  --vt-canvas:       var(--vt-bone-100);    /* the bench — recedes */
+  --vt-bg:           var(--vt-bone-50);     /* the lit surface things are made of */
+  --vt-surface:      var(--vt-bone-100);    /* recessed band inside a surface */
+  --vt-surface-2:    var(--vt-bone-200);    /* inset / well */
   --vt-surface-3:    var(--vt-bone-300);    /* divider rail */
   --vt-overlay:      oklch(20% 0.012 60 / 0.55);
 
@@ -232,6 +238,20 @@
   --vt-shadow-sheet: 0 24px 60px -16px oklch(40% 0.04 70 / 0.30);
   --vt-shadow-inset-press: inset 0 1px 0 oklch(0% 0 0 / 0.18);
 
+  /* Lift — the only two heights in the product. Level 1 is anything resting on
+     the bench (a board, a plate, the header). Level 2 is the one tool the
+     operator just opened, which must read as sitting on top of level 1. Both
+     carry a 1px top highlight so the edge catches light instead of drawing a
+     border. */
+  --vt-lift-1: 0 1px 0 oklch(100% 0 0 / 0.70) inset,
+               0 1px 1px oklch(38% 0.03 70 / 0.05),
+               0 4px 10px -6px oklch(38% 0.03 70 / 0.14);
+  --vt-lift-2: 0 1px 0 oklch(100% 0 0 / 0.85) inset,
+               0 2px 3px oklch(38% 0.03 70 / 0.06),
+               0 16px 32px -14px oklch(38% 0.03 70 / 0.22);
+  /* Pressed into the bench rather than lifted off it — group headers, wells. */
+  --vt-lift-in: inset 0 1px 2px oklch(38% 0.03 70 / 0.07);
+
   /* ===========================================================
      MOTION — calm. No bounces. Quick, decisive.
      =========================================================== */
@@ -260,11 +280,11 @@
 html, body { margin: 0; padding: 0; }
 
 html {
-  background: var(--vt-bg);
+  background: var(--vt-canvas);
 }
 
 body {
-  background: var(--vt-bg);
+  background: var(--vt-canvas);
   color: var(--vt-fg);
   font-family: var(--vt-font-body);
   font-size: var(--vt-fs-14);

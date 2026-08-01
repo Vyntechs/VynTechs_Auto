@@ -349,7 +349,7 @@ describe('WriteUp', () => {
 
   it('calls Requested work required, because the counter route rejects it empty', () => {
     render(<WriteUp userEmail="test@example.com" />)
-    expect(screen.getByText(/^Required · 200 characters maximum/)).toBeInTheDocument()
+    expect(screen.getByText(/^Required\. This becomes the one job/)).toBeInTheDocument()
     expect(screen.queryByText(/^Optional — becomes/)).toBeNull()
   })
 
