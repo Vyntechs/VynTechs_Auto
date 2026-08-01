@@ -92,3 +92,58 @@ Reason: The pipeline returns the last command's code, silently converting a fail
 Trigger: A required `clientKey` field broke two test files a delegated agent never found.
 Rule: Widening a shared contract means grepping every call site, then running the whole suite CI runs.
 Reason: A hand-picked subset passes while unrelated fixtures still build the old body shape.
+
+### fail-soft-catch-hides-from-every-signal
+Trigger: A swallowed storage throw disabled the unsaved-draft guard for three days with zero error signals.
+Rule: When a catch degrades silently, only a browser walking the journey can catch it — keep that gate green.
+Reason: No console error, no failed request, and no unit test sees a deliberate fail-soft path.
+
+### version-8-uuids-are-real-here
+Trigger: A `[1-5]` UUID regex rejected client-key-derived ids, which this codebase stamps as version 8.
+Rule: Allow `[1-8]` in any UUID pattern; derived idempotency ids are as real as gen_random_uuid ones.
+Reason: Five modules derive ids by hash, and every one of them sets the version nibble to 8.
+
+### first-project-aborts-hide-the-second
+Trigger: A red golden-phone run made golden-desktop look green; desktop was failing identically.
+Rule: When one Playwright project fails, never infer the others pass — the run stops before they start.
+Reason: The harness runs projects in sequence and exits on the first failure.
+
+### resolve-the-deployed-commit-not-the-age
+Trigger: `vercel ls` Age column made a fresh deploy look 43 minutes old; I nearly re-deployed.
+Rule: Prove what production is serving via the GitHub deployments API, matching sha to environment_url.
+Reason: The CLI's relative age is unreliable, and both a stale and a fresh alias read "Ready".
+
+### section-label-collides-with-its-own-field
+Trigger: `getByLabelText` matched both a section's aria-label and the input labelled the same.
+Rule: Never give a landmark the same accessible name as a control it contains.
+Reason: Screen readers and role queries both see two things named one thing.
+
+### owner-questions-need-filtering
+Trigger: I handed Brandon four audit questions; three were noise he was angry to be asked.
+Rule: Filter every audit-generated question through what he cares about and what code can answer. Ask the one that changes the build.
+Reason: An audit lists gaps generically; a technician-owner has already ruled most of them out.
+
+### a-default-is-where-tax-bugs-live
+Trigger: Tax math was correct and per-line, but every new labor line started taxable in Texas.
+Rule: When a rule is per-line, audit the DEFAULT, not just the arithmetic. Trace every factory that mints one.
+Reason: Correct math over a wrong default bills real money wrong, and a subtotal hides which line caused it.
+
+### changing-a-default-moves-hosted-totals
+Trigger: The labor-tax fix silently invalidated the dollar totals two production journeys assert.
+Rule: After changing anything that touches money, grep the e2e specs for hard-coded totals before the gate runs.
+Reason: CI does not run the hosted journeys, so the break surfaces later with no obvious cause.
+
+### unsourced-numbers-become-facts
+Trigger: A research doc states a specific count about Brandon's shop or business.
+Rule: Attribute it or strike it. Never let an unsourced observation size work or justify strategy.
+Reason: "67 open ROs" was repeated across three docs and sized a week; Brandon never said it.
+
+### success-unmounts-its-own-confirmation
+Trigger: Retiring a declined line worked, but its "Declined work retired." message never painted.
+Rule: When success removes the command that offered a control, put the confirmation on the surviving row.
+Reason: React batches parent and child updates, so the control unmounts in the same commit that set its notice.
+
+### a-stopped-agents-handoff-is-a-lead
+Trigger: A killed agent's PR handoff listed as unfinished a test already committed and passing.
+Rule: Verify every handoff claim against the commit and a real run before scheduling work from it.
+Reason: The handoff narrates intent at the moment of death, not what the branch actually contains.
