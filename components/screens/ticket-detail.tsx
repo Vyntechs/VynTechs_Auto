@@ -432,11 +432,10 @@ export function TicketDetailScreen({
                         action="cancel_job"
                         className={styles.inlineAction}
                         onApplied={(retired) => {
-                          setWorkOverrides((current) => {
-                            const existing = current.get(job.id)
-                            if (existing?.workStatus === retired.workStatus) return current
-                            return new Map(current).set(job.id, { workStatus: retired.workStatus })
-                          })
+                          setWorkOverrides((current) => new Map(current).set(job.id, {
+                            workStatus: retired.workStatus,
+                            notice: 'Declined work retired.',
+                          }))
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
                       />
@@ -446,11 +445,10 @@ export function TicketDetailScreen({
                         jobId={job.id}
                         className={styles.inlineAction}
                         onApplied={(interrupted) => {
-                          setWorkOverrides((current) => {
-                            const existing = current.get(job.id)
-                            if (existing?.workStatus === interrupted.workStatus) return current
-                            return new Map(current).set(job.id, { workStatus: interrupted.workStatus })
-                          })
+                          setWorkOverrides((current) => new Map(current).set(job.id, {
+                            workStatus: interrupted.workStatus,
+                            notice: 'Hold resolved.',
+                          }))
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
                       />
@@ -523,6 +521,11 @@ export function TicketDetailScreen({
                   {assignmentOverrides.get(job.id)?.notice && (
                     <p className={styles.assignmentNotice} role="status" aria-live="polite">
                       {assignmentOverrides.get(job.id)?.notice}
+                    </p>
+                  )}
+                  {workOverrides.get(job.id)?.notice && (
+                    <p className={styles.assignmentNotice} role="status" aria-live="polite">
+                      {workOverrides.get(job.id)?.notice}
                     </p>
                   )}
                   {activeTool === null && canManageCannedJobs && job.approvalState === 'approved' && (
@@ -672,6 +675,11 @@ type QuoteOverride = {
 
 type WorkOverride = {
   workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
+  // Retiring a declined line, or resolving a hold, removes the very command
+  // that offered it — so the control announcing the result unmounts in the same
+  // render that succeeds. The confirmation has to be spoken by the row, which
+  // stays.
+  notice?: string
 }
 
 type DisplayJob = Pick<TicketDetail['jobs'][number],
