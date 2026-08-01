@@ -15,6 +15,30 @@ export function isExpectedPageNavigationAbort(
   return CANCELLABLE_BACKGROUND_READS.has(pathname)
 }
 
+// Proving the product refuses something means letting the browser say so:
+// Chrome logs every non-2xx fetch to the console as an error. Closing a repair
+// order that still carries live work is answered 409 by design, and the journey
+// asserts the sentence the counter actually reads. Only that one endpoint and
+// only that one status is forgiven — every other refusal still counts.
+// The reason phrase is not part of the status. HTTP/2 dropped it, so a hosted
+// preview logs "409 ()" where a local HTTP/1.1 server logs "409 (Conflict)".
+// Matching the code and leaving the phrase free is what makes this filter mean
+// the same thing on both.
+const EXPECTED_REFUSALS: ReadonlyArray<{ path: RegExp; message: RegExp }> = [
+  {
+    path: /^\/api\/tickets\/[0-9a-f-]+\/close$/i,
+    message: /^Failed to load resource: the server responded with a status of 409 \([^)]*\)$/,
+  },
+]
+
+export function isExpectedProductRefusal(sourceUrl: string, message: string): boolean {
+  const pathname = safeUrl(sourceUrl)?.pathname
+  if (!pathname) return false
+  return EXPECTED_REFUSALS.some((refusal) => (
+    refusal.message.test(message) && refusal.path.test(pathname)
+  ))
+}
+
 export function isExpectedLocalAnalyticsConsole(
   pageUrl: string,
   sourceUrl: string,

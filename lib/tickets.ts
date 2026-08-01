@@ -1028,7 +1028,10 @@ function ticketActivitySummary(
     case 'job_hold_resolved': return `${subject}Hold resolved.`
     case 'job_reassigned': return `${subject}Assignment changed.`
     case 'job_handed_off': return `${subject}Handed off.`
-    case 'ticket_canceled': return `Repair order canceled${bounded(payload.reason) ? ` — ${bounded(payload.reason)}` : '.'}`
+    // A job-scoped cancellation is one retired line, not the whole repair order.
+    case 'ticket_canceled': return jobTitle
+      ? `${subject}Retired — the customer declined this work.`
+      : `Repair order canceled${bounded(payload.reason) ? ` — ${bounded(payload.reason)}` : '.'}`
     case 'ticket_reopened': return 'Repair order reopened.'
   }
 }

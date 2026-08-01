@@ -33,39 +33,57 @@ export function parseInterruptionJob(value: unknown): InterruptionJobView | null
   return job as InterruptionJobView
 }
 
+const COPY = {
+  resolve_hold: {
+    idle: 'Resolve hold',
+    pending: 'Resolving hold…',
+    done: 'Hold resolved.',
+    failed: 'Hold was not changed. Check the connection and retry.',
+  },
+  cancel_job: {
+    idle: 'Retire declined work',
+    pending: 'Retiring…',
+    done: 'Declined work retired.',
+    failed: 'The line was not retired. Check the connection and retry.',
+  },
+} as const
+
 export function TicketInterruptionAction({
   ticketId,
   jobId,
+  action = 'resolve_hold',
   className,
   onApplied,
 }: {
   ticketId: string
   jobId: string
+  action?: keyof typeof COPY
   className?: string
   onApplied: (job: InterruptionJobView) => void
 }): React.JSX.Element {
   const [pending, setPending] = useState(false)
   const [notice, setNotice] = useState<{ kind: 'status' | 'error'; text: string } | null>(null)
+  const copy = COPY[action]
 
-  async function resolveHold(): Promise<void> {
+  async function submit(): Promise<void> {
     if (pending) return
     setPending(true)
-    setNotice({ kind: 'status', text: 'Resolving hold…' })
+    setNotice({ kind: 'status', text: copy.pending })
     try {
       const response = await fetch(`/api/tickets/${ticketId}/jobs/${jobId}/interruption`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'resolve_hold', requestKey: crypto.randomUUID() }),
+        body: JSON.stringify({ action, requestKey: crypto.randomUUID() }),
       })
       const body = await response.json().catch(() => null)
       const job = response.ok && body && typeof body === 'object'
         ? parseInterruptionJob((body as { job?: unknown }).job)
         : null
-      if (!job) throw new Error('resolve_failed')
+      if (!job) throw new Error('interruption_failed')
       onApplied(job)
-      setNotice({ kind: 'status', text: 'Hold resolved.' })
+      setNotice({ kind: 'status', text: copy.done })
     } catch {
-      setNotice({ kind: 'error', text: 'Hold was not changed. Check the connection and retry.' })
+      setNotice({ kind: 'error', text: copy.failed })
     } finally {
       setPending(false)
     }
@@ -73,8 +91,8 @@ export function TicketInterruptionAction({
 
   return (
     <div>
-      <button className={className} type="button" disabled={pending} onClick={() => void resolveHold()}>
-        {pending ? 'Resolving hold…' : 'Resolve hold'}
+      <button className={className} type="button" disabled={pending} onClick={() => void submit()}>
+        {pending ? copy.pending : copy.idle}
       </button>
       {notice && <p role={notice.kind === 'error' ? 'alert' : 'status'} aria-live="polite">{notice.text}</p>}
     </div>

@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import { profiles, ticketActivity, ticketJobs, ticketPayments, tickets } from '@/lib/db/schema'
-import { canAssignWork, isShopRole } from '@/lib/shop-os/capabilities'
+import { canAssignWork, canRecordCustomerApproval, isShopRole } from '@/lib/shop-os/capabilities'
 import { isLockUnavailable } from '@/lib/shop-os/quotes'
 import { nextSimpleWorkTimestamp } from '@/lib/shop-os/simple-work'
 import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
@@ -63,6 +63,10 @@ const resolveHoldBody = z.strictObject({
   requestKey: uuid,
 })
 
+const cancelJobBody = z.strictObject({
+  action: z.literal('cancel_job'),
+  requestKey: uuid,
+})
 const handoffBody = z.strictObject({
   action: z.literal('handoff'),
   requestKey: uuid,
@@ -96,12 +100,20 @@ const cancellationSnapshot = z.strictObject({
   interruptedJobs: z.array(cancellationSnapshotJob).max(25),
 })
 
-const mutationBody = z.discriminatedUnion('action', [blockBody, resolveHoldBody, handoffBody])
+const mutationBody = z.discriminatedUnion('action', [
+  blockBody,
+  resolveHoldBody,
+  handoffBody,
+  cancelJobBody,
+])
 
+// A retired line has no kind of its own in `ticket_activity_kind_valid`, so it
+// rides the cancellation kind and is told apart by carrying a `jobId`.
 const JOB_ACTIVITY_KIND = {
   block: 'job_blocked',
   resolve_hold: 'job_hold_resolved',
   handoff: 'job_handed_off',
+  cancel_job: 'ticket_canceled',
 } as const
 
 const LIFECYCLE_ACTIVITY_KIND = {
@@ -366,6 +378,44 @@ export async function mutateJobInterruption(
         return { ok: true, changed: true, job: projection(updated) }
       }
 
+      if (body.data.action === 'cancel_job') {
+        // Retiring a line acts on the decision the counter recorded, so it takes
+        // approval authority — not the dispatch authority that moves work around.
+        if (!canRecordCustomerApproval(profile.role)) return failure('forbidden')
+        // Deliberately no payment guard: the whole point is retiring the tires
+        // after the brakes were already paid for.
+        if (job.approvalState !== 'declined') return failure('not_ready')
+        if (!['open', 'in_progress', 'blocked'].includes(job.workStatus)) {
+          return failure('not_ready')
+        }
+        const [updated] = await tx
+          .update(ticketJobs)
+          .set({
+            workStatus: 'canceled',
+            activeSeconds: bankClock(),
+            clockedOnSince: null,
+            updatedAt: nextSimpleWorkTimestamp(),
+          })
+          .where(and(
+            eq(ticketJobs.shopId, actor.data.shopId),
+            eq(ticketJobs.id, job.id),
+            inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
+          ))
+          .returning()
+        if (!updated) return failure('conflict', true)
+        const activity = await appendTicketActivity(tx, {
+          shopId: actor.data.shopId,
+          ticketId: ticket.id,
+          jobId: job.id,
+          actorProfileId: profile.id,
+          kind: 'ticket_canceled',
+          requestKey: body.data.requestKey,
+          payload: { from: job.workStatus, to: 'canceled', approvalState: job.approvalState },
+        })
+        if (!activity.ok) throw new Error('ticket_activity_conflict')
+        return { ok: true, changed: true, job: projection(updated) }
+      }
+
       if (job.workStatus !== 'blocked') return failure('not_ready')
       const resumeStatus = job.holdResumeStatus
         ?? (job.workStartedAt ? 'in_progress' : 'open')
@@ -477,6 +527,9 @@ export async function mutateTicketLifecycle(
             eq(ticketActivity.shopId, actor.data.shopId),
             eq(ticketActivity.ticketId, ticket.id),
             eq(ticketActivity.kind, 'ticket_canceled'),
+            // Retired single lines share this kind; only the ticket-level row
+            // carries the recovery snapshot.
+            isNull(ticketActivity.jobId),
           )).orderBy(desc(ticketActivity.createdAt), desc(ticketActivity.id)).limit(1)
           .for('update', { noWait: true })
         const snapshot = cancellationSnapshot.safeParse(cancellation?.payload)

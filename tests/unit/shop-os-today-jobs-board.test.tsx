@@ -358,6 +358,18 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByText(/approved|approval required/i)).toBeNull()
   })
 
+  it('shows the customer decision on the row and never offers to open declined work', () => {
+    render(<TodayJobsBoard myJobs={[{ ...maintenance, approvalState: 'declined' }]} openJobs={[]} />)
+
+    const row = screen.getByRole('article', { name: 'Ticket 44: Perform 60k service' })
+    expect(within(row).getByText('Declined')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open work' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute(
+      'href', '/tickets/ticket-44',
+    )
+  })
+
   it('routes blocked or identity-incomplete simple work to honest ticket context', () => {
     render(<TodayJobsBoard myJobs={[
       repair,

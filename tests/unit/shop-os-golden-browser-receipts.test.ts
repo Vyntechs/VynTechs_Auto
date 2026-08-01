@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isExpectedLocalAnalyticsConsole,
   isExpectedPageNavigationAbort,
+  isExpectedProductRefusal,
 } from '@/tests/e2e/golden-browser-fault-filter'
 
 describe('Golden browser fault receipts', () => {
@@ -19,6 +20,36 @@ describe('Golden browser fault receipts', () => {
     expect(isExpectedPageNavigationAbort('GET', '/api/today/jobs', 'net::ERR_FAILED')).toBe(false)
     expect(isExpectedPageNavigationAbort('GET', '/api/today/jobs/extra', 'net::ERR_ABORTED')).toBe(false)
     expect(isExpectedPageNavigationAbort('GET', '/api/tickets/abc/payments', 'net::ERR_ABORTED')).toBe(false)
+  })
+
+  it('ignores only the close route refusing a repair order that still has live work', () => {
+    const conflict = 'Failed to load resource: the server responded with a status of 409 (Conflict)'
+    const close = 'https://vyntechs.dev/api/tickets/6f1d2c34-0000-4000-8000-000000000001/close'
+
+    expect(isExpectedProductRefusal(close, conflict)).toBe(true)
+    // HTTP/2 has no reason phrase, so a hosted preview logs the same refusal
+    // without one. Both are the same refusal and both must be forgiven.
+    expect(isExpectedProductRefusal(
+      close,
+      'Failed to load resource: the server responded with a status of 409 ()',
+    )).toBe(true)
+    // A status the code merely starts with is not that status.
+    expect(isExpectedProductRefusal(
+      close,
+      'Failed to load resource: the server responded with a status of 4090 (Nonsense)',
+    )).toBe(false)
+    // Another status on the same route is a real fault.
+    expect(isExpectedProductRefusal(
+      close,
+      'Failed to load resource: the server responded with a status of 500 (Internal Server Error)',
+    )).toBe(false)
+    // Another route answering 409 is a real fault.
+    expect(isExpectedProductRefusal(
+      'https://vyntechs.dev/api/tickets/6f1d2c34-0000-4000-8000-000000000001/payments',
+      conflict,
+    )).toBe(false)
+    expect(isExpectedProductRefusal('', conflict)).toBe(false)
+    expect(isExpectedProductRefusal(close, 'Uncaught TypeError: broken')).toBe(false)
   })
 
   it('ignores only the missing Vercel Analytics script on local hosts', () => {

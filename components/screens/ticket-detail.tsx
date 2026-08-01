@@ -425,17 +425,30 @@ export function TicketDetailScreen({
 
                   <div className={styles.assignmentRow}>
                     <p>{assigneeLabel(job, assignmentOverrides.get(job.id))}</p>
-                    {resolveHoldCommandFor(allCommands, job.id) ? (
+                    {cancelJobCommandFor(allCommands, job.id) ? (
+                      <TicketInterruptionAction
+                        ticketId={ticket.id}
+                        jobId={job.id}
+                        action="cancel_job"
+                        className={styles.inlineAction}
+                        onApplied={(retired) => {
+                          setWorkOverrides((current) => new Map(current).set(job.id, {
+                            workStatus: retired.workStatus,
+                            notice: 'Declined work retired.',
+                          }))
+                          setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
+                        }}
+                      />
+                    ) : resolveHoldCommandFor(allCommands, job.id) ? (
                       <TicketInterruptionAction
                         ticketId={ticket.id}
                         jobId={job.id}
                         className={styles.inlineAction}
                         onApplied={(interrupted) => {
-                          setWorkOverrides((current) => {
-                            const existing = current.get(job.id)
-                            if (existing?.workStatus === interrupted.workStatus) return current
-                            return new Map(current).set(job.id, { workStatus: interrupted.workStatus })
-                          })
+                          setWorkOverrides((current) => new Map(current).set(job.id, {
+                            workStatus: interrupted.workStatus,
+                            notice: 'Hold resolved.',
+                          }))
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
                       />
@@ -508,6 +521,11 @@ export function TicketDetailScreen({
                   {assignmentOverrides.get(job.id)?.notice && (
                     <p className={styles.assignmentNotice} role="status" aria-live="polite">
                       {assignmentOverrides.get(job.id)?.notice}
+                    </p>
+                  )}
+                  {workOverrides.get(job.id)?.notice && (
+                    <p className={styles.assignmentNotice} role="status" aria-live="polite">
+                      {workOverrides.get(job.id)?.notice}
                     </p>
                   )}
                   {activeTool === null && canManageCannedJobs && job.approvalState === 'approved' && (
@@ -657,6 +675,11 @@ type QuoteOverride = {
 
 type WorkOverride = {
   workStatus: 'open' | 'in_progress' | 'blocked' | 'done' | 'canceled'
+  // Retiring a declined line, or resolving a hold, removes the very command
+  // that offered it — so the control announcing the result unmounts in the same
+  // render that succeeds. The confirmation has to be spoken by the row, which
+  // stays.
+  notice?: string
 }
 
 type DisplayJob = Pick<TicketDetail['jobs'][number],
@@ -713,4 +736,14 @@ function resolveHoldCommandFor(
     candidate.kind === 'resolve_hold' && candidate.jobId === jobId
   ))
   return command ? command as LivingTicketCommand & { kind: 'resolve_hold' } : null
+}
+
+function cancelJobCommandFor(
+  commands: LivingTicketCommand[],
+  jobId: string,
+): (LivingTicketCommand & { kind: 'cancel_job' }) | null {
+  const command = commands.find((candidate) => (
+    candidate.kind === 'cancel_job' && candidate.jobId === jobId
+  ))
+  return command ? command as LivingTicketCommand & { kind: 'cancel_job' } : null
 }

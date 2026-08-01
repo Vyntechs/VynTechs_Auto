@@ -100,8 +100,17 @@ vi.mock('@/components/screens/inline-work-workspace', () => ({
 
 vi.mock('@/components/screens/ticket-interruption-action', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/screens/ticket-interruption-action')>(),
-  TicketInterruptionAction: ({ onApplied }: { onApplied: (job: { workStatus: 'in_progress' }) => void }) => (
-    <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
+  TicketInterruptionAction: ({ action = 'resolve_hold', onApplied }: {
+    action?: 'resolve_hold' | 'cancel_job'
+    onApplied: (job: { workStatus: 'in_progress' | 'canceled' }) => void
+  }) => (
+    action === 'cancel_job'
+      ? (
+        <button type="button" onClick={() => onApplied({ workStatus: 'canceled' })}>
+          Retire declined work
+        </button>
+      )
+      : <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
   ),
 }))
 
@@ -526,6 +535,32 @@ describe('TicketDetailScreen', () => {
     expect(within(row).getByRole('button', { name: 'Resolve hold' })).toBeInTheDocument()
     await user.click(within(row).getByRole('button', { name: 'Resolve hold' }))
     expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
+    // Succeeding retires the control that offered it, so the row — not the
+    // control — has to be the one that says so.
+    expect(within(row).queryByRole('button', { name: 'Resolve hold' })).not.toBeInTheDocument()
+    expect(within(row).getByText('Hold resolved.')).toBeInTheDocument()
+  })
+
+  it('says a declined line was retired on the row, which outlives the control that retired it', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      role="advisor"
+      skillTier={null}
+      currentProfileId="advisor-1"
+      ticket={ticket({ jobs: [job({
+        id: 'declined-tires',
+        title: 'Replace all four tires',
+        kind: 'repair',
+        approvalState: 'declined',
+        workStatus: 'open',
+      })] })}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Replace all four tires' }).closest('li')!
+    await user.click(within(row).getByRole('button', { name: 'Retire declined work' }))
+    expect(within(row).getByText('Work · Canceled')).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: 'Retire declined work' })).not.toBeInTheDocument()
+    expect(within(row).getByText('Declined work retired.')).toBeInTheDocument()
   })
 
   it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {
