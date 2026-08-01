@@ -1,8 +1,10 @@
 # Getting Young Motorsports off Mitchell 1 TeamWorks SE
 
 Research date: 2026-07-30
-Subject install: Manager SE `9.2.1.5356`, user `DEFAULTUSER`, Windows laptop, 67 open ROs on the W.I.P. screen.
+Subject install: Manager SE `9.2.1.5356`, user `DEFAULTUSER`, Windows laptop. The W.I.P. screen showed a stack of open ROs during the walkthrough, but that count was never verified with the owner and is treated nowhere in this document as a fact — see the note below.
 Status: research only. Nothing was installed, connected to, or run against the shop's machine.
+
+**A note on the open-RO count.** An earlier draft of this document stated a specific number of open ROs as fact, based on a single glance at the W.I.P. screen. Nobody confirmed it with the owner, and when he saw it he corrected it directly: it's a guess, he thinks the real number is closer to 200, and the exact figure doesn't matter. He's right on both counts — an unsourced observation had been laundered into a fact, repeated across three documents, and used to size a week of engineering work and to justify a strategic claim. It's struck throughout. Counts about the shop come from the shop, not from research: the real number gets measured in Pass 0 (§5) and reconciled against the W.I.P. screen at cutover in Pass 3, not assumed in advance.
 
 **Evidence labels used throughout:**
 
@@ -16,7 +18,7 @@ Status: research only. Nothing was installed, connected to, or run against the s
 
 ## 1. The answer in five sentences
 
-Yes, the data gets out, and it gets out cleanly — Manager SE stores everything in a **Microsoft SQL Server database named `ShopMgt`** running on the shop's own PC, and Mitchell 1's own knowledge base publishes step-by-step instructions for connecting to it over ODBC and pulling tables into Excel, which means every customer, vehicle, repair order, line item, and RO number is directly queryable by us with no permission, no export request, and no cooperation from Mitchell 1. The second, equally viable route is the product's built-in **Configuration → Special Maintenance → Database Backup**, which writes a standard SQL Server `.bak` file the shop owner already has the right to make — this is literally the file that Tekmetric and Identifix ask their incoming customers to hand over, so it is a proven, industry-standard extraction. Cost is therefore near zero in dollars (competitors charge **$750** for exactly this) and the real cost is our engineering time writing the field mapping, which is days not weeks once we can see the schema. Fidelity is the honest catch: every commercial migration in this market drops **open/active repair orders and A/R balances** and does not carry history into reporting — we can beat all of them because we own the target schema and can read the source directly, but that is work we have to choose to do rather than a switch we flip. My recommendation is a three-pass migration that moves customers + vehicles + closed RO history first, hand-carries the 67 open ROs second, and preserves the original Mitchell RO numbers as a permanent immutable field with our new sequence seeded to `max+1` — with the Mitchell 1 subscription left running until the shop has independently verified the migrated data.
+Yes, the data gets out, and it gets out cleanly — Manager SE stores everything in a **Microsoft SQL Server database named `ShopMgt`** running on the shop's own PC, and Mitchell 1's own knowledge base publishes step-by-step instructions for connecting to it over ODBC and pulling tables into Excel, which means every customer, vehicle, repair order, line item, and RO number is directly queryable by us with no permission, no export request, and no cooperation from Mitchell 1. The second, equally viable route is the product's built-in **Configuration → Special Maintenance → Database Backup**, which writes a standard SQL Server `.bak` file the shop owner already has the right to make — this is literally the file that Tekmetric and Identifix ask their incoming customers to hand over, so it is a proven, industry-standard extraction. Cost is therefore near zero in dollars (competitors charge **$750** for exactly this) and the real cost is our engineering time writing the field mapping, which is days not weeks once we can see the schema. Fidelity is the honest catch: every commercial migration in this market drops **open/active repair orders and A/R balances** and does not carry history into reporting — we can beat all of them because we own the target schema and can read the source directly, but that is work we have to choose to do rather than a switch we flip. My recommendation is a three-pass migration that moves customers + vehicles + closed RO history first, hand-carries the shop's open ROs second, and preserves the original Mitchell RO numbers as a permanent immutable field with our new sequence seeded to `max+1` — with the Mitchell 1 subscription left running until the shop has independently verified the migrated data.
 
 ---
 
@@ -104,7 +106,7 @@ Photos and digital inspections created in **Mobile Manager / BOLT ON** are repor
 - **Drops:** nothing in the database. May drop BOLT ON photos if those live outside it (§2.4).
 - **How:** ODBC DSN to `<HOSTNAME>\SHOPSTREAM`, database `ShopMgt`, plain "SQL Server" driver — exactly as Mitchell 1 documents. Then `SELECT` whatever we want, on our schedule, repeatedly, non-destructively.
 - **Cost:** zero dollars. Needs physical/remote access to the host laptop and an hour.
-- **Why it's #1:** it is the only path that gives us the **67 open ROs**, and it is re-runnable — we can do a dry run today, a second dry run next week, and a final delta pull the night of cutover.
+- **Why it's #1:** it is the only path that gives us the shop's open ROs, and it is re-runnable — we can do a dry run today, a second dry run next week, and a final delta pull the night of cutover.
 - **Risk:** read-only queries against a live SQL Server are low-risk, but run them when the shop is closed and never write. If access needs SQL credentials we don't have, fall back to #2.
 
 ### #2 — The product's built-in Database Backup (`.bak`) **(recommended safety net, do this first regardless)**
@@ -139,7 +141,7 @@ Manager SE ships 180+ reports; from print preview you can change the output opti
 
 ### #6 — Re-typing
 
-The fallback for the 67 open ROs if — and only if — path #1 proves inaccessible. Every commercial competitor's answer *is* this (§4). Ours shouldn't be.
+The fallback for the shop's open ROs if — and only if — path #1 proves inaccessible. Every commercial competitor's answer *is* this (§4). Ours shouldn't be.
 
 ---
 
@@ -163,7 +165,7 @@ Sources: [Tekmetric Mitchell1 Data Migration](https://support.tekmetric.com/hc/e
 ### What this tells us that the marketing doesn't
 
 1. **$750 is the market price for a job whose input is a file the shop can make for free in ten minutes.** That is the entire commercial migration industry in one sentence.
-2. **Nobody moves open ROs.** Tekmetric and Identifix both say so in writing. The shop has **67** of them. This is the sharpest single differentiator available to us, and it maps directly onto the owner's stated fear.
+2. **Nobody moves open ROs.** Tekmetric and Identifix both say so in writing. We don't yet know how many the shop is carrying — the owner puts it closer to 200 than the guess this document used to make — but whatever the count, it's the sharpest single differentiator available to us, and it maps directly onto the owner's stated fear.
 3. **Nobody moves A/R.** Identifix says so explicitly. If the shop is carrying receivables, every commercial option makes him re-key them.
 4. **"History migrated" ≠ "history usable."** Tekmetric's own admission — history lands as records but **does not populate reports** — is the gap between a vendor's "we migrate your history" and the owner's mental model of "my numbers are still there." We should decide deliberately whether our reports include pre-cutover data, and tell him which.
 5. **No vendor publishes a field-level mapping.** Not one. If we publish ours, we are more transparent than the entire category.
@@ -227,7 +229,7 @@ Order matters — each depends on the last:
 - Record the pairing in a mapping table so any historical document can be traced both directions forever.
 - Do the same for invoice numbers if Manager SE numbers them separately from ROs — **[UNKNOWN]** until we see the schema.
 
-### Pass 3 — The 67 open ROs (cutover night)
+### Pass 3 — The open ROs (cutover night)
 
 This is the pass nobody else does, and it is the whole "friction-free" promise.
 
@@ -235,7 +237,7 @@ This is the pass nobody else does, and it is the whole "friction-free" promise.
 2. Take a **fresh** backup — Pass 0's copy is now stale. (Tekmetric schedules extraction one business day before launch for exactly this reason.)
 3. Re-run the bulk migration against the fresh copy for the delta since Pass 2.
 4. **Migrate the open ROs as open ROs** — every W.I.P. column the owner looks at every day, faithfully: RO number, vehicle, labor tech, sched, status, promised, written-by, order total, time in, telephone, margin %, drop-off, plus all approved and pending line items.
-5. Owner reconciles: does our W.I.P. list show 67 rows? Do the RO numbers match? Do the order totals match? Does the A/R total match the report from Pass 0? **He signs off on that, not us.**
+5. Owner reconciles: does our W.I.P. list show the same row count Pass 0 measured on his system? Do the RO numbers match? Do the order totals match? Does the A/R total match the report from Pass 0? **He signs off on that, not us.**
 
 ### Pass 4 — Parallel period and decommission
 
@@ -247,7 +249,7 @@ This is the pass nobody else does, and it is the whole "friction-free" promise.
 
 The market's practical answer is *"customers + vehicles migrate cleanly; closed history migrates as records but not into reports; open ROs and A/R get re-keyed by hand."* That is not a technical limit — it is a **commercial** limit, driven by conversion vendors doing a fixed-price job across 150 different source systems. Identifix and Tekmetric both put it in writing.
 
-**For us that limit doesn't apply**, because we have direct SQL access to a documented Microsoft SQL Server database and we own the destination schema. Full-fidelity migration — including all 67 open ROs, A/R, and RO-number continuity — is genuinely achievable. But be honest about what it costs: it is **our engineering time**, concentrated in Pass 2 step 4 (closed RO line detail) and Pass 3 (open RO reconstruction), and it cannot be estimated properly until someone has looked at the actual table structure. Everything before that estimate is a guess.
+**For us that limit doesn't apply**, because we have direct SQL access to a documented Microsoft SQL Server database and we own the destination schema. Full-fidelity migration — including every open RO, A/R, and RO-number continuity — is genuinely achievable. But be honest about what it costs: it is **our engineering time**, concentrated in Pass 2 step 4 (closed RO line detail) and Pass 3 (open RO reconstruction), and it cannot be estimated properly until someone has looked at the actual table structure. Everything before that estimate is a guess.
 
 ---
 
@@ -259,7 +261,7 @@ The market's practical answer is *"customers + vehicles migrate cleanly; closed 
 | **B** | Does connecting to `ShopMgt` need SQL credentials Mitchell 1 controls, or is local Windows admin enough? | Decides whether live/delta pulls are available, or only file-based backups | Follow Mitchell 1's own KB id-200 ODBC steps on the shop laptop and click **Test Data Source**. Their doc says it should succeed. ~10 minutes. |
 | **C** | Is 9.2.1.5356 still SQL Server / `ShopMgt` / `SHOPSTREAM`? (Our evidence is a 6.x doc plus a "6.4 or later" third-party note.) | Everything above rests on it | **Help → About Manager → Core Database Path** on the shop's screen. One screenshot. Zero risk. Confirms or kills it instantly. |
 | **D** | The actual `ShopMgt` schema — tables, keys, how ROs join to lines, how RO vs. invoice numbers are assigned | This is the entire Pass 2 estimate. No public schema documentation exists — I searched hard and found none. | Enumerate `INFORMATION_SCHEMA.TABLES` / `.COLUMNS` on our restored copy. Half a day, and it converts every "days not weeks" hand-wave into a real number. |
-| **E** | Are the 67 open ROs fully represented in the DB, or partly in transient/session state? | Pass 3 is the differentiator; if open ROs aren't durably stored, the plan changes | Compare the W.I.P. screen's 67 rows against the equivalent query on the restored copy. Row-for-row. |
+| **E** | How many open ROs does the shop actually have, and are they fully represented in the DB, or partly in transient/session state? | Pass 3 is the differentiator; we can't size or scope it without a real count, and if open ROs aren't durably stored, the plan changes | Count the W.I.P. screen's rows and compare against the equivalent query on the restored copy. Row-for-row. |
 | **F** | Where do BOLT ON / Mobile Manager inspection photos live, and are they in the backup? | Possible silent data loss the owner won't notice for months | Ask the owner if he uses Mobile Manager/DVI. If yes: file-level sweep of `C:\Program Files (x86)\M1-SK\` and `C:\ProgramData\M1-SK\` alongside the DB. |
 | **G** | Does Manager SE hold A/R with enough structure to migrate balances *and* their aging? | Determines whether we can beat Identifix's explicit A/R drop | Falls out of D. Cross-check against the Pass 0 A/R aging report. |
 | **H** | Mitchell 1's actual notice/cancellation terms on **this** account | BBB shows a 30-day opt-out window and refused cancellations. Getting this wrong costs real money after cutover. | Owner pulls his signed Order Form / invoice and reads the term and notice window. Not a research question — a paperwork question, and it should happen in week 1, not at cutover. |
