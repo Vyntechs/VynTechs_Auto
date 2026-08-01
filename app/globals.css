@@ -111,7 +111,10 @@
   --vt-status-active:    var(--vt-signal-500);
   --vt-status-queued:    oklch(72% 0.04  240);
   --vt-status-deferred:  oklch(68% 0.13  300);
-  --vt-status-declined:  oklch(60% 0.10  20);
+  /* 60% lightness read 3.97:1 as text on bone — under WCAG AA. 56% holds the
+     same hue and chroma at 4.69:1, which the declined stamp and the ring-out
+     refusal both need. */
+  --vt-status-declined:  oklch(56% 0.10  20);
   --vt-status-closed:    oklch(74% 0.10  170);
   --vt-status-comeback:  oklch(70% 0.16  50);
 

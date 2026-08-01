@@ -3,6 +3,7 @@ import { expect, type Page, type TestInfo } from '@playwright/test'
 import {
   isExpectedLocalAnalyticsConsole,
   isExpectedPageNavigationAbort,
+  isExpectedProductRefusal,
 } from './golden-browser-fault-filter'
 
 type BrowserFaults = {
@@ -15,11 +16,10 @@ export function watchBrowserFaults(page: Page, label = 'browser'): BrowserFaults
   const faults: BrowserFaults = { consoleErrors: [], pageErrors: [], failedRequests: [] }
   page.on('console', (message) => {
     const text = message.text()
-    if (message.type() === 'error' && !isExpectedLocalAnalyticsConsole(
-      page.url(),
-      message.location().url,
-      text,
-    )) faults.consoleErrors.push(text)
+    if (message.type() === 'error'
+      && !isExpectedLocalAnalyticsConsole(page.url(), message.location().url, text)
+      && !isExpectedProductRefusal(message.location().url, text)
+    ) faults.consoleErrors.push(text)
   })
   page.on('pageerror', (error) => {
     faults.pageErrors.push(`[${label}] ${new URL(page.url()).pathname}: ${error.message}`)

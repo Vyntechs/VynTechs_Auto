@@ -58,6 +58,20 @@ async function openTicketFromToday(page: Page, ticketNumber: string): Promise<vo
   await page.waitForURL(/\/tickets\/[0-9a-f-]+$/)
 }
 
+// Two jobs on one repair order means Today carries two rows for the same ticket
+// number and the quote workspace carries two of every per-job control. Naming
+// the job in the locator is what keeps each step pointed at the line the shop
+// is actually touching.
+function boardRow(page: Page, ticketNumber: string, jobTitle: string) {
+  return page.getByRole('article', { name: `Ticket ${ticketNumber}: ${jobTitle}` })
+}
+
+function quoteJobCard(page: Page, jobTitle: string) {
+  return page.locator('li').filter({
+    has: page.getByRole('heading', { name: jobTitle, exact: true }),
+  }).first()
+}
+
 test('the living repair order survives one complete shop day', async ({ browser, baseURL }, testInfo) => {
   if (!baseURL) throw new Error('Golden browser base URL is required')
   const viewport = testInfo.project.use.viewport ?? { width: 1440, height: 900 }
@@ -74,6 +88,15 @@ test('the living repair order survives one complete shop day', async ({ browser,
   const laborDescription = [
     'Front brake inspection and pad replacement, including rotor measurement, hardware cleaning,',
     'lubrication, final torque verification, and road-test confirmation',
+  ].join(' ')
+  // The repair order carries two jobs: the brakes the customer approves and the
+  // tires they turn down. The declined line is the one that used to jam the
+  // repair order open forever.
+  const brakeJobTitle = 'Inspect and repair the front brake concern'
+  const tireJobTitle = 'Rotate and balance all four tires'
+  const tireLaborDescription = [
+    'Rotate all four tires, balance each wheel, torque the lug nuts to spec,',
+    'and reset the tire pressure monitors',
   ].join(' ')
 
   try {
@@ -97,7 +120,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByRole('button', { name: /^Perform known work/ }).click()
     const scopeSource = owner.getByLabel('Scope source')
     if (await scopeSource.count()) await scopeSource.selectOption('manual')
-    await owner.getByLabel('Requested work').fill('Inspect and repair the front brake concern')
+    await owner.getByLabel('Requested work').fill(brakeJobTitle)
     await checkpoint(owner, testInfo, 'owner-intake-complete')
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
     await owner.waitForURL(/\/tickets\/[0-9a-f-]+$/)
@@ -161,6 +184,44 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(advisor.getByRole('status', { name: 'Quote update' })).toHaveText('Labor added')
     await expect(savedLabor.locator('xpath=ancestor::li[1]')).toHaveAttribute('data-change-state', 'confirmed')
     await checkpoint(advisor, testInfo, 'advisor-quote-draft')
+
+    // While the advisor has them on the phone the customer asks about the
+    // tires, so a second job goes onto the same repair order and the same quote
+    // version. One of these two is the one they are going to say no to.
+    const addRepair = advisor.getByRole('region', { name: 'Add repair' })
+    await addRepair.getByLabel('Work type').selectOption('maintenance')
+    await addRepair.getByLabel('What are we doing').fill(tireJobTitle)
+    const addJobResponsePromise = advisor.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/quote\/jobs$/i.test(new URL(response.url()).pathname)
+    ))
+    await addRepair.getByRole('button', { name: 'Add repair' }).click()
+    expect((await addJobResponsePromise).status(), 'second job API status').toBe(201)
+    const tireJob = quoteJobCard(advisor, tireJobTitle)
+    await expect(tireJob).toBeVisible()
+    await tireJob.getByRole('button', { name: 'Add labor' }).click()
+    const tireEditor = advisor.getByRole('form', { name: 'Add labor line' })
+    await tireEditor.getByLabel('Description').fill(tireLaborDescription)
+    await tireEditor.getByLabel('Hours').fill('1')
+    await advisor.getByRole('button', { name: 'Save line' }).click()
+    await expect(advisor.getByRole('status', { name: 'Quote update' })).toHaveText('Labor added')
+    await expect(advisor.getByText(tireLaborDescription, { exact: true })).toBeVisible()
+    await checkpoint(advisor, testInfo, 'advisor-quote-two-jobs')
+
+    // The shop lines both jobs up for the same technician before the customer
+    // answers. That is exactly how a refused line ends up sitting in a tech's
+    // own queue with a green button on it.
+    await owner.goto('/today')
+    const tireAssignmentPromise = owner.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/assignment$/i.test(new URL(response.url()).pathname)
+    ))
+    await boardRow(owner, ticketNumber, tireJobTitle)
+      .getByRole('button', { name: 'Assign work' }).click()
+    await owner.getByLabel('Choose technician').getByRole('button', { name: /Golden QA Technician/ }).click()
+    expect((await tireAssignmentPromise).status(), 'second job assignment API status').toBe(200)
+    await expect(boardRow(owner, ticketNumber, tireJobTitle)).toContainText('Golden QA Technician')
+
     await advisor.getByRole('button', { name: 'Prepare quote' }).click()
     await expect(advisor.getByText(/Prepared version V1/)).toBeVisible()
 
@@ -175,36 +236,69 @@ test('the living repair order survives one complete shop day', async ({ browser,
       await page.goto(path)
       await page.getByRole('button', { name: viewer.entry }).click()
       await expect(page.getByRole('heading', { name: 'Build quote' })).toBeVisible()
+      // Both jobs carry their own authorization strip now, so the authority
+      // check is read off one named strip rather than the whole workspace.
       if (viewer.canDecide) {
-        await expect(page.getByRole('button', { name: 'Phone approval' })).toBeVisible()
+        await expect(page.getByRole('region', { name: `Authorization for ${brakeJobTitle}` })
+          .getByRole('button', { name: 'Phone approval' })).toBeVisible()
       } else {
         await expect(page.getByRole('button', { name: 'Phone approval' })).toHaveCount(0)
-        await expect(page.getByText('Advisor or owner records the customer decision.')).toBeVisible()
+        await expect(page.getByText('Advisor or owner records the customer decision.').first())
+          .toBeVisible()
       }
       await checkpoint(page, testInfo, `${viewer.role}-quote-authority`)
       await page.getByRole('button', { name: 'Close quote' }).click()
     }
 
-    await advisor.getByRole('button', { name: 'Defer decision' }).click()
+    const brakeAuthorization = advisor.getByRole('region', { name: `Authorization for ${brakeJobTitle}` })
+    await brakeAuthorization.getByRole('button', { name: 'Defer decision' }).click()
     const deferral = advisor.getByRole('alertdialog', { name: 'Defer customer decision?' })
     await deferral.getByLabel('What are we waiting for?').fill('Customer is confirming the timing of the repair.')
     await deferral.getByRole('button', { name: 'Defer decision' }).click()
-    await expect(advisor.getByText('Deferred · follow up · V1')).toBeVisible()
-    await expect(advisor.getByRole('button', { name: 'Phone approval' })).toBeVisible()
+    await expect(brakeAuthorization.getByText('Deferred · follow up · V1')).toBeVisible()
+    await expect(brakeAuthorization.getByRole('button', { name: 'Phone approval' })).toBeVisible()
     await checkpoint(advisor, testInfo, 'advisor-deferred-then-resumed-decision')
 
-    await advisor.getByRole('button', { name: 'Phone approval' }).click()
+    await brakeAuthorization.getByRole('button', { name: 'Phone approval' }).click()
     const approval = advisor.getByRole('alertdialog', { name: 'Record phone approval?' })
     await approval.getByRole('button', { name: 'Record approval' }).click()
+    await expect(brakeAuthorization.getByText('Approved · V1')).toBeVisible()
+
+    // The customer says yes to the brakes and no to the tires. One immutable
+    // version, two answers — which is the whole reason a single job has to be
+    // retirable on its own.
+    await advisor.getByRole('region', { name: `Authorization for ${tireJobTitle}` })
+      .getByRole('button', { name: 'Record declined' }).click()
+    const declineDialog = advisor.getByRole('alertdialog', { name: 'Record declined?' })
+    await declineDialog.getByRole('button', { name: 'Record declined' }).click()
+
     await expect(advisor.getByRole('heading', { name: 'Quote complete' })).toBeVisible()
-    await expect(advisor.getByText('Approved · Version 1')).toBeVisible()
+    const quoteProof = advisor.getByRole('region', { name: 'Quote workspace', exact: true })
+    await expect(quoteProof.getByRole('listitem').filter({ hasText: brakeJobTitle }))
+      .toContainText('Approved · Version 1')
+    await expect(quoteProof.getByRole('listitem').filter({ hasText: tireJobTitle }))
+      .toContainText('Declined · Version 1')
+    await checkpoint(advisor, testInfo, 'advisor-approved-one-declined-one')
     await advisor.getByRole('button', { name: 'Close quote' }).click()
     await expect(advisor.getByRole('button', { name: 'Record approval' })).toBeHidden()
     await expect(advisor).toHaveURL(/\/today$/)
 
     const tech = sessions.get('tech')!.page
     await tech.goto('/today')
-    const techTodayRow = tech.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const techTodayRow = boardRow(tech, ticketNumber, brakeJobTitle)
+
+    // The trap this closes: both lines are assigned to this tech, and the board
+    // used to offer the same green "Open work" on the one the customer refused.
+    // The row now states the customer's decision and sends the tech to the
+    // paperwork instead of to the truck.
+    const techDeclinedRow = boardRow(tech, ticketNumber, tireJobTitle)
+    await expect(techDeclinedRow).toBeVisible()
+    await expect(techDeclinedRow).toContainText('Declined')
+    await expect(techDeclinedRow.getByText('Open work')).toHaveCount(0)
+    await expect(techDeclinedRow.getByRole('link', { name: 'Review work order' })).toBeVisible()
+    await expect(techTodayRow).toContainText('Approved')
+    await checkpoint(tech, testInfo, 'tech-board-declined-line-is-not-workable')
+
     const workResponsePromise = tech.waitForResponse((response) => (
       response.request().method() === 'GET'
       && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/work$/i.test(new URL(response.url()).pathname)
@@ -271,7 +365,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(owner, testInfo, 'owner-cancel-reopen-blocked-work')
 
     await advisor.goto('/today')
-    const advisorHandoffRow = advisor.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const advisorHandoffRow = boardRow(advisor, ticketNumber, brakeJobTitle)
     await advisorHandoffRow.getByRole('button', { name: 'Hand off' }).click()
     await advisor.getByLabel('Choose technician').getByRole('button', { name: /Golden QA Relief Technician/ }).click()
     await expect(advisor.getByRole('status').filter({ hasText: /assigned to Golden QA Relief Technician/i })).toBeVisible()
@@ -281,15 +375,15 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await parts.goto('/today')
     await expect(parts.getByRole('heading', { name: 'Parts needed' })).toBeVisible()
     await checkpoint(parts, testInfo, 'parts-queue')
-    const partsTodayRow = parts.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const partsTodayRow = boardRow(parts, ticketNumber, brakeJobTitle)
     await partsTodayRow.getByRole('button', { name: 'Got it' }).click()
     await expect(parts.getByRole('status').filter({ hasText: /Parts found/ })).toBeVisible()
-    await expect(parts.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
+    await expect(boardRow(parts, ticketNumber, brakeJobTitle)).toHaveCount(0)
     await expect(parts).toHaveURL(/\/today$/)
 
     const relief = sessions.get('relief')!.page
     await relief.goto('/today')
-    const reliefTodayRow = relief.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const reliefTodayRow = boardRow(relief, ticketNumber, brakeJobTitle)
     await expect(reliefTodayRow.getByRole('button', { name: 'Resolve hold' })).toBeVisible()
     await reliefTodayRow.getByRole('button', { name: 'Resolve hold' }).click()
     await expect(relief.getByRole('status').filter({ hasText: /Hold resolved/ })).toBeVisible()
@@ -303,39 +397,75 @@ test('the living repair order survives one complete shop day', async ({ browser,
     expect((await completionResponsePromise).status(), 'relief completion API status').toBe(200)
     await expect(relief.getByRole('heading', { name: 'Work complete' })).toBeVisible()
     await relief.getByRole('button', { name: 'Close work' }).click()
-    await expect(relief.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
+    await expect(boardRow(relief, ticketNumber, brakeJobTitle)).toHaveCount(0)
     await expect(relief.getByRole('heading', { name: 'Ready to collect' })).toHaveCount(0)
     await checkpoint(relief, testInfo, 'relief-complete-ticket')
 
-    // The finished repair order is still open and still owes money, so it stays
-    // findable on Today and rings out in place — no deep link, no lost counter.
+    // The approved repair is finished and the shop is owed money, but the
+    // declined line is still live work, so the counter's Ready-to-collect lane
+    // does not carry this repair order at all. That is the jam, at the board.
     await advisor.goto('/today')
     const collectCard = advisor.getByRole('article', {
       name: `Ticket ${ticketNumber}: ready to collect`,
     })
-    await expect(advisor.getByRole('heading', { name: 'Ready to collect' })).toBeVisible()
-    await expect(collectCard).toContainText('Work complete')
-    await expect(collectCard).toContainText('$180.00 due')
-    await checkpoint(advisor, testInfo, 'advisor-ready-to-collect')
-    await collectCard.getByRole('button', { name: 'Collect & close' }).click()
-    await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
+    await expect(collectCard).toHaveCount(0)
+    await checkpoint(advisor, testInfo, 'advisor-declined-line-holds-the-counter')
+
+    // The repair order itself still rings out, and the bill is only what the
+    // customer said yes to: 1.5 hours of labor at $120/hr, untaxed. The
+    // declined line's $120 of labor is not on it, so the balance is exactly
+    // what it would have been without the second job.
+    await advisor.goto(path)
+    const ringOut = advisor.getByRole('region', { name: 'Ring out' })
+    await expect(ringOut).toContainText(brakeJobTitle)
+    await expect(ringOut.getByText(tireJobTitle)).toHaveCount(0)
+    await expect(ringOut.getByText('$120.00')).toHaveCount(0)
+    await expect(ringOut).toContainText('$180.00')
     await advisor.getByLabel('Payment amount').fill('180.00')
     await advisor.getByLabel('How paid').selectOption('card')
     // Review the mounted tool while it is actionable. Checkpointing after the
     // click instead would audit whatever transient busy state the request
     // happened to be in.
-    await checkpoint(advisor, testInfo, 'advisor-ring-out-in-place')
+    await checkpoint(advisor, testInfo, 'advisor-ring-out-on-the-repair-order')
     const paymentResponsePromise = advisor.waitForResponse((response) => (
       response.request().method() === 'POST'
       && /\/api\/tickets\/[0-9a-f-]+\/payments$/i.test(new URL(response.url()).pathname)
     ))
     await advisor.getByRole('button', { name: 'Record payment' }).click()
     expect((await paymentResponsePromise).status(), 'in-place payment API status').toBe(200)
-    // Named, enabled, and no longer "Closing…": the payment landed and the
-    // balance it reported is zero.
+
+    // Paid in full and it still refuses to close, because a declined line is
+    // open work. Whole-ticket cancel is no way out either — a payment exists.
+    // This is the wall the shop hit, and it had no door until this branch.
     const closeButton = advisor.getByRole('button', { name: 'Mark paid & close ticket' })
     await expect(closeButton).toBeEnabled()
     await closeButton.click()
+    await expect(ringOut.getByRole('alert'))
+      .toHaveText('Finish or cancel every work item before closing this repair order.')
+    await expect(advisor.getByText('Closed · Counter intake', { exact: true })).toHaveCount(0)
+    await checkpoint(advisor, testInfo, 'advisor-close-blocked-by-declined-line')
+
+    // Retiring the line is the counter acting on the decision it already
+    // recorded — one job, not the whole repair order, with the money already
+    // collected.
+    await advisor.getByRole('button', { name: 'Retire declined work' }).click()
+    await expect(advisor.getByText('Declined work retired.')).toBeVisible()
+    await checkpoint(advisor, testInfo, 'advisor-retired-declined-line')
+
+    // With the refused line off the floor the repair order finally reaches the
+    // counter lane — paid in full — and closes in place.
+    await advisor.goto('/today')
+    await expect(advisor.getByRole('heading', { name: 'Ready to collect' })).toBeVisible()
+    await expect(collectCard).toContainText('Work complete')
+    await expect(collectCard).toContainText('Paid in full')
+    await checkpoint(advisor, testInfo, 'advisor-ready-to-collect')
+    await collectCard.getByRole('button', { name: 'Close repair order' }).click()
+    await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
+    // Named, enabled, and no longer "Closing…": the payment landed and the
+    // balance it reported is zero.
+    const boardCloseButton = advisor.getByRole('button', { name: 'Mark paid & close ticket' })
+    await expect(boardCloseButton).toBeEnabled()
+    await boardCloseButton.click()
     await expect(advisor.getByRole('status').filter({
       hasText: `Ticket ${ticketNumber} is closed and off the board.`,
     })).toBeVisible()
