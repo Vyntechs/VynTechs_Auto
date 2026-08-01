@@ -107,6 +107,8 @@
   min-inline-size: 0;
   flex: 1;
   flex-direction: column;
+  /* Scroll room so the last field can clear the floating status region. */
+  padding-block-end: var(--vt-status-region-clearance, 0px);
 }
 
 .workspace:focus-visible {

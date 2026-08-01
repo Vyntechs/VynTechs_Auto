@@ -75,6 +75,19 @@ describe('status region clearance', () => {
     expect(block).toMatch(/bottom:\s*var\(--vt-status-region-clearance,\s*0px\)/)
   })
 
+  it('gives the workspace scroll room so the last field clears the region', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/app-shell/app-shell.module.css'),
+      'utf8',
+    )
+    const workspace = css.slice(css.indexOf('.workspace {'))
+    const block = workspace.slice(0, workspace.indexOf('}'))
+
+    expect(block).toMatch(
+      /padding-block-end:\s*var\(--vt-status-region-clearance,\s*0px\)/,
+    )
+  })
+
   it('keeps the region mounted through the shell so every screen gets the offset', () => {
     const shell = readFileSync(
       resolve(process.cwd(), 'components/app-shell/shop-os-shell.tsx'),
