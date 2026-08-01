@@ -27,6 +27,17 @@ describe('Golden browser fault receipts', () => {
     const close = 'https://vyntechs.dev/api/tickets/6f1d2c34-0000-4000-8000-000000000001/close'
 
     expect(isExpectedProductRefusal(close, conflict)).toBe(true)
+    // HTTP/2 has no reason phrase, so a hosted preview logs the same refusal
+    // without one. Both are the same refusal and both must be forgiven.
+    expect(isExpectedProductRefusal(
+      close,
+      'Failed to load resource: the server responded with a status of 409 ()',
+    )).toBe(true)
+    // A status the code merely starts with is not that status.
+    expect(isExpectedProductRefusal(
+      close,
+      'Failed to load resource: the server responded with a status of 4090 (Nonsense)',
+    )).toBe(false)
     // Another status on the same route is a real fault.
     expect(isExpectedProductRefusal(
       close,
