@@ -118,8 +118,6 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByLabel('Mileage today').first().fill('48120')
     await owner.getByLabel('What brought them in?').fill(concern)
     await owner.getByRole('button', { name: /^Perform known work/ }).click()
-    const scopeSource = owner.getByLabel('Scope source')
-    if (await scopeSource.count()) await scopeSource.selectOption('manual')
     await owner.getByLabel('Requested work').fill(brakeJobTitle)
     await checkpoint(owner, testInfo, 'owner-intake-complete')
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
