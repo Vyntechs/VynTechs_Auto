@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { TodayTicketJobs } from '@/lib/tickets'
 import { parseTodayJobsResponse } from '@/lib/shop-os/today-board'
 import { floorLayout, projectFloorBoard, type FloorLane } from '@/lib/shop-os/floor-board'
+import { formatAttentionClock } from '@/lib/shop-os/attention-clock'
 import styles from './floor-board.module.css'
 
 type Props = {
@@ -22,7 +23,7 @@ function formatClock(now: Date): string {
 
 export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Props) {
   const [jobs, setJobs] = useState<TodayTicketJobs>(todayJobs)
-  const [clock, setClock] = useState<string | null>(null)
+  const [nowMs, setNowMs] = useState<number | null>(null)
 
   useEffect(() => {
     setJobs(todayJobs)
@@ -50,7 +51,7 @@ export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Prop
   }, [refresh, refreshMs])
 
   useEffect(() => {
-    const tick = () => { setClock(formatClock(new Date())) }
+    const tick = () => { setNowMs(Date.now()) }
     tick()
     const interval = window.setInterval(tick, CLOCK_MS)
     return () => { window.clearInterval(interval) }
@@ -58,6 +59,7 @@ export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Prop
 
   const board = useMemo(() => projectFloorBoard(jobs), [jobs])
   const layout = useMemo(() => floorLayout(board), [board])
+  const clock = nowMs === null ? '' : formatClock(new Date(nowMs))
 
   return (
     <main
@@ -79,7 +81,7 @@ export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Prop
             {board.vehicleCount === 1 ? 'vehicle in the building' : 'vehicles in the building'}
           </span>
         </p>
-        <p className={styles.clock}>{clock ?? ''}</p>
+        <p className={styles.clock}>{clock}</p>
       </header>
 
       {board.vehicleCount === 0 ? (
@@ -87,7 +89,7 @@ export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Prop
       ) : (
         <div className={styles.lanes} style={{ gridTemplateRows: layout.tracks }}>
           {board.lanes.map((lane) => (
-            <Lane key={lane.id} lane={lane} dense={board.dense} />
+            <Lane key={lane.id} lane={lane} dense={board.dense} nowMs={nowMs} />
           ))}
         </div>
       )}
@@ -95,7 +97,15 @@ export function FloorBoard({ shopName, todayJobs, refreshMs = REFRESH_MS }: Prop
   )
 }
 
-function Lane({ lane, dense }: { lane: FloorLane; dense: boolean }) {
+function Lane({
+  lane,
+  dense,
+  nowMs,
+}: {
+  lane: FloorLane
+  dense: boolean
+  nowMs: number | null
+}) {
   return (
     <section className={styles.lane} data-lane={lane.id} data-empty={lane.total === 0}>
       <div className={styles.spine} aria-hidden="true" />
@@ -104,17 +114,29 @@ function Lane({ lane, dense }: { lane: FloorLane; dense: boolean }) {
         <span className={styles.laneCount}>{lane.total === 0 ? '—' : lane.total}</span>
       </h2>
       <div className={styles.rows}>
-        {lane.rows.map((row) => (
-          <div className={styles.row} key={row.key}>
-            <span className={styles.ticket}>{String(row.ticketNumber).padStart(4, '0')}</span>
-            <span className={styles.subject}>
-              <span className={styles.vehicle}>{row.vehicle}</span>
-              <span className={styles.customer}>{row.customer}</span>
-              {dense ? null : <span className={styles.concern}>{row.concern}</span>}
-            </span>
-            <span className={styles.right}>{row.right}</span>
-          </div>
-        ))}
+        {lane.rows.map((row) => {
+          const attention = nowMs === null
+            ? null
+            : formatAttentionClock(row.attentionAt, nowMs)
+          return (
+            <div className={styles.row} key={row.key} data-ticket-id={row.key}>
+              <span className={styles.ticket}>{String(row.ticketNumber).padStart(4, '0')}</span>
+              <span className={styles.subject}>
+                <span className={styles.vehicle}>{row.vehicle}</span>
+                <span className={styles.customer}>{row.customer}</span>
+                {dense ? null : <span className={styles.concern}>{row.concern}</span>}
+              </span>
+              <span className={styles.right}>
+                <span>{row.right}</span>
+                {attention && (
+                  <span className={styles.attention} data-attention={attention.tier}>
+                    {attention.label}
+                  </span>
+                )}
+              </span>
+            </div>
+          )
+        })}
         {lane.overflow > 0 ? (
           <div className={styles.tail}>{`+${lane.overflow} more`}</div>
         ) : null}

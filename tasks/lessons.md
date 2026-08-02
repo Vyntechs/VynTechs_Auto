@@ -236,3 +236,8 @@ Reason: /sign-in put a typed password in the address bar, history, and Referer w
 Trigger: A pass that renames user-facing strings claims its specs were updated in lockstep.
 Rule: Run the hosted journeys against the deploy before believing it. Unit tests pass on renamed strings; browsers do not.
 Reason: Three specs still clicked "New work order" after the rename merged, and only a production run found it.
+
+### never-grep-a-playwright-trace-with-credentials
+Trigger: A browser sign-in trace needs diagnosis.
+Rule: Use redacted harness receipts or the trace viewer; never print raw trace JSON because fill actions contain credentials.
+Reason: Raw Playwright trace output exposed a fixed QA password and forced immediate rotation.

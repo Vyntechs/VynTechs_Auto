@@ -171,6 +171,17 @@
   color: var(--vt-status-declined);
 }
 
+.facts .attention {
+  color: var(--vt-fg-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.facts .attention[data-attention='stale'] {
+  color: var(--vt-amber-600);
+  font-weight: 700;
+}
+
 .facts span + span::before {
   content: '·';
   margin-right: var(--vt-space-2);

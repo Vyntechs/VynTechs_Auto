@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import type { TodayTicketJob, TodayTicketJobs } from '@/lib/tickets'
 import type { TeamMember } from '@/lib/intake/team'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
+import { formatAttentionClock } from '@/lib/shop-os/attention-clock'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
@@ -136,6 +137,7 @@ export function TodayJobsBoard({
   const [ringOutUpdates, setRingOutUpdates] = useState<Map<string, TicketRingOut>>(
     () => new Map(),
   )
+  const [attentionNow, setAttentionNow] = useState<number | null>(null)
   const activeWorkspaceRef = useRef(false)
   const [focusRequest, setFocusRequest] = useState<{
     kind: 'board' | 'row' | 'claim'
@@ -204,6 +206,13 @@ export function TodayJobsBoard({
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [refreshTodayJobs])
+
+  useEffect(() => {
+    const tick = () => { setAttentionNow(Date.now()) }
+    tick()
+    const interval = window.setInterval(tick, 60_000)
+    return () => { window.clearInterval(interval) }
+  }, [])
 
   const board = useMemo(() => projectTodayBoard({
     myJobs: serverJobs.myJobs,
@@ -721,6 +730,7 @@ export function TodayJobsBoard({
           label="My work"
           jobs={board.mine}
           mode="mine"
+          attentionNow={attentionNow}
           pendingDiagnosticJobId={pendingDiagnosticJobId}
           diagnosticsDisabled={pendingDiagnosticJobId !== null}
           diagnosticsEntitled={diagnosticsEntitled}
@@ -747,6 +757,7 @@ export function TodayJobsBoard({
           label={canDispatchWork ? 'Needs assignment' : 'Available'}
           jobs={board.open}
           mode="open"
+          attentionNow={attentionNow}
           pendingJobId={pendingJobId}
           claimsDisabled={pendingJobId !== null}
           onClaim={claim}
@@ -769,6 +780,7 @@ export function TodayJobsBoard({
           label="With the team"
           jobs={board.team}
           mode="team"
+          attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
           currentProfileId={currentProfileId}
           team={team}
@@ -784,6 +796,7 @@ export function TodayJobsBoard({
           label="Created by me"
           jobs={board.created}
           mode="created"
+          attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
           currentProfileId={currentProfileId}
           team={team}
@@ -799,6 +812,7 @@ export function TodayJobsBoard({
           label="Parts needed"
           jobs={board.parts}
           mode="parts"
+          attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
           currentProfileId={currentProfileId}
           team={team}
@@ -947,6 +961,7 @@ function JobSection({
   label,
   jobs,
   mode,
+  attentionNow,
   pendingJobId = null,
   claimsDisabled = false,
   onClaim,
@@ -981,6 +996,7 @@ function JobSection({
   label: string
   jobs: TodayTicketJob[]
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
+  attentionNow: number | null
   pendingJobId?: string | null
   claimsDisabled?: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -1028,6 +1044,7 @@ function JobSection({
             <JobRow
               job={job}
               mode={mode}
+              attentionNow={attentionNow}
               pending={pendingJobId === job.id}
               claimDisabled={claimsDisabled}
               onClaim={onClaim}
@@ -1098,6 +1115,7 @@ function JobSection({
 function JobRow({
   job,
   mode,
+  attentionNow,
   pending,
   claimDisabled,
   onClaim,
@@ -1125,6 +1143,7 @@ function JobRow({
 }: {
   job: TodayTicketJob
   mode: 'mine' | 'open' | 'team' | 'created' | 'parts'
+  attentionNow: number | null
   pending: boolean
   claimDisabled: boolean
   onClaim?: (job: TodayTicketJob) => void
@@ -1154,6 +1173,9 @@ function JobRow({
   onOpenWork?: (job: TodayTicketJob) => void
   onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
 }) {
+  const attention = attentionNow === null
+    ? null
+    : formatAttentionClock(job.attentionAt, attentionNow)
   const vehicle = job.vehicle
     ? `${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`
     : 'Vehicle not recorded'
@@ -1203,6 +1225,11 @@ function JobRow({
           </span>
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
+          )}
+          {attention && (
+            <span className={styles.attention} data-attention={attention.tier}>
+              {attention.label}
+            </span>
           )}
         </div>
       </div>

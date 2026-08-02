@@ -27,6 +27,7 @@ export type FloorRow = {
   concern: string
   /** Right-hand column. Meaning is fixed per lane; see `rowRight`. */
   right: string
+  attentionAt: string
 }
 
 export type FloorLane = {
@@ -85,6 +86,11 @@ type TicketAggregate = {
   quoteSent: boolean
   techName: string | null
   readyToCollect: boolean
+  attentionAt: string
+}
+
+function newestAttentionAt(current: string, candidate: string): string {
+  return Date.parse(candidate) > Date.parse(current) ? candidate : current
 }
 
 function displayVehicle(vehicle: TodayTicketJob['vehicle']): string {
@@ -124,6 +130,7 @@ function rowRight(lane: FloorLaneId, ticket: TicketAggregate): string {
 }
 
 function foldJob(into: TicketAggregate, job: TodayTicketJob): void {
+  into.attentionAt = newestAttentionAt(into.attentionAt, job.attentionAt)
   if (job.assignmentState === 'unassigned' && job.workStatus === 'open') {
     into.unassignedKind ??= job.kind
   }
@@ -134,7 +141,7 @@ function foldJob(into: TicketAggregate, job: TodayTicketJob): void {
 
 function emptyAggregate(
   source: { ticketId: string; ticketNumber: number; concern: string;
-    customerName: string | null; vehicle: TodayTicketJob['vehicle'] },
+    customerName: string | null; vehicle: TodayTicketJob['vehicle']; attentionAt: string },
 ): TicketAggregate {
   return {
     ticketId: source.ticketId,
@@ -147,6 +154,7 @@ function emptyAggregate(
     quoteSent: false,
     techName: null,
     readyToCollect: false,
+    attentionAt: source.attentionAt,
   }
 }
 
@@ -215,6 +223,7 @@ export function projectFloorBoard(
     const existing = tickets.get(card.ticketId)
     if (existing) {
       existing.readyToCollect = true
+      existing.attentionAt = newestAttentionAt(existing.attentionAt, card.attentionAt)
       continue
     }
     const aggregate = emptyAggregate(card)
@@ -248,6 +257,7 @@ export function projectFloorBoard(
       customer: ticket.customer,
       concern: ticket.concern,
       right: rowRight(id, ticket),
+      attentionAt: ticket.attentionAt,
     }))
     return {
       id,

@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, inArray, not } from 'drizzle-orm'
+import { and, asc, eq, exists, inArray, not, sql } from 'drizzle-orm'
 import type { AppDb } from '@/lib/db/queries'
 import { customers, ticketJobs, tickets, vehicles } from '@/lib/db/schema'
 import { canCloseTickets } from '@/lib/shop-os/capabilities'
@@ -28,12 +28,22 @@ const ACTIVE_WORK_STATUSES = ['open', 'in_progress', 'blocked'] as const
 
 export const READY_TO_COLLECT_LIMIT = 25
 
+function attentionIso(value: unknown): string | null {
+  const date = value instanceof Date
+    ? value
+    : typeof value === 'string'
+      ? new Date(value)
+      : null
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : null
+}
+
 export type ReadyToCollectTicket = {
   ticketId: string
   ticketNumber: number
   concern: string
   customerName: string | null
   vehicle: { year: number; make: string; model: string } | null
+  attentionAt: string
   ringOut: TicketRingOut
 }
 
@@ -69,6 +79,12 @@ export async function listReadyToCollectTickets(
         inArray(ticketJobs.workStatus, [...ACTIVE_WORK_STATUSES]),
       )),
   )
+  const latestJobUpdatedAt = sql<Date | null>`(
+    select max(${ticketJobs.updatedAt})
+    from ${ticketJobs}
+    where ${ticketJobs.shopId} = ${shopId}
+      and ${ticketJobs.ticketId} = ${tickets.id}
+  )`
 
   const rows = await db
     .select({
@@ -79,6 +95,7 @@ export async function listReadyToCollectTickets(
       vehicleYear: vehicles.year,
       vehicleMake: vehicles.make,
       vehicleModel: vehicles.model,
+      attentionAt: latestJobUpdatedAt,
     })
     .from(tickets)
     .leftJoin(customers, eq(tickets.customerId, customers.id))
@@ -96,6 +113,8 @@ export async function listReadyToCollectTickets(
   // single money code path at the cost of a bounded fan-out; a shop has only a
   // handful of repair orders waiting at the counter at once.
   const cards = await Promise.all(rows.map(async (row) => {
+    const attentionAt = attentionIso(row.attentionAt)
+    if (!attentionAt) return null
     const result = await getTicketRingOut(db, { actor, ticketId: row.id })
     if (!result.ok) return null
     return {
@@ -107,6 +126,7 @@ export async function listReadyToCollectTickets(
         row.vehicleYear !== null && row.vehicleMake !== null && row.vehicleModel !== null
           ? { year: row.vehicleYear, make: row.vehicleMake, model: row.vehicleModel }
           : null,
+      attentionAt,
       ringOut: result.ringOut,
     }
   }))
