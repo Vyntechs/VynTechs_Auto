@@ -81,7 +81,7 @@ test('the shop finishes the repair order after the diagnosis', async ({ browser,
 
     // 1. The counter writes it up as a diagnosis: the customer's own words, and
     //    the diagnostic labor the customer is authorizing.
-    await owner.getByRole('link', { name: 'New work order' }).click()
+    await owner.getByRole('link', { name: 'New repair order' }).click()
     await owner.getByLabel('Name', { exact: true }).fill(customerName)
     await owner.getByLabel('Phone').fill('5550100300')
     await owner.getByLabel('Year').fill('2021')

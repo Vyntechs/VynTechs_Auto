@@ -109,7 +109,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const owner = sessions.get('owner')!.page
     await expect(owner.getByText('Shop floor', { exact: true })).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-today-empty')
-    await owner.getByRole('link', { name: 'New work order' }).click()
+    await owner.getByRole('link', { name: 'New repair order' }).click()
     await owner.getByLabel('Name', { exact: true }).fill(customerName)
     await owner.getByLabel('Phone').fill('5550100200')
     await owner.getByLabel('Year').fill('2021')
