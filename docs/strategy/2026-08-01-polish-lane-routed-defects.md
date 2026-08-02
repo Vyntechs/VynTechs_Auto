@@ -58,3 +58,42 @@ The polish lane added no new fixed-position element, so nothing in it needs the
 offset today. If a later visual change pins something to the bottom of the
 viewport, it has to subtract `--vt-status-region-clearance` the same way
 `.vt-form__footer` now does, or it will land under the notice.
+
+## 4. The clearance does not save the quote screen's last control — OPEN
+
+Found by the demo-shop lane on branch `demo/full-shop`, against a local database
+carrying sixteen repair orders. Item 3 above turns out to have already happened,
+on a screen that has no `.vt-form__footer`.
+
+At **390×844**, signed in as the owner, on `/tickets/{id}/quote`, scrolled all
+the way to the bottom:
+
+```
+--vt-status-region-clearance   152px      (published correctly)
+#shop-os-workspace padding-bottom  152px  (consumed correctly)
+window.scrollY / maxScroll     1770 / 1770
+"Prepare quote" rect           top 798, bottom 844
+legal notice rect              top 693, bottom 832
+document.elementFromPoint(centre of "Prepare quote")
+                               → SECTION.app-shell-module__legalNotice
+```
+
+The button is enabled, the page cannot scroll further, and the notice owns the
+pixel. Playwright's `click()` on it times out after 30 s; remove the notice node
+and the same click succeeds at both 390×844 and 1440×900. So the reservation
+mechanism from PR #236 is publishing and being consumed, and the last control on
+this screen still ends up underneath the notice — the padding lands after the
+button rather than lifting it.
+
+Why it matters more than the earlier one: this is the button that turns priced
+lines into a quote a customer can answer. Until the notice is dismissed, a phone
+cannot prepare a quote at all. Every operator meets this on their first session,
+because the notice shows until it is dismissed once.
+
+Evidence capture: `.design-shots/demo-shop/DEFECT-phone-notice-covers-prepare-quote.png`.
+
+Not fixed here deliberately. The demo lane owns `scripts/` and the seed, not the
+shell's layout, and the two candidate fixes — lifting the whole workspace's
+scroll end above the region, or giving the quote builder's action block its own
+clearance — read differently depending on what the shell is meant to guarantee.
+That is the polish lane's call, and it is one CSS rule either way.

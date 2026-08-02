@@ -111,7 +111,15 @@ export default function SignInPage() {
         />
       </div>
 
-      <form onSubmit={handleSubmit} noValidate>
+      {/* `method="post"` is the only thing standing between a password and the
+          address bar. Sign-in is submitted by `handleSubmit`, which cannot run
+          until React has hydrated; a submit before that — Enter in the password
+          field on a slow phone — falls back to the browser's native behaviour,
+          and a form with no method GETs, appending `?email=…&password=…` to the
+          URL. That lands in history, the Referer header and every access log in
+          front of the app. Posting instead sends nothing to a route that
+          accepts it and leaks nothing on the way. */}
+      <form method="post" onSubmit={handleSubmit} noValidate>
         <div className="field">
           <label htmlFor="email">Email</label>
           <input
