@@ -226,3 +226,13 @@ Reason: Equal weight forces the operator to read both labels before deciding, on
 Trigger: Cards were painted DARKER than the page, so nothing read as raised and the product looked like one flat plane.
 Rule: Give the canvas its own token, one step darker than the surface content sits on, and light the surface.
 Reason: Figure/ground is the cheapest depth in a design system; inverted, no amount of shadow rescues it.
+
+### hydration-gap-is-a-real-attack-window
+Trigger: Any form carrying credentials or secrets in a client component.
+Rule: Declare method="post" and disable submit until a mount effect runs. A form with no method GETs every named field into the URL.
+Reason: /sign-in put a typed password in the address bar, history, and Referer whenever a press beat hydration.
+
+### renames-must-be-proven-in-the-browser
+Trigger: A pass that renames user-facing strings claims its specs were updated in lockstep.
+Rule: Run the hosted journeys against the deploy before believing it. Unit tests pass on renamed strings; browsers do not.
+Reason: Three specs still clicked "New work order" after the rename merged, and only a production run found it.
