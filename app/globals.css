@@ -111,10 +111,13 @@
   --vt-status-active:    var(--vt-signal-500);
   --vt-status-queued:    oklch(72% 0.04  240);
   --vt-status-deferred:  oklch(68% 0.13  300);
-  /* 60% lightness read 3.97:1 as text on bone — under WCAG AA. 56% holds the
-     same hue and chroma at 4.69:1, which the declined stamp and the ring-out
-     refusal both need. */
-  --vt-status-declined:  oklch(56% 0.10  20);
+  /* 60% lightness read 3.97:1 as text on bone — under WCAG AA. 56% was chosen
+     against --vt-bg (4.69:1), but every place this is used as text sits on the
+     recessed --vt-bone-100 band, not on --vt-bg: the declined job stamp, the
+     board's customer-answer fact, and the ring-out refusal. Measured there by
+     axe in production, 56% is 4.34:1 — a fail. 54% holds the same hue and
+     chroma at 4.74:1 on --vt-bone-100 and 5.10:1 on --vt-bg. */
+  --vt-status-declined:  oklch(54% 0.10  20);
   --vt-status-closed:    oklch(74% 0.10  170);
   --vt-status-comeback:  oklch(70% 0.16  50);
 
