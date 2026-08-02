@@ -93,8 +93,31 @@ Three suites (`golden`, `post-diagnosis`, `vin-decode`) and two projects
 (`golden-phone`, `golden-desktop`) all need to pass. **The runner stops at the
 first failing project, so a green phone run does not mean desktop passes.**
 
-An agent was working this when the session ended — check for a branch or PR it
-pushed before assuming nothing exists.
+**Start from PR #240** (`fix/e2e-plain-words-sweep`), titled "INCOMPLETE" on
+purpose. An agent was mid-remap when the session ended and was told to push
+what it had rather than finish. Its PR body carries the old→new string map
+applied so far, the exact locator where the run currently fails, which suites
+and projects are and are not proven, and — worth noting — **a real product
+contrast defect it found and fixed** rather than a stale word. Read that body
+before touching the specs; it supersedes the lead list above wherever the two
+disagree.
+
+Where #240 actually stands: the shop-day journey now walks sign-in → write-up →
+assignment → the two-job quote → approve-one/decline-one → the tech's work →
+the hold → cancel-and-reopen, and then stops at `golden-shop-day.spec.ts:371`
+on **a real production defect, not a stale word**. The "Customer said no" stamp
+renders at **4.34:1 contrast where WCAG AA requires 4.5:1**, and the axe gate
+fails it. The branch fixes it in `app/globals.css`
+(`--vt-status-declined` 56% → 54%, measured 4.74:1 on the band it sits on), so
+**the journey cannot go green against production until that deploys.** Deploy
+first, then re-run.
+
+Still entirely unrun on that branch, and it says so plainly: `golden-desktop`,
+both `post-diagnosis` projects, both `vin-decode` projects,
+`node scripts/test-shards.mjs`, and the production build. The other two suites
+were only scanned statically against source — paper, not a run. It also found
+nine further missed `Ticket`-word strings and deliberately left them; they are
+listed in the PR body. The QA tenant was left verified clean.
 
 ---
 
