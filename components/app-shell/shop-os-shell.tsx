@@ -13,7 +13,7 @@ export function ShopOsShell({
   noticeAudienceKey: string
 }): React.ReactElement {
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-customer-copy-app-shell>
       <a className={styles.skipLink} href="#shop-os-workspace">
         Skip to current work
       </a>
@@ -24,7 +24,7 @@ export function ShopOsShell({
         <PwaUpdateStatus />
       </StatusRegion>
 
-      <div id="shop-os-workspace" className={styles.workspace} tabIndex={-1}>
+      <div id="shop-os-workspace" className={styles.workspace} tabIndex={-1} data-customer-copy-workspace>
         {children}
       </div>
     </div>

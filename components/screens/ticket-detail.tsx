@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from '@/components/vt'
 import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
@@ -14,7 +15,7 @@ import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
-import type { CustomerCopyProjection } from '@/lib/shop-os/customer-copy'
+import type { CustomerCopyProjection, CustomerCopyResult } from '@/lib/shop-os/customer-copy'
 import type {
   SimpleWorkEscalationView,
   SimpleWorkProjectionView,
@@ -90,6 +91,7 @@ export function TicketDetailScreen({
   partRequests = [],
   diagnosticsEntitled = true,
   customerCopy = null,
+  refreshCustomerCopyAction,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
@@ -104,7 +106,9 @@ export function TicketDetailScreen({
   partRequests?: TicketPartRequestView[]
   diagnosticsEntitled?: boolean
   customerCopy?: CustomerCopyProjection | null
+  refreshCustomerCopyAction?: (ticketId: string) => Promise<CustomerCopyResult>
 }): React.JSX.Element {
+  const router = useRouter()
   const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
     () => new Map(),
   )
@@ -118,6 +122,7 @@ export function TicketDetailScreen({
   const [ringOutState, setRingOutState] = useState(ringOut)
   const [ticketStatus, setTicketStatus] = useState(ticket.status)
   const [customerCopyOpen, setCustomerCopyOpen] = useState(false)
+  const [customerCopyStale, setCustomerCopyStale] = useState(false)
   const [activeTool, setActiveTool] = useState<
     { kind: 'quote' } | { kind: 'work'; jobId: string } | null
   >(null)
@@ -125,6 +130,9 @@ export function TicketDetailScreen({
   const quoteOpenerRef = useRef<HTMLButtonElement>(null)
   const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const ringOutRef = useRef<HTMLElement>(null)
+  const approvalStateRef = useRef(new Map(
+    ticket.jobs.map((job) => [job.id, job.approvalState]),
+  ))
   const repairOrder = `RO ${String(ticket.ticketNumber).padStart(6, '0')}`
   const statusLabel = formatLabel(TICKET_STATUS_LABELS, ticketStatus)
   const sourceLabel = formatLabel(TICKET_SOURCE_LABELS, ticket.source)
@@ -165,7 +173,19 @@ export function TicketDetailScreen({
     command.kind === 'ring_out' || command.kind === 'close'
   )) ?? null
   const legacyQuoteFallback = !currentProfileId || !role
+  const invalidateCustomerCopy = useCallback(() => {
+    if (!customerCopy) return
+    setCustomerCopyOpen(false)
+    setCustomerCopyStale(true)
+    router.refresh()
+  }, [customerCopy, router])
   const applyQuoteProjection = useCallback((projection: QuoteWorkspaceProjection) => {
+    const financialStateChanged = projection.some((projected) => (
+      approvalStateRef.current.get(projected.id) !== projected.approvalState
+    ))
+    for (const projected of projection) {
+      approvalStateRef.current.set(projected.id, projected.approvalState)
+    }
     setQuoteOverrides((current) => {
       const next = new Map(current)
       let changed = false
@@ -181,19 +201,24 @@ export function TicketDetailScreen({
       }
       return changed ? next : current
     })
-  }, [])
+    if (financialStateChanged) invalidateCustomerCopy()
+  }, [invalidateCustomerCopy])
   useEffect(() => setTicketStatus(ticket.status), [ticket.status])
   useEffect(() => setRingOutState(ringOut), [ringOut])
+  useEffect(() => setCustomerCopyStale(false), [customerCopy])
+  useEffect(() => {
+    approvalStateRef.current = new Map(ticket.jobs.map((job) => [job.id, job.approvalState]))
+  }, [ticket.jobs])
 
   return (
-    <main className={`app ${styles.screen}`}>
+    <main className={`app ${styles.screen}`} data-customer-copy-shell>
       <AppHeader
         title={repairOrder}
         meta={<span>{statusLabel} · {sourceLabel}</span>}
         back={{ href: '/today', label: canAssignWork(role) ? 'Shop floor' : 'My work' }}
       />
 
-      <div className={styles.content}>
+      <div className={styles.content} data-customer-copy-container>
         <header className={styles.identity}>
           <div>
             <p className={styles.eyebrow}>Repair order</p>
@@ -246,16 +271,24 @@ export function TicketDetailScreen({
                 type="button"
                 className={styles.customerCopyAction}
                 aria-expanded={customerCopyOpen}
+                disabled={customerCopyStale}
                 onClick={() => setCustomerCopyOpen((open) => !open)}
               >
-                {customerCopyOpen ? 'Hide customer copy' : 'Customer copy'}
+                {customerCopyStale
+                  ? 'Refreshing customer copy…'
+                  : customerCopyOpen ? 'Hide customer copy' : 'Customer copy'}
               </button>
             )}
           </div>
         )}
 
         {customerCopyOpen && customerCopy && (
-          <CustomerCopy copy={customerCopy} canManageShopIdentity={role === 'owner'} />
+          <CustomerCopy
+            copy={customerCopy}
+            canManageShopIdentity={role === 'owner'}
+            ticketId={ticket.id}
+            refreshCopy={refreshCustomerCopyAction}
+          />
         )}
 
         {activeTool?.kind === 'quote' && currentProfileId && (
@@ -567,6 +600,7 @@ export function TicketDetailScreen({
             onApplied={(next) => {
               setTicketStatus(next.status)
               setActiveTool(null)
+              invalidateCustomerCopy()
               setWorkOverrides((current) => {
                 const updated = new Map(current)
                 for (const job of next.jobs) updated.set(job.id, { workStatus: job.workStatus })
@@ -607,6 +641,7 @@ export function TicketDetailScreen({
               setRingOutState(next)
               setTicketStatus(next.status)
               if (next.status !== 'open') setActiveTool(null)
+              invalidateCustomerCopy()
             }}
           />
         )}

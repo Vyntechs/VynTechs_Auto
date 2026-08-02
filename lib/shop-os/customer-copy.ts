@@ -16,7 +16,7 @@ import {
   readPreparedCustomerPricing,
   type ApprovedJobPricing,
 } from '@/lib/shop-os/quotes'
-import { getTicketRingOut } from '@/lib/shop-os/ring-out'
+import { getTicketRingOut, type TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketActor } from '@/lib/tickets'
 
 export type CustomerCopyActor = TicketActor
@@ -71,7 +71,13 @@ export type CustomerCopyResult =
   | { ok: true; copy: CustomerCopyProjection }
   | { ok: false; error: 'invalid_input' | 'not_found' | 'forbidden' }
 
-function actorGate(actor: CustomerCopyActor): CustomerCopyResult | null {
+type CustomerCopyFailure = Extract<CustomerCopyResult, { ok: false }>
+
+export type CustomerCopyBundleResult =
+  | { ok: true; copy: CustomerCopyProjection; ringOut: TicketRingOut }
+  | { ok: false; error: 'invalid_input' | 'not_found' | 'forbidden' }
+
+function actorGate(actor: CustomerCopyActor): CustomerCopyFailure | null {
   if (!actor.shopId) return { ok: false, error: 'not_found' }
   if (
     actor.membershipStatus !== 'active'
@@ -97,9 +103,10 @@ function missingIdentity(row: {
   return blockers
 }
 
-export async function getCustomerCopy(
+async function projectCustomerCopy(
   db: AppDb,
   input: { actor: CustomerCopyActor; ticketId: unknown },
+  ringOut: TicketRingOut,
 ): Promise<CustomerCopyResult> {
   const denied = actorGate(input.actor)
   if (denied) return denied
@@ -175,9 +182,6 @@ export async function getCustomerCopy(
   let balanceCents = 0
   let payments: CustomerCopyProjection['totals']['payments'] = []
 
-  const ringOut = await getTicketRingOut(db, { actor: input.actor, ticketId: ticketId.data })
-  if (!ringOut.ok) return { ok: false, error: ringOut.error === 'invalid_input' ? 'invalid_input' : 'not_found' }
-
   if (approvedJobs.length > 0) {
     const priced = approvedJobs.map((job) => {
       if (!job.approvedQuoteVersionId) return null
@@ -192,12 +196,12 @@ export async function getCustomerCopy(
         lines: job.lines,
       }))
     }
-    subtotalCents = ringOut.ringOut.owed.subtotalCents
-    taxCents = ringOut.ringOut.owed.taxCents
-    totalCents = ringOut.ringOut.owed.totalCents
-    paidCents = ringOut.ringOut.paidCents
-    balanceCents = ringOut.ringOut.balanceCents
-    payments = ringOut.ringOut.payments.map(({ amountCents, method, recordedAt }) => ({
+    subtotalCents = ringOut.owed.subtotalCents
+    taxCents = ringOut.owed.taxCents
+    totalCents = ringOut.owed.totalCents
+    paidCents = ringOut.paidCents
+    balanceCents = ringOut.balanceCents
+    payments = ringOut.payments.map(({ amountCents, method, recordedAt }) => ({
       amountCents,
       method,
       recordedAt,
@@ -282,4 +286,46 @@ export async function getCustomerCopy(
       closedAt: row.closedAt?.toISOString() ?? null,
     },
   }
+}
+
+export async function getCustomerCopyBundle(
+  db: AppDb,
+  input: { actor: CustomerCopyActor; ticketId: unknown },
+): Promise<CustomerCopyBundleResult> {
+  const denied = actorGate(input.actor)
+  if (denied) return denied
+  const ticketId = z.uuid().safeParse(input.ticketId)
+  if (!ticketId.success) return { ok: false, error: 'invalid_input' }
+
+  return db.transaction(async (txRaw) => {
+    const tx = txRaw as AppDb
+    const ringOutResult = await getTicketRingOut(tx, {
+      actor: input.actor,
+      ticketId: ticketId.data,
+    })
+    if (!ringOutResult.ok) {
+      return {
+        ok: false as const,
+        error: ringOutResult.error === 'invalid_input'
+          ? 'invalid_input' as const
+          : ringOutResult.error === 'forbidden'
+            ? 'forbidden' as const
+            : 'not_found' as const,
+      }
+    }
+    const copyResult = await projectCustomerCopy(tx, {
+      actor: input.actor,
+      ticketId: ticketId.data,
+    }, ringOutResult.ringOut)
+    if (!copyResult.ok) return { ok: false as const, error: copyResult.error }
+    return { ok: true as const, ringOut: ringOutResult.ringOut, copy: copyResult.copy }
+  }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
+}
+
+export async function getCustomerCopy(
+  db: AppDb,
+  input: { actor: CustomerCopyActor; ticketId: unknown },
+): Promise<CustomerCopyResult> {
+  const result = await getCustomerCopyBundle(db, input)
+  return result.ok ? { ok: true, copy: result.copy } : result
 }

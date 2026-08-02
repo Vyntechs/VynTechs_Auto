@@ -1,7 +1,7 @@
 # Shop OS Customer Copy — Design
 
-**Status:** Approved for implementation  
-**Approved by:** Brandon Nichols in Buzz event `58a69d3e9976a2d24996d1bbda239c3f6dd75f1d87ca75bb9ecf5d74e636ada9` on 2026-08-02  
+**Status:** Approved for implementation
+**Approved by:** Brandon Nichols in Buzz event `58a69d3e9976a2d24996d1bbda239c3f6dd75f1d87ca75bb9ecf5d74e636ada9` on 2026-08-02
 **Tier:** T2 / A2 for branch work. Production migration, merge, and deployment remain A3 gates.
 
 ## Intent normalization
@@ -142,4 +142,3 @@ No animation is required. Focus, keyboard reachability, semantic headings, table
 7. Printing is unavailable when required shop identity or trustworthy pricing is missing.
 8. Browser print media shows only the document at 390×844 and 1440×900, with no horizontal overflow, serious/critical accessibility findings, or browser faults.
 9. Migration replay, all test shards, TypeScript, and production build pass on the exact reviewed head.
-

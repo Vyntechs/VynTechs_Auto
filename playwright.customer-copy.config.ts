@@ -7,7 +7,13 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: 'list',
+  webServer: {
+    command: 'node tests/e2e/customer-copy-harness/server.mjs',
+    url: 'http://127.0.0.1:4178',
+    reuseExistingServer: false,
+  },
   use: {
+    baseURL: 'http://127.0.0.1:4178',
     channel: 'chrome',
     trace: 'on-first-retry',
   },

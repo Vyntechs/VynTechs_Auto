@@ -51,11 +51,11 @@ vi.mock('@/lib/shop-os/part-requests', () => ({
 }))
 
 vi.mock('@/lib/shop-os/customer-copy', () => ({
-  getCustomerCopy: vi.fn(),
+  getCustomerCopyBundle: vi.fn(),
 }))
 
-vi.mock('@/lib/shop-os/ring-out', () => ({
-  getTicketRingOut: vi.fn(async () => ({ ok: false, error: 'not_found' })),
+vi.mock('@/app/(app)/tickets/[id]/customer-copy-actions', () => ({
+  refreshCustomerCopy: vi.fn(),
 }))
 
 vi.mock('@/lib/intake/team', () => ({
@@ -66,8 +66,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null }) => (
-    <div data-canned-library={String(canManageCannedJobs)} data-customer-copy={customerCopy?.documentKind ?? 'none'}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy, refreshCustomerCopyAction }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null; refreshCustomerCopyAction?: unknown }) => (
+    <div data-canned-library={String(canManageCannedJobs)} data-customer-copy={customerCopy?.documentKind ?? 'none'} data-customer-copy-refresh={String(typeof refreshCustomerCopyAction === 'function')}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
   ),
 }))
 
@@ -76,14 +76,14 @@ import { requireUserAndProfile } from '@/lib/auth'
 import { checkAccess } from '@/lib/auth-access'
 import { getShopTeam } from '@/lib/intake/team'
 import { getTicketDetail } from '@/lib/tickets'
-import { getCustomerCopy } from '@/lib/shop-os/customer-copy'
+import { getCustomerCopyBundle } from '@/lib/shop-os/customer-copy'
 import { customerCopyFixture } from '@/tests/helpers/customer-copy'
 
 const requireUserMock = vi.mocked(requireUserAndProfile)
 const checkAccessMock = vi.mocked(checkAccess)
 const getTicketMock = vi.mocked(getTicketDetail)
 const getShopTeamMock = vi.mocked(getShopTeam)
-const getCustomerCopyMock = vi.mocked(getCustomerCopy)
+const getCustomerCopyBundleMock = vi.mocked(getCustomerCopyBundle)
 
 const TICKET_ID = '00000000-0000-0000-0000-000000000101'
 const profile = {
@@ -132,6 +132,17 @@ const ticket: TicketDetail = {
 }
 
 const pageProps = () => ({ params: Promise.resolve({ id: TICKET_ID }) })
+const ringOut = {
+  ticketId: TICKET_ID,
+  status: 'open' as const,
+  owed: { subtotalCents: 0, taxCents: 0, totalCents: 0, jobs: [] },
+  paidCents: 0,
+  balanceCents: 0,
+  payments: [],
+  canRecordPayment: false,
+  canClose: true,
+  closedAt: null,
+}
 
 describe('TicketPage', () => {
   beforeEach(() => {
@@ -139,7 +150,7 @@ describe('TicketPage', () => {
     requireUserMock.mockResolvedValue(authContext)
     checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
-    getCustomerCopyMock.mockResolvedValue({ ok: true, copy: customerCopyFixture })
+    getCustomerCopyBundleMock.mockResolvedValue({ ok: true, copy: customerCopyFixture, ringOut })
   })
 
   it('redirects unauthenticated visitors before ticket access', async () => {
@@ -188,8 +199,10 @@ describe('TicketPage', () => {
   it('loads and passes one server-shaped Customer Copy only for advisor/owner authority', async () => {
     render(await TicketPage(pageProps()))
 
-    expect(getCustomerCopyMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID })
+    expect(getCustomerCopyBundleMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID })
+    expect(getCustomerCopyBundleMock).toHaveBeenCalledTimes(1)
     expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-customer-copy', 'invoice')
+    expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-customer-copy-refresh', 'true')
   })
 
   it('never asks for or passes Customer Copy to a technician', async () => {
@@ -200,7 +213,7 @@ describe('TicketPage', () => {
 
     render(await TicketPage(pageProps()))
 
-    expect(getCustomerCopyMock).not.toHaveBeenCalled()
+    expect(getCustomerCopyBundleMock).not.toHaveBeenCalled()
     expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-customer-copy', 'none')
   })
 

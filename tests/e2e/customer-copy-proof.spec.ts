@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { customerCopyFixtureHtml } from './customer-copy-fixture'
 import {
   assertNoBrowserFaults,
   checkpoint,
@@ -10,9 +9,9 @@ import {
 
 const evidenceDirectory = resolve(process.cwd(), 'test-results/customer-copy')
 
-test('an authenticated repair order reveals one customer-safe screen and print document', async ({ page }, testInfo) => {
+test('the real CustomerCopy component reveals fresh customer-safe screen and print truth', async ({ page }, testInfo) => {
   const faults = watchBrowserFaults(page, testInfo.project.name)
-  await page.setContent(customerCopyFixtureHtml())
+  await page.goto('/?state=ready')
 
   const action = page.getByRole('button', { name: 'Customer copy' })
   await expect(action).toBeVisible()
@@ -32,16 +31,21 @@ test('an authenticated repair order reveals one customer-safe screen and print d
   await expect(document).not.toContainText('STAFF-ONLY-SENTINEL')
   await expect(document).not.toContainText('PRIVATE-PAYMENT-NOTE-SENTINEL')
 
+  await page.getByRole('button', { name: 'Print customer copy' }).click()
+  await expect(page.locator('body')).toHaveAttribute('data-refresh-count', '1')
+  await expect(page.locator('body')).toHaveAttribute('data-print-calls', '1')
+
   await mkdir(evidenceDirectory, { recursive: true })
   const screenEvidence = resolve(evidenceDirectory, `${testInfo.project.name}-screen.png`)
   await page.screenshot({ path: screenEvidence })
   await checkpoint(page, testInfo, `${testInfo.project.name}-screen`)
 
   await page.emulateMedia({ media: 'print' })
-  await expect(page.locator('[data-fixture-app-chrome]')).toHaveCSS('visibility', 'hidden')
-  await expect(page.locator('[data-staff-only]')).toHaveCSS('visibility', 'hidden')
+  await expect(page.locator('[data-fixture-app-chrome]')).toHaveCSS('display', 'none')
+  await expect(page.locator('[data-staff-only]')).toHaveCSS('display', 'none')
+  await expect(page.locator('[data-long-surrounding]')).toHaveCSS('display', 'none')
   await expect(page.locator('[data-customer-copy-controls]')).toHaveCSS('display', 'none')
-  await expect(document).toHaveCSS('visibility', 'visible')
+  await expect(document).toHaveCSS('display', 'block')
   await expect.poll(() => document.evaluate((node) => ({
     left: node.getBoundingClientRect().left,
     right: node.getBoundingClientRect().right,
@@ -51,5 +55,24 @@ test('an authenticated repair order reveals one customer-safe screen and print d
   const printEvidence = resolve(evidenceDirectory, `${testInfo.project.name}-print.png`)
   await page.screenshot({ path: printEvidence, fullPage: true })
   await checkpoint(page, testInfo, `${testInfo.project.name}-print`)
+  assertNoBrowserFaults([faults])
+})
+
+test('native print fails closed for blocked real CustomerCopy paperwork', async ({ page }, testInfo) => {
+  const faults = watchBrowserFaults(page, `${testInfo.project.name}-blocked`)
+  await page.goto('/?state=blocked')
+  await page.getByRole('button', { name: 'Customer copy' }).click()
+
+  const document = page.locator('[data-customer-copy-document]')
+  await expect(document).toHaveAttribute('data-print-ready', 'false')
+  await expect(page.getByRole('button', { name: 'Print customer copy' })).toBeDisabled()
+
+  await page.emulateMedia({ media: 'print' })
+  await expect(document).toHaveCSS('display', 'none')
+  await expect(page.locator('[data-customer-copy-print-blocker]')).toHaveCSS('display', 'block')
+  await expect(page.locator('[data-fixture-app-chrome]')).toHaveCSS('display', 'none')
+  await expect(page.locator('[data-staff-only]')).toHaveCSS('display', 'none')
+  await expect(page.locator('[data-long-surrounding]')).toHaveCSS('display', 'none')
+  await checkpoint(page, testInfo, `${testInfo.project.name}-blocked-print`)
   assertNoBrowserFaults([faults])
 })

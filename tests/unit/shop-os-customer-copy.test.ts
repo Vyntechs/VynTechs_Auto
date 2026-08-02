@@ -1,4 +1,6 @@
 import { eq } from 'drizzle-orm'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   customers,
@@ -13,6 +15,7 @@ import {
 } from '@/lib/db/schema'
 import {
   getCustomerCopy,
+  getCustomerCopyBundle,
   type CustomerCopyActor,
 } from '@/lib/shop-os/customer-copy'
 import { readPreparedCustomerPricing } from '@/lib/shop-os/quotes'
@@ -250,6 +253,35 @@ describe('Shop OS Customer Copy projection', () => {
       { jobTitle: 'Brake fluid service', decision: 'declined', method: null, recordedAt: '2026-08-01T13:05:00.000Z' },
     ])
     expect(result.copy.readyToPrint).toBe(true)
+  })
+
+  it('returns the exact ring-out and safe copy from one read-only repeatable-read snapshot', async () => {
+    const result = await getCustomerCopyBundle(db, {
+      actor: actor('advisor', shopId),
+      ticketId: TICKET,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.copy.totals).toMatchObject({
+      subtotalCents: result.ringOut.owed.subtotalCents,
+      taxCents: result.ringOut.owed.taxCents,
+      totalCents: result.ringOut.owed.totalCents,
+      paidCents: result.ringOut.paidCents,
+      balanceCents: result.ringOut.balanceCents,
+    })
+    expect(result.copy.totals.payments).toEqual(
+      result.ringOut.payments.map(({ amountCents, method, recordedAt }) => ({
+        amountCents, method, recordedAt,
+      })),
+    )
+  })
+
+  it('pins bundle assembly to the repository repeatable-read transaction contract', () => {
+    const source = readFileSync(resolve(process.cwd(), 'lib/shop-os/customer-copy.ts'), 'utf8')
+
+    expect(source).toMatch(/db\.transaction\([\s\S]*isolationLevel:\s*['"]repeatable read['"]/)
+    expect(source).toMatch(/accessMode:\s*['"]read only['"]/)
   })
 
   it('selects Estimate from the current prepared version when no work is approved', async () => {

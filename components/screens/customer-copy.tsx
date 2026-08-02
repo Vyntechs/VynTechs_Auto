@@ -1,8 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef } from 'react'
-import type { CustomerCopyBlocker, CustomerCopyProjection } from '@/lib/shop-os/customer-copy'
+import { useEffect, useRef, useState } from 'react'
+import type {
+  CustomerCopyBlocker,
+  CustomerCopyProjection,
+  CustomerCopyResult,
+} from '@/lib/shop-os/customer-copy'
 import styles from './customer-copy.module.css'
 
 const DOCUMENT_LABELS: Record<CustomerCopyProjection['documentKind'], string> = {
@@ -26,33 +30,76 @@ const IDENTITY_BLOCKERS: CustomerCopyBlocker[] = [
 ]
 
 export function CustomerCopy({
-  copy,
+  copy: initialCopy,
   canManageShopIdentity,
+  ticketId,
+  refreshCopy,
 }: {
   copy: CustomerCopyProjection
   canManageShopIdentity: boolean
+  ticketId?: string
+  refreshCopy?: (ticketId: string) => Promise<CustomerCopyResult>
 }): React.JSX.Element {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const [copy, setCopy] = useState(initialCopy)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState(false)
+  const [printPending, setPrintPending] = useState(false)
   useEffect(() => headingRef.current?.focus(), [])
+  useEffect(() => setCopy(initialCopy), [initialCopy])
+  useEffect(() => {
+    if (!printPending || refreshing || !copy.readyToPrint) return
+    setPrintPending(false)
+    window.print()
+  }, [copy, printPending, refreshing])
   const documentLabel = DOCUMENT_LABELS[copy.documentKind]
   const missingIdentity = copy.blockers.filter((blocker) => IDENTITY_BLOCKERS.includes(blocker))
   const pricingUnavailable = copy.blockers.includes('pricing_unavailable')
+  const printable = copy.readyToPrint && !refreshError
+
+  async function printFreshCopy(): Promise<void> {
+    if (!refreshCopy || !ticketId) {
+      setRefreshError(true)
+      return
+    }
+    setRefreshing(true)
+    setRefreshError(false)
+    try {
+      const result = await refreshCopy(ticketId)
+      if (!result.ok) {
+        setRefreshError(true)
+        return
+      }
+      setCopy(result.copy)
+      if (result.copy.readyToPrint) setPrintPending(true)
+    } catch {
+      setRefreshError(true)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   return (
-    <section className={styles.preview} aria-label="Customer copy preview">
+    <section className={styles.preview} aria-label="Customer copy preview" data-customer-copy-preview>
       <div className={styles.controls} data-customer-copy-controls>
         <div>
           <p>Customer copy</p>
-          <span>{copy.readyToPrint ? `${documentLabel} ready` : 'Printing unavailable'}</span>
+          <span>{refreshing ? 'Refreshing current money…' : printable ? `${documentLabel} ready` : 'Printing unavailable'}</span>
         </div>
         <button
           type="button"
-          disabled={!copy.readyToPrint}
-          onClick={() => window.print()}
+          disabled={!copy.readyToPrint || refreshing}
+          onClick={() => void printFreshCopy()}
         >
-          Print customer copy
+          {refreshing ? 'Refreshing…' : 'Print customer copy'}
         </button>
       </div>
+
+      {refreshError && (
+        <p className={styles.blocker} role="alert">
+          Customer copy could not be refreshed. Nothing was printed. Try again.
+        </p>
+      )}
 
       {pricingUnavailable && (
         <p className={styles.blocker} role="alert">
@@ -72,6 +119,7 @@ export function CustomerCopy({
         className={styles.paper}
         data-customer-copy-document
         data-document-kind={copy.documentKind}
+        data-print-ready={String(printable)}
       >
         <header className={styles.documentHeader}>
           <div className={styles.shopIdentity}>
@@ -82,6 +130,9 @@ export function CustomerCopy({
           <div className={styles.documentIdentity}>
             <p>RO {String(copy.ticketNumber).padStart(6, '0')}</p>
             <h2 ref={headingRef} tabIndex={-1}>{documentLabel}</h2>
+            {copy.documentKind === 'paid_receipt' && copy.closedAt && (
+              <p className={styles.closedAt}>Closed {dateOnly(copy.closedAt)}</p>
+            )}
             <p className={styles.balanceLabel}>Balance</p>
             <p className={styles.balance}>{money(copy.totals.balanceCents)}</p>
           </div>
@@ -106,8 +157,8 @@ export function CustomerCopy({
           <h3 id="customer-copy-work">Work and pricing</h3>
           {copy.jobs.length === 0 ? (
             <p className={styles.empty}>No trustworthy pricing is available.</p>
-          ) : copy.jobs.map((job) => (
-            <article key={`${job.kind}:${job.title}`} className={styles.job} data-customer-copy-job>
+          ) : copy.jobs.map((job, jobIndex) => (
+            <article key={`${job.kind}:${job.title}:${jobIndex}`} className={styles.job} data-customer-copy-job>
               <header>
                 <p>{job.kind}</p>
                 <h4>{job.title}</h4>
@@ -165,6 +216,9 @@ export function CustomerCopy({
           </dl>
         </div>
       </article>
+      <p className={styles.printBlocker} data-customer-copy-print-blocker>
+        Customer copy is not ready to print. Return to Shop OS and resolve the blocker.
+      </p>
     </section>
   )
 }
@@ -211,5 +265,11 @@ function titleCase(value: string): string {
 function dateTime(value: string): string {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function dateOnly(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
   }).format(new Date(value))
 }

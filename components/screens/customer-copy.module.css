@@ -98,6 +98,9 @@
 .documentIdentity h2:focus { outline: 2px solid var(--vt-focus-ring); outline-offset: 4px; }
 .balanceLabel { color: #555; font: 600 10px/1.2 var(--vt-font-sans); letter-spacing: 0.1em; text-transform: uppercase; }
 .balance { font: 600 24px/1.1 var(--vt-font-mono); font-variant-numeric: tabular-nums; }
+.closedAt { color: #555; font: 11px/1.4 var(--vt-font-sans); }
+
+.printBlocker { display: none; }
 
 .factGrid {
   display: grid;
