@@ -513,7 +513,8 @@
   border-top: 0.5px solid var(--vt-rule-strong);
   background: var(--vt-bone-50);
   position: sticky;
-  bottom: 0;
+  /* Clear the floating status region; it otherwise covers Cancel and submit. */
+  bottom: var(--vt-status-region-clearance, 0px);
 }
 .vt-form__footer-meta {
   font-family: var(--vt-font-mono);

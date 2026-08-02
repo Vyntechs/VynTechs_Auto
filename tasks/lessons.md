@@ -147,3 +147,63 @@ Reason: React batches parent and child updates, so the control unmounts in the s
 Trigger: A killed agent's PR handoff listed as unfinished a test already committed and passing.
 Rule: Verify every handoff claim against the commit and a real run before scheduling work from it.
 Reason: The handoff narrates intent at the moment of death, not what the branch actually contains.
+
+### no-authored-steps-the-engine-is-off
+Trigger: Designing any Shop OS technician screen showing a next physical action.
+Rule: Never draw software-issued procedure steps. A job has a description; the tech decides what to do.
+Reason: Authored steps exist only in the disabled diagnostic engine, so the screen cannot be built.
+
+### name-the-table-or-drop-the-number
+Trigger: Putting any metric on a Shop OS design, especially in a headline position.
+Rule: Name the table it reads from before drawing it. Verify in code, not from plausibility.
+Reason: Comeback and first-call figures are session-keyed and never written in production; both were invented.
+
+### the-tool-never-forecasts-completion
+Trigger: Any surface tempted to show an ETA, a countdown, or "done within the hour".
+Rule: Report state, never forecast. Blocked or not blocked. On this since 9:40.
+Reason: The shop has no set start time and people leave mid-job; every forecast would be fabricated.
+
+### screens-not-essays
+Trigger: Brandon asks for design work in Figma so he can approve it before implementation.
+Rule: One page of real screens at device sizes, numbered. Reasoning goes on pages prefixed "ref".
+Reason: He approves what he can see; screens scattered through a design essay are unreviewable.
+
+### the-ai-ick-checklist
+Trigger: Building any screen mockup Brandon will look at.
+Rule: No rule-between-every-section, no ALL-CAPS label above every block, no all-rectangles, no centered button text.
+Reason: That stack reads as machine-made on sight and costs his trust in the whole design.
+
+### carry-the-signature-into-the-product
+Trigger: A design has a signature element specced beautifully on its own page.
+Rule: Check it is actually visible and felt on every real screen before calling the set done.
+Reason: The pulse shipped as 2px of near-black on black — the thesis was present decoratively, absent functionally.
+
+### stop-inventing-his-shop
+Trigger: Writing any concrete noun into a Shop OS screen — a place, a role, a process word.
+Rule: If Brandon did not say it, do not write it. His own words are the only vocabulary source.
+Reason: Invented specifics like "counter" and bay numbers are landmines he must decode, and each one breaks trust.
+
+### a-word-that-must-be-taught-has-failed
+Trigger: Writing any user-facing string in Shop OS.
+Rule: The word must mean on screen what it means on a shop floor. Never repurpose a plain noun as a product term.
+Reason: Readers are skilled non-college-educated professionals, not engineers; "Provisional ticket" and "Job ledger" cost them a decode.
+
+### no-appointments-and-almost-no-waiters
+Trigger: Designing any Shop OS queue, board, or intake surface.
+Rule: No schedule, no appointment book, no promise time. Waiters are under 1% — handle, never feature.
+Reason: The shop specializes in problem children other shops failed; nothing about its day is calendar-driven.
+
+### go-look-before-you-theorize
+Trigger: Brandon reports how something looks or feels.
+Rule: Sign in and photograph the live product first. Report measured pixels, not what the source implies.
+Reason: "Feels black" was the landing hero plus a three-surface authed page — the source alone would have sent the fix to the wrong screen.
+
+### fix-the-bug-dont-route-it
+Trigger: Noticing a defect while doing other work, in any lane.
+Rule: Fix it, prove it, ship it. Never hand a bug back to Brandon as a captured item.
+Reason: He said plainly "the bugs are your problem" — routing a defect to him is making him the queue.
+
+### verify-before-you-call-it-a-bug
+Trigger: About to report a visual defect seen in a full-page screenshot.
+Rule: Re-check it in a real viewport with hit-testing. Fixed-position elements stitch into the middle of full-page shots.
+Reason: I called the notice an overlap over the VIN field; the true fault was at the bottom, covering 99% of the submit button.
