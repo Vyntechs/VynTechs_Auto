@@ -207,3 +207,22 @@ Reason: He said plainly "the bugs are your problem" — routing a defect to him 
 Trigger: About to report a visual defect seen in a full-page screenshot.
 Rule: Re-check it in a real viewport with hit-testing. Fixed-position elements stitch into the middle of full-page shots.
 Reason: I called the notice an overlap over the VIN field; the true fault was at the bottom, covering 99% of the submit button.
+### form-kit-without-a-breakpoint-leaks
+Trigger: v2.css's form kit had zero media queries; its fixed 200px label column overflowed every phone.
+Rule: A shared kit must carry its own responsive rules. A local `:global` patch on one screen hides the bug on all the others.
+Reason: The write-up patched it and looked fine; the quote a technician opens on a phone ran 434px wide in a 390px window.
+
+### an-undefined-css-var-is-silent-until-it-is-not
+Trigger: `--vt-fg-1` is referenced eighteen times and defined nowhere; on one button it was the background.
+Rule: Grep every custom property for a matching definition. `color:` fails invisibly by inheriting; `background:` fails as invisible text.
+Reason: The advisor's close-out button rendered bone-on-bone at 1.08:1 and nothing in the suite could see it.
+
+### two-filled-buttons-rank-nothing
+Trigger: Today showed "New work order" and "Quick ticket" as two identical solid slabs side by side.
+Rule: One filled control per surface. Everything else is outlined, and the fill says which one the person wants.
+Reason: Equal weight forces the operator to read both labels before deciding, on every visit.
+
+### the-page-behind-must-recede
+Trigger: Cards were painted DARKER than the page, so nothing read as raised and the product looked like one flat plane.
+Rule: Give the canvas its own token, one step darker than the surface content sits on, and light the surface.
+Reason: Figure/ground is the cheapest depth in a design system; inverted, no amount of shadow rescues it.

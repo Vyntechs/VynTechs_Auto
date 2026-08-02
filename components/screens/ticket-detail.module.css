@@ -22,7 +22,7 @@
 
 .identity {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(0, 0.32fr) minmax(0, 1.68fr);
   align-items: end;
   gap: 32px;
   padding-bottom: 24px;
@@ -43,13 +43,23 @@
   text-transform: uppercase;
 }
 
+/* This number is already in the header. Printed a second time at 52px it was a
+   second focal point competing with the only thing that should own the top of
+   the screen — whose truck this is. It is now a stamp. */
 .repairOrder {
+  display: inline-flex;
+  align-items: center;
   margin: 8px 0 0;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bg);
+  box-shadow: var(--vt-lift-1);
+  padding: 6px 10px;
   font-family: var(--vt-font-mono);
-  font-size: clamp(30px, 5vw, 52px);
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
-  line-height: 0.95;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .identityCopy {
@@ -81,9 +91,13 @@
   letter-spacing: 0.02em;
 }
 
+/* The next action belongs to the vehicle above it. At the screen's full column
+   gap it floated in an empty band twice its own height and read as unattached;
+   the negative block margin pulls it back onto the identity block. */
 .actions {
   display: flex;
   justify-content: flex-end;
+  margin-block: calc(-1 * clamp(14px, 2.5vw, 30px));
 }
 
 .quoteAction {
@@ -226,8 +240,11 @@
 }
 
 .provisional {
+  border: var(--vt-stroke-hair);
   border-left: 3px solid var(--vt-signal-500);
-  background: var(--vt-bone-100);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bg);
+  box-shadow: var(--vt-lift-1);
   padding: clamp(20px, 4vw, 32px);
 }
 
@@ -319,21 +336,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The jobs are the working part of this screen, so they are the one thing on it
+   that is raised off the bench. Everything above stays flat editorial type, and
+   the eye lands here. */
 .ledger {
   position: relative;
   margin: 24px 0 0;
-  padding: 0;
+  padding: 20px 22px;
   list-style: none;
-}
-
-.ledger::before {
-  content: '';
-  position: absolute;
-  top: 19px;
-  bottom: 19px;
-  left: 17px;
-  width: 1px;
-  background: var(--vt-signal-500);
+  border: var(--vt-stroke-hair);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bg);
+  box-shadow: var(--vt-lift-1);
 }
 
 .job {
@@ -341,6 +355,23 @@
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   gap: 20px;
+}
+
+/* The spine belongs to the jobs it connects. Drawn once across the whole list
+   it ran past the last badge into empty space; drawn per job and dropped on the
+   last one, it ends exactly where the work does. */
+.job::before {
+  content: '';
+  position: absolute;
+  top: 36px;
+  bottom: -12px;
+  left: 17px;
+  width: 1px;
+  background: var(--vt-signal-500);
+}
+
+.job:last-child::before {
+  content: none;
 }
 
 .job + .job {
@@ -398,15 +429,22 @@
   gap: 6px;
 }
 
+/* A stamp is a fact, not a control. Bordered blue chips sat right beside the
+   real bordered blue buttons on the same row and read as tappable. A stamp now
+   has no border at all: it is a tinted well with a 2px ink edge, and the only
+   bordered thing on a job row is something you can press. */
 .stamp {
-  border: 1px solid var(--vt-rule-strong);
-  border-radius: var(--vt-radius-2);
-  padding: 7px 9px;
+  border: 0;
+  border-left: 2px solid var(--vt-rule-strong);
+  border-radius: 0 var(--vt-radius-1) var(--vt-radius-1) 0;
+  background: var(--vt-surface);
+  padding: 6px 9px;
   color: var(--vt-fg-3);
   font-family: var(--vt-font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -414,25 +452,25 @@
 .stamp[data-state='in_progress'],
 .stamp[data-state='quote_ready'],
 .stamp[data-state='sent'] {
-  border-color: var(--vt-status-active);
-  color: var(--vt-status-active);
+  border-left-color: var(--vt-status-active);
+  color: var(--vt-fg-2);
 }
 
 .stamp[data-state='blocked'] {
-  border-color: var(--vt-risk-high);
+  border-left-color: var(--vt-risk-high);
   background: color-mix(in oklch, var(--vt-risk-high) 14%, var(--vt-bone-50));
-  color: var(--vt-fg-1);
+  color: var(--vt-fg);
 }
 
 .stamp[data-state='done'],
 .stamp[data-state='approved'] {
-  border-color: var(--vt-status-closed);
+  border-left-color: var(--vt-status-closed);
   color: var(--vt-fg-2);
 }
 
 .stamp[data-state='canceled'],
 .stamp[data-state='declined'] {
-  border-color: var(--vt-status-declined);
+  border-left-color: var(--vt-status-declined);
   color: var(--vt-status-declined);
 }
 
@@ -778,7 +816,12 @@
     height: 30px;
   }
 
-  .ledger::before {
+  .ledger {
+    padding: 16px 14px;
+  }
+
+  .job::before {
+    top: 30px;
     left: 14px;
   }
 }

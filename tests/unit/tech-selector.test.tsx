@@ -19,8 +19,8 @@ describe('TechSelector — resting + solo states', () => {
         onChange={onChange}
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
-    expect(trigger).toHaveTextContent(/open queue/i)
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
+    expect(trigger).toHaveTextContent(/nobody yet/i)
 
     fireEvent.keyDown(trigger, { key: 'Enter' })
     fireEvent.keyDown(trigger, { key: 'Enter' })
@@ -34,7 +34,7 @@ describe('TechSelector — resting + solo states', () => {
         onChange={onChange}
       />,
     )
-    const selectedTrigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const selectedTrigger = screen.getByRole('combobox', { name: /who is doing it/i })
     fireEvent.keyDown(selectedTrigger, { key: 'Enter' })
     fireEvent.keyDown(selectedTrigger, { key: 'ArrowDown' })
     expect(selectedTrigger).toHaveAttribute(
@@ -55,7 +55,7 @@ describe('TechSelector — resting + solo states', () => {
     expect(css).toMatch(/\.ts__row--clear\s*\{[\s\S]*?min-height:\s*44px/)
   })
 
-  it('renders an active "Open queue ▾" combobox when team has 2+ members and nothing selected', () => {
+  it('renders an active "Nobody yet ▾" combobox when team has 2+ members and nothing selected', () => {
     render(
       <TechSelector
         currentUserId="a"
@@ -64,9 +64,9 @@ describe('TechSelector — resting + solo states', () => {
         onChange={vi.fn()}
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    expect(trigger).toHaveTextContent(/open queue/i)
+    expect(trigger).toHaveTextContent(/nobody yet/i)
   })
 
   it('renders the selected member name when selectedId is set', () => {
@@ -78,9 +78,9 @@ describe('TechSelector — resting + solo states', () => {
         onChange={vi.fn()}
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     expect(trigger).toHaveTextContent(/diana/i)
-    expect(trigger).not.toHaveTextContent(/open queue/i)
+    expect(trigger).not.toHaveTextContent(/nobody yet/i)
   })
 })
 
@@ -100,7 +100,7 @@ describe('TechSelector — popover', () => {
         onChange={vi.fn()}
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
 
@@ -116,7 +116,7 @@ describe('TechSelector — popover', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     fireEvent.click(trigger)
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     fireEvent.keyDown(trigger, { key: 'Escape' })
@@ -129,7 +129,7 @@ describe('TechSelector — popover', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={onChange} />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     fireEvent.click(screen.getByRole('option', { name: /diana/i }))
     expect(onChange).toHaveBeenCalledWith('b')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
@@ -139,7 +139,7 @@ describe('TechSelector — popover', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     expect(screen.queryByRole('option', { name: /clear/i })).not.toBeInTheDocument()
   })
 
@@ -148,8 +148,8 @@ describe('TechSelector — popover', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId="b" onChange={onChange} />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
-    const clear = screen.getByRole('option', { name: /clear.*open queue/i })
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
+    const clear = screen.getByRole('option', { name: /clear, leave it for anybody/i })
     fireEvent.click(clear)
     expect(onChange).toHaveBeenCalledWith(null)
   })
@@ -161,7 +161,7 @@ describe('TechSelector — popover', () => {
         <button>Outside</button>
       </div>,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     fireEvent.mouseDown(screen.getByRole('button', { name: /outside/i }))
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
@@ -189,7 +189,7 @@ describe('TechSelector — search + workload', () => {
         onChange={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
   })
 
@@ -202,7 +202,7 @@ describe('TechSelector — search + workload', () => {
         onChange={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     const input = screen.getByRole('searchbox')
     fireEvent.change(input, { target: { value: 'di' } })
     const options = screen.getAllByRole('option').filter(
@@ -222,7 +222,7 @@ describe('TechSelector — search + workload', () => {
         onChange={onChange}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     const input = screen.getByRole('searchbox')
     fireEvent.change(input, { target: { value: 'di' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -239,7 +239,7 @@ describe('TechSelector — search + workload', () => {
     render(
       <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     expect(screen.getByText(/3 open/i)).toBeInTheDocument()
     expect(screen.getByText(/1 today/i)).toBeInTheDocument()
     expect(screen.getByText(/5 open/i)).toBeInTheDocument()
@@ -260,7 +260,7 @@ describe('TechSelector — search + workload', () => {
         onChange={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     expect(screen.queryByText(/\d+ open/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/\d+ today/i)).not.toBeInTheDocument()
   })
@@ -273,7 +273,7 @@ describe('TechSelector — search + workload', () => {
     render(
       <TechSelector currentUserId="a" team={team} selectedId={null} onChange={vi.fn()} />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     const brandonBadge = screen.getByText(/5 open/i).closest('.ts__badge')
     const dianaBadge = screen.getByText(/4 open/i).closest('.ts__badge')
     expect(brandonBadge).toHaveClass('ts__badge--busy')
@@ -292,7 +292,7 @@ describe('TechSelector — keyboard', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: 'Enter' })
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
@@ -304,7 +304,7 @@ describe('TechSelector — keyboard', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: ' ' })
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
@@ -314,7 +314,7 @@ describe('TechSelector — keyboard', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: 'Enter' })
     const options = screen.getAllByRole('option')
@@ -330,7 +330,7 @@ describe('TechSelector — keyboard', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={vi.fn()} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: 'Enter' })
     const options = screen.getAllByRole('option')
@@ -343,7 +343,7 @@ describe('TechSelector — keyboard', () => {
     render(
       <TechSelector currentUserId="a" team={TEAM} selectedId={null} onChange={onChange} />,
     )
-    const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+    const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: 'Enter' })
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })

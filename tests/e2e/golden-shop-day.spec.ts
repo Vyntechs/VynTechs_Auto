@@ -152,7 +152,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(advisor, testInfo, 'advisor-found-ticket')
     const quoteEntry = advisorTodayRow.getByRole('button', { name: 'Build quote' })
     await quoteEntry.click()
-    const quoteWorkspace = advisor.getByRole('region', { name: 'Inline quote workspace' })
+    const quoteWorkspace = advisor.getByRole('region', { name: 'Quote for this repair order' })
     await expect(quoteWorkspace).toBeFocused()
     await expect(quoteWorkspace).not.toHaveAttribute('aria-busy', { timeout: 30_000 })
     await expect(advisor.getByRole('heading', { name: 'Build quote' })).toBeVisible()
@@ -273,7 +273,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await declineDialog.getByRole('button', { name: 'Record declined' }).click()
 
     await expect(advisor.getByRole('heading', { name: 'Quote complete' })).toBeVisible()
-    const quoteProof = advisor.getByRole('region', { name: 'Quote workspace', exact: true })
+    const quoteProof = advisor.getByRole('region', { name: 'Quote', exact: true })
     await expect(quoteProof.getByRole('listitem').filter({ hasText: brakeJobTitle }))
       .toContainText('Approved · Version 1')
     await expect(quoteProof.getByRole('listitem').filter({ hasText: tireJobTitle }))
@@ -295,7 +295,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(techDeclinedRow).toBeVisible()
     await expect(techDeclinedRow).toContainText('Declined')
     await expect(techDeclinedRow.getByText('Open work')).toHaveCount(0)
-    await expect(techDeclinedRow.getByRole('link', { name: 'Review work order' })).toBeVisible()
+    await expect(techDeclinedRow.getByRole('link', { name: 'Review repair order' })).toBeVisible()
     await expect(techTodayRow).toContainText('Approved')
     await checkpoint(tech, testInfo, 'tech-board-declined-line-is-not-workable')
 
@@ -358,9 +358,9 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.locator('summary').filter({ hasText: 'Cancel repair order' }).click()
     await owner.getByLabel('Cancellation reason').fill('Customer asked us to pause while they confirm the repair timing.')
     await owner.getByRole('button', { name: 'Cancel repair order' }).click()
-    await expect(owner.getByText('Canceled · Counter intake', { exact: true })).toBeVisible()
+    await expect(owner.getByText('Canceled · Written up', { exact: true })).toBeVisible()
     await owner.getByRole('button', { name: 'Reopen repair order' }).click()
-    await expect(owner.getByText('Open · Counter intake', { exact: true })).toBeVisible()
+    await expect(owner.getByText('Open · Written up', { exact: true })).toBeVisible()
     await expect(owner.getByText('Work · Blocked')).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-cancel-reopen-blocked-work')
 
@@ -437,19 +437,19 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // Paid in full and it still refuses to close, because a declined line is
     // open work. Whole-ticket cancel is no way out either — a payment exists.
     // This is the wall the shop hit, and it had no door until this branch.
-    const closeButton = advisor.getByRole('button', { name: 'Mark paid & close ticket' })
+    const closeButton = advisor.getByRole('button', { name: 'Mark paid and close' })
     await expect(closeButton).toBeEnabled()
     await closeButton.click()
     await expect(ringOut.getByRole('alert'))
       .toHaveText('Finish or cancel every work item before closing this repair order.')
-    await expect(advisor.getByText('Closed · Counter intake', { exact: true })).toHaveCount(0)
+    await expect(advisor.getByText('Closed · Written up', { exact: true })).toHaveCount(0)
     await checkpoint(advisor, testInfo, 'advisor-close-blocked-by-declined-line')
 
     // Retiring the line is the counter acting on the decision it already
     // recorded — one job, not the whole repair order, with the money already
     // collected.
-    await advisor.getByRole('button', { name: 'Retire declined work' }).click()
-    await expect(advisor.getByText('Declined work retired.')).toBeVisible()
+    await advisor.getByRole('button', { name: 'Not doing this one' }).click()
+    await expect(advisor.getByText('Dropped. The customer said no to this one.')).toBeVisible()
     await checkpoint(advisor, testInfo, 'advisor-retired-declined-line')
 
     // With the refused line off the floor the repair order finally reaches the
@@ -463,7 +463,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
     // Named, enabled, and no longer "Closing…": the payment landed and the
     // balance it reported is zero.
-    const boardCloseButton = advisor.getByRole('button', { name: 'Mark paid & close ticket' })
+    const boardCloseButton = advisor.getByRole('button', { name: 'Mark paid and close' })
     await expect(boardCloseButton).toBeEnabled()
     await boardCloseButton.click()
     await expect(advisor.getByRole('status').filter({
@@ -474,7 +474,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(advisor, testInfo, 'advisor-closed-ticket')
 
     await owner.goto(path)
-    await expect(owner.getByText('Closed · Counter intake', { exact: true })).toBeVisible()
+    await expect(owner.getByText('Closed · Written up', { exact: true })).toBeVisible()
     await expect(owner.getByRole('heading', { name: 'Receipt' })).toBeVisible()
     await owner.goto('/today')
     await expect(owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)

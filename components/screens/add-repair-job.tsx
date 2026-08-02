@@ -76,7 +76,7 @@ export function AddRepairJob({
       <div className="vt-form__group-label">
         <span className="vt-form__group-name">Add repair</span>
         <span className="vt-form__group-hint">
-          Adds a new approvable job. Price it with its own part, labor and fee lines.
+          Adds a job the customer can say yes to. Price it with its own parts, labor and fees.
         </span>
       </div>
       <form className="vt-form__group-fields" onSubmit={submit}>

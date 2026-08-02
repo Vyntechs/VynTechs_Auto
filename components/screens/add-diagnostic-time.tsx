@@ -83,7 +83,7 @@ export function AddDiagnosticTime({
       <div className="vt-form__group-label">
         <span className="vt-form__group-name">Add diagnostic time</span>
         <span className="vt-form__group-hint">
-          Adds a new approvable job. It never edits the in-progress diagnosis.
+          Adds a job the customer can say yes to. It never touches work already under way.
         </span>
       </div>
       <form className="vt-form__group-fields" onSubmit={submit}>

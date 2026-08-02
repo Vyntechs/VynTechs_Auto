@@ -1,5 +1,5 @@
 const STEPS = [
-  ['1', 'Capture it once', 'Counter intake creates the customer, vehicle, concern, and work order without asking the bay to retype it.', 'intake'],
+  ['1', 'Capture it once', 'Writing it up once creates the customer, vehicle, concern, and repair order, so nobody retypes it.', 'intake'],
   ['2', 'Put an owner on the work', 'Assignments and skill tiers make the next responsible person visible without a side conversation.', 'assign'],
   ['3', 'Move the same record forward', 'Manual findings, text work notes, quotes, approvals, and status changes stay attached to the work.', 'finish'],
 ] as const

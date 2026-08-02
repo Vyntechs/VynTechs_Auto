@@ -152,13 +152,13 @@ describe('living repair order next-move projection', () => {
       role: 'advisor',
       jobs: done,
       ringOut: { balanceCents: 12500, canClose: false },
-    }).primary).toMatchObject({ kind: 'ring_out', label: 'Collect & close' })
+    }).primary).toMatchObject({ kind: 'ring_out', label: 'Take payment' })
 
     expect(project({
       role: 'owner',
       jobs: done,
       ringOut: { balanceCents: 0, canClose: true },
-    }).primary).toMatchObject({ kind: 'close', label: 'Close repair order' })
+    }).primary).toMatchObject({ kind: 'close', label: 'Close it out' })
 
     expect(project({
       role: 'tech',
@@ -186,7 +186,7 @@ describe('living repair order next-move projection', () => {
       expect(project({ role, skillTier: null, jobs: declined }).primary).toMatchObject({
         kind: 'cancel_job',
         jobId: '00000000-0000-0000-0000-000000000201',
-        label: 'Retire declined work',
+        label: 'Not doing this one',
       })
     }
 

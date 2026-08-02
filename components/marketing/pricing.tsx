@@ -1,9 +1,9 @@
 type PricingProps = { isSignedIn: boolean }
 
 const INCLUSIONS = [
-  ['Work orders', 'Counter and quick-ticket intake feed one durable repair record.'],
+  ['Repair orders', 'The write-up and the quick ticket both feed one lasting record.'],
   ['Assignments and job flow', 'Give work a clear owner and keep its current state visible.'],
-  ['Manual findings and text work notes', 'Record the bay truth without requiring an automated engine.'],
+  ['Manual findings and text work notes', 'Record what the technician actually found, with no automated engine required.'],
   ['Quotes and authorization', 'Build work lines and keep the customer decision with the job.'],
   ['Vehicle and customer facts', 'Keep the identity needed to run the repair order accurately.'],
 ] as const

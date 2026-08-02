@@ -16,7 +16,7 @@ export function Hero({ isSignedIn }: HeroProps) {
           The repair order that keeps the whole shop moving.
         </h1>
         <p className="vm-hero-sub">
-          One living repair order connects the counter, the bay, and the
+          One repair order connects the write-up, the technician, and the
           customer decision. Capture the concern once, assign the work, record
           manual findings or text work notes, build the quote, and move the job
           forward without rebuilding the story on every screen.

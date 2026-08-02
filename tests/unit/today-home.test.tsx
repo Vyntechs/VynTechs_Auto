@@ -136,7 +136,7 @@ describe('TodayHome', () => {
       <TodayHome techName="Brandon" inProgress={[]} closedToday={[]} />,
     )
     expect(screen.queryByRole('link', { name: /new diagnosis/i })).toBeNull()
-    expect(screen.getByText(/new work orders and quick tickets appear here/i)).toBeInTheDocument()
+    expect(screen.getByText(/new repair orders and quick tickets show up here/i)).toBeInTheDocument()
   })
 
   it('renders modules in order: In-progress → Check-ins → Closed today', () => {
@@ -170,7 +170,7 @@ describe('TodayHome', () => {
       />,
     )
 
-    expect(screen.getByRole('region', { name: 'Ticket jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Work in the shop' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'My work' })).toBeInTheDocument()
     expect(screen.getByText('Trace intermittent no-start')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Available' })).toBeInTheDocument()
@@ -250,7 +250,7 @@ describe('TodayHome', () => {
       />,
     )
 
-    expect(screen.getByText('My Jobs')).toBeInTheDocument()
+    expect(screen.getAllByText('My work').length).toBeGreaterThan(0)
     expect(screen.queryByRole('heading', { name: 'With the team' })).toBeNull()
     expect(screen.queryByText('Avery Tech')).toBeNull()
   })
@@ -452,7 +452,7 @@ describe('TodayHome', () => {
       />,
     )
 
-    expect(screen.getByRole('link', { name: 'New work order' })).toHaveAttribute('href', '/intake')
+    expect(screen.getByRole('link', { name: 'New repair order' })).toHaveAttribute('href', '/intake')
     expect(screen.getByRole('link', { name: 'Quick ticket' })).toHaveAttribute('href', '/tickets/new')
     expect(screen.getByRole('link', { name: 'Record findings' })).toHaveAttribute(
       'href',

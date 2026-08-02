@@ -9,7 +9,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }))
 
-import { CounterIntake } from '@/components/screens/counter-intake'
+import { WriteUp } from '@/components/screens/write-up'
 
 const diagnosticTemplate = {
   id: '11111111-1111-4111-8111-111111111111', title: 'Initial diagnosis', kind: 'diagnostic' as const,
@@ -33,7 +33,7 @@ function fillRequiredNewVehicle() {
   fireEvent.change(screen.getByLabelText(/what brought them in/i), { target: { value: 'Warning light' } })
 }
 
-describe('CounterIntake', () => {
+describe('WriteUp', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
@@ -51,17 +51,17 @@ describe('CounterIntake', () => {
   })
 
   it('renders the screen title', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
-    expect(screen.getByRole('heading', { name: /who's at the counter/i })).toBeInTheDocument()
+    render(<WriteUp userEmail="test@example.com" />)
+    expect(screen.getByRole('heading', { name: /who's the customer/i })).toBeInTheDocument()
   })
 
   it('defaults to the shop diagnostic authorization and submits its exact immutable identity', async () => {
-    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText(/diagnostic labor/i)).toHaveValue(diagnosticTemplate.id)
     expect(screen.queryByLabelText(/customer-supplied item/i)).toBeNull()
     fillRequiredNewVehicle()
-    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    fireEvent.submit(document.getElementById('write-up-form')!)
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
     expect(body.work).toEqual({
@@ -73,14 +73,14 @@ describe('CounterIntake', () => {
   })
 
   it('keeps customer-supplied truth only in known work and submits the selected saved scope once', async () => {
-    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
     expect(screen.getByLabelText(/work to perform/i)).toHaveValue(knownTemplate.id)
     fireEvent.change(screen.getByLabelText(/customer-supplied item/i), {
       target: { value: ' Customer supplied unopened lift kit. ' },
     })
     fillRequiredNewVehicle()
-    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    fireEvent.submit(document.getElementById('write-up-form')!)
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
     expect(body.work).toEqual({
@@ -93,7 +93,7 @@ describe('CounterIntake', () => {
   })
 
   it('submits a writer-typed custom diagnostic labor line as diagnosis-manual', async () => {
-    render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.change(screen.getByLabelText(/diagnostic labor/i), { target: { value: 'custom' } })
     fireEvent.change(screen.getByLabelText(/^description$/i), {
@@ -102,7 +102,7 @@ describe('CounterIntake', () => {
     fireEvent.change(screen.getByLabelText(/^hours$/i), { target: { value: '2.5' } })
     fireEvent.change(screen.getByLabelText(/^price/i), { target: { value: '187.50' } })
     fillRequiredNewVehicle()
-    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    fireEvent.submit(document.getElementById('write-up-form')!)
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]
     expect(url).toBe('/api/tickets/counter')
@@ -117,7 +117,7 @@ describe('CounterIntake', () => {
 
   it('protects the counter form at 375px with a single-column responsive contract and 44px controls', () => {
     const css = readFileSync(
-      resolve(process.cwd(), 'components/screens/counter-intake.module.css'),
+      resolve(process.cwd(), 'components/screens/write-up.module.css'),
       'utf8',
     )
     const allWidths = css.slice(0, css.indexOf('@media'))
@@ -140,7 +140,7 @@ describe('CounterIntake', () => {
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/phone/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
@@ -157,21 +157,21 @@ describe('CounterIntake', () => {
   // to reveal a different control. Writing up one truck should be one section.
   describe('the complaint reads as a single section', () => {
     it('asks for the customer story once instead of splitting it across three boxes', () => {
-      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       expect(screen.getByLabelText(/what brought them in/i)).toBeInTheDocument()
       expect(screen.queryByLabelText(/when did it start/i)).not.toBeInTheDocument()
       expect(screen.queryByLabelText(/how often/i)).not.toBeInTheDocument()
     })
 
     it('never asks where the scope is coming from, in either intent', () => {
-      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
       expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
     })
 
     it('reveals typed known work from the same dropdown that lists saved work', () => {
-      render(<CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
       expect(screen.queryByLabelText(/^requested work$/i)).not.toBeInTheDocument()
 
@@ -181,7 +181,7 @@ describe('CounterIntake', () => {
 
     it('leaves the whole complaint under one heading', () => {
       const { container } = render(
-        <CounterIntake cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />,
+        <WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />,
       )
       const headings = Array.from(container.querySelectorAll('.vt-form__group-name'))
         .map((node) => node.textContent)
@@ -193,7 +193,7 @@ describe('CounterIntake', () => {
   })
 
   it('auto-uppercases VIN as the writer types', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     const vin = screen.getByLabelText(/vin/i) as HTMLInputElement
     fireEvent.change(vin, { target: { value: 'wba3a5c50ejf12345' } })
     expect(vin.value).toBe('WBA3A5C50EJF12345')
@@ -204,7 +204,7 @@ describe('CounterIntake', () => {
       ok: true,
       json: async () => ({ year: 2014, make: 'BMW', model: '335i', engine: 'N55' }),
     } as Response)
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
 
     const decode = screen.getByRole('button', { name: /decode vin/i })
     expect(decode).toBeDisabled()
@@ -242,7 +242,7 @@ describe('CounterIntake', () => {
       ok: true,
       json: async () => ({ error }),
     } as Response)
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^vin$/i), {
       target: { value: 'WBA3A5C50EJF12345' },
     })
@@ -254,7 +254,7 @@ describe('CounterIntake', () => {
   })
 
   it('does not claim VIN fields auto-fill before a successful decode', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(screen.queryByText(/vin auto-fills/i)).not.toBeInTheDocument()
   })
 
@@ -264,14 +264,14 @@ describe('CounterIntake', () => {
   // claimed persistence the form does not have. Both fakes removed.
   // docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
   it('does not render a fake "Scan with camera" button (no real camera scan exists)', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(
       screen.queryByRole('button', { name: /scan with camera/i }),
     ).not.toBeInTheDocument()
   })
 
   it('does not claim the form is auto-saved (no draft persistence exists)', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     expect(screen.queryByText(/auto-saved/i)).not.toBeInTheDocument()
   })
 
@@ -281,14 +281,14 @@ describe('CounterIntake', () => {
   // focus move, on a form long enough that the missing field was off-screen.
   // A dead control that explains nothing is the defect.
   it('never leaves the writer tapping a dead Create repair order button', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     expect(submits.length).toBeGreaterThan(0)
     submits.forEach((btn) => expect(btn).toBeEnabled())
   })
 
   it('names and focuses the complaint when it is the only thing missing', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
@@ -309,7 +309,7 @@ describe('CounterIntake', () => {
   })
 
   it('names and focuses the phone when a new customer has no number yet', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
     fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Chevrolet' } })
@@ -329,7 +329,7 @@ describe('CounterIntake', () => {
   })
 
   it('names and focuses the requested work when known work is chosen and it is blank', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
@@ -348,8 +348,8 @@ describe('CounterIntake', () => {
   })
 
   it('calls Requested work required, because the counter route rejects it empty', () => {
-    render(<CounterIntake userEmail="test@example.com" />)
-    expect(screen.getByText(/^Required · 200 characters maximum/)).toBeInTheDocument()
+    render(<WriteUp userEmail="test@example.com" />)
+    expect(screen.getByText(/^Required\. This becomes the one job/)).toBeInTheDocument()
     expect(screen.queryByText(/^Optional — becomes/)).toBeNull()
   })
 
@@ -357,7 +357,7 @@ describe('CounterIntake', () => {
     // Real PR-27 preview bug: previously required VIN at the UI gate even
     // though /api/intake/submit doesn't. Counter staff with no VIN in hand
     // were locked out with no hint why.
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
     expect(screen.getByRole('alert')).toHaveTextContent('Add the customer’s name.')
 
@@ -380,7 +380,7 @@ describe('CounterIntake', () => {
   })
 
   it('submits with Command-Enter from the complaint without bypassing the form gate', async () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     const complaint = screen.getByLabelText(/what brought them in/i)
 
     fireEvent.keyDown(complaint, { key: 'Enter', metaKey: true })
@@ -401,20 +401,20 @@ describe('CounterIntake', () => {
   })
 
   it('shows the logged-in user email in the top bar (not the old "Diana" placeholder)', () => {
-    render(<CounterIntake userEmail="brandon@vyntechs.com" />)
+    render(<WriteUp userEmail="brandon@vyntechs.com" />)
     expect(screen.getByText('brandon@vyntechs.com')).toBeInTheDocument()
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
   it('soft-fails to "—" in the top bar when no userEmail is supplied (no crash, no build break)', () => {
-    render(<CounterIntake />)
+    render(<WriteUp />)
     // Two dashes render: one in the avatar circle, one in the name span.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
   it('POSTs the exact new-vehicle ticket body with requested work and no dormant diagnostic fields, then navigates to the ticket', async () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '(303) 555-0142' } })
     fireEvent.change(screen.getByLabelText(/vin/i), { target: { value: 'WBA3A5C50EJF12345' } })
@@ -431,7 +431,7 @@ describe('CounterIntake', () => {
       target: { value: 'repair' },
     })
 
-    fireEvent.submit(document.getElementById('counter-intake-form')!)
+    fireEvent.submit(document.getElementById('write-up-form')!)
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
@@ -478,7 +478,7 @@ describe('CounterIntake', () => {
   })
 
   it('sends numeric year and mileage with an explicit known-work scope', async () => {
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
@@ -507,7 +507,7 @@ describe('CounterIntake', () => {
       ok: false,
       json: async () => ({ error: 'not_found' }),
     } as Response)
-    render(<CounterIntake userEmail="test@example.com" />)
+    render(<WriteUp userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
@@ -547,7 +547,7 @@ describe('CounterIntake', () => {
       } as Response)
 
     render(
-      <CounterIntake
+      <WriteUp
         userEmail="brandon@example.com"
         team={[
           {
@@ -561,7 +561,7 @@ describe('CounterIntake', () => {
         ]}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+    fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
     fireEvent.click(screen.getByRole('option', { name: /diana/i }))
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
@@ -624,27 +624,27 @@ describe('CounterIntake', () => {
 
     it('defaults a one-member roster to Open and lets the writer assign then clear the sole profile', () => {
       render(
-        <CounterIntake
+        <WriteUp
           userEmail="brandon@example.com"
           team={team({ id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true })}
           workloadFailed={false}
         />,
       )
-      const trigger = screen.getByRole('combobox', { name: /assigned to/i })
-      expect(trigger).toHaveTextContent(/open queue/i)
+      const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
+      expect(trigger).toHaveTextContent(/nobody yet/i)
 
       fireEvent.click(trigger)
       fireEvent.click(screen.getByRole('option', { name: /brandon/i }))
       expect(trigger).toHaveTextContent(/brandon/i)
 
       fireEvent.click(trigger)
-      fireEvent.click(screen.getByRole('option', { name: /clear.*open queue/i }))
-      expect(trigger).toHaveTextContent(/open queue/i)
+      fireEvent.click(screen.getByRole('option', { name: /clear, leave it for anybody/i }))
+      expect(trigger).toHaveTextContent(/nobody yet/i)
     })
 
     it('renders compact A/B/C skill labels for the wrenching roster', () => {
       render(
-        <CounterIntake
+        <WriteUp
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Alice', skillTier: 3, isCurrentUser: true },
@@ -655,7 +655,7 @@ describe('CounterIntake', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+      fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
       expect(screen.getByRole('option', { name: /alice/i })).toHaveTextContent('A')
       expect(screen.getByRole('option', { name: /bob/i })).toHaveTextContent('B')
       expect(screen.getByRole('option', { name: /charlie/i })).toHaveTextContent('C')
@@ -663,7 +663,7 @@ describe('CounterIntake', () => {
 
     it('sends assignedTechId: null in the submit body when nothing is picked', async () => {
       render(
-        <CounterIntake
+        <WriteUp
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
@@ -685,7 +685,7 @@ describe('CounterIntake', () => {
 
     it('sends the picked assignedTechId in the submit body', async () => {
       render(
-        <CounterIntake
+        <WriteUp
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
@@ -694,7 +694,7 @@ describe('CounterIntake', () => {
           workloadFailed={false}
         />,
       )
-      fireEvent.click(screen.getByRole('combobox', { name: /assigned to/i }))
+      fireEvent.click(screen.getByRole('combobox', { name: /who is doing it/i }))
       fireEvent.click(screen.getByRole('option', { name: /diana/i }))
       fillRequired()
       fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
@@ -708,14 +708,14 @@ describe('CounterIntake', () => {
     })
 
     it('omits the pill entirely when team is empty (existing-tests safety)', () => {
-      render(<CounterIntake userEmail="brandon@example.com" />)
-      expect(screen.queryByRole('group', { name: /assigned to/i })).not.toBeInTheDocument()
-      expect(screen.queryByRole('combobox', { name: /assigned to/i })).not.toBeInTheDocument()
+      render(<WriteUp userEmail="brandon@example.com" />)
+      expect(screen.queryByRole('group', { name: /who is doing it/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: /who is doing it/i })).not.toBeInTheDocument()
     })
 
     it('lets a non-wrenching counter owner assign from a populated technician roster', () => {
       render(
-        <CounterIntake
+        <WriteUp
           userEmail="owner@example.com"
           team={team(
             { id: 'a', name: 'Alice', skillTier: 3 },
@@ -724,7 +724,7 @@ describe('CounterIntake', () => {
         />,
       )
 
-      const trigger = screen.getByRole('combobox', { name: /assigned to/i })
+      const trigger = screen.getByRole('combobox', { name: /who is doing it/i })
       fireEvent.click(trigger)
       fireEvent.click(screen.getByRole('option', { name: /alice/i }))
       expect(trigger).toHaveTextContent(/alice/i)

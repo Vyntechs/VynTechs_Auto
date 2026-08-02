@@ -56,7 +56,7 @@ describe('TicketInterruptionAction', () => {
         onApplied={onApplied}
       />,
     )
-    await user.click(screen.getByRole('button', { name: 'Retire declined work' }))
+    await user.click(screen.getByRole('button', { name: 'Not doing this one' }))
 
     expect(fetchMock).toHaveBeenCalledWith('/api/tickets/ticket-1/jobs/job-2/interruption', expect.objectContaining({
       method: 'POST',
@@ -65,6 +65,6 @@ describe('TicketInterruptionAction', () => {
     expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({
       id: 'job-2', workStatus: 'canceled',
     }))
-    expect(screen.getByRole('status')).toHaveTextContent('Declined work retired.')
+    expect(screen.getByRole('status')).toHaveTextContent('Dropped. The customer said no to this one.')
   })
 })

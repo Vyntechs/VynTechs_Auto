@@ -72,19 +72,25 @@ const titleCase: Record<TodayTicketJob['kind'], string> = {
 }
 
 const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
-  open: 'Open',
-  in_progress: 'In progress',
-  blocked: 'Blocked',
+  open: 'Not started',
+  in_progress: 'Being worked',
+  blocked: 'On hold',
 }
 
 const approvalLabel: Record<TodayTicketJob['approvalState'], string> = {
-  pending_quote: 'Not quoted',
-  quote_ready: 'Quote ready',
-  sent: 'Quote sent',
-  approved: 'Approved',
-  declined: 'Declined',
-  deferred: 'Deferred',
+  pending_quote: 'No price yet',
+  quote_ready: 'Priced',
+  sent: 'Sent to customer',
+  approved: 'Customer said yes',
+  declined: 'Customer said no',
+  deferred: 'Customer said later',
 }
+
+// The shop says A-tech, B-tech, C-tech out loud. "Tier 3" is a column name.
+const tierLabel: Record<number, string> = { 3: 'A-tech', 2: 'B-tech', 1: 'C-tech' }
+
+// The three states where the customer has actually answered.
+const DECIDED = new Set<TodayTicketJob['approvalState']>(['approved', 'declined', 'deferred'])
 
 export function TodayJobsBoard({
   myJobs,
@@ -245,7 +251,7 @@ export function TodayJobsBoard({
     let returnFocusToRow = false
 
     setPendingJobId(job.id)
-    setAnnouncement({ kind: 'status', text: `Claiming ticket ${job.ticketNumber}.` })
+    setAnnouncement({ kind: 'status', text: `Claiming repair order ${job.ticketNumber}.` })
 
     try {
       const response = await fetch(
@@ -267,7 +273,7 @@ export function TodayJobsBoard({
           applyJobTruth(job, { ...job, canClaim: false })
           setAnnouncement({
             kind: 'error',
-            text: `Ticket ${job.ticketNumber} changed, but this screen couldn't safely reconcile it. View the ticket.`,
+            text: `Repair order ${job.ticketNumber} changed, but this screen couldn't safely catch up. Open the repair order.`,
           })
           returnFocusToRow = true
           return
@@ -284,8 +290,8 @@ export function TodayJobsBoard({
         setAnnouncement({
           kind: 'status',
           text: assignment.state === 'mine'
-            ? `Ticket ${job.ticketNumber} claimed.`
-            : `Ticket ${job.ticketNumber} assignment updated.`,
+            ? `Repair order ${job.ticketNumber} claimed.`
+            : `Repair order ${job.ticketNumber} assignment updated.`,
         })
         const lane = placeTodayJob(updatedJob, canDispatchWork)
         returnFocusToBoard = lane === 'hidden'
@@ -352,7 +358,7 @@ export function TodayJobsBoard({
     if (pendingJobId) return
 
     setPendingJobId(job.id)
-    setAnnouncement({ kind: 'status', text: `Marking parts found for ticket ${job.ticketNumber}.` })
+    setAnnouncement({ kind: 'status', text: `Marking parts found for repair order ${job.ticketNumber}.` })
     try {
       const response = await fetch(
         `/api/tickets/${job.ticketId}/part-requests/${request.id}`,
@@ -368,12 +374,12 @@ export function TodayJobsBoard({
         throw new Error('part_request_not_resolved')
       }
       setResolvedPartRequests((current) => new Map(current).set(job.id, request.id))
-      setAnnouncement({ kind: 'status', text: `Parts found for ticket ${job.ticketNumber}.` })
+      setAnnouncement({ kind: 'status', text: `Parts found for repair order ${job.ticketNumber}.` })
       void refreshTodayJobs()
     } catch {
       setAnnouncement({
         kind: 'error',
-        text: `Couldn't mark parts found for ticket ${job.ticketNumber}. Try again.`,
+        text: `Couldn't mark parts found for repair order ${job.ticketNumber}. Try again.`,
       })
     } finally {
       setPendingJobId(null)
@@ -489,7 +495,7 @@ export function TodayJobsBoard({
       createdJobs: current.createdJobs.map(update),
       partsJobs: current.partsJobs.map(update),
     }))
-    setAnnouncement({ kind: 'status', text: `Hold resolved for ticket ${job.ticketNumber}.` })
+    setAnnouncement({ kind: 'status', text: `Hold resolved for repair order ${job.ticketNumber}.` })
     void refreshTodayJobs()
   }
 
@@ -508,7 +514,7 @@ export function TodayJobsBoard({
     }))
     activeWorkspaceRef.current = false
     setActiveWorkJob(null)
-    setAnnouncement({ kind: 'status', text: `Work on hold for ticket ${job.ticketNumber}.` })
+    setAnnouncement({ kind: 'status', text: `Work on hold for repair order ${job.ticketNumber}.` })
     setFocusRequest({ kind: 'row', jobId: job.id })
     void refreshTodayJobs()
   }
@@ -549,7 +555,7 @@ export function TodayJobsBoard({
     setActiveRingOutTicketId(null)
     setAnnouncement({
       kind: 'status',
-      text: `Ticket ${card.ticketNumber} is closed and off the board.`,
+      text: `Repair order ${card.ticketNumber} is closed and off the board.`,
     })
     setFocusRequest({ kind: 'board', jobId: card.ticketId })
   }
@@ -565,8 +571,8 @@ export function TodayJobsBoard({
     setAnnouncement({
       kind: 'status',
       text: statusOnly
-        ? `Checking diagnosis status for ticket ${job.ticketNumber}.`
-        : `Starting diagnosis for ticket ${job.ticketNumber}.`,
+        ? `Checking diagnosis status for repair order ${job.ticketNumber}.`
+        : `Starting diagnosis for repair order ${job.ticketNumber}.`,
     })
 
     try {
@@ -598,7 +604,7 @@ export function TodayJobsBoard({
         })
         setAnnouncement({
           kind: 'status',
-          text: `Diagnosis ready for ticket ${job.ticketNumber}. Opening now.`,
+          text: `Diagnosis ready for repair order ${job.ticketNumber}. Opening now.`,
         })
         router.push(`/sessions/${body.sessionId}`)
         return
@@ -645,7 +651,7 @@ export function TodayJobsBoard({
         ))
         setAnnouncement({
           kind: 'status',
-          text: `Diagnosis start for ticket ${job.ticketNumber} needs confirmation.`,
+          text: `Diagnosis start for repair order ${job.ticketNumber} needs confirmation.`,
         })
         return
       }
@@ -659,7 +665,7 @@ export function TodayJobsBoard({
     } catch {
       setAnnouncement({
         kind: 'error',
-        text: `Couldn't start diagnosis for ticket ${job.ticketNumber}. Try again.`,
+        text: `Couldn't start diagnosis for repair order ${job.ticketNumber}. Try again.`,
       })
     } finally {
       setPendingDiagnosticJobId(null)
@@ -685,7 +691,7 @@ export function TodayJobsBoard({
     <section
       ref={boardRef}
       className={styles.board}
-      aria-label="Ticket jobs"
+      aria-label="Work in the shop"
       tabIndex={-1}
       data-empty={
         board.mine.length === 0 &&
@@ -877,14 +883,14 @@ function ReadyToCollectSection({
             <div key={card.ticketId} className={styles.jobSlot}>
               <article
                 className={styles.row}
-                aria-label={`Ticket ${card.ticketNumber}: ready to collect`}
+                aria-label={`Repair order ${card.ticketNumber}: ready to collect`}
                 data-job-id={card.ticketId}
                 tabIndex={-1}
               >
                 <Link
                   href={`/tickets/${card.ticketId}`}
                   className={styles.ticketStamp}
-                  aria-label={`Open ticket ${card.ticketNumber}`}
+                  aria-label={`Open repair order ${card.ticketNumber}`}
                 >
                   #{String(card.ticketNumber).padStart(4, '0')}
                 </Link>
@@ -915,7 +921,7 @@ function ReadyToCollectSection({
                     {open
                       ? 'Close panel'
                       : owes
-                        ? 'Collect & close'
+                        ? 'Take payment and close'
                         : 'Close repair order'}
                   </button>
                 </div>
@@ -1161,14 +1167,14 @@ function JobRow({
   return (
     <article
       className={styles.row}
-      aria-label={`Ticket ${job.ticketNumber}: ${job.title}`}
+      aria-label={`Repair order ${job.ticketNumber}: ${job.title}`}
       data-job-id={job.id}
       tabIndex={-1}
     >
       <Link
         href={`/tickets/${job.ticketId}`}
         className={styles.ticketStamp}
-        aria-label={`Open ticket ${job.ticketNumber}`}
+        aria-label={`Open repair order ${job.ticketNumber}`}
       >
         #{String(job.ticketNumber).padStart(4, '0')}
       </Link>
@@ -1187,9 +1193,14 @@ function JobRow({
         )}
         <div className={styles.facts}>
           <span>{titleCase[job.kind]}</span>
-          <span>Tier {job.requiredSkillTier}</span>
+          <span>{tierLabel[job.requiredSkillTier] ?? `Tier ${job.requiredSkillTier}`}</span>
           <span>{statusLabel[job.workStatus]}</span>
-          <span>{approvalLabel[job.approvalState]}</span>
+          {/* Four facts at one weight rank nothing. The customer's answer is the
+              only one that changes what you do next, so it is the only one that
+              gets ink. */}
+          <span data-decision={DECIDED.has(job.approvalState) ? job.approvalState : undefined}>
+            {approvalLabel[job.approvalState]}
+          </span>
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
           )}
@@ -1349,7 +1360,7 @@ function SimpleWorkAction({
         : `/tickets/${job.ticketId}`}
       className={`${styles.control} ${workAvailable ? styles.openDiagnosis : styles.secondary}`}
     >
-      {workAvailable ? 'Open work' : job.workStatus === 'blocked' ? 'Review blocked work' : 'Review work order'}
+      {workAvailable ? 'Open work' : job.workStatus === 'blocked' ? 'Review blocked work' : 'Review repair order'}
     </Link>
   )
 }

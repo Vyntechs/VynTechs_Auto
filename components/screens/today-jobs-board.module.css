@@ -1,6 +1,10 @@
+/* The board is one object resting on the bench, not a region of the page. */
 .board {
   border: var(--vt-stroke-hair);
+  border-radius: var(--vt-radius-2);
   background: var(--vt-bg);
+  box-shadow: var(--vt-lift-1);
+  overflow: hidden;
 }
 
 .board[data-empty='true'] {
@@ -16,6 +20,8 @@
   border-top: var(--vt-stroke-strong);
 }
 
+/* Pressed into the board, so the rows above it read as raised by comparison.
+   This is the only place on the board that is darker than its surroundings. */
 .groupHeader {
   display: flex;
   align-items: baseline;
@@ -25,6 +31,7 @@
   padding: var(--vt-space-3) var(--vt-space-4);
   border-bottom: var(--vt-stroke-hair);
   background: var(--vt-surface);
+  box-shadow: var(--vt-lift-in);
 }
 
 .heading,
@@ -52,9 +59,12 @@
   font-family: var(--vt-font-mono);
 }
 
+/* A revealed tool opens into the row rather than floating over it: the well is
+   pressed in, and the tool inside it keeps the lit surface. */
 .workspacePanel {
   border-top: var(--vt-stroke-strong);
   background: var(--vt-surface);
+  box-shadow: var(--vt-lift-in);
 }
 
 .heading {
@@ -84,6 +94,9 @@
   border-bottom: 0;
 }
 
+/* The signature of this board: the repair-order number lives on a physical tab
+   cut into the left edge of every row, recessed and ruled, so the eye can run
+   the column of numbers without reading a single word. */
 .ticketStamp {
   display: flex;
   align-items: flex-start;
@@ -92,15 +105,20 @@
   min-width: 0;
   padding: var(--vt-space-5) var(--vt-space-2);
   border-right: var(--vt-stroke-hair);
+  background: var(--vt-surface);
+  box-shadow: inset -1px 0 2px -1px oklch(38% 0.03 70 / 0.10);
   color: var(--vt-accent);
   font-size: var(--vt-fs-12);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-decoration: none;
-  transition: color var(--vt-dur-1) var(--vt-ease);
+  transition:
+    color var(--vt-dur-1) var(--vt-ease),
+    background var(--vt-dur-1) var(--vt-ease);
 }
 
 .ticketStamp:hover {
+  background: var(--vt-bg);
   color: var(--vt-accent-hover);
 }
 
@@ -141,6 +159,16 @@
 .facts span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* The customer's answer carries weight; the rest of the line stays quiet. */
+.facts span[data-decision] {
+  color: var(--vt-fg);
+  font-weight: 700;
+}
+
+.facts span[data-decision='declined'] {
+  color: var(--vt-status-declined);
 }
 
 .facts span + span::before {
@@ -264,15 +292,48 @@
   line-height: var(--vt-lh-normal);
 }
 
+/* Phone is the primary target and a row used to cost about 190px, so a
+   technician saw two of them before the fold. Trimming the paddings and the
+   gaps between the three lines gets a third row on screen without shrinking a
+   single tap target — the control keeps its 44px. */
 @media (max-width: 680px) {
   .row {
     grid-template-columns: 58px minmax(0, 1fr);
   }
 
+  /* The number tab runs the whole height of the row. Left to one implicit row
+     it stopped at the title and the row broke in half under it. */
+  .ticketStamp {
+    grid-row: 1 / -1;
+    padding: var(--vt-space-3) var(--vt-space-2);
+  }
+
+  /* On a wrapped fact line the interpunct lands at the start of the new line
+     and reads as a bullet. Wider column gap does the separating instead. */
+  .facts {
+    gap: var(--vt-space-1) var(--vt-space-4);
+  }
+
+  .facts span + span::before {
+    content: none;
+  }
+
+  .details {
+    padding: var(--vt-space-3) var(--vt-space-4);
+  }
+
+  .title {
+    margin-top: var(--vt-space-1);
+  }
+
+  .facts {
+    margin-top: var(--vt-space-2);
+  }
+
   .action {
     grid-column: 2;
     justify-content: flex-start;
-    padding: 0 var(--vt-space-4) var(--vt-space-4);
+    padding: 0 var(--vt-space-4) var(--vt-space-3);
   }
 }
 
@@ -282,10 +343,12 @@
   }
 
   .ticketStamp {
+    grid-row: auto;
     justify-content: flex-start;
     padding: var(--vt-space-3);
     border-right: 0;
     border-bottom: var(--vt-stroke-hair);
+    box-shadow: inset 0 -1px 2px -1px oklch(38% 0.03 70 / 0.10);
   }
 
   .details {

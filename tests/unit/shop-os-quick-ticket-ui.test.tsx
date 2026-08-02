@@ -150,7 +150,7 @@ describe('QuickTicket', () => {
 
     expect(screen.getByRole('heading', { name: 'Quick quote' })).toBeInTheDocument()
     expect(screen.getByText(/nothing is prepared, sent, approved, or started here/i)).toBeInTheDocument()
-    expect(screen.getByText(/manual capture creates an incomplete draft/i)).toBeInTheDocument()
+    expect(screen.getByText(/typing it in starts the repair order with no prices/i)).toBeInTheDocument()
     expect(screen.queryByText(/auto.?save|\bAI\b|send quote|assign technician|start work/i)).toBeNull()
   })
 
@@ -298,7 +298,7 @@ describe('QuickTicket', () => {
     await user.click(screen.getByText('Marisol Vega'))
     const create = screen.getAllByRole('button', { name: /^Create quote/i })[0]
     fireEvent.click(create)
-    await screen.findByText('The quote service could not be reached. Retry with the same details.')
+    await screen.findByText('Could not reach the shop. Try again with the same details.')
     fireEvent.click(create)
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
     fireEvent.change(screen.getByLabelText(/mileage today/i), { target: { value: '89001' } })
@@ -375,9 +375,9 @@ describe('QuickTicket', () => {
     const nullTaxJob = { ...cannedJob, summary: { ...cannedJob.summary, taxCents: null, totalCents: null } }
     const view = render(<QuickTicket cannedJobs={[nullTaxJob]} cannedTaxRateBps={null} />)
     const preview = screen.getByRole('region', { name: 'Exact quote preview' })
-    expect(preview).toHaveTextContent('TaxUnavailable')
-    expect(preview).toHaveTextContent('TotalUnavailable')
-    expect(preview).toHaveTextContent(/remain an incomplete draft/i)
+    expect(preview).toHaveTextContent('TaxNot set')
+    expect(preview).toHaveTextContent('TotalNot set')
+    expect(preview).toHaveTextContent(/no tax rate is set/i)
     view.rerender(<QuickTicket cannedCatalogAvailable={false} />)
     expect(screen.getByText(/canned jobs are unavailable/i)).toBeInTheDocument()
     expect(screen.getByLabelText('Source')).toHaveValue('manual')
@@ -517,7 +517,7 @@ describe('QuickTicket', () => {
     fillNewTicket()
     fireEvent.submit(document.getElementById('quick-ticket-form')!)
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not create/i))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not start/i))
     expect(mockPush).not.toHaveBeenCalled()
   })
 

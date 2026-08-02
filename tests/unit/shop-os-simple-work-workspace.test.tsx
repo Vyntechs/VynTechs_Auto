@@ -80,7 +80,7 @@ describe('simple work workspace', () => {
       .toHaveValue('Front-left bolts are ready for final torque.'))
     fireEvent.click(screen.getByText('Found another concern'))
     expect(screen.getByRole('textbox', { name: 'Concern' })).toHaveValue('Rear brake squeal after road test')
-    expect(screen.getByLabelText('Required skill tier')).toHaveValue('2')
+    expect(screen.getByLabelText('Who can do it')).toHaveValue('2')
     expect(screen.getByLabelText('What part do you need?')).toHaveValue('Pad hardware kit')
     fireEvent.click(screen.getAllByText('Put work on hold')[0])
     expect(screen.getByLabelText('Reason for hold')).toHaveValue('parts')
@@ -165,7 +165,7 @@ describe('simple work workspace', () => {
       target: { value: 'Water pump' },
     })
     expect(screen.getByRole('button', { name: 'Complete work' })).toBeDisabled()
-    expect(screen.getByText('Finish or clear the open concern or parts draft first.')).toBeInTheDocument()
+    expect(screen.getByText('Finish or clear what you started above first.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).not.toHaveBeenCalled()
 
@@ -220,7 +220,7 @@ describe('simple work workspace', () => {
     const { container } = render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{ ...base, workStatus: 'in_progress' }} />)
     expect(screen.getByRole('heading', { name: 'Work note' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Complete work' })).toBeInTheDocument()
-    expect(screen.getByText('Requires a saved work note.')).toBeInTheDocument()
+    expect(screen.getByText('Save a work note first.')).toBeInTheDocument()
     expect(container.querySelector('input[type="file"]')).toBeNull()
     expect(container.querySelector('[capture]')).toBeNull()
     expect(container.textContent).not.toMatch(/proof|photo|upload|filename|download/i)
@@ -240,7 +240,7 @@ describe('simple work workspace', () => {
     expect(screen.getByLabelText('Concern')).not.toBeVisible()
     fireEvent.click(screen.getByText('Found another concern'))
     fireEvent.change(screen.getByLabelText('Concern'), { target: { value: 'Steering clunk' } })
-    fireEvent.change(screen.getByLabelText('Required skill tier'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Who can do it'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send to be quoted' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Sent to be quoted. It is on the ticket, unassigned until the advisor prices it.')
     expect(onEscalation).toHaveBeenCalledWith(expect.objectContaining({

@@ -104,7 +104,7 @@ test('the shop finishes the repair order after the diagnosis', async ({ browser,
     // 2. Build quote opens on a repair order carrying only diagnostic labor —
     //    the state the owner reported as "only lets me add more diagnostics".
     await owner.getByRole('button', { name: 'Build quote' }).click()
-    const workspace = owner.getByRole('region', { name: 'Inline quote workspace' })
+    const workspace = owner.getByRole('region', { name: 'Quote for this repair order' })
     await expect(workspace).not.toHaveAttribute('aria-busy', { timeout: 30_000 })
     await expect(owner.getByRole('heading', { name: 'Build quote' })).toBeVisible()
 
@@ -161,7 +161,7 @@ test('the shop finishes the repair order after the diagnosis', async ({ browser,
     await expect(owner.getByRole('region', { name: `Authorization for ${diagnosticTitle}` })
       .getByText('Approved · V1')).toBeVisible()
     await approve(repairTitle)
-    const complete = owner.getByRole('region', { name: 'Quote workspace', exact: true })
+    const complete = owner.getByRole('region', { name: 'Quote', exact: true })
     await expect(complete.getByRole('heading', { name: 'Quote complete' })).toBeVisible()
     await expect(complete.getByRole('listitem').filter({ hasText: diagnosticTitle }))
       .toContainText('Approved · Version 1')

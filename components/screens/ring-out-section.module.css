@@ -1,6 +1,12 @@
+/* The money is the one thing on a finished repair order that has to be
+   unmistakable, so it is a plate, not a band. */
 .ringOut {
-  border-top: 1px solid var(--vt-rule-strong);
-  padding-top: 24px;
+  border: var(--vt-stroke-hair);
+  border-top: 2px solid var(--vt-accent);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bg);
+  box-shadow: var(--vt-lift-1);
+  padding: 22px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -258,16 +264,24 @@
   background: var(--vt-signal-700);
 }
 
+/* `--vt-fg-1` is referenced in eighteen places and defined in none of them, so
+   this button's fill resolved to nothing and its bone label sat on the bone
+   page at 1.08:1 — the advisor's last action of the day was unreadable.
+   Outlined rather than filled so it does not stack a second solid slab under
+   Record payment: one filled control per surface. */
 .closeButton {
   align-self: flex-start;
-  border: 1px solid var(--vt-fg-1);
-  background: var(--vt-fg-1);
-  color: var(--vt-bone-50);
+  border: 1px solid var(--vt-accent);
+  background: var(--vt-bg);
+  color: var(--vt-accent-press);
+  box-shadow: var(--vt-lift-1);
 }
 
 .closeButton:hover:not(:disabled) {
-  opacity: 0.9;
+  border-color: var(--vt-accent-hover);
+  background: var(--vt-surface);
 }
+
 
 .recordButton:disabled,
 .closeButton:disabled {

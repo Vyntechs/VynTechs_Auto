@@ -110,15 +110,15 @@ describe('TodayJobsBoard persisted ledger', () => {
   it('renders the persisted repair-order facts and canonical ticket link', () => {
     render(<TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} />)
 
-    const row = screen.getByRole('article', { name: 'Ticket 41: Trace intermittent no-start' })
+    const row = screen.getByRole('article', { name: 'Repair order 41: Trace intermittent no-start' })
     expect(within(row).getByText('#0041')).toBeInTheDocument()
     expect(within(row).getByText('Morgan Lee')).toBeInTheDocument()
     expect(within(row).getByText('2018 Honda Accord')).toBeInTheDocument()
     expect(within(row).getByText('Trace intermittent no-start')).toBeInTheDocument()
     expect(within(row).getByText('Diagnostic')).toBeInTheDocument()
-    expect(within(row).getByText('Tier 2')).toBeInTheDocument()
-    expect(within(row).getByText('In progress')).toBeInTheDocument()
-    expect(within(row).getByRole('link', { name: 'Open ticket 41' })).toHaveAttribute(
+    expect(within(row).getByText('B-tech')).toBeInTheDocument()
+    expect(within(row).getByText('Being worked')).toBeInTheDocument()
+    expect(within(row).getByRole('link', { name: 'Open repair order 41' })).toHaveAttribute(
       'href',
       '/tickets/ticket-41',
     )
@@ -173,7 +173,7 @@ describe('TodayJobsBoard persisted ledger', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Build quote' }))
 
-    expect(screen.getByRole('region', { name: 'Inline quote workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Quote for this repair order' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening the current quote…')
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-44/quote',
@@ -197,7 +197,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
 
     expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Quote for this repair order' })).toBeNull()
   })
 
   it('makes a pending quote the dispatch role’s next action for assigned team work', () => {
@@ -235,7 +235,7 @@ describe('TodayJobsBoard persisted ledger', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open work' }))
 
-    expect(screen.getByLabelText('Work workspace')).toBeInTheDocument()
+    expect(screen.getByLabelText('Work on this job')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-44/jobs/job-maintenance/work',
@@ -276,7 +276,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resolve hold' }))
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
-      'Hold resolved for ticket 44.',
+      'Hold resolved for repair order 44.',
     ))
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
@@ -308,7 +308,7 @@ describe('TodayJobsBoard persisted ledger', () => {
   it('uses honest persisted-data fallbacks without inventing customer or vehicle facts', () => {
     render(<TodayJobsBoard myJobs={[unlinkedDiagnostic]} openJobs={[]} />)
 
-    const row = screen.getByRole('article', { name: 'Ticket 42: Confirm charging fault' })
+    const row = screen.getByRole('article', { name: 'Repair order 42: Confirm charging fault' })
     expect(within(row).getByText('Customer not recorded')).toBeInTheDocument()
     expect(within(row).getByText('Vehicle not recorded')).toBeInTheDocument()
   })
@@ -322,7 +322,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
 
     const linkedRow = screen.getByRole('article', {
-      name: 'Ticket 41: Trace intermittent no-start',
+      name: 'Repair order 41: Trace intermittent no-start',
     })
     expect(within(linkedRow).getByRole('link', { name: 'Open diagnosis' })).toHaveAttribute(
       'href',
@@ -330,7 +330,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     )
 
     const unlinkedRow = screen.getByRole('article', {
-      name: 'Ticket 42: Confirm charging fault',
+      name: 'Repair order 42: Confirm charging fault',
     })
     expect(within(unlinkedRow).getByRole('button', { name: 'Start diagnosis' })).toBeEnabled()
   })
@@ -361,11 +361,11 @@ describe('TodayJobsBoard persisted ledger', () => {
   it('shows the customer decision on the row and never offers to open declined work', () => {
     render(<TodayJobsBoard myJobs={[{ ...maintenance, approvalState: 'declined' }]} openJobs={[]} />)
 
-    const row = screen.getByRole('article', { name: 'Ticket 44: Perform 60k service' })
-    expect(within(row).getByText('Declined')).toBeInTheDocument()
+    const row = screen.getByRole('article', { name: 'Repair order 44: Perform 60k service' })
+    expect(within(row).getByText('Customer said no')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open work' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Review repair order' })).toHaveAttribute(
       'href', '/tickets/ticket-44',
     )
   })
@@ -376,12 +376,12 @@ describe('TodayJobsBoard persisted ledger', () => {
       { ...maintenance, id: 'missing-identity', ticketId: 'ticket-45', customerName: null, vehicle: null },
     ]} openJobs={[]} />)
     expect(screen.getByRole('link', { name: 'Review blocked work' })).toHaveAttribute('href', '/tickets/ticket-43')
-    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute('href', '/tickets/ticket-45')
+    expect(screen.getByRole('link', { name: 'Review repair order' })).toHaveAttribute('href', '/tickets/ticket-45')
   })
 
   it('does not create a dead work link for corrupt session-linked simple work', () => {
     render(<TodayJobsBoard myJobs={[{ ...maintenance, sessionId: 'unexpected-session' }]} openJobs={[]} />)
-    expect(screen.getByRole('link', { name: 'Review work order' })).toHaveAttribute('href', '/tickets/ticket-44')
+    expect(screen.getByRole('link', { name: 'Review repair order' })).toHaveAttribute('href', '/tickets/ticket-44')
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
 
@@ -404,7 +404,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       fireEvent.click(start)
 
       expect(await screen.findByRole('status')).toHaveTextContent(
-        'Starting diagnosis for ticket 42',
+        'Starting diagnosis for repair order 42',
       )
       expect(screen.getByRole('button', { name: 'Starting diagnosis…' })).toBeDisabled()
       fireEvent.click(screen.getByRole('button', { name: 'Starting diagnosis…' }))
@@ -466,7 +466,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.getByRole('button', { name: 'Diagnosis starting…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Refresh diagnosis status' }))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Checking diagnosis status for ticket 42',
+      'Checking diagnosis status for repair order 42',
     )
     expect(screen.getByRole('button', { name: 'Checking status…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Checking status…' }))
@@ -747,7 +747,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("Couldn't start diagnosis for ticket 42. Try again.")
+    expect(alert).toHaveTextContent("Couldn't start diagnosis for repair order 42. Try again.")
     expect(alert).not.toHaveTextContent(/open_session_limit|provider-secret|rate_limited/)
     expect(pushMock).not.toHaveBeenCalled()
   })
@@ -763,7 +763,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start diagnosis' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Couldn't start diagnosis for ticket 42. Try again.",
+      "Couldn't start diagnosis for repair order 42. Try again.",
     )
     expect(pushMock).not.toHaveBeenCalled()
   })
@@ -809,7 +809,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     const claim = screen.getByRole('button', { name: 'Claim job' })
     fireEvent.click(claim)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Claiming ticket 42')
+    expect(await screen.findByRole('status')).toHaveTextContent('Claiming repair order 42')
     expect(screen.getByRole('button', { name: 'Claiming…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Claiming…' }))
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -829,14 +829,14 @@ describe('TodayJobsBoard persisted ledger', () => {
     } as Response)
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Ticket 42 claimed')
+      expect(screen.getByRole('status')).toHaveTextContent('Repair order 42 claimed')
       expect(screen.getByRole('heading', { name: 'My work' })).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'Available' })).toBeNull()
       expect(refreshMock).not.toHaveBeenCalled()
     })
     await waitFor(() => {
       expect(screen.getByRole('article', {
-        name: 'Ticket 42: Confirm charging fault',
+        name: 'Repair order 42: Confirm charging fault',
       })).toHaveFocus()
     })
   })
@@ -901,7 +901,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     })
     await waitFor(() => {
       expect(screen.getByRole('article', {
-        name: 'Ticket 42: Confirm charging fault',
+        name: 'Repair order 42: Confirm charging fault',
       })).toHaveFocus()
     })
     expect(screen.queryByText(/hidden-id|owner/i)).toBeNull()
@@ -967,9 +967,9 @@ describe('TodayJobsBoard persisted ledger', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Ticket 42 changed, but this screen couldn't safely reconcile it. View the ticket.",
+      "Repair order 42 changed, but this screen couldn't safely catch up. Open the repair order.",
     )
-    expect(screen.getByRole('article', { name: 'Ticket 42: Confirm charging fault' })).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Repair order 42: Confirm charging fault' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
     expect(screen.getByRole('link', { name: 'View ticket' })).toBeInTheDocument()
     expect(refreshMock).not.toHaveBeenCalled()
@@ -1189,7 +1189,7 @@ describe('TodayJobsBoard diagnostics entitlement one-slot rule', () => {
     )
 
     expect(screen.queryByText('Record findings')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /Open work|Review blocked work|Review work order/ })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: /Open work|Review blocked work|Review repair order/ })).toHaveLength(2)
   })
 })
 
@@ -1238,16 +1238,16 @@ describe('TodayJobsBoard ready to collect', () => {
     render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[readyCard]} />)
 
     expect(screen.getByRole('heading', { name: 'Ready to collect' })).toBeInTheDocument()
-    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    const card = screen.getByRole('article', { name: 'Repair order 77: ready to collect' })
     expect(within(card).getByText('#0077')).toBeInTheDocument()
     expect(within(card).getByText('Ada Driver')).toBeInTheDocument()
     expect(within(card).getByText('2020 Ford F-150')).toBeInTheDocument()
     expect(within(card).getByText('Grinding noise when braking')).toBeInTheDocument()
     // Exactly the server's balance, not a recomputation.
     expect(within(card).getByText('$158.00 due')).toBeInTheDocument()
-    expect(within(card).getByRole('link', { name: 'Open ticket 77' }))
+    expect(within(card).getByRole('link', { name: 'Open repair order 77' }))
       .toHaveAttribute('href', `/tickets/${READY_TICKET}`)
-    expect(screen.getByRole('button', { name: 'Collect & close' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Take payment and close' })).toBeInTheDocument()
     expect(pushMock).not.toHaveBeenCalled()
   })
 
@@ -1256,12 +1256,12 @@ describe('TodayJobsBoard ready to collect', () => {
       <TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[readyCard]} />,
     )
 
-    expect(screen.queryByRole('heading', { name: 'Ring out' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Collect & close' }))
+    expect(screen.queryByRole('heading', { name: 'The bill' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Take payment and close' }))
 
     // The existing payment/close tool, mounted inside the same card.
-    const ringOut = screen.getByRole('region', { name: 'Ring out' })
-    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    const ringOut = screen.getByRole('region', { name: 'The bill' })
+    const card = screen.getByRole('article', { name: 'Repair order 77: ready to collect' })
     expect(card.parentElement).toContainElement(ringOut)
     // The operator lands in the revealed tool, like every other inline
     // workspace on this board.
@@ -1299,14 +1299,14 @@ describe('TodayJobsBoard ready to collect', () => {
     }))
     render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[readyCard]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collect & close' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Take payment and close' }))
     fireEvent.change(screen.getByLabelText('Payment amount'), { target: { value: '50' } })
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }))
 
     await waitFor(() => expect(screen.getByLabelText('Payment amount')).toHaveValue('108.00'))
     fireEvent.click(screen.getByRole('button', { name: 'Close panel' }))
 
-    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
+    const card = screen.getByRole('article', { name: 'Repair order 77: ready to collect' })
     expect(within(card).getByText('$108.00 due')).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(
       `/api/tickets/${READY_TICKET}/payments`,
@@ -1338,15 +1338,15 @@ describe('TodayJobsBoard ready to collect', () => {
     }))
     render(<TodayJobsBoard myJobs={[]} openJobs={[]} readyToCollect={[paidInFull]} />)
 
-    expect(screen.getByRole('article', { name: 'Ticket 77: ready to collect' })).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Repair order 77: ready to collect' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close repair order' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Mark paid & close ticket' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paid and close' }))
 
     await waitFor(() => {
-      expect(screen.queryByRole('article', { name: 'Ticket 77: ready to collect' })).toBeNull()
+      expect(screen.queryByRole('article', { name: 'Repair order 77: ready to collect' })).toBeNull()
     })
     expect(screen.queryByRole('heading', { name: 'Ready to collect' })).toBeNull()
-    expect(screen.getByRole('status')).toHaveTextContent('Ticket 77 is closed and off the board.')
+    expect(screen.getByRole('status')).toHaveTextContent('Repair order 77 is closed and off the board.')
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${READY_TICKET}/close`, { method: 'POST' })
     expect(pushMock).not.toHaveBeenCalled()
   })
@@ -1356,7 +1356,7 @@ describe('TodayJobsBoard ready to collect', () => {
     render(<TodayJobsBoard myJobs={[linkedDiagnostic]} openJobs={[]} readyToCollect={[]} />)
 
     expect(screen.queryByRole('heading', { name: 'Ready to collect' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Collect & close' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Take payment and close' })).toBeNull()
     expect(document.body.textContent).not.toMatch(/\$/)
   })
 
@@ -1370,8 +1370,8 @@ describe('TodayJobsBoard ready to collect', () => {
     )
 
     // Reusing .row/.details/.action means the audited 375px rules already apply.
-    const card = screen.getByRole('article', { name: 'Ticket 77: ready to collect' })
-    const jobRow = screen.getByRole('article', { name: 'Ticket 41: Trace intermittent no-start' })
+    const card = screen.getByRole('article', { name: 'Repair order 77: ready to collect' })
+    const jobRow = screen.getByRole('article', { name: 'Repair order 41: Trace intermittent no-start' })
     expect(card.className).toBe(jobRow.className)
     const narrowRules = css.slice(css.indexOf('@media (max-width: 375px)'))
     expect(narrowRules).toMatch(/\.row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s)

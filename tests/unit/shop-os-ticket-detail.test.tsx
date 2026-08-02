@@ -37,7 +37,7 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
   }) => (
     <section
       id={workspaceId}
-      aria-label="Inline quote workspace"
+      aria-label="Quote for this repair order"
       data-actor-id={actorId}
     >
       <button type="button" onClick={() => onProjection([{
@@ -107,7 +107,7 @@ vi.mock('@/components/screens/ticket-interruption-action', async (importOriginal
     action === 'cancel_job'
       ? (
         <button type="button" onClick={() => onApplied({ workStatus: 'canceled' })}>
-          Retire declined work
+          Not doing this one
         </button>
       )
       : <button type="button" onClick={() => onApplied({ workStatus: 'in_progress' })}>Resolve hold</button>
@@ -179,8 +179,8 @@ describe('TicketDetailScreen', () => {
     render(<TicketDetailScreen ticket={ticket()} />)
 
     expect(screen.getAllByText('RO 000042').length).toBeGreaterThan(0)
-    expect(screen.getByText('Open · Counter intake')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Back to My Jobs' })).toHaveAttribute(
+    expect(screen.getByText('Open · Written up')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to My work' })).toHaveAttribute(
       'href',
       '/today',
     )
@@ -220,8 +220,8 @@ describe('TicketDetailScreen', () => {
       }],
     })} />)
 
-    expect(screen.getByRole('heading', { name: 'Repair order activity' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Repair order activity' }).closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'History' }).closest('details')).not.toHaveAttribute('open')
     expect(screen.getByText('Diagnose brake vibration: Put on hold — Awaiting pads.')).toBeInTheDocument()
     expect(screen.getByText(/Taylor Tech/)).toBeInTheDocument()
   })
@@ -242,13 +242,13 @@ describe('TicketDetailScreen', () => {
       />,
     )
 
-    expect(screen.getByText('Open · Tech quick')).toBeInTheDocument()
+    expect(screen.getByText('Open · Started by a tech')).toBeInTheDocument()
     const provisional = screen.getByRole('region', {
-      name: 'Customer and vehicle still needed',
+      name: 'No customer or vehicle yet',
     })
     expect(
       within(provisional).getByText(
-        'Draft quote lines now. Prepare, send, approval, delivery, and closeout stay blocked until this ticket is reconciled.',
+        /You can price the work now\..*stay locked until the customer and vehicle are on here\./,
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Build quote' })).toHaveAttribute(
@@ -298,16 +298,16 @@ describe('TicketDetailScreen', () => {
     expect(opener).toHaveAttribute('aria-controls', 'inline-quote-workspace-ticket-1')
     await user.click(opener)
 
-    const workspace = screen.getByRole('region', { name: 'Inline quote workspace' })
+    const workspace = screen.getByRole('region', { name: 'Quote for this repair order' })
     expect(workspace).toHaveAttribute('id', 'inline-quote-workspace-ticket-1')
     expect(workspace).toHaveAttribute('data-actor-id', 'advisor-1')
     expect(opener).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
-    expect(screen.getByText('Approval · Quote ready')).toBeInTheDocument()
+    expect(screen.getByText('Priced')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Close quote' }))
-    expect(screen.queryByRole('region', { name: 'Inline quote workspace' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Quote for this repair order' })).toBeNull()
     expect(opener).toHaveFocus()
   })
 
@@ -437,11 +437,11 @@ describe('TicketDetailScreen', () => {
 
   it('labels every persisted work and approval state without collapsing them', () => {
     const states = [
-      ['open', 'pending_quote', 'Work · Open', 'Approval · Quote not built'],
-      ['in_progress', 'quote_ready', 'Work · In progress', 'Approval · Quote ready'],
-      ['blocked', 'sent', 'Work · Blocked', 'Approval · Sent'],
-      ['done', 'approved', 'Work · Done', 'Approval · Approved'],
-      ['canceled', 'declined', 'Work · Canceled', 'Approval · Declined'],
+      ['open', 'pending_quote', 'Not started', 'No price yet'],
+      ['in_progress', 'quote_ready', 'Being worked', 'Priced'],
+      ['blocked', 'sent', 'On hold', 'Sent to customer'],
+      ['done', 'approved', 'Finished', 'Customer said yes'],
+      ['canceled', 'declined', 'Not doing it', 'Customer said no'],
     ] as const
 
     render(
@@ -504,10 +504,10 @@ describe('TicketDetailScreen', () => {
 
     await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
     expect(screen.getByRole('heading', { name: 'Found: steering clunk' })).toBeInTheDocument()
-    expect(screen.getByText('2 lines')).toBeInTheDocument()
+    expect(screen.getByText('2 jobs')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Publish work state' }))
-    expect(screen.getByText('Work · Done')).toBeInTheDocument()
+    expect(screen.getByText('Finished')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^(Start|Continue) work$/ })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Close work' }))
@@ -534,7 +534,7 @@ describe('TicketDetailScreen', () => {
     const row = screen.getByRole('heading', { name: 'Install lift kit' }).closest('li')!
     expect(within(row).getByRole('button', { name: 'Resolve hold' })).toBeInTheDocument()
     await user.click(within(row).getByRole('button', { name: 'Resolve hold' }))
-    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
+    expect(within(row).getByText('Being worked')).toBeInTheDocument()
     // Succeeding retires the control that offered it, so the row — not the
     // control — has to be the one that says so.
     expect(within(row).queryByRole('button', { name: 'Resolve hold' })).not.toBeInTheDocument()
@@ -557,10 +557,10 @@ describe('TicketDetailScreen', () => {
     />)
 
     const row = screen.getByRole('heading', { name: 'Replace all four tires' }).closest('li')!
-    await user.click(within(row).getByRole('button', { name: 'Retire declined work' }))
-    expect(within(row).getByText('Work · Canceled')).toBeInTheDocument()
-    expect(within(row).queryByRole('button', { name: 'Retire declined work' })).not.toBeInTheDocument()
-    expect(within(row).getByText('Declined work retired.')).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'Not doing this one' }))
+    expect(within(row).getByText('Not doing it')).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: 'Not doing this one' })).not.toBeInTheDocument()
+    expect(within(row).getByText('Dropped. The customer said no to this one.')).toBeInTheDocument()
   })
 
   it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {
@@ -775,7 +775,7 @@ describe('TicketDetailScreen', () => {
       action: 'handoff', assignedTechId: 'relief-1', requestKey: '00000000-0000-4000-8000-000000000099',
     })
     expect(within(row).getByText('Assigned · Riley Relief')).toBeInTheDocument()
-    expect(within(row).getByText('Work · In progress')).toBeInTheDocument()
+    expect(within(row).getByText('Being worked')).toBeInTheDocument()
   })
 
   it('lets an advisor cancel and reopen the mounted repair order while reconciling every returned job state', async () => {
@@ -802,12 +802,12 @@ describe('TicketDetailScreen', () => {
     await user.click(screen.getAllByText('Cancel repair order')[0])
     await user.type(screen.getByLabelText('Cancellation reason'), 'Customer rescheduled.')
     await user.click(screen.getByRole('button', { name: 'Cancel repair order' }))
-    expect(await screen.findByText('Canceled · Counter intake')).toBeInTheDocument()
-    expect(screen.getByText('Work · Canceled')).toBeInTheDocument()
+    expect(await screen.findByText('Canceled · Written up')).toBeInTheDocument()
+    expect(screen.getByText('Not doing it')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Reopen repair order' }))
-    expect(await screen.findByText('Open · Counter intake')).toBeInTheDocument()
-    expect(screen.getByText('Work · In progress')).toBeInTheDocument()
+    expect(await screen.findByText('Open · Written up')).toBeInTheDocument()
+    expect(screen.getByText('Being worked')).toBeInTheDocument()
   })
 
   it('keeps the row mounted and shows only the safe winner after a claim race', async () => {
@@ -873,11 +873,11 @@ describe('TicketDetailScreen', () => {
       ringOut={ringOut}
     />)
 
+    await user.click(screen.getByRole('button', { name: 'Close it out' }))
+    expect(screen.getByRole('region', { name: 'The bill' })).toHaveFocus()
     await user.click(screen.getByRole('button', { name: 'Close repair order' }))
-    expect(screen.getByRole('region', { name: 'Ring out' })).toHaveFocus()
-    await user.click(screen.getByRole('button', { name: 'Close ticket' }))
 
-    expect(await screen.findByText('Closed · Counter intake')).toBeInTheDocument()
+    expect(await screen.findByText('Closed · Written up')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Close repair order' })).toBeNull()
   })

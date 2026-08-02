@@ -299,14 +299,16 @@
   cursor: not-allowed;
 }
 .vt-btn:disabled:hover { background: var(--vt-bone-50); border-color: var(--vt-rule-strong); }
+/* One accent. This was the near-black slab at the end of every form. */
 .vt-btn--primary {
-  background: var(--vt-bone-900);
-  color: var(--vt-bone-50);
-  border-color: var(--vt-bone-900);
+  background: var(--vt-accent);
+  color: var(--vt-fg-on-signal);
+  border-color: var(--vt-accent);
+  box-shadow: var(--vt-lift-1);
 }
 .vt-btn--primary:hover {
-  background: var(--vt-bone-800);
-  border-color: var(--vt-bone-800);
+  background: var(--vt-accent-hover);
+  border-color: var(--vt-accent-hover);
 }
 .vt-btn--accent {
   background: var(--vt-signal-500);
@@ -423,28 +425,55 @@
   min-width: 0;
 }
 
+/* Phone. This kit was built for a desktop pane and had no breakpoint at all, so
+   its fixed 200px label column plus 24px gap plus 64px of side padding forced
+   the field column past the viewport: /tickets/[id]/quote measured 434px of
+   content in a 390px window, and "What are we doing" ran off the right edge.
+   The write-up screen patched this locally; every other consumer of the kit —
+   including Add repair and Add diagnostic time inside the quote a technician
+   opens on a phone — did not. */
+@media (max-width: 767px) {
+  .vt-form__group {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 18px;
+  }
+
+  .vt-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .vt-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
   min-width: 0;
 }
+/* Written up on a phone, this form had roughly twenty-five letterspaced ALL-CAPS
+   mono labels stacked down it. That voice belongs to a machine, and used on
+   every single field it ranks nothing. A field label is now an ordinary word in
+   the chrome face. */
 .vt-field__label {
-  font-family: var(--vt-font-mono);
-  font-size: 9.5px;
+  font-family: var(--vt-font-sans);
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--vt-fg-3);
+  letter-spacing: 0.005em;
+  color: var(--vt-fg-2);
 }
+/* A field is a well cut into the surface, not a line ruled under empty air. The
+   old treatment gave a technician nothing to aim a thumb at in a loud shop and
+   made every field on the screen weigh exactly the same. */
 .vt-field__input,
 .vt-field__textarea,
 .vt-field__select {
   width: 100%;
-  background: transparent;
-  border: 0;
-  border-bottom: 0.5px solid var(--vt-rule-strong);
-  padding: 5px 0 6px;
+  min-height: 44px;
+  background: var(--vt-surface);
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  box-shadow: var(--vt-lift-in);
+  padding: 9px 12px;
   font-family: var(--vt-font-serif);
   font-size: 17px;
   letter-spacing: -0.012em;
@@ -452,28 +481,38 @@
   outline: 0;
   box-sizing: border-box;
   font-feature-settings: "ss01";
+  transition:
+    border-color var(--vt-dur-1) var(--vt-ease),
+    background var(--vt-dur-1) var(--vt-ease);
 }
 .vt-field__input--mono { font-family: var(--vt-font-mono); font-size: 14px; letter-spacing: 0; font-feature-settings: "tnum"; }
+/* Focus lights the well: it becomes the lit surface and takes the accent edge,
+   so the field you are typing in is the only one that looks open. */
 .vt-field__input:focus,
 .vt-field__textarea:focus,
 .vt-field__select:focus {
-  border-bottom-color: var(--vt-signal-500);
+  border-color: var(--vt-accent);
+  background: var(--vt-bg);
+  box-shadow: none;
 }
 .vt-field__input::placeholder,
 .vt-field__textarea::placeholder {
   color: var(--vt-fg-3);
-  font-style: italic;
+  font-style: normal;
 }
 .vt-field__textarea {
   resize: vertical;
   min-height: 64px;
   line-height: 1.45;
 }
+/* Mono is for data — VINs, plates, money. A sentence telling a person what a
+   field is for is not data, and set in mono it reads like a compiler message. */
 .vt-field__hint {
-  font-family: var(--vt-font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.4;
   color: var(--vt-fg-3);
 }
 .vt-field__hint--accent { color: var(--vt-signal-500); }

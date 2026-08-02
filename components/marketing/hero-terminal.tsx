@@ -6,7 +6,7 @@ type Row = { time: string; kind: string; cls: string; html: string }
 
 const SCRIPT_ROWS: Row[] = [
   { time: '08:14', kind: 'INTAKE', cls: 'k-step', html: '<em>2018 F-250</em> · crank, no start' },
-  { time: '08:16', kind: 'ASSIGN', cls: 'k-obs', html: 'Fuel-system check assigned to <em>Bay 03</em>' },
+  { time: '08:16', kind: 'ASSIGN', cls: 'k-obs', html: 'Fuel-system check assigned to <em>Marcus</em>' },
   { time: '08:43', kind: 'NOTE', cls: 'k-rung', html: 'Manual finding: supply pressure drops under crank.' },
   { time: '08:48', kind: 'QUOTE', cls: 'k-step', html: 'Pump test and repair line ready for review.' },
   { time: '08:55', kind: 'OK', cls: 'k-ok', html: 'Customer approved · work status moved to ready.' },
@@ -68,7 +68,7 @@ export function HeroTerminal() {
     <div className="vm-term">
       <div className="vm-term-head">
         <span>Living repair order</span>
-        <span className="vm-term-live"><span className="vm-dot2" />Live &middot; Bay 03</span>
+        <span className="vm-term-live"><span className="vm-dot2" />Live</span>
         <span className="vm-term-vin">RO 000127 &middot; example workflow</span>
       </div>
       <div className="vm-term-body" ref={bodyRef} />

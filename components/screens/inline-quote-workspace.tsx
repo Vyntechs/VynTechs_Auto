@@ -138,7 +138,7 @@ export function InlineQuoteWorkspace({
       id={boundaryId}
       className={styles.boundary}
       role="region"
-      aria-label="Inline quote workspace"
+      aria-label="Quote for this repair order"
       aria-busy={!error && !loaded ? true : undefined}
       tabIndex={-1}
     >
@@ -146,7 +146,7 @@ export function InlineQuoteWorkspace({
         <div className={styles.state}>
           <div role="alert">
             <strong>Quote could not be opened here.</strong>
-            <p>The repair order is safe. Retry this tool or use the full quote page.</p>
+            <p>The repair order is safe. Try again here, or open the full quote page.</p>
           </div>
           <div className={styles.actions}>
             <button type="button" onClick={() => setAttempt((current) => current + 1)}>Retry quote</button>

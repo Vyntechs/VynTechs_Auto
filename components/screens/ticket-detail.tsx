@@ -9,6 +9,7 @@ import {
   projectLivingTicketCommands,
   type LivingTicketCommand,
 } from '@/lib/shop-os/living-ticket'
+import { canAssignWork } from '@/lib/shop-os/capabilities'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
@@ -38,10 +39,10 @@ const TICKET_STATUS_LABELS: Record<string, string> = {
 }
 
 const TICKET_SOURCE_LABELS: Record<string, string> = {
-  counter: 'Counter intake',
-  tech_quick: 'Tech quick',
+  counter: 'Written up',
+  tech_quick: 'Started by a tech',
   quick_quote: 'Quick ticket',
-  legacy_repair_order: 'Legacy repair order',
+  legacy_repair_order: 'Brought over',
 }
 
 const JOB_KIND_LABELS: Record<string, string> = {
@@ -57,20 +58,20 @@ const TIER_LABELS: Record<number, string> = {
 }
 
 const WORK_STATUS_LABELS: Record<string, string> = {
-  open: 'Open',
-  in_progress: 'In progress',
-  blocked: 'Blocked',
-  done: 'Done',
-  canceled: 'Canceled',
+  open: 'Not started',
+  in_progress: 'Being worked',
+  blocked: 'On hold',
+  done: 'Finished',
+  canceled: 'Not doing it',
 }
 
 const APPROVAL_STATE_LABELS: Record<string, string> = {
-  pending_quote: 'Quote not built',
-  quote_ready: 'Quote ready',
-  sent: 'Sent',
-  approved: 'Approved',
-  declined: 'Declined',
-  deferred: 'Deferred',
+  pending_quote: 'No price yet',
+  quote_ready: 'Priced',
+  sent: 'Sent to customer',
+  approved: 'Customer said yes',
+  declined: 'Customer said no',
+  deferred: 'Customer said later',
 }
 
 export function TicketDetailScreen({
@@ -184,7 +185,7 @@ export function TicketDetailScreen({
       <AppHeader
         title={repairOrder}
         meta={<span>{statusLabel} · {sourceLabel}</span>}
-        back={{ href: '/today', label: 'My Jobs' }}
+        back={{ href: '/today', label: canAssignWork(role) ? 'Shop floor' : 'My work' }}
       />
 
       <div className={styles.content}>
@@ -310,16 +311,16 @@ export function TicketDetailScreen({
             className={styles.provisional}
             aria-labelledby="provisional-title"
           >
-            <p className={styles.eyebrow}>Provisional ticket</p>
-            <h1 id="provisional-title">Customer and vehicle still needed</h1>
+            <p className={styles.eyebrow}>Missing</p>
+            <h1 id="provisional-title">No customer or vehicle yet</h1>
             <p>
-              Draft quote lines now. Prepare, send, approval, delivery, and closeout stay blocked until this ticket is reconciled.
+              You can price the work now. Sending it, getting the customer&apos;s answer, and closing it stay locked until the customer and vehicle are on here.
             </p>
           </section>
         ) : (
           <div className={styles.identityGrid}>
             <section aria-labelledby="customer-heading" className={styles.factSection}>
-              <h2 id="customer-heading">Customer contact</h2>
+              <h2 id="customer-heading">Customer</h2>
               <p className={styles.factLead}>{ticket.customer.name}</p>
               <div className={styles.linkStack}>
                 {phoneTarget ? (
@@ -373,13 +374,13 @@ export function TicketDetailScreen({
             <dl className={styles.storyFacts}>
               {ticket.whenStarted && (
                 <>
-                  <dt>Started</dt>
+                  <dt>When it started</dt>
                   <dd>{ticket.whenStarted}</dd>
                 </>
               )}
               {ticket.howOften && (
                 <>
-                  <dt>Frequency</dt>
+                  <dt>How often</dt>
                   <dd>{ticket.howOften}</dd>
                 </>
               )}
@@ -390,10 +391,10 @@ export function TicketDetailScreen({
         <section className={styles.jobs} aria-labelledby="jobs-heading">
           <div className={styles.sectionHeading}>
             <div>
-              <p className={styles.eyebrow}>Persisted work</p>
-              <h2 id="jobs-heading">Job ledger</h2>
+              <p className={styles.eyebrow}>On this repair order</p>
+              <h2 id="jobs-heading">Jobs</h2>
             </div>
-            <span className={styles.jobCount}>{displayedJobs.length} {displayedJobs.length === 1 ? 'line' : 'lines'}</span>
+            <span className={styles.jobCount}>{displayedJobs.length} {displayedJobs.length === 1 ? 'job' : 'jobs'}</span>
           </div>
 
           <ol className={styles.ledger}>
@@ -415,10 +416,10 @@ export function TicketDetailScreen({
                     </div>
                     <div className={styles.stamps}>
                       <span className={styles.stamp} data-state={job.workStatus}>
-                        Work · {formatLabel(WORK_STATUS_LABELS, job.workStatus)}
+                        {formatLabel(WORK_STATUS_LABELS, job.workStatus)}
                       </span>
                       <span className={styles.stamp} data-state={job.approvalState}>
-                        Approval · {formatLabel(APPROVAL_STATE_LABELS, job.approvalState)}
+                        {formatLabel(APPROVAL_STATE_LABELS, job.approvalState)}
                       </span>
                     </div>
                   </div>
@@ -434,7 +435,7 @@ export function TicketDetailScreen({
                         onApplied={(retired) => {
                           setWorkOverrides((current) => new Map(current).set(job.id, {
                             workStatus: retired.workStatus,
-                            notice: 'Declined work retired.',
+                            notice: 'Dropped. The customer said no to this one.',
                           }))
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}
@@ -560,8 +561,8 @@ export function TicketDetailScreen({
           <details className={styles.activity}>
             <summary className={styles.activitySummary}>
               <div>
-                <p className={styles.eyebrow}>Durable record</p>
-                <h2 id="activity-heading">Repair order activity</h2>
+                <p className={styles.eyebrow}>Every change</p>
+                <h2 id="activity-heading">History</h2>
               </div>
               <span>{activities.length} {activities.length === 1 ? 'entry' : 'entries'}</span>
             </summary>
