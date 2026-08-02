@@ -150,3 +150,45 @@ describe('SignInPage', () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/today'))
   })
 })
+
+/* Regression: before React hydrates, this is a plain HTML form. A press on the
+   submit button used to perform a native GET, which put the typed password in
+   the address bar, the browser's history, and the outgoing Referer. Reproduced
+   against production on 2026-08-01. */
+describe('SignInPage credential exposure before hydration', () => {
+  it('never lets a native submit put fields in the query string', () => {
+    const { container } = render(<SignInPage />)
+    const form = container.querySelector('form')
+
+    expect(form).not.toBeNull()
+    // A form with no method GETs, serialising every named field into the URL.
+    expect(form?.getAttribute('method')?.toLowerCase()).toBe('post')
+  })
+
+  it('keeps the submit button inert until the client is live', async () => {
+    const { renderToString } = await import('react-dom/server')
+    // Server render runs no effects, which is exactly the pre-hydration DOM.
+    const html = renderToString(<SignInPage />)
+    const submit = html.slice(html.indexOf('type="submit"'))
+
+    expect(submit.slice(0, submit.indexOf('>'))).toContain('disabled')
+  })
+
+  it('enables the button once mounted so sign-in still works', async () => {
+    render(<SignInPage />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /sign in/i })).toBeEnabled(),
+    )
+
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'tech@shop.com' } })
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'correct horse' } })
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }))
+
+    await waitFor(() =>
+      expect(mockSignInWithPassword).toHaveBeenCalledWith({
+        email: 'tech@shop.com',
+        password: 'correct horse',
+      }),
+    )
+  })
+})
