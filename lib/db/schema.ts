@@ -78,6 +78,12 @@ export const shops = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
+    phone: text('phone'),
+    addressLine1: text('address_line_1'),
+    addressLine2: text('address_line_2'),
+    city: text('city'),
+    region: text('region'),
+    postalCode: text('postal_code'),
     nextTicketNumber: bigint('next_ticket_number', { mode: 'number' }).default(1).notNull(),
     laborRateCents: bigint('labor_rate_cents', { mode: 'number' }),
     taxRateBps: integer('tax_rate_bps'),

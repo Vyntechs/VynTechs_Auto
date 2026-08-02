@@ -294,4 +294,52 @@ describe('POST /api/shop', () => {
     const res = await POST(makeReq({ somethingElse: true }))
     expect(res.status).toBe(422)
   })
+
+  it('persists trimmed customer-paperwork identity and normalizes an empty second line to null', async () => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({
+      phone: '  (214) 555-0197  ',
+      addressLine1: '  415 Industrial Way  ',
+      addressLine2: '   ',
+      city: '  Garland  ',
+      region: '  TX  ',
+      postalCode: '  75040  ',
+    }))
+
+    expect(res.status).toBe(200)
+    const [row] = await currentDb.select().from(shops).where(eq(shops.id, shopId))
+    expect(row).toMatchObject({
+      phone: '(214) 555-0197',
+      addressLine1: '415 Industrial Way',
+      addressLine2: null,
+      city: 'Garland',
+      region: 'TX',
+      postalCode: '75040',
+    })
+  })
+
+  it.each([
+    ['phone', 'x'.repeat(31), 'invalid_phone'],
+    ['addressLine1', 'x'.repeat(121), 'invalid_address_line_1'],
+    ['addressLine2', 'x'.repeat(121), 'invalid_address_line_2'],
+    ['city', 'x'.repeat(81), 'invalid_city'],
+    ['region', 'x'.repeat(41), 'invalid_region'],
+    ['postalCode', 'x'.repeat(21), 'invalid_postal_code'],
+  ])('rejects %s beyond its customer-paperwork length bound', async (field, value, error) => {
+    await seedProfile({ role: 'owner' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ [field]: value }))
+
+    expect(res.status).toBe(422)
+    expect(await res.json()).toEqual({ error })
+  })
+
+  it('rejects customer-paperwork identity changes from a tech', async () => {
+    await seedProfile({ role: 'tech' })
+    const { POST } = await import('@/app/api/shop/route')
+    const res = await POST(makeReq({ phone: '(214) 555-0197' }))
+
+    expect(res.status).toBe(403)
+  })
 })

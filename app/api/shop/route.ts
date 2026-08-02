@@ -19,6 +19,12 @@ export async function POST(req: Request) {
     taxRateBps?: unknown
     laborRateCents?: unknown
     partsMarkupBps?: unknown
+    phone?: unknown
+    addressLine1?: unknown
+    addressLine2?: unknown
+    city?: unknown
+    region?: unknown
+    postalCode?: unknown
   }
   try {
     body = (await req.json()) as {
@@ -26,6 +32,12 @@ export async function POST(req: Request) {
       taxRateBps?: unknown
       laborRateCents?: unknown
       partsMarkupBps?: unknown
+      phone?: unknown
+      addressLine1?: unknown
+      addressLine2?: unknown
+      city?: unknown
+      region?: unknown
+      postalCode?: unknown
     }
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
@@ -60,6 +72,12 @@ export async function POST(req: Request) {
     taxRateBps?: number
     laborRateCents?: number
     partsMarkupBps?: number
+    phone?: string
+    addressLine1?: string
+    addressLine2?: string | null
+    city?: string
+    region?: string
+    postalCode?: string
   } = {}
 
   if (body.name !== undefined) {
@@ -102,6 +120,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'invalid_parts_markup' }, { status: 422 })
     }
     updates.partsMarkupBps = bps
+  }
+
+  const identityFields = [
+    ['phone', 'invalid_phone', 30],
+    ['addressLine1', 'invalid_address_line_1', 120],
+    ['city', 'invalid_city', 80],
+    ['region', 'invalid_region', 40],
+    ['postalCode', 'invalid_postal_code', 20],
+  ] as const
+  for (const [field, error, maxLength] of identityFields) {
+    if (body[field] === undefined) continue
+    const value = typeof body[field] === 'string' ? body[field].trim() : ''
+    if (value.length === 0 || value.length > maxLength) {
+      return NextResponse.json({ error }, { status: 422 })
+    }
+    updates[field] = value
+  }
+
+  if (body.addressLine2 !== undefined) {
+    if (typeof body.addressLine2 !== 'string' && body.addressLine2 !== null) {
+      return NextResponse.json({ error: 'invalid_address_line_2' }, { status: 422 })
+    }
+    const value = typeof body.addressLine2 === 'string' ? body.addressLine2.trim() : ''
+    if (value.length > 120) {
+      return NextResponse.json({ error: 'invalid_address_line_2' }, { status: 422 })
+    }
+    updates.addressLine2 = value || null
   }
 
   if (Object.keys(updates).length === 0) {

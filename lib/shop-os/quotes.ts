@@ -431,6 +431,35 @@ export type ApprovedJobPricing = {
   >
 }
 
+export type PreparedCustomerPricing = {
+  jobs: ApprovedJobPricing[]
+  totals: {
+    subtotalCents: number
+    taxCents: number
+    totalCents: number
+  }
+}
+
+/** Customer-safe prices from the one current prepared quote version. */
+export function readPreparedCustomerPricing(snapshot: unknown): PreparedCustomerPricing | null {
+  let safe: QuoteSnapshotV1
+  try {
+    safe = validatedQuoteSnapshot(snapshot)
+  } catch {
+    return null
+  }
+  const jobs = safe.jobs.map((job) => readApprovedJobPricing(safe, job.id))
+  if (jobs.some((job) => job === null)) return null
+  return {
+    jobs: jobs as ApprovedJobPricing[],
+    totals: {
+      subtotalCents: safe.totals.subtotalCents,
+      taxCents: safe.totals.taxCents,
+      totalCents: safe.totals.totalCents,
+    },
+  }
+}
+
 // The priced sibling of `readApprovedJobScope`: the same immutable version the
 // customer approved, but carrying the money as well as the work. Callers that
 // need to re-use an authorized price — not just show a technician the scope —

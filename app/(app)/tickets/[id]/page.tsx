@@ -12,10 +12,11 @@ import {
   canManageTeam,
   canPlacePartsOrders,
 } from '@/lib/shop-os/capabilities'
-import { getTicketRingOut } from '@/lib/shop-os/ring-out'
+import { getCustomerCopyBundle } from '@/lib/shop-os/customer-copy'
 import { listPartRequestsForTicket } from '@/lib/shop-os/part-requests'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
+import { refreshCustomerCopy } from './customer-copy-actions'
 
 export default async function TicketPage({
   params,
@@ -48,9 +49,13 @@ export default async function TicketPage({
   // Getting paid is an advisor/owner surface — techs never see money. Only load
   // the ring-out state when the viewer can act on it.
   let ringOut = null
+  let customerCopy = null
   if (canCloseTickets(ctx.profile.role)) {
-    const ringOutResult = await getTicketRingOut(db, { actor, ticketId: id })
-    if (ringOutResult.ok) ringOut = ringOutResult.ringOut
+    const customerCopyBundle = await getCustomerCopyBundle(db, { actor, ticketId: id })
+    if (customerCopyBundle.ok) {
+      ringOut = customerCopyBundle.ringOut
+      customerCopy = customerCopyBundle.copy
+    }
   }
 
   // The parts a tech flagged relay to whoever sources parts (parts/advisor/owner).
@@ -78,6 +83,8 @@ export default async function TicketPage({
       ringOut={ringOut}
       partRequests={partRequests}
       diagnosticsEntitled={access.entitlements.diagnostics}
+      customerCopy={customerCopy}
+      refreshCustomerCopyAction={refreshCustomerCopy}
     />
   )
 }

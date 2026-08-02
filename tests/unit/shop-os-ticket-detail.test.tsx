@@ -2,12 +2,15 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import type { TicketDetail } from '@/lib/tickets'
+import { customerCopyFixture } from '@/tests/helpers/customer-copy'
+
+const { routerRefreshMock } = vi.hoisted(() => ({ routerRefreshMock: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ refresh: routerRefreshMock, push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
   usePathname: () => '/tickets/ticket-1',
   useSearchParams: () => new URLSearchParams(),
 }))
@@ -32,7 +35,7 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
     onProjection: (jobs: Array<{
       id: string
       workStatus: 'open'
-      approvalState: 'quote_ready'
+      approvalState: 'quote_ready' | 'approved'
     }>) => void
   }) => (
     <section
@@ -45,6 +48,11 @@ vi.mock('@/components/screens/inline-quote-workspace', () => ({
         workStatus: 'open',
         approvalState: 'quote_ready',
       }])}>Publish quote state</button>
+      <button type="button" onClick={() => onProjection([{
+        id: 'job-1',
+        workStatus: 'open',
+        approvalState: 'approved',
+      }])}>Publish approval state</button>
       <button type="button" onClick={onClose}>Close quote</button>
     </section>
   ),
@@ -175,6 +183,53 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
 }
 
 describe('TicketDetailScreen', () => {
+  beforeEach(() => routerRefreshMock.mockClear())
+
+  it('reveals Customer Copy in place for an advisor and moves focus to its heading', async () => {
+    render(
+      <TicketDetailScreen
+        ticket={ticket()}
+        role="advisor"
+        currentProfileId="advisor-1"
+        customerCopy={customerCopyFixture}
+      />,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Customer copy' })
+    expect(opener).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(opener)
+
+    expect(opener).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: 'Customer copy preview' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Invoice' })).toHaveFocus()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+  })
+
+  it('does not render the Customer Copy control when the server withheld its projection', () => {
+    render(<TicketDetailScreen ticket={ticket()} role="tech" currentProfileId="tech-1" />)
+    expect(screen.queryByRole('button', { name: 'Customer copy' })).toBeNull()
+  })
+
+  it('closes and disables stale Customer Copy after quote approval while refreshing server truth', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      ticket={ticket()}
+      role="advisor"
+      canBuildQuote
+      currentProfileId="advisor-1"
+      customerCopy={customerCopyFixture}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Customer copy' }))
+    expect(screen.getByRole('region', { name: 'Customer copy preview' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Build quote' }))
+    await user.click(screen.getByRole('button', { name: 'Publish approval state' }))
+
+    expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
+    expect(screen.getByRole('button', { name: /customer copy/i })).toBeDisabled()
+    expect(routerRefreshMock).toHaveBeenCalledTimes(1)
+  })
+
   it('renders a complete counter ticket from the safe projection with real links', () => {
     render(<TicketDetailScreen ticket={ticket()} />)
 
@@ -871,8 +926,10 @@ describe('TicketDetailScreen', () => {
         })],
       })}
       ringOut={ringOut}
+      customerCopy={customerCopyFixture}
     />)
 
+    await user.click(screen.getByRole('button', { name: 'Customer copy' }))
     await user.click(screen.getByRole('button', { name: 'Close it out' }))
     expect(screen.getByRole('region', { name: 'The bill' })).toHaveFocus()
     await user.click(screen.getByRole('button', { name: 'Close repair order' }))
@@ -880,6 +937,59 @@ describe('TicketDetailScreen', () => {
     expect(await screen.findByText('Closed · Written up')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Receipt' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Close repair order' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
+    expect(routerRefreshMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes and disables stale Customer Copy after recording a payment', async () => {
+    const user = userEvent.setup()
+    const ringOut = {
+      ticketId: '00000000-0000-4000-8000-000000000020',
+      status: 'open' as const,
+      owed: {
+        subtotalCents: 10_000,
+        taxCents: 0,
+        totalCents: 10_000,
+        jobs: [{
+          jobId: '00000000-0000-4000-8000-000000000030',
+          title: 'Brake service',
+          subtotalCents: 10_000,
+        }],
+      },
+      paidCents: 0,
+      balanceCents: 10_000,
+      payments: [],
+      canRecordPayment: true,
+      canClose: false,
+      closedAt: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ringOut: {
+        ...ringOut,
+        paidCents: 10_000,
+        balanceCents: 0,
+        canRecordPayment: false,
+        canClose: true,
+        payments: [{
+          id: '00000000-0000-4000-8000-000000000040', amountCents: 10_000, method: 'cash', note: null,
+          recordedAt: '2026-08-02T14:00:00.000Z',
+        }],
+      },
+    })))
+    render(<TicketDetailScreen
+      role="advisor"
+      currentProfileId="advisor-1"
+      ticket={ticket({ id: ringOut.ticketId, jobs: [job({ approvalState: 'approved', workStatus: 'done' })] })}
+      ringOut={ringOut}
+      customerCopy={customerCopyFixture}
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Customer copy' }))
+    await user.click(screen.getByRole('button', { name: 'Record payment' }))
+
+    expect(screen.queryByRole('region', { name: 'Customer copy preview' })).toBeNull()
+    expect(screen.getByRole('button', { name: /customer copy/i })).toBeDisabled()
+    expect(routerRefreshMock).toHaveBeenCalledTimes(1)
   })
 
   const CANNED_JOB_ID = '00000000-0000-4000-8000-000000000040'
