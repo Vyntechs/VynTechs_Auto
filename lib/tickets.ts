@@ -355,6 +355,8 @@ export type TodayTicketJob = {
   assignmentState: 'mine' | 'team' | 'unassigned'
   assignedTechName: string | null
   createdByMe: boolean
+  /** Last real mutation to this job, serialized for the read-only attention clock. */
+  attentionAt: string
   // Only projected to the parts desk: enough context to finish the next
   // request in place, without leaking parts details to every role.
   partRequest?: {
@@ -526,6 +528,7 @@ export async function listTodayTicketJobs(
       assignedTechFullName: profiles.fullName,
       diagnosticStartState: ticketJobs.diagnosticStartState,
       diagnosticStartErrorCode: ticketJobs.diagnosticStartErrorCode,
+      attentionAt: ticketJobs.updatedAt,
       hasRequestedParts,
       nextPartRequestId,
       nextPartRequestDescription,
@@ -629,6 +632,7 @@ export async function listTodayTicketJobs(
             : 'team',
       assignedTechName: row.assignedTechFullName,
       createdByMe: row.createdByProfileId === actor.profileId,
+      attentionAt: row.attentionAt.toISOString(),
       ...(actor.role === 'parts' ? {
         partRequest: row.nextPartRequestId !== null
           && row.nextPartRequestDescription !== null

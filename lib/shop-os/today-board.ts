@@ -103,6 +103,7 @@ const todayJobSchema = z.strictObject({
   assignmentState: z.enum(['mine', 'team', 'unassigned']),
   assignedTechName: z.string().min(1).max(120).nullable(),
   createdByMe: z.boolean(),
+  attentionAt: z.iso.datetime({ offset: true }),
   partRequest: z.strictObject({
     id: z.uuid(),
     description: z.string().min(1).max(200),
@@ -128,6 +129,7 @@ const readyToCollectSchema = z.strictObject({
     make: z.string().min(1).max(120),
     model: z.string().min(1).max(120),
   }).nullable(),
+  attentionAt: z.iso.datetime({ offset: true }),
   ringOut: ringOutSchema,
 })
 

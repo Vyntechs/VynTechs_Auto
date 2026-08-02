@@ -98,7 +98,8 @@ describe('Today “Ready to collect” projection', () => {
     })
     await db.insert(ticketJobs).values([
       { id: JOB_BRAKES, shopId: shop.id, ticketId: DONE_TICKET, title: 'Front brakes', kind: 'repair',
-        requiredSkillTier: 1, workStatus: 'done', approvalState: 'approved', approvedQuoteVersionId: VERSION },
+        requiredSkillTier: 1, workStatus: 'done', approvalState: 'approved', approvedQuoteVersionId: VERSION,
+        updatedAt: new Date('2026-08-01T14:00:00Z') },
       { id: JOB_OIL, shopId: shop.id, ticketId: ACTIVE_TICKET, title: 'Oil change', kind: 'maintenance',
         requiredSkillTier: 1, workStatus: 'in_progress' },
       { id: uuid(32), shopId: shop.id, ticketId: CANCELED_WORK_TICKET, title: 'Replace alternator',
@@ -117,6 +118,7 @@ describe('Today “Ready to collect” projection', () => {
     expect(brakes.concern).toBe('Brake noise')
     expect(brakes.customerName).toBe('Ada Driver')
     expect(brakes.vehicle).toEqual({ year: 2020, make: 'Ford', model: 'F-150' })
+    expect(brakes.attentionAt).toBe('2026-08-01T14:00:00.000Z')
 
     // The money is the audited ring-out, not a second computation.
     const authoritative = await getTicketRingOut(db, { actor: advisorActor, ticketId: DONE_TICKET })
@@ -125,6 +127,24 @@ describe('Today “Ready to collect” projection', () => {
     expect(brakes.ringOut).toEqual(authoritative.ringOut)
     expect(brakes.ringOut.balanceCents).toBe(10_800)
     expect(brakes.ringOut.canRecordPayment).toBe(true)
+  })
+
+  it('uses the newest terminal job change for a finished repair order', async () => {
+    await db.insert(ticketJobs).values({
+      id: uuid(33),
+      shopId,
+      ticketId: DONE_TICKET,
+      title: 'Declined alignment',
+      kind: 'maintenance',
+      requiredSkillTier: 1,
+      workStatus: 'canceled',
+      updatedAt: new Date('2026-08-02T17:18:00Z'),
+    })
+
+    const cards = await listReadyToCollectTickets(db, { actor: advisorActor })
+    const brakes = cards.find((card) => card.ticketId === DONE_TICKET)
+
+    expect(brakes?.attentionAt).toBe('2026-08-02T17:18:00.000Z')
   })
 
   it.each([

@@ -18,6 +18,7 @@ const liveCard: ReadyToCollectTicket = {
   concern: 'Brake pedal pulses at highway speed.',
   customerName: 'Morgan Lee',
   vehicle: { year: 2024, make: 'Ford', model: 'F-350' },
+  attentionAt: '2026-07-26T14:00:00.000Z',
   ringOut: {
     ticketId: '00000000-0000-4000-8000-000000000003',
     status: 'open',
@@ -64,6 +65,7 @@ const baseJob: TodayTicketJob = {
   assignmentState: 'unassigned',
   assignedTechName: null,
   createdByMe: false,
+  attentionAt: '2026-07-26T14:00:00.000Z',
 }
 
 describe('Today board projection', () => {
@@ -223,6 +225,7 @@ describe('Today live-feed parsing', () => {
     assignmentState: 'unassigned',
     assignedTechName: null,
     createdByMe: false,
+    attentionAt: '2026-07-26T14:00:00.000Z',
   }
 
   it('accepts only a bounded Today projection before replacing the mounted board', () => {
@@ -238,6 +241,19 @@ describe('Today live-feed parsing', () => {
     expect(parseTodayJobsResponse({
       todayJobs: {
         myJobs: [], openJobs: [{ ...liveJob, id: 'not-a-uuid' }], createdJobs: [], teamJobs: [], partsJobs: [],
+        readyToCollect: [], linkedSessionIds: [],
+      },
+    })).toBeNull()
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [{ ...liveJob, attentionAt: 'yesterday' }], createdJobs: [], teamJobs: [], partsJobs: [],
+        readyToCollect: [], linkedSessionIds: [],
+      },
+    })).toBeNull()
+    const { attentionAt: _missingAttentionAt, ...missingAttentionAt } = liveJob
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [missingAttentionAt], createdJobs: [], teamJobs: [], partsJobs: [],
         readyToCollect: [], linkedSessionIds: [],
       },
     })).toBeNull()

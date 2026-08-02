@@ -109,6 +109,7 @@ const jobs: TodayTicketJobs = {
       assignmentState: 'unassigned',
       assignedTechName: null,
       createdByMe: false,
+      attentionAt: '2026-08-02T17:18:00.000Z',
     },
   ],
   createdJobs: [],

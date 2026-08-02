@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FloorBoard } from '@/components/screens/floor-board'
 import {
@@ -27,6 +27,7 @@ function job(overrides: Partial<TodayTicketJob> & { id: string; ticketId: string
     assignmentState: 'unassigned',
     assignedTechName: null,
     createdByMe: false,
+    attentionAt: '2026-08-02T17:18:00.000Z',
     ...overrides,
   }
 }
@@ -102,6 +103,20 @@ describe('projectFloorBoard', () => {
     expect(board.lanes.find((lane) => lane.id === 'with_tech')?.rows).toHaveLength(1)
   })
 
+  it('keeps the newest job change when several jobs share one vehicle', () => {
+    const board = projectFloorBoard(todayJobs({
+      myJobs: [
+        job({ id: 'job-a', ticketId: 'ticket-1', assignmentState: 'mine',
+          assignedTechName: 'Kyle Ortiz', attentionAt: '2026-08-01T09:00:00.000Z' }),
+        job({ id: 'job-b', ticketId: 'ticket-1', assignmentState: 'mine',
+          assignedTechName: 'Kyle Ortiz', attentionAt: '2026-08-02T17:18:00.000Z' }),
+      ],
+    }))
+
+    expect(board.lanes.find((lane) => lane.id === 'with_tech')?.rows[0]?.attentionAt)
+      .toBe('2026-08-02T17:18:00.000Z')
+  })
+
   it('sorts each vehicle by what is blocking it, unclaimed work first', () => {
     const board = projectFloorBoard(todayJobs({
       openJobs: [job({ id: 'j1', ticketId: 't1', ticketNumber: 1 })],
@@ -142,6 +157,7 @@ describe('projectFloorBoard', () => {
         concern: 'Brake job complete',
         customerName: 'Ana Diaz',
         vehicle: { year: 2016, make: 'Ford', model: 'F-350' },
+        attentionAt: '2026-08-01T14:00:00.000Z',
         ringOut: {
           status: 'open',
           totalCents: 120_000,
@@ -153,6 +169,7 @@ describe('projectFloorBoard', () => {
 
     const lane = board.lanes.find((entry) => entry.id === 'customer')
     expect(lane?.rows[0]?.right).toBe('READY')
+    expect(lane?.rows[0]?.attentionAt).toBe('2026-08-01T14:00:00.000Z')
     expect(JSON.stringify(board)).not.toContain('120000')
   })
 })
@@ -201,6 +218,36 @@ describe('FloorBoard rendering', () => {
     expect(layout.weight).toBeCloseTo(1.9)
   })
 
+  it('shows the newest vehicle quiet time and automatically ages it on the existing wall clock', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-02T18:00:00.000Z'))
+    const board = todayJobs({
+      openJobs: [
+        job({ id: 'job-recent', ticketId: 'ticket-recent', ticketNumber: 41 }),
+        job({
+          id: 'job-stale',
+          ticketId: 'ticket-stale',
+          ticketNumber: 42,
+          vehicle: { year: 2016, make: 'Ford', model: 'F-350' },
+          attentionAt: '2026-07-30T18:00:00.000Z',
+        }),
+      ],
+    })
+
+    const { container } = render(<FloorBoard shopName="Young Motorsports" todayJobs={board} />)
+    const recentRow = container.querySelector('[data-ticket-id="ticket-recent"]')
+    const staleRow = container.querySelector('[data-ticket-id="ticket-stale"]')
+    expect(recentRow).not.toBeNull()
+    expect(staleRow).not.toBeNull()
+    expect(within(recentRow as HTMLElement).getByText('Quiet 42m'))
+      .toHaveAttribute('data-attention', 'normal')
+    expect(within(staleRow as HTMLElement).getByText('Quiet 3d'))
+      .toHaveAttribute('data-attention', 'stale')
+
+    act(() => { vi.advanceTimersByTime(60_000) })
+    expect(within(recentRow as HTMLElement).getByText('Quiet 43m')).toBeTruthy()
+  })
+
   it('holds a thirty-vehicle shop inside the row budget without overflowing', () => {
     const busy = fullBoard(30)
     const board = projectFloorBoard(busy)
@@ -236,7 +283,7 @@ describe('FloorBoard rendering', () => {
     expect(setInterval).toHaveBeenCalledTimes(2)
     expect(setInterval.mock.calls.some(([, ms]) => ms === 5_000)).toBe(true)
 
-    vi.advanceTimersByTime(15_000)
+    act(() => { vi.advanceTimersByTime(15_000) })
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/today/jobs', expect.anything())
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
 

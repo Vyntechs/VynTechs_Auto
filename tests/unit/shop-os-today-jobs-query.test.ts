@@ -157,6 +157,7 @@ describe('Today ticket jobs read model', () => {
         diagnosticStartState: 'ready',
         workStatus: 'open',
         createdAt: new Date('2026-07-10T10:01:00Z'),
+        updatedAt: new Date('2026-08-02T17:18:00Z'),
       },
       {
         id: uuid(42),
@@ -229,6 +230,7 @@ describe('Today ticket jobs read model', () => {
       assignmentState: 'mine',
       assignedTechName: 'Taylor Tech',
       createdByMe: true,
+      attentionAt: '2026-08-02T17:18:00.000Z',
       diagnosticStartState: 'ready',
       diagnosticStartErrorCode: null,
     })

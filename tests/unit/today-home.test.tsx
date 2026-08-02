@@ -86,6 +86,7 @@ const todayJobs: TodayTicketJobs = {
       assignmentState: 'mine',
       assignedTechName: 'Taylor Tech',
       createdByMe: false,
+      attentionAt: '2026-08-02T17:18:00.000Z',
     },
   ],
   openJobs: [
@@ -106,6 +107,7 @@ const todayJobs: TodayTicketJobs = {
       assignmentState: 'unassigned',
       assignedTechName: null,
       createdByMe: false,
+      attentionAt: '2026-08-02T17:18:00.000Z',
     },
   ],
   createdJobs: [],

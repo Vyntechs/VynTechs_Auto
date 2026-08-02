@@ -233,6 +233,10 @@
 }
 
 .right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--floor-line) * 0.04);
   justify-self: end;
   font-family: var(--vt-font-mono);
   font-weight: 500;
@@ -241,6 +245,19 @@
   text-transform: uppercase;
   white-space: nowrap;
   color: var(--vt-graphite-300);
+}
+
+.attention {
+  color: var(--vt-graphite-500);
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.attention[data-attention='stale'] {
+  color: var(--vt-amber-400);
+  font-weight: 700;
 }
 
 .tail {

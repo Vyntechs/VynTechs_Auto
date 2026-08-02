@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -44,6 +44,7 @@ const linkedDiagnostic: TodayTicketJob = {
   createdByMe: false,
   diagnosticStartState: 'ready',
   diagnosticStartErrorCode: null,
+  attentionAt: '2026-08-02T17:18:00.000Z',
 }
 
 const unlinkedDiagnostic: TodayTicketJob = {
@@ -105,6 +106,7 @@ describe('TodayJobsBoard persisted ledger', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it('renders the persisted repair-order facts and canonical ticket link', () => {
@@ -122,6 +124,40 @@ describe('TodayJobsBoard persisted ledger', () => {
       'href',
       '/tickets/ticket-41',
     )
+  })
+
+  it('shows and automatically ages truthful quiet time without making stale work an emergency', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-02T18:00:00.000Z'))
+
+    render(
+      <TodayJobsBoard
+        myJobs={[
+          linkedDiagnostic,
+          {
+            ...repair,
+            id: 'job-stale',
+            ticketId: 'ticket-stale',
+            ticketNumber: 45,
+            title: 'Inspect long-standing vibration',
+            attentionAt: '2026-07-30T18:00:00.000Z',
+          },
+        ]}
+        openJobs={[]}
+      />,
+    )
+
+    const recentRow = screen.getByRole('article', {
+      name: 'Repair order 41: Trace intermittent no-start',
+    })
+    const staleRow = screen.getByRole('article', {
+      name: 'Repair order 45: Inspect long-standing vibration',
+    })
+    expect(within(recentRow).getByText('Quiet 42m')).toHaveAttribute('data-attention', 'normal')
+    expect(within(staleRow).getByText('Quiet 3d')).toHaveAttribute('data-attention', 'stale')
+
+    act(() => { vi.advanceTimersByTime(60_000) })
+    expect(within(recentRow).getByText('Quiet 43m')).toBeInTheDocument()
   })
 
   it('honestly signals when the bounded Today view has more work', () => {
@@ -1220,6 +1256,7 @@ const readyCard: ReadyToCollectTicket = {
   concern: 'Grinding noise when braking',
   customerName: 'Ada Driver',
   vehicle: { year: 2020, make: 'Ford', model: 'F-150' },
+  attentionAt: '2026-08-02T17:18:00.000Z',
   ringOut: readyRingOut,
 }
 
