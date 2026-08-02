@@ -52,6 +52,29 @@ describe('migration folder', () => {
           failures.push(`${file}: ${message}`)
         }
       }
+
+      const identityColumns = await client.query<{
+        column_name: string
+        is_nullable: string
+      }>(`
+        select column_name, is_nullable
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'shops'
+          and column_name in (
+            'phone', 'address_line_1', 'address_line_2',
+            'city', 'region', 'postal_code'
+          )
+        order by column_name
+      `)
+      expect(identityColumns.rows).toEqual([
+        { column_name: 'address_line_1', is_nullable: 'YES' },
+        { column_name: 'address_line_2', is_nullable: 'YES' },
+        { column_name: 'city', is_nullable: 'YES' },
+        { column_name: 'phone', is_nullable: 'YES' },
+        { column_name: 'postal_code', is_nullable: 'YES' },
+        { column_name: 'region', is_nullable: 'YES' },
+      ])
     } finally {
       await client.close()
     }

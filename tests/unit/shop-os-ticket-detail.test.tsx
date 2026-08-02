@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { TicketDetailScreen } from '@/components/screens/ticket-detail'
 import type { TicketDetail } from '@/lib/tickets'
+import { customerCopyFixture } from '@/tests/helpers/customer-copy'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), back: vi.fn(), replace: vi.fn() }),
@@ -175,6 +176,31 @@ function ticket(overrides: Partial<TicketDetail> = {}): TicketDetail {
 }
 
 describe('TicketDetailScreen', () => {
+  it('reveals Customer Copy in place for an advisor and moves focus to its heading', async () => {
+    render(
+      <TicketDetailScreen
+        ticket={ticket()}
+        role="advisor"
+        currentProfileId="advisor-1"
+        customerCopy={customerCopyFixture}
+      />,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Customer copy' })
+    expect(opener).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(opener)
+
+    expect(opener).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: 'Customer copy preview' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Invoice' })).toHaveFocus()
+    expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
+  })
+
+  it('does not render the Customer Copy control when the server withheld its projection', () => {
+    render(<TicketDetailScreen ticket={ticket()} role="tech" currentProfileId="tech-1" />)
+    expect(screen.queryByRole('button', { name: 'Customer copy' })).toBeNull()
+  })
+
   it('renders a complete counter ticket from the safe projection with real links', () => {
     render(<TicketDetailScreen ticket={ticket()} />)
 

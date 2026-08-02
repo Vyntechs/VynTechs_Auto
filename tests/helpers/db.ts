@@ -73,6 +73,7 @@ export async function createTestDb(): Promise<{
   await ensureTicketActivityMigration(client)
   await ensureShopOsQuoteDeferralMigration(client)
   await ensureIntentAwareIntakeMigration(client)
+  await ensureCustomerCopyIdentityMigration(client)
   return {
     db,
     client,
@@ -80,6 +81,35 @@ export async function createTestDb(): Promise<{
       await client.close()
     },
   }
+}
+
+export async function ensureCustomerCopyIdentityMigration(client: PGlite): Promise<void> {
+  const columns = await client.query<{ column_name: string }>(`
+    select column_name
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'shops'
+      and column_name in (
+        'phone', 'address_line_1', 'address_line_2',
+        'city', 'region', 'postal_code'
+      )
+  `)
+  if (columns.rows.length === 6) return
+  if (columns.rows.length !== 0) throw new Error('partial customer copy identity schema')
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0049_shop_os_customer_copy_identity.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  const applied = await client.query<{ column_name: string }>(`
+    select column_name
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'shops'
+      and column_name in (
+        'phone', 'address_line_1', 'address_line_2',
+        'city', 'region', 'postal_code'
+      )
+  `)
+  if (applied.rows.length !== 6) throw new Error('customer copy identity migration failed')
 }
 
 export async function ensureIntentAwareIntakeMigration(client: PGlite): Promise<void> {

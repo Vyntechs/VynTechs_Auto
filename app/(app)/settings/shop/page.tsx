@@ -46,7 +46,15 @@ export default async function SettingsShopPage() {
   })
 
   return <>
-    <ShopSection initialName={shop.name} />
+    <ShopSection
+      initialName={shop.name}
+      initialPhone={shop.phone}
+      initialAddressLine1={shop.addressLine1}
+      initialAddressLine2={shop.addressLine2}
+      initialCity={shop.city}
+      initialRegion={shop.region}
+      initialPostalCode={shop.postalCode}
+    />
     <RatesSection
       initialTaxRateBps={shop.taxRateBps}
       initialLaborRateCents={shop.laborRateCents}

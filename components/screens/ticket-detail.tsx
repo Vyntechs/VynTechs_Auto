@@ -14,6 +14,7 @@ import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import type { TicketDetail } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
+import type { CustomerCopyProjection } from '@/lib/shop-os/customer-copy'
 import type {
   SimpleWorkEscalationView,
   SimpleWorkProjectionView,
@@ -30,6 +31,7 @@ import { TicketInterruptionAction } from './ticket-interruption-action'
 import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import { InlineWorkWorkspace } from './inline-work-workspace'
+import { CustomerCopy } from './customer-copy'
 import styles from './ticket-detail.module.css'
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -87,6 +89,7 @@ export function TicketDetailScreen({
   ringOut = null,
   partRequests = [],
   diagnosticsEntitled = true,
+  customerCopy = null,
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
@@ -100,6 +103,7 @@ export function TicketDetailScreen({
   ringOut?: TicketRingOut | null
   partRequests?: TicketPartRequestView[]
   diagnosticsEntitled?: boolean
+  customerCopy?: CustomerCopyProjection | null
 }): React.JSX.Element {
   const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
     () => new Map(),
@@ -113,6 +117,7 @@ export function TicketDetailScreen({
   const [escalatedJobs, setEscalatedJobs] = useState<SimpleWorkEscalationView[]>([])
   const [ringOutState, setRingOutState] = useState(ringOut)
   const [ticketStatus, setTicketStatus] = useState(ticket.status)
+  const [customerCopyOpen, setCustomerCopyOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<
     { kind: 'quote' } | { kind: 'work'; jobId: string } | null
   >(null)
@@ -203,9 +208,9 @@ export function TicketDetailScreen({
           )}
         </header>
 
-        {ticketStatus === 'open' && (
+        {((ticketStatus === 'open' && (
           (canBuildQuote && (quoteCommand || legacyQuoteFallback)) || ringOutCommand
-        ) && (
+        )) || customerCopy) && (
           <div className={styles.actions}>
             {canBuildQuote && (quoteCommand ? (
               <button
@@ -236,7 +241,21 @@ export function TicketDetailScreen({
                 {ringOutCommand.label}
               </button>
             )}
+            {customerCopy && (
+              <button
+                type="button"
+                className={styles.customerCopyAction}
+                aria-expanded={customerCopyOpen}
+                onClick={() => setCustomerCopyOpen((open) => !open)}
+              >
+                {customerCopyOpen ? 'Hide customer copy' : 'Customer copy'}
+              </button>
+            )}
           </div>
+        )}
+
+        {customerCopyOpen && customerCopy && (
+          <CustomerCopy copy={customerCopy} canManageShopIdentity={role === 'owner'} />
         )}
 
         {activeTool?.kind === 'quote' && currentProfileId && (
