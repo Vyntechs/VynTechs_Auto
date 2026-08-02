@@ -52,9 +52,9 @@ function ticketPath(page: Page): string {
 
 async function openTicketFromToday(page: Page, ticketNumber: string): Promise<void> {
   await page.goto('/today')
-  const row = page.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+  const row = page.getByRole('article', { name: new RegExp(`Repair order ${ticketNumber}:`) })
   await expect(row).toBeVisible()
-  await row.getByRole('link', { name: new RegExp(`Open ticket ${ticketNumber}`) }).click()
+  await row.getByRole('link', { name: new RegExp(`Open repair order ${ticketNumber}`) }).click()
   await page.waitForURL(/\/tickets\/[0-9a-f-]+$/)
 }
 
@@ -63,7 +63,7 @@ async function openTicketFromToday(page: Page, ticketNumber: string): Promise<vo
 // the job in the locator is what keeps each step pointed at the line the shop
 // is actually touching.
 function boardRow(page: Page, ticketNumber: string, jobTitle: string) {
-  return page.getByRole('article', { name: `Ticket ${ticketNumber}: ${jobTitle}` })
+  return page.getByRole('article', { name: `Repair order ${ticketNumber}: ${jobTitle}` })
 }
 
 function quoteJobCard(page: Page, jobTitle: string) {
@@ -109,7 +109,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     const owner = sessions.get('owner')!.page
     await expect(owner.getByText('Shop floor', { exact: true })).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-today-empty')
-    await owner.getByRole('link', { name: 'New work order' }).click()
+    await owner.getByRole('link', { name: 'New repair order' }).click()
     await owner.getByLabel('Name', { exact: true }).fill(customerName)
     await owner.getByLabel('Phone').fill('5550100200')
     await owner.getByLabel('Year').fill('2021')
@@ -118,8 +118,6 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByLabel('Mileage today').first().fill('48120')
     await owner.getByLabel('What brought them in?').fill(concern)
     await owner.getByRole('button', { name: /^Perform known work/ }).click()
-    const scopeSource = owner.getByLabel('Scope source')
-    if (await scopeSource.count()) await scopeSource.selectOption('manual')
     await owner.getByLabel('Requested work').fill(brakeJobTitle)
     await checkpoint(owner, testInfo, 'owner-intake-complete')
     await owner.getByRole('button', { name: 'Create repair order' }).last().click()
@@ -133,7 +131,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await checkpoint(owner, testInfo, 'owner-created-ticket')
 
     await owner.goto('/today')
-    const ownerTodayRow = owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const ownerTodayRow = owner.getByRole('article', { name: new RegExp(`Repair order ${ticketNumber}:`) })
     const assignmentResponsePromise = owner.waitForResponse((response) => (
       response.request().method() === 'POST'
       && /\/api\/tickets\/[0-9a-f-]+\/jobs\/[0-9a-f-]+\/assignment$/i.test(new URL(response.url()).pathname)
@@ -142,13 +140,13 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await owner.getByLabel('Choose technician').getByRole('button', { name: /Golden QA Technician/ }).click()
     expect((await assignmentResponsePromise).status(), 'in-place assignment API status').toBe(200)
     await expect(owner.getByRole('heading', { name: 'With the team' })).toBeVisible()
-    await expect(owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) }))
+    await expect(owner.getByRole('article', { name: new RegExp(`Repair order ${ticketNumber}:`) }))
       .toContainText('Golden QA Technician')
     await expect(owner).toHaveURL(/\/today$/)
 
     const advisor = sessions.get('advisor')!.page
     await advisor.goto('/today')
-    const advisorTodayRow = advisor.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })
+    const advisorTodayRow = advisor.getByRole('article', { name: new RegExp(`Repair order ${ticketNumber}:`) })
     await checkpoint(advisor, testInfo, 'advisor-found-ticket')
     const quoteEntry = advisorTodayRow.getByRole('button', { name: 'Build quote' })
     await quoteEntry.click()
@@ -293,10 +291,10 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // paperwork instead of to the truck.
     const techDeclinedRow = boardRow(tech, ticketNumber, tireJobTitle)
     await expect(techDeclinedRow).toBeVisible()
-    await expect(techDeclinedRow).toContainText('Declined')
+    await expect(techDeclinedRow).toContainText('Customer said no')
     await expect(techDeclinedRow.getByText('Open work')).toHaveCount(0)
     await expect(techDeclinedRow.getByRole('link', { name: 'Review repair order' })).toBeVisible()
-    await expect(techTodayRow).toContainText('Approved')
+    await expect(techTodayRow).toContainText('Customer said yes')
     await checkpoint(tech, testInfo, 'tech-board-declined-line-is-not-workable')
 
     const workResponsePromise = tech.waitForResponse((response) => (
@@ -361,7 +359,13 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(owner.getByText('Canceled · Written up', { exact: true })).toBeVisible()
     await owner.getByRole('button', { name: 'Reopen repair order' }).click()
     await expect(owner.getByText('Open · Written up', { exact: true })).toBeVisible()
-    await expect(owner.getByText('Work · Blocked')).toBeVisible()
+    // The work stamp on the brake job. It used to print the column and its
+    // value ("Work · Blocked"); it now says what the shop says.
+    await expect(
+      owner.getByRole('listitem')
+        .filter({ has: owner.getByRole('heading', { name: brakeJobTitle, exact: true }) })
+        .getByText('On hold', { exact: true }),
+    ).toBeVisible()
     await checkpoint(owner, testInfo, 'owner-cancel-reopen-blocked-work')
 
     await advisor.goto('/today')
@@ -406,7 +410,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // does not carry this repair order at all. That is the jam, at the board.
     await advisor.goto('/today')
     const collectCard = advisor.getByRole('article', {
-      name: `Ticket ${ticketNumber}: ready to collect`,
+      name: `Repair order ${ticketNumber}: ready to collect`,
     })
     await expect(collectCard).toHaveCount(0)
     await checkpoint(advisor, testInfo, 'advisor-declined-line-holds-the-counter')
@@ -416,7 +420,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // declined line's $120 of labor is not on it, so the balance is exactly
     // what it would have been without the second job.
     await advisor.goto(path)
-    const ringOut = advisor.getByRole('region', { name: 'Ring out' })
+    const ringOut = advisor.getByRole('region', { name: 'The bill' })
     await expect(ringOut).toContainText(brakeJobTitle)
     await expect(ringOut.getByText(tireJobTitle)).toHaveCount(0)
     await expect(ringOut.getByText('$120.00')).toHaveCount(0)
@@ -441,7 +445,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(closeButton).toBeEnabled()
     await closeButton.click()
     await expect(ringOut.getByRole('alert'))
-      .toHaveText('Finish or cancel every work item before closing this repair order.')
+      .toHaveText('Finish every job, or drop the ones you are not doing, before closing this repair order.')
     await expect(advisor.getByText('Closed · Written up', { exact: true })).toHaveCount(0)
     await checkpoint(advisor, testInfo, 'advisor-close-blocked-by-declined-line')
 
@@ -460,14 +464,14 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(collectCard).toContainText('Paid in full')
     await checkpoint(advisor, testInfo, 'advisor-ready-to-collect')
     await collectCard.getByRole('button', { name: 'Close repair order' }).click()
-    await expect(advisor.getByRole('region', { name: 'Ring out' })).toBeFocused()
+    await expect(advisor.getByRole('region', { name: 'The bill' })).toBeFocused()
     // Named, enabled, and no longer "Closing…": the payment landed and the
     // balance it reported is zero.
     const boardCloseButton = advisor.getByRole('button', { name: 'Mark paid and close' })
     await expect(boardCloseButton).toBeEnabled()
     await boardCloseButton.click()
     await expect(advisor.getByRole('status').filter({
-      hasText: `Ticket ${ticketNumber} is closed and off the board.`,
+      hasText: `Repair order ${ticketNumber} is closed and off the board.`,
     })).toBeVisible()
     await expect(collectCard).toHaveCount(0)
     await expect(advisor).toHaveURL(/\/today$/)
@@ -477,7 +481,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     await expect(owner.getByText('Closed · Written up', { exact: true })).toBeVisible()
     await expect(owner.getByRole('heading', { name: 'Receipt' })).toBeVisible()
     await owner.goto('/today')
-    await expect(owner.getByRole('article', { name: new RegExp(`Ticket ${ticketNumber}:`) })).toHaveCount(0)
+    await expect(owner.getByRole('article', { name: new RegExp(`Repair order ${ticketNumber}:`) })).toHaveCount(0)
     await checkpoint(owner, testInfo, 'owner-closed-day')
 
     // Off the board is where a closed repair order used to leave the product

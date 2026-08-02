@@ -73,7 +73,7 @@ test('the counter decodes a real VIN and refuses a bad one honestly', async ({ b
     const owner = session.page
     const faults = [watchBrowserFaults(owner, 'owner')]
 
-    await owner.getByRole('link', { name: 'New work order' }).click()
+    await owner.getByRole('link', { name: 'New repair order' }).click()
     const vin = owner.getByLabel('VIN')
     const decode = owner.getByRole('button', { name: 'Decode VIN' })
 
