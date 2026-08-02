@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -37,8 +37,18 @@ describe('CustomerCopy', () => {
     expect(screen.getByRole('heading', { name: label })).toBeInTheDocument()
   })
 
-  it('calls the browser print dialog and does not mutate application state', async () => {
-    const print = vi.fn()
+  it('keeps a ready screen projection locked against native print before a fresh attempt', () => {
+    const { container } = render(<CustomerCopy copy={customerCopyFixture} canManageShopIdentity />)
+
+    expect(screen.getByText('Invoice ready')).toBeInTheDocument()
+    expect(container.querySelector('[data-customer-copy-document]')).toHaveAttribute('data-print-ready', 'false')
+    expect(container.querySelector('[data-customer-copy-print-blocker]')).toHaveTextContent('not ready to print')
+  })
+
+  it('grants print authorization only after refresh succeeds and the print sink observes it', async () => {
+    const print = vi.fn(() => {
+      expect(document.querySelector('[data-customer-copy-document]')).toHaveAttribute('data-print-ready', 'true')
+    })
     vi.stubGlobal('print', print)
     const refreshCopy = vi.fn(async () => ({ ok: true as const, copy: customerCopyFixture }))
     render(<CustomerCopy
@@ -51,6 +61,27 @@ describe('CustomerCopy', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Print customer copy' }))
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1))
     expect(refreshCopy).toHaveBeenCalledWith('ticket-1')
+    expect(document.querySelector('[data-customer-copy-document]')).toHaveAttribute('data-print-ready', 'true')
+  })
+
+  it('revokes the fresh print grant after the print attempt ends', async () => {
+    const print = vi.fn()
+    vi.stubGlobal('print', print)
+    const refreshCopy = vi.fn(async () => ({ ok: true as const, copy: customerCopyFixture }))
+    render(<CustomerCopy
+      copy={customerCopyFixture}
+      canManageShopIdentity
+      ticketId="ticket-1"
+      refreshCopy={refreshCopy}
+    />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Print customer copy' }))
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1))
+    expect(document.querySelector('[data-customer-copy-document]')).toHaveAttribute('data-print-ready', 'true')
+
+    act(() => window.dispatchEvent(new Event('afterprint')))
+
+    await waitFor(() => expect(document.querySelector('[data-customer-copy-document]')).toHaveAttribute('data-print-ready', 'false'))
   })
 
   it('renders fresh authorized money before printing', async () => {

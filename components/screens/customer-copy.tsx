@@ -44,20 +44,36 @@ export function CustomerCopy({
   const [copy, setCopy] = useState(initialCopy)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState(false)
+  const [printAuthorized, setPrintAuthorized] = useState(false)
   const [printPending, setPrintPending] = useState(false)
   useEffect(() => headingRef.current?.focus(), [])
-  useEffect(() => setCopy(initialCopy), [initialCopy])
   useEffect(() => {
-    if (!printPending || refreshing || !copy.readyToPrint) return
+    setCopy(initialCopy)
+    setPrintAuthorized(false)
+    setPrintPending(false)
+  }, [initialCopy])
+  useEffect(() => {
+    if (!printPending || refreshing || !copy.readyToPrint || !printAuthorized) return
     setPrintPending(false)
     window.print()
-  }, [copy, printPending, refreshing])
+  }, [copy, printAuthorized, printPending, refreshing])
+  useEffect(() => {
+    function revokePrintAuthorization(): void {
+      setPrintAuthorized(false)
+      setPrintPending(false)
+    }
+    window.addEventListener('afterprint', revokePrintAuthorization)
+    return () => window.removeEventListener('afterprint', revokePrintAuthorization)
+  }, [])
   const documentLabel = DOCUMENT_LABELS[copy.documentKind]
   const missingIdentity = copy.blockers.filter((blocker) => IDENTITY_BLOCKERS.includes(blocker))
   const pricingUnavailable = copy.blockers.includes('pricing_unavailable')
-  const printable = copy.readyToPrint && !refreshError
+  const screenReady = copy.readyToPrint && !refreshError
+  const printable = screenReady && printAuthorized
 
   async function printFreshCopy(): Promise<void> {
+    setPrintAuthorized(false)
+    setPrintPending(false)
     if (!refreshCopy || !ticketId) {
       setRefreshError(true)
       return
@@ -71,7 +87,10 @@ export function CustomerCopy({
         return
       }
       setCopy(result.copy)
-      if (result.copy.readyToPrint) setPrintPending(true)
+      if (result.copy.readyToPrint) {
+        setPrintAuthorized(true)
+        setPrintPending(true)
+      }
     } catch {
       setRefreshError(true)
     } finally {
@@ -84,7 +103,7 @@ export function CustomerCopy({
       <div className={styles.controls} data-customer-copy-controls>
         <div>
           <p>Customer copy</p>
-          <span>{refreshing ? 'Refreshing current money…' : printable ? `${documentLabel} ready` : 'Printing unavailable'}</span>
+          <span>{refreshing ? 'Refreshing current money…' : screenReady ? `${documentLabel} ready` : 'Printing unavailable'}</span>
         </div>
         <button
           type="button"

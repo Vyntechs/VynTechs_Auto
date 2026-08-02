@@ -21,7 +21,11 @@ function Harness(): React.JSX.Element {
   useEffect(() => {
     document.body.dataset.refreshCount = '0'
     document.body.dataset.printCalls = '0'
+    document.body.dataset.printReadyAtCall = 'unset'
     window.print = () => {
+      document.body.dataset.printReadyAtCall = document
+        .querySelector('[data-customer-copy-document]')
+        ?.getAttribute('data-print-ready') ?? 'missing'
       document.body.dataset.printCalls = String(Number(document.body.dataset.printCalls ?? '0') + 1)
     }
   }, [])
