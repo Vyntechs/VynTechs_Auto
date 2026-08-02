@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBrowserSupabase } from '@/lib/supabase-client'
 import { safeNextPath } from '@/lib/safe-next-path'
@@ -19,6 +19,12 @@ export default function SignInPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /* Until React is live, this is a plain HTML form: pressing the button
+     submits it natively and the browser puts every named field — including
+     the password — in the address bar, browser history, and the Referer.
+     Keep the button inert until the handler that prevents that exists. */
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(true), [])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -111,15 +117,9 @@ export default function SignInPage() {
         />
       </div>
 
-      {/* `method="post"` is the only thing standing between a password and the
-          address bar. Sign-in is submitted by `handleSubmit`, which cannot run
-          until React has hydrated; a submit before that — Enter in the password
-          field on a slow phone — falls back to the browser's native behaviour,
-          and a form with no method GETs, appending `?email=…&password=…` to the
-          URL. That lands in history, the Referer header and every access log in
-          front of the app. Posting instead sends nothing to a route that
-          accepts it and leaks nothing on the way. */}
-      <form method="post" onSubmit={handleSubmit} noValidate>
+      {/* method="post" so even a submit that outruns hydration cannot put the
+          password in the query string; the handler always preventDefaults. */}
+      <form onSubmit={handleSubmit} method="post" noValidate>
         <div className="field">
           <label htmlFor="email">Email</label>
           <input
@@ -152,7 +152,7 @@ export default function SignInPage() {
         <button
           type="submit"
           className="btn"
-          disabled={busy}
+          disabled={busy || !ready}
           style={{ width: '100%', marginTop: 14 }}
         >
           {busy ? 'Signing in…' : 'Sign in'}
