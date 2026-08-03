@@ -75,6 +75,10 @@ export function isCustomerApprovalLinkRoute(pathname: string): boolean {
   return /^\/api\/tickets\/[^/]+\/quote\/approval-links$/.test(pathname)
 }
 
+export function isTicketCorrectionRoute(pathname: string): boolean {
+  return /^\/api\/tickets\/[^/]+\/corrections$/.test(pathname)
+}
+
 // Diagnostic-engine surfaces gated by the per-shop diagnostics entitlement
 // (plan §3.4). Mirrors the guardCuratorRoute per-surface pattern: middleware
 // checks these after the paywall gate, and entitlementReject() repeats the

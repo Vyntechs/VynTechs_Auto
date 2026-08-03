@@ -512,7 +512,7 @@ export function readApprovedJobPricing(snapshot: unknown, jobId: string): Approv
   }
 }
 
-function isPinnedSimpleWork(
+export function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus' | 'sessionId'>,
 ): boolean {
   return (job.kind === 'repair' || job.kind === 'maintenance'

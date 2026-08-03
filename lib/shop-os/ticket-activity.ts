@@ -220,38 +220,30 @@ export async function appendTicketActivity(
     ? { ok: true, created: false }
     : { ok: false, error: 'conflict' }
 
-  try {
-    await db.insert(ticketActivity).values({
-      shopId: input.shopId,
-      ticketId: input.ticketId,
-      jobId: input.jobId ?? null,
-      actorProfileId: input.actorProfileId,
-      kind: input.kind,
-      requestKey: input.requestKey,
-      payload: input.payload,
+  const [created] = await db.insert(ticketActivity).values({
+    shopId: input.shopId,
+    ticketId: input.ticketId,
+    jobId: input.jobId ?? null,
+    actorProfileId: input.actorProfileId,
+    kind: input.kind,
+    requestKey: input.requestKey,
+    payload: input.payload,
+  })
+    .onConflictDoNothing({
+      target: [ticketActivity.shopId, ticketActivity.requestKey],
     })
-    return { ok: true, created: true }
-  } catch (error) {
-    if (!isUniqueViolation(error)) throw error
-    const [winner] = await db
-      .select()
-      .from(ticketActivity)
-      .where(and(
-        eq(ticketActivity.shopId, input.shopId),
-        eq(ticketActivity.requestKey, input.requestKey),
-      ))
-      .limit(1)
-    return winner && matches(winner, input)
-      ? { ok: true, created: false }
-      : { ok: false, error: 'conflict' }
-  }
-}
+    .returning()
+  if (created) return { ok: true, created: true }
 
-function isUniqueViolation(error: unknown): boolean {
-  let current: unknown = error
-  for (let depth = 0; current && depth < 5; depth += 1) {
-    if (typeof current === 'object' && 'code' in current && current.code === '23505') return true
-    current = typeof current === 'object' && 'cause' in current ? current.cause : null
-  }
-  return false
+  const [winner] = await db
+    .select()
+    .from(ticketActivity)
+    .where(and(
+      eq(ticketActivity.shopId, input.shopId),
+      eq(ticketActivity.requestKey, input.requestKey),
+    ))
+    .limit(1)
+  return winner && matches(winner, input)
+    ? { ok: true, created: false }
+    : { ok: false, error: 'conflict' }
 }
