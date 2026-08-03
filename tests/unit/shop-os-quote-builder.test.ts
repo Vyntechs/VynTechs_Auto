@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
   customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets,
@@ -78,7 +78,10 @@ describe('Shop OS quote builder read model', () => {
     ])
   })
 
-  afterEach(async () => close())
+  afterEach(async () => {
+    vi.unstubAllEnvs()
+    await close()
+  })
 
   it('reauthorizes the persisted actor inside a consistent read-only snapshot', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
@@ -131,7 +134,10 @@ describe('Shop OS quote builder read model', () => {
             source: 'vendor_offer', mutable: false,
           }],
         }],
-        capabilities: { canRecordCustomerApproval: false },
+        capabilities: {
+          canRecordCustomerApproval: false,
+          canCreateCustomerApprovalLink: false,
+        },
         activeVersion: null,
       },
     })
@@ -317,14 +323,39 @@ describe('Shop OS quote builder read model', () => {
           },
           approval: { state: 'quote_ready', quoteVersionId: null },
         }],
-        capabilities: { canRecordCustomerApproval: false },
+        capabilities: {
+          canRecordCustomerApproval: false,
+          canCreateCustomerApprovalLink: false,
+        },
       },
     })
     await expect(getQuoteBuilder(db, { actor: { profileId: uuid(4) }, ticketId })).resolves.toMatchObject({
-      ok: true, builder: { capabilities: { canRecordCustomerApproval: true } },
+      ok: true,
+      builder: {
+        capabilities: {
+          canRecordCustomerApproval: true,
+          canCreateCustomerApprovalLink: false,
+        },
+      },
+    })
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', 'true')
+    await expect(getQuoteBuilder(db, { actor: { profileId: uuid(4) }, ticketId })).resolves.toMatchObject({
+      ok: true,
+      builder: {
+        capabilities: {
+          canRecordCustomerApproval: true,
+          canCreateCustomerApprovalLink: true,
+        },
+      },
     })
     await expect(getQuoteBuilder(db, { actor: { profileId: uuid(5) }, ticketId })).resolves.toMatchObject({
-      ok: true, builder: { capabilities: { canRecordCustomerApproval: false } },
+      ok: true,
+      builder: {
+        capabilities: {
+          canRecordCustomerApproval: false,
+          canCreateCustomerApprovalLink: false,
+        },
+      },
     })
     await db.update(ticketJobs).set({ storyMeta: { source: 'ai' } as never }).where(eq(ticketJobs.id, uuid(30)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({

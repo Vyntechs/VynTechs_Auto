@@ -38,11 +38,22 @@ describe('quote preparation readiness', () => {
   })!
 
   it('allows explicitly priced persisted labor without a global labor rate', () => {
+    expect(readyBuilder.capabilities.canCreateCustomerApprovalLink).toBe(false)
     expect(getQuotePreparationState({
       builder: readyBuilder,
       totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
       editorOpen: false, modalOpen: false, busy: false,
     })).toEqual({ kind: 'ready', reasons: [] })
+  })
+
+  it('accepts an explicit server-projected customer-link capability', () => {
+    expect(parseQuoteBuilderProjection({
+      ...readyBuilder,
+      capabilities: {
+        ...readyBuilder.capabilities,
+        canCreateCustomerApprovalLink: true,
+      },
+    })?.capabilities.canCreateCustomerApprovalLink).toBe(true)
   })
 
   it('lists every actionable block without adding a labor-rate requirement', () => {
@@ -206,7 +217,10 @@ describe('quote builder refresh projection validation', () => {
         source: 'manual', mutable: true,
       }],
     }],
-    capabilities: { canRecordCustomerApproval: false },
+    capabilities: {
+      canRecordCustomerApproval: false,
+      canCreateCustomerApprovalLink: false,
+    },
     activeVersion: null,
   }
 

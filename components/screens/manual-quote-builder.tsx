@@ -276,6 +276,10 @@ export function ManualQuoteBuilder({
     })))
   }, [current, onProjection])
   useEffect(() => {
+    if (current.capabilities.canCreateCustomerApprovalLink !== true) {
+      approvalRefreshRef.current = null
+      return
+    }
     let canceled = false
     async function refreshApprovalTruth(): Promise<void> {
       if (canceled || document.visibilityState !== 'visible') return
@@ -329,7 +333,12 @@ export function ManualQuoteBuilder({
       document.removeEventListener('visibilitychange', trigger)
       if (approvalRefreshRef.current === trigger) approvalRefreshRef.current = null
     }
-  }, [current.activeVersion?.id, current.activeVersion?.versionNumber, ticket.id])
+  }, [
+    current.activeVersion?.id,
+    current.activeVersion?.versionNumber,
+    current.capabilities.canCreateCustomerApprovalLink,
+    ticket.id,
+  ])
   useEffect(() => {
     if (!reloadPendingRef.current || !reloadBaselineRef.current) return
     const baseline = reloadBaselineRef.current
@@ -423,6 +432,7 @@ export function ManualQuoteBuilder({
     : basePreparation
   const approvalLinkEligible = current.activeVersion !== null
     && current.capabilities.canRecordCustomerApproval
+    && current.capabilities.canCreateCustomerApprovalLink === true
     && current.activeVersion.jobs.every((versionJob) => {
       const approval = current.jobs.find((job) => job.id === versionJob.jobId)?.approval
       return approval !== undefined
@@ -520,7 +530,9 @@ export function ManualQuoteBuilder({
 
   async function copyCustomerApprovalLink(): Promise<void> {
     const version = current.activeVersion
-    if (!version || !current.capabilities.canRecordCustomerApproval || !beginOperation('approval-link')) return
+    if (!version || !current.capabilities.canRecordCustomerApproval
+      || current.capabilities.canCreateCustomerApprovalLink !== true
+      || !beginOperation('approval-link')) return
     setError(null)
     setApprovalLinkStatus('')
     setApprovalLinkCopied(false)

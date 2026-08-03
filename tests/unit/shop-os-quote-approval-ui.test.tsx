@@ -17,18 +17,39 @@ const REQUEST = '00000000-0000-4000-8000-000000000901'
 const NEXT_REQUEST = '00000000-0000-4000-8000-000000000902'
 const THIRD_REQUEST = '00000000-0000-4000-8000-000000000903'
 const ticket = { id: TICKET, ticketNumber: 42, concern: 'Brake vibration', customer: { name: 'Marisol Vega' }, vehicle: { year: 2019, make: 'Ford', model: 'F-150' } }
-function builder(canApprove = true, approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null }): Builder {
+function builder(
+  canApprove = true,
+  approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null },
+  canCreateCustomerApprovalLink = false,
+): Builder {
   return {
     ticket: { id: TICKET, status: 'open', reconciled: true }, configuration: { laborRateCents: 12000, taxRateBps: 825, partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true },
     jobs: [{ id: JOB, title: 'Front brake repair', kind: 'repair', workStatus: 'open', story: { content: null, source: null, reviewStatus: null, revision: 0 }, storyMode: null, decisionEligible: true, approval, lines: [] }],
-    capabilities: { canRecordCustomerApproval: canApprove },
+    capabilities: {
+      canRecordCustomerApproval: canApprove,
+      ...(canCreateCustomerApprovalLink ? { canCreateCustomerApprovalLink: true } : {}),
+    },
     activeVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, jobs: [{ jobId: JOB, subtotalCents: 84217 }] },
   }
+}
+
+function linkBuilder(
+  canApprove = true,
+  approval: Builder['jobs'][number]['approval'] = { state: 'quote_ready', quoteVersionId: null },
+): Builder {
+  return builder(canApprove, approval, true)
 }
 
 describe('Shop OS exact-version approval UI', () => {
   beforeEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.stubGlobal('crypto', { randomUUID: vi.fn(() => REQUEST) }) })
   afterEach(() => { vi.useRealTimers() })
+
+  it('keeps the mounted customer-link control off by default without disabling advisor-recorded decisions', () => {
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    expect(screen.queryByRole('region', { name: 'Customer approval link' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Phone approval' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'In-person approval' })).toBeInTheDocument()
+  })
 
   it('binds immutable facts into a two-tap phone confirmation and retains request identity through retry', async () => {
     const fetchMock = vi.fn()
@@ -86,7 +107,7 @@ describe('Shop OS exact-version approval UI', () => {
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
 
@@ -111,10 +132,10 @@ describe('Shop OS exact-version approval UI', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ builder: builder(true, { state: 'sent', quoteVersionId: null }) }),
+      json: async () => ({ builder: linkBuilder(true, { state: 'sent', quoteVersionId: null }) }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} onProjection={onProjection} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} onProjection={onProjection} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add part' }))
     const draft = screen.getByLabelText('Description')
     fireEvent.change(draft, { target: { value: 'Do not replace this unsaved draft' } })
@@ -141,7 +162,7 @@ describe('Shop OS exact-version approval UI', () => {
 
   it('preserves a mounted draft and offers recovery when the prepared version changes elsewhere', async () => {
     vi.useFakeTimers()
-    const newer = builder()
+    const newer = linkBuilder()
     newer.activeVersion = {
       id: NEWER_VERSION,
       versionNumber: 4,
@@ -154,7 +175,7 @@ describe('Shop OS exact-version approval UI', () => {
       json: async () => ({ builder: newer }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add part' }))
     const draft = screen.getByLabelText('Description')
     fireEvent.change(draft, { target: { value: 'Keep this exact local draft' } })
@@ -190,11 +211,11 @@ describe('Shop OS exact-version approval UI', () => {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: async () => ({ builder: builder(true, { state: 'approved', quoteVersionId: VERSION }) }),
+        json: async () => ({ builder: linkBuilder(true, { state: 'approved', quoteVersionId: VERSION }) }),
       })
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
     await act(async () => { await Promise.resolve() })
@@ -225,7 +246,7 @@ describe('Shop OS exact-version approval UI', () => {
   })
 
   it('keeps Copy available after a view while hiding it after a terminal decision', () => {
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder(true, { state: 'sent', quoteVersionId: null })} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder(true, { state: 'sent', quoteVersionId: null })} />)
     expect(screen.getByRole('button', { name: 'Copy customer link' })).toBeInTheDocument()
   })
 
@@ -253,7 +274,7 @@ describe('Shop OS exact-version approval UI', () => {
         link: { id: '00000000-0000-4000-8000-000000000602', quoteVersionId: VERSION, versionNumber: 3, expiresAt: '2026-08-09T12:01:00.000Z' },
       }) })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
     expect(await screen.findByRole('button', { name: 'Replace customer link' })).toBeInTheDocument()
@@ -277,7 +298,7 @@ describe('Shop OS exact-version approval UI', () => {
     ['declined', null],
     ['deferred', null],
   ] as const)('hides Copy when the exact-version job is %s', (state, quoteVersionId) => {
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder(true, { state, quoteVersionId })} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder(true, { state, quoteVersionId })} />)
     expect(screen.queryByRole('button', { name: 'Copy customer link' })).toBeNull()
   })
 
@@ -309,7 +330,7 @@ describe('Shop OS exact-version approval UI', () => {
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
     expect(await screen.findByText('The link is ready, but the clipboard was interrupted. Try Copy again.')).toBeInTheDocument()
@@ -339,7 +360,7 @@ describe('Shop OS exact-version approval UI', () => {
         link: { id: '00000000-0000-4000-8000-000000000601', quoteVersionId: VERSION, versionNumber: 3, expiresAt: '2026-08-09T12:00:00.000Z' },
       }) })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
     expect(await screen.findByText('The secure link is busy. Retry the same Copy action.')).toBeInTheDocument()
@@ -369,10 +390,10 @@ describe('Shop OS exact-version approval UI', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ status: 201, json: async () => created })
       .mockResolvedValueOnce({ status, json: async () => ({ error: status === 404 ? 'not_found' : 'conflict' }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: builder() }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: linkBuilder() }) })
       .mockResolvedValueOnce({ status: 201, json: async () => created })
     vi.stubGlobal('fetch', fetchMock)
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy customer link' }))
     expect(await screen.findByText('Link copied · V3')).toBeInTheDocument()
@@ -388,7 +409,7 @@ describe('Shop OS exact-version approval UI', () => {
   })
 
   it('shows decision truth without enabled controls for tech or parts capability', () => {
-    render(<ManualQuoteBuilder ticket={ticket} builder={builder(false)} />)
+    render(<ManualQuoteBuilder ticket={ticket} builder={linkBuilder(false)} />)
     expect(screen.getByText('Advisor or owner records the customer decision.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /approval|declined/i })).toBeNull()
   })

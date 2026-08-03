@@ -135,7 +135,10 @@ const quoteBuilderSchema = z.strictObject({
     }),
     lines: z.array(builderLineSchema).max(2_000),
   })).max(500),
-  capabilities: z.strictObject({ canRecordCustomerApproval: z.boolean() }),
+  capabilities: z.strictObject({
+    canRecordCustomerApproval: z.boolean(),
+    canCreateCustomerApprovalLink: z.boolean().optional().default(false),
+  }),
   activeVersion: z.strictObject({
     id: uuidSchema,
     versionNumber: z.number().int().min(1).max(2_147_483_647),

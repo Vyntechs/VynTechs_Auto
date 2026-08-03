@@ -4,6 +4,7 @@ import { paywallReject } from '@/lib/auth-access'
 import { db } from '@/lib/db/client'
 import { readBoundedJson } from '@/lib/http/bounded-json'
 import { rateLimitReject } from '@/lib/rate-limit'
+import { CUSTOMER_APPROVAL_UNAVAILABLE, isCustomerApprovalEnabled } from '@/lib/release-policy'
 import { createCustomerApprovalLink } from '@/lib/shop-os/customer-approval'
 import { getServerSupabase } from '@/lib/supabase-server'
 
@@ -22,6 +23,12 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!isCustomerApprovalEnabled()) {
+    return NextResponse.json(CUSTOMER_APPROVAL_UNAVAILABLE.body, {
+      status: CUSTOMER_APPROVAL_UNAVAILABLE.status,
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
   const ctx = await requireUserAndProfile({ supabase: await getServerSupabase(), db })
   if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   const denied = await paywallReject(db, ctx.user.id)

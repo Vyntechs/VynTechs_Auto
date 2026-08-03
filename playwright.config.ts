@@ -40,6 +40,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `corepack pnpm ${useProductionServer ? 'start' : 'dev'} --hostname 127.0.0.1 --port ${playwrightPort}`,
+    env: { SHOP_OS_CUSTOMER_APPROVAL_ENABLED: 'true' },
     url: playwrightBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -85,15 +85,27 @@ The correction may not add a public endpoint, browser persistence, payload field
 
 The single repair wave also makes copy feedback visibly local, constrains actionable link rows to complete bearer material, returns cross-ticket idempotency collisions as conflicts, aligns lock ordering, scrubs browser-history state, preserves mounted advisor drafts while approval truth changes, and repairs the customer surface's contrast/group semantics. Internal `sent` remains the persisted state name, but every visible label reports the narrower fact `Link opened`.
 
-Technical PR completion does not authorize production release. Legal review found that the current per-job choice record is not yet a counsel-approved electronic repair authorization: responder attribution/authority, assent language, reproducible disclosure version, receipt delivery, and retention remain unresolved. Merge/deploy is blocked until Brandon chooses the intended authorization posture and licensed Texas automotive consumer counsel approves the exact language and record policy. No unapproved legal workflow is added inside this repair wave.
+Technical PR completion does not authorize customer activation. Legal review found that the current per-job choice record is not yet a counsel-approved electronic repair authorization: responder attribution/authority, assent language, reproducible disclosure version, receipt delivery, and retention remain unresolved. Source may merge only behind the production-default-off boundary below; customer use remains blocked until licensed Texas automotive consumer counsel approves the exact language and record policy. No unapproved legal workflow is added inside this repair wave.
+
+### Legal activation boundary replan (2026-08-02)
+
+**Re-plans:** 2/3. Brandon preapproved this chunk and the next two through reviewed merge, but owner preapproval cannot supply missing legal assent evidence. Primary-source review and independent legal issue-spotting therefore narrowed the release architecture once:
+
+1. Merge only behind one server-owned `SHOP_OS_CUSTOMER_APPROVAL_ENABLED === 'true'` boundary that is false when absent or malformed.
+2. When off, hide the advisor link control, reject authenticated link creation before database work, return a uniform data-free unavailable response from the public API before rate limiting or parsing, and make the public page unavailable.
+3. Keep existing component/domain proof explicitly enabled in tests so the dormant implementation cannot decay while customer use remains impossible.
+4. Add no migration, dependency, alternate customer state, legal copy, or production configuration in this correction.
+
+Activation remains a separate A3 action. Before setting the flag in production, licensed Texas automotive consumer counsel must approve the exact affirmative assent, responder attribution, date/time, itemized work and fees, customer receipt delivery, and reproducible retention/audit contract; focused legal-contract, security, and phone/desktop proof must then pass on the exact release head.
 
 ### Verification receipt (2026-08-02)
 
-- Eight serialized shards: 3,909 tests passed on the final source and test tree.
+- Eight serialized shards: 3,926 tests passed on the final source and test tree.
 - TypeScript, `git diff --check`, and the production build passed.
 - Mounted system-Chrome proof: phone completion, locked receipt, browser-history scrub, and desktop geometry passed; no horizontal overflow, browser faults, or serious/critical Axe findings.
-- Exact production-server proof: `/approve` returned `no-store`, `no-referrer`, and `noindex, nofollow`.
-- Focused static re-review: APPROVE. Security re-review: PASS. Independent acceptance validation: DONE.
+- Exact production-server proof with the flag off: `/approve`, public quote approval, and authenticated link creation returned privacy-safe 404 responses; the two APIs returned only `{ "error": "unavailable" }`.
+- The same production artifact changed `/approve` from 404 to 200 and link creation from 404 to the ordinary 401 auth boundary only for exact `true`, then returned to 404 when restarted off; every response remained `no-store`.
+- Focused static re-review: APPROVE. Security re-review: PASS. Mounted phone/desktop/history acceptance proof: PASS.
 - No migration, production data, merge, deploy, external message, or legal representation was executed.
 
 ## Stop conditions

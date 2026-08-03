@@ -28,6 +28,7 @@ import {
 import { validateStoredManualOfferLine } from '@/lib/shop-os/parts-adapters'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
 import { deliveryRetainUntil } from '@/lib/shop-os/messaging-retention-policy'
+import { isCustomerApprovalEnabled } from '@/lib/release-policy'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
@@ -190,7 +191,10 @@ export type QuoteBuilderResult =
           }
         >
       }>
-      capabilities: { canRecordCustomerApproval: boolean }
+      capabilities: {
+        canRecordCustomerApproval: boolean
+        canCreateCustomerApprovalLink?: boolean
+      }
       activeVersion: {
         id: string
         versionNumber: number
@@ -842,7 +846,11 @@ export async function getQuoteBuilder(
                 .filter((line) => line.jobId === job.id && isBuilderVisibleLine(line))
                 .map(safeBuilderLine),
             })),
-            capabilities: { canRecordCustomerApproval: canRecordCustomerApproval(actor.role) },
+            capabilities: {
+              canRecordCustomerApproval: canRecordCustomerApproval(actor.role),
+              canCreateCustomerApprovalLink:
+                canRecordCustomerApproval(actor.role) && isCustomerApprovalEnabled(),
+            },
             activeVersion: activeVersionProjection,
           },
         }

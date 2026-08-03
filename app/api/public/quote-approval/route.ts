@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
 import { readBoundedJson } from '@/lib/http/bounded-json'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { CUSTOMER_APPROVAL_UNAVAILABLE, isCustomerApprovalEnabled } from '@/lib/release-policy'
 import {
   loadCustomerApproval,
   recordCustomerApprovalResponse,
@@ -63,6 +64,9 @@ function resultStatus(result: { ok: boolean; error?: string }, changed = false):
 }
 
 export async function GET(req: Request) {
+  if (!isCustomerApprovalEnabled()) {
+    return response(CUSTOMER_APPROVAL_UNAVAILABLE.body, CUSTOMER_APPROVAL_UNAVAILABLE.status)
+  }
   const token = tokenFrom(req)
   const limited = await publicLimit(req)
   if (limited) return limited
@@ -76,6 +80,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  if (!isCustomerApprovalEnabled()) {
+    return response(CUSTOMER_APPROVAL_UNAVAILABLE.body, CUSTOMER_APPROVAL_UNAVAILABLE.status)
+  }
   const token = tokenFrom(req)
   const limited = await publicLimit(req)
   if (limited) return limited

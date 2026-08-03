@@ -17,6 +17,7 @@ import { canSendQuotes } from '@/lib/shop-os/capabilities'
 import { calculateTicketTotals, type QuoteCustomerStoryV1 } from '@/lib/shop-os/quote-math'
 import { deliveryRetainUntil } from '@/lib/shop-os/messaging-retention-policy'
 import { isLockUnavailable, readCustomerApprovalSnapshot } from '@/lib/shop-os/quotes'
+import { isCustomerApprovalEnabled } from '@/lib/release-policy'
 
 const uuid = z.uuid().transform((value) => value.toLowerCase())
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
@@ -140,6 +141,7 @@ export async function createCustomerApprovalLink(
   db: AppDb,
   input: { actor: LinkActor; ticketId: unknown; body: unknown },
 ): Promise<LinkResult> {
+  if (!isCustomerApprovalEnabled()) return { ok: false, error: 'unavailable' }
   const actorId = uuid.safeParse(input.actor.profileId)
   const ticketId = uuid.safeParse(input.ticketId)
   const body = createBody.safeParse(input.body)
@@ -377,6 +379,7 @@ export async function loadCustomerApproval(
   db: AppDb,
   input: { token: unknown },
 ): Promise<LoadResult> {
+  if (!isCustomerApprovalEnabled()) return { ok: false, error: 'unavailable' }
   if (typeof input.token !== 'string') return { ok: false, error: 'invalid_input' }
   const hint = await findLinkHint(db, input.token, false)
   if (!hint) return { ok: false, error: 'unavailable' }
@@ -465,6 +468,7 @@ export async function recordCustomerApprovalResponse(
   db: AppDb,
   input: { token: unknown; body: unknown },
 ): Promise<ResponseResult> {
+  if (!isCustomerApprovalEnabled()) return { ok: false, error: 'unavailable' }
   if (typeof input.token !== 'string') return { ok: false, error: 'invalid_input' }
   const body = responseBody.safeParse(input.body)
   if (!body.success) return { ok: false, error: 'invalid_input' }

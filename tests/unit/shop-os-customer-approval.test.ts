@@ -17,6 +17,7 @@ import {
   loadCustomerApproval,
   recordCustomerApprovalResponse,
 } from '@/lib/shop-os/customer-approval'
+import type { AppDb } from '@/lib/db/queries'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
 const uuid = (suffix: number) => `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
@@ -24,6 +25,31 @@ const TOKEN = 'A'.repeat(43)
 const TOKEN_HASH = createHash('sha256').update(TOKEN).digest('hex')
 const SECOND_TOKEN = 'B'.repeat(43)
 const SECOND_TOKEN_HASH = createHash('sha256').update(SECOND_TOKEN).digest('hex')
+
+describe('disabled customer approval domain', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('refuses every entry before input parsing or database access', async () => {
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', undefined)
+    const forbiddenDb = new Proxy({}, {
+      get() {
+        throw new Error('database must remain untouched')
+      },
+    }) as AppDb
+
+    await expect(createCustomerApprovalLink(forbiddenDb, {
+      actor: { profileId: uuid(2) },
+      ticketId: uuid(5),
+      body: { requestKey: uuid(30), quoteVersionId: uuid(8), tokenHash: TOKEN_HASH },
+    })).resolves.toEqual({ ok: false, error: 'unavailable' })
+    await expect(loadCustomerApproval(forbiddenDb, { token: TOKEN }))
+      .resolves.toEqual({ ok: false, error: 'unavailable' })
+    await expect(recordCustomerApprovalResponse(forbiddenDb, {
+      token: TOKEN,
+      body: { requestKey: uuid(30), decisions: [{ jobId: uuid(6), decision: 'approved' }] },
+    })).resolves.toEqual({ ok: false, error: 'unavailable' })
+  })
+})
 
 describe('Shop OS customer approval handoff', () => {
   let db: TestDb
@@ -38,6 +64,7 @@ describe('Shop OS customer approval handoff', () => {
   const versionId = uuid(8)
 
   beforeEach(async () => {
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', 'true')
     ;({ db, close } = await createTestDb())
     await db.insert(shops).values({
       id: shopId,
@@ -148,7 +175,10 @@ describe('Shop OS customer approval handoff', () => {
     })
   })
 
-  afterEach(async () => close())
+  afterEach(async () => {
+    vi.unstubAllEnvs()
+    await close()
+  })
 
   it('creates, views, and atomically resolves one exact-version link without storing the raw token', async () => {
     const created = await createCustomerApprovalLink(db, {

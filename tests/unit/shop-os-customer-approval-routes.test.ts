@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextResponse } from 'next/server'
 
 vi.mock('@/lib/auth', () => ({ requireUserAndProfile: vi.fn() }))
@@ -51,6 +51,7 @@ function jsonRequest(url: string, body: unknown, token?: string): Request {
 describe('Shop OS customer approval routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', 'true')
     vi.mocked(requireUserAndProfile).mockResolvedValue({ user: { id: profile.userId }, profile } as never)
     vi.mocked(paywallReject).mockResolvedValue(null)
     vi.mocked(rateLimitReject).mockResolvedValue(null)
@@ -60,6 +61,60 @@ describe('Shop OS customer approval routes', () => {
       resetAt: new Date('2026-08-02T12:01:00.000Z'),
     })
   })
+
+  afterEach(() => vi.unstubAllEnvs())
+
+  it.each([undefined, 'TRUE'])(
+    'keeps link creation and both public methods data-free when the release flag is %s',
+    async (flag) => {
+      vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', flag)
+      const decisions = [{ jobId: VERSION, decision: 'declined' as const }]
+      vi.mocked(createCustomerApprovalLink).mockResolvedValue({
+        ok: true,
+        changed: true,
+        link: {
+          id: REQUEST,
+          quoteVersionId: VERSION,
+          versionNumber: 1,
+          expiresAt: '2026-08-09T12:00:00.000Z',
+        },
+      })
+      vi.mocked(loadCustomerApproval).mockResolvedValue({ ok: true, quote: { jobs: [] } } as never)
+      vi.mocked(recordCustomerApprovalResponse).mockResolvedValue({
+        ok: true,
+        changed: true,
+        receipt: { versionNumber: 1, decisions, approvedTotalCents: 0 },
+      })
+      const createResponse = await createLink(
+        jsonRequest(`https://vyntechs.dev/api/tickets/${TICKET}/quote/approval-links`, {
+          requestKey: REQUEST,
+          quoteVersionId: VERSION,
+          tokenHash: 'a'.repeat(64),
+        }),
+        { params: Promise.resolve({ id: TICKET }) },
+      )
+      const loadResponse = await loadLink(new Request('https://vyntechs.dev/api/public/quote-approval', {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }))
+      const submitResponse = await respond(new Request('https://vyntechs.dev/api/public/quote-approval', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({ requestKey: REQUEST, decisions }),
+      }))
+
+      for (const response of [createResponse, loadResponse, submitResponse]) {
+        expect(response.status).toBe(404)
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        await expect(response.json()).resolves.toEqual({ error: 'unavailable' })
+      }
+      expect(paywallReject).not.toHaveBeenCalled()
+      expect(rateLimitReject).not.toHaveBeenCalled()
+      expect(checkRateLimit).not.toHaveBeenCalled()
+      expect(createCustomerApprovalLink).not.toHaveBeenCalled()
+      expect(loadCustomerApproval).not.toHaveBeenCalled()
+      expect(recordCustomerApprovalResponse).not.toHaveBeenCalled()
+    },
+  )
 
   it('creates link metadata only after authenticated and paywall-safe domain work', async () => {
     vi.mocked(createCustomerApprovalLink).mockResolvedValue({

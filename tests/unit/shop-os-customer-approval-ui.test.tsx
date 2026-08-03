@@ -10,6 +10,14 @@ import {
   type CustomerApprovalQuote,
 } from '@/lib/shop-os/customer-approval-ui'
 
+const { notFoundMock } = vi.hoisted(() => ({
+  notFoundMock: vi.fn(() => { throw new Error('NEXT_NOT_FOUND') }),
+}))
+
+vi.mock('next/navigation', () => ({ notFound: notFoundMock }))
+
+import ApprovalPage from '@/app/approve/page'
+
 const TOKEN = 'A'.repeat(43)
 const JOB_ONE = '00000000-0000-4000-8000-000000000011'
 const JOB_TWO = '00000000-0000-4000-8000-000000000012'
@@ -53,10 +61,21 @@ function response(body: unknown, status = 200): Response {
 describe('customer approval surface', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    notFoundMock.mockClear()
     window.history.replaceState(null, '', '/approve')
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  it('returns the public page as not found when the release flag is absent', () => {
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', undefined)
+    expect(() => ApprovalPage()).toThrow('NEXT_NOT_FOUND')
+    expect(notFoundMock).toHaveBeenCalledTimes(1)
+  })
 
   it('creates the exact hash the server will verify for the copied bearer value', async () => {
     vi.stubGlobal('crypto', webcrypto)
