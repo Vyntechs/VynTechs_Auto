@@ -360,6 +360,15 @@ describe('ticket activity persistence contract', () => {
           title: secret,
         },
       })))
+      await fixture.db.insert(schema.ticketActivity).values({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_canceled',
+        requestKey: uuid(519),
+        payload: { scope: 'job_removed' },
+      })
 
       const detail = await getTicketDetail(fixture.db, {
         actor: ticketActorFromProfile(fixture.actor),
@@ -376,8 +385,22 @@ describe('ticket activity persistence contract', () => {
         'Repair order corrected.',
       ]))
       expect(summaries.filter((summary) => summary === 'Repair order corrected.')).toHaveLength(2)
+      expect(detail.ticket.activities?.find((activity) => (
+        activity.summary === 'Customer or vehicle corrected.'
+      ))?.correctionScope).toBe('identity')
+      expect(detail.ticket.activities?.find((activity) => (
+        activity.summary === 'Brake inspection: Removed from active work. It remains in History.'
+      ))?.correctionScope).toBe('job_removed')
+      expect(detail.ticket.activities?.filter((activity) => (
+        activity.summary === 'Repair order corrected.'
+      )).every((activity) => activity.correctionScope === null)).toBe(true)
+      const ordinaryCancellation = detail.ticket.activities?.find((activity) => (
+        activity.kind === 'ticket_canceled'
+      ))
+      expect(ordinaryCancellation?.correctionScope).toBeNull()
+      expect(ordinaryCancellation?.summary).toContain('customer declined')
+      expect(ordinaryCancellation?.summary).not.toContain('Removed')
       expect(JSON.stringify(detail.ticket.activities)).not.toContain(secret)
-      expect(summaries.join(' ')).not.toContain('customer declined')
     } finally {
       await fixture.close()
     }

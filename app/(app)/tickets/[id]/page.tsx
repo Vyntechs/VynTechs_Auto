@@ -14,6 +14,7 @@ import {
 } from '@/lib/shop-os/capabilities'
 import { getCustomerCopyBundle } from '@/lib/shop-os/customer-copy'
 import { listPartRequestsForTicket } from '@/lib/shop-os/part-requests'
+import { isTicketCorrectionEnabled } from '@/lib/release-policy'
 import { getServerSupabase } from '@/lib/supabase-server'
 import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
 import { refreshCustomerCopy } from './customer-copy-actions'
@@ -67,6 +68,7 @@ export default async function TicketPage({
     <TicketDetailScreen
       ticket={result.ticket}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
+      canCorrectTicket={isTicketCorrectionEnabled() && canAssignWork(ctx.profile.role)}
       canCreateVendorAccount={canManageIntegrations(
         ctx.profile.role,
         isFounder(ctx.user.email),

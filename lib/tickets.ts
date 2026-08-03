@@ -77,6 +77,7 @@ export type TicketActivityView = {
   kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened' | 'ticket_corrected'
   actorName: string | null
   summary: string
+  correctionScope?: 'identity' | 'concern' | 'job' | 'job_removed' | null
   createdAt: Date
 }
 
@@ -1015,11 +1016,27 @@ async function loadTicketDetail(
       kind: activity.kind,
       actorName: activity.actorName,
       summary: ticketActivitySummary(activity.kind, activity.payload, activity.jobId ? jobTitles.get(activity.jobId) ?? null : null),
+      correctionScope: ticketActivityCorrectionScope(activity.kind, activity.payload, activity.jobId),
       createdAt: activity.createdAt,
     })),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function ticketActivityCorrectionScope(
+  kind: TicketActivityView['kind'],
+  payload: Record<string, unknown>,
+  jobId: string | null,
+): NonNullable<TicketActivityView['correctionScope']> | null {
+  if (kind !== 'ticket_corrected') return null
+  if ((payload.scope === 'identity' || payload.scope === 'concern') && jobId === null) {
+    return payload.scope
+  }
+  if ((payload.scope === 'job' || payload.scope === 'job_removed') && jobId !== null) {
+    return payload.scope
+  }
+  return null
 }
 
 function ticketActivitySummary(
