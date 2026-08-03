@@ -1,6 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 import { STORAGE_STATE_PATH } from './tests/e2e/global-setup'
 
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? '3217'
+const playwrightBaseUrl =
+  process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${playwrightPort}`
+const useProductionServer = process.env.PLAYWRIGHT_PRODUCTION_SERVER === '1'
+
 export default defineConfig({
   testDir: './tests/e2e',
   globalSetup: './tests/e2e/global-setup.ts',
@@ -10,7 +15,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: playwrightBaseUrl,
     trace: 'on-first-retry',
   },
   projects: [
@@ -22,7 +27,7 @@ export default defineConfig({
           ? { channel: 'chrome' as const }
           : {}),
       },
-      testMatch: /landing\.spec\.ts/,
+      testMatch: /(landing|customer-approval-proof)\.spec\.ts/,
     },
     {
       name: 'curator',
@@ -34,8 +39,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:3000',
+    command: `corepack pnpm ${useProductionServer ? 'start' : 'dev'} --hostname 127.0.0.1 --port ${playwrightPort}`,
+    url: playwrightBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

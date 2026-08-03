@@ -16,9 +16,9 @@ const DOCUMENT_LABELS: Record<CustomerCopyProjection['documentKind'], string> = 
 }
 
 const DECISION_LABELS: Record<CustomerCopyProjection['decisions'][number]['decision'], string> = {
-  approved: 'Customer said yes',
-  declined: 'Customer said no',
-  deferred: 'Customer said later',
+  approved: 'Approved',
+  declined: 'Declined',
+  deferred: 'Decision deferred',
 }
 
 const IDENTITY_BLOCKERS: CustomerCopyBlocker[] = [

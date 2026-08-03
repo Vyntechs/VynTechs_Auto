@@ -123,7 +123,7 @@ function rowRight(lane: FloorLaneId, ticket: TicketAggregate): string {
     case 'held':
       return ticket.techName ? firstName(ticket.techName) : 'HELD'
     case 'customer':
-      return ticket.readyToCollect ? 'READY' : 'QUOTE SENT'
+      return ticket.readyToCollect ? 'READY' : 'LINK OPENED'
     case 'with_tech':
       return ticket.techName ? firstName(ticket.techName) : 'ASSIGNED'
   }

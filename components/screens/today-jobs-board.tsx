@@ -81,10 +81,10 @@ const statusLabel: Record<TodayTicketJob['workStatus'], string> = {
 const approvalLabel: Record<TodayTicketJob['approvalState'], string> = {
   pending_quote: 'No price yet',
   quote_ready: 'Priced',
-  sent: 'Sent to customer',
-  approved: 'Customer said yes',
-  declined: 'Customer said no',
-  deferred: 'Customer said later',
+  sent: 'Link opened',
+  approved: 'Approved',
+  declined: 'Declined',
+  deferred: 'Decision deferred',
 }
 
 // The shop says A-tech, B-tech, C-tech out loud. "Tier 3" is a column name.

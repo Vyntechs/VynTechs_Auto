@@ -6,13 +6,14 @@
 }
 
 .liveStatus {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #b9b4a8;
+  border-radius: 10px;
+  color: #292c27;
+  background: #f3efe4;
+  font-size: .88rem;
+  font-weight: 650;
 }
 
 .screenWithSourcing {
@@ -749,6 +750,75 @@
   font-weight: 600;
 }
 
+.approvalLink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  border: 1px solid var(--vt-rule-strong);
+  border-left: 3px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-1);
+  padding: 14px;
+  background: var(--vt-bone-50);
+}
+
+.approvalLink strong {
+  color: var(--vt-fg);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
+}
+
+.approvalLink p {
+  margin: 4px 0 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.approvalLink .approvalLinkStatus {
+  margin-top: 8px;
+  color: var(--vt-fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.approvalLink button {
+  min-height: 44px;
+  border: 1px solid var(--vt-fg);
+  border-radius: var(--vt-radius-1);
+  padding: 0 14px;
+  background: var(--vt-fg);
+  color: var(--vt-bone-50);
+  font-family: var(--vt-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.approvalLink button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgb(22 31 38 / 14%);
+}
+
+.approvalLink button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.approvalLink button:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.approvalLink button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .blocked {
   margin-top: 22px;
   border-left: 3px solid var(--vt-amber-500);
@@ -1150,6 +1220,14 @@
   .decisionDialog {
     min-width: 0;
   }
+
+  .approvalLink {
+    grid-template-columns: 1fr;
+  }
+
+  .approvalLink button {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1163,5 +1241,9 @@
   .authorizationStrip,
   .decisionDialog {
     scroll-behavior: auto;
+  }
+
+  .approvalLink button {
+    transition: none;
   }
 }

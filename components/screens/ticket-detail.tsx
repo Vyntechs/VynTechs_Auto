@@ -71,10 +71,10 @@ const WORK_STATUS_LABELS: Record<string, string> = {
 const APPROVAL_STATE_LABELS: Record<string, string> = {
   pending_quote: 'No price yet',
   quote_ready: 'Priced',
-  sent: 'Sent to customer',
-  approved: 'Customer said yes',
-  declined: 'Customer said no',
-  deferred: 'Customer said later',
+  sent: 'Link opened',
+  approved: 'Approved',
+  declined: 'Declined',
+  deferred: 'Decision deferred',
 }
 
 export function TicketDetailScreen({
@@ -487,7 +487,7 @@ export function TicketDetailScreen({
                         onApplied={(retired) => {
                           setWorkOverrides((current) => new Map(current).set(job.id, {
                             workStatus: retired.workStatus,
-                            notice: 'Dropped. The customer said no to this one.',
+                            notice: 'Dropped. This job was declined.',
                           }))
                           setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
                         }}

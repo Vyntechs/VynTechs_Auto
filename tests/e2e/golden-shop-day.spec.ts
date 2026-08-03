@@ -291,10 +291,10 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // paperwork instead of to the truck.
     const techDeclinedRow = boardRow(tech, ticketNumber, tireJobTitle)
     await expect(techDeclinedRow).toBeVisible()
-    await expect(techDeclinedRow).toContainText('Customer said no')
+    await expect(techDeclinedRow).toContainText('Declined')
     await expect(techDeclinedRow.getByText('Open work')).toHaveCount(0)
     await expect(techDeclinedRow.getByRole('link', { name: 'Review repair order' })).toBeVisible()
-    await expect(techTodayRow).toContainText('Customer said yes')
+    await expect(techTodayRow).toContainText('Approved')
     await checkpoint(tech, testInfo, 'tech-board-declined-line-is-not-workable')
 
     const workResponsePromise = tech.waitForResponse((response) => (
@@ -453,7 +453,7 @@ test('the living repair order survives one complete shop day', async ({ browser,
     // recorded — one job, not the whole repair order, with the money already
     // collected.
     await advisor.getByRole('button', { name: 'Not doing this one' }).click()
-    await expect(advisor.getByText('Dropped. The customer said no to this one.')).toBeVisible()
+    await expect(advisor.getByText('Dropped. This job was declined.')).toBeVisible()
     await checkpoint(advisor, testInfo, 'advisor-retired-declined-line')
 
     // With the refused line off the floor the repair order finally reaches the

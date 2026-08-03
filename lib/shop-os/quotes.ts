@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
-  jobLines, profiles, quoteEvents, quoteVersions, sessionEvents, sessions, shops,
+  jobLines, profiles, quoteEvents, quoteSends, quoteVersions, sessionEvents, sessions, shops,
   ticketJobs, tickets,
 } from '@/lib/db/schema'
 import { resolveShopEntitlements } from '@/lib/entitlements'
@@ -27,6 +27,7 @@ import {
 } from '@/lib/shop-os/quote-math'
 import { validateStoredManualOfferLine } from '@/lib/shop-os/parts-adapters'
 import { ticketAtJobLimit } from '@/lib/shop-os/job-limits'
+import { deliveryRetainUntil } from '@/lib/shop-os/messaging-retention-policy'
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const MAX_PART_QUANTITY_SCALED = 999_999_999_999n
@@ -146,6 +147,7 @@ export type QuoteDraftResult =
 
 export type QuoteDraftDependencies = {
   beforeMutation?: () => Promise<void>
+  afterLinkLock?: () => Promise<void>
 }
 
 export type QuoteBuilderResult =
@@ -975,6 +977,7 @@ export async function invalidateActiveQuoteVersion(
     jobIds: string[]
     activeVersions: DraftContext['activeVersions']
   },
+  dependencies: Pick<QuoteDraftDependencies, 'afterLinkLock'> = {},
 ): Promise<Failure | null> {
   if (input.activeVersions.length > 1) return conflict()
   const active = input.activeVersions[0]
@@ -991,12 +994,37 @@ export async function invalidateActiveQuoteVersion(
     return conflict()
   }
 
+  const activeLinks = await db
+    .select({ id: quoteSends.id })
+    .from(quoteSends)
+    .where(and(
+      eq(quoteSends.shopId, input.shopId),
+      eq(quoteSends.ticketId, input.ticketId),
+      eq(quoteSends.quoteVersionId, active.id),
+      eq(quoteSends.channel, 'link'),
+      eq(quoteSends.state, 'submitted'),
+    ))
+    .orderBy(quoteSends.id)
+    .for('update', { noWait: true })
+  await dependencies.afterLinkLock?.()
+  const terminalAt = new Date()
   const [superseded] = await db
     .update(quoteVersions)
-    .set({ supersededAt: new Date() })
+    .set({ supersededAt: terminalAt })
     .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
     .returning()
   if (!superseded) return conflict(true)
+  if (activeLinks.length > 0) await db
+    .update(quoteSends)
+    .set({
+      state: 'expired',
+      tokenHash: null,
+      tokenExpiresAt: null,
+      terminalAt,
+      retainUntil: deliveryRetainUntil(terminalAt),
+      updatedAt: terminalAt,
+    })
+    .where(inArray(quoteSends.id, activeLinks.map((link) => link.id)))
   if (includedJobIds.length > 0) {
     const resetJobIds = (await db
       .select({ id: ticketJobs.id, kind: ticketJobs.kind, workStatus: ticketJobs.workStatus, sessionId: ticketJobs.sessionId })
@@ -1034,6 +1062,7 @@ export type CreateQuoteVersionResult =
 export type CreateQuoteVersionDependencies = {
   beforeWrite?: () => Promise<void>
   afterTicketLock?: () => Promise<void>
+  afterLinkLock?: () => Promise<void>
 }
 
 type VersionFailure = Extract<CreateQuoteVersionResult, { ok: false }>
@@ -1498,6 +1527,61 @@ function validatedQuoteSnapshot(
   return snapshot
 }
 
+export type CustomerApprovalSnapshot = {
+  jobs: Array<{
+    id: string
+    title: string
+    story: QuoteCustomerStoryV1 | null
+    lines: Array<{
+      kind: 'part' | 'labor' | 'fee'
+      description: string
+      quantity: string
+      priceCents: number
+    }>
+    subtotalCents: number
+    taxableSubtotalCents: number
+  }>
+  totals: { subtotalCents: number; taxCents: number; totalCents: number }
+  taxRateBps: number
+}
+
+export function readCustomerApprovalSnapshot(
+  snapshotValue: unknown,
+  expectedTicket: {
+    id: string
+    ticketNumber: number
+    customerId: string | null
+    vehicleId: string | null
+  },
+): CustomerApprovalSnapshot | null {
+  try {
+    const snapshot = validatedQuoteSnapshot(snapshotValue, expectedTicket)
+    return {
+      jobs: snapshot.jobs.map((job) => ({
+        id: job.id,
+        title: job.title,
+        story: job.customerStory,
+        lines: job.lines.map((line) => ({
+          kind: line.kind,
+          description: line.description,
+          quantity: line.quantity,
+          priceCents: line.priceCents,
+        })),
+        subtotalCents: job.totals.subtotalCents,
+        taxableSubtotalCents: job.totals.taxableSubtotalCents,
+      })),
+      totals: {
+        subtotalCents: snapshot.totals.subtotalCents,
+        taxCents: snapshot.totals.taxCents,
+        totalCents: snapshot.totals.totalCents,
+      },
+      taxRateBps: snapshot.ticket.taxRateBps,
+    }
+  } catch {
+    return null
+  }
+}
+
 function validatedActiveSnapshot(
   context: VersionContext,
   version: typeof quoteVersions.$inferSelect,
@@ -1552,27 +1636,13 @@ export async function createQuoteVersion(
       }
       await dependencies.beforeWrite?.()
       if (active) {
-        const [superseded] = await transactionDb
-          .update(quoteVersions)
-          .set({ supersededAt: new Date() })
-          .where(and(eq(quoteVersions.id, active.id), isNull(quoteVersions.supersededAt)))
-          .returning()
-        if (!superseded) throw new AbortVersionCreation(conflict(true))
-        const oldJobIds = activeSnapshot!.jobs.map((job) => job.id)
-        const resetOldJobIds = context.jobs
-          .filter((job) => oldJobIds.includes(job.id) && !isPinnedSimpleWork(job))
-          .map((job) => job.id)
-        if (resetOldJobIds.length > 0) {
-          await transactionDb.update(ticketJobs).set({
-            approvalState: 'pending_quote',
-            approvedQuoteVersionId: null,
-            updatedAt: new Date(),
-          }).where(and(
-            eq(ticketJobs.shopId, context.shop.id),
-            eq(ticketJobs.ticketId, context.ticket.id),
-            inArray(ticketJobs.id, resetOldJobIds),
-          ))
-        }
+        const invalidationFailure = await invalidateActiveQuoteVersion(transactionDb, {
+          shopId: context.shop.id,
+          ticketId: context.ticket.id,
+          jobIds: context.jobs.map((job) => job.id),
+          activeVersions: [active],
+        }, dependencies)
+        if (invalidationFailure) throw new AbortVersionCreation(invalidationFailure)
       }
       const maxVersion = context.versions.reduce((maximum, version) => Math.max(maximum, version.versionNumber), 0)
       if (!Number.isInteger(maxVersion) || maxVersion >= MAX_POSTGRES_INTEGER) {
@@ -2027,7 +2097,7 @@ export async function createDraftLine(
       ticketId: context.ticketId,
       jobIds: context.jobIds,
       activeVersions: context.activeVersions,
-    })
+    }, dependencies)
     if (invalidationFailure) throw new AbortDraftMutation(invalidationFailure)
     return { ok: true, changed: true, line: safeManualDraftLine(line) }
   })

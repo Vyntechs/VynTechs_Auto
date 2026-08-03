@@ -11,6 +11,7 @@ import {
 import {
   jobLines,
   profiles,
+  quoteSends,
   quoteVersions,
   shops,
   ticketJobs,
@@ -329,6 +330,70 @@ describe('Shop OS quote draft mutations', () => {
     expect(jobs.find((job) => job.id === excludedJobId)).toMatchObject({ approvalState: 'quote_ready' })
     const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id))
     expect(stored.supersededAt).not.toBeNull()
+  })
+
+  it('makes an ordinary draft edit expire and clear every active link for the old version', async () => {
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
+    }).returning()
+    await db.insert(quoteSends).values({
+      shopId,
+      ticketId,
+      quoteVersionId: version.id,
+      customerId: null,
+      subjectKey: uuid(300),
+      destinationFingerprint: 'a'.repeat(64),
+      fingerprintKeyVersion: 'link_v1',
+      channel: 'link',
+      tokenHash: 'b'.repeat(64),
+      tokenExpiresAt: new Date(Date.now() + 60_000),
+      requestingActorProfileId: uuid(1),
+      requestKey: uuid(170),
+      requestFingerprint: 'c'.repeat(64),
+      state: 'submitted',
+      submittingAt: new Date(),
+      submittedAt: new Date(),
+    })
+
+    await expect(create(uuid(171))).resolves.toMatchObject({ ok: true, changed: true })
+    expect((await db.select().from(quoteSends))[0]).toMatchObject({
+      state: 'expired', tokenHash: null, tokenExpiresAt: null,
+      terminalAt: expect.any(Date), retainUntil: expect.any(Date),
+    })
+  })
+
+  it('rolls back the ordinary edit and version invalidation when link-row contention interrupts the lock step', async () => {
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
+    }).returning()
+    await db.insert(quoteSends).values({
+      shopId, ticketId, quoteVersionId: version.id, customerId: null, subjectKey: uuid(300),
+      destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(Date.now() + 60_000),
+      requestingActorProfileId: uuid(1), requestKey: uuid(172), requestFingerprint: 'c'.repeat(64),
+      state: 'submitted', submittingAt: new Date(), submittedAt: new Date(),
+    })
+
+    const result = await createDraftLine(
+      db,
+      { actor, ticketId, jobId, clientKey: uuid(173), body: partBody() },
+      { afterLinkLock: async () => { throw Object.assign(new Error('link row held'), { code: '55P03' }) } },
+    )
+    expect(result).toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect(await db.select().from(jobLines)).toEqual([])
+    expect((await db.select().from(quoteVersions))[0]?.supersededAt).toBeNull()
+    expect((await db.select().from(quoteSends))[0]).toMatchObject({
+      state: 'submitted', tokenHash: 'b'.repeat(64),
+    })
+  })
+
+  it('pins deterministic version-to-link locking inside the shared invalidation helper', () => {
+    const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
+    const helper = source.slice(
+      source.indexOf('export async function invalidateActiveQuoteVersion'),
+      source.indexOf('export type CreateQuoteVersionResult'),
+    )
+    expect(helper).toMatch(/\.from\(quoteSends\)[\s\S]*?orderBy\(quoteSends\.id\)[\s\S]*?\.for\('update', \{ noWait: true \}\)[\s\S]*?\.update\(quoteVersions\)[\s\S]*?\.update\(quoteSends\)/)
   })
 
   it('fails closed on malformed or duplicate active snapshots and rolls back the line mutation', async () => {
