@@ -82,7 +82,7 @@ export function PredictiveIntakeSearch({
   // Total row count for keyboard navigation wraparound.
   const rowCount = useMemo(() => {
     if (tier) return tier.vehicles.length + 1
-    if (state.kind === 'matched') return state.customers.length + state.vehicles.length + 1
+    if (state.kind === 'matched') return state.customers.length + state.vehicles.length
     if (state.kind === 'slow') {
       return (state.cached?.customers.length ?? 0) + (state.cached?.vehicles.length ?? 0) + 1
     }
@@ -147,7 +147,7 @@ export function PredictiveIntakeSearch({
         setTier(null)
         return
       }
-      const canCreate = state.kind === 'idle' || state.kind === 'matched' || state.kind === 'no-match'
+      const canCreate = state.kind === 'idle' || state.kind === 'no-match'
       if (e.key === 'Enter' && e.shiftKey && canCreate) {
         e.preventDefault()
         fireCreateNew()
@@ -186,7 +186,7 @@ export function PredictiveIntakeSearch({
           return
         }
         if (focusedIdx === null) {
-          fireCreateNew()
+          if (state.kind === 'idle' || state.kind === 'no-match') fireCreateNew()
           return
         }
         if (tier) {
@@ -210,8 +210,6 @@ export function PredictiveIntakeSearch({
           } else if (focusedIdx < customerCount + state.vehicles.length) {
             onPickVehicle(state.vehicles[focusedIdx - customerCount].id)
             setOpen(false)
-          } else {
-            fireCreateNew()
           }
           return
         }
@@ -233,9 +231,7 @@ export function PredictiveIntakeSearch({
     if (focusedIdx === null) return undefined
     if (tier) return focusedIdx >= tier.vehicles.length ? 'pis-row-create' : `pis-row-${focusedIdx}`
     if (state.kind === 'matched') {
-      return focusedIdx >= state.customers.length + state.vehicles.length
-        ? 'pis-row-create'
-        : `pis-row-${focusedIdx}`
+      return focusedIdx < state.customers.length + state.vehicles.length ? `pis-row-${focusedIdx}` : undefined
     }
     if (state.kind === 'idle') {
       return focusedIdx >= Math.min(recentCustomers.length, 5)
@@ -325,7 +321,6 @@ export function PredictiveIntakeSearch({
                 onPickVehicle(v.id)
                 setOpen(false)
               }}
-              onCreateNew={fireCreateNew}
               highlightTokens={tokens}
             />
           ) : state.kind === 'no-match' ? (

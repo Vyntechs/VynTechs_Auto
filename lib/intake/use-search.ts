@@ -66,6 +66,7 @@ export function useIntakeSearch() {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+    const isCurrent = () => abortRef.current === controller && !controller.signal.aborted
 
     // Clear any slowTimer left behind by a previous fire() before we set a
     // new one. Without this, a stale timer from an aborted query fires 5s
@@ -81,6 +82,8 @@ export function useIntakeSearch() {
     setState({ kind: 'searching', query, elapsedMs: 0 })
 
     slowTimer.current = setTimeout(() => {
+      if (!isCurrent()) return
+      slowTimer.current = null
       setState({
         kind: 'slow',
         query,
@@ -96,8 +99,11 @@ export function useIntakeSearch() {
         body: JSON.stringify({ q: query }),
         signal: controller.signal,
       })
-      if (slowTimer.current !== null) clearTimeout(slowTimer.current)
-      if (controller.signal.aborted) return
+      if (!isCurrent()) return
+      if (slowTimer.current !== null) {
+        clearTimeout(slowTimer.current)
+        slowTimer.current = null
+      }
       if (!res.ok) {
         setState({ kind: 'error', query, message: 'Search unavailable' })
         return
@@ -107,6 +113,7 @@ export function useIntakeSearch() {
         vehicles: VehicleHit[]
         latencyMs: number
       }
+      if (!isCurrent()) return
       lastResults.current = { normalizedQuery, customers: body.customers, vehicles: body.vehicles }
       const total = body.customers.length + body.vehicles.length
       if (total === 0) {
@@ -121,8 +128,11 @@ export function useIntakeSearch() {
         })
       }
     } catch (err) {
-      if ((err as Error).name === 'AbortError') return
-      if (slowTimer.current !== null) clearTimeout(slowTimer.current)
+      if (!isCurrent() || (err as Error).name === 'AbortError') return
+      if (slowTimer.current !== null) {
+        clearTimeout(slowTimer.current)
+        slowTimer.current = null
+      }
       setState({ kind: 'error', query, message: 'Search unavailable' })
     }
   }, [])

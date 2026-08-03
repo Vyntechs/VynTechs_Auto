@@ -142,7 +142,6 @@ export function DropdownResults({
   focusedIdx,
   onPickCustomer,
   onPickVehicle,
-  onCreateNew,
   highlightTokens,
 }: {
   customers: CustomerHit[]
@@ -151,7 +150,6 @@ export function DropdownResults({
   focusedIdx: number | null
   onPickCustomer: (customer: CustomerHit) => void
   onPickVehicle: (vehicle: VehicleHit) => void
-  onCreateNew: () => void
   highlightTokens: string[]
 }) {
   const totalMatches = customers.length + vehicles.length
@@ -216,12 +214,6 @@ export function DropdownResults({
           )
         })}
       </div>
-      <CreateRow
-        id="pis-row-create"
-        hint="Not in this list? Create new customer."
-        focused={focusedIdx === totalMatches}
-        onClick={onCreateNew}
-      />
     </div>
   )
 }

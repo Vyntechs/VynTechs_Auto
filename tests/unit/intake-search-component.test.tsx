@@ -310,6 +310,63 @@ describe('<PredictiveIntakeSearch>', () => {
     expect(onCreateNew).not.toHaveBeenCalled()
   })
 
+  it('keeps matched rows selectable without offering or triggering create-new', async () => {
+    const onCreateNew = vi.fn()
+    const onPickVehicle = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      fetchOk({
+        customers: [],
+        vehicles: [{
+          id: 'v1', year: 2018, make: 'Honda', model: 'Civic', engine: null,
+          vin: null, plate: null, mileage: null, ownerId: 'c1', ownerName: 'Robin', lastVisit: null,
+        }],
+        latencyMs: 4,
+      }),
+    ))
+    const user = userEvent.setup()
+    render(<PredictiveIntakeSearch recentCustomers={[]} onPickVehicle={onPickVehicle} onCreateNew={onCreateNew} />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'Robin')
+    await waitFor(() => expect(screen.getByText(/Honda Civic/i)).toBeInTheDocument())
+    expect(screen.queryByText('Create new customer with this info')).toBeNull()
+
+    await user.keyboard('{Shift>}{Enter}{/Shift}{Enter}')
+    expect(onCreateNew).not.toHaveBeenCalled()
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(onPickVehicle).toHaveBeenCalledWith('v1')
+  })
+
+  it('keeps current results when an aborted older response finishes JSON parsing', async () => {
+    let resolveOldBody: ((body: unknown) => void) | undefined
+    const oldBody = new Promise<unknown>((resolve) => { resolveOldBody = resolve })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => oldBody } as Response)
+      .mockResolvedValueOnce(fetchOk({
+        customers: [{ id: 'c2', name: 'Current Customer', phone: null, email: null, vehicleCount: 0, vehicles: [], lastVisit: null }],
+        vehicles: [], latencyMs: 4,
+      }))
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<PredictiveIntakeSearch recentCustomers={[]} onPickVehicle={vi.fn()} onCreateNew={vi.fn()} />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'old')
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    await user.clear(input)
+    await user.type(input, 'current')
+    await waitFor(() => expect(screen.getByRole('option', { name: /Current Customer/i })).toBeInTheDocument())
+
+    resolveOldBody?.({
+      customers: [{ id: 'c1', name: 'Stale Customer', phone: null, email: null, vehicleCount: 0, vehicles: [], lastVisit: null }],
+      vehicles: [], latencyMs: 4,
+    })
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Stale Customer/i })).toBeNull())
+    expect(screen.getByRole('option', { name: /Current Customer/i })).toBeInTheDocument()
+  })
+
   it('does not let Shift+Enter create a customer while search truth is pending, slow, or unavailable', async () => {
     const onCreateNew = vi.fn()
     let rejectSearch: ((reason?: unknown) => void) | undefined
