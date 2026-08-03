@@ -1,5 +1,9 @@
+import { createHash } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/pglite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AppDb } from '@/lib/db/queries'
+import * as dbSchema from '@/lib/db/schema'
 import {
   customers,
   jobLines,
@@ -14,6 +18,7 @@ import {
   vehicles,
 } from '@/lib/db/schema'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
+import { stableStringify } from '@/lib/shop-os/quote-math'
 import { createQuoteVersion } from '@/lib/shop-os/quotes'
 import {
   correctTicket,
@@ -116,6 +121,91 @@ async function prepareVersion(golden: Golden, ticketId: string) {
   const [version] = await golden.db.select().from(quoteVersions).where(eq(quoteVersions.id, result.version.id))
   if (!version) throw new Error('stored quote fixture missing')
   return version
+}
+
+async function addActionableLink(
+  golden: Golden,
+  ticketId: string,
+  quoteVersionId: string,
+  requestKey: string,
+) {
+  const sentAt = new Date('2026-08-03T06:00:00.000Z')
+  const [link] = await golden.db.insert(quoteSends).values({
+    shopId: golden.shop.id,
+    ticketId,
+    quoteVersionId,
+    customerId: null,
+    subjectKey: uuid(790),
+    destinationFingerprint: 'a'.repeat(64),
+    fingerprintKeyVersion: 'link_v1',
+    channel: 'link',
+    tokenHash: 'b'.repeat(64),
+    tokenExpiresAt: new Date('2026-08-10T12:00:00.000Z'),
+    requestingActorProfileId: golden.people.advisor.id,
+    requestKey,
+    requestFingerprint: 'c'.repeat(64),
+    state: 'submitted',
+    submittingAt: sentAt,
+    submittedAt: sentAt,
+    createdAt: sentAt,
+    updatedAt: sentAt,
+  }).returning()
+  return link
+}
+
+async function replaceVersionSnapshot(
+  golden: Golden,
+  versionId: string,
+  snapshot: Record<string, unknown>,
+) {
+  await golden.db.execute(sql`alter table quote_versions disable trigger quote_versions_immutable_update`)
+  await golden.db.update(quoteVersions).set({ snapshot }).where(eq(quoteVersions.id, versionId))
+  await golden.db.execute(sql`alter table quote_versions enable trigger quote_versions_immutable_update`)
+}
+
+async function correctionState(golden: Golden, ticketId: string) {
+  const jobs = await golden.db.select().from(ticketJobs)
+    .where(eq(ticketJobs.ticketId, ticketId)).orderBy(ticketJobs.id)
+  return {
+    ticket: await storedTicket(golden, ticketId),
+    jobs,
+    lines: await golden.db.select().from(jobLines).orderBy(jobLines.id),
+    versions: await golden.db.select().from(quoteVersions)
+      .where(eq(quoteVersions.ticketId, ticketId)).orderBy(quoteVersions.id),
+    links: await golden.db.select().from(quoteSends)
+      .where(eq(quoteSends.ticketId, ticketId)).orderBy(quoteSends.id),
+    receipts: await golden.db.select().from(ticketActivity)
+      .where(eq(ticketActivity.ticketId, ticketId)).orderBy(ticketActivity.id),
+    customers: await golden.db.select().from(customers).orderBy(customers.id),
+    vehicles: await golden.db.select().from(vehicles).orderBy(vehicles.id),
+  }
+}
+
+function concernBody(
+  ticket: { updatedAt: Date },
+  requestKey: string,
+  expectedActiveVersionId: string | null = null,
+) {
+  return {
+    action: 'concern' as const,
+    ...common(ticket, requestKey),
+    expectedActiveVersionId,
+    concern: 'Brake concern corrected under lock.',
+  }
+}
+
+function intentHash(body: unknown): string {
+  return createHash('sha256').update(stableStringify(body)).digest('hex')
+}
+
+function loggedDb(
+  golden: Golden,
+  logQuery: (query: string) => void,
+): AppDb {
+  return drizzle(golden.client, {
+    schema: dbSchema,
+    logger: { logQuery: (query) => logQuery(query) },
+  })
 }
 
 afterEach(() => {
@@ -223,6 +313,51 @@ describe('correctTicket', () => {
     }
   })
 
+  it.each([
+    ['demoted new write', false, 'forbidden'],
+    ['deactivated replay', true, 'not_found'],
+  ] as const)('refuses a persisted actor %s after version lock with zero repair-order mutation', async (
+    _label,
+    replay,
+    expectedError,
+  ) => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const body = concernBody(ticket, uuid(replay ? 734 : 735))
+      if (replay) {
+        await expect(correctTicket(golden.db, {
+          actor: golden.actors.advisor,
+          ticketId: ticket.id,
+          body,
+        })).resolves.toMatchObject({ ok: true, outcome: 'changed' })
+      }
+      const currentTicket = await storedTicket(golden, ticket.id)
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(replay ? 736 : 737))
+      const before = await correctionState(golden, ticket.id)
+      const result = await correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: replay ? body : concernBody(currentTicket, uuid(738), version.id),
+      }, {
+        afterVersionLock: async (transactionDb) => {
+          await transactionDb.update(profiles).set(replay
+            ? { deactivatedAt: new Date('2026-08-03T12:00:00.000Z') }
+            : { role: 'tech' })
+            .where(eq(profiles.id, golden.people.advisor.id))
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: expectedError })
+      expect(result).not.toHaveProperty('ticket')
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
   it('rejects a malformed persisted correction receipt before exposing replay truth', async () => {
     vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
     const golden = await createGoldenShopDay()
@@ -258,6 +393,64 @@ describe('correctTicket', () => {
       await golden.close()
     }
   })
+
+  it.each(['malformed version pair', 'scope/job mismatch'] as const)(
+    'rejects a hostile persisted receipt with %s and returns no current ticket data',
+    async (corruption) => {
+      vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+      const golden = await createGoldenShopDay()
+      try {
+        const ticket = await seedTicket(golden)
+        const job = await storedJob(golden, ticket.jobs[0].id)
+        const requestKey = uuid(corruption === 'malformed version pair' ? 739 : 740)
+        const body = corruption === 'malformed version pair'
+          ? concernBody(ticket, requestKey)
+          : {
+              action: 'job' as const,
+              ...common(ticket, requestKey),
+              jobId: job.id,
+              expectedJobUpdatedAt: job.updatedAt.toISOString(),
+              title: 'Hostile receipt must not replay',
+              kind: 'repair' as const,
+              customerSuppliedPartsNote: null,
+            }
+        await golden.db.insert(ticketActivity).values({
+          shopId: golden.shop.id,
+          ticketId: ticket.id,
+          jobId: corruption === 'scope/job mismatch' ? job.id : null,
+          actorProfileId: golden.people.advisor.id,
+          kind: 'ticket_corrected',
+          requestKey,
+          payload: corruption === 'malformed version pair' ? {
+            v: 1,
+            scope: 'concern',
+            intentHash: intentHash(body),
+            changedFields: ['concern'],
+            invalidatedVersionId: uuid(741),
+            invalidatedVersionNumber: null,
+          } : {
+            v: 1,
+            scope: 'concern',
+            intentHash: intentHash(body),
+            changedFields: ['concern'],
+          },
+        })
+        const before = await correctionState(golden, ticket.id)
+
+        const result = await correctTicket(golden.db, {
+          actor: golden.actors.advisor,
+          ticketId: ticket.id,
+          body,
+        })
+
+        expect(result).toEqual({ ok: false, error: 'conflict', retryable: false })
+        expect(result).not.toHaveProperty('ticket')
+        expect(await correctionState(golden, ticket.id)).toEqual(before)
+      } finally {
+        await golden.close()
+      }
+    },
+  )
 
   it('relinks only this ticket to an existing same-shop customer/vehicle and hides cross-shop selections', async () => {
     vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
@@ -370,6 +563,56 @@ describe('correctTicket', () => {
         .toEqual(oldCustomer)
       expect((await golden.db.select().from(vehicles).where(eq(vehicles.id, oldVehicle.id)))[0])
         .toEqual(oldVehicle)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('keeps an exact new-identity no-op receipt, version, link, and facts untouched', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      if (!ticket.customer || !ticket.vehicle) throw new Error('identity fixture missing')
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(764))
+      const before = await correctionState(golden, ticket.id)
+      const beforeFactWrite = vi.fn(async () => {})
+
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: {
+          action: 'identity',
+          ...common(before.ticket, uuid(765)),
+          expectedActiveVersionId: version.id,
+          selection: {
+            mode: 'new',
+            customer: {
+              name: ticket.customer.name,
+              phone: ticket.customer.phone,
+              email: ticket.customer.email,
+            },
+            vehicle: {
+              year: ticket.vehicle.year,
+              make: ticket.vehicle.make,
+              model: ticket.vehicle.model,
+              engine: ticket.vehicle.engine,
+              vin: ticket.vehicle.vin,
+              mileage: ticket.vehicle.mileage,
+              plate: ticket.vehicle.plate,
+            },
+          },
+        },
+      }, { beforeFactWrite })).resolves.toMatchObject({
+        ok: true,
+        outcome: 'unchanged',
+        changed: false,
+        scope: 'identity',
+        invalidatedVersionNumber: null,
+      })
+      expect(beforeFactWrite).not.toHaveBeenCalled()
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
     } finally {
       await golden.close()
     }
@@ -513,6 +756,134 @@ describe('correctTicket', () => {
     }
   })
 
+  it.each(['session-linked', 'initializing', 'ambiguous'] as const)(
+    'refuses ticket-wide and target correction for %s work with zero mutation',
+    async (unsafeState) => {
+      vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+      const golden = await createGoldenShopDay()
+      try {
+        const ticket = await seedTicket(golden)
+        const job = await storedJob(golden, ticket.jobs[0].id)
+        if (unsafeState === 'session-linked') {
+          const sessionId = uuid(742)
+          await golden.db.insert(sessions).values({
+            id: sessionId,
+            shopId: golden.shop.id,
+            techId: golden.people.tech.id,
+            vehicleId: ticket.vehicle?.id ?? null,
+            intake: {
+              vehicleYear: ticket.vehicle?.year ?? 2020,
+              vehicleMake: ticket.vehicle?.make ?? 'Ford',
+              vehicleModel: ticket.vehicle?.model ?? 'F-150',
+              customerComplaint: ticket.concern,
+            },
+            treeState: {
+              nodes: [{ id: 'root', label: 'Verify concern', status: 'active' }],
+              currentNodeId: 'root',
+              message: 'Begin inspection.',
+            },
+          })
+          await golden.db.update(ticketJobs).set({
+            kind: 'diagnostic',
+            sessionId,
+          }).where(eq(ticketJobs.id, job.id))
+        } else {
+          await golden.db.update(ticketJobs).set({
+            kind: 'diagnostic',
+            diagnosticStartState: unsafeState,
+          }).where(eq(ticketJobs.id, job.id))
+        }
+        const lockedJob = await storedJob(golden, job.id)
+        const before = await correctionState(golden, ticket.id)
+        await expect(correctTicket(golden.db, {
+          actor: golden.actors.owner,
+          ticketId: ticket.id,
+          body: concernBody(before.ticket, uuid(unsafeState === 'session-linked' ? 743 : unsafeState === 'initializing' ? 744 : 745)),
+        })).resolves.toEqual({ ok: false, error: 'job_not_open' })
+        await expect(correctTicket(golden.db, {
+          actor: golden.actors.owner,
+          ticketId: ticket.id,
+          body: {
+            action: 'job',
+            ...common(before.ticket, uuid(unsafeState === 'session-linked' ? 746 : unsafeState === 'initializing' ? 747 : 748)),
+            jobId: lockedJob.id,
+            expectedJobUpdatedAt: lockedJob.updatedAt.toISOString(),
+            title: 'Unsafe target correction',
+            kind: lockedJob.kind,
+            customerSuppliedPartsNote: null,
+          },
+        })).resolves.toEqual({ ok: false, error: 'job_not_open' })
+        expect(await correctionState(golden, ticket.id)).toEqual(before)
+      } finally {
+        await golden.close()
+      }
+    },
+  )
+
+  it('rejects stale job and active-version expectations without changing facts or history', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const job = await storedJob(golden, ticket.jobs[0].id)
+      const beforeJobConflict = await correctionState(golden, ticket.id)
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: {
+          action: 'job',
+          ...common(ticket, uuid(749)),
+          jobId: job.id,
+          expectedJobUpdatedAt: new Date(job.updatedAt.getTime() - 1).toISOString(),
+          title: 'Stale job correction',
+          kind: 'repair',
+          customerSuppliedPartsNote: null,
+        },
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(beforeJobConflict)
+
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(750))
+      const beforeVersionConflict = await correctionState(golden, ticket.id)
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(beforeVersionConflict.ticket, uuid(751), null),
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(beforeVersionConflict)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rejects multiple active versions before invalidation with zero mutation', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await golden.db.insert(quoteVersions).values({
+        id: uuid(752),
+        shopId: golden.shop.id,
+        ticketId: ticket.id,
+        versionNumber: 2,
+        snapshot: version.snapshot,
+        createdByProfileId: golden.people.advisor.id,
+      })
+      await addActionableLink(golden, ticket.id, version.id, uuid(753))
+      const before = await correctionState(golden, ticket.id)
+
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(754), version.id),
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
   it('invalidates one active version atomically while preserving its snapshot bytes and expiring its link', async () => {
     vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
     const golden = await createGoldenShopDay()
@@ -593,11 +964,11 @@ describe('correctTicket', () => {
         whatWeRecommend: 'Inspect the front brakes before further driving.',
       }
       corrupted.jobs[0].storyMeta = { source: 'manual' }
-      await golden.db.execute(sql`alter table quote_versions disable trigger quote_versions_immutable_update`)
-      await golden.db.update(quoteVersions)
-        .set({ snapshot: corrupted as unknown as Record<string, unknown> })
-        .where(eq(quoteVersions.id, version.id))
-      await golden.db.execute(sql`alter table quote_versions enable trigger quote_versions_immutable_update`)
+      await replaceVersionSnapshot(
+        golden,
+        version.id,
+        corrupted as unknown as Record<string, unknown>,
+      )
 
       const beforeTicket = await storedTicket(golden, ticket.id)
       const beforeJob = await storedJob(golden, ticket.jobs[0].id)
@@ -620,6 +991,222 @@ describe('correctTicket', () => {
       expect(stillActive.supersededAt).toBeNull()
       expect(stillActive.snapshot).toEqual(corrupted)
       expect(await golden.db.select().from(ticketActivity)).toEqual([])
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rejects a schema-invalid active snapshot with zero fact or handoff mutation', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await replaceVersionSnapshot(golden, version.id, { broken: true })
+      await addActionableLink(golden, ticket.id, version.id, uuid(766))
+      const before = await correctionState(golden, ticket.id)
+
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(767), version.id),
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rejects an active snapshot that omits one canonical eligible locked job', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { secondJob: true, priced: true })
+      const secondJob = await storedJob(golden, uuid(701))
+      await golden.db.insert(jobLines).values({
+        id: uuid(730),
+        shopId: golden.shop.id,
+        jobId: secondJob.id,
+        kind: 'fee',
+        description: 'Tire rotation',
+        sort: 0,
+        quantity: 1,
+        priceCents: 4_000,
+        taxable: false,
+        source: 'manual',
+      })
+      const version = await prepareVersion(golden, ticket.id)
+      const snapshot = structuredClone(version.snapshot) as {
+        jobs: Array<{ id: string }>
+      }
+      expect(snapshot.jobs).toHaveLength(2)
+      const omittedJobId = snapshot.jobs[1].id
+      snapshot.jobs = snapshot.jobs.slice(0, 1)
+      const keptSubtotal = (version.snapshot as {
+        jobs: Array<{ totals: { subtotalCents: number; taxableSubtotalCents: number } }>
+      }).jobs[0].totals
+      Object.assign(snapshot as object, {
+        totals: {
+          subtotalCents: keptSubtotal.subtotalCents,
+          taxableSubtotalCents: keptSubtotal.taxableSubtotalCents,
+          taxCents: 0,
+          totalCents: keptSubtotal.subtotalCents,
+        },
+      })
+      await replaceVersionSnapshot(
+        golden,
+        version.id,
+        snapshot as unknown as Record<string, unknown>,
+      )
+      await addActionableLink(golden, ticket.id, version.id, uuid(731))
+      const before = await correctionState(golden, ticket.id)
+      expect(before.jobs.find((job) => job.id === omittedJobId)?.approvalState).toBe('quote_ready')
+
+      const result = await correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: {
+          action: 'concern',
+          ...common(before.ticket, uuid(732)),
+          expectedActiveVersionId: version.id,
+          concern: 'This incomplete snapshot must not be invalidated.',
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rejects an active snapshot containing an unknown job with zero mutation', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      const snapshot = structuredClone(version.snapshot) as {
+        jobs: Array<{ id: string }>
+      }
+      snapshot.jobs[0].id = uuid(755)
+      await replaceVersionSnapshot(
+        golden,
+        version.id,
+        snapshot as unknown as Record<string, unknown>,
+      )
+      await addActionableLink(golden, ticket.id, version.id, uuid(756))
+      const before = await correctionState(golden, ticket.id)
+
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(757), version.id),
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it.each([
+    ['tickets', 'ticket'],
+    ['ticket_jobs', 'job'],
+    ['quote_versions', 'version'],
+    ['profiles', 'actor'],
+    ['quote_sends', 'link'],
+  ] as const)('classifies exact %s NOWAIT contention as retryable and rolls back all state', async (
+    table,
+    _boundary,
+  ) => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(758))
+      const before = await correctionState(golden, ticket.id)
+      let injected = false
+      const db = loggedDb(golden, (query) => {
+        if (!injected
+          && new RegExp(`from "${table}"`, 'i').test(query)
+          && /for update nowait/i.test(query)) {
+          injected = true
+          throw Object.assign(new Error(`${table} row held`), { code: '55P03' })
+        }
+      })
+
+      await expect(correctTicket(db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(759), version.id),
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(injected).toBe(true)
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('executes canonical ticket-to-link NOWAIT lock order before fact mutation', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(760))
+      const statements: string[] = []
+      const db = loggedDb(golden, (query) => statements.push(query.replace(/\s+/g, ' ')))
+
+      await expect(correctTicket(db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(ticket, uuid(761), version.id),
+      })).resolves.toMatchObject({ ok: true, outcome: 'changed' })
+
+      const lockTables = statements
+        .filter((query) => /for update nowait/i.test(query))
+        .map((query) => [
+          'tickets', 'ticket_jobs', 'job_lines', 'quote_versions',
+          'profiles', 'ticket_activity', 'quote_sends',
+        ].find((table) => new RegExp(`from "${table}"`, 'i').test(query)))
+      expect(lockTables).toEqual([
+        'tickets',
+        'ticket_jobs',
+        'job_lines',
+        'quote_versions',
+        'profiles',
+        'ticket_activity',
+        'quote_sends',
+      ])
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rolls back a quote-version CAS miss after the link lock', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(762))
+      const before = await correctionState(golden, ticket.id)
+      let transactionDb: AppDb
+
+      await expect(correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(763), version.id),
+      }, {
+        afterVersionLock: async (db) => { transactionDb = db },
+        afterLinkLock: async () => {
+          await transactionDb.update(quoteVersions)
+            .set({ supersededAt: new Date('2026-08-03T12:00:00.000Z') })
+            .where(eq(quoteVersions.id, version.id))
+        },
+      })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
     } finally {
       await golden.close()
     }
@@ -665,8 +1252,21 @@ describe('correctTicket', () => {
       const before = await storedTicket(golden, ticket.id)
       const customersBefore = await golden.db.select().from(customers)
       const vehiclesBefore = await golden.db.select().from(vehicles)
+      await addActionableLink(golden, ticket.id, version.id, uuid(733))
+      const stateBefore = await correctionState(golden, ticket.id)
+      let rowsVisibleAtSeam: { customers: number; vehicles: number } | null = null
+      let transactionDb: Parameters<NonNullable<TicketCorrectionDependencies['afterVersionLock']>>[0]
       const dependencies: TicketCorrectionDependencies = {
-        beforeFactWrite: async () => { throw new Error('forced final-write failure') },
+        afterVersionLock: async (db) => { transactionDb = db },
+        beforeFactWrite: async () => {
+          rowsVisibleAtSeam = {
+            customers: (await transactionDb.select().from(customers)
+              .where(eq(customers.phone, '202-555-0166'))).length,
+            vehicles: (await transactionDb.select().from(vehicles)
+              .where(eq(vehicles.plate, 'ROLLBACK'))).length,
+          }
+          throw new Error('forced final-write failure')
+        },
       }
       await expect(correctTicket(golden.db, {
         actor: golden.actors.advisor,
@@ -694,6 +1294,7 @@ describe('correctTicket', () => {
           },
         },
       }, dependencies)).rejects.toThrow('forced final-write failure')
+      expect(rowsVisibleAtSeam).toEqual({ customers: 0, vehicles: 0 })
       expect(await storedTicket(golden, ticket.id)).toMatchObject({
         customerId: before.customerId,
         vehicleId: before.vehicleId,
@@ -704,6 +1305,7 @@ describe('correctTicket', () => {
       const [stillActive] = await golden.db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id))
       expect(stillActive.supersededAt).toBeNull()
       expect(await golden.db.select().from(ticketActivity)).toEqual([])
+      expect(await correctionState(golden, ticket.id)).toEqual(stateBefore)
     } finally {
       await golden.close()
     }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import {
@@ -262,6 +262,15 @@ function snapshotMatchesLockedTruth(
 ): boolean {
   try {
     const snapshot = validatedQuoteSnapshot(version.snapshot, ticket)
+    const lineJobIds = new Set(lines.map((line) => line.jobId))
+    const canonicalJobIds = sortBySnapshotOrder(jobs)
+      .filter((job) => job.workStatus !== 'canceled'
+        && !isPinnedSimpleWork(job)
+        && lineJobIds.has(job.id))
+      .map((job) => job.id)
+    const snapshotJobIds = snapshot.jobs.map((job) => job.id)
+    if (canonicalJobIds.length !== snapshotJobIds.length
+      || canonicalJobIds.some((id, index) => id !== snapshotJobIds[index])) return false
     const currentJobs = new Map(jobs.map((job) => [job.id, job]))
     const currentLines = new Map(lines.map((line) => [line.id, line]))
     for (const snapshotJob of snapshot.jobs) {
@@ -312,12 +321,17 @@ function replayMatches(
     && row.payload.intentHash === hash
 }
 
-async function resolveIdentity(
+type ResolvedIdentity = { customerId: string; vehicleId: string }
+type IdentityPlan =
+  | { ok: true; identity: ResolvedIdentity | null }
+  | { ok: false }
+
+async function planIdentity(
   db: AppDb,
   shopId: string,
   ticket: LockedTicket,
   selection: z.infer<typeof identitySelectionSchema>,
-): Promise<{ customerId: string; vehicleId: string } | null> {
+): Promise<IdentityPlan> {
   if (selection.mode === 'existing') {
     const [pair] = await db
       .select({ customerId: customers.id, vehicleId: vehicles.id })
@@ -328,7 +342,7 @@ async function resolveIdentity(
       )
       .where(eq(customers.shopId, shopId))
       .limit(1)
-    return pair ?? null
+    return pair ? { ok: true, identity: pair } : { ok: false }
   }
 
   const [current] = ticket.customerId && ticket.vehicleId ? await db
@@ -364,9 +378,48 @@ async function resolveIdentity(
     && current.vin === selection.vehicle.vin
     && current.mileage === selection.vehicle.mileage
     && current.plate === selection.vehicle.plate) {
-    return { customerId: current.customerId, vehicleId: current.vehicleId }
+    return {
+      ok: true,
+      identity: { customerId: current.customerId, vehicleId: current.vehicleId },
+    }
   }
 
+  const [customer] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(and(eq(customers.shopId, shopId), eq(customers.phone, selection.customer.phone)))
+    .limit(1)
+  if (!customer) return { ok: true, identity: null }
+
+  const [vehicle] = selection.vehicle.vin ? await db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(and(
+      eq(vehicles.customerId, customer.id),
+      eq(vehicles.vin, selection.vehicle.vin),
+    ))
+    .limit(1) : selection.vehicle.plate ? await db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(and(
+      eq(vehicles.customerId, customer.id),
+      eq(vehicles.year, selection.vehicle.year),
+      eq(vehicles.make, selection.vehicle.make),
+      eq(vehicles.model, selection.vehicle.model),
+      eq(vehicles.plate, selection.vehicle.plate),
+    ))
+    .orderBy(desc(vehicles.createdAt))
+    .limit(1) : []
+  return vehicle
+    ? { ok: true, identity: { customerId: customer.id, vehicleId: vehicle.id } }
+    : { ok: true, identity: null }
+}
+
+async function materializeNewIdentity(
+  db: AppDb,
+  shopId: string,
+  selection: Extract<z.infer<typeof identitySelectionSchema>, { mode: 'new' }>,
+): Promise<ResolvedIdentity> {
   const customer = await upsertCustomer(db, {
     shopId,
     name: selection.customer.name,
@@ -615,14 +668,15 @@ export async function correctTicket(
         }
       }
 
-      let identity: { customerId: string; vehicleId: string } | null = null
+      let identityPlan: IdentityPlan | null = null
       if (body.action === 'identity') {
-        identity = await resolveIdentity(transactionDb, shopId, ticket, body.selection)
-        if (!identity) return failure('not_found')
+        identityPlan = await planIdentity(transactionDb, shopId, ticket, body.selection)
+        if (!identityPlan.ok) return failure('not_found')
       }
 
       const noChange = body.action === 'identity' ? (
-        ticket.customerId === identity?.customerId && ticket.vehicleId === identity?.vehicleId
+        ticket.customerId === identityPlan?.identity?.customerId
+        && ticket.vehicleId === identityPlan.identity.vehicleId
       ) : body.action === 'concern' ? ticket.concern === body.concern : body.action === 'job' ? (
         target?.title === body.title
         && target.kind === body.kind
@@ -640,7 +694,6 @@ export async function correctTicket(
         }
       }
 
-      const receipt = receiptFor(body, hash, ticket, target, identity, activeVersion)
       const invalidationFailure = await invalidateActiveQuoteVersion(transactionDb, {
         shopId,
         ticketId: ticket.id,
@@ -651,6 +704,17 @@ export async function correctTicket(
         throw new AbortCorrection(conflict(invalidationFailure.retryable === true))
       }
       await dependencies.beforeFactWrite?.()
+
+      let identity = identityPlan?.ok ? identityPlan.identity : null
+      if (body.action === 'identity' && identity === null) {
+        if (body.selection.mode !== 'new') throw new Error('correction_identity_plan_invalid')
+        identity = await materializeNewIdentity(
+          transactionDb,
+          shopId,
+          body.selection,
+        )
+      }
+      const receipt = receiptFor(body, hash, ticket, target, identity, activeVersion)
 
       if (body.action === 'identity' && identity) {
         await transactionDb.update(tickets).set({

@@ -77,6 +77,7 @@ export async function middleware(req: NextRequest) {
     })
   }
   const { res, supabase } = await refreshSession(req)
+  if (isTicketCorrectionRoute(pathname)) res.headers.set('Cache-Control', 'no-store')
   const exempt = isPaywallExempt(pathname)
   const isCurator = pathname.startsWith('/curator')
 

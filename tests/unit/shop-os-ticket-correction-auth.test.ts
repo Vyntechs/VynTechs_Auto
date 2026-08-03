@@ -29,8 +29,8 @@ const createServerClientMock = vi.mocked(createServerClient)
 const checkAccessMock = vi.mocked(authAccess.checkAccess)
 const getUser = vi.fn()
 
-function request(pathname: string): NextRequest {
-  return new NextRequest(`https://vyntechs.dev${pathname}`, { method: 'POST' })
+function request(pathname: string, method = 'POST'): NextRequest {
+  return new NextRequest(`https://vyntechs.dev${pathname}`, { method })
 }
 
 function exactCorrectionMatcher(pathname: string): boolean {
@@ -131,6 +131,22 @@ describe('Shop OS ticket-correction middleware boundary', () => {
     await expectJson(response, 401, { error: 'unauthenticated' })
     expect(checkAccessMock).not.toHaveBeenCalled()
   })
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])(
+    'marks the authenticated enabled %s pass-through no-store for the generated 405 boundary',
+    async (method) => {
+      getUser.mockResolvedValue({ data: { user: { id: USER_ID } } })
+
+      const response = await middleware(request(CORRECTION_PATH, method))
+
+      expect(response.headers.get('x-middleware-next')).toBe('1')
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(checkAccessMock).toHaveBeenCalledWith({}, USER_ID)
+
+      const neighbor = await middleware(request(`/api/tickets/${TICKET_ID}`, method))
+      expect(neighbor.headers.get('cache-control')).toBeNull()
+    },
+  )
 
   it.each([
     ['deactivated', { kind: 'deactivated' }, { error: 'deactivated' }],
