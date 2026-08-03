@@ -358,6 +358,55 @@ describe('correctTicket', () => {
     }
   })
 
+  it('refuses a persisted parts caller so widening locked authorization cannot expose or mutate repair-order truth', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(768))
+      const before = await correctionState(golden, ticket.id)
+
+      const result = await correctTicket(golden.db, {
+        actor: golden.actors.parts,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(769), version.id),
+      })
+
+      expect(result).toEqual({ ok: false, error: 'forbidden' })
+      expect(result).not.toHaveProperty('ticket')
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('refuses a persisted inactive membership so dropping the active lock predicate cannot expose or mutate repair-order truth', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(770))
+      await golden.db.update(profiles)
+        .set({ membershipStatus: 'pending', membershipActivatedAt: null })
+        .where(eq(profiles.id, golden.people.advisor.id))
+      const before = await correctionState(golden, ticket.id)
+
+      const result = await correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: concernBody(before.ticket, uuid(771), version.id),
+      })
+
+      expect(result).toEqual({ ok: false, error: 'not_found' })
+      expect(result).not.toHaveProperty('ticket')
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
+    } finally {
+      await golden.close()
+    }
+  })
+
   it('rejects a malformed persisted correction receipt before exposing replay truth', async () => {
     vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
     const golden = await createGoldenShopDay()
@@ -851,6 +900,32 @@ describe('correctTicket', () => {
         body: concernBody(beforeVersionConflict.ticket, uuid(751), null),
       })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
       expect(await correctionState(golden, ticket.id)).toEqual(beforeVersionConflict)
+    } finally {
+      await golden.close()
+    }
+  })
+
+  it('rejects a stale ticket timestamp so weakening the exact ticket concurrency check cannot mutate repair-order truth', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+    const golden = await createGoldenShopDay()
+    try {
+      const ticket = await seedTicket(golden, { priced: true })
+      const version = await prepareVersion(golden, ticket.id)
+      await addActionableLink(golden, ticket.id, version.id, uuid(772))
+      const before = await correctionState(golden, ticket.id)
+
+      const result = await correctTicket(golden.db, {
+        actor: golden.actors.advisor,
+        ticketId: ticket.id,
+        body: {
+          ...concernBody(before.ticket, uuid(773), version.id),
+          expectedTicketUpdatedAt: new Date(before.ticket.updatedAt.getTime() - 1).toISOString(),
+        },
+      })
+
+      expect(result).toEqual({ ok: false, error: 'conflict', retryable: false })
+      expect(result).not.toHaveProperty('ticket')
+      expect(await correctionState(golden, ticket.id)).toEqual(before)
     } finally {
       await golden.close()
     }
