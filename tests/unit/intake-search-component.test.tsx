@@ -288,6 +288,96 @@ describe('<PredictiveIntakeSearch>', () => {
     expect(screen.queryByText('Sandoval')).not.toBeInTheDocument()
   })
 
+  it('keeps a failed search truthful and retries without creating a customer', async () => {
+    const onCreateNew = vi.fn()
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(fetchOk({ customers: [], vehicles: [], latencyMs: 4 }))
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<PredictiveIntakeSearch recentCustomers={[]} onPickVehicle={vi.fn()} onCreateNew={onCreateNew} />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'Robin')
+    await waitFor(() => expect(screen.getByText('Search unavailable')).toBeInTheDocument())
+    const retry = screen.getByRole('option', { name: 'Retry search' })
+    expect(retry).toHaveClass('pis__retry')
+    expect(screen.queryByText('Create new customer with this info')).toBeNull()
+    await user.click(retry)
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(onCreateNew).not.toHaveBeenCalled()
+  })
+
+  it('does not let Shift+Enter create a customer while search truth is pending, slow, or unavailable', async () => {
+    const onCreateNew = vi.fn()
+    let rejectSearch: ((reason?: unknown) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((_, reject) => { rejectSearch = reject })))
+    const user = userEvent.setup()
+    render(<PredictiveIntakeSearch recentCustomers={[]} onPickVehicle={vi.fn()} onCreateNew={onCreateNew} />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'Robin')
+    await waitFor(() => expect(screen.getByText(/Holding previous results/i)).toBeInTheDocument())
+    await user.keyboard('{Shift>}{Enter}{/Shift}')
+    expect(onCreateNew).not.toHaveBeenCalled()
+
+    await waitFor(
+      () => expect(screen.getByText(/Search is taking longer than usual/i)).toBeInTheDocument(),
+      { timeout: 6_000 },
+    )
+    await user.keyboard('{Shift>}{Enter}{/Shift}')
+    expect(onCreateNew).not.toHaveBeenCalled()
+
+    rejectSearch?.(new Error('network down'))
+    await waitFor(() => expect(screen.getByText('Search unavailable')).toBeInTheDocument())
+    await user.keyboard('{Shift>}{Enter}{/Shift}')
+    expect(onCreateNew).not.toHaveBeenCalled()
+  })
+
+  it('hides stale slow rows after the query changes and exposes only exact-query cached rows with deterministic keyboard IDs', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(fetchOk({
+        customers: [{ id: 'c1', name: 'Sandoval', phone: null, email: null, vehicleCount: 0, vehicles: [], lastVisit: null }],
+        vehicles: [], latencyMs: 4,
+      }))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<PredictiveIntakeSearch recentCustomers={[]} onPickVehicle={vi.fn()} onCreateNew={vi.fn()} />)
+
+    const input = screen.getByRole('combobox')
+    await user.click(input)
+    await user.type(input, 'Sandoval')
+    await waitFor(() => expect(screen.getByText('Sandoval')).toBeInTheDocument())
+
+    await user.clear(input)
+    await user.type(input, 'Mendez')
+    await waitFor(
+      () => expect(screen.getByText(/Search is taking longer than usual/i)).toBeInTheDocument(),
+      { timeout: 6_000 },
+    )
+    expect(screen.queryByText('Sandoval')).toBeNull()
+    await user.keyboard('{ArrowDown}')
+    expect(input).toHaveAttribute('aria-activedescendant', 'pis-row-retry')
+
+    await user.clear(input)
+    await user.type(input, '  SANDOVAL  ')
+    await waitFor(
+      () => expect(screen.getByText(/Search is taking longer than usual/i)).toBeInTheDocument(),
+      { timeout: 6_000 },
+    )
+    expect(screen.getByText('Sandoval')).toBeInTheDocument()
+    await user.keyboard('{ArrowDown}')
+    expect(input).toHaveAttribute('aria-activedescendant', 'pis-row-0')
+    await user.keyboard('{ArrowDown}')
+    expect(input).toHaveAttribute('aria-activedescendant', 'pis-row-retry')
+    expect(screen.queryByText('Create new customer with this info')).toBeNull()
+  })
+
   it('does not crash when results contain ISO-string dates (wire-format)', async () => {
     // Reproduces a real PR-27 preview bug: /api/intake/search returns
     // lastVisit as an ISO string, but our types claimed Date. Calling

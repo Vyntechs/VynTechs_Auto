@@ -13,7 +13,7 @@ export type SearchState =
       kind: 'slow'
       query: string
       elapsedSec: number
-      prev: { customers: CustomerHit[]; vehicles: VehicleHit[] } | null
+      cached: CachedSearchRows | null
     }
   | {
       kind: 'matched'
@@ -25,9 +25,20 @@ export type SearchState =
   | { kind: 'no-match'; query: string; latencyMs: number }
   | { kind: 'error'; query: string; message: string }
 
+export type CachedSearchRows = {
+  normalizedQuery: string
+  customers: CustomerHit[]
+  vehicles: VehicleHit[]
+}
+
+export function normalizeIntakeSearchQuery(query: string): string {
+  return query.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export function useIntakeSearch() {
   const [state, setState] = useState<SearchState>({ kind: 'idle' })
-  const lastResults = useRef<{ customers: CustomerHit[]; vehicles: VehicleHit[] } | null>(null)
+  const lastResults = useRef<CachedSearchRows | null>(null)
+  const queryRef = useRef('')
   const abortRef = useRef<AbortController | null>(null)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,6 +61,8 @@ export function useIntakeSearch() {
   useEffect(() => () => abort(), [abort])
 
   const fire = useCallback(async (query: string) => {
+    const normalizedQuery = normalizeIntakeSearchQuery(query)
+    if (normalizedQuery === '') return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -72,7 +85,7 @@ export function useIntakeSearch() {
         kind: 'slow',
         query,
         elapsedSec: (Date.now() - startedAt) / 1000,
-        prev: lastResults.current,
+        cached: lastResults.current?.normalizedQuery === normalizedQuery ? lastResults.current : null,
       })
     }, SLOW_AFTER_MS)
 
@@ -94,7 +107,7 @@ export function useIntakeSearch() {
         vehicles: VehicleHit[]
         latencyMs: number
       }
-      lastResults.current = { customers: body.customers, vehicles: body.vehicles }
+      lastResults.current = { normalizedQuery, customers: body.customers, vehicles: body.vehicles }
       const total = body.customers.length + body.vehicles.length
       if (total === 0) {
         setState({ kind: 'no-match', query, latencyMs: body.latencyMs })
@@ -119,9 +132,17 @@ export function useIntakeSearch() {
       if (debounceTimer.current !== null) clearTimeout(debounceTimer.current)
       if (q.trim() === '') {
         abort()
+        queryRef.current = ''
         setState({ kind: 'idle' })
         return
       }
+      queryRef.current = q
+      abortRef.current?.abort()
+      if (slowTimer.current !== null) {
+        clearTimeout(slowTimer.current)
+        slowTimer.current = null
+      }
+      setState({ kind: 'searching', query: q, elapsedMs: 0 })
       debounceTimer.current = setTimeout(() => {
         void fire(q)
       }, DEBOUNCE_MS)
@@ -129,5 +150,10 @@ export function useIntakeSearch() {
     [abort, fire],
   )
 
-  return { state, setQuery, abort }
+  const retry = useCallback(() => {
+    const query = queryRef.current
+    if (normalizeIntakeSearchQuery(query) !== '') void fire(query)
+  }, [fire])
+
+  return { state, setQuery, abort, retry }
 }
