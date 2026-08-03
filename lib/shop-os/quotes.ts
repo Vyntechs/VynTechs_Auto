@@ -1440,7 +1440,7 @@ function safeVersionProjection(version: typeof quoteVersions.$inferSelect): Crea
   }
 }
 
-function validatedQuoteSnapshot(
+export function validatedQuoteSnapshot(
   snapshotValue: unknown,
   expectedTicket?: Pick<
     typeof tickets.$inferSelect,
