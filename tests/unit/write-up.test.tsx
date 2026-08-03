@@ -11,6 +11,8 @@ vi.mock('next/navigation', () => ({
 
 import { WriteUp } from '@/components/screens/write-up'
 
+const testActorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+
 const diagnosticTemplate = {
   id: '11111111-1111-4111-8111-111111111111', title: 'Initial diagnosis', kind: 'diagnostic' as const,
   defaultRequiredSkillTier: 3 as const, sort: 10, fingerprint: 'a'.repeat(64),
@@ -35,28 +37,31 @@ function fillRequiredNewVehicle() {
 
 describe('WriteUp', () => {
   beforeEach(() => {
+    sessionStorage.clear()
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ ticket: { id: 'ticket-abc' } }),
+        status: 201,
+        json: async () => ({ ticket: { id: '33333333-3333-4333-8333-333333333333' } }),
       }),
     )
   })
 
   afterEach(() => {
+    sessionStorage.clear()
     vi.unstubAllGlobals()
     vi.clearAllMocks()
     mockPush.mockReset()
   })
 
   it('renders the screen title', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(screen.getByRole('heading', { name: /who's the customer/i })).toBeInTheDocument()
   })
 
   it('defaults to the shop diagnostic authorization and submits its exact immutable identity', async () => {
-    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByLabelText(/diagnostic labor/i)).toHaveValue(diagnosticTemplate.id)
     expect(screen.queryByLabelText(/customer-supplied item/i)).toBeNull()
@@ -73,7 +78,7 @@ describe('WriteUp', () => {
   })
 
   it('keeps customer-supplied truth only in known work and submits the selected saved scope once', async () => {
-    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
     expect(screen.getByLabelText(/work to perform/i)).toHaveValue(knownTemplate.id)
     fireEvent.change(screen.getByLabelText(/customer-supplied item/i), {
@@ -93,7 +98,7 @@ describe('WriteUp', () => {
   })
 
   it('submits a writer-typed custom diagnostic labor line as diagnosis-manual', async () => {
-    render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+    render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
     expect(screen.getByRole('button', { name: /find the cause/i })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.change(screen.getByLabelText(/diagnostic labor/i), { target: { value: 'custom' } })
     fireEvent.change(screen.getByLabelText(/^description$/i), {
@@ -140,7 +145,7 @@ describe('WriteUp', () => {
   })
 
   it('renders the customer, vehicle, and complaint fields', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/phone/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
@@ -157,21 +162,21 @@ describe('WriteUp', () => {
   // to reveal a different control. Writing up one truck should be one section.
   describe('the complaint reads as a single section', () => {
     it('asks for the customer story once instead of splitting it across three boxes', () => {
-      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       expect(screen.getByLabelText(/what brought them in/i)).toBeInTheDocument()
       expect(screen.queryByLabelText(/when did it start/i)).not.toBeInTheDocument()
       expect(screen.queryByLabelText(/how often/i)).not.toBeInTheDocument()
     })
 
     it('never asks where the scope is coming from, in either intent', () => {
-      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
       expect(screen.queryByLabelText(/scope source/i)).not.toBeInTheDocument()
     })
 
     it('reveals typed known work from the same dropdown that lists saved work', () => {
-      render(<WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
+      render(<WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />)
       fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
       expect(screen.queryByLabelText(/^requested work$/i)).not.toBeInTheDocument()
 
@@ -181,7 +186,7 @@ describe('WriteUp', () => {
 
     it('leaves the whole complaint under one heading', () => {
       const { container } = render(
-        <WriteUp cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />,
+        <WriteUp actorId={testActorId} cannedJobs={[diagnosticTemplate, knownTemplate]} cannedTaxRateBps={825} />,
       )
       const headings = Array.from(container.querySelectorAll('.vt-form__group-name'))
         .map((node) => node.textContent)
@@ -193,7 +198,7 @@ describe('WriteUp', () => {
   })
 
   it('auto-uppercases VIN as the writer types', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     const vin = screen.getByLabelText(/vin/i) as HTMLInputElement
     fireEvent.change(vin, { target: { value: 'wba3a5c50ejf12345' } })
     expect(vin.value).toBe('WBA3A5C50EJF12345')
@@ -204,7 +209,7 @@ describe('WriteUp', () => {
       ok: true,
       json: async () => ({ year: 2014, make: 'BMW', model: '335i', engine: 'N55' }),
     } as Response)
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
 
     const decode = screen.getByRole('button', { name: /decode vin/i })
     expect(decode).toBeDisabled()
@@ -242,7 +247,7 @@ describe('WriteUp', () => {
       ok: true,
       json: async () => ({ error }),
     } as Response)
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^vin$/i), {
       target: { value: 'WBA3A5C50EJF12345' },
     })
@@ -254,7 +259,7 @@ describe('WriteUp', () => {
   })
 
   it('does not claim VIN fields auto-fill before a successful decode', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(screen.queryByText(/vin auto-fills/i)).not.toBeInTheDocument()
   })
 
@@ -264,14 +269,14 @@ describe('WriteUp', () => {
   // claimed persistence the form does not have. Both fakes removed.
   // docs/strategy/2026-05-29-customer-interaction-doctrine.md (§2.5)
   it('does not render a fake "Scan with camera" button (no real camera scan exists)', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(
       screen.queryByRole('button', { name: /scan with camera/i }),
     ).not.toBeInTheDocument()
   })
 
   it('does not claim the form is auto-saved (no draft persistence exists)', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(screen.queryByText(/auto-saved/i)).not.toBeInTheDocument()
   })
 
@@ -281,14 +286,14 @@ describe('WriteUp', () => {
   // focus move, on a form long enough that the missing field was off-screen.
   // A dead control that explains nothing is the defect.
   it('never leaves the writer tapping a dead Create repair order button', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     expect(submits.length).toBeGreaterThan(0)
     submits.forEach((btn) => expect(btn).toBeEnabled())
   })
 
   it('names and focuses the complaint when it is the only thing missing', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
@@ -309,7 +314,7 @@ describe('WriteUp', () => {
   })
 
   it('names and focuses the phone when a new customer has no number yet', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2007' } })
     fireEvent.change(screen.getByLabelText(/^make$/i), { target: { value: 'Chevrolet' } })
@@ -329,7 +334,7 @@ describe('WriteUp', () => {
   })
 
   it('names and focuses the requested work when known work is chosen and it is blank', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.click(screen.getByRole('button', { name: /perform known work/i }))
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Brittney Nichols' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '1235542121' } })
@@ -348,7 +353,7 @@ describe('WriteUp', () => {
   })
 
   it('calls Requested work required, because the counter route rejects it empty', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     expect(screen.getByText(/^Required\. This becomes the one job/)).toBeInTheDocument()
     expect(screen.queryByText(/^Optional — becomes/)).toBeNull()
   })
@@ -357,7 +362,7 @@ describe('WriteUp', () => {
     // Real PR-27 preview bug: previously required VIN at the UI gate even
     // though /api/intake/submit doesn't. Counter staff with no VIN in hand
     // were locked out with no hint why.
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.click(screen.getAllByRole('button', { name: /create repair order/i })[0])
     expect(screen.getByRole('alert')).toHaveTextContent('Add the customer’s name.')
 
@@ -380,7 +385,7 @@ describe('WriteUp', () => {
   })
 
   it('submits with Command-Enter from the complaint without bypassing the form gate', async () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     const complaint = screen.getByLabelText(/what brought them in/i)
 
     fireEvent.keyDown(complaint, { key: 'Enter', metaKey: true })
@@ -401,20 +406,20 @@ describe('WriteUp', () => {
   })
 
   it('shows the logged-in user email in the top bar (not the old "Diana" placeholder)', () => {
-    render(<WriteUp userEmail="brandon@vyntechs.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="brandon@vyntechs.com" />)
     expect(screen.getByText('brandon@vyntechs.com')).toBeInTheDocument()
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
   it('soft-fails to "—" in the top bar when no userEmail is supplied (no crash, no build break)', () => {
-    render(<WriteUp />)
+    render(<WriteUp actorId={testActorId} />)
     // Two dashes render: one in the avatar circle, one in the name span.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
     expect(screen.queryByText('Diana')).not.toBeInTheDocument()
   })
 
   it('POSTs the exact new-vehicle ticket body with requested work and no dormant diagnostic fields, then navigates to the ticket', async () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Robert Sandoval' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '(303) 555-0142' } })
     fireEvent.change(screen.getByLabelText(/vin/i), { target: { value: 'WBA3A5C50EJF12345' } })
@@ -473,12 +478,12 @@ describe('WriteUp', () => {
     })
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-abc')
+      expect(mockPush).toHaveBeenCalledWith('/tickets/33333333-3333-4333-8333-333333333333')
     })
   })
 
   it('sends numeric year and mileage with an explicit known-work scope', async () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
@@ -507,7 +512,7 @@ describe('WriteUp', () => {
       ok: false,
       json: async () => ({ error: 'not_found' }),
     } as Response)
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={testActorId} userEmail="test@example.com" />)
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'C' } })
     fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '555' } })
     fireEvent.change(screen.getByLabelText(/^year$/i), { target: { value: '2020' } })
@@ -543,11 +548,12 @@ describe('WriteUp', () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ ticket: { id: 'ticket-confirmed' } }),
+        status: 201,
+        json: async () => ({ ticket: { id: '44444444-4444-4444-8444-444444444444' } }),
       } as Response)
 
     render(
-      <WriteUp
+      <WriteUp actorId={testActorId}
         userEmail="brandon@example.com"
         team={[
           {
@@ -587,7 +593,7 @@ describe('WriteUp', () => {
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
     const retryBody = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[1][1]!.body as string)
     expect(retryBody.confirmBelowTier).toBe(true)
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-confirmed'))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/tickets/44444444-4444-4444-8444-444444444444'))
   })
 
   describe('tech selector wiring', () => {
@@ -624,7 +630,7 @@ describe('WriteUp', () => {
 
     it('defaults a one-member roster to Open and lets the writer assign then clear the sole profile', () => {
       render(
-        <WriteUp
+        <WriteUp actorId={testActorId}
           userEmail="brandon@example.com"
           team={team({ id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true })}
           workloadFailed={false}
@@ -644,7 +650,7 @@ describe('WriteUp', () => {
 
     it('renders compact A/B/C skill labels for the wrenching roster', () => {
       render(
-        <WriteUp
+        <WriteUp actorId={testActorId}
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Alice', skillTier: 3, isCurrentUser: true },
@@ -663,7 +669,7 @@ describe('WriteUp', () => {
 
     it('sends assignedTechId: null in the submit body when nothing is picked', async () => {
       render(
-        <WriteUp
+        <WriteUp actorId={testActorId}
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
@@ -685,7 +691,7 @@ describe('WriteUp', () => {
 
     it('sends the picked assignedTechId in the submit body', async () => {
       render(
-        <WriteUp
+        <WriteUp actorId={testActorId}
           userEmail="brandon@example.com"
           team={team(
             { id: 'a', name: 'Brandon', skillTier: 3, isCurrentUser: true },
@@ -708,14 +714,14 @@ describe('WriteUp', () => {
     })
 
     it('omits the pill entirely when team is empty (existing-tests safety)', () => {
-      render(<WriteUp userEmail="brandon@example.com" />)
+      render(<WriteUp actorId={testActorId} userEmail="brandon@example.com" />)
       expect(screen.queryByRole('group', { name: /who is doing it/i })).not.toBeInTheDocument()
       expect(screen.queryByRole('combobox', { name: /who is doing it/i })).not.toBeInTheDocument()
     })
 
     it('lets a non-wrenching counter owner assign from a populated technician roster', () => {
       render(
-        <WriteUp
+        <WriteUp actorId={testActorId}
           userEmail="owner@example.com"
           team={team(
             { id: 'a', name: 'Alice', skillTier: 3 },

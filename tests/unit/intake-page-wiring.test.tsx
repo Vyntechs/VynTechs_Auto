@@ -33,7 +33,7 @@ describe('WriteUp page wiring (search + form)', () => {
 
   it('renders the search combobox above the customer form', () => {
     render(
-      <WriteUp
+      <WriteUp actorId={draftActorId}
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -55,7 +55,7 @@ describe('WriteUp page wiring (search + form)', () => {
   it('focuses search box → shows recent customers from the prop', async () => {
     const user = userEvent.setup()
     render(
-      <WriteUp
+      <WriteUp actorId={draftActorId}
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -85,7 +85,7 @@ describe('WriteUp page wiring (search + form)', () => {
   })
 
   it('shows the customer/vehicle form when no pick has been made', () => {
-    render(<WriteUp userEmail="test@example.com" recentCustomers={[]} />)
+    render(<WriteUp actorId={draftActorId} userEmail="test@example.com" recentCustomers={[]} />)
     // Customer + Vehicle groups are visible.
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/vin/i)).toBeInTheDocument()
@@ -93,7 +93,7 @@ describe('WriteUp page wiring (search + form)', () => {
   })
 
   it('refuses an empty form by naming the first missing field, not by going dead', () => {
-    render(<WriteUp userEmail="test@example.com" recentCustomers={[]} />)
+    render(<WriteUp actorId={draftActorId} userEmail="test@example.com" recentCustomers={[]} />)
     const submits = screen.getAllByRole('button', { name: /create repair order/i })
     submits.forEach((b) => expect(b).toBeEnabled())
     fireEvent.click(submits[0])
@@ -102,7 +102,7 @@ describe('WriteUp page wiring (search + form)', () => {
   })
 
   it('passes recentCustomers={[]} when prop is omitted (no crash)', () => {
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={draftActorId} userEmail="test@example.com" />)
     expect(screen.getByPlaceholderText(/customer name, phone, vin/i)).toBeInTheDocument()
   })
 
@@ -110,10 +110,11 @@ describe('WriteUp page wiring (search + form)', () => {
     const user = userEvent.setup()
     vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ ticket: { id: 'ticket-existing' } }),
+      status: 201,
+      json: async () => ({ ticket: { id: '33333333-3333-4333-8333-333333333333' } }),
     } as Response)
     render(
-      <WriteUp
+      <WriteUp actorId={draftActorId}
         userEmail="test@example.com"
         recentCustomers={[
           {
@@ -182,12 +183,12 @@ describe('WriteUp page wiring (search + form)', () => {
       },
       assignedTechId: null,
     })
-    expect(mockPush).toHaveBeenCalledWith('/tickets/ticket-existing')
+    expect(mockPush).toHaveBeenCalledWith('/tickets/33333333-3333-4333-8333-333333333333')
   })
 
   it('keeps discard and cancel routed to Today and never claims repair approval', async () => {
     const user = userEvent.setup()
-    render(<WriteUp userEmail="test@example.com" />)
+    render(<WriteUp actorId={draftActorId} userEmail="test@example.com" />)
     expect(screen.queryByText(/repair approved|approved repair/i)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /discard/i }))

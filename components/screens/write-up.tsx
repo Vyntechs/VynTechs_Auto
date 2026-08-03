@@ -173,6 +173,17 @@ function ticketErrorMessage(error?: string): string {
   }
 }
 
+function ticketIdFromCounterResponse(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const ticket = (value as { ticket?: unknown }).ticket
+  if (!ticket || typeof ticket !== 'object' || Array.isArray(ticket)) return null
+  const id = (ticket as { id?: unknown }).id
+  return typeof id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ? id.toLowerCase()
+    : null
+}
+
 export function WriteUp({
   actorId,
   userEmail,
@@ -183,7 +194,7 @@ export function WriteUp({
   cannedTaxRateBps = null,
   cannedCatalogAvailable = true,
 }: {
-  actorId?: string
+  actorId: string
   userEmail?: string
   recentCustomers?: RecentCustomer[]
   team?: TeamMember[]
@@ -236,6 +247,9 @@ export function WriteUp({
   const [draftNotice, setDraftNotice] = useState<string | null>(null)
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [recoveryReady, setRecoveryReady] = useState(false)
+  const [selectionTouched, setSelectionTouched] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(false)
+  const [draftActive, setDraftActive] = useState(true)
   // Held across retries so a repeat of the same submission is a replay, not a
   // second repair order. Rotated when the writer changes what they are sending,
   // and cleared once the server has recorded this one.
@@ -247,8 +261,7 @@ export function WriteUp({
   // customer contact, year/make/model, and concern are required.
   const selectedDiagnostic = diagnosticJobs.find((job) => job.id === selectedDiagnosticId) ?? null
   const selectedKnown = knownWorkJobs.find((job) => job.id === selectedKnownId) ?? null
-  const draftActorId = actorId ?? ''
-  const draftKey = ticketIntakeDraftKey(draftActorId, 'write_up')
+  const draftKey = ticketIntakeDraftKey(actorId, 'write_up')
   const formDraft: TicketIntakeDraft['form'] = {
     existingVehicleId: pickedVehicleId,
     name,
@@ -280,13 +293,13 @@ export function WriteUp({
     requestedWork: '',
   }
   const hasMeaningfulDraft = Boolean(
-    pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate || description
-    || assignedTechId || selectedDiagnostic || selectedKnown || customDiagDescription || customDiagHours || customDiagPrice
-    || requestedServiceDescription || customerSuppliedPartsNote,
+    draftActive && (restoredDraft || selectionTouched || pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate || description
+    || assignedTechId || customDiagDescription || customDiagHours || customDiagPrice
+    || requestedServiceDescription || customerSuppliedPartsNote),
   )
   const persistDraft = (pending = requestIdentityRef.current) => {
     if (!draftKey || !hasMeaningfulDraft) return
-    const encoded = encodeTicketIntakeDraft({ actorId: draftActorId, surface: 'write_up', form: formDraft, pending })
+    const encoded = encodeTicketIntakeDraft({ actorId, surface: 'write_up', form: formDraft, pending })
     if (!encoded) return
     try { sessionStorage.setItem(draftKey, encoded) } catch { /* recovery is optional when storage is unavailable */ }
   }
@@ -304,7 +317,7 @@ export function WriteUp({
     }
     let raw: string | null = null
     try { raw = sessionStorage.getItem(draftKey) } catch { /* keep an ordinary blank form */ }
-    const draft = parseTicketIntakeDraft(raw, { actorId: draftActorId, surface: 'write_up' })
+    const draft = parseTicketIntakeDraft(raw, { actorId, surface: 'write_up' })
     if (!draft) {
       if (raw !== null) clearDraft()
       setRecoveryReady(true)
@@ -328,6 +341,7 @@ export function WriteUp({
     setRequestedServiceKind(form.requestedServiceKind); setRequestedServiceDescription(form.requestedServiceDescription)
     setCustomerSuppliedPartsNote(form.customerSuppliedPartsNote)
     requestIdentityRef.current = draft.pending
+    setRestoredDraft(true)
     setDraftNotice('Draft restored')
     if (staleSavedWork) setRecoveryNotice('Saved work changed. Choose a current option or type the work.')
     setRecoveryReady(true)
@@ -536,24 +550,24 @@ export function WriteUp({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...body, clientKey: requestIdentityRef.current.clientKey }),
       })
-      const payload = (await res.json()) as {
-        ticket?: { id?: string }
-        error?: string
-        warning?: TierWarning
-      }
-      if (payload.error === 'tier_confirmation_required' && payload.warning) {
-        setTierWarning(payload.warning)
+      let payload: unknown
+      try { payload = await res.json() } catch { payload = null }
+      const record = payload && typeof payload === 'object' ? payload as { error?: unknown; warning?: unknown } : {}
+      if (record.error === 'tier_confirmation_required' && record.warning) {
+        setTierWarning(record.warning as TierWarning)
         setBusy(false)
         return
       }
-      if (!res.ok || !payload.ticket?.id) {
-        setError(ticketErrorMessage(payload.error))
+      const ticketId = res.status === 201 ? ticketIdFromCounterResponse(payload) : null
+      if (!ticketId) {
+        setError(ticketErrorMessage(typeof record.error === 'string' ? record.error : undefined))
         setBusy(false)
         return
       }
       requestIdentityRef.current = null
       clearDraft()
-      router.push(`/tickets/${payload.ticket.id}`)
+      setDraftActive(false)
+      router.push(`/tickets/${ticketId}`)
     } catch {
       setError('Could not reach the shop. Try again.')
       setBusy(false)
@@ -567,6 +581,7 @@ export function WriteUp({
 
   const discard = () => {
     clearDraft()
+    setDraftActive(false)
     router.push('/today')
   }
 
@@ -903,7 +918,7 @@ export function WriteUp({
                     type="button"
                     className={`${styles.intentChoice} ${intent === 'diagnosis' ? styles.intentChoiceActive : ''}`}
                     aria-pressed={intent === 'diagnosis'}
-                    onClick={() => { setIntent('diagnosis'); setTierWarning(null) }}
+                    onClick={() => { setIntent('diagnosis'); setSelectionTouched(true); setTierWarning(null) }}
                   >
                     <strong>Find the cause</strong>
                     <span>Authorize the shop’s diagnostic labor before assignment.</span>
@@ -912,7 +927,7 @@ export function WriteUp({
                     type="button"
                     className={`${styles.intentChoice} ${intent === 'known' ? styles.intentChoiceActive : ''}`}
                     aria-pressed={intent === 'known'}
-                    onClick={() => { setIntent('known'); setTierWarning(null) }}
+                    onClick={() => { setIntent('known'); setSelectionTouched(true); setTierWarning(null) }}
                   >
                     <strong>Perform known work</strong>
                     <span>The requested repair or maintenance is already known.</span>
@@ -928,6 +943,7 @@ export function WriteUp({
                           className="vt-field__input"
                           value={diagMode === 'manual' ? CUSTOM_SCOPE : selectedDiagnosticId}
                           onChange={(event) => {
+                            setSelectionTouched(true)
                             if (event.target.value === CUSTOM_SCOPE) {
                               setDiagMode('manual')
                               return
@@ -997,6 +1013,7 @@ export function WriteUp({
                           className="vt-field__input"
                           value={knownMode === 'manual' ? CUSTOM_SCOPE : selectedKnownId}
                           onChange={(event) => {
+                            setSelectionTouched(true)
                             if (event.target.value === CUSTOM_SCOPE) {
                               setKnownMode('manual')
                               return
@@ -1022,9 +1039,10 @@ export function WriteUp({
                       name="requestedServiceKind"
                       className="vt-field__input"
                       value={requestedServiceKind}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        setSelectionTouched(true)
                         setRequestedServiceKind(e.target.value as 'repair' | 'maintenance')
-                      }
+                      }}
                     >
                       <option value="repair">Repair</option>
                       <option value="maintenance">Maintenance</option>

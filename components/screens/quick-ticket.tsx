@@ -208,7 +208,7 @@ export function QuickTicket({
   cannedTaxRateBps = null,
   cannedCatalogAvailable = true,
 }: {
-  actorId?: string
+  actorId: string
   userEmail?: string
   recentCustomers?: RecentCustomer[]
   cannedJobs?: SafeCannedJobTemplate[]
@@ -238,6 +238,9 @@ export function QuickTicket({
   const [draftNotice, setDraftNotice] = useState<string | null>(null)
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [recoveryReady, setRecoveryReady] = useState(false)
+  const [selectionTouched, setSelectionTouched] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(false)
+  const [draftActive, setDraftActive] = useState(true)
   const inFlightRef = useRef(false)
   const requestIdentityRef = useRef<{ signature: string; clientKey: string } | null>(null)
   const catalogRefreshPendingRef = useRef(false)
@@ -249,8 +252,7 @@ export function QuickTicket({
     .find((vehicle) => vehicle.id === pickedVehicleId)
   const isExisting = pickedVehicleId !== null
   const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
-  const draftActorId = actorId ?? ''
-  const draftKey = ticketIntakeDraftKey(draftActorId, 'quick_ticket')
+  const draftKey = ticketIntakeDraftKey(actorId, 'quick_ticket')
   const formDraft: TicketIntakeDraft['form'] = {
     existingVehicleId: pickedVehicleId,
     name,
@@ -282,12 +284,12 @@ export function QuickTicket({
     requestedWork,
   }
   const hasMeaningfulDraft = Boolean(
-    pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate
-    || selectedCannedJob || requestedWork,
+    draftActive && (restoredDraft || selectionTouched || pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate
+    || requestedWork),
   )
   const persistDraft = (pending = requestIdentityRef.current) => {
     if (!draftKey || !hasMeaningfulDraft) return
-    const encoded = encodeTicketIntakeDraft({ actorId: draftActorId, surface: 'quick_ticket', form: formDraft, pending })
+    const encoded = encodeTicketIntakeDraft({ actorId, surface: 'quick_ticket', form: formDraft, pending })
     if (!encoded) return
     try { sessionStorage.setItem(draftKey, encoded) } catch { /* recovery is optional when storage is unavailable */ }
   }
@@ -305,7 +307,7 @@ export function QuickTicket({
     }
     let raw: string | null = null
     try { raw = sessionStorage.getItem(draftKey) } catch { /* keep an ordinary blank form */ }
-    const draft = parseTicketIntakeDraft(raw, { actorId: draftActorId, surface: 'quick_ticket' })
+    const draft = parseTicketIntakeDraft(raw, { actorId, surface: 'quick_ticket' })
     if (!draft) {
       if (raw !== null) clearDraft()
       setRecoveryReady(true)
@@ -321,6 +323,7 @@ export function QuickTicket({
     setSelectedCannedId(canned?.id ?? '')
     setWorkKind(form.workKind); setRequestedWork(form.requestedWork)
     requestIdentityRef.current = draft.pending
+    setRestoredDraft(true)
     setDraftNotice('Draft restored')
     if (form.selectedCannedJob && !canned) setRecoveryNotice('Saved canned job changed. Choose a current canned job or type the work.')
     setRecoveryReady(true)
@@ -480,6 +483,7 @@ export function QuickTicket({
       }
       requestIdentityRef.current = null
       clearDraft()
+      setDraftActive(false)
       router.push(`/tickets/${ticketId}/quote`)
     } catch {
       setError('Could not reach the shop. Try again with the same details.')
@@ -507,6 +511,7 @@ export function QuickTicket({
 
   const discard = () => {
     clearDraft()
+    setDraftActive(false)
     router.push('/today')
   }
 
@@ -666,6 +671,7 @@ export function QuickTicket({
                       className="vt-field__input"
                       value={quoteMode}
                       onChange={(event) => {
+                        setSelectionTouched(true)
                         setQuoteMode(event.target.value as 'canned' | 'manual')
                         setError(null)
                       }}
@@ -683,6 +689,7 @@ export function QuickTicket({
                         className="vt-field__input"
                         value={selectedCannedId}
                         onChange={(event) => {
+                          setSelectionTouched(true)
                           setSelectedCannedId(event.target.value)
                           setError(null)
                         }}
@@ -697,7 +704,10 @@ export function QuickTicket({
                           id="qt-work-kind"
                           className="vt-field__input"
                           value={workKind}
-                          onChange={(event) => setWorkKind(event.target.value as WorkKind)}
+                          onChange={(event) => {
+                            setSelectionTouched(true)
+                            setWorkKind(event.target.value as WorkKind)
+                          }}
                         >
                           <option value="repair">Repair</option>
                           <option value="maintenance">Maintenance</option>

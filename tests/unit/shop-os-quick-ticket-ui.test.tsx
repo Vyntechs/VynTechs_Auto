@@ -37,10 +37,15 @@ vi.mock('@/lib/intake/recent-customers', async (importOriginal) => {
 
 import QuickTicketPage from '@/app/(app)/tickets/new/page'
 import { QuickTicket } from '@/components/screens/quick-ticket'
-import { encodeTicketIntakeDraft, ticketIntakeDraftKey } from '@/lib/intake/ticket-intake-draft'
+import { encodeTicketIntakeDraft, ticketIntakeDraftKey, type TicketIntakeDraft } from '@/lib/intake/ticket-intake-draft'
 
 const draftActorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const quickDraftKey = ticketIntakeDraftKey(draftActorId, 'quick_ticket')!
+const emptyQuickDraftForm = {
+  existingVehicleId: null, name: '', phone: '', email: '', year: '', make: '', model: '', engine: '', vin: '', mileage: '', plate: '', concern: '', assignedTechId: null,
+  intent: 'known', diagnosticMode: 'manual', knownWorkMode: 'manual', selectedDiagnostic: null, selectedKnownWork: null,
+  customDiagnosticDescription: '', customDiagnosticHours: '', customDiagnosticPrice: '', requestedServiceKind: 'repair', requestedServiceDescription: '', customerSuppliedPartsNote: '', quoteMode: 'manual', selectedCannedJob: null, workKind: 'repair', requestedWork: '',
+} satisfies TicketIntakeDraft['form']
 
 const vehicleId = '11111111-1111-4111-8111-111111111111'
 const ticketId = '33333333-3333-4333-8333-333333333333'
@@ -151,7 +156,7 @@ describe('QuickTicket', () => {
   })
 
   it('states the honest boundary and renders no quote, approval, assignment, AI, or price theater', () => {
-    render(<QuickTicket userEmail="avery@shop.test" />)
+    render(<QuickTicket actorId={draftActorId} userEmail="avery@shop.test" />)
 
     expect(screen.getByRole('heading', { name: 'Quick quote' })).toBeInTheDocument()
     expect(screen.getByText(/nothing is prepared, sent, approved, or started here/i)).toBeInTheDocument()
@@ -176,13 +181,36 @@ describe('QuickTicket', () => {
     expect(screen.getByLabelText(/^name$/i)).toHaveValue('Marisol Vega')
     expect(screen.getByLabelText('Canned job')).toHaveValue(cannedId)
     expect(container.textContent).not.toContain(encoded)
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+    expect(sessionStorage.getItem(quickDraftKey)).toBeNull()
+    expect(mockPush).toHaveBeenCalledWith('/today')
+  })
+
+  it('does not persist or warn on unload for untouched default canned work', () => {
+    const addListener = vi.spyOn(window, 'addEventListener')
+    render(<QuickTicket actorId={draftActorId} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+
+    expect(sessionStorage.getItem(quickDraftKey)).toBeNull()
+    expect(addListener).not.toHaveBeenCalledWith('beforeunload', expect.any(Function))
+  })
+
+  it.each([
+    ['corrupt', '{not json'],
+    ['expired', encodeTicketIntakeDraft({ actorId: draftActorId, surface: 'quick_ticket', form: emptyQuickDraftForm, pending: null }, new Date(0))!],
+    ['another actor', encodeTicketIntakeDraft({ actorId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', surface: 'quick_ticket', form: emptyQuickDraftForm, pending: null })!],
+  ])('deletes a %s stored draft instead of recovering it', async (_case, raw) => {
+    sessionStorage.setItem(quickDraftKey, raw)
+    render(<QuickTicket actorId={draftActorId} />)
+
+    await waitFor(() => expect(sessionStorage.getItem(quickDraftKey)).toBeNull())
+    expect(screen.queryByText('Draft restored')).toBeNull()
   })
 
   // Same defect the counter intake had on 2026-07-28: the writer pressed a
   // disabled Create button with no message and no focus move, on a form long
   // enough that the missing field was off-screen.
   it('requires one requested repair or maintenance description, and names it at the point of action', async () => {
-    render(<QuickTicket />)
+    render(<QuickTicket actorId={draftActorId} />)
     const createButtons = screen.getAllByRole('button', { name: /^Create quote/i })
     createButtons.forEach((button) => expect(button).toBeEnabled())
 
@@ -207,8 +235,12 @@ describe('QuickTicket', () => {
     ['repair', 'Replace rear brake pads'],
     ['maintenance', 'Change engine oil'],
   ] as const)('POSTs the exact new-vehicle %s body and redirects only to ticket detail', async (kind, description) => {
-    render(<QuickTicket userEmail="avery@shop.test" />)
+    const addListener = vi.spyOn(window, 'addEventListener')
+    const removeListener = vi.spyOn(window, 'removeEventListener')
+    render(<QuickTicket actorId={draftActorId} userEmail="avery@shop.test" />)
     fillNewTicket(kind)
+    await waitFor(() => expect(sessionStorage.getItem(quickDraftKey)).not.toBeNull())
+    expect(addListener).toHaveBeenCalledWith('beforeunload', expect.any(Function))
     fireEvent.submit(document.getElementById('quick-ticket-form')!)
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
@@ -240,11 +272,13 @@ describe('QuickTicket', () => {
     expect(body.sessionId).toBeUndefined()
     expect(body.price).toBeUndefined()
     expect(mockPush).toHaveBeenCalledWith(`/tickets/${ticketId}/quote`)
+    expect(sessionStorage.getItem(quickDraftKey)).toBeNull()
+    await waitFor(() => expect(removeListener).toHaveBeenCalledWith('beforeunload', expect.any(Function)))
   })
 
   it('reuses predictive search and POSTs the exact existing-vehicle body with true-open semantics', async () => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} />)
 
     await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
     await user.click(screen.getByText('Marisol Vega'))
@@ -272,7 +306,7 @@ describe('QuickTicket', () => {
   })
 
   it('defaults to canned work and previews exact lines, tax, and total', () => {
-    render(<QuickTicket cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    render(<QuickTicket actorId={draftActorId} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
     expect(screen.getByLabelText('Source')).toHaveValue('canned')
     expect(screen.getByLabelText('Canned job')).toHaveValue(cannedId)
     const preview = screen.getByRole('region', { name: 'Exact quote preview' })
@@ -289,7 +323,7 @@ describe('QuickTicket', () => {
 
   it('posts exact canned expectations and redirects to the quote builder', async () => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
     await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
     await user.click(screen.getByText('Marisol Vega'))
     fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
@@ -317,7 +351,7 @@ describe('QuickTicket', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }) } as Response)
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
     await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
     await user.click(screen.getByText('Marisol Vega'))
     const create = screen.getAllByRole('button', { name: /^Create quote/i })[0]
@@ -347,7 +381,7 @@ describe('QuickTicket', () => {
         ok: true, status: 201, json: async () => ({ ticket: { id: ticketId } }),
       } as Response)
     const user = userEvent.setup()
-    const view = render(<QuickTicket
+    const view = render(<QuickTicket actorId={draftActorId}
       recentCustomers={recentCustomers}
       cannedJobs={[cannedJob]}
       cannedTaxRateBps={825}
@@ -360,7 +394,7 @@ describe('QuickTicket', () => {
     const first = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string)
     fireEvent.click(screen.getByRole('button', { name: 'Refresh canned jobs' }))
     expect(mockRefresh).toHaveBeenCalledTimes(1)
-    view.rerender(<QuickTicket
+    view.rerender(<QuickTicket actorId={draftActorId}
       recentCustomers={recentCustomers}
       cannedJobs={[refreshedJob]}
       cannedTaxRateBps={900}
@@ -381,7 +415,7 @@ describe('QuickTicket', () => {
     let resolveRequest!: (value: Response) => void
     vi.mocked(globalThis.fetch).mockReturnValueOnce(new Promise((resolve) => { resolveRequest = resolve }))
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
     await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
     await user.click(screen.getByText('Marisol Vega'))
     fireEvent.click(screen.getAllByRole('button', { name: /^Create quote/i })[0])
@@ -397,19 +431,19 @@ describe('QuickTicket', () => {
 
   it('keeps null-tax canned work visibly incomplete and degrades to manual when the catalog fails', () => {
     const nullTaxJob = { ...cannedJob, summary: { ...cannedJob.summary, taxCents: null, totalCents: null } }
-    const view = render(<QuickTicket cannedJobs={[nullTaxJob]} cannedTaxRateBps={null} />)
+    const view = render(<QuickTicket actorId={draftActorId} cannedJobs={[nullTaxJob]} cannedTaxRateBps={null} />)
     const preview = screen.getByRole('region', { name: 'Exact quote preview' })
     expect(preview).toHaveTextContent('TaxNot set')
     expect(preview).toHaveTextContent('TotalNot set')
     expect(preview).toHaveTextContent(/no tax rate is set/i)
-    view.rerender(<QuickTicket cannedCatalogAvailable={false} />)
+    view.rerender(<QuickTicket actorId={draftActorId} cannedCatalogAvailable={false} />)
     expect(screen.getByText(/canned jobs are unavailable/i)).toBeInTheDocument()
     expect(screen.getByLabelText('Source')).toHaveValue('manual')
   })
 
   it('clears entity-specific mileage when switching from one existing vehicle to another', async () => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} />)
 
     const search = screen.getByPlaceholderText(/customer name, phone, vin/i)
     await user.click(search)
@@ -433,7 +467,7 @@ describe('QuickTicket', () => {
 
   it('clears existing-vehicle mileage when Create new crosses back to the new form', async () => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} />)
 
     const search = screen.getByPlaceholderText(/customer name, phone, vin/i)
     await user.click(search)
@@ -454,7 +488,7 @@ describe('QuickTicket', () => {
 
   it('clears existing-vehicle mileage when Change returns to the new form', async () => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} />)
 
     await user.click(screen.getByPlaceholderText(/customer name, phone, vin/i))
     await user.click(screen.getByText('Marisol Vega'))
@@ -470,7 +504,7 @@ describe('QuickTicket', () => {
     ['Control', { ctrlKey: true }],
   ])('makes the form the single %s+Enter owner while predictive search is open', async (_key, modifier) => {
     const user = userEvent.setup()
-    render(<QuickTicket recentCustomers={recentCustomers} />)
+    render(<QuickTicket actorId={draftActorId} recentCustomers={recentCustomers} />)
     fillNewTicket()
     const search = screen.getByPlaceholderText(/customer name, phone, vin/i)
     await user.click(search)
@@ -485,7 +519,7 @@ describe('QuickTicket', () => {
   })
 
   it('mirrors every practical server field bound in native controls', () => {
-    render(<QuickTicket />)
+    render(<QuickTicket actorId={draftActorId} />)
 
     expect(screen.getByLabelText(/^name$/i)).toHaveAttribute('maxlength', '200')
     expect(screen.getByLabelText(/^phone$/i)).toHaveAttribute('maxlength', '100')
@@ -506,7 +540,7 @@ describe('QuickTicket', () => {
     ['year', /^year$/i, String(new Date().getFullYear() + 2)],
     ['mileage', /mileage today/i, '2147483648'],
   ])('does not submit when %s violates the server contract', async (_name, label, invalidValue) => {
-    render(<QuickTicket />)
+    render(<QuickTicket actorId={draftActorId} />)
     fillNewTicket()
     fireEvent.change(screen.getByLabelText(label), { target: { value: invalidValue } })
     fireEvent.submit(document.getElementById('quick-ticket-form')!)
@@ -521,13 +555,14 @@ describe('QuickTicket', () => {
       status: 404,
       json: async () => ({ error: 'not_found' }),
     } as Response)
-    render(<QuickTicket />)
+    render(<QuickTicket actorId={draftActorId} />)
     fillNewTicket()
     fireEvent.submit(document.getElementById('quick-ticket-form')!)
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/choose the customer or vehicle again/i),
     )
+    expect(sessionStorage.getItem(quickDraftKey)).not.toBeNull()
     expect(mockPush).not.toHaveBeenCalled()
   })
 
@@ -537,11 +572,12 @@ describe('QuickTicket', () => {
       status: 201,
       json: async () => ({ ticket: {} }),
     } as Response)
-    render(<QuickTicket />)
+    render(<QuickTicket actorId={draftActorId} />)
     fillNewTicket()
     fireEvent.submit(document.getElementById('quick-ticket-form')!)
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not start/i))
+    expect(sessionStorage.getItem(quickDraftKey)).not.toBeNull()
     expect(mockPush).not.toHaveBeenCalled()
   })
 
