@@ -145,6 +145,8 @@ export function TicketDetailScreen({
     | { kind: 'correction'; target: TicketCorrectionTarget }
     | null
   >(null)
+  const [lifecycleMutationActive, setLifecycleMutationActive] = useState(false)
+  const lifecycleMutationActiveRef = useRef(false)
   const identityTargetRef = useRef<HTMLDivElement>(null)
   const concernTargetRef = useRef<HTMLElement>(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
@@ -209,6 +211,7 @@ export function TicketDetailScreen({
     && canAssignWork(role)
     && currentProfileId !== null
     && ticketStatus === 'open'
+  const toolBlocked = activeTool !== null || lifecycleMutationActive
   const invalidateCustomerCopy = useCallback(() => {
     if (!customerCopy) return
     setCustomerCopyOpen(false)
@@ -240,10 +243,14 @@ export function TicketDetailScreen({
     if (financialStateChanged) invalidateCustomerCopy()
   }, [invalidateCustomerCopy])
   const openCorrection = useCallback((target: TicketCorrectionTarget) => {
-    if (activeTool !== null) return
+    if (activeTool !== null || lifecycleMutationActiveRef.current) return
     setConfirmedCorrection(null)
     setActiveTool({ kind: 'correction', target })
   }, [activeTool])
+  const trackLifecycleMutation = useCallback((active: boolean) => {
+    lifecycleMutationActiveRef.current = active
+    setLifecycleMutationActive(active)
+  }, [])
   const applyCorrection = useCallback((result: TicketCorrectionAppliedProjection) => {
     setCorrectionTruth({ ticket: result.ticket, quote: result.quote })
     setAssignmentOverrides(new Map())
@@ -316,8 +323,10 @@ export function TicketDetailScreen({
                 className={styles.quoteAction}
                 aria-expanded={activeTool?.kind === 'quote'}
                 aria-controls={inlineQuoteWorkspaceId(ticket.id)}
-                disabled={activeTool !== null}
-                onClick={() => setActiveTool({ kind: 'quote' })}
+                disabled={toolBlocked}
+                onClick={() => {
+                  if (!lifecycleMutationActiveRef.current) setActiveTool({ kind: 'quote' })
+                }}
               >
                 {quoteCommand.label}
               </button>
@@ -502,7 +511,7 @@ export function TicketDetailScreen({
               ref={(element) => setCorrectionOpenerRef(correctionOpenerRefs.current, IDENTITY_CORRECTION_TARGET, element)}
               type="button"
               className={styles.correctionAction}
-              disabled={activeTool !== null}
+              disabled={toolBlocked}
               aria-expanded={activeTool?.kind === 'correction'
                 && sameCorrectionTarget(activeTool.target, IDENTITY_CORRECTION_TARGET)}
               onClick={() => openCorrection(IDENTITY_CORRECTION_TARGET)}
@@ -562,7 +571,7 @@ export function TicketDetailScreen({
               ref={(element) => setCorrectionOpenerRef(correctionOpenerRefs.current, CONCERN_CORRECTION_TARGET, element)}
               type="button"
               className={styles.correctionAction}
-              disabled={activeTool !== null}
+              disabled={toolBlocked}
               aria-expanded={activeTool?.kind === 'correction'
                 && sameCorrectionTarget(activeTool.target, CONCERN_CORRECTION_TARGET)}
               onClick={() => openCorrection(CONCERN_CORRECTION_TARGET)}
@@ -677,8 +686,12 @@ export function TicketDetailScreen({
                         type="button"
                         className={styles.inlineAction}
                         aria-expanded={activeTool?.kind === 'work' && activeTool.jobId === job.id}
-                      disabled={activeTool !== null}
-                      onClick={() => setActiveTool({ kind: 'work', jobId: job.id })}
+                        disabled={toolBlocked}
+                        onClick={() => {
+                          if (!lifecycleMutationActiveRef.current) {
+                            setActiveTool({ kind: 'work', jobId: job.id })
+                          }
+                        }}
                       >
                         {workCommandFor(allCommands, job.id)?.label}
                       </button>
@@ -702,7 +715,7 @@ export function TicketDetailScreen({
                       aria-label={`Correct job ${String(index + 1).padStart(2, '0')}: ${job.title}`}
                       aria-expanded={activeTool?.kind === 'correction'
                         && sameCorrectionTarget(activeTool.target, correctionTarget)}
-                      disabled={activeTool !== null}
+                      disabled={toolBlocked}
                       onClick={() => openCorrection(correctionTarget)}
                     >
                       Correct job
@@ -798,6 +811,8 @@ export function TicketDetailScreen({
           <TicketLifecycleControl
             ticketId={ticket.id}
             status={ticketStatus as 'open' | 'closed' | 'canceled'}
+            blocked={activeTool !== null}
+            onMutationStateChange={trackLifecycleMutation}
             onApplied={(next) => {
               setTicketStatus(next.status)
               setActiveTool(null)

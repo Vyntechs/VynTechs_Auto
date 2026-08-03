@@ -51,4 +51,65 @@ describe('TicketLifecycleControl', () => {
       id: TICKET_ID, status: 'open', jobs: [{ id: 'job-1', workStatus: 'blocked' }],
     }))
   })
+
+  it('blocks mutation without unmounting or losing a typed cancellation reason', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { rerender } = render(
+      <TicketLifecycleControl
+        ticketId={TICKET_ID}
+        status="open"
+        blocked={false}
+        onApplied={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getAllByText('Cancel repair order')[0])
+    const reason = screen.getByLabelText('Cancellation reason')
+    fireEvent.change(reason, { target: { value: 'Customer needs another week.' } })
+
+    rerender(<TicketLifecycleControl
+      ticketId={TICKET_ID}
+      status="open"
+      blocked
+      onApplied={vi.fn()}
+    />)
+
+    expect(reason).toHaveValue('Customer needs another week.')
+    expect(screen.getByRole('button', { name: 'Cancel repair order' })).toBeDisabled()
+    fireEvent.submit(screen.getByRole('button', { name: 'Cancel repair order' }).closest('form')!)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    rerender(<TicketLifecycleControl
+      ticketId={TICKET_ID}
+      status="open"
+      blocked={false}
+      onApplied={vi.fn()}
+    />)
+    expect(screen.getByLabelText('Cancellation reason')).toHaveValue('Customer needs another week.')
+    expect(screen.getByRole('button', { name: 'Cancel repair order' })).toBeEnabled()
+  })
+
+  it('reports its mutation lifetime to the parent arbitration owner', async () => {
+    let resolveRequest!: (response: Response) => void
+    const request = new Promise<Response>((resolve) => { resolveRequest = resolve })
+    const onMutationStateChange = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(() => request))
+    render(<TicketLifecycleControl
+      ticketId={TICKET_ID}
+      status="open"
+      onMutationStateChange={onMutationStateChange}
+      onApplied={vi.fn()}
+    />)
+
+    fireEvent.click(screen.getAllByText('Cancel repair order')[0])
+    fireEvent.change(screen.getByLabelText('Cancellation reason'), {
+      target: { value: 'Customer needs another week.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel repair order' }))
+    expect(onMutationStateChange).toHaveBeenLastCalledWith(true)
+
+    resolveRequest(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }))
+    await waitFor(() => expect(onMutationStateChange).toHaveBeenLastCalledWith(false))
+  })
 })

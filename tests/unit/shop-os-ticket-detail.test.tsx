@@ -510,6 +510,42 @@ describe('TicketDetailScreen', () => {
     expect(concernOpener).toHaveFocus()
   })
 
+  it('arbitrates lifecycle mutation against mounted tools while preserving a typed reason', async () => {
+    const user = userEvent.setup()
+    let resolveLifecycle!: (response: Response) => void
+    const lifecycleRequest = new Promise<Response>((resolve) => { resolveLifecycle = resolve })
+    vi.stubGlobal('fetch', vi.fn((url: string | URL | Request) => (
+      String(url).endsWith('/lifecycle')
+        ? lifecycleRequest
+        : Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
+    )))
+    render(<TicketDetailScreen
+      ticket={ticket()}
+      canBuildQuote
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    await user.click(screen.getAllByText('Cancel repair order')[0])
+    const reason = screen.getByLabelText('Cancellation reason')
+    await user.type(reason, 'Customer needs another week.')
+
+    await user.click(screen.getByRole('button', { name: 'Correct concern' }))
+    expect(screen.getByRole('button', { name: 'Cancel repair order' })).toBeDisabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+    await user.click(screen.getByRole('button', { name: 'Cancel correction' }))
+
+    await user.click(screen.getByRole('button', { name: 'Cancel repair order' }))
+    expect(screen.getByRole('button', { name: 'Correct concern' })).toBeDisabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+
+    resolveLifecycle(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The repair order was not changed.')
+    expect(screen.getByRole('button', { name: 'Correct concern' })).toBeEnabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+  })
+
   it('atomically seats validated ticket and quote truth without a page refresh', async () => {
     const user = userEvent.setup()
     render(<TicketDetailScreen

@@ -64,6 +64,29 @@ function rawQuote() {
   }
 }
 
+function rawQuoteForJob(job: {
+  id: string
+  title: string
+  kind: string
+  customerSuppliedPartsNote: string | null
+  workStatus: string
+  approvalState: string
+}) {
+  const quote = rawQuote()
+  return {
+    ...quote,
+    jobs: [{
+      ...quote.jobs[0],
+      id: job.id,
+      title: job.title,
+      kind: job.kind,
+      customerSuppliedPartsNote: job.customerSuppliedPartsNote,
+      workStatus: job.workStatus,
+      approval: { ...quote.jobs[0].approval, state: job.approvalState },
+    }],
+  }
+}
+
 describe('strict ticket correction client truth', () => {
   it('rehydrates a complete tenant-safe ticket and quote baseline before editing', () => {
     const parsed = parseTicketCorrectionBaseline(
@@ -162,6 +185,66 @@ describe('strict ticket correction client truth', () => {
       correctionScope: null,
     })
   })
+
+  it.each([
+    ['in-progress work', { workStatus: 'in_progress' }, 'work_started', 'Finish or cancel that work before correcting repair-order truth.'],
+    ['blocked work', { workStatus: 'blocked' }, 'work_blocked', 'Resolve or cancel that work before correcting repair-order truth.'],
+    ['a linked session', { sessionId: IDS.activity }, 'session_linked', 'Finish or cancel that diagnostic before correcting repair-order truth.'],
+    ['diagnostic startup', { diagnosticStartState: 'initializing' }, 'diagnostic_starting', 'Wait for startup to finish, then check current truth again.'],
+    ['an ambiguous diagnostic start', { diagnosticStartState: 'ambiguous' }, 'diagnostic_ambiguous', 'Resolve that diagnostic start before correcting repair-order truth.'],
+  ])('projects a truthful refusal for a fresh job with %s', (_label, overrides, reason, nextAction) => {
+    const ticket = rawTicket()
+    const targetJob = { ...ticket.jobs[0], ...overrides }
+    const parsed = parseTicketCorrectionBaseline({
+      ticket: { ...ticket, jobs: [targetJob] },
+      quote: rawQuoteForJob(targetJob),
+    }, {
+      ticketId: IDS.ticket,
+      target: { kind: 'job', jobId: IDS.job },
+    })
+
+    expect(parsed?.eligibility).toEqual({
+      ok: false,
+      reason,
+      message: `Diagnose brake vibration: ${nextAction}`,
+    })
+  })
+
+  it.each(['identity', 'concern'] as const)(
+    'refuses ticket-wide %s correction when any non-canceled job is ineligible',
+    (kind) => {
+      const ticket = rawTicket()
+      const blocked = {
+        ...ticket.jobs[0],
+        id: IDS.secondJob,
+        title: 'Blocked tire repair',
+        kind: 'repair',
+        workStatus: 'blocked',
+      }
+      const quote = rawQuote()
+      const blockedQuote = {
+        ...quote.jobs[0],
+        id: blocked.id,
+        title: blocked.title,
+        kind: blocked.kind,
+        workStatus: blocked.workStatus,
+        storyMode: null,
+      }
+      const parsed = parseTicketCorrectionBaseline({
+        ticket: { ...ticket, jobs: [...ticket.jobs, blocked] },
+        quote: { ...quote, jobs: [...quote.jobs, blockedQuote] },
+      }, {
+        ticketId: IDS.ticket,
+        target: { kind },
+      })
+
+      expect(parsed?.eligibility).toEqual({
+        ok: false,
+        reason: 'work_blocked',
+        message: 'Blocked tire repair: Resolve or cancel that work before correcting repair-order truth.',
+      })
+    },
+  )
 
   it.each([
     ['changed', true, 'job'],

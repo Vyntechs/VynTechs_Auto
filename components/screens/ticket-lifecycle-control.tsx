@@ -29,10 +29,14 @@ function parseTicket(value: unknown): TicketLifecycleView | null {
 export function TicketLifecycleControl({
   ticketId,
   status,
+  blocked = false,
+  onMutationStateChange,
   onApplied,
 }: {
   ticketId: string
   status: 'open' | 'closed' | 'canceled'
+  blocked?: boolean
+  onMutationStateChange?: (active: boolean) => void
   onApplied: (ticket: TicketLifecycleView) => void
 }): React.JSX.Element | null {
   const [reason, setReason] = useState('')
@@ -43,6 +47,7 @@ export function TicketLifecycleControl({
   if (status === 'closed') return null
 
   async function mutate(action: 'cancel' | 'reopen'): Promise<void> {
+    if (blocked || busy) return
     const normalizedReason = reason.trim()
     if (action === 'cancel' && (normalizedReason.length < 1 || normalizedReason.length > 500)) {
       setNotice({ kind: 'error', text: 'Say why this repair order is being canceled.' })
@@ -53,6 +58,7 @@ export function TicketLifecycleControl({
       ? pendingRequest.current.requestKey
       : crypto.randomUUID()
     pendingRequest.current = { fingerprint, requestKey }
+    onMutationStateChange?.(true)
     setBusy(true)
     setNotice({ kind: 'status', text: action === 'cancel' ? 'Canceling repair order…' : 'Reopening repair order…' })
     try {
@@ -76,6 +82,7 @@ export function TicketLifecycleControl({
       setNotice({ kind: 'error', text: 'The repair order was not changed. Check the connection and retry.' })
     } finally {
       setBusy(false)
+      onMutationStateChange?.(false)
     }
   }
 
@@ -83,7 +90,12 @@ export function TicketLifecycleControl({
     return (
       <section className={styles.lifecycleControl} aria-label="Canceled repair order">
         <p>This repair order is canceled. Its work history is retained.</p>
-        <button className={styles.inlineAction} type="button" disabled={busy} onClick={() => void mutate('reopen')}>
+        <button
+          className={styles.inlineAction}
+          type="button"
+          disabled={busy || blocked}
+          onClick={() => void mutate('reopen')}
+        >
           {busy ? 'Reopening…' : 'Reopen repair order'}
         </button>
         {notice && <p className={notice.kind === 'error' ? styles.assignmentError : styles.assignmentNotice}
@@ -104,7 +116,11 @@ export function TicketLifecycleControl({
           maxLength={500}
           onChange={(event) => setReason(event.target.value)}
         />
-        <button className={styles.inlineAction} type="submit" disabled={busy || reason.trim().length < 1}>
+        <button
+          className={styles.inlineAction}
+          type="submit"
+          disabled={busy || blocked || reason.trim().length < 1}
+        >
           {busy ? 'Canceling…' : 'Cancel repair order'}
         </button>
       </form>

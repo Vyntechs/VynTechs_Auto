@@ -34,7 +34,7 @@ export type TicketCorrectionAppliedProjection = {
   announcement: string
 }
 
-type Phase = 'loading' | 'ready' | 'saving' | 'recovery'
+type Phase = 'loading' | 'ready' | 'saving' | 'refreshing' | 'recovery'
 
 export function TicketCorrectionWorkspace({
   actorId,
@@ -56,16 +56,24 @@ export function TicketCorrectionWorkspace({
   const [message, setMessage] = useState<string | null>(null)
   const [currentValue, setCurrentValue] = useState<string | null>(null)
   const [retryAllowed, setRetryAllowed] = useState(false)
+  const [needsTruthRefresh, setNeedsTruthRefresh] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const retryRef = useRef<HTMLButtonElement>(null)
+  const mountedRef = useRef(true)
   const scope = { actorId, ticketId: ticket.id, target }
   const storageKey = ticketCorrectionDraftKey(actorId, ticket.id, target)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     let canceled = false
     setPhase('loading')
     setMessage(null)
     setRetryAllowed(false)
+    setNeedsTruthRefresh(false)
     void loadFreshBaseline(ticket.id, target).then((fresh) => {
       if (canceled) return
       if (!fresh) {
@@ -82,6 +90,13 @@ export function TicketCorrectionWorkspace({
         // Storage recovery is optional; fresh server truth still opens safely.
       }
       setBaseline(fresh)
+      if (!fresh.eligibility.ok && !restored?.pending) {
+        setFields(null)
+        setPending(null)
+        setPhase('recovery')
+        setMessage(fresh.eligibility.message)
+        return
+      }
       setFields(restored?.fields ?? fieldsFromBaseline(fresh, target))
       setPending(restored?.pending ?? null)
       setPhase('ready')
@@ -123,6 +138,7 @@ export function TicketCorrectionWorkspace({
     setMessage(null)
     setCurrentValue(null)
     setRetryAllowed(false)
+    setNeedsTruthRefresh(false)
     setPhase('ready')
   }
 
@@ -134,18 +150,37 @@ export function TicketCorrectionWorkspace({
   async function submit(): Promise<void> {
     if (!baseline || !fields || phase === 'saving') return
     const built = buildIntent(baseline, fields, target)
-    if (!built.ok) {
+    const restoredScope = pending ? scopeFromPending(pending, target) : null
+    if (pending && !restoredScope) {
+      setPending(null)
       setPhase('recovery')
-      setMessage(built.message)
+      setMessage('This saved correction does not match the fact being edited. Discard it and start here again.')
       setRetryAllowed(false)
+      setNeedsTruthRefresh(false)
       return
     }
-    const nextPending = prepareTicketCorrectionRequest(built.intent, pending)
+    let nextPending: PendingTicketCorrectionRequest
+    let submittedScope: TicketCorrectionScope
+    if (pending && restoredScope) {
+      nextPending = pending
+      submittedScope = restoredScope
+    } else {
+      if (!built.ok) {
+        setPhase('recovery')
+        setMessage(built.message)
+        setRetryAllowed(false)
+        setNeedsTruthRefresh(!baseline.eligibility.ok)
+        return
+      }
+      nextPending = prepareTicketCorrectionRequest(built.intent, null)
+      submittedScope = built.scope
+    }
     setPending(nextPending)
     persist(fields, nextPending)
     setPhase('saving')
     setMessage(null)
     setRetryAllowed(false)
+    setNeedsTruthRefresh(false)
 
     let response: Response
     let body: unknown
@@ -160,27 +195,23 @@ export function TicketCorrectionWorkspace({
       recover('The correction could not be confirmed. Retry uses the same saved request.', true)
       return
     }
+    if (!mountedRef.current) return
 
     if (!response.ok) {
       const error = errorCode(body)
       if (error === 'conflict') {
+        if (property(body, 'retryable') === true) {
+          recover('The repair order is busy. Retry uses the same saved request.', true)
+          return
+        }
         const fresh = await loadFreshBaseline(ticket.id, target)
+        if (!mountedRef.current) return
         if (!fresh) {
+          setNeedsTruthRefresh(true)
           recover('Current repair-order truth could not be refreshed. The editor and saved request are still here.', false)
           return
         }
-        const refreshed = buildIntent(fresh, fields, target)
-        if (!refreshed.ok) {
-          setBaseline(fresh)
-          recover(refreshed.message, false)
-          return
-        }
-        const rotated = prepareTicketCorrectionRequest(refreshed.intent, nextPending)
-        setBaseline(fresh)
-        setPending(rotated)
-        setCurrentValue(currentFactValue(fresh, target))
-        persist(fields, rotated)
-        recover('Current repair-order truth changed. Review the current value, then retry.', true)
+        stageFreshRetry(fresh, fields)
         return
       }
       recover(refusalMessage(error), false)
@@ -189,7 +220,7 @@ export function TicketCorrectionWorkspace({
 
     const success = parseTicketCorrectionSuccess(body, {
       ticketId: ticket.id,
-      expectedScope: built.scope,
+      expectedScope: submittedScope,
       target,
     })
     if (!success) {
@@ -198,6 +229,7 @@ export function TicketCorrectionWorkspace({
     }
 
     const quote = await loadFreshQuote(ticket.id)
+    if (!mountedRef.current) return
     if (!quote || !quoteMatchesTicket(success.ticket, quote)) {
       recover('The correction may be saved, but current quote truth could not be checked. Retry here before leaving.', true)
       return
@@ -210,6 +242,7 @@ export function TicketCorrectionWorkspace({
       targetJobId: target.kind === 'job' ? target.jobId : null,
     })
     try { sessionStorage.removeItem(storageKey) } catch { /* confirmed truth does not depend on cleanup */ }
+    if (!mountedRef.current) return
     onApplied({
       target,
       outcome: success.outcome,
@@ -221,9 +254,45 @@ export function TicketCorrectionWorkspace({
   }
 
   function recover(nextMessage: string, canRetry: boolean): void {
+    if (!mountedRef.current) return
     setMessage(nextMessage)
     setRetryAllowed(canRetry)
     setPhase('recovery')
+  }
+
+  function stageFreshRetry(
+    fresh: TicketCorrectionBaseline,
+    retainedFields: TicketCorrectionFields,
+  ): void {
+    const refreshed = buildIntent(fresh, retainedFields, target)
+    setBaseline(fresh)
+    setCurrentValue(currentFactValue(fresh, target))
+    if (!refreshed.ok) {
+      setNeedsTruthRefresh(true)
+      recover(refreshed.message, false)
+      return
+    }
+    const rotated = prepareTicketCorrectionRequest(refreshed.intent, null)
+    setPending(rotated)
+    persist(retainedFields, rotated)
+    setNeedsTruthRefresh(false)
+    recover('Current repair-order truth changed. Review the current value, then retry.', true)
+  }
+
+  async function refreshCurrentTruth(): Promise<void> {
+    if (!fields || phase === 'saving' || phase === 'refreshing') return
+    setPhase('refreshing')
+    setMessage(null)
+    setRetryAllowed(false)
+    setNeedsTruthRefresh(false)
+    const fresh = await loadFreshBaseline(ticket.id, target)
+    if (!mountedRef.current) return
+    if (!fresh) {
+      setNeedsTruthRefresh(true)
+      recover('Current repair-order truth could not be refreshed. The editor and saved request are still here.', false)
+      return
+    }
+    stageFreshRetry(fresh, fields)
   }
 
   function chooseRemoval(): void {
@@ -241,7 +310,9 @@ export function TicketCorrectionWorkspace({
       className={styles.workspace}
       role="region"
       aria-label={label}
-      aria-busy={phase === 'loading' || phase === 'saving' ? true : undefined}
+      aria-busy={phase === 'loading' || phase === 'saving' || phase === 'refreshing'
+        ? true
+        : undefined}
       data-correction-state={phase === 'recovery' ? 'recovery' : undefined}
     >
       {phase === 'loading' ? (
@@ -259,7 +330,10 @@ export function TicketCorrectionWorkspace({
           </div>
         </div>
       ) : (
-        <fieldset className={styles.editor} disabled={phase === 'saving'}>
+        <fieldset
+          className={styles.editor}
+          disabled={phase === 'saving' || phase === 'refreshing'}
+        >
           <legend>{label}</legend>
           {fields.kind === 'identity' ? (
             <IdentityEditor fields={fields} onChange={updateFields} />
@@ -282,6 +356,11 @@ export function TicketCorrectionWorkspace({
           )}
           {phase === 'saving' && (
             <p className={styles.state} role="status" aria-live="polite">Saving correction…</p>
+          )}
+          {phase === 'refreshing' && (
+            <p className={styles.state} role="status" aria-live="polite">
+              Checking current repair-order truth…
+            </p>
           )}
           {phase === 'recovery' && message && <p className={styles.error} role="alert">{message}</p>}
 
@@ -313,6 +392,11 @@ export function TicketCorrectionWorkspace({
                   {retryAllowed ? 'Retry correction' : 'Save correction'}
                 </button>
               )
+            )}
+            {phase === 'recovery' && needsTruthRefresh && (
+              <button type="button" onClick={() => void refreshCurrentTruth()}>
+                Check current truth
+              </button>
             )}
             <button type="button" onClick={discardAndClose}>Cancel</button>
           </div>
@@ -521,6 +605,9 @@ function buildIntent(
   target: TicketCorrectionTarget,
 ): { ok: true; intent: Record<string, unknown>; scope: TicketCorrectionScope }
   | { ok: false; message: string } {
+  if (!baseline.eligibility.ok) {
+    return { ok: false, message: baseline.eligibility.message }
+  }
   const common = {
     expectedTicketUpdatedAt: baseline.ticket.updatedAt.toISOString(),
     expectedActiveVersionId: baseline.quote.activeVersion?.id ?? null,
@@ -593,6 +680,27 @@ function buildIntent(
     }
   }
   return { ok: false, message: 'This saved correction does not match the fact being edited. Discard it and start here again.' }
+}
+
+function scopeFromPending(
+  pending: PendingTicketCorrectionRequest,
+  target: TicketCorrectionTarget,
+): TicketCorrectionScope | null {
+  let value: unknown
+  try {
+    value = JSON.parse(pending.body)
+  } catch {
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const body = value as Record<string, unknown>
+  if (target.kind === 'identity') return body.action === 'identity' ? 'identity' : null
+  if (target.kind === 'concern') return body.action === 'concern' ? 'concern' : null
+  if (typeof body.jobId !== 'string' || body.jobId.toLowerCase() !== target.jobId.toLowerCase()) {
+    return null
+  }
+  if (body.action === 'job') return 'job'
+  return body.action === 'remove_job' ? 'job_removed' : null
 }
 
 function currentFactValue(baseline: TicketCorrectionBaseline, target: TicketCorrectionTarget): string {

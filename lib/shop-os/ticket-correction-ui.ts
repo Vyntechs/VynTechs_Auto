@@ -14,7 +14,22 @@ export type TicketCorrectionQuoteProjection = Extract<
 export type TicketCorrectionBaseline = {
   ticket: TicketDetail
   quote: TicketCorrectionQuoteProjection
+  eligibility: TicketCorrectionEligibility
 }
+
+export type TicketCorrectionEligibility =
+  | { ok: true }
+  | {
+      ok: false
+      reason:
+        | 'work_started'
+        | 'work_blocked'
+        | 'work_not_open'
+        | 'session_linked'
+        | 'diagnostic_starting'
+        | 'diagnostic_ambiguous'
+      message: string
+    }
 
 export type TicketCorrectionSuccess = {
   outcome: TicketCorrectionOutcome
@@ -137,7 +152,7 @@ export function parseTicketCorrectionBaseline(
   if (!ticket || !quote || !truthMatches(ticket, quote, expected.ticketId, expected.target)) {
     return null
   }
-  return { ticket, quote }
+  return { ticket, quote, eligibility: correctionEligibility(ticket, expected.target) }
 }
 
 export function parseTicketCorrectionQuoteResponse(
@@ -248,7 +263,61 @@ function truthMatches(
   if (!quoteMatchesTicket(ticket, quote)) return false
   if (target.kind !== 'job') return true
   return ticket.jobs.some((job) => job.id === target.jobId.toLowerCase())
-    && quote.jobs.some((job) => job.id === target.jobId.toLowerCase())
+}
+
+function correctionEligibility(
+  ticket: TicketDetail,
+  target: TicketCorrectionTarget,
+): TicketCorrectionEligibility {
+  const jobs = target.kind === 'job'
+    ? ticket.jobs.filter((job) => job.id === target.jobId.toLowerCase())
+    : ticket.jobs.filter((job) => job.workStatus !== 'canceled')
+  for (const job of jobs) {
+    const prefix = `${job.title}: `
+    if (job.workStatus === 'in_progress') {
+      return {
+        ok: false,
+        reason: 'work_started',
+        message: `${prefix}Finish or cancel that work before correcting repair-order truth.`,
+      }
+    }
+    if (job.workStatus === 'blocked') {
+      return {
+        ok: false,
+        reason: 'work_blocked',
+        message: `${prefix}Resolve or cancel that work before correcting repair-order truth.`,
+      }
+    }
+    if (job.workStatus !== 'open') {
+      return {
+        ok: false,
+        reason: 'work_not_open',
+        message: `${prefix}This work is no longer open. Use current repair-order history instead.`,
+      }
+    }
+    if (job.sessionId !== null) {
+      return {
+        ok: false,
+        reason: 'session_linked',
+        message: `${prefix}Finish or cancel that diagnostic before correcting repair-order truth.`,
+      }
+    }
+    if (job.kind === 'diagnostic' && job.diagnosticStartState === 'initializing') {
+      return {
+        ok: false,
+        reason: 'diagnostic_starting',
+        message: `${prefix}Wait for startup to finish, then check current truth again.`,
+      }
+    }
+    if (job.kind === 'diagnostic' && job.diagnosticStartState === 'ambiguous') {
+      return {
+        ok: false,
+        reason: 'diagnostic_ambiguous',
+        message: `${prefix}Resolve that diagnostic start before correcting repair-order truth.`,
+      }
+    }
+  }
+  return { ok: true }
 }
 
 function isExactRecord<const T extends readonly string[]>(
