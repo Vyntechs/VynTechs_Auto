@@ -548,12 +548,13 @@ describe('Shop OS immutable quote version creation', () => {
   it('uses the shared invalidation lifecycle and rolls back when link locking is interrupted', async () => {
     const first = await create()
     if (!first.ok) throw new Error('missing first version')
+    const sentAt = new Date()
     await db.insert(quoteSends).values({
       shopId, ticketId, quoteVersionId: first.version.id, customerId: uuid(10), subjectKey: uuid(10),
       destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
-      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(Date.now() + 60_000),
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(sentAt.getTime() + 60_000),
       requestingActorProfileId: uuid(1), requestKey: uuid(92), requestFingerprint: 'c'.repeat(64),
-      state: 'submitted', submittingAt: new Date(), submittedAt: new Date(),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
     })
     await db.update(jobLines).set({ priceCents: 13_000 }).where(eq(jobLines.id, uuid(41)))
 

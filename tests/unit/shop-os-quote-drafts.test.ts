@@ -336,6 +336,7 @@ describe('Shop OS quote draft mutations', () => {
     const [version] = await db.insert(quoteVersions).values({
       shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
     }).returning()
+    const sentAt = new Date()
     await db.insert(quoteSends).values({
       shopId,
       ticketId,
@@ -346,13 +347,15 @@ describe('Shop OS quote draft mutations', () => {
       fingerprintKeyVersion: 'link_v1',
       channel: 'link',
       tokenHash: 'b'.repeat(64),
-      tokenExpiresAt: new Date(Date.now() + 60_000),
+      tokenExpiresAt: new Date(sentAt.getTime() + 60_000),
       requestingActorProfileId: uuid(1),
       requestKey: uuid(170),
       requestFingerprint: 'c'.repeat(64),
       state: 'submitted',
-      submittingAt: new Date(),
-      submittedAt: new Date(),
+      submittingAt: sentAt,
+      submittedAt: sentAt,
+      createdAt: sentAt,
+      updatedAt: sentAt,
     })
 
     await expect(create(uuid(171))).resolves.toMatchObject({ ok: true, changed: true })
@@ -366,12 +369,13 @@ describe('Shop OS quote draft mutations', () => {
     const [version] = await db.insert(quoteVersions).values({
       shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
     }).returning()
+    const sentAt = new Date()
     await db.insert(quoteSends).values({
       shopId, ticketId, quoteVersionId: version.id, customerId: null, subjectKey: uuid(300),
       destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
-      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(Date.now() + 60_000),
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(sentAt.getTime() + 60_000),
       requestingActorProfileId: uuid(1), requestKey: uuid(172), requestFingerprint: 'c'.repeat(64),
-      state: 'submitted', submittingAt: new Date(), submittedAt: new Date(),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
     })
 
     const result = await createDraftLine(
