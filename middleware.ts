@@ -9,10 +9,13 @@ import { guardCuratorRoute } from '@/lib/curator/role-gate'
 import {
   checkAccess,
   isApiRoute,
+  isCustomerApprovalLinkRoute,
   isDiagnosticsGatedRoute,
   isPaywallExempt,
 } from '@/lib/auth-access'
 import {
+  CUSTOMER_APPROVAL_UNAVAILABLE,
+  isCustomerApprovalEnabled,
   isDiagnosticsReleaseEnabled,
   OPERATIONAL_MEDIA_UNAVAILABLE,
 } from '@/lib/release-policy'
@@ -43,8 +46,19 @@ async function refreshSession(req: NextRequest) {
 }
 
 export async function middleware(req: NextRequest) {
-  const { res, supabase } = await refreshSession(req)
   const pathname = req.nextUrl.pathname
+  if (isCustomerApprovalLinkRoute(pathname) && !isCustomerApprovalEnabled()) {
+    return NextResponse.json(CUSTOMER_APPROVAL_UNAVAILABLE.body, {
+      status: CUSTOMER_APPROVAL_UNAVAILABLE.status,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        'X-Robots-Tag': 'noindex, nofollow',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    })
+  }
+  const { res, supabase } = await refreshSession(req)
   const exempt = isPaywallExempt(pathname)
   const isCurator = pathname.startsWith('/curator')
 

@@ -241,3 +241,8 @@ Reason: Three specs still clicked "New work order" after the rename merged, and 
 Trigger: A browser sign-in trace needs diagnosis.
 Rule: Use redacted harness receipts or the trace viewer; never print raw trace JSON because fill actions contain credentials.
 Reason: Raw Playwright trace output exposed a fixed QA password and forced immediate rotation.
+
+### simplicity-is-the-product-gate
+Trigger: Founder questions multi-variable pass/fail for interaction quality.
+Rule: One real role task decides release; keep only controls needed to finish, correct, or recover.
+Reason: Independent metrics invite scope growth and painful friction instead of proving simple completion.

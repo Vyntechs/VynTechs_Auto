@@ -36,12 +36,55 @@ import {
 } from '@/lib/shop-os/quote-editor-draft'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import { CUSTOMER_STORY_WAIVER } from '@/lib/shop-os/customer-story-contracts'
+import {
+  createCustomerApprovalSecret,
+  parseCustomerApprovalLink,
+} from '@/lib/shop-os/customer-approval-ui'
 import { AddDiagnosticTime } from './add-diagnostic-time'
 import { AddRepairJob } from './add-repair-job'
 import { ManualPartSourcing } from './manual-part-sourcing'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
+const APPROVAL_TRUTH_REFRESH_MS = 20_000
+
+function mergeExactVersionApprovalTruth(
+  current: QuoteBuilder,
+  refreshed: QuoteBuilder,
+): { kind: 'merged'; builder: QuoteBuilder; changed: boolean } | { kind: 'drift' } {
+  const currentVersion = current.activeVersion
+  const refreshedVersion = refreshed.activeVersion
+  if (!currentVersion || !refreshedVersion
+    || refreshedVersion.id !== currentVersion.id
+    || refreshedVersion.versionNumber !== currentVersion.versionNumber) {
+    return { kind: 'drift' }
+  }
+  const currentJobIds = currentVersion.jobs.map((job) => job.jobId).sort()
+  const refreshedJobIds = refreshedVersion.jobs.map((job) => job.jobId).sort()
+  const currentBuilderJobIds = current.jobs.map((job) => job.id).sort()
+  const refreshedBuilderJobIds = refreshed.jobs.map((job) => job.id).sort()
+  if (currentJobIds.length !== refreshedJobIds.length
+    || currentBuilderJobIds.length !== refreshedBuilderJobIds.length
+    || currentJobIds.some((id, index) => id !== refreshedJobIds[index])
+    || currentBuilderJobIds.some((id, index) => id !== refreshedBuilderJobIds[index])) {
+    return { kind: 'drift' }
+  }
+  const refreshedById = new Map(refreshed.jobs.map((job) => [job.id, job]))
+  let changed = false
+  const jobs = current.jobs.map((job) => {
+    const next = refreshedById.get(job.id)
+    if (!next) return job
+    if (next.approval.state === job.approval.state
+      && next.approval.quoteVersionId === job.approval.quoteVersionId) return job
+    changed = true
+    return { ...job, approval: next.approval }
+  })
+  return {
+    kind: 'merged',
+    changed,
+    builder: changed ? { ...current, jobs } : current,
+  }
+}
 
 export type QuoteTicketIdentity = {
   id: string
@@ -84,6 +127,7 @@ export function ManualQuoteBuilder({
 }): React.JSX.Element {
   const router = useRouter()
   const [current, setCurrent] = useState(builder)
+  const currentRef = useRef(builder)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [error, setError] = useState<{
@@ -92,9 +136,11 @@ export function ManualQuoteBuilder({
     reloadPage?: boolean
   } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | 'sourcing' | null>(null)
+  const [operation, setOperation] = useState<'refresh' | 'line' | 'remove' | 'prepare' | 'canned' | 'sourcing' | 'approval-link' | null>(null)
   const [focusTarget, setFocusTarget] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
+  const [approvalLinkStatus, setApprovalLinkStatus] = useState('')
+  const [approvalLinkCopied, setApprovalLinkCopied] = useState(false)
   const [confirmedTarget, setConfirmedTarget] = useState<string | null>(null)
   const [selectedCannedId, setSelectedCannedId] = useState<string | null>(null)
   const [cannedClientKey, setCannedClientKey] = useState<string | null>(null)
@@ -108,6 +154,9 @@ export function ManualQuoteBuilder({
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
   const inFlightRef = useRef(false)
+  const approvalRefreshInFlightRef = useRef(false)
+  const approvalRefreshQueuedRef = useRef(false)
+  const approvalRefreshRef = useRef<(() => void) | null>(null)
   const editorFirstInputRef = useRef<HTMLInputElement>(null)
   const editorFocusKeyRef = useRef<string | null>(null)
   const recoveryRefreshRef = useRef<HTMLButtonElement>(null)
@@ -123,10 +172,23 @@ export function ManualQuoteBuilder({
   } | null>(null)
   const selectedFingerprintRef = useRef<string | null>(null)
   const draftRecoveryAttemptedRef = useRef(false)
+  const approvalLinkRef = useRef<{
+    requestKey: string
+    quoteVersionId: string
+    versionNumber: number
+    rawToken: string
+    tokenHash: string
+  } | null>(null)
   const quotePath = `/tickets/${ticket.id}/quote`
   const catalogSignature = cannedJobs.map((job) => `${job.id}:${job.fingerprint}`).join('|')
 
   useEffect(() => setCurrent(builder), [builder])
+  useEffect(() => { currentRef.current = current }, [current])
+  useEffect(() => {
+    approvalLinkRef.current = null
+    setApprovalLinkStatus('')
+    setApprovalLinkCopied(false)
+  }, [current.activeVersion?.id])
   useEffect(() => {
     if (!actorId || draftRecoveryAttemptedRef.current) return
     draftRecoveryAttemptedRef.current = true
@@ -213,6 +275,70 @@ export function ManualQuoteBuilder({
       approvalState: job.approval.state,
     })))
   }, [current, onProjection])
+  useEffect(() => {
+    if (current.capabilities.canCreateCustomerApprovalLink !== true) {
+      approvalRefreshRef.current = null
+      return
+    }
+    let canceled = false
+    async function refreshApprovalTruth(): Promise<void> {
+      if (canceled || document.visibilityState !== 'visible') return
+      const baseline = currentRef.current
+      if (!baseline.activeVersion) return
+      if (inFlightRef.current) {
+        approvalRefreshQueuedRef.current = true
+        return
+      }
+      if (approvalRefreshInFlightRef.current) return
+      approvalRefreshInFlightRef.current = true
+      try {
+        const response = await fetch(`/api/tickets/${ticket.id}/quote`, {
+          method: 'GET',
+          headers: { accept: 'application/json' },
+          cache: 'no-store',
+        })
+        const body = await readJson(response)
+        const refreshed = response.ok && body && typeof body === 'object' && 'builder' in body
+          ? parseQuoteBuilderProjection((body as { builder: unknown }).builder)
+          : null
+        if (canceled || !refreshed || refreshed.ticket.id !== ticket.id.toLowerCase()) return
+        if (inFlightRef.current) {
+          approvalRefreshQueuedRef.current = true
+          return
+        }
+        const merged = mergeExactVersionApprovalTruth(currentRef.current, refreshed)
+        if (merged.kind === 'drift') {
+          setError({
+            message: 'Quote changed elsewhere. Finish or cancel this edit, then refresh.',
+            refresh: true,
+          })
+          return
+        }
+        if (!merged.changed) return
+        currentRef.current = merged.builder
+        setCurrent(merged.builder)
+      } catch {
+        // This is a quiet revalidation. Keep the mounted truth and try later.
+      } finally {
+        approvalRefreshInFlightRef.current = false
+      }
+    }
+    const trigger = () => { void refreshApprovalTruth() }
+    approvalRefreshRef.current = trigger
+    const interval = window.setInterval(trigger, APPROVAL_TRUTH_REFRESH_MS)
+    document.addEventListener('visibilitychange', trigger)
+    return () => {
+      canceled = true
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', trigger)
+      if (approvalRefreshRef.current === trigger) approvalRefreshRef.current = null
+    }
+  }, [
+    current.activeVersion?.id,
+    current.activeVersion?.versionNumber,
+    current.capabilities.canCreateCustomerApprovalLink,
+    ticket.id,
+  ])
   useEffect(() => {
     if (!reloadPendingRef.current || !reloadBaselineRef.current) return
     const baseline = reloadBaselineRef.current
@@ -304,6 +430,15 @@ export function ManualQuoteBuilder({
   const preparation = basePreparation.kind === 'ready' && pendingStory
     ? { kind: 'blocked' as const, reasons: ['Review every diagnostic story.'] }
     : basePreparation
+  const approvalLinkEligible = current.activeVersion !== null
+    && current.capabilities.canRecordCustomerApproval
+    && current.capabilities.canCreateCustomerApprovalLink === true
+    && current.activeVersion.jobs.every((versionJob) => {
+      const approval = current.jobs.find((job) => job.id === versionJob.jobId)?.approval
+      return approval !== undefined
+        && ['quote_ready', 'sent'].includes(approval.state)
+        && approval.quoteVersionId === null
+    })
 
   function beginOperation(kind: NonNullable<typeof operation>): boolean {
     if (inFlightRef.current) return false
@@ -317,6 +452,10 @@ export function ManualQuoteBuilder({
     inFlightRef.current = false
     setBusy(false)
     setOperation(null)
+    if (approvalRefreshQueuedRef.current) {
+      approvalRefreshQueuedRef.current = false
+      queueMicrotask(() => approvalRefreshRef.current?.())
+    }
   }
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
@@ -387,6 +526,76 @@ export function ManualQuoteBuilder({
 
   async function readJson(response: Response): Promise<unknown> {
     try { return await response.json() } catch { return {} }
+  }
+
+  async function copyCustomerApprovalLink(): Promise<void> {
+    const version = current.activeVersion
+    if (!version || !current.capabilities.canRecordCustomerApproval
+      || current.capabilities.canCreateCustomerApprovalLink !== true
+      || !beginOperation('approval-link')) return
+    setError(null)
+    setApprovalLinkStatus('')
+    setApprovalLinkCopied(false)
+    let serverConfirmed = false
+    try {
+      let draft = approvalLinkRef.current
+      if (!draft || draft.quoteVersionId !== version.id) {
+        const secret = await createCustomerApprovalSecret()
+        if (!secret) {
+          setApprovalLinkStatus('Secure link creation is unavailable in this browser')
+          return
+        }
+        draft = {
+          requestKey: crypto.randomUUID(),
+          quoteVersionId: version.id,
+          versionNumber: version.versionNumber,
+          ...secret,
+        }
+        approvalLinkRef.current = draft
+      }
+      const response = await fetch(`/api/tickets/${ticket.id}/quote/approval-links`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          requestKey: draft.requestKey,
+          quoteVersionId: draft.quoteVersionId,
+          tokenHash: draft.tokenHash,
+        }),
+      })
+      const responseBody = await readJson(response)
+      const link = parseCustomerApprovalLink(response.status, responseBody)
+      if (!link || link.quoteVersionId !== version.id || link.versionNumber !== version.versionNumber) {
+        const retryable = responseBody !== null && typeof responseBody === 'object'
+          && 'retryable' in responseBody && responseBody.retryable === true
+        if ((response.status === 404 || response.status === 409) && !retryable) {
+          approvalLinkRef.current = null
+          const refreshed = await refreshQuote('prepared', false, true)
+          if (refreshed) {
+            setApprovalLinkStatus('The prepared quote was refreshed. Copy again for its current link.')
+          }
+          return
+        }
+        setApprovalLinkStatus(response.status === 409 && retryable
+          ? 'The secure link is busy. Retry the same Copy action.'
+          : 'The secure link was not created. Retry this action.')
+        return
+      }
+      serverConfirmed = true
+      if (!navigator.clipboard?.writeText) {
+        setApprovalLinkStatus('The link is ready, but this browser blocked the clipboard. Try Copy again.')
+        return
+      }
+      await navigator.clipboard.writeText(`${window.location.origin}/approve#${draft.rawToken}`)
+      approvalLinkRef.current = null
+      setApprovalLinkCopied(true)
+      setApprovalLinkStatus(`Link copied · V${draft.versionNumber}`)
+    } catch {
+      setApprovalLinkStatus(serverConfirmed
+        ? 'The link is ready, but the clipboard was interrupted. Try Copy again.'
+        : 'Connection interrupted. Retry the same Copy action.')
+    } finally {
+      endOperation()
+    }
   }
 
   function applyFailure(status: number, body: unknown, forceRefresh = false): void {
@@ -1308,6 +1517,28 @@ export function ManualQuoteBuilder({
                 if (element) focusRefs.current.set('prepared', element)
                 else focusRefs.current.delete('prepared')
               }}>Prepared version V{preparation.version.versionNumber}</p>
+              {approvalLinkEligible && (
+                <section className={styles.approvalLink} aria-label="Customer approval link">
+                  <div>
+                    <strong>Customer link</strong>
+                    <p>Copy the exact prepared quote. Waiting begins only when this secure link is opened.</p>
+                    {approvalLinkStatus && (
+                      <p className={styles.approvalLinkStatus} role="status" aria-label="Customer link update" aria-live="polite">
+                        {approvalLinkStatus}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void copyCustomerApprovalLink()}
+                  >
+                    {operation === 'approval-link' ? 'Securing…'
+                      : approvalLinkCopied ? 'Replace customer link'
+                        : 'Copy customer link'}
+                  </button>
+                </section>
+              )}
               {current.activeVersion?.jobs.map((versionJob) => {
                 const job = current.jobs.find((candidate) => candidate.id === versionJob.jobId)
                 return job ? (
@@ -1638,7 +1869,8 @@ function AuthorizationStrip({ job, versionNumber, jobSubtotalCents, totalCents, 
   const verdict = immediateVerdict ?? (job.approval.state === 'approved'
     ? `Approved · V${versionNumber}`
     : job.approval.state === 'declined' ? `Declined · V${versionNumber}`
-      : job.approval.state === 'deferred' ? `Deferred · follow up · V${versionNumber}` : null)
+      : job.approval.state === 'deferred' ? `Deferred · follow up · V${versionNumber}`
+        : job.approval.state === 'sent' ? 'Link opened · waiting on decision' : null)
   return (
     <section className={styles.authorizationStrip} role="region" aria-label={`Authorization for ${job.title}`} tabIndex={-1} ref={focusRef}>
       <p className={styles.eyebrow}>Quote V{versionNumber} · immutable</p>

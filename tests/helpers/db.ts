@@ -74,6 +74,7 @@ export async function createTestDb(): Promise<{
   await ensureShopOsQuoteDeferralMigration(client)
   await ensureIntentAwareIntakeMigration(client)
   await ensureCustomerCopyIdentityMigration(client)
+  await ensureCustomerApprovalLinksMigration(client)
   return {
     db,
     client,
@@ -81,6 +82,52 @@ export async function createTestDb(): Promise<{
       await client.close()
     },
   }
+}
+
+export async function ensureCustomerApprovalLinksMigration(client: PGlite): Promise<void> {
+  const inspect = async () => {
+    const constraints = await client.query<{ conname: string; definition: string }>(`
+      select conname, pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid = 'quote_sends'::regclass
+        and conname in ('quote_sends_channel_valid', 'quote_sends_link_state_consistent')
+      order by conname
+    `)
+    const indexes = await client.query<{ indexname: string }>(`
+      select indexname
+      from pg_indexes
+      where schemaname = 'public' and tablename = 'quote_sends'
+        and indexname in (
+          'quote_sends_active_link_token_uq',
+          'quote_sends_link_request_fingerprint_idx',
+          'quote_sends_shop_ticket_version_submitted_link_uq'
+        )
+      order by indexname
+    `)
+    const channel = constraints.rows.find((row) => row.conname === 'quote_sends_channel_valid')
+    return {
+      channelAllowsLink: Boolean(channel && /\blink\b/.test(channel.definition)),
+      linkStateConstraint: constraints.rows.some((row) => row.conname === 'quote_sends_link_state_consistent'),
+      indexes: new Set(indexes.rows.map((row) => row.indexname)),
+    }
+  }
+  const complete = (markers: Awaited<ReturnType<typeof inspect>>) => markers.channelAllowsLink
+    && markers.linkStateConstraint
+    && markers.indexes.has('quote_sends_active_link_token_uq')
+    && markers.indexes.has('quote_sends_link_request_fingerprint_idx')
+    && markers.indexes.has('quote_sends_shop_ticket_version_submitted_link_uq')
+
+  const before = await inspect()
+  if (complete(before)) return
+  if (before.channelAllowsLink || before.linkStateConstraint || before.indexes.size > 0) {
+    throw new Error('partial customer approval link schema in ephemeral database')
+  }
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0050_shop_os_customer_approval_links.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+  if (!complete(await inspect())) throw new Error('customer approval link migration failed')
 }
 
 export async function ensureCustomerCopyIdentityMigration(client: PGlite): Promise<void> {

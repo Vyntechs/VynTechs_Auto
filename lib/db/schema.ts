@@ -894,7 +894,7 @@ export const quoteSends = pgTable(
     subjectKey: uuid('subject_key').notNull(),
     destinationFingerprint: text('destination_fingerprint').notNull(),
     fingerprintKeyVersion: text('fingerprint_key_version').notNull(),
-    channel: text('channel', { enum: ['sms'] }).notNull(),
+    channel: text('channel', { enum: ['sms', 'link'] }).notNull(),
     tokenHash: text('token_hash'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     requestingActorProfileId: uuid('requesting_actor_profile_id').notNull(),
@@ -965,6 +965,15 @@ export const quoteSends = pgTable(
       table.retainUntil,
       table.id,
     ),
+    uniqueIndex('quote_sends_active_link_token_uq')
+      .on(table.tokenHash)
+      .where(sql`${table.channel} = 'link' and ${table.tokenHash} is not null`),
+    index('quote_sends_link_request_fingerprint_idx')
+      .on(table.requestFingerprint)
+      .where(sql`${table.channel} = 'link'`),
+    uniqueIndex('quote_sends_shop_ticket_version_submitted_link_uq')
+      .on(table.shopId, table.ticketId, table.quoteVersionId)
+      .where(sql`${table.channel} = 'link' and ${table.state} = 'submitted'`),
     check(
       'quote_sends_destination_fingerprint_valid',
       sql`${table.destinationFingerprint} ~ '^[0-9a-f]{64}$'`,
@@ -973,7 +982,20 @@ export const quoteSends = pgTable(
       'quote_sends_fingerprint_key_version_valid',
       sql`${table.fingerprintKeyVersion} ~ '^[a-z][a-z0-9_]{0,62}[a-z0-9]$'`,
     ),
-    check('quote_sends_channel_valid', sql`${table.channel} = 'sms'`),
+    check('quote_sends_channel_valid', sql`${table.channel} in ('sms', 'link')`),
+    check(
+      'quote_sends_link_state_consistent',
+      sql`${table.channel} <> 'link'
+        or (${table.fingerprintKeyVersion} = 'link_v1'
+          and (
+            (${table.state} = 'submitted'
+              and ${table.tokenHash} is not null
+              and ${table.tokenExpiresAt} is not null)
+            or (${table.state} in ('responded', 'expired')
+              and ${table.tokenHash} is null
+              and ${table.tokenExpiresAt} is null)
+          ))`,
+    ),
     check(
       'quote_sends_token_hash_valid',
       sql`${table.tokenHash} is null or ${table.tokenHash} ~ '^[0-9a-f]{64}$'`,

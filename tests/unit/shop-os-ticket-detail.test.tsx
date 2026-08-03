@@ -494,9 +494,9 @@ describe('TicketDetailScreen', () => {
     const states = [
       ['open', 'pending_quote', 'Not started', 'No price yet'],
       ['in_progress', 'quote_ready', 'Being worked', 'Priced'],
-      ['blocked', 'sent', 'On hold', 'Sent to customer'],
-      ['done', 'approved', 'Finished', 'Customer said yes'],
-      ['canceled', 'declined', 'Not doing it', 'Customer said no'],
+      ['blocked', 'sent', 'On hold', 'Link opened'],
+      ['done', 'approved', 'Finished', 'Approved'],
+      ['canceled', 'declined', 'Not doing it', 'Declined'],
     ] as const
 
     render(
@@ -615,7 +615,7 @@ describe('TicketDetailScreen', () => {
     await user.click(within(row).getByRole('button', { name: 'Not doing this one' }))
     expect(within(row).getByText('Not doing it')).toBeInTheDocument()
     expect(within(row).queryByRole('button', { name: 'Not doing this one' })).not.toBeInTheDocument()
-    expect(within(row).getByText('Dropped. The customer said no to this one.')).toBeInTheDocument()
+    expect(within(row).getByText('Dropped. This job was declined.')).toBeInTheDocument()
   })
 
   it('performs an approved sessionless manual diagnostic in place only while diagnostics are unavailable', () => {

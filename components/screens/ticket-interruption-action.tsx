@@ -43,7 +43,7 @@ const COPY = {
   cancel_job: {
     idle: 'Not doing this one',
     pending: 'Dropping it…',
-    done: 'Dropped. The customer said no to this one.',
+    done: 'Dropped. This job was declined.',
     failed: 'It was not dropped. Check the connection and retry.',
   },
 } as const

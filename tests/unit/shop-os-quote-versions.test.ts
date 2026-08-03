@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
-  customers, jobAttachments, jobLines, profiles, quoteEvents, quoteVersions, shops, ticketJobs, tickets, vehicles,
+  customers, jobAttachments, jobLines, profiles, quoteEvents, quoteSends, quoteVersions, shops, ticketJobs, tickets, vehicles,
   vendorAccounts,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
@@ -503,6 +503,71 @@ describe('Shop OS immutable quote version creation', () => {
     })
     const third = await create()
     expect(third).toMatchObject({ ok: true, version: { versionNumber: 8 } })
+  })
+
+  it('expires every actionable customer link before replacing exact quote truth', async () => {
+    const first = await create()
+    if (!first.ok) throw new Error('missing first version')
+    await db.insert(quoteSends).values({
+      shopId,
+      ticketId,
+      quoteVersionId: first.version.id,
+      customerId: uuid(10),
+      subjectKey: uuid(10),
+      destinationFingerprint: 'a'.repeat(64),
+      fingerprintKeyVersion: 'link_v1',
+      channel: 'link',
+      tokenHash: 'b'.repeat(64),
+      tokenExpiresAt: new Date('2026-08-09T12:00:00.000Z'),
+      requestingActorProfileId: uuid(1),
+      requestKey: uuid(91),
+      requestFingerprint: 'c'.repeat(64),
+      state: 'submitted',
+      submittingAt: new Date('2026-08-02T12:00:00.000Z'),
+      submittedAt: new Date('2026-08-02T12:00:00.000Z'),
+      createdAt: new Date('2026-08-02T12:00:00.000Z'),
+    })
+
+    await db.update(jobLines).set({ priceCents: 13_000 }).where(eq(jobLines.id, uuid(41)))
+    await expect(create()).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+      version: { versionNumber: 2 },
+    })
+    expect(await db.select().from(quoteSends)).toEqual([
+      expect.objectContaining({
+        state: 'expired',
+        tokenHash: null,
+        tokenExpiresAt: null,
+        terminalAt: expect.any(Date),
+        retainUntil: expect.any(Date),
+      }),
+    ])
+  })
+
+  it('uses the shared invalidation lifecycle and rolls back when link locking is interrupted', async () => {
+    const first = await create()
+    if (!first.ok) throw new Error('missing first version')
+    const sentAt = new Date()
+    await db.insert(quoteSends).values({
+      shopId, ticketId, quoteVersionId: first.version.id, customerId: uuid(10), subjectKey: uuid(10),
+      destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date(sentAt.getTime() + 60_000),
+      requestingActorProfileId: uuid(1), requestKey: uuid(92), requestFingerprint: 'c'.repeat(64),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
+    })
+    await db.update(jobLines).set({ priceCents: 13_000 }).where(eq(jobLines.id, uuid(41)))
+
+    await expect(create({}, {
+      afterLinkLock: async () => { throw Object.assign(new Error('link row held'), { code: '55P03' }) },
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: true })
+    expect((await db.select().from(quoteVersions))[0]?.supersededAt).toBeNull()
+    expect((await db.select().from(quoteSends))[0]).toMatchObject({ state: 'submitted', tokenHash: 'b'.repeat(64) })
+
+    const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
+    const creation = source.slice(source.indexOf('export async function createQuoteVersion'), source.indexOf('export async function recordQuoteDecision'))
+    expect(creation).toContain('invalidateActiveQuoteVersion')
+    expect(creation).not.toMatch(/update\(quoteSends\)/)
   })
 
   it('fails closed across authorization, tenant, ticket state, reconciliation, tax, and empty boundaries', async () => {

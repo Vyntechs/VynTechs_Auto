@@ -65,6 +65,6 @@ describe('TicketInterruptionAction', () => {
     expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({
       id: 'job-2', workStatus: 'canceled',
     }))
-    expect(screen.getByRole('status')).toHaveTextContent('Dropped. The customer said no to this one.')
+    expect(screen.getByRole('status')).toHaveTextContent('Dropped. This job was declined.')
   })
 })

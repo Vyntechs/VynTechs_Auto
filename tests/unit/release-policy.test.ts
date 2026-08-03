@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  CUSTOMER_APPROVAL_UNAVAILABLE,
   getDiagnosticsRelease,
   getOperationalMediaRelease,
+  isCustomerApprovalEnabled,
   isDiagnosticsReleaseEnabled,
   isOperationalMediaEnabled,
   OPERATIONAL_MEDIA_UNAVAILABLE,
@@ -49,5 +51,24 @@ describe('release policy', () => {
       status: 404,
       body: { error: 'not_available' },
     })
+  })
+
+  it.each([undefined, '', 'false', 'TRUE', ' true ', '1', 'on', 'unknown'])(
+    'fails customer approval closed for %s',
+    (value) => {
+      vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', value)
+
+      expect(isCustomerApprovalEnabled()).toBe(false)
+      expect(CUSTOMER_APPROVAL_UNAVAILABLE).toEqual({
+        status: 404,
+        body: { error: 'unavailable' },
+      })
+    },
+  )
+
+  it('allows only exact true for customer approval', () => {
+    vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', 'true')
+
+    expect(isCustomerApprovalEnabled()).toBe(true)
   })
 })

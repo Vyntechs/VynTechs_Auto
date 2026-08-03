@@ -43,6 +43,10 @@ const EXEMPT_EXACT = new Set<string>([
   // also signs the contract every shop accepts on sign-up, so it must be
   // readable without auth at any point.
   '/terms',
+  // Exact hosted customer-approval surfaces. Neighboring public paths remain
+  // authenticated; the bearer-bound API repeats its own token and rate gates.
+  '/approve',
+  '/api/public/quote-approval',
   // The browser must fetch the service worker before any session exists.
   '/sw.js',
   // Mandatory import for the public-only worker; it must stay reachable so a
@@ -65,6 +69,10 @@ export function isPaywallExempt(pathname: string): boolean {
 
 export function isApiRoute(pathname: string): boolean {
   return pathname.startsWith('/api/')
+}
+
+export function isCustomerApprovalLinkRoute(pathname: string): boolean {
+  return /^\/api\/tickets\/[^/]+\/quote\/approval-links$/.test(pathname)
 }
 
 // Diagnostic-engine surfaces gated by the per-shop diagnostics entitlement
