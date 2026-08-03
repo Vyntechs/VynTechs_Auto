@@ -6,7 +6,9 @@ import {
   isCustomerApprovalEnabled,
   isDiagnosticsReleaseEnabled,
   isOperationalMediaEnabled,
+  isTicketCorrectionEnabled,
   OPERATIONAL_MEDIA_UNAVAILABLE,
+  TICKET_CORRECTION_UNAVAILABLE,
 } from '@/lib/release-policy'
 
 describe('release policy', () => {
@@ -70,5 +72,24 @@ describe('release policy', () => {
     vi.stubEnv('SHOP_OS_CUSTOMER_APPROVAL_ENABLED', 'true')
 
     expect(isCustomerApprovalEnabled()).toBe(true)
+  })
+
+  it.each([undefined, '', 'false', 'TRUE', ' true ', '1', 'on', 'unknown'])(
+    'fails ticket correction closed for %s',
+    (value) => {
+      vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', value)
+
+      expect(isTicketCorrectionEnabled()).toBe(false)
+      expect(TICKET_CORRECTION_UNAVAILABLE).toEqual({
+        status: 404,
+        body: { error: 'unavailable' },
+      })
+    },
+  )
+
+  it('allows only exact true for ticket correction', () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
+
+    expect(isTicketCorrectionEnabled()).toBe(true)
   })
 })

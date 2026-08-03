@@ -530,6 +530,7 @@ export const TICKET_ACTIVITY_KINDS = [
   'job_handed_off',
   'ticket_canceled',
   'ticket_reopened',
+  'ticket_corrected',
 ] as const
 
 export const ticketActivity = pgTable(
@@ -578,7 +579,8 @@ export const ticketActivity = pgTable(
       'ticket_activity_kind_valid',
       sql`${table.kind} in (
         'work_paused', 'work_resumed', 'job_blocked', 'job_hold_resolved',
-        'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened'
+        'job_reassigned', 'job_handed_off', 'ticket_canceled', 'ticket_reopened',
+        'ticket_corrected'
       )`,
     ),
     check('ticket_activity_payload_object', sql`jsonb_typeof(${table.payload}) = 'object'`),

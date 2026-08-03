@@ -75,12 +75,70 @@ export async function createTestDb(): Promise<{
   await ensureIntentAwareIntakeMigration(client)
   await ensureCustomerCopyIdentityMigration(client)
   await ensureCustomerApprovalLinksMigration(client)
+  await ensureTicketCorrectionMigration(client)
   return {
     db,
     client,
     close: async () => {
       await client.close()
     },
+  }
+}
+
+const TICKET_ACTIVITY_KIND_OLD_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text])))"
+const TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION = "CHECK ((kind = ANY (ARRAY['work_paused'::text, 'work_resumed'::text, 'job_blocked'::text, 'job_hold_resolved'::text, 'job_reassigned'::text, 'job_handed_off'::text, 'ticket_canceled'::text, 'ticket_reopened'::text, 'ticket_corrected'::text])))"
+
+type TicketActivityKindConstraintState = {
+  oid: number
+  contype: string
+  convalidated: boolean
+  connoinherit: boolean
+  definition: string
+}
+
+async function ticketActivityKindConstraint(
+  client: PGlite,
+): Promise<TicketActivityKindConstraintState | null> {
+  const result = await client.query<TicketActivityKindConstraintState>(`
+    select
+      oid::int,
+      contype::text,
+      convalidated,
+      connoinherit,
+      pg_get_constraintdef(oid) as definition
+    from pg_constraint
+    where conrelid = to_regclass('public.ticket_activity')
+      and conname = 'ticket_activity_kind_valid'
+  `)
+  return result.rows[0] ?? null
+}
+
+function exactTicketActivityKindConstraint(
+  state: TicketActivityKindConstraintState | null,
+  definition: string,
+): state is TicketActivityKindConstraintState {
+  return state?.contype === 'c'
+    && state.convalidated === true
+    && state.connoinherit === false
+    && state.definition === definition
+}
+
+export async function ensureTicketCorrectionMigration(client: PGlite): Promise<void> {
+  const before = await ticketActivityKindConstraint(client)
+  if (exactTicketActivityKindConstraint(before, TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION)) return
+  if (!exactTicketActivityKindConstraint(before, TICKET_ACTIVITY_KIND_OLD_DEFINITION)) {
+    throw new Error('unexpected ticket correction constraint state in ephemeral database')
+  }
+
+  const migration = await readFile(
+    path.join(process.cwd(), 'drizzle/migrations/0051_shop_os_ticket_corrections.sql'),
+    'utf8',
+  )
+  await client.exec(migration.replaceAll('--> statement-breakpoint', ''))
+
+  const after = await ticketActivityKindConstraint(client)
+  if (!exactTicketActivityKindConstraint(after, TICKET_ACTIVITY_KIND_COMPLETE_DEFINITION)) {
+    throw new Error('ticket correction migration failed in ephemeral database')
   }
 }
 

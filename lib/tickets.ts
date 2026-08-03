@@ -74,7 +74,7 @@ export type AssignmentTierWarning = {
 export type TicketActivityView = {
   id: string
   jobId: string | null
-  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened'
+  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened' | 'ticket_corrected'
   actorName: string | null
   summary: string
   createdAt: Date
@@ -1045,6 +1045,17 @@ function ticketActivitySummary(
       ? `${subject}Retired — the customer declined this work.`
       : `Repair order canceled${bounded(payload.reason) ? ` — ${bounded(payload.reason)}` : '.'}`
     case 'ticket_reopened': return 'Repair order reopened.'
+    case 'ticket_corrected': {
+      switch (payload.scope) {
+        case 'identity': return 'Customer or vehicle corrected.'
+        case 'concern': return 'Concern corrected.'
+        case 'job': return jobTitle ? `${subject}Details corrected.` : 'Repair order corrected.'
+        case 'job_removed': return jobTitle
+          ? `${subject}Removed from active work. It remains in History.`
+          : 'Repair order corrected.'
+        default: return 'Repair order corrected.'
+      }
+    }
   }
 }
 

@@ -11,6 +11,11 @@ export const CUSTOMER_APPROVAL_UNAVAILABLE = {
   body: { error: 'unavailable' },
 } as const
 
+export const TICKET_CORRECTION_UNAVAILABLE = {
+  status: 404,
+  body: { error: 'unavailable' },
+} as const
+
 export function getDiagnosticsRelease(): DiagnosticsRelease {
   if (process.env.NODE_ENV === 'production') return 'off'
   return process.env.DIAGNOSTICS_RELEASE === 'legacy' ? 'legacy' : 'off'
@@ -30,4 +35,8 @@ export function isOperationalMediaEnabled(): false {
 
 export function isCustomerApprovalEnabled(): boolean {
   return process.env.SHOP_OS_CUSTOMER_APPROVAL_ENABLED === 'true'
+}
+
+export function isTicketCorrectionEnabled(): boolean {
+  return process.env.SHOP_OS_TICKET_CORRECTION_ENABLED === 'true'
 }
