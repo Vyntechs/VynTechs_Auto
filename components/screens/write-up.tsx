@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Btn,
@@ -18,6 +18,12 @@ import { TechSelector, type TeamMember } from '@/components/vt/tech-selector'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
+import {
+  encodeTicketIntakeDraft,
+  parseTicketIntakeDraft,
+  ticketIntakeDraftKey,
+  type TicketIntakeDraft,
+} from '@/lib/intake/ticket-intake-draft'
 import styles from './write-up.module.css'
 
 type CounterBody = {
@@ -168,6 +174,7 @@ function ticketErrorMessage(error?: string): string {
 }
 
 export function WriteUp({
+  actorId,
   userEmail,
   recentCustomers = [],
   team = [],
@@ -176,6 +183,7 @@ export function WriteUp({
   cannedTaxRateBps = null,
   cannedCatalogAvailable = true,
 }: {
+  actorId?: string
   userEmail?: string
   recentCustomers?: RecentCustomer[]
   team?: TeamMember[]
@@ -225,16 +233,122 @@ export function WriteUp({
   const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tierWarning, setTierWarning] = useState<TierWarning | null>(null)
+  const [draftNotice, setDraftNotice] = useState<string | null>(null)
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
+  const [recoveryReady, setRecoveryReady] = useState(false)
   // Held across retries so a repeat of the same submission is a replay, not a
   // second repair order. Rotated when the writer changes what they are sending,
   // and cleared once the server has recorded this one.
   const requestIdentityRef = useRef<{ signature: string; clientKey: string } | null>(null)
+  const restoredRef = useRef(false)
 
   const isPickExisting = pickedVehicleId !== null
   // Mirror the counter-ticket requirements. VIN remains optional for walk-ins;
   // customer contact, year/make/model, and concern are required.
   const selectedDiagnostic = diagnosticJobs.find((job) => job.id === selectedDiagnosticId) ?? null
   const selectedKnown = knownWorkJobs.find((job) => job.id === selectedKnownId) ?? null
+  const draftActorId = actorId ?? ''
+  const draftKey = ticketIntakeDraftKey(draftActorId, 'write_up')
+  const formDraft: TicketIntakeDraft['form'] = {
+    existingVehicleId: pickedVehicleId,
+    name,
+    phone,
+    email,
+    year,
+    make,
+    model,
+    engine,
+    vin,
+    mileage,
+    plate,
+    concern: description,
+    assignedTechId,
+    intent,
+    diagnosticMode: diagMode,
+    knownWorkMode: knownMode,
+    selectedDiagnostic: selectedDiagnostic ? { id: selectedDiagnostic.id, fingerprint: selectedDiagnostic.fingerprint } : null,
+    selectedKnownWork: selectedKnown ? { id: selectedKnown.id, fingerprint: selectedKnown.fingerprint } : null,
+    customDiagnosticDescription: customDiagDescription,
+    customDiagnosticHours: customDiagHours,
+    customDiagnosticPrice: customDiagPrice,
+    requestedServiceKind,
+    requestedServiceDescription,
+    customerSuppliedPartsNote,
+    quoteMode: 'manual',
+    selectedCannedJob: null,
+    workKind: 'repair',
+    requestedWork: '',
+  }
+  const hasMeaningfulDraft = Boolean(
+    pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate || description
+    || assignedTechId || selectedDiagnostic || selectedKnown || customDiagDescription || customDiagHours || customDiagPrice
+    || requestedServiceDescription || customerSuppliedPartsNote,
+  )
+  const persistDraft = (pending = requestIdentityRef.current) => {
+    if (!draftKey || !hasMeaningfulDraft) return
+    const encoded = encodeTicketIntakeDraft({ actorId: draftActorId, surface: 'write_up', form: formDraft, pending })
+    if (!encoded) return
+    try { sessionStorage.setItem(draftKey, encoded) } catch { /* recovery is optional when storage is unavailable */ }
+  }
+  const clearDraft = () => {
+    if (!draftKey) return
+    try { sessionStorage.removeItem(draftKey) } catch { /* nothing to clear when storage is unavailable */ }
+  }
+
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    if (!draftKey) {
+      setRecoveryReady(true)
+      return
+    }
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem(draftKey) } catch { /* keep an ordinary blank form */ }
+    const draft = parseTicketIntakeDraft(raw, { actorId: draftActorId, surface: 'write_up' })
+    if (!draft) {
+      if (raw !== null) clearDraft()
+      setRecoveryReady(true)
+      return
+    }
+    const form = draft.form
+    const diagnostic = form.selectedDiagnostic && diagnosticJobs.find((job) =>
+      job.id === form.selectedDiagnostic!.id && job.fingerprint === form.selectedDiagnostic!.fingerprint)
+    const known = form.selectedKnownWork && knownWorkJobs.find((job) =>
+      job.id === form.selectedKnownWork!.id && job.fingerprint === form.selectedKnownWork!.fingerprint)
+    const staleSavedWork = (form.selectedDiagnostic !== null && !diagnostic) || (form.selectedKnownWork !== null && !known)
+    setPickedVehicleId(form.existingVehicleId)
+    setName(form.name); setPhone(form.phone); setEmail(form.email); setYear(form.year); setMake(form.make); setModel(form.model)
+    setEngine(form.engine); setVin(form.vin); setMileage(form.mileage); setPlate(form.plate); setDescription(form.concern)
+    setAssignedTechId(form.assignedTechId); setIntent(form.intent)
+    setDiagMode(form.selectedDiagnostic && !diagnostic ? 'manual' : form.diagnosticMode)
+    setKnownMode(form.selectedKnownWork && !known ? 'manual' : form.knownWorkMode)
+    setSelectedDiagnosticId(diagnostic?.id ?? '')
+    setSelectedKnownId(known?.id ?? '')
+    setCustomDiagDescription(form.customDiagnosticDescription); setCustomDiagHours(form.customDiagnosticHours); setCustomDiagPrice(form.customDiagnosticPrice)
+    setRequestedServiceKind(form.requestedServiceKind); setRequestedServiceDescription(form.requestedServiceDescription)
+    setCustomerSuppliedPartsNote(form.customerSuppliedPartsNote)
+    requestIdentityRef.current = draft.pending
+    setDraftNotice('Draft restored')
+    if (staleSavedWork) setRecoveryNotice('Saved work changed. Choose a current option or type the work.')
+    setRecoveryReady(true)
+  // This runs once after the catalog for this server render is available.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
+
+  useEffect(() => {
+    if (!recoveryReady) return
+    if (hasMeaningfulDraft) persistDraft()
+    else clearDraft()
+  // Persist only observable form changes, after mounted recovery has completed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryReady, hasMeaningfulDraft, JSON.stringify(formDraft)])
+
+  useEffect(() => {
+    if (!recoveryReady || !hasMeaningfulDraft) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [recoveryReady, hasMeaningfulDraft])
   const missing = firstMissingRequirement({
     isPickExisting,
     name,
@@ -415,6 +529,7 @@ export function WriteUp({
     if (requestIdentityRef.current?.signature !== signature) {
       requestIdentityRef.current = { signature, clientKey: crypto.randomUUID() }
     }
+    persistDraft(requestIdentityRef.current)
     try {
       const res = await fetch('/api/tickets/counter', {
         method: 'POST',
@@ -437,6 +552,7 @@ export function WriteUp({
         return
       }
       requestIdentityRef.current = null
+      clearDraft()
       router.push(`/tickets/${payload.ticket.id}`)
     } catch {
       setError('Could not reach the shop. Try again.')
@@ -447,6 +563,11 @@ export function WriteUp({
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     void submitTicket()
+  }
+
+  const discard = () => {
+    clearDraft()
+    router.push('/today')
   }
 
   const handleFormKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
@@ -483,7 +604,7 @@ export function WriteUp({
             sub="Search to find an existing customer or vehicle, or fill in the form below."
             actions={
               <>
-                <Btn kind="ghost" size="sm" type="button" onClick={() => router.push('/today')}>
+                <Btn kind="ghost" size="sm" type="button" onClick={discard}>
                   Discard
                 </Btn>
                 <Btn
@@ -518,6 +639,14 @@ export function WriteUp({
                   onCreateNew={handleCreateNew}
                 />
               </div>
+
+              {draftNotice && (
+                <div className={styles.draftRecovery} role="status" aria-label="Draft restored">
+                  <span>{draftNotice}</span>
+                  <button type="button" className={styles.changeButton} onClick={discard}>Discard draft</button>
+                </div>
+              )}
+              {recoveryNotice && <p className={styles.draftRecoveryAlert} role="alert">{recoveryNotice}</p>}
 
               {isPickExisting ? (
                 <div
@@ -999,7 +1128,7 @@ export function WriteUp({
                 meta={busy ? 'Submitting…' : attempted && missing ? missing.message : ''}
                 actions={
                   <>
-                    <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>
+                    <Btn kind="ghost" type="button" onClick={discard}>
                       Cancel
                     </Btn>
                     <Btn kind="primary" type="submit" disabled={busy} kbd="⌘ ↵">

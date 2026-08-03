@@ -17,6 +17,12 @@ import { PredictiveIntakeSearch } from '@/components/vt/intake-search'
 import type { RecentCustomer } from '@/lib/intake/recent-customers'
 import type { CreateNewPrefill } from '@/lib/intake/tokens-to-prefill'
 import { formatMoneyCents, type SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
+import {
+  encodeTicketIntakeDraft,
+  parseTicketIntakeDraft,
+  ticketIntakeDraftKey,
+  type TicketIntakeDraft,
+} from '@/lib/intake/ticket-intake-draft'
 import styles from './quick-ticket.module.css'
 
 type WorkKind = 'repair' | 'maintenance'
@@ -195,12 +201,14 @@ function cannedLineLabel(line: SafeCannedJobTemplate['lines'][number]): string {
 }
 
 export function QuickTicket({
+  actorId,
   userEmail,
   recentCustomers = [],
   cannedJobs = [],
   cannedTaxRateBps = null,
   cannedCatalogAvailable = true,
 }: {
+  actorId?: string
   userEmail?: string
   recentCustomers?: RecentCustomer[]
   cannedJobs?: SafeCannedJobTemplate[]
@@ -227,16 +235,113 @@ export function QuickTicket({
   const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [catalogRefreshRequired, setCatalogRefreshRequired] = useState(false)
+  const [draftNotice, setDraftNotice] = useState<string | null>(null)
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
+  const [recoveryReady, setRecoveryReady] = useState(false)
   const inFlightRef = useRef(false)
   const requestIdentityRef = useRef<{ signature: string; clientKey: string } | null>(null)
   const catalogRefreshPendingRef = useRef(false)
   const sourceSelectRef = useRef<HTMLSelectElement>(null)
+  const restoredRef = useRef(false)
 
   const pickedVehicle = recentCustomers
     .flatMap((customer) => customer.vehicles)
     .find((vehicle) => vehicle.id === pickedVehicleId)
   const isExisting = pickedVehicleId !== null
   const selectedCannedJob = cannedJobs.find((job) => job.id === selectedCannedId) ?? null
+  const draftActorId = actorId ?? ''
+  const draftKey = ticketIntakeDraftKey(draftActorId, 'quick_ticket')
+  const formDraft: TicketIntakeDraft['form'] = {
+    existingVehicleId: pickedVehicleId,
+    name,
+    phone,
+    email,
+    year,
+    make,
+    model,
+    engine,
+    vin,
+    mileage,
+    plate,
+    concern: '',
+    assignedTechId: null,
+    intent: 'known',
+    diagnosticMode: 'manual',
+    knownWorkMode: 'manual',
+    selectedDiagnostic: null,
+    selectedKnownWork: null,
+    customDiagnosticDescription: '',
+    customDiagnosticHours: '',
+    customDiagnosticPrice: '',
+    requestedServiceKind: 'repair',
+    requestedServiceDescription: '',
+    customerSuppliedPartsNote: '',
+    quoteMode,
+    selectedCannedJob: selectedCannedJob ? { id: selectedCannedJob.id, fingerprint: selectedCannedJob.fingerprint } : null,
+    workKind,
+    requestedWork,
+  }
+  const hasMeaningfulDraft = Boolean(
+    pickedVehicleId || name || phone || email || year || make || model || engine || vin || mileage || plate
+    || selectedCannedJob || requestedWork,
+  )
+  const persistDraft = (pending = requestIdentityRef.current) => {
+    if (!draftKey || !hasMeaningfulDraft) return
+    const encoded = encodeTicketIntakeDraft({ actorId: draftActorId, surface: 'quick_ticket', form: formDraft, pending })
+    if (!encoded) return
+    try { sessionStorage.setItem(draftKey, encoded) } catch { /* recovery is optional when storage is unavailable */ }
+  }
+  const clearDraft = () => {
+    if (!draftKey) return
+    try { sessionStorage.removeItem(draftKey) } catch { /* nothing to clear when storage is unavailable */ }
+  }
+
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    if (!draftKey) {
+      setRecoveryReady(true)
+      return
+    }
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem(draftKey) } catch { /* keep an ordinary blank form */ }
+    const draft = parseTicketIntakeDraft(raw, { actorId: draftActorId, surface: 'quick_ticket' })
+    if (!draft) {
+      if (raw !== null) clearDraft()
+      setRecoveryReady(true)
+      return
+    }
+    const form = draft.form
+    const canned = form.selectedCannedJob && cannedJobs.find((job) =>
+      job.id === form.selectedCannedJob!.id && job.fingerprint === form.selectedCannedJob!.fingerprint)
+    setPickedVehicleId(form.existingVehicleId)
+    setName(form.name); setPhone(form.phone); setEmail(form.email); setYear(form.year); setMake(form.make); setModel(form.model)
+    setEngine(form.engine); setVin(form.vin); setMileage(form.mileage); setPlate(form.plate)
+    setQuoteMode(form.selectedCannedJob && !canned ? 'manual' : form.quoteMode)
+    setSelectedCannedId(canned?.id ?? '')
+    setWorkKind(form.workKind); setRequestedWork(form.requestedWork)
+    requestIdentityRef.current = draft.pending
+    setDraftNotice('Draft restored')
+    if (form.selectedCannedJob && !canned) setRecoveryNotice('Saved canned job changed. Choose a current canned job or type the work.')
+    setRecoveryReady(true)
+  // This runs once after the catalog for this server render is available.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
+
+  useEffect(() => {
+    if (!recoveryReady) return
+    if (hasMeaningfulDraft) persistDraft()
+    else clearDraft()
+  // Persist only observable form changes, after mounted recovery has completed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoveryReady, hasMeaningfulDraft, JSON.stringify(formDraft)])
+
+  useEffect(() => {
+    if (!recoveryReady || !hasMeaningfulDraft) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [recoveryReady, hasMeaningfulDraft])
   useEffect(() => {
     if (!catalogRefreshPendingRef.current) return
     catalogRefreshPendingRef.current = false
@@ -345,6 +450,7 @@ export function QuickTicket({
       requestIdentityRef.current = { signature, clientKey: crypto.randomUUID() }
     }
     const body = { ...unsignedBody, clientKey: requestIdentityRef.current.clientKey }
+    persistDraft(requestIdentityRef.current)
 
     try {
       const response = await fetch('/api/tickets/quick', {
@@ -372,6 +478,8 @@ export function QuickTicket({
         inFlightRef.current = false
         return
       }
+      requestIdentityRef.current = null
+      clearDraft()
       router.push(`/tickets/${ticketId}/quote`)
     } catch {
       setError('Could not reach the shop. Try again with the same details.')
@@ -397,6 +505,11 @@ export function QuickTicket({
     router.refresh()
   }
 
+  const discard = () => {
+    clearDraft()
+    router.push('/today')
+  }
+
   return (
     <div className={`vt-app ${styles.screen}`}>
       <Topbar
@@ -412,7 +525,7 @@ export function QuickTicket({
             sub="Capture the customer and vehicle, then start with exact saved work or a clearly incomplete manual draft."
             actions={
               <>
-                <Btn kind="ghost" size="sm" type="button" disabled={busy} onClick={() => router.push('/today')}>
+                <Btn kind="ghost" size="sm" type="button" disabled={busy} onClick={discard}>
                   Discard
                 </Btn>
                 <Btn
@@ -449,6 +562,14 @@ export function QuickTicket({
                   onCreateNew={createNew}
                 />
               </div>
+
+              {draftNotice && (
+                <div className={styles.draftRecovery} role="status" aria-label="Draft restored">
+                  <span>{draftNotice}</span>
+                  <button type="button" className={styles.changeButton} onClick={discard}>Discard draft</button>
+                </div>
+              )}
+              {recoveryNotice && <p className={styles.draftRecoveryAlert} role="alert">{recoveryNotice}</p>}
 
               {isExisting ? (
                 <div className={styles.selectedVehicle} role="status">
@@ -658,7 +779,7 @@ export function QuickTicket({
                     : 'You send it to the customer from the quote.'}
                 actions={
                   <>
-                    <Btn kind="ghost" type="button" onClick={() => router.push('/today')}>
+                    <Btn kind="ghost" type="button" onClick={discard}>
                       Cancel
                     </Btn>
                     <Btn kind="primary" type="submit" disabled={busy || catalogRefreshRequired} kbd="⌘ ↵">

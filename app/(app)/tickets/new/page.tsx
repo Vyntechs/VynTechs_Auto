@@ -39,6 +39,7 @@ export default async function QuickTicketPage() {
 
   return (
     <QuickTicket
+      actorId={ctx.profile.id}
       userEmail={ctx.user.email}
       recentCustomers={recentCustomers}
       cannedJobs={cannedJobs}

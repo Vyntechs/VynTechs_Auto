@@ -9,6 +9,10 @@ vi.mock('next/navigation', () => ({
 }))
 
 import { WriteUp } from '@/components/screens/write-up'
+import { encodeTicketIntakeDraft, ticketIntakeDraftKey } from '@/lib/intake/ticket-intake-draft'
+
+const draftActorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const draftKey = ticketIntakeDraftKey(draftActorId, 'write_up')!
 
 describe('WriteUp page wiring (search + form)', () => {
   beforeEach(() => {
@@ -21,6 +25,7 @@ describe('WriteUp page wiring (search + form)', () => {
     )
   })
   afterEach(() => {
+    sessionStorage.clear()
     vi.unstubAllGlobals()
     vi.clearAllMocks()
     mockPush.mockReset()
@@ -189,5 +194,36 @@ describe('WriteUp page wiring (search + form)', () => {
     await user.click(screen.getByRole('button', { name: /cancel/i }))
     expect(mockPush).toHaveBeenNthCalledWith(1, '/today')
     expect(mockPush).toHaveBeenNthCalledWith(2, '/today')
+  })
+
+  it('restores same-actor typed intake work once, keeps its retry identity, and lets the writer discard it', async () => {
+    const user = userEvent.setup()
+    const encoded = encodeTicketIntakeDraft({
+      actorId: draftActorId,
+      surface: 'write_up',
+      form: {
+        existingVehicleId: null, name: 'Marisol Vega', phone: '(214) 555-0197', email: 'marisol@example.com',
+        year: '2019', make: 'Ford', model: 'F-150', engine: '3.5L', vin: '1FTFW1E41KFA00001', mileage: '88420',
+        plate: 'TEX-4192', concern: 'Rough idle after warm-up', assignedTechId: null, intent: 'known',
+        diagnosticMode: 'manual', knownWorkMode: 'manual', selectedDiagnostic: null, selectedKnownWork: null,
+        customDiagnosticDescription: '', customDiagnosticHours: '', customDiagnosticPrice: '', requestedServiceKind: 'repair',
+        requestedServiceDescription: 'Check ignition coils', customerSuppliedPartsNote: 'Customer has plugs',
+        quoteMode: 'manual', selectedCannedJob: null, workKind: 'repair', requestedWork: '',
+      },
+      pending: { signature: 'stable-counter-signature', clientKey: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+    })!
+    sessionStorage.setItem(draftKey, encoded)
+
+    render(<WriteUp actorId={draftActorId} userEmail="test@example.com" />)
+
+    expect(await screen.findByRole('status', { name: /draft restored/i })).toHaveTextContent('Draft restored')
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue('Marisol Vega')
+    expect(screen.getByLabelText(/what brought them in/i)).toHaveValue('Rough idle after warm-up')
+    expect(screen.getByLabelText(/^requested work$/i)).toHaveValue('Check ignition coils')
+    expect(sessionStorage.getItem(draftKey)).not.toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /discard draft/i }))
+    expect(sessionStorage.getItem(draftKey)).toBeNull()
+    expect(mockPush).toHaveBeenCalledWith('/today')
   })
 })

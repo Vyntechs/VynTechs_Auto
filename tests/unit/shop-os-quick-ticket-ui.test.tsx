@@ -37,6 +37,10 @@ vi.mock('@/lib/intake/recent-customers', async (importOriginal) => {
 
 import QuickTicketPage from '@/app/(app)/tickets/new/page'
 import { QuickTicket } from '@/components/screens/quick-ticket'
+import { encodeTicketIntakeDraft, ticketIntakeDraftKey } from '@/lib/intake/ticket-intake-draft'
+
+const draftActorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const quickDraftKey = ticketIntakeDraftKey(draftActorId, 'quick_ticket')!
 
 const vehicleId = '11111111-1111-4111-8111-111111111111'
 const ticketId = '33333333-3333-4333-8333-333333333333'
@@ -141,6 +145,7 @@ describe('QuickTicket', () => {
   })
 
   afterEach(() => {
+    sessionStorage.clear()
     vi.unstubAllGlobals()
     vi.clearAllMocks()
   })
@@ -152,6 +157,25 @@ describe('QuickTicket', () => {
     expect(screen.getByText(/nothing is prepared, sent, approved, or started here/i)).toBeInTheDocument()
     expect(screen.getByText(/typing it in starts the repair order with no prices/i)).toBeInTheDocument()
     expect(screen.queryByText(/auto.?save|\bAI\b|send quote|assign technician|start work/i)).toBeNull()
+  })
+
+  it('restores a same-actor canned selection only when the current fingerprint matches, without rendering the encoded draft', async () => {
+    const encoded = encodeTicketIntakeDraft({
+      actorId: draftActorId,
+      surface: 'quick_ticket',
+      form: {
+        existingVehicleId: null, name: 'Marisol Vega', phone: '2145550197', email: 'marisol@example.com', year: '2019', make: 'Ford', model: 'F-150', engine: '3.5L', vin: '1FTFW1E41KFA00001', mileage: '88420', plate: 'TEX-4192', concern: '', assignedTechId: null,
+        intent: 'known', diagnosticMode: 'manual', knownWorkMode: 'manual', selectedDiagnostic: null, selectedKnownWork: null, customDiagnosticDescription: '', customDiagnosticHours: '', customDiagnosticPrice: '', requestedServiceKind: 'repair', requestedServiceDescription: '', customerSuppliedPartsNote: '', quoteMode: 'canned', selectedCannedJob: { id: cannedId, fingerprint: 'a'.repeat(64) }, workKind: 'maintenance', requestedWork: 'Keep this typed work',
+      }, pending: null,
+    })!
+    sessionStorage.setItem(quickDraftKey, encoded)
+
+    const { container } = render(<QuickTicket actorId={draftActorId} cannedJobs={[cannedJob]} cannedTaxRateBps={825} />)
+
+    expect(await screen.findByRole('status', { name: /draft restored/i })).toHaveTextContent('Draft restored')
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue('Marisol Vega')
+    expect(screen.getByLabelText('Canned job')).toHaveValue(cannedId)
+    expect(container.textContent).not.toContain(encoded)
   })
 
   // Same defect the counter intake had on 2026-07-28: the writer pressed a
@@ -560,6 +584,7 @@ describe('/tickets/new page', () => {
     })
     expect(result.type).toBe(QuickTicket)
     expect(result.props).toMatchObject({
+      actorId: 'profile-1',
       userEmail: 'avery@shop.test',
       recentCustomers,
       cannedJobs: [cannedJob],

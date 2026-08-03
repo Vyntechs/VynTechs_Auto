@@ -41,6 +41,7 @@ export default async function IntakePage() {
 
   return (
     <WriteUp
+      actorId={ctx.profile.id}
       userEmail={ctx.user.email}
       recentCustomers={recentCustomers}
       team={team.members}
