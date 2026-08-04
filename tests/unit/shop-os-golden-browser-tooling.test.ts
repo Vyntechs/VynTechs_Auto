@@ -48,9 +48,12 @@ describe('Golden browser QA control', () => {
     expect(proof).toMatch(/active inline tool|Work on this job/i)
   })
 
-  it('removes database, Buzz, Nostr, Vercel, and QA credentials before the proof spawn', () => {
+  it('passes only the minimal runtime allowlist to the proof spawn', () => {
     const environment = technicianHandoffEnvironment({
       PATH: '/safe/bin',
+      HOME: '/safe/home',
+      TMPDIR: '/safe/tmp',
+      CI: '1',
       PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
       DATABASE_URL: 'must-not-escape',
       SUPABASE_SERVICE_ROLE_KEY: 'must-not-escape',
@@ -59,10 +62,19 @@ describe('Golden browser QA control', () => {
       NOSTR_PRIVATE_KEY: 'must-not-escape',
       VERCEL_TOKEN: 'must-not-escape',
       GOLDEN_QA_TECH_PASSWORD: 'must-not-escape',
+      STRIPE_SECRET_KEY: 'must-not-escape',
+      ANTHROPIC_API_KEY: 'must-not-escape',
+      OPENAI_API_KEY: 'must-not-escape',
+      GITHUB_TOKEN: 'must-not-escape',
+      NODE_OPTIONS: '--require must-not-run',
+      UNLISTED_SECRET: 'must-not-escape',
     })
 
     expect(environment).toEqual({
       PATH: '/safe/bin',
+      HOME: '/safe/home',
+      TMPDIR: '/safe/tmp',
+      CI: '1',
       PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
       TECHNICIAN_HANDOFF_BASE_URL: CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
     })

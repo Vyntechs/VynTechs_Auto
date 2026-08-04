@@ -14,6 +14,17 @@ export const TECHNICIAN_HANDOFF_FORBIDDEN_ENVIRONMENT = Object.freeze([
   'VERCEL_TOKEN',
 ])
 
+export const TECHNICIAN_HANDOFF_PASSTHROUGH_ENVIRONMENT = Object.freeze([
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'CI',
+  'PLAYWRIGHT_BROWSERS_PATH',
+  'PLAYWRIGHT_USE_SYSTEM_CHROME',
+])
+
 const forbiddenPrefix = /^(?:BUZZ_|NOSTR_|GOLDEN_QA_(?:OWNER|ADVISOR|TECH|RELIEF|PARTS)_)/
 
 export function technicianHandoffEnvironment(
@@ -21,11 +32,9 @@ export function technicianHandoffEnvironment(
   baseUrl = CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
 ) {
   const result = {}
-  for (const [name, value] of Object.entries(environment)) {
+  for (const name of TECHNICIAN_HANDOFF_PASSTHROUGH_ENVIRONMENT) {
+    const value = environment[name]
     if (value === undefined) continue
-    if (TECHNICIAN_HANDOFF_FORBIDDEN_ENVIRONMENT.includes(name)) continue
-    if (forbiddenPrefix.test(name)) continue
-    if (name === 'VERCEL_ENV') continue
     result[name] = value
   }
   result.TECHNICIAN_HANDOFF_BASE_URL = baseUrl
