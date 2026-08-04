@@ -19,7 +19,7 @@ import {
 } from '@/lib/db/schema'
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
 import { stableStringify } from '@/lib/shop-os/quote-math'
-import { createQuoteVersion } from '@/lib/shop-os/quotes'
+import { createQuoteVersion, getQuoteBuilder } from '@/lib/shop-os/quotes'
 import {
   correctTicket,
   type TicketCorrectionDependencies,
@@ -113,9 +113,15 @@ async function storedJob(golden: Golden, jobId: string) {
 }
 
 async function prepareVersion(golden: Golden, ticketId: string) {
+  const actor = { profileId: golden.people.advisor.id }
+  const builder = await getQuoteBuilder(golden.db, { actor, ticketId })
+  if (!builder.ok || !builder.builder.draftCommitment) {
+    throw new Error('quote commitment fixture failed')
+  }
   const result = await createQuoteVersion(golden.db, {
-    actor: { profileId: golden.people.advisor.id },
+    actor,
     ticketId,
+    expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
   })
   if (!result.ok) throw new Error('quote fixture failed')
   const [version] = await golden.db.select().from(quoteVersions).where(eq(quoteVersions.id, result.version.id))

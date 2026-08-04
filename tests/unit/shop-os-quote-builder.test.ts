@@ -3,11 +3,12 @@ import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  getQuoteBuilder, manualDraftLineFingerprint, quoteSnapshotFingerprint, type QuoteActor,
+  createDraftLine, deleteDraftLine, getQuoteBuilder, manualDraftLineFingerprint,
+  quoteSnapshotFingerprint, replaceDraftLine, type QuoteActor,
 } from '@/lib/shop-os/quotes'
 import {
-  customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets,
-  vehicles, vendorAccounts,
+  customers, jobLines, profiles, quoteSends, quoteVersions, sessionEvents, sessions, shops,
+  ticketJobs, tickets, vehicles, vendorAccounts,
 } from '@/lib/db/schema'
 import { createTestDb, type TestDb } from '@/tests/helpers/db'
 
@@ -610,6 +611,154 @@ describe('Shop OS quote builder read model', () => {
         laborRateConfigured: false, taxRateConfigured: false,
       } },
     })
+  })
+
+  it('compares the locked manual-line revision before no-op, overwrite, delete, or invalidation', async () => {
+    const [original] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
+    const staleFingerprint = manualDraftLineFingerprint(original)
+    const changedBody = {
+      kind: 'part', description: 'Current pads', quantity: '2', priceCents: 13_500,
+      taxable: true, partNumber: 'PAD', brand: 'ACME', unitCostCents: 7_000,
+      coreChargeCents: 100, fitment: 'Front',
+    }
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: staleFingerprint,
+      body: changedBody,
+    })).resolves.toMatchObject({
+      ok: true, changed: true, line: { description: 'Current pads', priceCents: 13_500 },
+    })
+
+    const activeSnapshot = {
+      schemaVersion: 1,
+      ticket: {
+        id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11),
+        laborRateCents: 15_000, taxRateBps: 825,
+      },
+      jobs: [{
+        id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+        lines: [], attachments: [], totals: { subtotalCents: 0, taxableSubtotalCents: 0 },
+      }],
+      totals: { subtotalCents: 0, taxableSubtotalCents: 0, taxCents: 0, totalCents: 0 },
+    }
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1, snapshot: activeSnapshot,
+      createdByProfileId: uuid(1),
+    }).returning()
+    await db.update(ticketJobs).set({
+      approvalState: 'approved', approvedQuoteVersionId: version.id,
+    }).where(eq(ticketJobs.id, uuid(30)))
+    const sentAt = new Date('2026-08-04T12:00:00.000Z')
+    await db.insert(quoteSends).values({
+      shopId, ticketId, quoteVersionId: version.id, customerId: uuid(10), subjectKey: uuid(10),
+      destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date('2026-08-05T12:00:00.000Z'),
+      requestingActorProfileId: uuid(1), requestKey: uuid(91), requestFingerprint: 'c'.repeat(64),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
+    })
+
+    const beforeConflict = {
+      lines: await db.select().from(jobLines).where(eq(jobLines.id, uuid(40))),
+      versions: await db.select().from(quoteVersions),
+      jobs: await db.select().from(ticketJobs),
+      links: await db.select().from(quoteSends),
+    }
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: staleFingerprint,
+      body: changedBody,
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: staleFingerprint,
+      body: {
+        kind: 'part', description: 'Pads', quantity: '2', priceCents: 12_500,
+        taxable: true, partNumber: 'PAD', brand: 'ACME', unitCostCents: 7_000,
+        coreChargeCents: 100, fitment: 'Front',
+      },
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: staleFingerprint,
+    })).resolves.toEqual({ ok: false, error: 'conflict', retryable: false })
+    expect({
+      lines: await db.select().from(jobLines).where(eq(jobLines.id, uuid(40))),
+      versions: await db.select().from(quoteVersions),
+      jobs: await db.select().from(ticketJobs),
+      links: await db.select().from(quoteSends),
+    }).toEqual(beforeConflict)
+  })
+
+  it('accepts current line revisions, invalidates successful changes atomically, and preserves create replay', async () => {
+    const [original] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
+    const [version] = await db.insert(quoteVersions).values({
+      shopId, ticketId, versionNumber: 1,
+      snapshot: {
+        schemaVersion: 1,
+        ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+        jobs: [{ id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null, lines: [], attachments: [], totals: { subtotalCents: 0, taxableSubtotalCents: 0 } }],
+        totals: { subtotalCents: 0, taxableSubtotalCents: 0, taxCents: 0, totalCents: 0 },
+      },
+      createdByProfileId: uuid(1),
+    }).returning()
+    await db.update(ticketJobs).set({
+      approvalState: 'approved', approvedQuoteVersionId: version.id,
+    }).where(eq(ticketJobs.id, uuid(30)))
+    const sentAt = new Date('2026-08-04T12:00:00.000Z')
+    await db.insert(quoteSends).values({
+      shopId, ticketId, quoteVersionId: version.id, customerId: uuid(10), subjectKey: uuid(10),
+      destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date('2026-08-05T12:00:00.000Z'),
+      requestingActorProfileId: uuid(1), requestKey: uuid(92), requestFingerprint: 'c'.repeat(64),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
+    })
+
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: manualDraftLineFingerprint(original),
+      body: {
+        kind: 'part', description: 'Updated pads', quantity: '2', priceCents: 12_500,
+        taxable: true, partNumber: 'PAD', brand: 'ACME', unitCostCents: 7_000,
+        coreChargeCents: 100, fitment: 'Front',
+      },
+    })).resolves.toMatchObject({ ok: true, changed: true })
+    expect((await db.select().from(quoteVersions))[0].supersededAt).not.toBeNull()
+    expect((await db.select().from(quoteSends))[0]).toMatchObject({
+      state: 'expired', tokenHash: null, tokenExpiresAt: null,
+    })
+    expect((await db.select().from(ticketJobs).where(eq(ticketJobs.id, uuid(30))))[0]).toMatchObject({
+      approvalState: 'pending_quote', approvedQuoteVersionId: null,
+    })
+
+    const [current] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: manualDraftLineFingerprint(current),
+    })).resolves.toEqual({ ok: true, changed: true })
+    expect(await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))).toEqual([])
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: manualDraftLineFingerprint(current),
+    })).resolves.toEqual({ ok: true, changed: false })
+
+    const createInput = {
+      actor, ticketId, jobId: uuid(30), clientKey: uuid(97),
+      body: { kind: 'fee', description: 'Shop supplies', priceCents: 500, taxable: true },
+    }
+    const first = await createDraftLine(db, createInput)
+    await expect(createDraftLine(db, createInput)).resolves.toEqual({ ...first, changed: false })
+  })
+
+  it('rejects malformed line fingerprints before any database or actor work', async () => {
+    const input = {
+      actor, ticketId, jobId: uuid(30), lineId: uuid(40),
+      expectedLineFingerprint: 'A'.repeat(64),
+    }
+    await expect(replaceDraftLine(null as never, {
+      ...input,
+      body: { kind: 'fee', description: 'Shop supplies', priceCents: 500, taxable: true },
+    })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+    await expect(deleteDraftLine(null as never, input)).resolves.toEqual({ ok: false, error: 'invalid_input' })
   })
 
   it('derives the tenant from a current persisted builder role and canonicalizes UUIDs', async () => {

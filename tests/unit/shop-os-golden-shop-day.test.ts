@@ -4,7 +4,9 @@ import { jobPartRequests, quoteEvents, ticketActivity, ticketPayments } from '@/
 import { createCounterTicket } from '@/lib/intake/counter-ticket'
 import { projectLivingTicketCommands } from '@/lib/shop-os/living-ticket'
 import { createPartRequest, resolvePartRequest } from '@/lib/shop-os/part-requests'
-import { createDraftLine, createQuoteVersion, recordQuoteDecision } from '@/lib/shop-os/quotes'
+import {
+  createDraftLine, createQuoteVersion, getQuoteBuilder, recordQuoteDecision,
+} from '@/lib/shop-os/quotes'
 import { closeTicket, getTicketRingOut, recordTicketPayment } from '@/lib/shop-os/ring-out'
 import { getSimpleWorkWorkspace, mutateSimpleWork } from '@/lib/shop-os/simple-work'
 import { mutateJobInterruption } from '@/lib/shop-os/interruption'
@@ -69,8 +71,13 @@ describe('Golden Shop Day release gate', () => {
           body: { kind: 'labor', description, taxable: false, laborHours: '1' },
         })).toMatchObject({ ok: true, changed: true })
       }
+      const builder = await getQuoteBuilder(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+      })
+      if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment failed')
       const version = await createQuoteVersion(golden.db, {
         actor: { profileId: golden.people.advisor.id }, ticketId: created.ticket.id,
+        expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
       })
       expect(version).toMatchObject({ ok: true, changed: true })
       if (!version.ok) throw new Error('quote version failed')
@@ -193,9 +200,14 @@ describe('Golden Shop Day release gate', () => {
       })
       expect(line).toMatchObject({ ok: true, changed: true })
 
+      const builder = await getQuoteBuilder(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId,
+      })
+      if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment failed')
       const version = await createQuoteVersion(golden.db, {
         actor: { profileId: golden.people.advisor.id },
         ticketId,
+        expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
       })
       expect(version).toMatchObject({ ok: true, changed: true })
       if (!version.ok) throw new Error('quote version failed')

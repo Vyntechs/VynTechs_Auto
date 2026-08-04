@@ -36,6 +36,7 @@ const MAX_LABOR_HOURS_SCALED = 99_999_999n
 const MAX_POSTGRES_INTEGER = 2_147_483_647
 const MAX_SNAPSHOT_BYTES = 65_536
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
+const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/)
 const moneySchema = z.number().int().min(0).max(MAX_SAFE_INTEGER)
 const boundedText = (max: number) => z.string().max(max)
 const commonShape = {
@@ -1749,11 +1750,14 @@ function validatedActiveSnapshot(
 
 export async function createQuoteVersion(
   db: AppDb,
-  input: { actor: QuoteActor; ticketId: unknown },
+  input: { actor: QuoteActor; ticketId: unknown; expectedDraftFingerprint: unknown },
   dependencies: CreateQuoteVersionDependencies = {},
 ): Promise<CreateQuoteVersionResult> {
   const parsedTicket = uuidSchema.safeParse(input.ticketId)
-  if (!parsedTicket.success) return { ok: false, error: 'invalid_input' }
+  const parsedFingerprint = fingerprintSchema.safeParse(input.expectedDraftFingerprint)
+  if (!parsedTicket.success || !parsedFingerprint.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
   const persistedActor = await loadActiveActor(db, input.actor)
   if (!persistedActor?.shopId) return notFound()
   try {
@@ -1771,6 +1775,9 @@ export async function createQuoteVersion(
       try {
         snapshot = buildQuoteSnapshot(context)
       } catch {
+        throw new AbortVersionCreation(conflict())
+      }
+      if (quoteSnapshotFingerprint(snapshot) !== parsedFingerprint.data) {
         throw new AbortVersionCreation(conflict())
       }
       const active = activeVersions[0]
@@ -2251,10 +2258,18 @@ export async function createDraftLine(
 
 export async function replaceDraftLine(
   db: AppDb,
-  input: { actor: QuoteActor; ticketId: unknown; jobId: unknown; lineId: unknown; body: unknown },
+  input: {
+    actor: QuoteActor
+    ticketId: unknown
+    jobId: unknown
+    lineId: unknown
+    expectedLineFingerprint: unknown
+    body: unknown
+  },
 ): Promise<QuoteDraftResult> {
   const parsedLineId = uuidSchema.safeParse(input.lineId)
-  if (!parsedLineId.success || !manualLineSchema.safeParse(input.body).success) {
+  const parsedFingerprint = fingerprintSchema.safeParse(input.expectedLineFingerprint)
+  if (!parsedLineId.success || !parsedFingerprint.success || !manualLineSchema.safeParse(input.body).success) {
     return { ok: false, error: 'invalid_input' }
   }
   return runMutation(db, input.actor, input.ticketId, input.jobId, {}, async (tx, context) => {
@@ -2264,6 +2279,11 @@ export async function replaceDraftLine(
       && isMutableManualLine(line),
     )
     if (!existing) return notFound()
+    try {
+      if (manualDraftLineFingerprint(existing) !== parsedFingerprint.data) return conflict()
+    } catch {
+      return conflict()
+    }
     const desired = normalizedLine(input.body, context.shopRateCents, existing)
     if (!desired) return { ok: false, error: 'invalid_input' }
     if (sameLine(existing, desired)) {
@@ -2288,10 +2308,19 @@ export async function replaceDraftLine(
 
 export async function deleteDraftLine(
   db: AppDb,
-  input: { actor: QuoteActor; ticketId: unknown; jobId: unknown; lineId: unknown },
+  input: {
+    actor: QuoteActor
+    ticketId: unknown
+    jobId: unknown
+    lineId: unknown
+    expectedLineFingerprint: unknown
+  },
 ): Promise<QuoteDraftResult> {
   const parsedLineId = uuidSchema.safeParse(input.lineId)
-  if (!parsedLineId.success) return { ok: false, error: 'invalid_input' }
+  const parsedFingerprint = fingerprintSchema.safeParse(input.expectedLineFingerprint)
+  if (!parsedLineId.success || !parsedFingerprint.success) {
+    return { ok: false, error: 'invalid_input' }
+  }
   return runMutation(db, input.actor, input.ticketId, input.jobId, {}, async (tx, context) => {
     const namedLine = context.lineRows.find((line) =>
       line.id === parsedLineId.data && line.jobId === context.jobId,
@@ -2299,6 +2328,11 @@ export async function deleteDraftLine(
     if (namedLine && !isMutableManualLine(namedLine)) return notFound()
     const existing = namedLine
     if (!existing) return { ok: true, changed: false }
+    try {
+      if (manualDraftLineFingerprint(existing) !== parsedFingerprint.data) return conflict()
+    } catch {
+      return conflict()
+    }
     const [deleted] = await tx.delete(jobLines).where(and(
       eq(jobLines.shopId, context.shopId),
       eq(jobLines.jobId, context.jobId),
