@@ -10,7 +10,7 @@
 
 **Approved design:** `docs/superpowers/specs/2026-08-04-shop-os-quote-composition-commitment-design.md`
 
-**Re-plans:** 1 — Task 1 keeps the widened server projection fields required at compile time as well as runtime. TypeScript exposed four consumer fixtures, so Task 1 gained mechanical fixture-only ownership rather than weakening the contract to optional.
+**Re-plans:** 2 — Task 1 keeps the widened server projection fields required at compile time as well as runtime. TypeScript exposed four consumer fixtures, so Task 1 gained mechanical fixture-only ownership rather than weakening the contract to optional. Task 2 likewise keeps CAS tokens mandatory; TypeScript exposed seven legacy direct-caller test fixtures, so Task 2 gained mechanical fixture-only ownership rather than accepting tokenless writes.
 
 **Baseline note:** Exact clean main `9dc3845` ran all eight shards with 4,208 passing tests and one focus assertion failure in the existing manual quote-builder suite; that exact assertion passed immediately in a one-worker isolated rerun. This is not accepted as a green baseline receipt. The final branch must pass the complete eight-shard gate.
 
@@ -157,6 +157,13 @@ Expected: focused projection/version tests, TypeScript, and diff checks pass.
 - Modify: `tests/unit/shop-os-quote-builder.test.ts`
 - Modify: `tests/unit/shop-os-quote-versions.test.ts`
 - Modify: `tests/unit/shop-os-quote-routes.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-canned-job-apply.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-golden-shop-day.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-quote-drafts.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-save-job-as-canned.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-supplemental-diagnostic.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-ticket-building-correction-harness.test.ts`
+- Mechanical caller updates: `tests/unit/shop-os-ticket-corrections.test.ts`
 
 **Interfaces:**
 - `replaceDraftLine` additionally requires `expectedLineFingerprint: unknown` beside `body`.
