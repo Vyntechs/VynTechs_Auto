@@ -266,3 +266,8 @@ Reason: Chrome logs handled 409/503 responses as errors; an unmodeled refusal cr
 Trigger: A read-only reviewer reran Playwright, which cleared ignored screenshots before sandbox startup failed.
 Rule: Copy required browser artifacts to a stable receipt before any independent rerun.
 Reason: Playwright clears test-results at startup, so a failed reviewer rerun can erase valid evidence.
+
+### resolve-review-head-before-dispatch
+Trigger: Preparing a reviewer packet with a commit identifier.
+Rule: Insert the exact output of `git rev-parse HEAD`; never manually extend a short hash.
+Reason: One mistyped character triggered a false review stop despite a correct diff package.
