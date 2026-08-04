@@ -191,7 +191,7 @@ describe('Shop OS exact-version approval UI', () => {
     expect(draft).toHaveFocus()
     expect(screen.getByText('Quote changed elsewhere. Finish or cancel this edit, then refresh.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
-    expect(screen.getByText('Prepared version V3')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Prepared V3 remains current' })).toBeInTheDocument()
   })
 
   it('queues approval truth while a local mutation is unresolved and revalidates after it settles', async () => {
