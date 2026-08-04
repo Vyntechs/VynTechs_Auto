@@ -30,7 +30,10 @@ import {
   listReadyToCollectTickets,
   type ReadyToCollectTicket,
 } from '@/lib/shop-os/ready-to-collect'
-import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
+import {
+  appendTicketActivity,
+  isTicketCorrectionReceiptV1,
+} from '@/lib/shop-os/ticket-activity'
 import {
   invalidateActiveQuoteVersion,
   isLockUnavailable,
@@ -125,6 +128,7 @@ export type TicketDetail = {
     updatedAt: Date
   }>
   activities?: TicketActivityView[]
+  correctedRemovedJobIds?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -952,6 +956,28 @@ async function loadTicketDetail(
     .orderBy(desc(ticketActivity.createdAt), desc(ticketActivity.id))
     .limit(20)
   const jobTitles = new Map(jobs.map((job) => [job.id, job.title]))
+  const correctedRemovalRows = await db
+    .select({
+      jobId: ticketActivity.jobId,
+      payload: ticketActivity.payload,
+    })
+    .from(ticketActivity)
+    .where(and(
+      eq(ticketActivity.shopId, shopId),
+      eq(ticketActivity.ticketId, ticketId),
+      eq(ticketActivity.kind, 'ticket_corrected'),
+      isNotNull(ticketActivity.jobId),
+      sql`${ticketActivity.payload}->>'scope' = 'job_removed'`,
+    ))
+  const ticketJobIds = new Set(jobs.map((job) => job.id))
+  const correctedRemovedJobIds = [...new Set(correctedRemovalRows.flatMap((activity) => (
+    activity.jobId
+      && ticketJobIds.has(activity.jobId)
+      && isTicketCorrectionReceiptV1(activity.payload, activity.jobId)
+      && activity.payload.scope === 'job_removed'
+      ? [activity.jobId]
+      : []
+  )))]
 
   return {
     id: row.id,
@@ -1019,6 +1045,7 @@ async function loadTicketDetail(
       correctionScope: ticketActivityCorrectionScope(activity.kind, activity.payload, activity.jobId),
       createdAt: activity.createdAt,
     })),
+    correctedRemovedJobIds,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

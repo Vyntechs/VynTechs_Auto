@@ -130,6 +130,7 @@ const ticketSchema = z.strictObject({
   }).nullable(),
   jobs: z.array(jobSchema).max(500),
   activities: z.array(activitySchema).max(20),
+  correctedRemovedJobIds: z.array(uuid).max(500).optional(),
   createdAt: date,
   updatedAt: date,
 }).superRefine((ticket, context) => {
@@ -140,6 +141,11 @@ const ticketSchema = z.strictObject({
   if (ticket.activities.some((activity) => (
     activity.jobId !== null && !jobIds.includes(activity.jobId)
   ))) context.addIssue({ code: 'custom', message: 'activity job is not on this ticket' })
+  if (ticket.correctedRemovedJobIds
+    && (new Set(ticket.correctedRemovedJobIds).size !== ticket.correctedRemovedJobIds.length
+      || ticket.correctedRemovedJobIds.some((jobId) => !jobIds.includes(jobId)))) {
+    context.addIssue({ code: 'custom', message: 'removed correction job is not unique on this ticket' })
+  }
 })
 
 export function parseTicketCorrectionBaseline(

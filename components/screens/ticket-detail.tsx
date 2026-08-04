@@ -165,7 +165,7 @@ export function TicketDetailScreen({
     ? emailHref(ticket.customer.email)
     : null
   const activities = ticket.activities ?? []
-  const correctedRemovedJobIds = new Set(activities.flatMap((activity) => (
+  const correctedRemovedJobIds = new Set(ticket.correctedRemovedJobIds ?? activities.flatMap((activity) => (
     activity.kind === 'ticket_corrected'
       && activity.correctionScope === 'job_removed'
       && activity.jobId

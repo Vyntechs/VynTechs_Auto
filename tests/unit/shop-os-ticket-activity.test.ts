@@ -405,6 +405,53 @@ describe('ticket activity persistence contract', () => {
       await fixture.close()
     }
   })
+
+  it('retains validated removal provenance beyond the 20-item activity window', async () => {
+    const fixture = await createCorrectionFixture()
+    try {
+      const correctionCreatedAt = new Date('2026-08-03T15:00:00.000Z')
+      await fixture.db.insert(schema.ticketActivity).values({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_corrected' as never,
+        requestKey: uuid(520),
+        payload: {
+          v: 1,
+          scope: 'job_removed',
+          intentHash: 'c'.repeat(64),
+          changedFields: ['work_status'],
+        },
+        createdAt: correctionCreatedAt,
+      })
+      await fixture.db.insert(schema.ticketActivity).values(Array.from({ length: 21 }, (_, index) => ({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'job_reassigned' as const,
+        requestKey: uuid(521 + index),
+        payload: {},
+        createdAt: new Date(correctionCreatedAt.getTime() + (index + 1) * 1_000),
+      })))
+
+      const detail = await getTicketDetail(fixture.db, {
+        actor: ticketActorFromProfile(fixture.actor),
+        ticketId: fixture.ticket.id,
+      })
+
+      expect(detail.ok).toBe(true)
+      if (!detail.ok) return
+      expect(detail.ticket.activities).toHaveLength(20)
+      expect(detail.ticket.activities).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: expect.any(String), correctionScope: 'job_removed' }),
+      ]))
+      expect(detail.ticket.correctedRemovedJobIds).toEqual([fixture.job.id])
+    } finally {
+      await fixture.close()
+    }
+  })
 })
 
 async function expectAppendOnlyFailure(operation: Promise<unknown>): Promise<void> {

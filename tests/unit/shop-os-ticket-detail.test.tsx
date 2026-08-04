@@ -639,6 +639,23 @@ describe('TicketDetailScreen', () => {
       .toHaveTextContent('Removed')
   })
 
+  it('keeps the Removed label when its correction receipt has aged out of recent activity', () => {
+    const corrected = job({
+      id: 'corrected',
+      title: 'Duplicate inspection',
+      kind: 'repair',
+      workStatus: 'canceled',
+    })
+    render(<TicketDetailScreen ticket={ticket({
+      jobs: [corrected],
+      activities: [],
+      correctedRemovedJobIds: ['corrected'],
+    })} />)
+
+    expect(screen.getByRole('heading', { name: 'Duplicate inspection' }).closest('li'))
+      .toHaveTextContent('Removed')
+  })
+
   it('keeps the correction controls and detent accessible without decorative motion', () => {
     const css = readFileSync(
       resolve(process.cwd(), 'components/screens/ticket-detail.module.css'),

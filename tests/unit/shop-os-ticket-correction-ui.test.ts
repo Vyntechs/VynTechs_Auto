@@ -89,8 +89,9 @@ function rawQuoteForJob(job: {
 
 describe('strict ticket correction client truth', () => {
   it('rehydrates a complete tenant-safe ticket and quote baseline before editing', () => {
+    const ticket = { ...rawTicket(), correctedRemovedJobIds: [IDS.job] }
     const parsed = parseTicketCorrectionBaseline(
-      { ticket: rawTicket(), quote: rawQuote() },
+      { ticket, quote: rawQuote() },
       { ticketId: IDS.ticket, target: { kind: 'job', jobId: IDS.job } },
     )
 
@@ -98,6 +99,7 @@ describe('strict ticket correction client truth', () => {
     expect(parsed?.ticket.jobs[0].updatedAt).toBeInstanceOf(Date)
     expect(parsed?.ticket.activities?.[0].createdAt).toBeInstanceOf(Date)
     expect(parsed?.ticket.activities?.[0].correctionScope).toBe('job')
+    expect(parsed?.ticket.correctedRemovedJobIds).toEqual([IDS.job])
     expect(parsed?.quote.activeVersion).toMatchObject({ id: IDS.version, versionNumber: 1 })
   })
 
@@ -115,6 +117,12 @@ describe('strict ticket correction client truth', () => {
       const { summary: _removed, ...activity } = ticket.activities[0]
       return { ticket: { ...ticket, activities: [activity] }, quote: rawQuote() }
     }],
+    ['a removed correction for another ticket job', () => ({
+      ticket: { ...rawTicket(), correctedRemovedJobIds: [IDS.secondJob] }, quote: rawQuote(),
+    })],
+    ['duplicate removed correction job IDs', () => ({
+      ticket: { ...rawTicket(), correctedRemovedJobIds: [IDS.job, IDS.job] }, quote: rawQuote(),
+    })],
     ['an unknown correction scope', () => {
       const ticket = rawTicket()
       return {

@@ -422,7 +422,7 @@ git commit -m "feat: settle corrections into repair order truth" --trailer "Co-a
 - Modify: `docs/superpowers/plans/2026-08-03-shop-os-ticket-building-correction.md`
 - Modify: `tasks/lessons.md`
 
-- [ ] **Step 1: Add mounted phone and desktop proof**
+- [x] **Step 1: Add mounted phone and desktop proof**
 
 Use a deliberately split proof boundary. Persistence, migration `0051`, authorization, immutable V1, link expiry, receipts, replay, and zero-duplicate guarantees run against the real domain in the existing ephemeral PGlite golden-shop suites with the flag true. Browser evidence runs at 390×844 and 1440×900 in a localhost-only Vite harness that mounts the production React surfaces and uses deterministic in-memory HTTP fixtures. The browser harness proves rendered interaction, not database persistence; the two receipts are accepted only together.
 
@@ -434,7 +434,7 @@ The harness must not import or invoke `scripts/shop-os-golden-browser.mjs`, pull
 
 Assert no horizontal overflow, browser faults, serious/critical Axe findings, broken focus order, target below 44px, motion without reduced-motion equivalence, or generic success decoration. Save one phone and one desktop screenshot to ignored `test-results/ticket-building-correction/`.
 
-- [ ] **Step 2: Run focused integrated proof**
+- [x] **Step 2: Run focused integrated proof**
 
 ```bash
 SHOP_OS_TICKET_CORRECTION_ENABLED=true node node_modules/vitest/vitest.mjs run \
@@ -464,7 +464,7 @@ git diff --check
 
 The migrated-domain receipt must explicitly include exact-old → complete `0051` replay, exact-complete no-op, drift refusal, DDL/data/trigger/ledger atomic rollback, correction receipt persistence, immutable V1, expired actionable handoff, and zero duplicate supplemental work. It is the persistence half of the split proof.
 
-- [ ] **Step 3: Build and run the mounted browser half**
+- [x] **Step 3: Build and run the mounted browser half**
 
 Run only `playwright.ticket-building-correction.config.ts` against the dedicated loopback harness, using system Chrome when bundled Chromium is unavailable. Intercept the harness APIs with deterministic stateful fixtures that exercise pending, slow, failure, stale conflict, malformed refresh, exact replay, late success, and browser Back. The fixture may preserve state across a reload, but its receipt must say that this is deterministic harness state, not database persistence.
 
@@ -476,7 +476,7 @@ env -u DATABASE_URL -u DATABASE_URL_DIRECT -u SUPABASE_SERVICE_ROLE_KEY -u VERCE
 
 Record exact loopback base URL, commit-or-dirty-tree status, viewport, screenshots, Axe/browser-fault receipts, and the harness's no-secret/no-network startup assertion. Never use the production-backed golden-browser helper for this proof.
 
-- [ ] **Step 4: Commit proof/docs and establish a clean verification head**
+- [x] **Step 4: Commit proof/docs and establish a clean verification head**
 
 ```bash
 git config user.name
@@ -489,7 +489,7 @@ git status --porcelain
 
 Require empty `git status --porcelain`. Dirty-tree proof is useful while building but is not final acceptance evidence.
 
-- [ ] **Step 5: Run the exact full gate on that clean head**
+- [x] **Step 5: Run the exact full gate on that clean head**
 
 ```bash
 git rev-parse HEAD
@@ -512,7 +512,7 @@ If repair changes any file, commit the consolidated repair with the required tra
 
 - [ ] **Step 7: Push and open the channel-linked PR, then prove preview OFF**
 
-Push the exact clean reviewed head, then open the PR through Buzz with channel `3c51444f-299a-4be9-9ad5-560046dc0501`. Report exact head, local proof, split-proof evidence ceiling, dormant flag/migration posture, reviewers, and rollback. On the exact PR preview, prove `/api/health` is healthy and the correction POST returns exact no-store `404 {"error":"unavailable"}` while the flag is absent. The authenticated UI-absence claim remains source/page-test evidence; do not use the production-backed golden helper or mutate its QA tenant to manufacture a preview receipt.
+Push the exact clean reviewed head, then open the PR through Buzz with channel `95938fc9-02c1-4c1a-8b20-84f540bc6c74`. Report exact head, local proof, split-proof evidence ceiling, dormant flag/migration posture, reviewers, and rollback. On the exact PR preview, prove `/api/health` is healthy and the correction POST returns exact no-store `404 {"error":"unavailable"}` while the flag is absent. The authenticated UI-absence claim remains source/page-test evidence; do not use the production-backed golden helper or mutate its QA tenant to manufacture a preview receipt.
 
 - [ ] **Step 8: Assert every hosted check before merge**
 
@@ -551,4 +551,6 @@ Wait for the production deployment explicitly bound to the merge SHA. Verify `/a
 - Release state: dirty local proof tree only. No commit, push, PR, preview, hosted check, merge, production migration, activation, external request, or secret access occurred in this lane.
 - Final bounded recovery: Brandon reopened one harness-only lane in Buzz event `c0171527c8a63768bcb96c2b882cfd6dd276ab8d8bc748cdf6c42c561e769b27`. The correction-route `409` expected-refusal rule was added RED-first beside the existing close-route rule; its negative cases preserve all other faults. The complete focused gate passed 19 files / 419 tests plus 2 migration/replay files / 13 tests, TypeScript, diff integrity, and four-case discovery, followed by independent APPROVE with no finding.
 - Dedicated browser GREEN: the exact loopback system-Chrome gate passed all four cases in 18.6 seconds. Search passed in 3.7 seconds phone / 3.4 seconds desktop; Finish / Correct / Recover passed in 4.2 seconds phone / 4.6 seconds desktop. The two deterministic screenshots are 390×844 (`02723a…704f9`) and 1440×900 (`a3cf20…f7197`) and were inspected without visible overlap. This proves rendered harness behavior, not database persistence; the migrated PGlite half remains the persistence receipt.
-- Current release state: Task 7 is browser-GREEN on the intentional dirty tree. No stage, commit, push, PR, preview, hosted check, merge, migration `0051`, activation, secret access, or correction-enabled external request has occurred. Clean-head full verification and final reviews remain.
+- Clean-head convergence: the proof source and CSS-module selector repair passed 19 files / 419 focused tests, 13 migration/replay tests, all eight shards / 4,205 tests, TypeScript, a 69-page build, and repeated 4/4 loopback system-Chrome runs. Final security returned PASS and runtime/accessibility found no product defect.
+- Consolidated review repair: final static review found that retained `Removed` provenance depended on the capped recent feed. RED-first server and UI regressions prove the failure after 21 newer activities; the tenant/ticket/job-bound validated projection repair passes three focused files / 101 tests, TypeScript, and diff integrity. Focused static re-review and the exact repaired-head release gate precede PR.
+- Current release state: local convergence only. No push, PR, preview, hosted check, merge, migration `0051`, activation, secret access, or correction-enabled external request has occurred. Migration and activation remain separate owner gates.

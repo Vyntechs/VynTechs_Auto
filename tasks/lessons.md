@@ -261,3 +261,8 @@ Reason: Copy drift cost one rerun, then a 150 ms scheduler margin failed identic
 Trigger: A browser journey deliberately exercises a handled non-2xx response.
 Rule: Pin its exact route and status in the fault contract before asserting a globally empty console ledger.
 Reason: Chrome logs handled 409/503 responses as errors; an unmodeled refusal creates a false final gate without proving less.
+
+### preserve-browser-artifacts-before-review-reruns
+Trigger: A read-only reviewer reran Playwright, which cleared ignored screenshots before sandbox startup failed.
+Rule: Copy required browser artifacts to a stable receipt before any independent rerun.
+Reason: Playwright clears test-results at startup, so a failed reviewer rerun can erase valid evidence.
