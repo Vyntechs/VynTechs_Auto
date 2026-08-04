@@ -287,6 +287,12 @@ describe('quote builder refresh projection validation', () => {
     expect(parseQuoteBuilderProjection({
       ...committed, activeVersion: active, lastPreparedVersion: { ...current, totalCents: 501 },
     })).toBeNull()
+    for (const mismatch of [
+      { ...current, id: '00000000-0000-4000-8000-000000000402' },
+      { ...current, versionNumber: 2 },
+      { ...current, totalCents: 501 },
+      { ...current, contentFingerprint: 'd'.repeat(64) },
+    ]) expect(parseQuoteBuilderProjection({ ...committed, activeVersion: active, lastPreparedVersion: mismatch })).toBeNull()
     expect(parseQuoteBuilderProjection({
       ...committed, activeVersion: active, lastPreparedVersion: { ...current, state: 'superseded' },
     })).toBeNull()
@@ -310,12 +316,12 @@ describe('quote builder refresh projection validation', () => {
       draftCommitment: ['algorithm', 'fingerprint', 'totalCents', 'jobCount', 'lineCount'],
     })) {
       for (const key of keys) {
-        const candidate = structuredClone(complete) as Record<string, Record<string, unknown>>
+        const candidate = structuredClone(complete) as unknown as Record<string, Record<string, unknown>>
         delete candidate[section][key]
         expect(parseQuoteBuilderProjection(candidate)).toBeNull()
         expect(parseQuoteBuilderProjection({
-          ...candidate,
-          [section]: { ...candidate[section], hiddenConcurrencyTruth: true },
+          ...complete,
+          [section]: { ...(complete as unknown as Record<string, Record<string, unknown>>)[section], hiddenConcurrencyTruth: true },
         })).toBeNull()
       }
     }

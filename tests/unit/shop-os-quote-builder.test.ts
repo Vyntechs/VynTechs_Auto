@@ -239,6 +239,21 @@ describe('Shop OS quote builder read model', () => {
       { ...snapshot, jobs: [{ ...snapshot.jobs[0], lines: [{ ...snapshot.jobs[0].lines[0], priceCents: 11_000 }], totals: { subtotalCents: 11_000, taxableSubtotalCents: 11_000 } }], totals: { subtotalCents: 11_000, taxableSubtotalCents: 11_000, taxCents: 908, totalCents: 11_908 } },
     ]
     for (const variant of variants) expect(quoteSnapshotFingerprint(variant as never)).not.toBe(base)
+    // A snapshot with changed aggregates but otherwise byte-identical lines is
+    // internally contradictory. The public helper validates it before hashing,
+    // so rejection is the only truthful independent mutation assertion.
+    for (const corruptTotals of [
+      { ...snapshot.jobs[0].totals, subtotalCents: 10_001 },
+      { ...snapshot.jobs[0].totals, taxableSubtotalCents: 10_001 },
+    ]) expect(() => quoteSnapshotFingerprint({
+      ...snapshot, jobs: [{ ...snapshot.jobs[0], totals: corruptTotals }],
+    } as never)).toThrow()
+    for (const corruptTotals of [
+      { ...snapshot.totals, subtotalCents: 10_001 },
+      { ...snapshot.totals, taxableSubtotalCents: 10_001 },
+      { ...snapshot.totals, taxCents: 826 },
+      { ...snapshot.totals, totalCents: 10_826 },
+    ]) expect(() => quoteSnapshotFingerprint({ ...snapshot, totals: corruptTotals } as never)).toThrow()
 
     const [line] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
     const lineBase = manualDraftLineFingerprint(line)
