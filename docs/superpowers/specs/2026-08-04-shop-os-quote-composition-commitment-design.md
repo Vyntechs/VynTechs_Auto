@@ -1,6 +1,6 @@
 # Shop OS Quote Composition and Commitment Design
 
-**Status:** Draft for Brandon's design approval. No implementation authority is implied by this artifact.
+**Status:** Approved by Brandon for source implementation in Buzz event `3798f271ca8882267144fc5c8071e39a269aea86f64c65e330ea680c616d4526` on 2026-08-04. Migration, activation, merge, and deployment remain separate gates.
 
 ## Executive result
 
