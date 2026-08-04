@@ -10,7 +10,7 @@
 
 **Approved design:** `docs/superpowers/specs/2026-08-04-shop-os-quote-composition-commitment-design.md`
 
-**Re-plans:** 0
+**Re-plans:** 1 — Task 1 keeps the widened server projection fields required at compile time as well as runtime. TypeScript exposed four consumer fixtures, so Task 1 gained mechanical fixture-only ownership rather than weakening the contract to optional.
 
 **Baseline note:** Exact clean main `9dc3845` ran all eight shards with 4,208 passing tests and one focus assertion failure in the existing manual quote-builder suite; that exact assertion passed immediately in a one-worker isolated rerun. This is not accepted as a green baseline receipt. The final branch must pass the complete eight-shard gate.
 
@@ -42,6 +42,10 @@
 - Modify: `lib/shop-os/quote-builder-ui.ts`
 - Modify: `tests/unit/shop-os-quote-builder.test.ts`
 - Modify: `tests/unit/shop-os-quote-builder-ui.test.ts`
+- Modify mechanically for required projection fixtures only: `tests/unit/shop-os-manual-quote-builder.test.tsx`
+- Modify mechanically for required projection fixtures only: `tests/unit/shop-os-quote-approval-ui.test.tsx`
+- Modify mechanically for required projection fixtures only: `tests/unit/shop-os-quote-page.test.tsx`
+- Modify mechanically for required projection fixtures only: `tests/unit/shop-os-story-review-ui.test.tsx`
 
 **Interfaces:**
 - Add `contentFingerprint: string` to `activeVersion`.
