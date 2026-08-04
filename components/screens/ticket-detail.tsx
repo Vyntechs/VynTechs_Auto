@@ -442,6 +442,7 @@ export function TicketDetailScreen({
         <div
           ref={identityTargetRef}
           className={styles.correctionTarget}
+          aria-label="Customer and vehicle correction target"
           data-correction-target="identity"
           data-correction-state={correctionDataState(confirmedCorrection, IDENTITY_CORRECTION_TARGET)}
           tabIndex={-1}
@@ -543,7 +544,7 @@ export function TicketDetailScreen({
         <section
           ref={concernTargetRef}
           className={styles.concern}
-          aria-labelledby="concern-heading"
+          aria-label="Concern correction target"
           data-correction-target="concern"
           data-correction-state={correctionDataState(confirmedCorrection, CONCERN_CORRECTION_TARGET)}
           tabIndex={-1}
@@ -617,6 +618,7 @@ export function TicketDetailScreen({
                 <li
                   key={job.id}
                   className={styles.job}
+                  aria-label={`Job correction target ${String(index + 1).padStart(2, '0')}`}
                   data-correction-target={`job:${job.id}`}
                   data-correction-state={correctionDataState(confirmedCorrection, correctionTarget)}
                   tabIndex={-1}

@@ -471,6 +471,15 @@ describe('TicketDetailScreen', () => {
     expect(screen.queryByRole('button', { name: 'Correct job 05: Session-linked diagnosis' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Correct job 06: Initializing diagnosis' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Correct job 07: Ambiguous diagnosis' })).toBeNull()
+
+    expect(document.querySelector('[data-correction-target="identity"]'))
+      .toHaveAccessibleName('Customer and vehicle correction target')
+    expect(document.querySelector('[data-correction-target="concern"]'))
+      .toHaveAccessibleName('Concern correction target')
+    expect(document.querySelector('[data-correction-target="job:job-1"]'))
+      .toHaveAccessibleName('Job correction target 01')
+    expect(document.querySelector('[data-correction-target="job:job-2"]'))
+      .toHaveAccessibleName('Job correction target 02')
   })
 
   it('uses an accurate identity action when the repair order is still provisional', () => {

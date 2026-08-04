@@ -17,7 +17,7 @@ export function Bar({
   onChange: (v: string) => void
   onFocus: () => void
   onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
-  ariaControls: string
+  ariaControls?: string
   ariaExpanded: boolean
   activeDescendant?: string
   inputRef: Ref<HTMLInputElement>
@@ -28,6 +28,7 @@ export function Bar({
       <input
         ref={inputRef}
         role="combobox"
+        aria-label="Search customers and vehicles"
         aria-expanded={ariaExpanded}
         aria-controls={ariaControls}
         aria-autocomplete="list"

@@ -173,9 +173,9 @@
   scroll-margin-block: 96px;
 }
 
-.correctionTarget:focus-visible,
-.concern:focus-visible,
-.job:focus-visible {
+.correctionTarget:focus,
+.concern:focus,
+.job:focus {
   outline: 2px solid var(--vt-focus-ring);
   outline-offset: 5px;
 }

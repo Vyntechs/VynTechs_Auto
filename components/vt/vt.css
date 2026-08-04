@@ -109,6 +109,9 @@
 .app-header__lockup {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-inline-size: 44px;
+  min-block-size: 44px;
 }
 .app-header__right {
   display: flex;

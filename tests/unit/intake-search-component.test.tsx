@@ -43,7 +43,26 @@ describe('<PredictiveIntakeSearch>', () => {
         onCreateNew={vi.fn()}
       />,
     )
-    expect(screen.getByRole('combobox')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Search customers and vehicles' }))
+      .toBeInTheDocument()
+  })
+
+  it('wires the named search combobox to the listbox that is actually mounted', async () => {
+    const user = userEvent.setup()
+    render(
+      <PredictiveIntakeSearch
+        recentCustomers={recents}
+        onPickVehicle={vi.fn()}
+        onCreateNew={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByRole('combobox', { name: 'Search customers and vehicles' })
+    await user.click(input)
+    const listbox = screen.getByRole('listbox')
+
+    expect(listbox.id).not.toBe('')
+    expect(input).toHaveAttribute('aria-controls', listbox.id)
   })
 
   it('does not render the dead Scan VIN/plate coming-soon control', () => {
@@ -308,6 +327,33 @@ describe('<PredictiveIntakeSearch>', () => {
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     expect(onCreateNew).not.toHaveBeenCalled()
+  })
+
+  it('collapses empty popup semantics and announces one stable status while search is pending', async () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(
+      <PredictiveIntakeSearch
+        recentCustomers={[]}
+        onPickVehicle={vi.fn()}
+        onCreateNew={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByRole('combobox', { name: 'Search customers and vehicles' })
+    await user.click(input)
+    await user.type(input, 'Robin')
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(input).not.toHaveAttribute('aria-controls')
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    const status = screen.getByRole('status', { name: 'Searching customers and vehicles' })
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(status).toHaveTextContent('Searching customers and vehicles')
+    expect(status.textContent).not.toMatch(/\d+\s*ms/i)
   })
 
   it('keeps matched rows selectable without offering or triggering create-new', async () => {

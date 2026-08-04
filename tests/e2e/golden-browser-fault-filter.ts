@@ -17,9 +17,10 @@ export function isExpectedPageNavigationAbort(
 
 // Proving the product refuses something means letting the browser say so:
 // Chrome logs every non-2xx fetch to the console as an error. Closing a repair
-// order that still carries live work is answered 409 by design, and the journey
-// asserts the sentence the counter actually reads. Only that one endpoint and
-// only that one status is forgiven — every other refusal still counts.
+// order that still carries live work and retrying a correction from stale truth
+// are answered 409 by design, and each journey asserts the recovery it actually
+// renders. Only those exact endpoints and that one status are forgiven — every
+// other refusal still counts.
 // The reason phrase is not part of the status. HTTP/2 dropped it, so a hosted
 // preview logs "409 ()" where a local HTTP/1.1 server logs "409 (Conflict)".
 // Matching the code and leaving the phrase free is what makes this filter mean
@@ -27,6 +28,10 @@ export function isExpectedPageNavigationAbort(
 const EXPECTED_REFUSALS: ReadonlyArray<{ path: RegExp; message: RegExp }> = [
   {
     path: /^\/api\/tickets\/[0-9a-f-]+\/close$/i,
+    message: /^Failed to load resource: the server responded with a status of 409 \([^)]*\)$/,
+  },
+  {
+    path: /^\/api\/tickets\/[0-9a-f-]+\/corrections$/i,
     message: /^Failed to load resource: the server responded with a status of 409 \([^)]*\)$/,
   },
 ]

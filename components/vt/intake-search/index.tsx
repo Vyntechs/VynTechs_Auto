@@ -249,6 +249,7 @@ export function PredictiveIntakeSearch({
 
   const tokens = useMemo(() => value.trim().split(/\s+/).filter((t) => t !== ''), [value])
   const noMatchShape = useMemo(() => detectInputShape(value.trim()), [value])
+  const popupExpanded = open && state.kind !== 'searching'
 
   return (
     <div className="pis">
@@ -258,15 +259,16 @@ export function PredictiveIntakeSearch({
         onChange={onInputChange}
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
-        ariaControls={dropdownId}
-        ariaExpanded={open}
-        activeDescendant={activeDescendantId}
+        ariaControls={popupExpanded ? dropdownId : undefined}
+        ariaExpanded={popupExpanded}
+        activeDescendant={popupExpanded ? activeDescendantId : undefined}
         inputRef={inputRef}
       />
       {open && (
         <>
           {tier ? (
             <DropdownWhichVehicle
+              dropdownId={dropdownId}
               customerName={tier.customer.name}
               vehicles={tier.vehicles}
               focusedIdx={focusedIdx}
@@ -291,15 +293,17 @@ export function PredictiveIntakeSearch({
             />
           ) : state.kind === 'idle' && value.trim() === '' ? (
             <DropdownEmpty
+              dropdownId={dropdownId}
               recents={recentCustomers}
               focusedIdx={focusedIdx}
               onPickCustomer={pickCustomer}
               onCreateNew={fireCreateNew}
             />
           ) : state.kind === 'searching' ? (
-            <DropdownSearching elapsedMs={state.elapsedMs} />
+            <DropdownSearching />
           ) : state.kind === 'slow' ? (
             <DropdownSlow
+              dropdownId={dropdownId}
               elapsedSec={state.elapsedSec}
               cached={state.cached}
               focusedIdx={focusedIdx}
@@ -312,6 +316,7 @@ export function PredictiveIntakeSearch({
             />
           ) : state.kind === 'matched' ? (
             <DropdownResults
+              dropdownId={dropdownId}
               customers={state.customers}
               vehicles={state.vehicles}
               latencyMs={state.latencyMs}
@@ -325,13 +330,14 @@ export function PredictiveIntakeSearch({
             />
           ) : state.kind === 'no-match' ? (
             <DropdownNoMatch
+              dropdownId={dropdownId}
               query={value}
               shape={noMatchShape}
               focusedIdx={focusedIdx}
               onCreateNew={fireCreateNew}
             />
           ) : state.kind === 'error' ? (
-            <DropdownUnavailable focusedIdx={focusedIdx} onRetry={retry} />
+            <DropdownUnavailable dropdownId={dropdownId} focusedIdx={focusedIdx} onRetry={retry} />
           ) : null}
         </>
       )}

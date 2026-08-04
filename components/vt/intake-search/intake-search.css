@@ -65,6 +65,8 @@
 .pis__bar--focused .pis__glyph::after { background: var(--vt-signal-500); }
 
 .pis__input {
+  box-sizing: border-box;
+  min-height: 44px;
   background: transparent;
   border: 0;
   padding: 4px 0;

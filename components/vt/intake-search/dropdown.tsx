@@ -6,11 +6,13 @@ import type { CustomerHit, CustomerVehicle, VehicleHit } from '@/lib/intake/sear
 import type { InputShape } from '@/lib/intake/input-shape'
 
 export function DropdownEmpty({
+  dropdownId,
   recents,
   focusedIdx,
   onPickCustomer,
   onCreateNew,
 }: {
+  dropdownId: string
   recents: RecentCustomer[]
   focusedIdx: number | null
   onPickCustomer: (customer: RecentCustomer) => void
@@ -18,7 +20,7 @@ export function DropdownEmpty({
 }) {
   if (recents.length === 0) {
     return (
-      <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+      <div className="pis__dropdown" role="listbox" id={dropdownId}>
         <div className="pis__dropdown-inner">
           <div className="pis__empty-zero">
             No one&apos;s been through the counter yet today.
@@ -40,7 +42,7 @@ export function DropdownEmpty({
   const showSeeMore = recents.length > 5
 
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <GroupHead
           label="Recent · today"
@@ -82,17 +84,18 @@ export function DropdownEmpty({
   )
 }
 
-export function DropdownSearching({
-  elapsedMs,
-}: {
-  elapsedMs: number
-}) {
+export function DropdownSearching() {
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown">
       <div className="pis__dropdown-inner">
-        <div className="pis__status">
+        <div
+          className="pis__status"
+          role="status"
+          aria-live="polite"
+          aria-label="Searching customers and vehicles"
+        >
           <span className="pis__status__left">
-            <span className="pis__spinner" /> Searching · {elapsedMs} ms
+            <span className="pis__spinner" aria-hidden="true" /> Searching customers and vehicles
           </span>
           <span>—</span>
         </div>
@@ -113,14 +116,16 @@ export function DropdownSearching({
 }
 
 export function DropdownUnavailable({
+  dropdownId,
   focusedIdx,
   onRetry,
 }: {
+  dropdownId: string
   focusedIdx: number | null
   onRetry: () => void
 }) {
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">Search unavailable</span>
@@ -136,6 +141,7 @@ export function DropdownUnavailable({
 }
 
 export function DropdownResults({
+  dropdownId,
   customers,
   vehicles,
   latencyMs,
@@ -144,6 +150,7 @@ export function DropdownResults({
   onPickVehicle,
   highlightTokens,
 }: {
+  dropdownId: string
   customers: CustomerHit[]
   vehicles: VehicleHit[]
   latencyMs: number
@@ -155,7 +162,7 @@ export function DropdownResults({
   const totalMatches = customers.length + vehicles.length
   let idx = 0
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">
@@ -219,11 +226,13 @@ export function DropdownResults({
 }
 
 export function DropdownNoMatch({
+  dropdownId,
   query,
   shape,
   onCreateNew,
   focusedIdx,
 }: {
+  dropdownId: string
   query: string
   shape: InputShape
   onCreateNew: () => void
@@ -231,7 +240,7 @@ export function DropdownNoMatch({
 }) {
   const hint = routeHint(shape)
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">No match</span>
@@ -268,6 +277,7 @@ export function DropdownNoMatch({
 }
 
 export function DropdownSlow({
+  dropdownId,
   elapsedSec,
   cached,
   focusedIdx,
@@ -275,6 +285,7 @@ export function DropdownSlow({
   onPickVehicle,
   onRetry,
 }: {
+  dropdownId: string
   elapsedSec: number
   cached: { customers: CustomerHit[]; vehicles: VehicleHit[] } | null
   focusedIdx: number | null
@@ -285,7 +296,7 @@ export function DropdownSlow({
   const cachedCount = cached ? cached.customers.length + cached.vehicles.length : 0
   let index = 0
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">
@@ -334,6 +345,7 @@ export function DropdownSlow({
 }
 
 export function DropdownWhichVehicle({
+  dropdownId = 'pis-dropdown',
   customerName,
   vehicles,
   focusedIdx,
@@ -341,6 +353,7 @@ export function DropdownWhichVehicle({
   onPickVehicle,
   onCreateNew,
 }: {
+  dropdownId?: string
   customerName: string
   vehicles: CustomerVehicle[]
   focusedIdx: number | null
@@ -349,7 +362,7 @@ export function DropdownWhichVehicle({
   onCreateNew: () => void
 }) {
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__tier__head">
           <span className="pis__tier__title">
