@@ -262,6 +262,63 @@ describe('quote builder refresh projection validation', () => {
       ...committed,
       jobs: [{ ...committed.jobs[0], lines: [{ ...committed.jobs[0].lines[0], lineFingerprint: 'B'.repeat(64) }] }],
     })).toBeNull()
+    for (const fingerprint of ['a'.repeat(63), 'g'.repeat(64), 'A'.repeat(64)]) {
+      expect(parseQuoteBuilderProjection({
+        ...committed,
+        draftCommitment: { ...committed.draftCommitment, fingerprint },
+      })).toBeNull()
+    }
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{ ...committed.jobs[0].lines[0], lineFingerprint: null }] }],
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{
+        ...committed.jobs[0].lines[0], source: 'vendor_offer', mutable: false, lineFingerprint: 'b'.repeat(64),
+      }] }],
+    })).toBeNull()
+    const active = {
+      id: '00000000-0000-4000-8000-000000000401', versionNumber: 1, totalCents: 500,
+      contentFingerprint: 'c'.repeat(64), jobs: [{ jobId: committed.jobs[0].id, subtotalCents: 500 }],
+    }
+    const current = { id: active.id, versionNumber: 1, totalCents: 500, contentFingerprint: 'c'.repeat(64), state: 'current' as const }
+    expect(parseQuoteBuilderProjection({ ...committed, activeVersion: active, lastPreparedVersion: current })).not.toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed, activeVersion: active, lastPreparedVersion: { ...current, totalCents: 501 },
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed, activeVersion: active, lastPreparedVersion: { ...current, state: 'superseded' },
+    })).toBeNull()
+    for (const draft of [
+      { ...committed.draftCommitment, jobCount: 0 },
+      { ...committed.draftCommitment, jobCount: 501 },
+      { ...committed.draftCommitment, lineCount: 0 },
+      { ...committed.draftCommitment, lineCount: 1_000_001 },
+      { ...committed.draftCommitment, totalCents: -1 },
+      { ...committed.draftCommitment, totalCents: Number.MAX_SAFE_INTEGER + 1 },
+    ]) expect(parseQuoteBuilderProjection({ ...committed, draftCommitment: draft })).toBeNull()
+    for (const key of ['draftCommitment', 'lastPreparedVersion'] as const) {
+      const { [key]: _missing, ...missing } = committed
+      expect(parseQuoteBuilderProjection(missing)).toBeNull()
+    }
+    expect(parseQuoteBuilderProjection({ ...committed, hiddenCommitmentTruth: true })).toBeNull()
+    const complete = { ...committed, activeVersion: active, lastPreparedVersion: current }
+    for (const [section, keys] of Object.entries({
+      activeVersion: ['id', 'versionNumber', 'totalCents', 'contentFingerprint', 'jobs'],
+      lastPreparedVersion: ['id', 'versionNumber', 'totalCents', 'contentFingerprint', 'state'],
+      draftCommitment: ['algorithm', 'fingerprint', 'totalCents', 'jobCount', 'lineCount'],
+    })) {
+      for (const key of keys) {
+        const candidate = structuredClone(complete) as Record<string, Record<string, unknown>>
+        delete candidate[section][key]
+        expect(parseQuoteBuilderProjection(candidate)).toBeNull()
+        expect(parseQuoteBuilderProjection({
+          ...candidate,
+          [section]: { ...candidate[section], hiddenConcurrencyTruth: true },
+        })).toBeNull()
+      }
+    }
   })
 
   it('accepts only immutable customer-safe sourced parts', () => {

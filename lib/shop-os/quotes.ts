@@ -852,10 +852,12 @@ export async function getQuoteBuilder(
           contentFingerprint: latestPrepared.contentFingerprint,
           state: latestPrepared.version.supersededAt === null ? 'current' as const : 'superseded' as const,
         }
-        const hasVersionableLines = allJobs.some((job) => job.workStatus !== 'canceled'
+        const versionableJobs = allJobs.filter((job) => job.workStatus !== 'canceled'
           && !isPinnedSimpleWork(job) && lines.some((line) => line.jobId === job.id))
+        const hasVersionableLines = versionableJobs.length > 0
         const draftCommitment = ticket.customerId === null || ticket.vehicleId === null
           || shop.taxRateBps === null || !hasVersionableLines
+          || versionableJobs.some(draftReadinessBlocked)
           ? null
           : (() => {
             const snapshot = buildQuoteSnapshot({
@@ -1344,6 +1346,22 @@ function requireVersionableStory(
     && safeStory.content && safeStory.content.howWeKnow.length !== 0) {
     throw new TypeError('manual diagnostic story cannot claim sourced proof')
   }
+}
+
+function draftReadinessBlocked(job: typeof ticketJobs.$inferSelect): boolean {
+  const authorizationOnly = job.kind === 'diagnostic'
+    && job.sessionId === null
+    && job.customerStory === null
+    && job.storyMeta === null
+  if (job.customerStory === null) return job.kind === 'diagnostic' && !authorizationOnly
+  const story = safeBuilderStory(job.customerStory, job.storyMeta)
+  if (story.content?.howWeKnow.some((claim) => claim.sourceArtifactIds.length > 0)) return true
+  if (story.source === 'ai' && story.reviewStatus !== 'reviewed') return true
+  if (job.kind === 'diagnostic' && story.source === 'template') return true
+  if (job.kind === 'diagnostic' && story.source === 'manual' && (
+    story.reviewStatus !== 'reviewed' || (story.content?.howWeKnow.length ?? 0) > 0
+  )) return true
+  return false
 }
 
 function requireBoundedJson(value: unknown, maxBytes: number): void {

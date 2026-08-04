@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getQuoteBuilder, quoteSnapshotFingerprint, type QuoteActor } from '@/lib/shop-os/quotes'
+import {
+  getQuoteBuilder, manualDraftLineFingerprint, quoteSnapshotFingerprint, type QuoteActor,
+} from '@/lib/shop-os/quotes'
 import {
   customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets,
   vehicles, vendorAccounts,
@@ -187,6 +189,70 @@ describe('Shop OS quote builder read model', () => {
     expect(quoteSnapshotFingerprint(snapshot as never)).toBe(quoteSnapshotFingerprint(snapshot as never))
   })
 
+  it('keeps a valid but unreviewed diagnostic draft readable without a preparation commitment', async () => {
+    await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+    await db.update(ticketJobs).set({
+      kind: 'diagnostic',
+      customerStory: {
+        whatYouToldUs: 'Brake noise', whatWeFound: 'Pads are worn', howWeKnow: [],
+        whatItMeansIfWaived: 'Stopping distance may increase', whatWeRecommend: 'Replace pads',
+      },
+      storyMeta: {
+        source: 'ai', sessionId: uuid(70), generatedAt: '2026-07-11T12:00:00.000Z',
+        lastEditedByProfileId: uuid(1), lastEditedAt: '2026-07-11T12:00:00.000Z',
+        generationClientKey: uuid(71), generationRequestFingerprint: 'a'.repeat(64),
+        generatedByProfileId: uuid(1), storyRevision: 1, reviewStatus: 'pending',
+      },
+    }).where(eq(ticketJobs.id, uuid(30)))
+
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true,
+      builder: {
+        draftCommitment: null,
+        jobs: [{ story: { source: 'ai', reviewStatus: 'pending', revision: 1 } }],
+      },
+    })
+  })
+
+  it('changes opaque fingerprints for every bound customer-facing quote and editable-line revision input', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+      jobs: [{
+        id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+        lines: [{ id: uuid(40), kind: 'part', description: 'Pads', quantity: '1', priceCents: 10_000,
+          taxable: true, partNumber: 'PAD', brand: 'ACME', coreChargeCents: null, fitment: 'Front',
+          laborHours: null, laborRateCents: null, source: 'manual', vendorContext: null }],
+        attachments: [], totals: { subtotalCents: 10_000, taxableSubtotalCents: 10_000 },
+      }],
+      totals: { subtotalCents: 10_000, taxableSubtotalCents: 10_000, taxCents: 825, totalCents: 10_825 },
+    } as const
+    const base = quoteSnapshotFingerprint(snapshot as never)
+    expect(base).toMatch(/^[0-9a-f]{64}$/)
+    const variants = [
+      { ...snapshot, ticket: { ...snapshot.ticket, customerId: uuid(12) } },
+      { ...snapshot, ticket: { ...snapshot.ticket, vehicleId: uuid(13) } },
+      { ...snapshot, jobs: [{ ...snapshot.jobs[0], title: 'Rear brakes' }] },
+      { ...snapshot, jobs: [{ ...snapshot.jobs[0], lines: [{ ...snapshot.jobs[0].lines[0], description: 'Premium pads' }] }] },
+      { ...snapshot, jobs: [{ ...snapshot.jobs[0], attachments: [{ id: uuid(60), jobId: uuid(30), kind: 'photo' as const }] }] },
+      { ...snapshot, ticket: { ...snapshot.ticket, taxRateBps: 1_000 }, totals: { ...snapshot.totals, taxCents: 1_000, totalCents: 11_000 } },
+      { ...snapshot, jobs: [{ ...snapshot.jobs[0], lines: [{ ...snapshot.jobs[0].lines[0], priceCents: 11_000 }], totals: { subtotalCents: 11_000, taxableSubtotalCents: 11_000 } }], totals: { subtotalCents: 11_000, taxableSubtotalCents: 11_000, taxCents: 908, totalCents: 11_908 } },
+    ]
+    for (const variant of variants) expect(quoteSnapshotFingerprint(variant as never)).not.toBe(base)
+
+    const [line] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(40)))
+    const lineBase = manualDraftLineFingerprint(line)
+    const changes = {
+      kind: 'fee', description: 'Premium pads', sort: 1, quantity: 3, priceCents: 12_501,
+      taxable: false, partNumber: 'PAD-2', brand: 'Other', unitCostCents: 7_001,
+      coreChargeCents: 101, fitment: 'Rear', laborHours: 1.25, laborRateCents: 15_001,
+      updatedAt: new Date('2026-07-12T00:00:00.000Z'),
+    }
+    for (const [key, value] of Object.entries(changes)) {
+      expect(manualDraftLineFingerprint({ ...line, [key]: value } as never)).not.toBe(lineBase)
+    }
+  })
+
   it('fails closed instead of hiding malformed sourced truth', async () => {
     await db.update(jobLines).set({ vendorSnapshot: { token: 'secret' } })
       .where(eq(jobLines.id, uuid(41)))
@@ -231,9 +297,18 @@ describe('Shop OS quote builder read model', () => {
       ok: true, builder: { activeVersion: {
         id: uuid(50), versionNumber: 3, totalCents: 13_531,
         jobs: [{ jobId: uuid(30), subtotalCents: 12_500 }],
+      }, lastPreparedVersion: {
+        id: uuid(50), versionNumber: 3, totalCents: 13_531, state: 'current',
       }, jobs: [{ decisionEligible: true }] },
     })
     await db.update(quoteVersions).set({ supersededAt: new Date() }).where(eq(quoteVersions.id, uuid(50)))
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true,
+      builder: {
+        activeVersion: null,
+        lastPreparedVersion: { id: uuid(50), versionNumber: 3, totalCents: 13_531, state: 'superseded' },
+      },
+    })
     await db.insert(quoteVersions).values({
       id: uuid(52), shopId, ticketId, versionNumber: 4, snapshot: {}, createdByProfileId: uuid(1),
     })
@@ -249,6 +324,38 @@ describe('Shop OS quote builder read model', () => {
     })
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
       ok: false, error: 'conflict', retryable: false,
+    })
+  })
+
+  it('retains the highest valid historical version by number after current customer and job facts change', async () => {
+    await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+    const snapshot = {
+      schemaVersion: 1,
+      ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+      jobs: [{
+        id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+        lines: [{ id: uuid(40), kind: 'fee', description: 'Shop supplies', quantity: '1', priceCents: 500,
+          taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+          laborHours: null, laborRateCents: null, source: 'manual', vendorContext: null }],
+        attachments: [], totals: { subtotalCents: 500, taxableSubtotalCents: 0 },
+      }],
+      totals: { subtotalCents: 500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 500 },
+    }
+    await db.insert(quoteVersions).values([
+      { id: uuid(99), shopId, ticketId, versionNumber: 9, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
+      { id: uuid(51), shopId, ticketId, versionNumber: 8, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
+    ])
+    await db.insert(customers).values({ id: uuid(12), shopId, name: 'New customer', phone: '5550001212' })
+    await db.insert(vehicles).values({ id: uuid(13), customerId: uuid(12), year: 2021, make: 'Ford', model: 'Bronco' })
+    await db.update(tickets).set({ customerId: uuid(12), vehicleId: uuid(13) }).where(eq(tickets.id, ticketId))
+    await db.update(ticketJobs).set({ title: 'Current brake work' }).where(eq(ticketJobs.id, uuid(30)))
+
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
+      ok: true,
+      builder: {
+        activeVersion: null,
+        lastPreparedVersion: { id: uuid(99), versionNumber: 9, totalCents: 500, state: 'superseded' },
+      },
     })
   })
 
