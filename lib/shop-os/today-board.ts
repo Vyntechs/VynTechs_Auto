@@ -15,6 +15,7 @@ export type AssignmentEnvelope = {
   workStatus: TodayTicketJob['workStatus']
   state: TodayTicketJob['assignmentState']
   assignedTechName: string | null
+  approvalState: TodayTicketJob['approvalState']
 }
 
 const activeWorkStatuses = new Set<TodayTicketJob['workStatus']>([
@@ -26,6 +27,9 @@ const assignmentStates = new Set<TodayTicketJob['assignmentState']>([
   'mine',
   'team',
   'unassigned',
+])
+const approvalStates = new Set<TodayTicketJob['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -44,7 +48,9 @@ export function parseAssignmentEnvelope(
     typeof assignment.workStatus !== 'string' ||
     !activeWorkStatuses.has(assignment.workStatus as TodayTicketJob['workStatus']) ||
     typeof assignment.state !== 'string' ||
-    !assignmentStates.has(assignment.state as TodayTicketJob['assignmentState'])
+    !assignmentStates.has(assignment.state as TodayTicketJob['assignmentState']) ||
+    typeof assignment.approvalState !== 'string' ||
+    !approvalStates.has(assignment.approvalState as TodayTicketJob['approvalState'])
   ) return null
 
   let assignedTechName: string | null = null
@@ -61,12 +67,18 @@ export function parseAssignmentEnvelope(
     workStatus: assignment.workStatus as TodayTicketJob['workStatus'],
     state: assignment.state as TodayTicketJob['assignmentState'],
     assignedTechName,
+    approvalState: assignment.approvalState as TodayTicketJob['approvalState'],
   }
 }
 
 type AssignmentSnapshot = Pick<
   TodayTicketJob,
-  'workStatus' | 'canClaim' | 'assignmentState' | 'assignedTechName'
+  | 'workStatus'
+  | 'clockedOnSince'
+  | 'approvalState'
+  | 'canClaim'
+  | 'assignmentState'
+  | 'assignedTechName'
 >
 
 export type TodayJobOverride = {
@@ -98,6 +110,7 @@ const todayJobSchema = z.strictObject({
   requiredSkillTier: z.number().int().min(1).max(3),
   sessionId: z.uuid().nullable(),
   workStatus: z.enum(['open', 'in_progress', 'blocked']),
+  clockedOnSince: z.iso.datetime({ offset: true }).nullable(),
   approvalState: z.enum(['pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred']),
   canClaim: z.boolean(),
   assignmentState: z.enum(['mine', 'team', 'unassigned']),
@@ -198,6 +211,8 @@ type TodayBoardProjectionInput = {
 function assignmentSnapshot(job: TodayTicketJob): AssignmentSnapshot {
   return {
     workStatus: job.workStatus,
+    clockedOnSince: job.clockedOnSince,
+    approvalState: job.approvalState,
     canClaim: job.canClaim,
     assignmentState: job.assignmentState,
     assignedTechName: job.assignedTechName,
@@ -206,6 +221,8 @@ function assignmentSnapshot(job: TodayTicketJob): AssignmentSnapshot {
 
 function sameAssignment(left: AssignmentSnapshot, right: AssignmentSnapshot) {
   return left.workStatus === right.workStatus &&
+    left.clockedOnSince === right.clockedOnSince &&
+    left.approvalState === right.approvalState &&
     left.canClaim === right.canClaim &&
     left.assignmentState === right.assignmentState &&
     left.assignedTechName === right.assignedTechName

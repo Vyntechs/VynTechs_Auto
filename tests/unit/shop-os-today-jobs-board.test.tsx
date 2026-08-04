@@ -24,6 +24,8 @@ vi.mock('next/navigation', () => ({
 const ATTEMPT_ONE = '00000000-0000-4000-8000-000000000081'
 const ATTEMPT_TWO = '00000000-0000-4000-8000-000000000082'
 const RETURNED_SESSION = '00000000-0000-4000-8000-000000000083'
+const HANDOFF_TICKET = '00000000-0000-4000-8000-000000000084'
+const HANDOFF_JOB = '00000000-0000-4000-8000-000000000085'
 
 const linkedDiagnostic: TodayTicketJob = {
   id: 'job-linked',
@@ -37,6 +39,7 @@ const linkedDiagnostic: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: 'session-41',
   workStatus: 'in_progress',
+  clockedOnSince: null,
   approvalState: 'pending_quote',
   canClaim: false,
   assignmentState: 'mine',
@@ -91,6 +94,35 @@ const maintenance: TodayTicketJob = {
   kind: 'maintenance',
   requiredSkillTier: 3,
   workStatus: 'open',
+}
+
+const approvedAvailableMaintenance: TodayTicketJob = {
+  ...maintenance,
+  id: HANDOFF_JOB,
+  ticketId: HANDOFF_TICKET,
+  approvalState: 'approved',
+  assignmentState: 'unassigned',
+  assignedTechName: null,
+  canClaim: true,
+}
+
+const approvedWorkWorkspace = {
+  id: HANDOFF_JOB,
+  title: approvedAvailableMaintenance.title,
+  kind: 'maintenance' as const,
+  workStatus: 'open' as const,
+  workNotes: null,
+  startedAt: null,
+  completedAt: null,
+  clockedOnSince: null,
+  activeSeconds: 0,
+  updatedAt: '2026-08-04T20:00:00.000Z',
+  authorization: 'approved' as const,
+  approvedScope: {
+    authorizationPurpose: null,
+    customerSuppliedPartsNote: null,
+    lines: [{ kind: 'labor' as const, description: 'Perform 60k service', hours: '2.0' }],
+  },
 }
 
 describe('TodayJobsBoard persisted ledger', () => {
@@ -186,7 +218,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       'href',
       '/tickets/ticket-44',
     )
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
 
@@ -263,13 +295,14 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(
       <TodayJobsBoard
-        myJobs={[maintenance]}
+        myJobs={[{ ...maintenance, approvalState: 'approved' }]}
         openJobs={[]}
+        role="tech"
         currentProfileId="profile-1"
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open work' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
 
     expect(screen.getByLabelText('Work on this job')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
@@ -278,6 +311,173 @@ describe('TodayJobsBoard persisted ledger', () => {
       { method: 'GET', cache: 'no-store' },
     ))
     expect(screen.queryByRole('link', { name: 'Open the full work page' })).toBeNull()
+  })
+
+  it('settles an approved claim into exact scope before a separate clock-on tap', async () => {
+    const runningAt = '2026-08-04T20:01:00.000Z'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        assignment: {
+          ticketId: HANDOFF_TICKET,
+          jobId: HANDOFF_JOB,
+          workStatus: 'open',
+          state: 'mine',
+          assignedTechName: 'Taylor Tech',
+          approvalState: 'approved',
+        },
+      }))
+      .mockResolvedValueOnce(Response.json({ workspace: approvedWorkWorkspace, partRequests: [] }))
+      .mockResolvedValueOnce(Response.json({
+        changed: true,
+        work: {
+          status: 'in_progress',
+          workNotes: null,
+          startedAt: runningAt,
+          completedAt: null,
+          clockedOnSince: runningAt,
+          activeSeconds: 0,
+          updatedAt: runningAt,
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TodayJobsBoard
+      myJobs={[]}
+      openJobs={[approvedAvailableMaintenance]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    const scopeHeading = await screen.findByRole('heading', { name: 'Exactly what is approved' })
+    await waitFor(() => expect(scopeHeading).toHaveFocus())
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      `/api/tickets/${HANDOFF_TICKET}/jobs/${HANDOFF_JOB}/assignment`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'claim',
+          expectedApprovalState: 'approved',
+          requestKey: ATTEMPT_ONE,
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      `/api/tickets/${HANDOFF_TICKET}/jobs/${HANDOFF_JOB}/work`,
+      { method: 'GET', cache: 'no-store' },
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+
+    await waitFor(() => expect(screen.getByText(/Clock running since/)).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenNthCalledWith(3,
+      `/api/tickets/${HANDOFF_TICKET}/jobs/${HANDOFF_JOB}/work`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'clock_on' }) }),
+    )
+  })
+
+  it('refreshes the parent card after mounted work access changes', async () => {
+    const assigned = {
+      ...approvedAvailableMaintenance,
+      assignmentState: 'mine' as const,
+      assignedTechName: 'Taylor Tech',
+      canClaim: false,
+    }
+    const current = {
+      ...assigned,
+      approvalState: 'deferred' as const,
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ workspace: approvedWorkWorkspace, partRequests: [] }))
+      .mockResolvedValueOnce(Response.json({ error: 'not_found' }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({
+        todayJobs: {
+          myJobs: [current], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+          readyToCollect: [], linkedSessionIds: [], hasMore: false,
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TodayJobsBoard
+      myJobs={[assigned]}
+      openJobs={[]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
+    await screen.findByRole('heading', { name: 'Exactly what is approved' })
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+
+    expect(await screen.findByRole('heading', { name: 'Work access changed' })).toBeInTheDocument()
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/today/jobs', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    }))
+    expect(await screen.findByText('Waiting for customer')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Review repair order' })).toBeInTheDocument()
+  })
+
+  it('keeps a waiting claim in My work without opening a work tool', async () => {
+    const waiting = { ...approvedAvailableMaintenance, approvalState: 'pending_quote' as const }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      assignment: {
+        ticketId: HANDOFF_TICKET,
+        jobId: HANDOFF_JOB,
+        workStatus: 'open',
+        state: 'mine',
+        assignedTechName: 'Taylor Tech',
+        approvalState: 'pending_quote',
+      },
+    })))
+
+    render(<TodayJobsBoard
+      myJobs={[]}
+      openJobs={[waiting]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
+
+    expect(await screen.findByRole('heading', { name: 'My work' })).toBeInTheDocument()
+    expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Work on this job')).toBeNull()
+  })
+
+  it('retries one claim with the original key and visible approval state', async () => {
+    const waiting = { ...approvedAvailableMaintenance, approvalState: 'pending_quote' as const }
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    const { rerender } = render(<TodayJobsBoard
+      myJobs={[]}
+      openJobs={[waiting]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
+    await screen.findByRole('alert')
+
+    rerender(<TodayJobsBoard
+      myJobs={[]}
+      openJobs={[approvedAvailableMaintenance]}
+      role="tech"
+      currentProfileId="profile-1"
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Claim work' }))
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      action: 'claim', expectedApprovalState: 'pending_quote', requestKey: ATTEMPT_ONE,
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      action: 'claim', expectedApprovalState: 'pending_quote', requestKey: ATTEMPT_ONE,
+    })
   })
 
   it('resolves an assigned approved work hold in place and reveals the next action', async () => {
@@ -305,6 +505,7 @@ describe('TodayJobsBoard persisted ledger', () => {
           approvalState: 'approved',
         }]}
         openJobs={[]}
+        role="tech"
         currentProfileId="profile-1"
       />,
     )
@@ -318,7 +519,79 @@ describe('TodayJobsBoard persisted ledger', () => {
       '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(screen.getByRole('button', { name: 'Open work' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeEnabled()
+  })
+
+  it('shows technician waiting truth without exposing price-building', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[maintenance]}
+        openJobs={[]}
+        canBuildQuote
+        role="tech"
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+  })
+
+  it('keeps blocked technician work in repair-order recovery without exposing price-building', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...maintenance, workStatus: 'blocked' }]}
+        openJobs={[]}
+        canBuildQuote
+        role="tech"
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Review blocked work' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-44',
+    )
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+  })
+
+  it('shows below-tier and customer-outcome truth without fake claim controls', () => {
+    render(<TodayJobsBoard myJobs={[]} openJobs={[
+      { ...availableDiagnostic, id: 'below-tier', requiredSkillTier: 3, canClaim: false },
+      { ...availableDiagnostic, id: 'deferred', ticketId: 'ticket-46', approvalState: 'deferred', canClaim: false },
+      { ...availableDiagnostic, id: 'declined', ticketId: 'ticket-47', approvalState: 'declined', canClaim: false },
+    ]} />)
+
+    expect(screen.getByText('Requires A-tech')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for customer')).toBeInTheDocument()
+    expect(screen.getByText('Customer declined')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
+  })
+
+  it('shows persisted running and paused clock truth without active-second math', () => {
+    render(<TodayJobsBoard myJobs={[
+      {
+        ...maintenance,
+        id: 'running',
+        title: 'Running work',
+        approvalState: 'approved',
+        workStatus: 'in_progress',
+        clockedOnSince: '2026-08-04T20:00:00.000Z',
+      },
+      {
+        ...maintenance,
+        id: 'paused',
+        title: 'Paused work',
+        approvalState: 'approved',
+        workStatus: 'in_progress',
+        clockedOnSince: null,
+      },
+    ]} openJobs={[]} role="tech" currentProfileId="profile-1" />)
+
+    expect(screen.getByText('Running work').closest('article')).toHaveTextContent('Clock running since')
+    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Clock paused')
+    expect(screen.queryByText(/seconds|payroll/i)).toBeNull()
   })
 
   it('fails closed when an open-queue row is not actually open', () => {
@@ -334,7 +607,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
       'href',
       '/tickets/ticket-42',
@@ -815,20 +1088,25 @@ describe('TodayJobsBoard persisted ledger', () => {
           workStatus: 'open',
           state: 'mine',
           assignedTechName: 'Taylor Tech',
+          approvalState: 'pending_quote',
         },
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-42/jobs/job-unlinked/assignment',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'claim', requestKey: ATTEMPT_ONE }),
+        body: JSON.stringify({
+          action: 'claim',
+          expectedApprovalState: 'pending_quote',
+          requestKey: ATTEMPT_ONE,
+        }),
       },
     ))
     expect(screen.getAllByRole('button')).toHaveLength(1)
@@ -842,7 +1120,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    const claim = screen.getByRole('button', { name: 'Claim job' })
+    const claim = screen.getByRole('button', { name: 'Claim work' })
     fireEvent.click(claim)
 
     expect(await screen.findByRole('status')).toHaveTextContent('Claiming repair order 42')
@@ -860,6 +1138,7 @@ describe('TodayJobsBoard persisted ledger', () => {
           workStatus: 'open',
           state: 'mine',
           assignedTechName: 'Taylor Tech',
+          approvalState: 'pending_quote',
         },
       }),
     } as Response)
@@ -893,7 +1172,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    const claims = screen.getAllByRole('button', { name: 'Claim job' })
+    const claims = screen.getAllByRole('button', { name: 'Claim work' })
     fireEvent.click(claims[0])
 
     await screen.findByRole('status')
@@ -943,18 +1222,30 @@ describe('TodayJobsBoard persisted ledger', () => {
     expect(screen.queryByText(/hidden-id|owner/i)).toBeNull()
   })
 
-  it('uses a generic race announcement and quietly removes unrelated team work', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({ error: 'assignment_conflict' }),
-    }))
+  it('refreshes current bounded truth after a nameless assignment conflict', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'assignment_conflict' }),
+      })
+      .mockResolvedValueOnce(Response.json({
+        todayJobs: {
+          myJobs: [], openJobs: [], createdJobs: [], teamJobs: [], partsJobs: [],
+          readyToCollect: [], linkedSessionIds: [], hasMore: false,
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('This job was already claimed')
-    expect(screen.queryByRole('article')).toBeNull()
+    expect(await screen.findByRole('status')).toHaveTextContent('This job changed. Loading current shop truth.')
+    await waitFor(() => expect(screen.queryByRole('article')).toBeNull())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/today/jobs', {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    })
     expect(refreshMock).not.toHaveBeenCalled()
   })
 
@@ -974,7 +1265,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     expect(await screen.findByRole('heading', { name: 'Created by me' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
@@ -1000,13 +1291,13 @@ describe('TodayJobsBoard persisted ledger', () => {
     }))
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Repair order 42 changed, but this screen couldn't safely catch up. Open the repair order.",
     )
     expect(screen.getByRole('article', { name: 'Repair order 42: Confirm charging fault' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.getByRole('link', { name: 'View ticket' })).toBeInTheDocument()
     expect(refreshMock).not.toHaveBeenCalled()
   })
@@ -1015,7 +1306,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network detail must stay private')))
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    const claim = screen.getByRole('button', { name: 'Claim job' })
+    const claim = screen.getByRole('button', { name: 'Claim work' })
     claim.focus()
     fireEvent.click(claim)
 
@@ -1135,6 +1426,7 @@ describe('TodayJobsBoard parts handoff', () => {
           workStatus: 'open',
           state: 'team',
           assignedTechName: 'Avery Tech',
+          approvalState: 'pending_quote',
         },
       }),
     }))
@@ -1414,5 +1706,20 @@ describe('TodayJobsBoard ready to collect', () => {
     expect(narrowRules).toMatch(/\.row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s)
     expect(css).toMatch(/\.balanceFact\s*{[^}]*font-weight:\s*700/s)
     expect(css).toMatch(/\.facts span\s*{[^}]*overflow-wrap:\s*anywhere/s)
+  })
+
+  it('keeps the mounted work handoff quiet and motion-safe', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'components/screens/today-jobs-board.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(
+      /\.jobSlot\[data-work-open='true'\]\s*{[^}]*border-left:\s*2px solid var\(--vt-accent\)[^}]*transform:\s*translateY\(2px\)[^}]*transition:\s*transform 200ms/s,
+    )
+    const reducedMotion = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reducedMotion).toMatch(
+      /\.jobSlot\[data-work-open='true'\]\s*{[^}]*transform:\s*none[^}]*transition:\s*none/s,
+    )
   })
 })

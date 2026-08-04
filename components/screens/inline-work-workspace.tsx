@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   parseInlineSimpleWorkResponse,
   type SimpleWorkProjectionView,
@@ -31,6 +31,7 @@ export function InlineWorkWorkspace({
   jobId,
   onClose,
   onProjection,
+  onStale,
   onEscalation,
   onInterrupted,
 }: {
@@ -39,13 +40,24 @@ export function InlineWorkWorkspace({
   jobId: string
   onClose: () => void
   onProjection: (work: SimpleWorkProjectionView) => void
+  onStale?: () => void
   onEscalation?: (job: SimpleWorkEscalationView) => void
   onInterrupted?: (job: InterruptionJobView) => void
 }): React.JSX.Element {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const onStaleRef = useRef(onStale)
+  const errorRef = useRef<HTMLDivElement>(null)
   const workPath = `/tickets/${ticket.id}/jobs/${jobId}/work`
+
+  useEffect(() => {
+    onStaleRef.current = onStale
+  }, [onStale])
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus()
+  }, [error])
 
   useEffect(() => {
     let canceled = false
@@ -57,6 +69,7 @@ export function InlineWorkWorkspace({
           method: 'GET',
           cache: 'no-store',
         })
+        if (response.status === 404 && !canceled) onStaleRef.current?.()
         const body = await response.json().catch(() => null)
         const result = response.ok ? parseInlineSimpleWorkResponse(body) : null
         if (!result || result.workspace.id.toLowerCase() !== jobId.toLowerCase()) {
@@ -74,7 +87,7 @@ export function InlineWorkWorkspace({
   if (error) {
     return (
       <section className={styles.state} aria-label="Work on this job">
-        <div role="alert">
+        <div ref={errorRef} role="alert" tabIndex={-1}>
           <strong>Work could not be opened here.</strong>
           <p>The repair order is safe. Retry this tool or use the full work page.</p>
         </div>
@@ -104,6 +117,7 @@ export function InlineWorkWorkspace({
       embedded
       onClose={onClose}
       onProjection={onProjection}
+      onStale={onStale}
       onEscalation={onEscalation}
       onInterrupted={onInterrupted}
     />

@@ -9,6 +9,11 @@ import { execFileSync, spawnSync } from 'node:child_process'
 
 import { createClient } from '@supabase/supabase-js'
 import postgres from 'postgres'
+import {
+  CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
+  assertTechnicianHandoffHarnessSafety,
+  technicianHandoffEnvironment,
+} from '../tests/e2e/technician-handoff-harness/safety.mjs'
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(SCRIPT_DIR, '..')
@@ -525,7 +530,37 @@ export const SUITES = Object.freeze({
     config: 'playwright.vin-decode.config.ts',
     projects: Object.freeze(['vin-decode-phone', 'vin-decode-desktop']),
   }),
+  'technician-handoff': Object.freeze({
+    config: 'playwright.technician-handoff.config.ts',
+    projects: Object.freeze(['technician-handoff-phone', 'technician-handoff-desktop']),
+    hermetic: true,
+    baseUrl: CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
+  }),
 })
+
+async function runHermeticBrowserProjects(baseUrl, selectedProject, suiteName) {
+  const suite = SUITES[suiteName]
+  if (!suite?.hermetic) throw new Error(`Golden browser suite is not hermetic: ${suiteName}`)
+  if (baseUrl !== suite.baseUrl) {
+    throw new Error(`${suiteName} browser proof requires ${suite.baseUrl}`)
+  }
+  const environment = technicianHandoffEnvironment(process.env, baseUrl)
+  assertTechnicianHandoffHarnessSafety(environment, baseUrl)
+  const projects = selectedProject ? [selectedProject] : [...suite.projects]
+  for (const project of projects) {
+    const result = spawnSync(
+      join(REPO_ROOT, 'node_modules', '.bin', 'playwright'),
+      ['test', '--config', suite.config, '--project', project],
+      {
+        cwd: REPO_ROOT,
+        env: environment,
+        encoding: 'utf8',
+        stdio: 'inherit',
+      },
+    )
+    if (result.status !== 0) throw new Error(`${project} browser journey failed`)
+  }
+}
 
 async function runBrowserProjects(env, baseUrl, selectedProject = null, suiteName = 'golden') {
   const suite = SUITES[suiteName]
@@ -556,13 +591,15 @@ async function runBrowserProjects(env, baseUrl, selectedProject = null, suiteNam
 
 function parseCommand(argv) {
   const command = argv[2]
-  const baseUrlIndex = argv.indexOf('--base-url')
-  const baseUrl = baseUrlIndex >= 0 ? argv[baseUrlIndex + 1] : 'https://vyntechs.dev'
   const suiteIndex = argv.indexOf('--suite')
   const suite = suiteIndex >= 0 ? argv[suiteIndex + 1] : 'golden'
   if (!Object.hasOwn(SUITES, suite)) {
     throw new Error(`Golden browser QA suite must be one of ${Object.keys(SUITES).join(', ')}`)
   }
+  const baseUrlIndex = argv.indexOf('--base-url')
+  const baseUrl = baseUrlIndex >= 0
+    ? argv[baseUrlIndex + 1]
+    : SUITES[suite].baseUrl ?? 'https://vyntechs.dev'
   const projectIndex = argv.indexOf('--project')
   const project = projectIndex >= 0 ? argv[projectIndex + 1] : null
   if (project !== null && !SUITES[suite].projects.includes(project)) {
@@ -575,6 +612,14 @@ async function main() {
   const { command, baseUrl, project, suite } = parseCommand(process.argv)
   if (!['provision', 'test', 'clean', 'verify-clean'].includes(command)) {
     throw new Error('Usage: shop-os-golden-browser.mjs <provision|test|clean|verify-clean> [--base-url URL] [--suite NAME]')
+  }
+  if (SUITES[suite].hermetic) {
+    if (command !== 'test') throw new Error(`${suite} supports only the test command`)
+    await runHermeticBrowserProjects(baseUrl, project, suite)
+    process.stdout.write(project
+      ? `Golden browser QA passed: suite=${suite} ${project}=1 hermetic=1\n`
+      : `Golden browser QA passed: suite=${suite} phone=1 desktop=1 hermetic=1\n`)
+    return
   }
   const pulled = pullProductionEnv()
   try {

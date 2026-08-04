@@ -104,6 +104,7 @@ const jobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'linked-open',
       workStatus: 'open',
+      clockedOnSince: null,
       approvalState: 'pending_quote',
       canClaim: true,
       assignmentState: 'unassigned',

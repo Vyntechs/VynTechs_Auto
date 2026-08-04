@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { projectLivingTicketCommands } from '@/lib/shop-os/living-ticket'
+import {
+  projectLivingTicketCommands,
+  projectTechnicianJobReadiness,
+} from '@/lib/shop-os/living-ticket'
 
 const PROFILE = '00000000-0000-0000-0000-000000000101'
 
@@ -80,11 +83,11 @@ describe('living repair order next-move projection', () => {
   it('opens approved assigned simple work, including manual diagnostics only while diagnostics are unavailable', () => {
     expect(project({
       jobs: [job({ assignedTechId: PROFILE, approvalState: 'approved' })],
-    }).primary).toMatchObject({ kind: 'work', label: 'Start work' })
+    }).primary).toMatchObject({ kind: 'work', label: 'Review & clock on' })
 
     expect(project({
       jobs: [job({ kind: 'diagnostic', assignedTechId: PROFILE, approvalState: 'approved' })],
-    }).primary).toMatchObject({ kind: 'work', label: 'Start work' })
+    }).primary).toMatchObject({ kind: 'work', label: 'Review & clock on' })
 
     expect(project({
       diagnosticsEntitled: true,
@@ -110,11 +113,11 @@ describe('living repair order next-move projection', () => {
     expect(result.secondary.some((command) => command.kind === 'assign')).toBe(false)
 
     expect(project({ skillTier: 1, jobs: [job({ requiredSkillTier: 2 })] }).primary)
-      .toMatchObject({ kind: 'quote' })
+      .toBeNull()
   })
 
-  it('lets every supported role build while only advisor and owner receive approval wording', () => {
-    for (const role of ['tech', 'parts']) {
+  it('keeps price-building with non-technician flows and preserves approval wording', () => {
+    for (const role of ['parts']) {
       expect(project({ role, skillTier: null }).primary)
         .toMatchObject({ kind: 'quote', label: 'Build quote' })
       expect(project({
@@ -130,6 +133,25 @@ describe('living repair order next-move projection', () => {
         skillTier: null,
         jobs: [job({ approvalState: 'quote_ready', assignedTechId: 'other' })],
       }).primary).toMatchObject({ kind: 'quote', label: 'Record approval' })
+    }
+
+    expect(project({ role: 'tech', skillTier: 2 }).primary)
+      .toMatchObject({ kind: 'claim', label: 'Claim work' })
+    expect(project({ role: 'tech', skillTier: 2 }).secondary)
+      .not.toContainEqual(expect.objectContaining({ kind: 'quote' }))
+    expect(project({
+      role: 'tech',
+      skillTier: 2,
+      jobs: [job({ assignedTechId: PROFILE, approvalState: 'quote_ready' })],
+    }).primary).toBeNull()
+  })
+
+  it('does not offer a new claim after the customer deferred or declined', () => {
+    for (const approvalState of ['deferred', 'declined'] as const) {
+      expect(project({ jobs: [job({ approvalState })] })).toEqual({
+        primary: null,
+        secondary: [],
+      })
     }
   })
 
@@ -200,5 +222,81 @@ describe('living repair order next-move projection', () => {
   it('does not invent commands for unsupported roles or missing identity', () => {
     expect(project({ role: 'curator' })).toEqual({ primary: null, secondary: [] })
     expect(project({ profileId: null })).toEqual({ primary: null, secondary: [] })
+  })
+})
+
+describe('technician job readiness projection', () => {
+  const readiness = (overrides: Partial<Parameters<typeof projectTechnicianJobReadiness>[0]> = {}) =>
+    projectTechnicianJobReadiness({
+      assignmentState: 'mine',
+      approvalState: 'approved',
+      workStatus: 'open',
+      canClaim: false,
+      requiredSkillTier: 2,
+      clockedOnSince: null,
+      ...overrides,
+    })
+
+  it.each(['pending_quote', 'quote_ready', 'sent', 'approved'] as const)(
+    'offers Claim work for eligible unassigned %s work',
+    (approvalState) => {
+      expect(readiness({ assignmentState: 'unassigned', approvalState, canClaim: true }))
+        .toEqual({ state: 'claimable', label: 'Claim work' })
+    },
+  )
+
+  it.each([
+    ['pending_quote', 'Waiting for quote'],
+    ['quote_ready', 'Waiting for advisor'],
+    ['sent', 'Waiting for customer'],
+  ] as const)('names the exact %s handoff that assigned work awaits', (approvalState, label) => {
+    expect(readiness({ approvalState })).toEqual({
+      state: approvalState === 'pending_quote'
+        ? 'waiting_quote'
+        : approvalState === 'quote_ready'
+          ? 'waiting_advisor'
+          : 'waiting_customer',
+      label,
+    })
+  })
+
+  it('shows customer outcomes before skill fit', () => {
+    expect(readiness({ assignmentState: 'unassigned', approvalState: 'deferred' }))
+      .toEqual({ state: 'waiting_customer', label: 'Waiting for customer' })
+    expect(readiness({ assignmentState: 'unassigned', approvalState: 'declined' }))
+      .toEqual({ state: 'declined', label: 'Customer declined' })
+  })
+
+  it('explains below-tier work without granting a claim action', () => {
+    expect(readiness({ assignmentState: 'unassigned', canClaim: false, requiredSkillTier: 3 }))
+      .toEqual({ state: 'below_tier', label: 'Requires A-tech' })
+  })
+
+  it('separates approved review, running, paused, and blocked truth', () => {
+    expect(readiness()).toEqual({ state: 'review', label: 'Review & clock on' })
+    expect(readiness({
+      workStatus: 'in_progress',
+      clockedOnSince: '2026-08-04T20:00:00.000Z',
+    })).toEqual({
+      state: 'running',
+      label: 'Clock running since',
+      clockedOnSince: '2026-08-04T20:00:00.000Z',
+    })
+    expect(readiness({ workStatus: 'in_progress' }))
+      .toEqual({ state: 'paused', label: 'Clock paused' })
+    expect(readiness({ workStatus: 'blocked' }))
+      .toEqual({ state: 'unavailable', label: 'Review repair order' })
+    expect(readiness({ workStatus: 'blocked', approvalState: 'pending_quote' }))
+      .toEqual({ state: 'unavailable', label: 'Review repair order' })
+    expect(readiness({
+      assignmentState: 'unassigned',
+      workStatus: 'in_progress',
+      canClaim: false,
+    })).toEqual({ state: 'unavailable', label: 'Review repair order' })
+  })
+
+  it('does not invent a technician action for someone else’s assignment', () => {
+    expect(readiness({ assignmentState: 'team' }))
+      .toEqual({ state: 'unavailable', label: 'Review repair order' })
   })
 })

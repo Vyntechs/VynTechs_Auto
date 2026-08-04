@@ -36,6 +36,7 @@ export default async function TodayPage() {
       canCreateTickets={canCreateTickets(ctx.profile.role)}
       canDispatchWork={canDispatchWork}
       canBuildQuote={canBuildQuotes(ctx.profile.role)}
+      role={ctx.profile.role}
       currentProfileId={ctx.profile.id}
       team={shopTeam.members}
       todayJobs={todayJobs}

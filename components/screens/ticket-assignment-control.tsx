@@ -22,6 +22,7 @@ type Props = {
     requiredSkillTier: number
     hasAssignee: boolean
     workStatus: 'open' | 'in_progress' | 'blocked'
+    approvalState: string
   }
   command: AssignmentCommand
   team: TeamMember[]
@@ -31,6 +32,16 @@ type Props = {
 }
 
 type Candidate = TeamMember & { confirmBelowTier: boolean }
+
+const APPROVAL_STATES = new Set<AssignmentEnvelope['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred',
+])
+
+function safeApprovalState(value: string): AssignmentEnvelope['approvalState'] | null {
+  return APPROVAL_STATES.has(value as AssignmentEnvelope['approvalState'])
+    ? value as AssignmentEnvelope['approvalState']
+    : null
+}
 
 function safeConflictName(body: unknown): string | null {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null
@@ -114,6 +125,8 @@ export function TicketAssignmentControl({
       }
       const assignment = isActiveHandoff && interrupted
         ? (() => {
+            const approvalState = safeApprovalState(job.approvalState)
+            if (!approvalState) return null
             const state = interrupted.assignedTechId === currentProfileId
               ? 'mine' as const
               : interrupted.assignedTechId === null
@@ -128,6 +141,7 @@ export function TicketAssignmentControl({
               workStatus: activeWorkStatus as 'open' | 'in_progress' | 'blocked',
               state,
               assignedTechName,
+              approvalState,
             }
           })()
         : parseAssignmentEnvelope(responseBody, {
@@ -183,7 +197,10 @@ export function TicketAssignmentControl({
           type="button"
           className={styles.inlineAction}
           disabled={pending}
-          onClick={() => void mutate({ action: 'claim' }, currentProfileId)}
+          onClick={() => void mutate({
+            action: 'claim',
+            expectedApprovalState: job.approvalState,
+          }, currentProfileId)}
         >
           {pending ? 'Claiming…' : command.label}
         </button>

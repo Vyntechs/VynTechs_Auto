@@ -25,6 +25,7 @@ describe('atomic ticket-job assignment SQL contract', () => {
     expect(body).toContain('eq(ticketJobs.ticketId, ticketId)')
     expect(body).toContain('eq(ticketJobs.id, jobId)')
     expect(body).toContain("eq(ticketJobs.workStatus, 'open')")
+    expect(body).toContain('eq(ticketJobs.approvalState, expectedApprovalState)')
     expect(body).toContain('isNull(ticketJobs.assignedTechId)')
     expect(body).toContain("${tickets.status} = 'open'")
     expect(body).toContain("${profiles.membershipStatus} = 'active'")
@@ -87,11 +88,18 @@ describe('ticket-job assignment mutations', () => {
       actor: who,
       ticketId: ids.ticketId ?? ticketId,
       jobId: ids.jobId ?? jobId,
-      body: typeof body === 'object' && body !== null && !Array.isArray(body)
-        && typeof (body as Record<string, unknown>).action === 'string'
-        && !('requestKey' in body)
-        ? { ...body as Record<string, unknown>, requestKey: userId(requestSequence++) }
-        : body,
+      body: (() => {
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
+        const record = body as Record<string, unknown>
+        if (typeof record.action !== 'string') return body
+        return {
+          ...record,
+          ...(!('requestKey' in record) ? { requestKey: userId(requestSequence++) } : {}),
+          ...(record.action === 'claim' && !('expectedApprovalState' in record)
+            ? { expectedApprovalState: 'pending_quote' }
+            : {}),
+        }
+      })(),
     }, dependencies as never)
 
   beforeEach(async () => {
@@ -152,6 +160,7 @@ describe('ticket-job assignment mutations', () => {
     const body = {
       action: 'claim',
       requestKey: userId(70),
+      expectedApprovalState: 'pending_quote',
     }
 
     const first = await call(actor.tech, body)
@@ -177,10 +186,145 @@ describe('ticket-job assignment mutations', () => {
       requestKey: body.requestKey,
       payload: expect.objectContaining({
         action: 'claim',
+        expectedApprovalState: 'pending_quote',
         fromAssignedTechId: null,
         toAssignedTechId: actor.tech.profileId,
       }),
     })])
+  })
+
+  it('replays a matching pre-upgrade non-claim receipt without weakening claim binding', async () => {
+    const requestKey = userId(72)
+    await db.update(ticketJobs).set({
+      assignedTechId: actor.otherTech.profileId,
+      claimedAt: new Date(),
+    }).where(eq(ticketJobs.id, jobId))
+    await db.insert(ticketActivity).values({
+      shopId,
+      ticketId,
+      jobId,
+      actorProfileId: actor.advisor.profileId,
+      kind: 'job_reassigned',
+      requestKey,
+      payload: {
+        action: 'reassign',
+        requestedAssignedTechId: actor.otherTech.profileId,
+        confirmBelowTier: false,
+        fromAssignedTechId: null,
+        toAssignedTechId: actor.otherTech.profileId,
+      },
+    })
+
+    const replay = await call(actor.advisor, {
+      action: 'reassign',
+      assignedTechId: actor.otherTech.profileId,
+      requestKey,
+    })
+
+    expect(replay).toMatchObject({
+      ok: true,
+      changed: false,
+      ticket: { jobs: [{ id: jobId, assignedTechId: actor.otherTech.profileId }] },
+    })
+    expect(await db.select().from(ticketActivity)).toHaveLength(1)
+  })
+
+  it('does not replay a pre-upgrade claim receipt that lacks approval-state binding', async () => {
+    const requestKey = userId(73)
+    await db.insert(ticketActivity).values({
+      shopId,
+      ticketId,
+      jobId,
+      actorProfileId: actor.tech.profileId,
+      kind: 'job_reassigned',
+      requestKey,
+      payload: {
+        action: 'claim',
+        requestedAssignedTechId: actor.tech.profileId,
+        confirmBelowTier: false,
+        fromAssignedTechId: null,
+        toAssignedTechId: actor.tech.profileId,
+      },
+    })
+
+    const replay = await call(actor.tech, {
+      action: 'claim',
+      expectedApprovalState: 'pending_quote',
+      requestKey,
+    })
+
+    expect(replay).toEqual({ ok: false, error: 'conflict' })
+    expect((await db.select().from(ticketJobs))[0].assignedTechId).toBeNull()
+  })
+
+  it.each(['pending_quote', 'quote_ready', 'sent', 'approved'] as const)(
+    'self-claims only when the persisted approval state still equals %s',
+    async (approvalState) => {
+      await db.update(ticketJobs).set({
+        approvalState,
+        assignedTechId: null,
+        claimedAt: null,
+      }).where(eq(ticketJobs.id, jobId))
+
+      const result = await call(actor.tech, {
+        action: 'claim',
+        expectedApprovalState: approvalState,
+      })
+
+      expect(result).toMatchObject({
+        ok: true,
+        changed: true,
+        ticket: { jobs: [{ id: jobId, approvalState, assignedTechId: actor.tech.profileId }] },
+      })
+    },
+  )
+
+  it('changes nothing when approval no longer matches the state on the claimed card', async () => {
+    await db.update(ticketJobs).set({ approvalState: 'approved' })
+      .where(eq(ticketJobs.id, jobId))
+
+    const result = await call(actor.tech, {
+      action: 'claim',
+      expectedApprovalState: 'sent',
+    })
+    const [job] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
+    const receipts = await db.select().from(ticketActivity)
+
+    expect(result).toEqual({ ok: false, error: 'assignment_conflict' })
+    expect(job).toMatchObject({ approvalState: 'approved', assignedTechId: null, claimedAt: null })
+    expect(receipts).toEqual([])
+  })
+
+  it.each(['deferred', 'declined'] as const)(
+    'rejects %s as a new self-claim intent before assignment or receipt writes',
+    async (approvalState) => {
+      await db.update(ticketJobs).set({ approvalState }).where(eq(ticketJobs.id, jobId))
+
+      const result = await call(actor.tech, {
+        action: 'claim', expectedApprovalState: approvalState,
+      })
+
+      expect(result).toEqual({ ok: false, error: 'invalid_input' })
+      expect((await db.select().from(ticketJobs))[0].assignedTechId).toBeNull()
+      expect(await db.select().from(ticketActivity)).toEqual([])
+    },
+  )
+
+  it('refuses to replay one claim key with a different expected approval state', async () => {
+    const requestKey = userId(71)
+    const first = await call(actor.tech, {
+      action: 'claim', requestKey, expectedApprovalState: 'pending_quote',
+    })
+    await db.update(ticketJobs).set({ approvalState: 'approved' })
+      .where(eq(ticketJobs.id, jobId))
+
+    const replay = await call(actor.tech, {
+      action: 'claim', requestKey, expectedApprovalState: 'approved',
+    })
+
+    expect(first.ok).toBe(true)
+    expect(replay).toEqual({ ok: false, error: 'conflict' })
+    expect(await db.select().from(ticketActivity)).toHaveLength(1)
   })
 
   it('self-claims an eligible open job with a database timestamp and returns the safe ticket', async () => {

@@ -225,6 +225,7 @@ describe('Today ticket jobs read model', () => {
       requiredSkillTier: 2,
       sessionId: session.id,
       workStatus: 'open',
+      clockedOnSince: null,
       approvalState: 'pending_quote',
       canClaim: false,
       assignmentState: 'mine',
@@ -238,6 +239,59 @@ describe('Today ticket jobs read model', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /diagnosticStartAttemptKey|diagnosticStartLeaseUntil/,
     )
+  })
+
+  it('shows claimable work before above-tier and customer-outcome truth without granting claim authority', async () => {
+    const [advisor] = await db.insert(profiles).values({
+      id: uuid(7), userId: uuid(107), shopId, fullName: 'Avery Advisor', role: 'advisor', skillTier: null,
+    }).returning()
+    const [otherTicket] = await db.insert(tickets).values({
+      id: uuid(27), shopId, ticketNumber: 17, source: 'counter', concern: 'Separate work',
+      customerId, vehicleId, createdByProfileId: advisor.id,
+    }).returning()
+    await db.insert(ticketJobs).values([
+      { id: uuid(71), shopId, ticketId: otherTicket.id, title: 'Approved claimable', kind: 'repair', requiredSkillTier: 2, approvalState: 'approved' },
+      { id: uuid(72), shopId, ticketId: otherTicket.id, title: 'Waiting claimable', kind: 'repair', requiredSkillTier: 1, approvalState: 'sent' },
+      { id: uuid(73), shopId, ticketId: otherTicket.id, title: 'Above tier', kind: 'diagnostic', requiredSkillTier: 3, approvalState: 'approved' },
+      { id: uuid(74), shopId, ticketId: otherTicket.id, title: 'Deferred outcome', kind: 'repair', requiredSkillTier: 1, approvalState: 'deferred' },
+      { id: uuid(75), shopId, ticketId: otherTicket.id, title: 'Declined outcome', kind: 'repair', requiredSkillTier: 1, approvalState: 'declined' },
+    ])
+
+    const result = await listTodayTicketJobs(db, { actor })
+
+    expect(result.openJobs.map(({ title, canClaim, approvalState, requiredSkillTier }) => ({
+      title, canClaim, approvalState, requiredSkillTier,
+    }))).toEqual([
+      { title: 'Approved claimable', canClaim: true, approvalState: 'approved', requiredSkillTier: 2 },
+      { title: 'Waiting claimable', canClaim: true, approvalState: 'sent', requiredSkillTier: 1 },
+      { title: 'Above tier', canClaim: false, approvalState: 'approved', requiredSkillTier: 3 },
+      { title: 'Deferred outcome', canClaim: false, approvalState: 'deferred', requiredSkillTier: 1 },
+      { title: 'Declined outcome', canClaim: false, approvalState: 'declined', requiredSkillTier: 1 },
+    ])
+  })
+
+  it('projects persisted running and paused clock truth without active seconds', async () => {
+    await db.insert(ticketJobs).values([
+      {
+        id: uuid(76), shopId, ticketId, title: 'Running work', kind: 'repair', requiredSkillTier: 2,
+        assignedTechId: actorProfileId, workStatus: 'in_progress', approvalState: 'approved',
+        clockedOnSince: new Date('2026-08-04T20:00:00.000Z'), activeSeconds: 90,
+      },
+      {
+        id: uuid(77), shopId, ticketId, title: 'Paused work', kind: 'repair', requiredSkillTier: 2,
+        assignedTechId: actorProfileId, workStatus: 'in_progress', approvalState: 'approved',
+        clockedOnSince: null, activeSeconds: 180,
+      },
+    ])
+
+    const result = await listTodayTicketJobs(db, { actor })
+    const byTitle = new Map(result.myJobs.map((job) => [job.title, job]))
+
+    expect(byTitle.get('Running work')).toMatchObject({
+      clockedOnSince: '2026-08-04T20:00:00.000Z',
+    })
+    expect(byTitle.get('Paused work')).toMatchObject({ clockedOnSince: null })
+    expect(JSON.stringify(result)).not.toContain('activeSeconds')
   })
 
   it('excludes other tenants and terminal tickets or jobs without leaking profile or private customer/vehicle fields', async () => {

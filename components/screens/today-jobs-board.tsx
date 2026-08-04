@@ -3,10 +3,12 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import type { TodayTicketJob, TodayTicketJobs } from '@/lib/tickets'
 import type { TeamMember } from '@/lib/intake/team'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import { formatAttentionClock } from '@/lib/shop-os/attention-clock'
+import { projectTechnicianJobReadiness } from '@/lib/shop-os/living-ticket'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
@@ -39,6 +41,7 @@ type Props = {
   readyToCollect?: ReadyToCollectTicket[]
   canDispatchWork?: boolean
   canBuildQuote?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   hasMore?: boolean
@@ -56,6 +59,21 @@ type DiagnosticStartBody = {
   state?: unknown
   sessionId?: unknown
   warning?: unknown
+}
+
+type ClaimApprovalState = Extract<
+  TodayTicketJob['approvalState'],
+  'pending_quote' | 'quote_ready' | 'sent' | 'approved'
+>
+
+type ClaimAttempt = {
+  requestKey: string
+  expectedApprovalState: ClaimApprovalState
+}
+
+type TodayRefreshOptions = {
+  allowWhileWorkspace?: boolean
+  discardOverrideJobId?: string
 }
 
 const duplicateCostWarning =
@@ -102,6 +120,7 @@ export function TodayJobsBoard({
   readyToCollect = emptyReadyToCollect,
   canDispatchWork = false,
   canBuildQuote = false,
+  role = '',
   currentProfileId,
   team = emptyTeam,
   hasMore = false,
@@ -117,6 +136,9 @@ export function TodayJobsBoard({
   const [announcement, setAnnouncement] = useState<Announcement | null>(null)
   const [jobOverrides, setJobOverrides] = useState<Map<string, TodayJobOverride>>(
     () => new Map(),
+  )
+  const [claimSafetyBlocks, setClaimSafetyBlocks] = useState<Set<string>>(
+    () => new Set(),
   )
   const [serverJobs, setServerJobs] = useState<TodayTicketJobs>(() => ({
     myJobs,
@@ -145,7 +167,7 @@ export function TodayJobsBoard({
   } | null>(null)
   const claimButtons = useRef(new Map<string, HTMLButtonElement>())
   const diagnosticButtons = useRef(new Map<string, HTMLButtonElement>())
-  const claimAttempts = useRef(new Map<string, string>())
+  const claimAttempts = useRef(new Map<string, ClaimAttempt>())
   useEffect(() => {
     setServerJobs({
       myJobs,
@@ -167,7 +189,9 @@ export function TodayJobsBoard({
       || activeRingOutTicketId !== null
   }, [activeQuoteJob, activeWorkJob, activeRingOutTicketId])
 
-  const refreshTodayJobs = useCallback(async () => {
+  const refreshTodayJobs = useCallback(async (
+    options: TodayRefreshOptions = {},
+  ): Promise<boolean> => {
     try {
       const response = await fetch('/api/today/jobs', {
         headers: { accept: 'application/json' },
@@ -175,7 +199,16 @@ export function TodayJobsBoard({
       })
       const body: unknown = await response.json().catch(() => null)
       const fresh = response.ok ? parseTodayJobsResponse(body) : null
-      if (!fresh || activeWorkspaceRef.current) return
+      if (!fresh || (activeWorkspaceRef.current && !options.allowWhileWorkspace)) return false
+      const discardOverrideJobId = options.discardOverrideJobId
+      if (discardOverrideJobId) {
+        setJobOverrides((current) => {
+          if (!current.has(discardOverrideJobId)) return current
+          const next = new Map(current)
+          next.delete(discardOverrideJobId)
+          return next
+        })
+      }
       setServerJobs(fresh)
       // Fresh server truth supersedes the local echo of a payment or closure;
       // another advisor may have collected against the same repair order.
@@ -189,11 +222,20 @@ export function TodayJobsBoard({
         }
         return next
       })
+      return true
     } catch {
       // The displayed server truth remains useful when a background refresh
       // misses. Do not interrupt a technician with a transient network toast.
+      return false
     }
   }, [])
+
+  const refreshStaleWorkTruth = useCallback((jobId: string) => {
+    void refreshTodayJobs({
+      allowWhileWorkspace: true,
+      discardOverrideJobId: jobId,
+    })
+  }, [refreshTodayJobs])
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -254,8 +296,12 @@ export function TodayJobsBoard({
 
   async function claim(job: TodayTicketJob) {
     if (pendingJobId) return
-    const requestKey = claimAttempts.current.get(job.id) ?? crypto.randomUUID()
-    claimAttempts.current.set(job.id, requestKey)
+    if (!['pending_quote', 'quote_ready', 'sent', 'approved'].includes(job.approvalState)) return
+    const attempt = claimAttempts.current.get(job.id) ?? {
+      requestKey: crypto.randomUUID(),
+      expectedApprovalState: job.approvalState as ClaimApprovalState,
+    }
+    claimAttempts.current.set(job.id, attempt)
     let returnFocusToBoard = false
     let returnFocusToRow = false
 
@@ -268,7 +314,11 @@ export function TodayJobsBoard({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'claim', requestKey }),
+          body: JSON.stringify({
+            action: 'claim',
+            expectedApprovalState: attempt.expectedApprovalState,
+            requestKey: attempt.requestKey,
+          }),
         },
       )
 
@@ -280,6 +330,8 @@ export function TodayJobsBoard({
         })
         if (!assignment) {
           applyJobTruth(job, { ...job, canClaim: false })
+          setClaimSafetyBlocks((current) => new Set(current).add(job.id))
+          claimAttempts.current.delete(job.id)
           setAnnouncement({
             kind: 'error',
             text: `Repair order ${job.ticketNumber} changed, but this screen couldn't safely catch up. Open the repair order.`,
@@ -290,6 +342,7 @@ export function TodayJobsBoard({
         const updatedJob: TodayTicketJob = {
           ...job,
           workStatus: assignment.workStatus,
+          approvalState: assignment.approvalState,
           assignmentState: assignment.state,
           assignedTechName: assignment.assignedTechName,
           canClaim: false,
@@ -303,6 +356,17 @@ export function TodayJobsBoard({
             : `Repair order ${job.ticketNumber} assignment updated.`,
         })
         const lane = placeTodayJob(updatedJob, canDispatchWork)
+        if (assignment.state === 'mine'
+          && assignment.approvalState === 'approved'
+          && job.customerName !== null
+          && job.vehicle !== null
+          && canUseManualWork({
+            kind: job.kind,
+            sessionId: job.sessionId,
+            diagnosticsEntitled,
+          })) {
+          setActiveWorkJob(updatedJob)
+        }
         returnFocusToBoard = lane === 'hidden'
         returnFocusToRow = lane !== 'hidden'
         return
@@ -327,22 +391,28 @@ export function TodayJobsBoard({
         const safeWinner = trimmedWinner.length > 0 && trimmedWinner.length <= 120
           ? trimmedWinner
           : null
-        const updatedJob: TodayTicketJob = {
-          ...job,
-          assignmentState: 'team',
-          assignedTechName: safeWinner,
-          canClaim: false,
+        claimAttempts.current.delete(job.id)
+        if (safeWinner) {
+          const updatedJob: TodayTicketJob = {
+            ...job,
+            assignmentState: 'team',
+            assignedTechName: safeWinner,
+            canClaim: false,
+          }
+          applyJobTruth(job, updatedJob)
+          setAnnouncement({ kind: 'status', text: `Already claimed by ${safeWinner}.` })
+          const lane = placeTodayJob(updatedJob, canDispatchWork)
+          returnFocusToBoard = lane === 'hidden'
+          returnFocusToRow = lane !== 'hidden'
+          return
         }
-        applyJobTruth(job, updatedJob)
-        setAnnouncement({
-          kind: 'status',
-          text: safeWinner
-            ? `Already claimed by ${safeWinner}.`
-            : 'This job was already claimed.',
-        })
-        const lane = placeTodayJob(updatedJob, canDispatchWork)
-        returnFocusToBoard = lane === 'hidden'
-        returnFocusToRow = lane !== 'hidden'
+        setAnnouncement({ kind: 'status', text: 'This job changed. Loading current shop truth.' })
+        const refreshed = await refreshTodayJobs()
+        if (!refreshed) {
+          applyJobTruth(job, { ...job, canClaim: false })
+          setClaimSafetyBlocks((current) => new Set(current).add(job.id))
+        }
+        returnFocusToBoard = true
         return
       }
 
@@ -399,10 +469,12 @@ export function TodayJobsBoard({
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) {
     const updatedJob: TodayTicketJob = {
       ...job,
       workStatus: assignment.workStatus,
+      approvalState: assignment.approvalState,
       assignmentState: assignment.state,
       assignedTechName: assignment.assignedTechName,
       canClaim: false,
@@ -472,18 +544,26 @@ export function TodayJobsBoard({
     // making the confirmation disappear mid-task.
     if (work.status === 'open' || work.status === 'in_progress') {
       const workStatus: TodayTicketJob['workStatus'] = work.status
-      setServerJobs((current) => {
-        const update = (candidate: TodayTicketJob) => candidate.id === job.id
-          ? { ...candidate, workStatus }
-          : candidate
-        return {
-          ...current,
-          myJobs: current.myJobs.map(update),
-          openJobs: current.openJobs.map(update),
-          teamJobs: current.teamJobs.map(update),
-          createdJobs: current.createdJobs.map(update),
-          partsJobs: current.partsJobs.map(update),
+      setJobOverrides((current) => {
+        const next = new Map(current)
+        const existing = next.get(job.id)
+        if (existing) {
+          next.set(job.id, {
+            before: existing.before,
+            after: {
+              ...existing.after,
+              workStatus,
+              clockedOnSince: work.clockedOnSince,
+            },
+          })
+          return next
         }
+        next.set(job.id, createTodayJobOverride(job, {
+          ...job,
+          workStatus,
+          clockedOnSince: work.clockedOnSince,
+        }))
+        return next
       })
     }
   }
@@ -692,6 +772,7 @@ export function TodayJobsBoard({
     onOpenWork: setActiveWorkJob,
     onCloseWork: closeWork,
     onWorkProjection: applyWorkProjection,
+    onWorkStale: refreshStaleWorkTruth,
     onInterrupted: applyInterruptedWork,
     onResolveHold: applyResolvedHold,
   }
@@ -743,6 +824,7 @@ export function TodayJobsBoard({
             else diagnosticButtons.current.delete(jobId)
           }}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -760,12 +842,14 @@ export function TodayJobsBoard({
           attentionNow={attentionNow}
           pendingJobId={pendingJobId}
           claimsDisabled={pendingJobId !== null}
+          claimSafetyBlocks={claimSafetyBlocks}
           onClaim={claim}
           setClaimButton={(jobId, element) => {
             if (element) claimButtons.current.set(jobId, element)
             else claimButtons.current.delete(jobId)
           }}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -782,6 +866,7 @@ export function TodayJobsBoard({
           mode="team"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -798,6 +883,7 @@ export function TodayJobsBoard({
           mode="created"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -814,6 +900,7 @@ export function TodayJobsBoard({
           mode="parts"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -964,6 +1051,7 @@ function JobSection({
   attentionNow,
   pendingJobId = null,
   claimsDisabled = false,
+  claimSafetyBlocks = new Set(),
   onClaim,
   setClaimButton,
   pendingDiagnosticJobId = null,
@@ -975,6 +1063,7 @@ function JobSection({
   onCheckDiagnostic,
   setDiagnosticButton,
   canDispatchWork = false,
+  role = '',
   currentProfileId,
   team = [],
   onAssignment,
@@ -990,6 +1079,7 @@ function JobSection({
   onOpenWork,
   onCloseWork,
   onWorkProjection,
+  onWorkStale,
   onInterrupted,
   onResolveHold,
 }: {
@@ -999,6 +1089,7 @@ function JobSection({
   attentionNow: number | null
   pendingJobId?: string | null
   claimsDisabled?: boolean
+  claimSafetyBlocks?: ReadonlySet<string>
   onClaim?: (job: TodayTicketJob) => void
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   pendingDiagnosticJobId?: string | null
@@ -1010,12 +1101,14 @@ function JobSection({
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
   canDispatchWork?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   onAssignment?: (job: TodayTicketJob, assignment: {
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) => void
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
@@ -1029,6 +1122,7 @@ function JobSection({
   onOpenWork?: (job: TodayTicketJob) => void
   onCloseWork?: (job: TodayTicketJob) => void
   onWorkProjection?: (job: TodayTicketJob, work: SimpleWorkProjectionView) => void
+  onWorkStale?: (jobId: string) => void
   onInterrupted?: (job: TodayTicketJob, interrupted: InterruptionJobView) => void
   onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
 }) {
@@ -1040,13 +1134,18 @@ function JobSection({
       </div>
       <div className={styles.ledger}>
         {jobs.map((job) => (
-          <div key={job.id} className={styles.jobSlot}>
+          <div
+            key={job.id}
+            className={styles.jobSlot}
+            data-work-open={activeWorkJobId === job.id ? 'true' : undefined}
+          >
             <JobRow
               job={job}
               mode={mode}
               attentionNow={attentionNow}
               pending={pendingJobId === job.id}
               claimDisabled={claimsDisabled}
+              claimSafetyBlocked={claimSafetyBlocks.has(job.id)}
               onClaim={onClaim}
               setClaimButton={setClaimButton}
               diagnosticPending={pendingDiagnosticJobId === job.id}
@@ -1060,6 +1159,7 @@ function JobSection({
               onCheckDiagnostic={onCheckDiagnostic}
               setDiagnosticButton={setDiagnosticButton}
               canDispatchWork={canDispatchWork}
+              role={role}
               currentProfileId={currentProfileId}
               team={team}
               onAssignment={onAssignment}
@@ -1100,6 +1200,7 @@ function JobSection({
                   }}
                   jobId={job.id}
                   onProjection={(work) => onWorkProjection?.(job, work)}
+                  onStale={() => onWorkStale?.(job.id)}
                   onInterrupted={(interrupted) => onInterrupted?.(job, interrupted)}
                   onClose={() => onCloseWork?.(job)}
                 />
@@ -1118,6 +1219,7 @@ function JobRow({
   attentionNow,
   pending,
   claimDisabled,
+  claimSafetyBlocked,
   onClaim,
   setClaimButton,
   diagnosticPending,
@@ -1129,6 +1231,7 @@ function JobRow({
   onCheckDiagnostic,
   setDiagnosticButton,
   canDispatchWork,
+  role,
   currentProfileId,
   team,
   onAssignment,
@@ -1146,6 +1249,7 @@ function JobRow({
   attentionNow: number | null
   pending: boolean
   claimDisabled: boolean
+  claimSafetyBlocked: boolean
   onClaim?: (job: TodayTicketJob) => void
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   diagnosticPending: boolean
@@ -1157,12 +1261,14 @@ function JobRow({
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
   canDispatchWork?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   onAssignment?: (job: TodayTicketJob, assignment: {
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) => void
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
@@ -1185,6 +1291,26 @@ function JobRow({
       sessionId: job.sessionId,
       diagnosticsEntitled: diagnosticsEntitled ?? true,
     })
+  const readiness = (
+    mode === 'open' && !canDispatchWork
+    || mode === 'mine' && role === 'tech'
+  )
+    ? projectTechnicianJobReadiness({
+        assignmentState: job.assignmentState,
+        approvalState: job.approvalState,
+        workStatus: job.workStatus,
+        canClaim: job.canClaim,
+        requiredSkillTier: job.requiredSkillTier,
+        clockedOnSince: job.clockedOnSince,
+      })
+    : null
+  const readOnlyReadiness = readiness && [
+    'below_tier',
+    'waiting_quote',
+    'waiting_advisor',
+    'waiting_customer',
+    'declined',
+  ].includes(readiness.state)
 
   return (
     <article
@@ -1223,6 +1349,14 @@ function JobRow({
           <span data-decision={DECIDED.has(job.approvalState) ? job.approvalState : undefined}>
             {approvalLabel[job.approvalState]}
           </span>
+          {readiness?.state === 'running' && (
+            <span data-readiness="running">
+              {readiness.label} <LocalizedTimestamp value={readiness.clockedOnSince} kind="time" />
+            </span>
+          )}
+          {readiness?.state === 'paused' && (
+            <span data-readiness="paused">{readiness.label}</span>
+          )}
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
           )}
@@ -1234,7 +1368,8 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.workStatus === 'open' && job.canClaim
+        {mode === 'open' && job.workStatus === 'open'
+          && (readiness?.state === 'claimable' || (canDispatchWork && !currentProfileId && job.canClaim))
           && (!canDispatchWork || !currentProfileId) ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
@@ -1243,7 +1378,7 @@ function JobRow({
             disabled={claimDisabled}
             onClick={() => onClaim?.(job)}
           >
-            {pending ? 'Claiming…' : 'Claim job'}
+            {pending ? 'Claiming…' : readiness?.label ?? 'Claim work'}
           </button>
         ) : canDispatchWork && currentProfileId && (
           mode === 'open' || (mode === 'team' && (
@@ -1257,6 +1392,7 @@ function JobRow({
               requiredSkillTier: job.requiredSkillTier,
               hasAssignee: job.assignmentState !== 'unassigned',
               workStatus: job.workStatus,
+              approvalState: job.approvalState,
             }}
             command={{
               kind: mode === 'open' ? 'assign' : 'handoff',
@@ -1268,6 +1404,17 @@ function JobRow({
             onApplied={(assignment) => onAssignment?.(job, assignment)}
             onConflict={({ assignedTechName }) => onAssignmentConflict?.(job, assignedTechName)}
           />
+        ) : mode === 'open' && claimSafetyBlocked ? (
+          <Link
+            href={`/tickets/${job.ticketId}`}
+            className={`${styles.control} ${styles.secondary}`}
+          >
+            View ticket
+          </Link>
+        ) : mode === 'open' && readOnlyReadiness ? (
+          <span className={`${styles.control} ${styles.secondary}`} data-readiness={readiness.state}>
+            {readiness.label}
+          </span>
         ) : mode === 'open' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
@@ -1304,7 +1451,12 @@ function JobRow({
             className={`${styles.control} ${styles.claim}`}
             onApplied={(resolved) => onResolveHold?.(job, resolved)}
           />
-        ) : canBuildQuote && (mode === 'mine' || mode === 'created' || mode === 'team')
+        ) : readOnlyReadiness ? (
+          <span className={`${styles.control} ${styles.secondary}`} data-readiness={readiness.state}>
+            {readiness.label}
+          </span>
+        ) : role !== 'tech' && canBuildQuote
+          && (mode === 'mine' || mode === 'created' || mode === 'team')
           && job.approvalState === 'pending_quote' && job.concern ? (
           <button
             type="button"
@@ -1327,6 +1479,8 @@ function JobRow({
             inPlace={mode === 'mine' && Boolean(currentProfileId)}
             disabled={commandBusy}
             onOpen={onOpenWork}
+            label={readiness?.state === 'review' ? readiness.label : undefined}
+            requiresApproval={role === 'tech'}
           />
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
@@ -1346,6 +1500,7 @@ function JobRow({
             inPlace={mode === 'mine' && Boolean(currentProfileId)}
             disabled={commandBusy}
             onOpen={onOpenWork}
+            requiresApproval={role === 'tech'}
           />
         )}
       </div>
@@ -1358,16 +1513,21 @@ function SimpleWorkAction({
   inPlace = false,
   disabled = false,
   onOpen,
+  label,
+  requiresApproval = false,
 }: {
   job: TodayTicketJob
   inPlace?: boolean
   disabled?: boolean
   onOpen?: (job: TodayTicketJob) => void
+  label?: string
+  requiresApproval?: boolean
 }) {
   const identityComplete = job.customerName !== null && job.vehicle !== null
   // Declined work is not the tech's to open — the counter has to retire it first.
   const workAvailable = identityComplete && job.workStatus !== 'blocked'
-    && job.approvalState !== 'declined' && job.sessionId === null
+    && job.approvalState !== 'declined'
+    && (!requiresApproval || job.approvalState === 'approved') && job.sessionId === null
   if (workAvailable && inPlace && onOpen) {
     return (
       <button
@@ -1376,7 +1536,7 @@ function SimpleWorkAction({
         disabled={disabled}
         onClick={() => onOpen(job)}
       >
-        {job.workStatus === 'in_progress' ? 'Continue work' : 'Open work'}
+        {job.workStatus === 'in_progress' ? 'Continue work' : label ?? 'Open work'}
       </button>
     )
   }

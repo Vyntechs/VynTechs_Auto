@@ -6,6 +6,7 @@ import {
   isShopRole,
 } from '@/lib/shop-os/capabilities'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
+import type { TodayTicketJob } from '@/lib/tickets'
 
 export type LivingTicketJob = {
   id: string
@@ -16,6 +17,86 @@ export type LivingTicketJob = {
   workStatus: string
   approvalState: string
   assignmentState?: 'mine' | 'team' | 'unassigned'
+  clockedOnSince?: string | null
+}
+
+export type TechnicianJobReadiness =
+  | { state: 'claimable'; label: 'Claim work' }
+  | { state: 'below_tier'; label: `Requires ${string}` }
+  | { state: 'waiting_quote'; label: 'Waiting for quote' }
+  | { state: 'waiting_advisor'; label: 'Waiting for advisor' }
+  | { state: 'waiting_customer'; label: 'Waiting for customer' }
+  | { state: 'declined'; label: 'Customer declined' }
+  | { state: 'review'; label: 'Review & clock on' }
+  | { state: 'running'; label: 'Clock running since'; clockedOnSince: string }
+  | { state: 'paused'; label: 'Clock paused' }
+  | { state: 'continue'; label: 'Continue work' }
+  | { state: 'unavailable'; label: 'Review repair order' }
+
+type TechnicianJobReadinessInput = {
+  assignmentState: 'mine' | 'team' | 'unassigned'
+  approvalState: TodayTicketJob['approvalState']
+  workStatus: TodayTicketJob['workStatus']
+  canClaim: boolean
+  requiredSkillTier: number
+  clockedOnSince: string | null
+}
+
+const shopTierLabel: Record<number, string> = {
+  3: 'A-tech',
+  2: 'B-tech',
+  1: 'C-tech',
+}
+
+export function projectTechnicianJobReadiness(
+  input: TechnicianJobReadinessInput,
+): TechnicianJobReadiness {
+  if (input.approvalState === 'declined') {
+    return { state: 'declined', label: 'Customer declined' }
+  }
+  if (input.approvalState === 'deferred') {
+    return { state: 'waiting_customer', label: 'Waiting for customer' }
+  }
+  if (input.workStatus === 'blocked') {
+    return { state: 'unavailable', label: 'Review repair order' }
+  }
+  if (input.assignmentState === 'unassigned') {
+    if (input.workStatus !== 'open') {
+      return { state: 'unavailable', label: 'Review repair order' }
+    }
+    return input.canClaim
+      ? { state: 'claimable', label: 'Claim work' }
+      : {
+          state: 'below_tier',
+          label: `Requires ${shopTierLabel[input.requiredSkillTier] ?? `Tier ${input.requiredSkillTier}`}`,
+        }
+  }
+  if (input.assignmentState !== 'mine') {
+    return { state: 'unavailable', label: 'Review repair order' }
+  }
+  if (input.approvalState === 'pending_quote') {
+    return { state: 'waiting_quote', label: 'Waiting for quote' }
+  }
+  if (input.approvalState === 'quote_ready') {
+    return { state: 'waiting_advisor', label: 'Waiting for advisor' }
+  }
+  if (input.approvalState === 'sent') {
+    return { state: 'waiting_customer', label: 'Waiting for customer' }
+  }
+  if (input.workStatus === 'open') {
+    return { state: 'review', label: 'Review & clock on' }
+  }
+  if (input.workStatus === 'in_progress' && input.clockedOnSince) {
+    return {
+      state: 'running',
+      label: 'Clock running since',
+      clockedOnSince: input.clockedOnSince,
+    }
+  }
+  if (input.workStatus === 'in_progress') {
+    return { state: 'paused', label: 'Clock paused' }
+  }
+  return { state: 'unavailable', label: 'Review repair order' }
 }
 
 export type LivingTicketCommand = {
@@ -41,6 +122,16 @@ type Input = {
 
 type RankedCommand = LivingTicketCommand & { rank: number }
 
+const technicianApprovalStates = new Set<TodayTicketJob['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred',
+])
+const technicianWorkStatuses = new Set<TodayTicketJob['workStatus']>([
+  'open', 'in_progress', 'blocked',
+])
+const claimableApprovalStates = new Set<TodayTicketJob['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved',
+])
+
 function sameId(left: string | null, right: string | null): boolean {
   return left !== null && right !== null && left.toLowerCase() === right.toLowerCase()
 }
@@ -54,8 +145,34 @@ function assignmentState(
   return sameId(job.assignedTechId, profileId) ? 'mine' : 'team'
 }
 
+function technicianReadiness(
+  job: LivingTicketJob,
+  profileId: string,
+  skillTier: number | null,
+): TechnicianJobReadiness {
+  if (!technicianApprovalStates.has(job.approvalState as TodayTicketJob['approvalState'])
+    || !technicianWorkStatuses.has(job.workStatus as TodayTicketJob['workStatus'])) {
+    return { state: 'unavailable', label: 'Review repair order' }
+  }
+  const state = assignmentState(job, profileId)
+  const approvalState = job.approvalState as TodayTicketJob['approvalState']
+  const canClaim = state === 'unassigned'
+    && job.workStatus === 'open'
+    && skillTier !== null
+    && skillTier >= job.requiredSkillTier
+    && claimableApprovalStates.has(approvalState)
+  return projectTechnicianJobReadiness({
+    assignmentState: state,
+    approvalState,
+    workStatus: job.workStatus as TodayTicketJob['workStatus'],
+    canClaim,
+    requiredSkillTier: job.requiredSkillTier,
+    clockedOnSince: job.clockedOnSince ?? null,
+  })
+}
+
 function quoteCommand(input: Input, activeJobs: LivingTicketJob[]): RankedCommand | null {
-  if (!canBuildQuotes(input.role)) return null
+  if (input.role === 'tech' || !canBuildQuotes(input.role)) return null
   const needsDraft = activeJobs.some((job) => job.approvalState === 'pending_quote')
   if (needsDraft) return { kind: 'quote', label: 'Build quote', rank: 30 }
 
@@ -83,6 +200,7 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
 
   for (const job of activeJobs) {
     const state = assignmentState(job, input.profileId)
+    const readiness = technicianReadiness(job, input.profileId, input.skillTier)
     const isOwnApprovedSimpleWork = state === 'mine'
       && job.approvalState === 'approved'
       && canUseManualWork({
@@ -102,7 +220,11 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
       commands.push({
         kind: 'work',
         jobId: job.id,
-        label: job.workStatus === 'in_progress' ? 'Continue work' : 'Start work',
+        label: job.workStatus === 'in_progress'
+          ? 'Continue work'
+          : readiness.state === 'review'
+            ? readiness.label
+            : 'Review & clock on',
         rank: job.workStatus === 'in_progress' ? 0 : 20,
       })
     }
@@ -135,8 +257,7 @@ export function projectLivingTicketCommands(input: Input): LivingTicketCommands 
     }
   } else if (input.skillTier !== null && input.skillTier >= 1 && input.skillTier <= 3) {
     for (const job of openJobs) {
-      if (assignmentState(job, input.profileId) === 'unassigned'
-        && input.skillTier >= job.requiredSkillTier) {
+      if (technicianReadiness(job, input.profileId, input.skillTier).state === 'claimable') {
         commands.push({ kind: 'claim', jobId: job.id, label: 'Claim work', rank: 40 })
       }
     }

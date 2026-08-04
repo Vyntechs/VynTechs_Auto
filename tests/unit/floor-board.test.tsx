@@ -22,6 +22,7 @@ function job(overrides: Partial<TodayTicketJob> & { id: string; ticketId: string
     requiredSkillTier: 2,
     sessionId: null,
     workStatus: 'open',
+    clockedOnSince: null,
     approvalState: 'pending_quote',
     canClaim: false,
     assignmentState: 'unassigned',

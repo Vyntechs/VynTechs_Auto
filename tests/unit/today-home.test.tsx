@@ -81,6 +81,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 2,
       sessionId: 'session-linked',
       workStatus: 'in_progress',
+      clockedOnSince: null,
       approvalState: 'pending_quote',
       canClaim: false,
       assignmentState: 'mine',
@@ -102,6 +103,7 @@ const todayJobs: TodayTicketJobs = {
       requiredSkillTier: 1,
       sessionId: null,
       workStatus: 'open',
+      clockedOnSince: null,
       approvalState: 'pending_quote',
       canClaim: true,
       assignmentState: 'unassigned',
@@ -203,11 +205,8 @@ describe('TodayHome', () => {
       />,
     )
 
-    expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
-      'href',
-      '/tickets/ticket-open',
-    )
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.getByText('Requires C-tech')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
   })
 
   it('turns the same Today surface into a dispatch board without adding a page', () => {
@@ -310,9 +309,9 @@ describe('TodayHome', () => {
       announcement: 'Already claimed by Winner Tech',
     },
     {
-      label: 'generic winner',
+      label: 'nameless conflict',
       response: { error: 'assignment_conflict' },
-      announcement: 'This job was already claimed',
+      announcement: 'This job changed. Loading current shop truth.',
     },
   ])(
     'keeps the $label race announcement mounted after refreshed jobs become empty',
@@ -349,7 +348,7 @@ describe('TodayHome', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
       await waitFor(() => {
         expect(screen.getByRole('status')).toHaveTextContent(announcement)
       })

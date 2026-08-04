@@ -49,6 +49,15 @@ describe('simple work workspace', () => {
     expect(container.textContent).not.toMatch(/\$|price|cost|vendor/i)
   })
 
+  it('focuses the approved scope when mounted inside the technician handoff', async () => {
+    render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={base} embedded />)
+
+    await waitFor(() => expect(
+      screen.getByRole('heading', { name: 'Exactly what is approved' }),
+    ).toHaveFocus())
+    expect(screen.getByRole('button', { name: 'Clock on' })).toBeEnabled()
+  })
+
   it('restores the current technician draft after a reload without changing the repair-order route', async () => {
     const workspace = { ...base, workStatus: 'in_progress' as const }
     const scope = {
@@ -258,6 +267,41 @@ describe('simple work workspace', () => {
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith(`/tickets/${TICKET}`))
   })
 
+  it('replaces every embedded mutation with stale recovery after access changes', async () => {
+    const onClose = vi.fn()
+    const onStale = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'not_found' }),
+    }))
+    render(<SimpleWorkWorkspace
+      ticket={ticket}
+      initialWorkspace={base}
+      embedded
+      onClose={onClose}
+      onStale={onStale}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
+
+    const staleHeading = await screen.findByRole('heading', { name: 'Work access changed' })
+    expect(staleHeading).toHaveFocus()
+    expect(onStale).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Work note' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Complete work' })).toBeNull()
+    expect(screen.queryByText('Put work on hold')).toBeNull()
+    expect(screen.queryByText('Found another concern')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send to parts' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Review repair order' })).toHaveAttribute(
+      'href',
+      `/tickets/${TICKET}`,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Close work' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('renders completed work as text-only read-only history', () => {
     render(<SimpleWorkWorkspace ticket={ticket} initialWorkspace={{
       ...base, workStatus: 'done', workNotes: 'Installed and verified.',
@@ -376,6 +420,9 @@ describe('simple work workspace', () => {
     const css = readFileSync(join(process.cwd(), 'components/screens/simple-work-workspace.module.css'), 'utf8')
     expect(css).toMatch(/\.hero h1[^}]*overflow-wrap: anywhere/)
     expect(css).toMatch(/\.savedNote[^}]*overflow-wrap: anywhere/)
+    expect(css).toMatch(/\.approvedScope h2:focus-visible[^}]*outline:\s*2px solid var\(--vt-focus-ring\)/)
+    expect(css).toMatch(/\.primary, \.secondary, \.ticketLink[^}]*min-height:\s*44px/)
+    expect(css).toMatch(/\.closeEmbedded[^}]*min-width:\s*44px[^}]*min-height:\s*44px/)
     expect(css).not.toMatch(/proofList|primaryFile|secondaryFile|retryRow/)
   })
 })

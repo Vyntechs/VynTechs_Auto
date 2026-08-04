@@ -59,6 +59,7 @@ function updatedTicket(input: {
   assignedTechId: string | null
   assignedTechName: string | null
   workStatus?: 'open' | 'in_progress' | 'blocked'
+  approvalState?: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
 }) {
   return {
     id: TICKET_ID,
@@ -84,6 +85,7 @@ function updatedTicket(input: {
             }
           : null,
         workStatus: input.workStatus ?? 'open',
+        approvalState: input.approvalState ?? 'approved',
         sessionId: 'private-session-id',
       },
       { id: 'private-other-job', workStatus: 'open' },
@@ -130,6 +132,7 @@ describe('job assignment route', () => {
     const response = await POST(invalidJsonRequest(), params())
 
     expect(response.status).toBe(401)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     await expect(response.json()).resolves.toEqual({ error: 'unauthenticated' })
     expect(paywallMock).not.toHaveBeenCalled()
     expect(mutationMock).not.toHaveBeenCalled()
@@ -143,6 +146,7 @@ describe('job assignment route', () => {
     const response = await POST(invalidJsonRequest(), params())
 
     expect(response.status).toBe(403)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     await expect(response.json()).resolves.toEqual({ error: 'paywall', reason: 'past_due' })
     expect(paywallMock).toHaveBeenCalledWith({}, profile.userId)
     expect(mutationMock).not.toHaveBeenCalled()
@@ -152,13 +156,14 @@ describe('job assignment route', () => {
     const response = await POST(invalidJsonRequest(), params())
 
     expect(response.status).toBe(400)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
     expect(mutationMock).not.toHaveBeenCalled()
   })
 
   it.each([
     {
-      body: { action: 'claim' as const },
+      body: { action: 'claim' as const, expectedApprovalState: 'approved' as const },
       assignedTechId: profile.id,
       assignedTechName: profile.fullName,
       state: 'mine' as const,
@@ -207,8 +212,10 @@ describe('job assignment route', () => {
         workStatus: 'open',
         state,
         assignedTechName,
+        approvalState: 'approved',
       },
     })
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(JSON.stringify(payload)).not.toMatch(
       /Private Customer|555-PRIVATE|private@example|PRIVATEVIN|private-session|private-other-job|skillTier|role/,
     )
@@ -220,9 +227,10 @@ describe('job assignment route', () => {
       ticket: { ...updatedTicket({ assignedTechId: profile.id, assignedTechName: profile.fullName }), jobs: [] },
     } as never)
 
-    const response = await POST(request({ action: 'claim' }), params())
+    const response = await POST(request({ action: 'claim', expectedApprovalState: 'approved' }), params())
 
     expect(response.status).toBe(500)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     await expect(response.json()).resolves.toEqual({ error: 'invalid_assignment_result' })
   })
 
@@ -246,7 +254,7 @@ describe('job assignment route', () => {
       },
     } as never)
 
-    const response = await POST(request({ action: 'claim' }), {
+    const response = await POST(request({ action: 'claim', expectedApprovalState: 'approved' }), {
       params: Promise.resolve({ id: uppercaseTicketId, jobId: uppercaseJobId }),
     })
 
@@ -262,6 +270,7 @@ describe('job assignment route', () => {
         workStatus: 'open',
         state: 'mine',
         assignedTechName: profile.fullName,
+        approvalState: 'approved',
       },
     })
   })
@@ -279,9 +288,10 @@ describe('job assignment route', () => {
       currentAssignee,
     })
 
-    const response = await POST(request({ action: 'claim' }), params())
+    const response = await POST(request({ action: 'claim', expectedApprovalState: 'approved' }), params())
 
     expect(response.status).toBe(409)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     await expect(response.json()).resolves.toEqual({
       error: 'assignment_conflict',
       currentAssignee: { fullName: 'Winner Tech' },
@@ -300,7 +310,7 @@ describe('job assignment route', () => {
       },
     })
 
-    const response = await POST(request({ action: 'claim' }), params())
+    const response = await POST(request({ action: 'claim', expectedApprovalState: 'approved' }), params())
 
     expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual({ error: 'forbidden' })
@@ -345,7 +355,7 @@ describe('job assignment route', () => {
   ])('maps %s to HTTP %i without adding optional fields', async (error, status) => {
     mutationMock.mockResolvedValue({ ok: false, error })
 
-    const response = await POST(request({ action: 'claim' }), params())
+    const response = await POST(request({ action: 'claim', expectedApprovalState: 'approved' }), params())
 
     expect(response.status).toBe(status)
     await expect(response.json()).resolves.toEqual({ error })

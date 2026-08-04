@@ -83,6 +83,18 @@
   min-width: 0;
 }
 
+.jobSlot {
+  min-width: 0;
+}
+
+/* One quiet handoff signal: the claimed row and its mounted work tool settle
+   together behind a two-pixel rail. */
+.jobSlot[data-work-open='true'] {
+  border-left: 2px solid var(--vt-accent);
+  transform: translateY(2px);
+  transition: transform 200ms var(--vt-ease);
+}
+
 .row {
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr) minmax(172px, auto);
@@ -387,6 +399,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .jobSlot[data-work-open='true'] {
+    transform: none;
+    transition: none;
+  }
+
   .ticketStamp,
   .control {
     transition: none;

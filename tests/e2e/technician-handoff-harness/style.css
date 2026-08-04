@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--vt-canvas);
+}
+
+.technician-handoff-shell {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+  padding: clamp(14px, 3vw, 32px);
+}

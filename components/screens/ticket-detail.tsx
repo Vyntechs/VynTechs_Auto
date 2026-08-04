@@ -8,11 +8,12 @@ import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import type { TeamMember } from '@/lib/intake/team'
 import {
   projectLivingTicketCommands,
+  projectTechnicianJobReadiness,
   type LivingTicketCommand,
 } from '@/lib/shop-os/living-ticket'
 import { canAssignWork } from '@/lib/shop-os/capabilities'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
-import type { TicketDetail } from '@/lib/tickets'
+import type { TicketDetail, TodayTicketJob } from '@/lib/tickets'
 import type { TicketRingOut } from '@/lib/shop-os/ring-out'
 import type { TicketPartRequestView } from '@/lib/shop-os/part-requests-ui'
 import type { CustomerCopyProjection, CustomerCopyResult } from '@/lib/shop-os/customer-copy'
@@ -185,6 +186,7 @@ export function TicketDetailScreen({
       ?? job.workStatus,
     approvalState: quoteOverrides.get(job.id)?.approvalState
       ?? correctionTruth?.quote.jobs.find((quoteJob) => quoteJob.id === job.id)?.approval.state
+      ?? assignmentOverrides.get(job.id)?.approvalState
       ?? job.approvalState,
   }))
   const commands = projectLivingTicketCommands({
@@ -614,6 +616,23 @@ export function TicketDetailScreen({
             {displayedJobs.map((job, index) => {
               const correctionTarget = { kind: 'job', jobId: job.id } as const
               const correctionEligible = correctionAvailable && jobCanBeCorrected(job)
+              const readiness = role === 'tech' && currentProfileId
+                ? projectDetailTechnicianReadiness(
+                    job,
+                    currentProfileId,
+                    skillTier,
+                    assignmentOverrides.get(job.id),
+                  )
+                : null
+              const showReadiness = readiness && [
+                'below_tier',
+                'waiting_quote',
+                'waiting_advisor',
+                'waiting_customer',
+                'declined',
+                'running',
+                'paused',
+              ].includes(readiness.state)
               return (
                 <li
                   key={job.id}
@@ -647,6 +666,14 @@ export function TicketDetailScreen({
                       <span className={styles.stamp} data-state={job.approvalState}>
                         {formatLabel(APPROVAL_STATE_LABELS, job.approvalState)}
                       </span>
+                      {showReadiness && (
+                        <span className={styles.stamp} data-state={readiness.state}>
+                          {readiness.label}
+                          {readiness.state === 'running' && (
+                            <> <LocalizedTimestamp value={readiness.clockedOnSince} kind="time" /></>
+                          )}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -703,6 +730,7 @@ export function TicketDetailScreen({
                       currentProfileId,
                       diagnosticsEntitled,
                       assignmentOverrides.get(job.id),
+                      role === 'tech',
                     )}
                   </div>
                   {correctionEligible && (
@@ -749,6 +777,7 @@ export function TicketDetailScreen({
                         id: job.id,
                         requiredSkillTier: job.requiredSkillTier,
                         workStatus: job.workStatus as 'open' | 'in_progress' | 'blocked',
+                        approvalState: job.approvalState,
                         hasAssignee: assignmentOverrides.has(job.id)
                           ? assignmentOverrides.get(job.id)?.assignedTechId !== null
                           : job.assignedTechId !== null,
@@ -766,6 +795,7 @@ export function TicketDetailScreen({
                           assignedTechId: assignment.assignedTechId,
                           assignedTechName,
                           workStatus: assignment.workStatus,
+                          approvalState: assignment.approvalState,
                           notice: assignment.state === 'unassigned'
                             ? 'Work is open.'
                             : assignment.state === 'mine'
@@ -780,6 +810,7 @@ export function TicketDetailScreen({
                           assignedTechId: null,
                           assignedTechName,
                           workStatus: 'open',
+                          approvalState: job.approvalState,
                           notice: `${assignedTechName} claimed it first. The repair order is current.`,
                         }))
                         setTimeout(() => jobRefs.current.get(job.id)?.focus(), 0)
@@ -956,12 +987,14 @@ function simpleWorkLink(
   currentProfileId: string | null,
   diagnosticsEntitled: boolean,
   assignmentOverride?: AssignmentOverride,
+  requiresApproval = false,
 ) {
   const assignedToCurrent = assignmentOverride
     ? assignmentOverride.state === 'mine'
     : job.assignedTechId === currentProfileId
   if (!ticket.customer || !ticket.vehicle || !currentProfileId
     || !assignedToCurrent
+    || (requiresApproval && job.approvalState !== 'approved' && job.workStatus !== 'done')
     || !canUseManualWork({
       kind: job.kind,
       sessionId: job.sessionId,
@@ -1020,6 +1053,7 @@ type AssignmentOverride = {
   assignedTechId: string | null
   assignedTechName: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
+  approvalState: string
   notice: string
 }
 
@@ -1046,8 +1080,47 @@ type DisplayJob = Pick<TicketDetail['jobs'][number],
   | 'assignedTech'
   | 'sessionId'
   | 'workStatus'
+  | 'clockedOnSince'
   | 'approvalState'
 > & { diagnosticStartState?: string }
+
+const detailApprovalStates = new Set<TodayTicketJob['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred',
+])
+const detailWorkStatuses = new Set<TodayTicketJob['workStatus']>([
+  'open', 'in_progress', 'blocked',
+])
+const detailClaimableApprovalStates = new Set<TodayTicketJob['approvalState']>([
+  'pending_quote', 'quote_ready', 'sent', 'approved',
+])
+
+function projectDetailTechnicianReadiness(
+  job: DisplayJob,
+  currentProfileId: string,
+  skillTier: number | null,
+  override?: AssignmentOverride,
+) {
+  if (!detailApprovalStates.has(job.approvalState as TodayTicketJob['approvalState'])
+    || !detailWorkStatuses.has(job.workStatus as TodayTicketJob['workStatus'])) return null
+  const assignmentState = override?.state
+    ?? (job.assignedTechId === null
+      ? 'unassigned'
+      : job.assignedTechId.toLowerCase() === currentProfileId.toLowerCase()
+        ? 'mine'
+        : 'team')
+  const approvalState = job.approvalState as TodayTicketJob['approvalState']
+  return projectTechnicianJobReadiness({
+    assignmentState,
+    approvalState,
+    workStatus: job.workStatus as TodayTicketJob['workStatus'],
+    canClaim: assignmentState === 'unassigned'
+      && skillTier !== null
+      && skillTier >= job.requiredSkillTier
+      && detailClaimableApprovalStates.has(approvalState),
+    requiredSkillTier: job.requiredSkillTier,
+    clockedOnSince: job.clockedOnSince ?? null,
+  })
+}
 
 function jobCanBeCorrected(job: DisplayJob): boolean {
   return job.workStatus === 'open'
