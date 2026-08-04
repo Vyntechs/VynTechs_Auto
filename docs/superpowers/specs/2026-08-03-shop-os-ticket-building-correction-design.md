@@ -1,6 +1,6 @@
 # Shop OS Ticket Building and Correction Design
 
-**Status:** Approved-program design for Chunk 2. Source may merge under Brandon's three-chunk preapproval. Production migration and activation remain separate gates.
+**Status:** Source merged and deployed dormant in PR #244. Production migration and activation remain separate gates.
 
 ## Executive result
 
@@ -321,6 +321,6 @@ The risk was turning Shop OS into a familiar cream-card/serif template. The corr
 
 Facts come from source-equivalent production merge `60d1ffc`, the current-state audit, the interaction acceptance review, the active premium-interaction roadmap, and cited current code/tests. The no-migration architecture lane missed two time boxes and produced no usable verdict; Atlas independently traced the database constraint and canonical quote lock/invalidation code. The conclusion is direct source evidence: the database check cannot truthfully accept `ticket_corrected` without an additive migration.
 
-## Task 7 local proof status — 2026-08-04
+## Task 7 release status — 2026-08-04
 
-The migrated PGlite half and the mounted phone/desktop half are implemented and green together: 19 focused files / 419 tests, 13 migration/replay tests, all eight shards / 4,205 tests, TypeScript, 69 build pages, and repeated 4/4 loopback system-Chrome proof. Final static review found one Important violation of the retained-row contract at section 3: the UI derived `Removed` only from the capped 20-item recent feed. RED-first domain and mounted-UI regressions now prove that a validated older `job_removed` receipt remains projected after 21 newer activities, without expanding the presentation feed or trusting raw payload scope. The consolidated clean head still requires focused static re-review and the exact local release gate before PR. Production migration `0051` and correction activation remain untouched.
+The migrated PGlite half and mounted phone/desktop half passed together on tested head `e22bade`: 19 focused files / 423 tests, 13 migration/replay tests, all eight local shards / 4,209 tests, TypeScript, 69 build pages, and repeated 4/4 loopback system-Chrome proof. Final static review found one Important retained-row defect; RED-first domain and mounted-UI regressions now prove that a validated older `job_removed` receipt remains projected after 21 newer activities without expanding the presentation feed or trusting raw payload scope. Focused re-review closed that finding. PR #244 merged as `3972834`; the merge tree equals the tested tree, every expected hosted check passed, and preview/production dormant proof returned health `200` plus correction no-store `404 unavailable`. Read-only production inspection confirms the pre-`0051` constraint, no `0051` ledger row, and zero correction rows. Production migration `0051` and correction activation remain untouched and separately gated.
