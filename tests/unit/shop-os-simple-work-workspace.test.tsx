@@ -285,7 +285,8 @@ describe('simple work workspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clock on' }))
 
-    expect(await screen.findByRole('heading', { name: 'Work access changed' })).toBeInTheDocument()
+    const staleHeading = await screen.findByRole('heading', { name: 'Work access changed' })
+    expect(staleHeading).toHaveFocus()
     expect(onStale).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'Clock on' })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Work note' })).toBeNull()

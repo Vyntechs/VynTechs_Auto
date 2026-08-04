@@ -90,7 +90,9 @@ describe('InlineWorkWorkspace', () => {
 
     render(<InlineWorkWorkspace ticket={ticket} jobId={JOB} onClose={vi.fn()} onProjection={vi.fn()} />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Work could not be opened here')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Work could not be opened here')
+    expect(alert).toHaveFocus()
     expect(screen.getByRole('link', { name: 'Open the full work page' })).toHaveAttribute(
       'href',
       `/tickets/${TICKET}/jobs/${JOB}/work`,
@@ -109,7 +111,9 @@ describe('InlineWorkWorkspace', () => {
       onStale={onStale}
     />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Work could not be opened here')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Work could not be opened here')
+    expect(alert).toHaveFocus()
     expect(onStale).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Retry work' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open the full work page' })).toBeInTheDocument()

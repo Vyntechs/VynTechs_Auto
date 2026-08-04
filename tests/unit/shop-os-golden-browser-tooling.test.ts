@@ -1,12 +1,94 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 // @ts-ignore -- The executable is intentionally Node-only JavaScript with runtime-tested exports.
-import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, cleanupReplicationGuard, cleanupStatements, parseEnvFile, qaIdentityKey, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
+import { CLEANUP_TABLES, QA_SHOP_ID, QA_SHOP_NAME, QA_SUPABASE_PUBLISHABLE_KEY, QA_SUPABASE_URL, QA_USERS, SUITES, cleanupReplicationGuard, cleanupStatements, parseEnvFile, qaIdentityKey, redactError, validateBaseUrl } from '../../scripts/shop-os-golden-browser.mjs'
+import {
+  CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
+  assertTechnicianHandoffHarnessSafety,
+  technicianHandoffEnvironment,
+} from '@/tests/e2e/technician-handoff-harness/safety.mjs'
 
 type QaUser = { email: string; profileId: string; role: string; skillTier: number | null }
 type CleanupStatement = { table: string; sql: string; values: string[] }
 
 describe('Golden browser QA control', () => {
+  it('registers a secret-free real-component technician handoff proof', () => {
+    expect(SUITES['technician-handoff']).toEqual({
+      config: 'playwright.technician-handoff.config.ts',
+      projects: ['technician-handoff-phone', 'technician-handoff-desktop'],
+      hermetic: true,
+      baseUrl: 'http://127.0.0.1:4173',
+    })
+
+    const config = readFileSync(
+      join(process.cwd(), 'playwright.technician-handoff.config.ts'),
+      'utf8',
+    )
+    const main = readFileSync(
+      join(process.cwd(), 'tests/e2e/technician-handoff-harness/main.tsx'),
+      'utf8',
+    )
+    const proof = readFileSync(
+      join(process.cwd(), 'tests/e2e/technician-handoff-proof.spec.ts'),
+      'utf8',
+    )
+
+    expect(config).toMatch(/390[\s\S]*844/)
+    expect(config).toMatch(/1440[\s\S]*900/)
+    expect(main).toContain("@/components/screens/today-jobs-board")
+    expect(main).toContain("@/app/globals.css")
+    expect(proof).toMatch(/approved unassigned[\s\S]*approved preassigned[\s\S]*state matrix[\s\S]*recovery/i)
+    expect(proof).toMatch(/Exactly what is approved/)
+    expect(proof).toMatch(/44/)
+    expect(proof).toMatch(/scrollWidth/)
+    expect(proof).toMatch(/Axe|checkpoint/)
+    expect(proof).toMatch(/price|money/i)
+    expect(proof).toMatch(/active inline tool|Work on this job/i)
+  })
+
+  it('removes database, Buzz, Nostr, Vercel, and QA credentials before the proof spawn', () => {
+    const environment = technicianHandoffEnvironment({
+      PATH: '/safe/bin',
+      PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
+      DATABASE_URL: 'must-not-escape',
+      SUPABASE_SERVICE_ROLE_KEY: 'must-not-escape',
+      BUZZ_RELAY_URL: 'must-not-escape',
+      BUZZ_PRIVATE_KEY: 'must-not-escape',
+      NOSTR_PRIVATE_KEY: 'must-not-escape',
+      VERCEL_TOKEN: 'must-not-escape',
+      GOLDEN_QA_TECH_PASSWORD: 'must-not-escape',
+    })
+
+    expect(environment).toEqual({
+      PATH: '/safe/bin',
+      PLAYWRIGHT_USE_SYSTEM_CHROME: '1',
+      TECHNICIAN_HANDOFF_BASE_URL: CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
+    })
+    expect(assertTechnicianHandoffHarnessSafety(environment)).toEqual({
+      baseUrl: CANONICAL_TECHNICIAN_HANDOFF_BASE_URL,
+      loopback: true,
+      productionVercelMode: false,
+      forbiddenEnvironmentPresent: false,
+    })
+  })
+
+  it('rejects a noncanonical or credential-bearing handoff harness without echoing values', () => {
+    expect(() => assertTechnicianHandoffHarnessSafety(
+      {},
+      'http://localhost:4173',
+    )).toThrow(/canonical loopback URL/)
+    let message = ''
+    try {
+      assertTechnicianHandoffHarnessSafety({ BUZZ_PRIVATE_KEY: 'must-not-appear' })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain('BUZZ_PRIVATE_KEY')
+    expect(message).not.toContain('must-not-appear')
+  })
+
   it('uses one fixed synthetic shop and both technicians needed for Chaos Shop Day', () => {
     const users = Object.values(QA_USERS as Record<string, QaUser>)
 

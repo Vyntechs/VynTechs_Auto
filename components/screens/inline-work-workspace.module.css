@@ -12,6 +12,11 @@
   line-height: 1.5;
 }
 
+.state [role='alert']:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 4px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

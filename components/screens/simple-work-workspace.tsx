@@ -109,6 +109,7 @@ export function SimpleWorkWorkspace({
   const [draftReady, setDraftReady] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
   const approvedScopeHeading = useRef<HTMLHeadingElement>(null)
+  const staleHeading = useRef<HTMLHeadingElement>(null)
   const restoredDraftScope = useRef<string | null>(null)
   const basePath = `/api/tickets/${ticket.id}/jobs/${workspace.id}`
   const hasOtherUnsavedDraft = note !== (workspace.workNotes ?? '')
@@ -133,7 +134,12 @@ export function SimpleWorkWorkspace({
   const draftRevision = draftScopeKey ? `${draftScopeKey}:${workspace.updatedAt}` : null
 
   useEffect(() => {
-    if (!embedded || stale || workspace.authorization !== 'approved' || !workspace.approvedScope) return
+    if (!embedded) return
+    if (stale) {
+      staleHeading.current?.focus()
+      return
+    }
+    if (workspace.authorization !== 'approved' || !workspace.approvedScope) return
     approvedScopeHeading.current?.focus()
   }, [embedded, stale, workspace.authorization, workspace.id])
 
@@ -278,7 +284,7 @@ export function SimpleWorkWorkspace({
           </header>
           <section className={styles.state} aria-labelledby="stale-work-heading">
             <p className={styles.stateMark}>Refresh required</p>
-            <h2 id="stale-work-heading">Work access changed</h2>
+            <h2 ref={staleHeading} id="stale-work-heading" tabIndex={-1}>Work access changed</h2>
             <p>This work is no longer safe to change here. Review the current repair order before continuing.</p>
             <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>Review repair order</Link>
           </section>

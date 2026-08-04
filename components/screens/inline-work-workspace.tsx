@@ -48,11 +48,16 @@ export function InlineWorkWorkspace({
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const onStaleRef = useRef(onStale)
+  const errorRef = useRef<HTMLDivElement>(null)
   const workPath = `/tickets/${ticket.id}/jobs/${jobId}/work`
 
   useEffect(() => {
     onStaleRef.current = onStale
   }, [onStale])
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus()
+  }, [error])
 
   useEffect(() => {
     let canceled = false
@@ -82,7 +87,7 @@ export function InlineWorkWorkspace({
   if (error) {
     return (
       <section className={styles.state} aria-label="Work on this job">
-        <div role="alert">
+        <div ref={errorRef} role="alert" tabIndex={-1}>
           <strong>Work could not be opened here.</strong>
           <p>The repair order is safe. Retry this tool or use the full work page.</p>
         </div>
