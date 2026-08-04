@@ -11,35 +11,51 @@ import {
   quoteErrorBody,
 } from '@/lib/shop-os/quotes'
 
-const emptyBody = z.strictObject({})
+const prepareSchema = z.strictObject({
+  expectedDraftFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+})
+
+function noStoreJson(body: unknown, status: number) {
+  return NextResponse.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
+}
+
+function withNoStore(response: NextResponse): NextResponse {
+  response.headers.set('Cache-Control', 'no-store')
+  return response
+}
+
+function acceptsJson(req: Request): boolean {
+  return req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+    === 'application/json'
+}
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const ctx = await requireUserAndProfile({ supabase: await getServerSupabase(), db })
-  if (!ctx) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  if (!ctx) return noStoreJson({ error: 'unauthenticated' }, 401)
   const denied = await paywallReject(db, ctx.user.id)
-  if (denied) return denied
-  const rawBody = await _req.text()
-  if (rawBody.trim()) {
-    let body: unknown
-    try { body = JSON.parse(rawBody) } catch {
-      return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
-    }
-    if (!emptyBody.safeParse(body).success) {
-      return NextResponse.json({ error: 'invalid_input' }, { status: 422 })
-    }
+  if (denied) return withNoStore(denied)
+  if (!acceptsJson(req)) return noStoreJson({ error: 'unsupported_media_type' }, 415)
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return noStoreJson({ error: 'invalid_json' }, 400)
   }
+  const parsedBody = prepareSchema.safeParse(body)
+  if (!parsedBody.success) return noStoreJson({ error: 'invalid_input' }, 422)
   const { id } = await params
   const result = await createQuoteVersion(db, {
     actor: quoteActorFromProfile(ctx.profile), ticketId: id,
+    expectedDraftFingerprint: parsedBody.data.expectedDraftFingerprint,
   })
   if (!result.ok) {
-    return NextResponse.json(quoteErrorBody(result), { status: quoteDomainStatus(result) })
+    return noStoreJson(quoteErrorBody(result), quoteDomainStatus(result))
   }
-  return NextResponse.json(
+  return noStoreJson(
     { changed: result.changed, version: result.version },
-    { status: result.changed ? 201 : 200 },
+    result.changed ? 201 : 200,
   )
 }

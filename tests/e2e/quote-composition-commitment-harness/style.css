@@ -1,0 +1,14 @@
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--vt-canvas);
+}
+
+.quote-proof-shell {
+  min-height: 100vh;
+}

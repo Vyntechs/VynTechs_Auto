@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createQuoteVersion, getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
+import {
+  createQuoteVersion, getQuoteBuilder, quoteSnapshotFingerprint, type QuoteActor,
+} from '@/lib/shop-os/quotes'
 import {
   customers, jobAttachments, jobLines, profiles, quoteEvents, quoteSends, quoteVersions, shops, ticketJobs, tickets, vehicles,
   vendorAccounts,
@@ -20,6 +22,7 @@ describe('Shop OS immutable quote version creation', () => {
   let excludedJobId: string
   let canceledJobId: string
   let actor: QuoteActor
+  let baselineDraftFingerprint: string
 
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
@@ -32,6 +35,7 @@ describe('Shop OS immutable quote version creation', () => {
       { id: uuid(1), userId: uuid(101), shopId, role: 'tech' },
       { id: uuid(2), userId: uuid(102), shopId, role: 'founder' },
       { id: uuid(3), userId: uuid(103), shopId: otherShop.id, role: 'owner' },
+      { id: uuid(4), userId: uuid(104), shopId, role: 'advisor' },
     ])
     await db.insert(vendorAccounts).values({
       id: uuid(90), shopId, vendor: 'manual', displayName: 'Main supplier', mode: 'manual',
@@ -104,12 +108,38 @@ describe('Shop OS immutable quote version creation', () => {
         byteSize: 20, uploadedByProfileId: uuid(1), createdAt: new Date('2026-01-02T00:00:00Z'),
       },
     ])
+    const baseline = await getQuoteBuilder(db, { actor, ticketId })
+    if (!baseline.ok || !baseline.builder.draftCommitment) {
+      throw new Error('baseline quote commitment fixture failed')
+    }
+    baselineDraftFingerprint = baseline.builder.draftCommitment.fingerprint
   })
 
   afterEach(async () => close())
 
-  const create = (overrides: Record<string, unknown> = {}, dependencies = {}) =>
-    createQuoteVersion(db, { actor, ticketId, ...overrides }, dependencies)
+  const currentDraftFingerprint = async (
+    candidateActor: QuoteActor = actor,
+    candidateTicketId: unknown = ticketId,
+  ) => {
+    const projection = await getQuoteBuilder(db, {
+      actor: candidateActor,
+      ticketId: candidateTicketId,
+    })
+    return projection.ok && projection.builder.draftCommitment
+      ? projection.builder.draftCommitment.fingerprint
+      : baselineDraftFingerprint
+  }
+
+  const create = async (overrides: Record<string, unknown> = {}, dependencies = {}) => {
+    const candidateActor = (overrides.actor as QuoteActor | undefined) ?? actor
+    const candidateTicketId = overrides.ticketId ?? ticketId
+    const expectedDraftFingerprint = Object.prototype.hasOwnProperty.call(overrides, 'expectedDraftFingerprint')
+      ? overrides.expectedDraftFingerprint
+      : await currentDraftFingerprint(candidateActor, candidateTicketId)
+    return createQuoteVersion(db, {
+      actor, ticketId, expectedDraftFingerprint, ...overrides,
+    }, dependencies)
+  }
 
   it('captures ticket-first stable NOWAIT locks through actor reauthorization', () => {
     const source = readFileSync(join(process.cwd(), 'lib/shop-os/quotes.ts'), 'utf8')
@@ -304,7 +334,28 @@ describe('Shop OS immutable quote version creation', () => {
         description: 'Alignment check', priceCents: 5_000, taxable: false,
       })
 
-      const second = await create()
+      const doneDraftFingerprint = quoteSnapshotFingerprint({
+        schemaVersion: 1,
+        ticket: {
+          id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11),
+          laborRateCents: 15_000, taxRateBps: 825,
+        },
+        jobs: [{
+          id: excludedJobId, title: 'No lines', kind: 'maintenance',
+          customerStory: null, storyMeta: null,
+          lines: [{
+            id: uuid(44), kind: 'fee', description: 'Alignment check', quantity: '1',
+            priceCents: 5_000, taxable: false, partNumber: null, brand: null,
+            coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+            source: 'manual', vendorContext: null,
+          }],
+          attachments: [], totals: { subtotalCents: 5_000, taxableSubtotalCents: 0 },
+        }],
+        totals: { subtotalCents: 5_000, taxableSubtotalCents: 0, taxCents: 0, totalCents: 5_000 },
+      })
+      const second = await create(workStatus === 'done'
+        ? { expectedDraftFingerprint: doneDraftFingerprint }
+        : {})
       expect(second).toMatchObject({ ok: true, changed: true, version: { versionNumber: 2 } })
       if (!second.ok) throw new Error('missing second version')
       const [source] = await db.select().from(ticketJobs).where(eq(ticketJobs.id, jobId))
@@ -460,6 +511,45 @@ describe('Shop OS immutable quote version creation', () => {
     expect(await db.select().from(quoteVersions)).toHaveLength(1)
   })
 
+  it('rejects malformed draft fingerprints before any database or actor work', async () => {
+    await expect(createQuoteVersion(null as never, {
+      actor, ticketId, expectedDraftFingerprint: 'A'.repeat(64),
+    })).resolves.toEqual({ ok: false, error: 'invalid_input' })
+  })
+
+  it('conflicts on same-total composition drift without changing version, approval, or link truth', async () => {
+    const first = await create()
+    if (!first.ok) throw new Error('missing first version')
+    const expectedDraftFingerprint = await currentDraftFingerprint()
+    await db.update(ticketJobs).set({
+      approvalState: 'approved', approvedQuoteVersionId: first.version.id,
+    }).where(eq(ticketJobs.id, jobId))
+    const sentAt = new Date('2026-08-04T12:00:00.000Z')
+    await db.insert(quoteSends).values({
+      shopId, ticketId, quoteVersionId: first.version.id, customerId: uuid(10), subjectKey: uuid(10),
+      destinationFingerprint: 'a'.repeat(64), fingerprintKeyVersion: 'link_v1', channel: 'link',
+      tokenHash: 'b'.repeat(64), tokenExpiresAt: new Date('2026-08-05T12:00:00.000Z'),
+      requestingActorProfileId: uuid(1), requestKey: uuid(93), requestFingerprint: 'c'.repeat(64),
+      state: 'submitted', submittingAt: sentAt, submittedAt: sentAt, createdAt: sentAt, updatedAt: sentAt,
+    })
+    await db.update(jobLines).set({ description: 'Same price, newer composition' })
+      .where(eq(jobLines.id, uuid(42)))
+
+    const before = {
+      versions: await db.select().from(quoteVersions),
+      jobs: await db.select().from(ticketJobs),
+      links: await db.select().from(quoteSends),
+    }
+    await expect(create({ expectedDraftFingerprint })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
+    expect({
+      versions: await db.select().from(quoteVersions),
+      jobs: await db.select().from(ticketJobs),
+      links: await db.select().from(quoteSends),
+    }).toEqual(before)
+  })
+
   it('orders persisted job ties by immutable ID', async () => {
     await db.insert(jobLines).values({
       id: uuid(44), shopId, jobId: excludedJobId, kind: 'fee', description: 'Inspection fee',
@@ -475,7 +565,11 @@ describe('Shop OS immutable quote version creation', () => {
   })
 
   it('deterministically converges same-state calls on one PGlite client and versions later changed state', async () => {
-    const [left, right] = await Promise.all([create(), create()])
+    const expectedDraftFingerprint = await currentDraftFingerprint()
+    const [left, right] = await Promise.all([
+      create({ expectedDraftFingerprint, actor: { profileId: uuid(1) } }),
+      create({ expectedDraftFingerprint, actor: { profileId: uuid(4) } }),
+    ])
     expect([left, right].filter((result) => result.ok && result.changed)).toHaveLength(1)
     expect([left, right].filter((result) => result.ok && !result.changed)).toHaveLength(1)
     expect(await db.select().from(quoteVersions)).toHaveLength(1)
@@ -483,6 +577,21 @@ describe('Shop OS immutable quote version creation', () => {
     await db.update(jobLines).set({ priceCents: 13_001 }).where(eq(jobLines.id, uuid(41)))
     const changed = await create()
     expect(changed).toMatchObject({ ok: true, changed: true, version: { versionNumber: 2 } })
+  })
+
+  it('converges concurrent different commitments to one version and one stale conflict', async () => {
+    const staleFingerprint = await currentDraftFingerprint()
+    await db.update(jobLines).set({ description: 'New composition at the same amount' })
+      .where(eq(jobLines.id, uuid(42)))
+    const currentFingerprint = await currentDraftFingerprint()
+
+    const [stale, current] = await Promise.all([
+      create({ expectedDraftFingerprint: staleFingerprint, actor: { profileId: uuid(1) } }),
+      create({ expectedDraftFingerprint: currentFingerprint, actor: { profileId: uuid(4) } }),
+    ])
+    expect([stale, current].filter((result) => result.ok && result.changed)).toHaveLength(1)
+    expect([stale, current].filter((result) => !result.ok && result.error === 'conflict')).toHaveLength(1)
+    expect(await db.select().from(quoteVersions)).toHaveLength(1)
   })
 
   it('supersedes changed active content, resets old included jobs, and allocates max plus one', async () => {

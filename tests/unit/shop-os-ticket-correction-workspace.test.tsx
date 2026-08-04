@@ -67,8 +67,14 @@ function rawQuote(overrides: Record<string, unknown> = {}) {
     capabilities: { canRecordCustomerApproval: true, canCreateCustomerApprovalLink: true },
     activeVersion: {
       id: IDS.version, versionNumber: 1, totalCents: 18750,
+      contentFingerprint: 'a'.repeat(64),
       jobs: [{ jobId: IDS.job, subtotalCents: 18750 }],
     },
+    lastPreparedVersion: {
+      id: IDS.version, versionNumber: 1, totalCents: 18750,
+      contentFingerprint: 'a'.repeat(64), state: 'current',
+    },
+    draftCommitment: null,
     ...overrides,
   }
 }
@@ -312,7 +318,15 @@ describe('TicketCorrectionWorkspace', () => {
       if (path.endsWith('/quote')) {
         quoteReads += 1
         if (quoteReads === 2) return json({ builder: { malformed: true } })
-        return json({ builder: rawQuote({ activeVersion: quoteReads === 1 ? rawQuote().activeVersion : null }) })
+        return json({
+          builder: rawQuote(quoteReads === 1 ? {} : {
+            activeVersion: null,
+            lastPreparedVersion: {
+              id: IDS.version, versionNumber: 1, totalCents: 18750,
+              contentFingerprint: 'a'.repeat(64), state: 'superseded',
+            },
+          }),
+        })
       }
       return json({ ticket: rawTicket() })
     })
@@ -385,7 +399,15 @@ describe('TicketCorrectionWorkspace', () => {
           }),
         })
       }
-      if (path.endsWith('/quote')) return json({ builder: rawQuote({ activeVersion: null }) })
+      if (path.endsWith('/quote')) return json({
+        builder: rawQuote({
+          activeVersion: null,
+          lastPreparedVersion: {
+            id: IDS.version, versionNumber: 1, totalCents: 18750,
+            contentFingerprint: 'a'.repeat(64), state: 'superseded',
+          },
+        }),
+      })
       return json({ ticket: rawTicket({ updatedAt: CURRENT_TIME }) })
     }))
 
@@ -593,7 +615,15 @@ describe('TicketCorrectionWorkspace', () => {
           ticket: rawTicket({ concern: 'Current server concern', updatedAt: CURRENT_TIME }),
         })
       }
-      if (path.endsWith('/quote')) return json({ builder: rawQuote({ activeVersion: null }) })
+      if (path.endsWith('/quote')) return json({
+        builder: rawQuote({
+          activeVersion: null,
+          lastPreparedVersion: {
+            id: IDS.version, versionNumber: 1, totalCents: 18750,
+            contentFingerprint: 'a'.repeat(64), state: 'superseded',
+          },
+        }),
+      })
       ticketReads += 1
       return json({ ticket: rawTicket(ticketReads === 1 ? {} : {
         concern: 'Current server concern', updatedAt: CURRENT_TIME,

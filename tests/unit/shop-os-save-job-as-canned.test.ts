@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { saveTicketJobAsCannedJob, type CannedJobActor } from '@/lib/shop-os/canned-jobs'
-import { createQuoteVersion } from '@/lib/shop-os/quotes'
+import { createQuoteVersion, getQuoteBuilder } from '@/lib/shop-os/quotes'
 import {
   cannedJobs, customers, jobLines, profiles, quoteVersions, shops, ticketJobs, tickets, vehicles,
 } from '@/lib/db/schema'
@@ -69,7 +69,13 @@ describe('Shop OS save a worked job as a canned job', () => {
   // Pins the job to the version the customer approved, the way a counter
   // approval does, so every test below reads the authorized money.
   const approve = async () => {
-    const version = await createQuoteVersion(db, { actor: { profileId: uuid(2) }, ticketId })
+    const quoteActor = { profileId: uuid(2) }
+    const builder = await getQuoteBuilder(db, { actor: quoteActor, ticketId })
+    if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment fixture failed')
+    const version = await createQuoteVersion(db, {
+      actor: quoteActor, ticketId,
+      expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
+    })
     if (!version.ok) throw new Error('quote version fixture failed')
     await db.update(ticketJobs)
       .set({ approvalState: 'approved', approvedQuoteVersionId: version.version.id })

@@ -238,7 +238,14 @@ describe('Shop OS existing-ticket canned job application', () => {
       id: uuid(31), shopId, jobId: uuid(30), kind: 'fee', description: 'Inspection',
       priceCents: 1_000, taxable: false, source: 'manual',
     })
-    const version = await createQuoteVersion(db, { actor, ticketId })
+    const initialBuilder = await getQuoteBuilder(db, { actor, ticketId })
+    if (!initialBuilder.ok || !initialBuilder.builder.draftCommitment) {
+      throw new Error('initial quote commitment fixture failed')
+    }
+    const version = await createQuoteVersion(db, {
+      actor, ticketId,
+      expectedDraftFingerprint: initialBuilder.builder.draftCommitment.fingerprint,
+    })
     if (!version.ok) throw new Error('version fixture failed')
     await db.update(ticketJobs).set({ approvalState: 'approved', approvedQuoteVersionId: version.version.id })
       .where(eq(ticketJobs.id, uuid(30)))
@@ -254,7 +261,11 @@ describe('Shop OS existing-ticket canned job application', () => {
     const totals = builder.builder.jobs.flatMap((job) => job.lines)
       .reduce((sum, line) => sum + line.priceCents, 0)
     expect(totals).toBe(32_750)
-    const next = await createQuoteVersion(db, { actor, ticketId })
+    if (!builder.builder.draftCommitment) throw new Error('next quote commitment fixture failed')
+    const next = await createQuoteVersion(db, {
+      actor, ticketId,
+      expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
+    })
     if (!next.ok) throw new Error('next version failed')
     const [snapshot] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, next.version.id))
     expect((snapshot.snapshot as { totals: { subtotalCents: number; taxableSubtotalCents: number; taxCents: number; totalCents: number } }).totals)

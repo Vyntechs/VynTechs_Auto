@@ -66,9 +66,15 @@ async function seedDiagnosticTicket(
 }
 
 async function prepareActiveVersion(golden: Golden, ticketId: string) {
+  const actor = { profileId: golden.people.advisor.id }
+  const builder = await getQuoteBuilder(golden.db, { actor, ticketId })
+  if (!builder.ok || !builder.builder.draftCommitment) {
+    throw new Error('quote commitment fixture failed')
+  }
   const created = await createQuoteVersion(golden.db, {
-    actor: { profileId: golden.people.advisor.id },
+    actor,
     ticketId,
+    expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
   })
   if (!created.ok) throw new Error('quote version fixture failed')
   const [stored] = await golden.db
@@ -231,9 +237,14 @@ describe('addSupplementalDiagnosticTime', () => {
       const supplemental = added.ticket.jobs.find((job) => job.id !== originalJobId)
       if (!supplemental) throw new Error('supplemental job missing')
 
+      const builder = await getQuoteBuilder(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: ticket.id,
+      })
+      if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment failed')
       const version = await createQuoteVersion(golden.db, {
         actor: { profileId: golden.people.advisor.id },
         ticketId: ticket.id,
+        expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
       })
       expect(version).toMatchObject({ ok: true, changed: true })
       if (!version.ok) throw new Error('quote version failed')

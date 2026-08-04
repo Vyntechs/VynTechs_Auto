@@ -59,8 +59,14 @@ function rawQuote() {
     capabilities: { canRecordCustomerApproval: true, canCreateCustomerApprovalLink: true },
     activeVersion: {
       id: IDS.version, versionNumber: 1, totalCents: 18750,
+      contentFingerprint: 'a'.repeat(64),
       jobs: [{ jobId: IDS.job, subtotalCents: 18750 }],
     },
+    lastPreparedVersion: {
+      id: IDS.version, versionNumber: 1, totalCents: 18750,
+      contentFingerprint: 'a'.repeat(64), state: 'current',
+    },
+    draftCommitment: null,
   }
 }
 

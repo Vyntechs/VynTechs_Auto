@@ -528,19 +528,15 @@
 }
 
 .line[data-change-state='confirmed'],
-.job[data-change-state='confirmed'] {
-  animation: bay-pulse 220ms ease-out;
+.job[data-change-state='confirmed'],
+.tape[data-settled='true'] {
+  box-shadow: inset 2px 0 0 var(--vt-signal-600);
+  animation: tape-detent 200ms ease-out;
 }
 
-@keyframes bay-pulse {
-  0% {
-    box-shadow: inset 3px 0 0 var(--vt-signal-600);
-    background: color-mix(in oklch, var(--vt-signal-500) 12%, transparent);
-  }
-  100% {
-    box-shadow: inset 3px 0 0 transparent;
-    background: transparent;
-  }
+@keyframes tape-detent {
+  from { transform: translateY(-2px); }
+  to { transform: translateY(0); }
 }
 
 .editor h4 {
@@ -597,6 +593,29 @@
   margin-top: 18px;
 }
 
+.primaryAction {
+  min-height: 44px;
+  border: 1px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-2);
+  padding: 0 18px;
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+  font-family: var(--vt-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryAction:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.primaryAction:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .confirmation,
 .error {
   position: fixed;
@@ -628,6 +647,7 @@
 
 .tape {
   position: sticky;
+  overflow: hidden;
   top: 24px;
   border: 1px solid var(--vt-rule-strong);
   background: var(--vt-bone-100);
@@ -635,9 +655,32 @@
   box-shadow: 0 12px 30px color-mix(in oklch, var(--vt-fg) 8%, transparent);
 }
 
+.signalRail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--vt-signal-600);
+}
+
 .tape h2 {
   margin-top: 8px;
   font-size: 28px;
+}
+
+.tape h2:focus-visible,
+.commitmentPlate h3:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.unsavedTruth {
+  margin: 12px 0 0;
+  border-left: 2px solid var(--vt-amber-500);
+  padding: 8px 10px;
+  background: var(--vt-bone-50);
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-sans);
+  font-size: 13px;
 }
 
 .totalList {
@@ -680,6 +723,10 @@
   padding-top: 17px;
 }
 
+.totalList .historicalTotal {
+  color: var(--vt-fg-2);
+}
+
 .grandTotal dt,
 .grandTotal dd {
   color: var(--vt-fg);
@@ -705,6 +752,10 @@
   margin-top: 16px;
   border-top: 1px solid var(--vt-rule);
   padding-top: 16px;
+}
+
+.preparedActions {
+  margin-top: 16px;
 }
 
 .prepareState ul {
@@ -740,6 +791,42 @@
   background: var(--vt-bone-50);
   color: var(--vt-fg-3);
   cursor: not-allowed;
+}
+
+.commitmentPlate {
+  margin-top: 18px;
+  border-top: 1px solid var(--vt-rule-strong);
+  padding-top: 18px;
+  font-family: var(--vt-font-sans);
+}
+
+.commitmentPlate h3 {
+  margin: 0;
+  font-family: var(--vt-font-serif);
+  font-size: 21px;
+  font-weight: 400;
+}
+
+.commitmentPlate p {
+  margin: 10px 0;
+  color: var(--vt-fg-2);
+  font-family: var(--vt-font-mono);
+  font-size: 12px;
+}
+
+.commitmentPlate > strong {
+  display: block;
+  margin-top: 12px;
+  color: var(--vt-fg);
+  font-family: var(--vt-font-mono);
+  font-size: 17px;
+}
+
+.commitmentActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .preparedState {
@@ -982,11 +1069,8 @@
 .storyAction,
 .decisionActions button {
   min-height: 48px;
-  border: 1px solid var(--vt-signal-600);
   border-radius: var(--vt-radius-2);
   padding: 0 16px;
-  background: var(--vt-signal-600);
-  color: var(--vt-bone-50);
   font-family: var(--vt-font-sans);
   font-size: 13px;
   font-weight: 700;
@@ -996,6 +1080,15 @@
 .storyAction {
   width: 100%;
   margin-top: 16px;
+  border: 1px solid var(--vt-signal-600);
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+}
+
+.decisionActions button {
+  border: 1px solid var(--vt-rule-strong);
+  background: transparent;
+  color: var(--vt-fg);
 }
 
 .storyAction:disabled,
@@ -1129,35 +1222,71 @@
 
   .workspace {
     grid-template-columns: 1fr;
-    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
   .tape {
     position: static;
   }
 
-  .prepareAction {
+  .tape[data-rail-static='false'] {
     position: fixed;
     z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(112px, auto);
+    align-items: center;
+    gap: 8px;
     right: max(18px, env(safe-area-inset-right));
     bottom: 0;
     left: max(18px, env(safe-area-inset-left));
     width: auto;
-    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    top: auto;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
     box-shadow: 0 -12px 30px color-mix(in oklch, var(--vt-fg) 10%, transparent);
   }
 
-  .workspace:has(.editor) .prepareAction {
-    position: static;
-    width: 100%;
-    padding: 0 18px;
-    box-shadow: none;
+  .tape[data-rail-static='false'] > .eyebrow,
+  .tape[data-rail-static='false'] .compactDetail,
+  .tape[data-rail-static='false'] .version {
+    display: none;
   }
 
-  .workspace:has(.storyEditor:focus-within) .prepareAction {
+  .tape[data-rail-static='false'] h2,
+  .tape[data-rail-static='false'] .totalList,
+  .tape[data-rail-static='false'] .prepareState {
+    margin: 0;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .tape[data-rail-static='false'] h2 {
+    overflow-wrap: anywhere;
+    font-size: 18px;
+  }
+
+  .tape[data-rail-static='false'] .totalList > div {
+    display: none;
+  }
+
+  .tape[data-rail-static='false'] .totalList > .grandTotal {
+    display: block;
+    border: 0;
+    padding: 0;
+  }
+
+  .tape[data-rail-static='false'] .grandTotal dt {
+    display: none;
+  }
+
+  .tape[data-rail-static='false'] .prepareAction {
+    min-width: 112px;
+    padding: 0 12px;
+  }
+
+  .workspace:has(.editor, .storyEditor, input:focus, textarea:focus, select:focus) .tape {
     position: static;
     width: 100%;
-    padding: 0 18px;
+    padding: 24px;
     box-shadow: none;
   }
 }
@@ -1232,9 +1361,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .line[data-change-state='confirmed'],
-  .job[data-change-state='confirmed'] {
+  .job[data-change-state='confirmed'],
+  .tape[data-settled='true'] {
     animation: none;
-    box-shadow: inset 3px 0 0 var(--vt-signal-600);
+    transform: none;
+    box-shadow: inset 2px 0 0 var(--vt-signal-600);
   }
 
   .storyCard,

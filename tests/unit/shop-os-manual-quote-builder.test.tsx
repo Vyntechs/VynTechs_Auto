@@ -7,7 +7,7 @@ import { ManualQuoteBuilder } from '@/components/screens/manual-quote-builder'
 import type { SafeCannedJobTemplate } from '@/lib/shop-os/canned-jobs-ui'
 import type { SafeManualVendorAccount } from '@/lib/shop-os/parts-sourcing-ui'
 import { quoteEditorDraftKey } from '@/lib/shop-os/quote-editor-draft'
-import { parseQuoteBuilderProjection } from '@/lib/shop-os/quote-builder-ui'
+import { parseQuoteBuilderProjection, summarizeQuoteMoney } from '@/lib/shop-os/quote-builder-ui'
 import type { QuoteBuilderResult } from '@/lib/shop-os/quotes'
 import type { TicketDetail } from '@/lib/tickets'
 
@@ -43,6 +43,7 @@ const SECOND_JOB_ID = '00000000-0000-4000-8000-000000000202'
 // The counter door derives a repair order id from its client key and stamps
 // version 8, so a real ticket id is not always the version 4 shape.
 const DERIVED_TICKET_ID = '00000000-0000-8000-8000-000000000203'
+const DRAFT_FINGERPRINT = 'b'.repeat(64)
 
 const vendorAccount: SafeManualVendorAccount = {
   id: ACCOUNT_ID,
@@ -88,6 +89,8 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
     fitment: 'Front axle', laborHours: null, laborRateCents: null,
     source: 'manual', mutable: true,
     ...overrides,
+    lineFingerprint: overrides.lineFingerprint
+      ?? ((overrides.source ?? 'manual') === 'manual' ? 'a'.repeat(64) : null),
   }
 }
 
@@ -102,36 +105,71 @@ const activeVersion = (versionNumber = 3) => ({
   id: VERSION_ID,
   versionNumber,
   totalCents: 32_281,
+  contentFingerprint: 'b'.repeat(64),
   jobs: [{ jobId: JOB_ID, subtotalCents: 31_250 }],
 })
 
 function builder(overrides: Partial<Builder> = {}): Builder {
+  const selectedActiveVersion = overrides.activeVersion === undefined ? activeVersion() : overrides.activeVersion
+  const selectedLastPreparedVersion = overrides.lastPreparedVersion === undefined
+    ? selectedActiveVersion && {
+      id: selectedActiveVersion.id,
+      versionNumber: selectedActiveVersion.versionNumber,
+      totalCents: selectedActiveVersion.totalCents,
+      contentFingerprint: selectedActiveVersion.contentFingerprint,
+      state: 'current' as const,
+    }
+    : overrides.lastPreparedVersion
+  const defaultConfiguration = {
+    laborRateCents: 15_000, taxRateBps: 825,
+    partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
+  }
+  const defaultJobs: Builder['jobs'] = [{
+    id: JOB_ID, title: 'Replace front brakes', kind: 'repair', workStatus: 'open',
+    ...jobFacts,
+    lines: [
+      line(),
+      line({
+        id: LABOR_LINE_ID, kind: 'labor', description: 'Brake labor', quantity: '1',
+        priceCents: 18_750, taxable: false, partNumber: null, brand: null,
+        coreChargeCents: null, fitment: null, laborHours: '1.25', laborRateCents: 15_000,
+      }),
+      line({
+        id: FEE_LINE_ID, kind: 'fee', description: 'Shop supplies', quantity: '1',
+        priceCents: 500, taxable: true, partNumber: null, brand: null,
+        coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+      }),
+    ],
+  }]
+  const selectedConfiguration = overrides.configuration ?? defaultConfiguration
+  const selectedJobs = overrides.jobs ?? defaultJobs
+  const projectedTotals = summarizeQuoteMoney(
+    selectedJobs.flatMap((job) => job.lines),
+    selectedConfiguration.taxRateBps,
+  )
+  const projectedCommitment = selectedJobs.length > 0
+    && selectedJobs.some((job) => job.lines.length > 0)
+    && projectedTotals.ok
+    && projectedTotals.totalCents !== null
+      ? {
+        algorithm: 'quote-draft-v1-sha256' as const,
+        fingerprint: DRAFT_FINGERPRINT,
+        totalCents: projectedTotals.totalCents,
+        jobCount: selectedJobs.length,
+        lineCount: selectedJobs.reduce((count, job) => count + job.lines.length, 0),
+      }
+      : null
   return {
     ticket: { id: TICKET_ID, status: 'open', reconciled: true },
-    configuration: {
-      laborRateCents: 15_000, taxRateBps: 825,
-      partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
-    },
-    jobs: [{
-      id: JOB_ID, title: 'Replace front brakes', kind: 'repair', workStatus: 'open',
-      ...jobFacts,
-      lines: [
-        line(),
-        line({
-          id: LABOR_LINE_ID, kind: 'labor', description: 'Brake labor', quantity: '1',
-          priceCents: 18_750, taxable: false, partNumber: null, brand: null,
-          coreChargeCents: null, fitment: null, laborHours: '1.25', laborRateCents: 15_000,
-        }),
-        line({
-          id: FEE_LINE_ID, kind: 'fee', description: 'Shop supplies', quantity: '1',
-          priceCents: 500, taxable: true, partNumber: null, brand: null,
-          coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
-        }),
-      ],
-    }],
+    configuration: selectedConfiguration,
+    jobs: selectedJobs,
     capabilities: { canRecordCustomerApproval: true },
-    activeVersion: activeVersion(),
     ...overrides,
+    activeVersion: selectedActiveVersion,
+    lastPreparedVersion: selectedLastPreparedVersion,
+    draftCommitment: overrides.draftCommitment === undefined
+      ? selectedActiveVersion ? null : projectedCommitment
+      : overrides.draftCommitment,
   }
 }
 
@@ -445,11 +483,11 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.getByText('PAD-1 · ACME')).toBeInTheDocument()
     expect(screen.getByText('Fitment · Front axle')).toBeInTheDocument()
     expect(screen.getByText('Included in line price · $25.00')).toBeInTheDocument()
-    expect(screen.getAllByText('Prepared version V3')).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: 'Prepared V3' })).toBeInTheDocument()
 
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(within(tape).getByText('$312.50')).toBeInTheDocument()
-    expect(within(tape).getByText('$322.81')).toBeInTheDocument()
+    expect(within(tape).getAllByText('$322.81')).toHaveLength(2)
     expect(within(tape).getByText('Job subtotal before tax')).toBeInTheDocument()
     expect(within(tape).getByText('Ticket total')).toBeInTheDocument()
     expect(within(tape).queryByText('$337.50')).toBeNull()
@@ -520,7 +558,7 @@ describe('ManualQuoteBuilder', () => {
       jobs: [], activeVersion: null,
     })} />)
     expect(screen.getByText('No eligible jobs on this ticket.')).toBeInTheDocument()
-    expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    expect(screen.getByText('Customer has not received this')).toBeInTheDocument()
 
     rerender(<ManualQuoteBuilder ticket={ticket} builder={builder({
       jobs: [{ id: JOB_ID, title: 'Brake service', kind: 'repair', workStatus: 'open', ...jobFacts, lines: [] }],
@@ -565,8 +603,12 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/\.lineFacts span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
-    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.prepareAction\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
-    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\(\.editor\)\s+\.prepareAction\s*\{[^}]*position:\s*static/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.tape\[data-rail-static='false'\]\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\]\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\][^{]*\.compactDetail,[\s\S]*?\{[^}]*display:\s*none/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\][^{]*\.version\s*\{[^}]*display:\s*none/)
+    expect(css).not.toMatch(/\.tape\[data-rail-static='false'\][^{]*\.historicalTotal\s*\{[^}]*display:\s*none/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\([^}]*input:focus[^}]*\)\s+\.tape\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/\.cannedPicker select\s*\{[^}]*min-height:\s*44px/)
     expect(css).toMatch(/\.cannedApply\s*\{[^}]*min-height:\s*44px/)
@@ -575,6 +617,41 @@ describe('ManualQuoteBuilder', () => {
     const ledger = screen.getByRole('region', { name: 'Jobs on this quote' })
     const tape = screen.getByRole('complementary', { name: 'Quote totals' })
     expect(ledger.compareDocumentPosition(tape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('fixes only a fresh actionable draft and keeps blocked or historical truth in flow', () => {
+    const prepared = render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+    let tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    expect(tape).toHaveAttribute('data-rail-static', 'true')
+    expect(within(tape).getByRole('heading', { name: 'Prepared V3' })).toBeInTheDocument()
+    expect(within(tape).getAllByText('$322.81').length).toBeGreaterThan(0)
+    prepared.unmount()
+
+    const revisedBuilder = builder({
+      activeVersion: null,
+      lastPreparedVersion: {
+        id: VERSION_ID, versionNumber: 3, totalCents: 30_000,
+        contentFingerprint: 'b'.repeat(64), state: 'superseded',
+      },
+    })
+    const revised = render(<ManualQuoteBuilder ticket={ticket} builder={revisedBuilder} />)
+    tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    expect(tape).toHaveAttribute('data-rail-static', 'true')
+    expect(within(tape).getByText('V3 no longer current')).toBeInTheDocument()
+    expect(within(tape).getByText('Last prepared total')).toBeInTheDocument()
+    expect(within(tape).getByText('$300.00')).toBeInTheDocument()
+    expect(within(tape).getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+    revised.unmount()
+
+    revisedBuilder.activeVersion = null
+    revisedBuilder.lastPreparedVersion = null
+    const fresh = render(<ManualQuoteBuilder ticket={ticket} builder={revisedBuilder} />)
+    tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    expect(tape).toHaveAttribute('data-rail-static', 'false')
+    expect(within(tape).getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+
+    fireEvent.click(fresh.getByRole('button', { name: 'Edit Front pad set' }))
+    expect(tape).toHaveAttribute('data-rail-static', 'true')
   })
 })
 
@@ -1328,7 +1405,7 @@ describe('ManualQuoteBuilder line mutations', () => {
       line: expect.objectContaining({ kind: 'part', description: 'Premium pad set', priceCents: 12_000 }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/tickets/${TICKET_ID}/quote`, expect.objectContaining({ method: 'GET' }))
-    expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    expect(screen.getByText('Customer has not received this')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
     expect(document.activeElement).toHaveTextContent('Premium pad set')
   })
@@ -1425,6 +1502,10 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     await screen.findByText('Edited pads')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      expectedLineFingerprint: 'a'.repeat(64),
+      line: { description: 'Edited pads' },
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Edited pads' }))
     const removalDialog = screen.getByRole('alertdialog', { name: 'Remove this quote line?' })
@@ -1433,6 +1514,139 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
     await screen.findByText('No quote lines yet.')
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'DELETE' })
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      expectedLineFingerprint: 'a'.repeat(64),
+    })
+  })
+
+  it('refreshes a stale line, preserves typed intent, and retries only on a second save', async () => {
+    const changedElsewhere = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Server-edited pads', lineFingerprint: 'd'.repeat(64) })],
+    }] })
+    const settled = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Locally edited', lineFingerprint: 'e'.repeat(64) })],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockResolvedValueOnce(response(200, { builder: changedElsewhere }))
+      .mockResolvedValueOnce(response(200, { changed: true, line: { id: LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: settled }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Front pad set' }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Locally edited' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    expect(await screen.findByText('This line changed elsewhere. Your typed changes are still here.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
+    expect(screen.getByText('Server-edited pads')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    await screen.findByText('Locally edited')
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+      expectedLineFingerprint: 'd'.repeat(64),
+      line: { description: 'Locally edited' },
+    })
+  })
+
+  it('blocks a stale edit after its conflict refresh fails until fresh truth rotates the line token', async () => {
+    const changedElsewhere = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Server-edited pads', lineFingerprint: 'd'.repeat(64) })],
+    }] })
+    const settled = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Locally edited', lineFingerprint: 'e'.repeat(64) })],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { builder: changedElsewhere }))
+      .mockResolvedValueOnce(response(200, { changed: true, line: { id: LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: settled }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Front pad set' }))
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Locally edited' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+
+    const refresh = await screen.findByRole('button', { name: 'Refresh quote' })
+    expect(refresh).toHaveFocus()
+    expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
+    expect(screen.getByRole('button', { name: 'Save line' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(refresh)
+    await screen.findByText('Server-edited pads')
+    expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
+    expect(screen.getByRole('button', { name: 'Save line' })).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toMatchObject({
+      expectedLineFingerprint: 'd'.repeat(64),
+    })
+  })
+
+  it('refreshes a stale removal without resubmitting it', async () => {
+    const changedElsewhere = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Server-edited pads', lineFingerprint: 'd'.repeat(64) })],
+    }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockResolvedValueOnce(response(200, { builder: changedElsewhere }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Front pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
+
+    expect(await screen.findByText('This line changed elsewhere. Review the updated line before removing it.')).toBeInTheDocument()
+    expect(screen.getByText('Server-edited pads')).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      expectedLineFingerprint: 'a'.repeat(64),
+    })
+  })
+
+  it('blocks stale removal after its conflict refresh fails until fresh truth rotates the line token', async () => {
+    const changedElsewhere = builder({ activeVersion: null, jobs: [{
+      ...builder().jobs[0],
+      lines: [line({ description: 'Server-edited pads', lineFingerprint: 'd'.repeat(64) })],
+    }] })
+    const afterDelete = builder({ activeVersion: null, jobs: [{ ...builder().jobs[0], lines: [] }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { builder: changedElsewhere }))
+      .mockResolvedValueOnce(response(200, { changed: true }))
+      .mockResolvedValueOnce(response(200, { builder: afterDelete }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Front pad set' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
+
+    const refresh = await screen.findByRole('button', { name: 'Refresh quote' })
+    expect(refresh).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Remove Front pad set' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Front pad set' }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(refresh)
+    const remove = await screen.findByRole('button', { name: 'Remove Server-edited pads' })
+    expect(remove).toBeEnabled()
+    fireEvent.click(remove)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }))
+    await screen.findByText('No quote lines yet.')
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      expectedLineFingerprint: 'd'.repeat(64),
+    })
   })
 
   it('preserves persisted labor rate, exact price, and nonzero sort on description-only edit', async () => {
@@ -1468,7 +1682,8 @@ describe('ManualQuoteBuilder line mutations', () => {
     await screen.findByText('Renamed labor')
 
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-      description: 'Renamed labor', sort: 7, laborRateCents: 12_500, priceCents: 16_000,
+      expectedLineFingerprint: 'a'.repeat(64),
+      line: { description: 'Renamed labor', sort: 7, laborRateCents: 12_500, priceCents: 16_000 },
     })
   })
 
@@ -1491,7 +1706,8 @@ describe('ManualQuoteBuilder line mutations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-      sort: 7, laborHours: '2', laborRateCents: 12_500, priceCents: 25_000,
+      expectedLineFingerprint: 'a'.repeat(64),
+      line: { sort: 7, laborHours: '2', laborRateCents: 12_500, priceCents: 25_000 },
     })
   })
 
@@ -1557,7 +1773,8 @@ describe('ManualQuoteBuilder line mutations', () => {
     await screen.findByText('Rate · $100.00/hr')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-      sort: 7, laborHours: '1.25', laborRateCents: 10_000, priceCents: 12_500,
+      expectedLineFingerprint: 'a'.repeat(64),
+      line: { sort: 7, laborHours: '1.25', laborRateCents: 10_000, priceCents: 12_500 },
     })
     expect(screen.queryByText('Rate · $150.00/hr')).toBeNull()
   })
@@ -1645,11 +1862,16 @@ describe('ManualQuoteBuilder line mutations', () => {
   })
 
   it.each([
-    [response(409, { error: 'conflict', retryable: true }), 'Quote is busy. Refresh and retry.'],
+    [response(409, { error: 'conflict', retryable: true }), 'This line changed elsewhere. Review the updated line before removing it.'],
     [null, 'Connection interrupted. Retry with the same details.'],
   ] as const)('closes remove modal so delete failure is accessible', async (failure, message) => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-    if (failure) fetchMock.mockResolvedValueOnce(failure)
+    if (failure) fetchMock
+      .mockResolvedValueOnce(failure)
+      .mockResolvedValueOnce(response(200, { builder: builder({ activeVersion: null, jobs: [{
+        ...builder().jobs[0],
+        lines: [line({ lineFingerprint: 'd'.repeat(64) })],
+      }] }) }))
     else fetchMock.mockRejectedValueOnce(new Error('offline'))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
     const remove = screen.getByRole('button', { name: 'Remove Front pad set' })
@@ -1658,7 +1880,9 @@ describe('ManualQuoteBuilder line mutations', () => {
     expect(await screen.findByText(message)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(screen.getByTestId('quote-background')).not.toHaveAttribute('inert')
-    await waitFor(() => expect(document.activeElement).toBe(remove))
+    await waitFor(() => expect(document.activeElement).toBe(failure
+      ? screen.getByText('Front pad set').closest('li')
+      : remove))
   })
 
   it.each([
@@ -1681,21 +1905,40 @@ describe('ManualQuoteBuilder line mutations', () => {
     expect(screen.getByText('Front pad set')).toBeInTheDocument()
   })
 
-  it('closes an edit when refreshed server truth no longer contains its line', async () => {
+  it('preserves a stale edit as an explicit new line when server truth removed its original', async () => {
     const withoutLine = builder({
+      activeVersion: null,
       jobs: [{ ...builder().jobs[0], lines: builder().jobs[0].lines.slice(1) }],
     })
-    vi.spyOn(globalThis, 'fetch')
+    const restored = builder({
+      activeVersion: null,
+      jobs: [{
+        ...withoutLine.jobs[0],
+        lines: [
+          ...withoutLine.jobs[0].lines,
+          line({ id: NEW_LINE_ID, description: 'Locally edited', lineFingerprint: 'e'.repeat(64) }),
+        ],
+      }],
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
       .mockResolvedValueOnce(response(200, { builder: withoutLine }))
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: NEW_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: restored }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edit Front pad set' }))
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Locally edited' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
-    await screen.findByText('Quote is busy. Refresh and retry.')
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Edit part line' })).toBeNull())
+    await screen.findByText('This line changed elsewhere. Your typed changes are still here.')
+    expect(screen.getByRole('heading', { name: 'Add part line' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
     expect(screen.queryByText('Front pad set')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    expect(await screen.findByText('Locally edited')).toBeInTheDocument()
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+      line: { description: 'Locally edited' },
+    })
   })
 
   it('uses labeled decimal keyboards, 44px controls, and never renders hidden quote controls', () => {
@@ -1736,7 +1979,7 @@ describe('ManualQuoteBuilder preparation', () => {
     expect(screen.getByText('Add customer and vehicle.')).toBeInTheDocument()
     expect(screen.getByText('Configure a tax rate in shop settings.')).toBeInTheDocument()
     expect(screen.getByText('Add at least one quote line.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
   })
 
   it('does not require a global labor rate for explicitly priced persisted labor', () => {
@@ -1766,7 +2009,7 @@ describe('ManualQuoteBuilder preparation', () => {
     })} />)
     fireEvent.click(screen.getByRole('button', { name: 'Add labor' }))
     expect(screen.getByText('Finish or cancel the open line editor.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Prepare quote' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Labor' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     expect(screen.getByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
@@ -1776,16 +2019,22 @@ describe('ManualQuoteBuilder preparation', () => {
   it.each([
     [201, true],
     [200, false],
-  ])('prepares through a bodyless %i response then mandatory refreshed truth', async (status, changed) => {
+  ])('confirms an exact %i response then settles only on matching refreshed truth', async (status, changed) => {
     const prepared = { id: VERSION_ID, versionNumber: 4 }
     const active = activeVersion(4)
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(status, { changed, version: prepared }))
       .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    const invoker = screen.getByRole('button', { name: 'Prepare quote' })
+    fireEvent.click(invoker)
+    expect(fetchMock).not.toHaveBeenCalled()
+    const commitmentHeading = screen.getByRole('heading', { name: 'Prepare this exact quote?' })
+    expect(commitmentHeading).toHaveFocus()
+    expect(screen.getByText('Customer will see $322.81')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
     const preparedStatus = await screen.findByRole('status')
-    expect(preparedStatus).toHaveTextContent('Prepared version V4')
+    expect(preparedStatus).toHaveTextContent('Prepared V4')
     expect(preparedStatus).toHaveAttribute('aria-live', 'polite')
     expect(document.activeElement).toBe(
       screen.getByRole('region', { name: /Authorization for Replace front brakes/i }),
@@ -1793,10 +2042,38 @@ describe('ManualQuoteBuilder preparation', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe(`/api/tickets/${TICKET_ID}/quote/versions`)
     expect(fetchMock.mock.calls[0][1]).toEqual({
-      method: 'POST', headers: { accept: 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ expectedDraftFingerprint: DRAFT_FINGERPRINT }),
     })
     expect(fetchMock.mock.calls[1][0]).toBe(`/api/tickets/${TICKET_ID}/quote`)
     expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
+  })
+
+  it('restores focus to the Prepare invoker when commitment is canceled', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    const invoker = screen.getByRole('button', { name: 'Prepare quote' })
+    fireEvent.click(invoker)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare quote' })).toHaveFocus())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('makes the frozen Prepare plate the sole quote-mutation boundary', () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    const ledger = screen.getByRole('region', { name: 'Jobs on this quote' })
+    expect(ledger).toHaveAttribute('inert')
+    expect(screen.getAllByTestId('quote-background')[0].querySelectorAll('[data-primary-action="true"]'))
+      .toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Add part' }))
+    expect(screen.queryByRole('heading', { name: 'Add part line' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Prepare this exact quote?' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -1807,8 +2084,9 @@ describe('ManualQuoteBuilder preparation', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(status, body))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
     expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
-    expect(screen.getByText('No prepared version')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Current draft' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -1821,9 +2099,34 @@ describe('ManualQuoteBuilder preparation', () => {
       .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
     await screen.findByText('Review the visible fields, then refresh and retry.')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Prepared version V4')
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+    expect(screen.getByRole('heading', { name: 'Prepared V4' })).toHaveFocus()
+  })
+
+  it('keeps explicit refresh available after a failed malformed-success recovery', async () => {
+    const active = activeVersion(4)
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, {
+        changed: true,
+        version: { id: VERSION_ID, versionNumber: 4 },
+        extra: true,
+      }))
+      .mockResolvedValueOnce(response(503, { error: 'unavailable' }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeEnabled())
+    const retry = screen.getByRole('button', { name: 'Refresh quote' })
+    fireEvent.click(retry)
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+    expect(screen.getByRole('heading', { name: 'Prepared V4' })).toHaveFocus()
   })
 
   it('rejects refreshed truth that does not contain the exact prepared version', async () => {
@@ -1835,10 +2138,17 @@ describe('ManualQuoteBuilder preparation', () => {
       .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
-    expect(await screen.findByText('Review the visible fields, then refresh and retry.')).toBeInTheDocument()
-    expect(screen.getByText('No prepared version')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Prepared version V4')
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+    expect(await screen.findByText('Preparation could not be confirmed. Refresh the quote to review current server truth.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Current draft' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Prepare this exact quote?' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Prepare $322.81' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Prepare quote' })).toBeNull()
+    const refresh = screen.getByRole('button', { name: 'Refresh quote' })
+    expect(refresh).toHaveFocus()
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2)
+    fireEvent.click(refresh)
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
   })
 
   it.each([
@@ -1849,31 +2159,202 @@ describe('ManualQuoteBuilder preparation', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(status, body))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
     await waitFor(() => expect(router.push).toHaveBeenCalledWith(destination))
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('serializes rapid preparation and exposes retryable busy failure', async () => {
+  it('refreshes a stale commitment, closes it, and requires another deliberate review', async () => {
+    const changedCommitment = {
+      algorithm: 'quote-draft-v1-sha256' as const,
+      fingerprint: 'c'.repeat(64), totalCents: 40_000, jobCount: 1, lineCount: 1,
+    }
+    const changedBuilder = ready({
+      configuration: {
+        laborRateCents: 15_000, taxRateBps: 0,
+        partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
+      },
+      jobs: [{
+        ...builder().jobs[0],
+        lines: [line({
+          id: FEE_LINE_ID, kind: 'fee', description: 'Updated work', quantity: '1',
+          priceCents: 40_000, taxable: false, partNumber: null, brand: null,
+          coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+        })],
+      }],
+      draftCommitment: changedCommitment,
+    })
     let resolvePrepare!: (value: Response) => void
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockImplementationOnce(() => new Promise((resolve) => { resolvePrepare = resolve }))
+      .mockResolvedValueOnce(response(200, { builder: changedBuilder }))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     const prepare = screen.getByRole('button', { name: 'Prepare quote' })
     fireEvent.click(prepare)
-    fireEvent.click(prepare)
+    const confirm = screen.getByRole('button', { name: 'Prepare $322.81' })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     resolvePrepare(response(409, { error: 'conflict', retryable: true }))
-    expect(await screen.findByText('Quote is busy. Refresh and retry.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeInTheDocument()
+    expect(await screen.findByText('The quote changed elsewhere. Review the updated quote before preparing again.')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Prepare this exact quote?' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Prepare quote' })).toBeInTheDocument()
+    expect(screen.getAllByText('$400.00').length).toBeGreaterThan(0)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('blocks stale preparation after its conflict refresh fails until fresh truth rotates the draft token', async () => {
+    const changedCommitment = {
+      algorithm: 'quote-draft-v1-sha256' as const,
+      fingerprint: 'c'.repeat(64), totalCents: 40_000, jobCount: 1, lineCount: 1,
+    }
+    const changedBuilder = ready({
+      configuration: {
+        laborRateCents: 15_000, taxRateBps: 0,
+        partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
+      },
+      jobs: [{
+        ...builder().jobs[0],
+        lines: [line({
+          id: FEE_LINE_ID, kind: 'fee', description: 'Updated work', quantity: '1',
+          priceCents: 40_000, taxable: false, partNumber: null, brand: null,
+          coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+        })],
+      }],
+      draftCommitment: changedCommitment,
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { builder: changedBuilder }))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+
+    const refresh = await screen.findByRole('button', { name: 'Refresh quote' })
+    expect(refresh).toHaveFocus()
+    expect(screen.queryByRole('dialog', { name: 'Prepare this exact quote?' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Prepare/ })).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(refresh)
+    const prepare = await screen.findByRole('button', { name: 'Prepare quote' })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fireEvent.click(prepare)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $400.00' }))
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      expectedDraftFingerprint: 'c'.repeat(64),
+    })
   })
 
   it('shows network failure without inventing a cause or forbidden action wording', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('offline'))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
     render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
-    expect(await screen.findByText('Connection interrupted. Retry with the same details.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+    expect(await screen.findByText('Preparation could not be confirmed. Review the current quote before retrying.')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Prepare this exact quote?' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Prepare/ })).toBeNull()
+    const recoveryActions = screen.getAllByRole('button', { name: 'Refresh quote' })
+    expect(recoveryActions).toHaveLength(1)
+    expect(recoveryActions[0]).toHaveFocus()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'GET' })
     const actionCopy = screen.getAllByRole('button').map((button) => button.textContent).join(' ')
     expect(actionCopy).not.toMatch(/send|approve|authorize|start work/i)
+  })
+
+  it('keeps interrupted preparation blocked through unchanged draft truth and settles exact active truth', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { builder: ready() }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: activeVersion(4) }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+
+    let refresh = await screen.findByRole('button', { name: 'Refresh quote' })
+    fireEvent.click(refresh)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(screen.queryByRole('button', { name: /Prepare/ })).toBeNull()
+    refresh = screen.getByRole('button', { name: 'Refresh quote' })
+    expect(refresh).toHaveFocus()
+
+    fireEvent.click(refresh)
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1)
+  })
+
+  it('adopts a different concurrently prepared version for review without false settlement styling', async () => {
+    const concurrentVersion = {
+      ...activeVersion(5),
+      contentFingerprint: 'c'.repeat(64),
+      totalCents: 40_000,
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, {
+        builder: ready({ activeVersion: concurrentVersion }),
+      }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    expect(await screen.findByRole('heading', { name: 'Prepared V5' })).toBeInTheDocument()
+    expect(screen.getAllByText('$400.00')).not.toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /Prepare/ })).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1)
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).not.toHaveAttribute('data-settled')
+  })
+
+  it('releases interrupted preparation for review only after fresh draft truth rotates', async () => {
+    const changedCommitment = {
+      algorithm: 'quote-draft-v1-sha256' as const,
+      fingerprint: 'c'.repeat(64), totalCents: 40_000, jobCount: 1, lineCount: 1,
+    }
+    const changedBuilder = ready({
+      configuration: {
+        laborRateCents: 15_000, taxRateBps: 0,
+        partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
+      },
+      jobs: [{
+        ...builder().jobs[0],
+        lines: [line({
+          id: FEE_LINE_ID, kind: 'fee', description: 'Updated work', quantity: '1',
+          priceCents: 40_000, taxable: false, partNumber: null, brand: null,
+          coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
+        })],
+      }],
+      draftCommitment: changedCommitment,
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { builder: changedBuilder }))
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+    const prepare = await screen.findByRole('button', { name: 'Prepare quote' })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fireEvent.click(prepare)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $400.00' }))
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      expectedDraftFingerprint: 'c'.repeat(64),
+    })
   })
 
   it('keeps preparation at least 44px', () => {

@@ -16,6 +16,7 @@ import {
   createAdHocJob,
   createDraftLine,
   createQuoteVersion,
+  getQuoteBuilder,
 } from '@/lib/shop-os/quotes'
 import { correctTicket } from '@/lib/shop-os/ticket-corrections'
 import { addSupplementalDiagnosticTime } from '@/lib/tickets'
@@ -355,8 +356,13 @@ describe('migrated PGlite persistence half of the split proof', () => {
       expect(beforePrepareReceipts.map((row) => (row.payload as { scope: string }).scope).sort())
         .toEqual(['concern', 'identity', 'job'])
 
+      const builder = await getQuoteBuilder(golden.db, {
+        actor: { profileId: golden.people.advisor.id }, ticketId: ticket.id,
+      })
+      if (!builder.ok || !builder.builder.draftCommitment) throw new Error('quote commitment failed')
       const prepared = await createQuoteVersion(golden.db, {
         actor: { profileId: golden.people.advisor.id }, ticketId: ticket.id,
+        expectedDraftFingerprint: builder.builder.draftCommitment.fingerprint,
       })
       expect(prepared).toMatchObject({ ok: true, changed: true, version: { versionNumber: 1 } })
       if (!prepared.ok) return

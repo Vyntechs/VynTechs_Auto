@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   createDraftLine,
   deleteDraftLine,
+  manualDraftLineFingerprint,
   replaceDraftLine,
   type QuoteActor,
 } from '@/lib/shop-os/quotes'
@@ -51,6 +52,12 @@ describe('Shop OS quote draft mutations', () => {
 
   const create = (clientKey = uuid(100), body: unknown = partBody(), overrides = {}) =>
     createDraftLine(db, { actor, ticketId, jobId, clientKey, body, ...overrides })
+
+  const currentLineFingerprint = async (lineId: string) => {
+    const [line] = await db.select().from(jobLines).where(eq(jobLines.id, lineId))
+    if (!line) throw new Error('line fingerprint fixture failed')
+    return manualDraftLineFingerprint(line)
+  }
 
   beforeEach(async () => {
     ;({ db, close } = await createTestDb())
@@ -136,6 +143,7 @@ describe('Shop OS quote draft mutations', () => {
     if (!created.ok || !created.line) throw new Error('missing created line')
     const replaced = await replaceDraftLine(db, {
       actor, ticketId, jobId, lineId: created.line.id,
+      expectedLineFingerprint: await currentLineFingerprint(created.line.id),
       body: partBody({ description: 'Updated pads', unitCostCents: 8_000 }),
     })
     for (const result of [created, replaced]) {
@@ -237,6 +245,7 @@ describe('Shop OS quote draft mutations', () => {
     const replaced = await replaceDraftLine(db, {
       actor: { profileId: upper(profileId) }, ticketId: upper(upperTicketId),
       jobId: upper(upperJobId), lineId: upper(created.line.id),
+      expectedLineFingerprint: await currentLineFingerprint(created.line.id),
       body: partBody({ description: 'Updated uppercase work' }),
     })
     expect(replaced).toMatchObject({ ok: true, changed: true, line: { description: 'Updated uppercase work' } })
@@ -245,6 +254,7 @@ describe('Shop OS quote draft mutations', () => {
     await expect(deleteDraftLine(db, {
       actor: { profileId: upper(profileId) }, ticketId: upper(upperTicketId),
       jobId: upper(upperJobId), lineId: upper(created.line.id),
+      expectedLineFingerprint: await currentLineFingerprint(created.line.id),
     })).resolves.toEqual({ ok: true, changed: true })
   })
 
@@ -282,28 +292,44 @@ describe('Shop OS quote draft mutations', () => {
     const [version] = await db.insert(quoteVersions).values({
       shopId, ticketId, versionNumber: 1, snapshot: snapshot([jobId]), createdByProfileId: uuid(1),
     }).returning()
-    await expect(replaceDraftLine(db, { actor, ticketId, jobId, lineId: created.line.id, body: partBody() })).resolves.toMatchObject({ ok: true, changed: false })
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId, lineId: created.line.id,
+      expectedLineFingerprint: await currentLineFingerprint(created.line.id), body: partBody(),
+    })).resolves.toMatchObject({ ok: true, changed: false })
     const [stored] = await db.select().from(quoteVersions).where(eq(quoteVersions.id, version.id))
     expect(stored.supersededAt).toBeNull()
   })
 
   it('makes delete idempotent only under an authorized existing ticket and job', async () => {
-    await expect(deleteDraftLine(db, { actor, ticketId, jobId, lineId: uuid(140) })).resolves.toEqual({ ok: true, changed: false })
     const created = await create(uuid(140))
     if (!created.ok || !created.line) throw new Error('missing created line')
-    await expect(deleteDraftLine(db, { actor, ticketId, jobId, lineId: created.line.id })).resolves.toEqual({ ok: true, changed: true })
-    await expect(deleteDraftLine(db, { actor, ticketId, jobId, lineId: created.line.id })).resolves.toEqual({ ok: true, changed: false })
-    await expect(deleteDraftLine(db, { actor, ticketId: uuid(999), jobId, lineId: created.line.id })).resolves.toEqual({ ok: false, error: 'not_found' })
+    const expectedLineFingerprint = await currentLineFingerprint(created.line.id)
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId, lineId: created.line.id, expectedLineFingerprint,
+    })).resolves.toEqual({ ok: true, changed: true })
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId, lineId: created.line.id, expectedLineFingerprint,
+    })).resolves.toEqual({ ok: true, changed: false })
+    await expect(deleteDraftLine(db, {
+      actor, ticketId: uuid(999), jobId, lineId: created.line.id, expectedLineFingerprint,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
   })
 
   it('cannot replace or delete non-manual provider lifecycle rows', async () => {
+    const tokenSource = await create(uuid(144))
+    if (!tokenSource.ok || !tokenSource.line) throw new Error('token source line missing')
+    const expectedLineFingerprint = await currentLineFingerprint(tokenSource.line.id)
     await db.insert(jobLines).values({
       id: uuid(145), shopId, jobId, kind: 'part', description: 'Provider part', quantity: 1,
       priceCents: 10_000, taxable: true, source: 'vendor_offer', vendorAccountId: uuid(500),
       externalOfferId: 'offer-1', vendorSnapshot: { provider: 'catalog' }, partStatus: 'needs_order',
     })
-    await expect(replaceDraftLine(db, { actor, ticketId, jobId, lineId: uuid(145), body: partBody() })).resolves.toEqual({ ok: false, error: 'not_found' })
-    await expect(deleteDraftLine(db, { actor, ticketId, jobId, lineId: uuid(145) })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(replaceDraftLine(db, {
+      actor, ticketId, jobId, lineId: uuid(145), expectedLineFingerprint, body: partBody(),
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
+    await expect(deleteDraftLine(db, {
+      actor, ticketId, jobId, lineId: uuid(145), expectedLineFingerprint,
+    })).resolves.toEqual({ ok: false, error: 'not_found' })
     const [stored] = await db.select().from(jobLines).where(eq(jobLines.id, uuid(145)))
     expect(stored).toMatchObject({ source: 'vendor_offer', partStatus: 'needs_order', externalOfferId: 'offer-1' })
   })

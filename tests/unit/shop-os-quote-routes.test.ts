@@ -30,6 +30,7 @@ const TICKET_ID = '00000000-0000-4000-8000-000000000020'
 const JOB_ID = '00000000-0000-4000-8000-000000000030'
 const LINE_ID = '00000000-0000-4000-8000-000000000040'
 const CLIENT_KEY = '00000000-0000-4000-8000-000000000050'
+const FINGERPRINT = 'a'.repeat(64)
 const profile = { id: '00000000-0000-4000-8000-000000000001', userId: '00000000-0000-4000-8000-000000000101' }
 const authContext = { profile, user: { id: profile.userId, email: 'tech@test.local' } }
 const actor = { profileId: profile.id }
@@ -47,11 +48,21 @@ const decisionMock = vi.mocked(recordQuoteDecision)
 const ticketParams = () => ({ params: Promise.resolve({ id: TICKET_ID }) })
 const jobParams = () => ({ params: Promise.resolve({ id: TICKET_ID, jobId: JOB_ID }) })
 const lineParams = () => ({ params: Promise.resolve({ id: TICKET_ID, jobId: JOB_ID, lineId: LINE_ID }) })
-const request = (path: string, method: string, body?: unknown, raw?: string) => new Request(`http://localhost${path}`, {
+const request = (
+  path: string,
+  method: string,
+  body?: unknown,
+  raw?: string,
+  headers?: HeadersInit,
+) => new Request(`http://localhost${path}`, {
   method,
   ...(body !== undefined || raw !== undefined ? {
-    body: raw ?? JSON.stringify(body), headers: { 'content-type': 'application/json' },
+    body: raw ?? JSON.stringify(body),
   } : {}),
+  headers: {
+    ...(body !== undefined || raw !== undefined ? { 'content-type': 'application/json' } : {}),
+    ...Object.fromEntries(new Headers(headers)),
+  },
 })
 
 describe('Shop OS quote route contracts', () => {
@@ -64,9 +75,9 @@ describe('Shop OS quote route contracts', () => {
   const calls = () => [
     { name: 'GET /api/tickets/:id/quote', invoke: () => getBuilder(request(`/api/tickets/${TICKET_ID}/quote`, 'GET'), ticketParams()), mock: builderMock },
     { name: 'POST /api/tickets/:id/quote/jobs/:jobId/lines', invoke: () => createLine(request(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/lines`, 'POST', { clientKey: CLIENT_KEY, line }), jobParams()), mock: createLineMock },
-    { name: 'PUT /api/tickets/:id/quote/jobs/:jobId/lines/:lineId', invoke: () => replaceLine(request(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/lines/${LINE_ID}`, 'PUT', line), lineParams()), mock: replaceLineMock },
-    { name: 'DELETE /api/tickets/:id/quote/jobs/:jobId/lines/:lineId', invoke: () => deleteLine(request(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/lines/${LINE_ID}`, 'DELETE'), lineParams()), mock: deleteLineMock },
-    { name: 'POST /api/tickets/:id/quote/versions', invoke: () => createVersion(request(`/api/tickets/${TICKET_ID}/quote/versions`, 'POST', undefined, 'not-json{'), ticketParams()), mock: versionMock },
+    { name: 'PUT /api/tickets/:id/quote/jobs/:jobId/lines/:lineId', invoke: () => replaceLine(request(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/lines/${LINE_ID}`, 'PUT', { expectedLineFingerprint: FINGERPRINT, line }), lineParams()), mock: replaceLineMock },
+    { name: 'DELETE /api/tickets/:id/quote/jobs/:jobId/lines/:lineId', invoke: () => deleteLine(request(`/api/tickets/${TICKET_ID}/quote/jobs/${JOB_ID}/lines/${LINE_ID}`, 'DELETE', { expectedLineFingerprint: FINGERPRINT }), lineParams()), mock: deleteLineMock },
+    { name: 'POST /api/tickets/:id/quote/versions', invoke: () => createVersion(request(`/api/tickets/${TICKET_ID}/quote/versions`, 'POST', { expectedDraftFingerprint: FINGERPRINT }), ticketParams()), mock: versionMock },
     { name: 'POST /api/tickets/:id/quote/decisions', invoke: () => decide(request(`/api/tickets/${TICKET_ID}/quote/decisions`, 'POST', { requestKey: CLIENT_KEY, jobId: JOB_ID, quoteVersionId: LINE_ID, decision: 'declined' }), ticketParams()), mock: decisionMock },
   ]
 
@@ -90,6 +101,8 @@ describe('Shop OS quote route contracts', () => {
   it.each([
     { name: 'create line', invoke: () => createLine(request('/x', 'POST', undefined, 'not-json{'), jobParams()), mock: createLineMock },
     { name: 'replace line', invoke: () => replaceLine(request('/x', 'PUT', undefined, 'not-json{'), lineParams()), mock: replaceLineMock },
+    { name: 'delete line', invoke: () => deleteLine(request('/x', 'DELETE', undefined, 'not-json{'), lineParams()), mock: deleteLineMock },
+    { name: 'prepare quote', invoke: () => createVersion(request('/x', 'POST', undefined, 'not-json{'), ticketParams()), mock: versionMock },
     { name: 'decision', invoke: () => decide(request('/x', 'POST', undefined, 'not-json{'), ticketParams()), mock: decisionMock },
   ])('rejects malformed JSON for $name before domain access', async ({ invoke, mock }) => {
     const response = await invoke()
@@ -98,19 +111,39 @@ describe('Shop OS quote route contracts', () => {
     expect(mock).not.toHaveBeenCalled()
   })
 
-  it('accepts an absent or strict empty version body and rejects malformed or nonempty bodies', async () => {
+  it('requires strict fingerprint envelopes and refuses query or header substitutes before domain access', async () => {
     versionMock.mockResolvedValue({ ok: true, changed: true, version: { id: LINE_ID, versionNumber: 1 } })
-    expect((await createVersion(request('/x', 'POST'), ticketParams())).status).toBe(201)
-    expect((await createVersion(request('/x', 'POST', {}), ticketParams())).status).toBe(201)
-    expect(versionMock).toHaveBeenCalledTimes(2)
+    const invalidCalls = [
+      () => createVersion(request('/x', 'POST', {}), ticketParams()),
+      () => createVersion(request('/x', 'POST', { expectedDraftFingerprint: 'A'.repeat(64) }), ticketParams()),
+      () => createVersion(request('/x', 'POST', { expectedDraftFingerprint: FINGERPRINT, extra: true }), ticketParams()),
+      () => replaceLine(request('/x', 'PUT', { expectedLineFingerprint: 'short', line }), lineParams()),
+      () => replaceLine(request('/x', 'PUT', { expectedLineFingerprint: FINGERPRINT, line, extra: true }), lineParams()),
+      () => deleteLine(request(`/x?expectedLineFingerprint=${FINGERPRINT}`, 'DELETE', {}), lineParams()),
+      () => deleteLine(request('/x', 'DELETE', {}, undefined, { 'x-line-fingerprint': FINGERPRINT }), lineParams()),
+    ]
+    for (const invoke of invalidCalls) {
+      const response = await invoke()
+      expect(response.status).toBe(422)
+      await expect(response.json()).resolves.toEqual({ error: 'invalid_input' })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+    }
+    expect(versionMock).not.toHaveBeenCalled()
+    expect(replaceLineMock).not.toHaveBeenCalled()
+    expect(deleteLineMock).not.toHaveBeenCalled()
+  })
 
-    let response = await createVersion(request('/x', 'POST', undefined, 'not-json{'), ticketParams())
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_json' })
-    response = await createVersion(request('/x', 'POST', { extra: true }), ticketParams())
-    expect(response.status).toBe(422)
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_input' })
-    expect(versionMock).toHaveBeenCalledTimes(2)
+  it.each([
+    ['PUT line', () => replaceLine(request('/x', 'PUT'), lineParams()), replaceLineMock],
+    ['DELETE line', () => deleteLine(request('/x', 'DELETE'), lineParams()), deleteLineMock],
+    ['POST version', () => createVersion(request('/x', 'POST'), ticketParams()), versionMock],
+    ['PUT line wrong type', () => replaceLine(request('/x', 'PUT', { expectedLineFingerprint: FINGERPRINT, line }, undefined, { 'content-type': 'text/plain' }), lineParams()), replaceLineMock],
+  ])('requires application/json for %s before domain access', async (_name, invoke, mock) => {
+    const response = await invoke()
+    expect(response.status).toBe(415)
+    await expect(response.json()).resolves.toEqual({ error: 'unsupported_media_type' })
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(mock).not.toHaveBeenCalled()
   })
 
   it('requires the exact create-line envelope and forwards only clientKey plus line', async () => {
@@ -136,7 +169,7 @@ describe('Shop OS quote route contracts', () => {
     replaceLineMock.mockResolvedValue({ ok: true, changed: true, line: unsafe } as never)
     for (const response of [
       await createLine(request('/x', 'POST', { clientKey: CLIENT_KEY, line }), jobParams()),
-      await replaceLine(request('/x', 'PUT', line), lineParams()),
+      await replaceLine(request('/x', 'PUT', { expectedLineFingerprint: FINGERPRINT, line }), lineParams()),
     ]) {
       const serialized = JSON.stringify(await response.json())
       expect(serialized).not.toContain('unitCostCents')
@@ -157,17 +190,47 @@ describe('Shop OS quote route contracts', () => {
 
     expect((await getBuilder(request('/x', 'GET'), ticketParams())).status).toBe(200)
     expect(builderMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID })
-    expect((await replaceLine(request('/x', 'PUT', line), lineParams())).status).toBe(200)
-    expect(replaceLineMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, jobId: JOB_ID, lineId: LINE_ID, body: line })
-    expect((await deleteLine(request('/x', 'DELETE'), lineParams())).status).toBe(200)
-    expect(deleteLineMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, jobId: JOB_ID, lineId: LINE_ID })
-    expect((await createVersion(request('/x', 'POST'), ticketParams())).status).toBe(201)
-    expect(versionMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID })
+    expect((await replaceLine(request('/x', 'PUT', { expectedLineFingerprint: FINGERPRINT, line }), lineParams())).status).toBe(200)
+    expect(replaceLineMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, jobId: JOB_ID, lineId: LINE_ID, expectedLineFingerprint: FINGERPRINT, body: line })
+    expect((await deleteLine(request('/x', 'DELETE', { expectedLineFingerprint: FINGERPRINT }), lineParams())).status).toBe(200)
+    expect(deleteLineMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, jobId: JOB_ID, lineId: LINE_ID, expectedLineFingerprint: FINGERPRINT })
+    expect((await createVersion(request('/x', 'POST', { expectedDraftFingerprint: FINGERPRINT }), ticketParams())).status).toBe(201)
+    expect(versionMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, expectedDraftFingerprint: FINGERPRINT })
     const body = { requestKey: CLIENT_KEY, jobId: JOB_ID, quoteVersionId: LINE_ID, decision: 'declined' }
     const decisionResponse = await decide(request('/x', 'POST', body), ticketParams())
     expect(decisionResponse.status).toBe(200)
     expect(decisionMock).toHaveBeenCalledWith({}, { actor, ticketId: TICKET_ID, body })
     await expect(decisionResponse.json()).resolves.toEqual({ changed: false, event: { id: LINE_ID }, projection: { approvalState: 'approved' } })
+  })
+
+  it('normalizes JSON media type, distinguishes prepare replay, and emits no-store on success and conflict', async () => {
+    replaceLineMock.mockResolvedValue({ ok: true, changed: false, line: { id: LINE_ID } } as never)
+    let response = await replaceLine(request(
+      '/x', 'PUT', { expectedLineFingerprint: FINGERPRINT, line }, undefined,
+      { 'content-type': ' Application/JSON ; charset=utf-8 ' },
+    ), lineParams())
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+
+    versionMock.mockResolvedValueOnce({ ok: true, changed: true, version: { id: LINE_ID, versionNumber: 1 } })
+      .mockResolvedValueOnce({ ok: true, changed: false, version: { id: LINE_ID, versionNumber: 1 } })
+    response = await createVersion(request('/x', 'POST', { expectedDraftFingerprint: FINGERPRINT }), ticketParams())
+    expect(response.status).toBe(201)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    response = await createVersion(request('/x', 'POST', { expectedDraftFingerprint: FINGERPRINT }), ticketParams())
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+
+    deleteLineMock.mockResolvedValueOnce({ ok: true, changed: true })
+    response = await deleteLine(request('/x', 'DELETE', { expectedLineFingerprint: FINGERPRINT }), lineParams())
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+
+    deleteLineMock.mockResolvedValue({ ok: false, error: 'conflict', retryable: true })
+    response = await deleteLine(request('/x', 'DELETE', { expectedLineFingerprint: FINGERPRINT }), lineParams())
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({ error: 'conflict', retryable: true })
+    expect(response.headers.get('cache-control')).toBe('no-store')
   })
 
   it.each([

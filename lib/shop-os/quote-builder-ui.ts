@@ -13,10 +13,12 @@ import {
 } from '@/lib/shop-os/customer-story-contracts'
 
 const MAX_SAFE_CENTS = BigInt(Number.MAX_SAFE_INTEGER)
-type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder']
+export type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder']
+export type DraftCommitment = NonNullable<QuoteBuilderProjection['draftCommitment']>
 
 const safeMoneySchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
+const fingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/)
 const nullableText = (max: number) => z.string().max(max).nullable()
 const customerStorySchema = z.unknown().transform((value, context) => {
   const parsed = parsePersistedCustomerStory(value)
@@ -42,6 +44,7 @@ const builderLineSchema = z.strictObject({
   laborRateCents: safeMoneySchema.nullable(),
   source: z.enum(['manual', 'vendor_offer']),
   mutable: z.boolean(),
+  lineFingerprint: fingerprintSchema.nullable(),
 }).superRefine((line, context) => {
   try {
     const quantity = parseScaledDecimal(line.quantity, 3)
@@ -74,6 +77,9 @@ const builderLineSchema = z.strictObject({
   )) context.addIssue({ code: 'custom', message: 'fee fields are invalid' })
   if ((line.source === 'manual') !== line.mutable) {
     context.addIssue({ code: 'custom', message: 'line source and mutability are inconsistent' })
+  }
+  if ((line.source === 'manual') !== (line.lineFingerprint !== null)) {
+    context.addIssue({ code: 'custom', message: 'line revision fingerprint is inconsistent' })
   }
   if (line.source === 'vendor_offer' && (line.kind !== 'part' || line.coreChargeCents !== null)) {
     context.addIssue({ code: 'custom', message: 'sourced line projection is invalid' })
@@ -143,10 +149,25 @@ const quoteBuilderSchema = z.strictObject({
     id: uuidSchema,
     versionNumber: z.number().int().min(1).max(2_147_483_647),
     totalCents: safeMoneySchema,
+    contentFingerprint: fingerprintSchema,
     jobs: z.array(z.strictObject({
       jobId: uuidSchema,
       subtotalCents: safeMoneySchema,
     })).min(1).max(500),
+  }).nullable(),
+  lastPreparedVersion: z.strictObject({
+    id: uuidSchema,
+    versionNumber: z.number().int().min(1).max(2_147_483_647),
+    totalCents: safeMoneySchema,
+    contentFingerprint: fingerprintSchema,
+    state: z.enum(['current', 'superseded']),
+  }).nullable(),
+  draftCommitment: z.strictObject({
+    algorithm: z.literal('quote-draft-v1-sha256'),
+    fingerprint: fingerprintSchema,
+    totalCents: safeMoneySchema,
+    jobCount: z.number().int().min(1).max(500),
+    lineCount: z.number().int().min(1).max(1_000_000),
   }).nullable(),
 }).superRefine((builder, context) => {
   const jobIds = builder.jobs.map((job) => job.id)
@@ -167,6 +188,21 @@ const quoteBuilderSchema = z.strictObject({
     if (subtotal > BigInt(builder.activeVersion.totalCents)) {
       context.addIssue({ code: 'custom', message: 'active version total is invalid' })
     }
+  }
+  if (builder.lastPreparedVersion?.state === 'current') {
+    if (!builder.activeVersion
+      || builder.lastPreparedVersion.id !== builder.activeVersion.id
+      || builder.lastPreparedVersion.versionNumber !== builder.activeVersion.versionNumber
+      || builder.lastPreparedVersion.totalCents !== builder.activeVersion.totalCents
+      || builder.lastPreparedVersion.contentFingerprint !== builder.activeVersion.contentFingerprint) {
+      context.addIssue({ code: 'custom', message: 'current prepared version is inconsistent' })
+    }
+  }
+  if (builder.lastPreparedVersion?.state === 'superseded' && builder.activeVersion) {
+    context.addIssue({ code: 'custom', message: 'superseded prepared version cannot have active truth' })
+  }
+  if (builder.activeVersion && builder.lastPreparedVersion === null) {
+    context.addIssue({ code: 'custom', message: 'active version requires latest prepared truth' })
   }
   for (const job of builder.jobs) {
     if ((job.kind === 'diagnostic') !== (job.storyMode !== null)) {
@@ -421,6 +457,16 @@ export function getQuotePreparationState(input: {
     reasons.push('Add at least one quote line.')
   }
   if (!input.totals.ok) reasons.push('Review stored quote amounts.')
+  const versionableJobs = input.builder.jobs.filter((job) => job.lines.length > 0)
+  const projectedLineCount = versionableJobs.reduce((count, job) => count + job.lines.length, 0)
+  if (!input.builder.draftCommitment
+    || !input.totals.ok
+    || input.totals.totalCents === null
+    || input.builder.draftCommitment.totalCents !== input.totals.totalCents
+    || input.builder.draftCommitment.jobCount !== versionableJobs.length
+    || input.builder.draftCommitment.lineCount !== projectedLineCount) {
+    reasons.push('Refresh quote commitment.')
+  }
   if (input.editorOpen) reasons.push('Finish or cancel the open line editor.')
   if (input.modalOpen) reasons.push('Finish the open confirmation.')
   if (input.busy) reasons.push('Wait for the current quote update.')

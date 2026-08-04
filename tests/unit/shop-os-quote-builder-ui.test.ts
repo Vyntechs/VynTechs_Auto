@@ -31,10 +31,16 @@ describe('quote preparation readiness', () => {
         sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
         partNumber: null, brand: null, coreChargeCents: null, fitment: null,
         laborHours: '1', laborRateCents: null, source: 'manual', mutable: true,
+        lineFingerprint: 'a'.repeat(64),
       }],
     }],
     capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
+    lastPreparedVersion: null,
+    draftCommitment: {
+      algorithm: 'quote-draft-v1-sha256', fingerprint: 'd'.repeat(64),
+      totalCents: 10_000, jobCount: 1, lineCount: 1,
+    },
   })!
 
   it('allows explicitly priced persisted labor without a global labor rate', () => {
@@ -44,6 +50,14 @@ describe('quote preparation readiness', () => {
       totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
       editorOpen: false, modalOpen: false, busy: false,
     })).toEqual({ kind: 'ready', reasons: [] })
+  })
+
+  it('fails closed when the server has not projected an exact draft commitment', () => {
+    expect(getQuotePreparationState({
+      builder: { ...readyBuilder, draftCommitment: null },
+      totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
+      editorOpen: false, modalOpen: false, busy: false,
+    })).toEqual({ kind: 'blocked', reasons: ['Refresh quote commitment.'] })
   })
 
   it('accepts an explicit server-projected customer-link capability', () => {
@@ -68,7 +82,7 @@ describe('quote preparation readiness', () => {
       totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
     })).toEqual({ kind: 'blocked', reasons: [
       'Add customer and vehicle.', 'Configure a tax rate in shop settings.', 'Add at least one quote line.',
-      'Review stored quote amounts.', 'Finish or cancel the open line editor.',
+      'Review stored quote amounts.', 'Refresh quote commitment.', 'Finish or cancel the open line editor.',
       'Finish the open confirmation.', 'Wait for the current quote update.',
     ] })
   })
@@ -78,8 +92,12 @@ describe('quote preparation readiness', () => {
       ...readyBuilder,
       activeVersion: {
         id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
-        totalCents: 10_825,
+        totalCents: 10_825, contentFingerprint: 'a'.repeat(64),
         jobs: [{ jobId: '00000000-0000-4000-8000-000000000201', subtotalCents: 10_000 }],
+      },
+      lastPreparedVersion: {
+        id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
+        totalCents: 10_825, contentFingerprint: 'a'.repeat(64), state: 'current' as const,
       },
     }
     expect(getQuotePreparationState({
@@ -215,6 +233,7 @@ describe('quote builder refresh projection validation', () => {
         priceCents: 500, taxable: true, partNumber: null, brand: null,
         coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
         source: 'manual', mutable: true,
+        lineFingerprint: 'a'.repeat(64),
       }],
     }],
     capabilities: {
@@ -222,6 +241,8 @@ describe('quote builder refresh projection validation', () => {
       canCreateCustomerApprovalLink: false,
     },
     activeVersion: null,
+    lastPreparedVersion: null,
+    draftCommitment: null,
   }
 
   it('accepts the complete exact safe projection', () => {
@@ -233,6 +254,90 @@ describe('quote builder refresh projection validation', () => {
     expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
   })
 
+  it('requires exact canonical commitment and line-revision truth', () => {
+    const committed = {
+      ...valid,
+      draftCommitment: {
+        algorithm: 'quote-draft-v1-sha256', fingerprint: 'a'.repeat(64), totalCents: 500,
+        jobCount: 1, lineCount: 1,
+      },
+      lastPreparedVersion: null,
+      jobs: [{
+        ...valid.jobs[0],
+        lines: [{ ...valid.jobs[0].lines[0], lineFingerprint: 'b'.repeat(64) }],
+      }],
+      activeVersion: null,
+    }
+    expect(parseQuoteBuilderProjection(committed)).toEqual(committed)
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{ ...committed.jobs[0].lines[0], lineFingerprint: 'B'.repeat(64) }] }],
+    })).toBeNull()
+    for (const fingerprint of ['a'.repeat(63), 'g'.repeat(64), 'A'.repeat(64)]) {
+      expect(parseQuoteBuilderProjection({
+        ...committed,
+        draftCommitment: { ...committed.draftCommitment, fingerprint },
+      })).toBeNull()
+    }
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{ ...committed.jobs[0].lines[0], lineFingerprint: null }] }],
+    })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{
+        ...committed.jobs[0].lines[0], source: 'vendor_offer', mutable: false, lineFingerprint: 'b'.repeat(64),
+      }] }],
+    })).toBeNull()
+    const active = {
+      id: '00000000-0000-4000-8000-000000000401', versionNumber: 1, totalCents: 500,
+      contentFingerprint: 'c'.repeat(64), jobs: [{ jobId: committed.jobs[0].id, subtotalCents: 500 }],
+    }
+    const current = { id: active.id, versionNumber: 1, totalCents: 500, contentFingerprint: 'c'.repeat(64), state: 'current' as const }
+    expect(parseQuoteBuilderProjection({ ...committed, activeVersion: active, lastPreparedVersion: current })).not.toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed, activeVersion: active, lastPreparedVersion: { ...current, totalCents: 501 },
+    })).toBeNull()
+    for (const mismatch of [
+      { ...current, id: '00000000-0000-4000-8000-000000000402' },
+      { ...current, versionNumber: 2 },
+      { ...current, totalCents: 501 },
+      { ...current, contentFingerprint: 'd'.repeat(64) },
+    ]) expect(parseQuoteBuilderProjection({ ...committed, activeVersion: active, lastPreparedVersion: mismatch })).toBeNull()
+    expect(parseQuoteBuilderProjection({
+      ...committed, activeVersion: active, lastPreparedVersion: { ...current, state: 'superseded' },
+    })).toBeNull()
+    for (const draft of [
+      { ...committed.draftCommitment, jobCount: 0 },
+      { ...committed.draftCommitment, jobCount: 501 },
+      { ...committed.draftCommitment, lineCount: 0 },
+      { ...committed.draftCommitment, lineCount: 1_000_001 },
+      { ...committed.draftCommitment, totalCents: -1 },
+      { ...committed.draftCommitment, totalCents: Number.MAX_SAFE_INTEGER + 1 },
+    ]) expect(parseQuoteBuilderProjection({ ...committed, draftCommitment: draft })).toBeNull()
+    for (const key of ['draftCommitment', 'lastPreparedVersion'] as const) {
+      const { [key]: _missing, ...missing } = committed
+      expect(parseQuoteBuilderProjection(missing)).toBeNull()
+    }
+    expect(parseQuoteBuilderProjection({ ...committed, hiddenCommitmentTruth: true })).toBeNull()
+    const complete = { ...committed, activeVersion: active, lastPreparedVersion: current }
+    for (const [section, keys] of Object.entries({
+      activeVersion: ['id', 'versionNumber', 'totalCents', 'contentFingerprint', 'jobs'],
+      lastPreparedVersion: ['id', 'versionNumber', 'totalCents', 'contentFingerprint', 'state'],
+      draftCommitment: ['algorithm', 'fingerprint', 'totalCents', 'jobCount', 'lineCount'],
+    })) {
+      for (const key of keys) {
+        const candidate = structuredClone(complete) as unknown as Record<string, Record<string, unknown>>
+        delete candidate[section][key]
+        expect(parseQuoteBuilderProjection(candidate)).toBeNull()
+        expect(parseQuoteBuilderProjection({
+          ...complete,
+          [section]: { ...(complete as unknown as Record<string, Record<string, unknown>>)[section], hiddenConcurrencyTruth: true },
+        })).toBeNull()
+      }
+    }
+  })
+
   it('accepts only immutable customer-safe sourced parts', () => {
     const sourced = {
       ...valid.jobs[0].lines[0],
@@ -241,6 +346,7 @@ describe('quote builder refresh projection validation', () => {
       priceCents: 12_000,
       source: 'vendor_offer',
       mutable: false,
+      lineFingerprint: null,
     }
     const projection = { ...valid, jobs: [{ ...valid.jobs[0], lines: [sourced] }] }
     expect(parseQuoteBuilderProjection(projection)).toEqual(projection)
