@@ -66,7 +66,7 @@ describe('migration runner', () => {
 
     expect(names.length).toBeGreaterThan(50)
     expect(names[0]).toMatch(/^0000_/)
-    expect(names.at(-1)).toBe('0050_shop_os_customer_approval_links.sql')
+    expect(names.at(-1)).toBe('0051_shop_os_ticket_corrections.sql')
     expect([...names]).toEqual([...names].sort())
     expect(names.indexOf('0011a_session_curator_columns.sql'))
       .toBeGreaterThan(names.findIndex((name) => name.startsWith('0011_')))

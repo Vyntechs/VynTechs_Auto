@@ -1,0 +1,173 @@
+.workspace {
+  position: relative;
+  grid-column: 1 / -1;
+  margin-top: 18px;
+  border-block: 1px solid var(--vt-rule);
+  background: var(--vt-bone-50);
+  padding: 18px 20px;
+  color: var(--vt-fg-1);
+}
+
+.workspace[data-correction-state='recovery'] {
+  border-left: 2px solid var(--vt-amber-400);
+}
+
+.editor {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.editor legend {
+  margin-bottom: 14px;
+  color: var(--vt-fg-2);
+  font: 600 12px/1.3 var(--vt-font-sans);
+}
+
+.state,
+.error,
+.currentValue,
+.recovery p,
+.removeConfirmation p {
+  margin: 0;
+  font: 14px/1.5 var(--vt-font-sans);
+}
+
+.state,
+.currentValue {
+  color: var(--vt-fg-2);
+}
+
+.error,
+.recovery p {
+  color: var(--vt-fg-1);
+}
+
+.error,
+.currentValue {
+  margin-top: 14px;
+}
+
+.identityEditor,
+.formGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.formGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: var(--vt-fg-3);
+  font: 600 11px/1.3 var(--vt-font-sans);
+}
+
+.field input,
+.field textarea,
+.field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-block-size: 44px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-50);
+  color: var(--vt-fg-1);
+  padding: 10px 12px;
+  font: 15px/1.4 var(--vt-font-sans);
+}
+
+.field textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible,
+.field select:focus-visible,
+.actions button:focus-visible,
+.selection button:focus-visible,
+.removeAction:focus-visible {
+  outline: 2px solid var(--vt-signal-500);
+  outline-offset: 3px;
+}
+
+.selection {
+  min-block-size: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-left: 2px solid var(--vt-signal-500);
+  padding-left: 12px;
+  font: 14px/1.4 var(--vt-font-sans);
+}
+
+.selection button,
+.actions button,
+.removeAction {
+  min-block-size: 44px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-fg-1);
+  padding: 10px 14px;
+  font: 600 13px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.actions .primary {
+  border-color: var(--vt-signal-600);
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+}
+
+.editor:disabled .actions button {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.removeAction {
+  justify-self: start;
+  color: var(--vt-fg-2);
+}
+
+.removeConfirmation {
+  border-left: 2px solid var(--vt-amber-400);
+  padding: 10px 12px;
+}
+
+.removeConfirmation strong {
+  font: 600 15px/1.3 var(--vt-font-sans);
+}
+
+.removeConfirmation p {
+  margin-top: 6px;
+  color: var(--vt-fg-2);
+}
+
+@media (max-width: 640px) {
+  .workspace {
+    padding: 16px 14px;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

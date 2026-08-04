@@ -246,3 +246,23 @@ Reason: Raw Playwright trace output exposed a fixed QA password and forced immed
 Trigger: Founder questions multi-variable pass/fail for interaction quality.
 Rule: One real role task decides release; keep only controls needed to finish, correct, or recover.
 Reason: Independent metrics invite scope growth and painful friction instead of proving simple completion.
+
+### assert-all-checks-before-merge
+Trigger: Auto-merge lands while a non-required hosted check is still running.
+Rule: Assert every expected check is completed and successful before issuing any merge command.
+Reason: Repository protection may permit merge before the team’s full acceptance gate finishes.
+
+### browser-state-gates-use-semantics-and-clock-control
+Trigger: A browser journey waits for delayed state after debounce or product timers.
+Rule: Assert semantic state and drive product timers deterministically; never couple acceptance to changing copy or a razor-thin wall-clock margin.
+Reason: Copy drift cost one rerun, then a 150 ms scheduler margin failed identically on phone and desktop.
+
+### intentional-http-refusals-need-browser-contracts
+Trigger: A browser journey deliberately exercises a handled non-2xx response.
+Rule: Pin its exact route and status in the fault contract before asserting a globally empty console ledger.
+Reason: Chrome logs handled 409/503 responses as errors; an unmodeled refusal creates a false final gate without proving less.
+
+### preserve-browser-artifacts-before-review-reruns
+Trigger: A read-only reviewer reran Playwright, which cleared ignored screenshots before sandbox startup failed.
+Rule: Copy required browser artifacts to a stable receipt before any independent rerun.
+Reason: Playwright clears test-results at startup, so a failed reviewer rerun can erase valid evidence.

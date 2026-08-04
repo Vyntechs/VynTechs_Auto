@@ -66,8 +66,8 @@ vi.mock('@/lib/intake/team', () => ({
 }))
 
 vi.mock('@/components/screens/ticket-detail', () => ({
-  TicketDetailScreen: ({ ticket, canBuildQuote, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy, refreshCustomerCopyAction }: { ticket: TicketDetail; canBuildQuote: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null; refreshCustomerCopyAction?: unknown }) => (
-    <div data-canned-library={String(canManageCannedJobs)} data-customer-copy={customerCopy?.documentKind ?? 'none'} data-customer-copy-refresh={String(typeof refreshCustomerCopyAction === 'function')}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
+  TicketDetailScreen: ({ ticket, canBuildQuote, canCorrectTicket, canCreateVendorAccount, canManageCannedJobs, currentProfileId, role, team, diagnosticsEntitled, customerCopy, refreshCustomerCopyAction }: { ticket: TicketDetail; canBuildQuote: boolean; canCorrectTicket?: boolean; canCreateVendorAccount: boolean; canManageCannedJobs: boolean; currentProfileId: string; role: string; team: unknown[]; diagnosticsEntitled: boolean; customerCopy?: { documentKind: string } | null; refreshCustomerCopyAction?: unknown }) => (
+    <div data-canned-library={String(canManageCannedJobs)} data-ticket-correction={String(canCorrectTicket === true)} data-customer-copy={customerCopy?.documentKind ?? 'none'} data-customer-copy-refresh={String(typeof refreshCustomerCopyAction === 'function')}>Ticket screen {ticket.ticketNumber}; quote {String(canBuildQuote)}; vendor setup {String(canCreateVendorAccount)}; actor {currentProfileId}; role {role}; team {team.length}; diagnostics {String(diagnosticsEntitled)}</div>
   ),
 }))
 
@@ -147,6 +147,7 @@ const ringOut = {
 describe('TicketPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'true')
     requireUserMock.mockResolvedValue(authContext)
     checkAccessMock.mockResolvedValue({ kind: 'allow', entitlements: { diagnostics: true } })
     getTicketMock.mockResolvedValue({ ok: true, ticket })
@@ -189,11 +190,44 @@ describe('TicketPage', () => {
     render(await TicketPage(pageProps()))
 
     expect(screen.getByText(`Ticket screen 101; quote true; vendor setup false; actor ${profile.id}; role advisor; team 1; diagnostics true`)).toBeInTheDocument()
+    expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-ticket-correction', 'true')
     expect(getShopTeamMock).toHaveBeenCalledWith({
       db: {},
       shopId: profile.shopId,
       currentUserId: profile.id,
     })
+  })
+
+  it.each([
+    ['advisor', true],
+    ['owner', true],
+    ['tech', false],
+    ['parts', false],
+  ])('exposes correction only when the strict flag and %s capability both allow it', async (role, allowed) => {
+    requireUserMock.mockResolvedValue({
+      ...authContext,
+      profile: { ...profile, role: role as typeof profile.role },
+    })
+
+    render(await TicketPage(pageProps()))
+
+    expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute(
+      'data-ticket-correction',
+      String(allowed),
+    )
+    expect(getTicketMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps correction and its client baseline loading absent when the strict flag is off', async () => {
+    vi.stubEnv('SHOP_OS_TICKET_CORRECTION_ENABLED', 'false')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(await TicketPage(pageProps()))
+
+    expect(screen.getByText(/Ticket screen 101/)).toHaveAttribute('data-ticket-correction', 'false')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(getTicketMock).toHaveBeenCalledTimes(1)
   })
 
   it('loads and passes one server-shaped Customer Copy only for advisor/owner authority', async () => {

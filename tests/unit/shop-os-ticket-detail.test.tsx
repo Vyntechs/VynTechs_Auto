@@ -106,6 +106,86 @@ vi.mock('@/components/screens/inline-work-workspace', () => ({
   ),
 }))
 
+vi.mock('@/components/screens/ticket-correction-workspace', () => ({
+  TicketCorrectionWorkspace: ({ ticket, target, onApplied, onClose }: {
+    ticket: TicketDetail
+    target: { kind: 'identity' | 'concern' } | { kind: 'job'; jobId: string }
+    onApplied: (result: {
+      target: typeof target
+      outcome: 'changed' | 'replayed' | 'unchanged'
+      ticket: TicketDetail
+      quote: { jobs: Array<{ id: string; workStatus: 'open'; approval: { state: 'quote_ready' } }>; activeVersion: null }
+      invalidatedVersionNumber: number | null
+      announcement: string
+    }) => void
+    onClose: () => void
+  }) => {
+    const correctedTicket = (remove = false): TicketDetail => ({
+      ...ticket,
+      customer: target.kind === 'identity' ? {
+        id: 'customer-corrected', name: 'Jamie Reed', phone: '214-555-0101', email: null,
+      } : ticket.customer,
+      vehicle: target.kind === 'identity' ? {
+        id: 'vehicle-corrected', year: 2021, make: 'Ram', model: '2500', engine: '6.7L',
+        vin: null, mileage: 88300, plate: null,
+      } : ticket.vehicle,
+      concern: target.kind === 'concern' ? 'Steering wheel clunks over bumps.' : ticket.concern,
+      jobs: ticket.jobs.map((job) => target.kind === 'job' && job.id === target.jobId
+        ? {
+            ...job,
+            title: remove ? job.title : 'Inspect front suspension',
+            workStatus: remove ? 'canceled' : job.workStatus,
+          }
+        : job),
+      activities: remove && target.kind === 'job' ? [{
+        id: 'activity-corrected', jobId: target.jobId, kind: 'ticket_corrected',
+        actorName: 'Avery Advisor', summary: `${ticket.jobs.find((job) => job.id === target.jobId)?.title}: Removed from active work. It remains in History.`,
+        correctionScope: 'job_removed', createdAt: new Date('2026-08-03T15:00:00Z'),
+      }] : ticket.activities,
+    })
+    const publish = (
+      outcome: 'changed' | 'replayed' | 'unchanged',
+      remove = false,
+    ) => {
+      const next = correctedTicket(remove)
+      const scope = remove ? 'job_removed' : target.kind
+      const announcement = outcome === 'replayed'
+        ? 'Already saved. The repair order is current.'
+        : outcome === 'unchanged'
+          ? 'No change needed'
+          : remove
+            ? 'Removed from active work. It remains in History.'
+            : target.kind === 'identity'
+              ? 'Customer or vehicle corrected.'
+              : target.kind === 'concern'
+                ? 'Concern corrected.'
+                : 'Inspect front suspension corrected.'
+      onApplied({
+        target,
+        outcome,
+        ticket: outcome === 'unchanged' ? ticket : next,
+        quote: {
+          jobs: next.jobs.filter((job) => job.workStatus !== 'canceled').map((job) => ({
+            id: job.id, workStatus: 'open' as const, approval: { state: 'quote_ready' as const },
+          })),
+          activeVersion: null,
+        },
+        invalidatedVersionNumber: outcome === 'unchanged' ? null : 1,
+        announcement,
+      })
+    }
+    return (
+      <section aria-label={`Correction editor for ${target.kind}`} data-dirty="true">
+        <button type="button" onClick={() => publish('changed')}>Apply corrected truth</button>
+        <button type="button" onClick={() => publish('changed', true)}>Apply removal truth</button>
+        <button type="button" onClick={() => publish('replayed')}>Apply replay truth</button>
+        <button type="button" onClick={() => publish('unchanged')}>Apply no change</button>
+        <button type="button" onClick={onClose}>Cancel correction</button>
+      </section>
+    )
+  },
+}))
+
 vi.mock('@/components/screens/ticket-interruption-action', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/components/screens/ticket-interruption-action')>(),
   TicketInterruptionAction: ({ action = 'resolve_hold', onApplied }: {
@@ -364,6 +444,232 @@ describe('TicketDetailScreen', () => {
     await user.click(screen.getByRole('button', { name: 'Close quote' }))
     expect(screen.queryByRole('region', { name: 'Quote for this repair order' })).toBeNull()
     expect(opener).toHaveFocus()
+  })
+
+  it('mounts one correction entry at identity, concern, and only eligible job facts', () => {
+    render(<TicketDetailScreen
+      ticket={ticket({ jobs: [
+        job({ id: 'job-1', title: 'Diagnose brake vibration' }),
+        job({ id: 'job-2', title: 'Replace front pads', kind: 'repair' }),
+        job({ id: 'job-3', title: 'Started alignment', kind: 'maintenance', workStatus: 'in_progress' }),
+        job({ id: 'job-4', title: 'Blocked tire repair', kind: 'repair', workStatus: 'blocked' }),
+        job({ id: 'job-5', title: 'Session-linked diagnosis', sessionId: 'session-1' }),
+        job({ id: 'job-6', title: 'Initializing diagnosis', diagnosticStartState: 'initializing' }),
+        job({ id: 'job-7', title: 'Ambiguous diagnosis', diagnosticStartState: 'ambiguous' }),
+      ] })}
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    expect(screen.getByRole('button', { name: 'Correct customer or vehicle' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Correct concern' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Correct job 01: Diagnose brake vibration' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Correct job 02: Replace front pads' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Correct job 03: Started alignment' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Correct job 04: Blocked tire repair' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Correct job 05: Session-linked diagnosis' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Correct job 06: Initializing diagnosis' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Correct job 07: Ambiguous diagnosis' })).toBeNull()
+
+    expect(document.querySelector('[data-correction-target="identity"]'))
+      .toHaveAccessibleName('Customer and vehicle correction target')
+    expect(document.querySelector('[data-correction-target="concern"]'))
+      .toHaveAccessibleName('Concern correction target')
+    expect(document.querySelector('[data-correction-target="job:job-1"]'))
+      .toHaveAccessibleName('Job correction target 01')
+    expect(document.querySelector('[data-correction-target="job:job-2"]'))
+      .toHaveAccessibleName('Job correction target 02')
+  })
+
+  it('uses an accurate identity action when the repair order is still provisional', () => {
+    render(<TicketDetailScreen
+      ticket={ticket({ customer: null, vehicle: null })}
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    expect(screen.getByRole('button', { name: 'Add customer or vehicle' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Correct customer or vehicle' })).toBeNull()
+  })
+
+  it('mounts the editor directly under its fact and never silently discards another open tool', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      ticket={ticket()}
+      canBuildQuote
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    const concernOpener = screen.getByRole('button', { name: 'Correct concern' })
+    await user.click(screen.getByRole('button', { name: 'Build quote' }))
+    expect(concernOpener).toBeDisabled()
+    expect(screen.getByRole('region', { name: 'Quote for this repair order' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close quote' }))
+
+    await user.click(concernOpener)
+    const editor = screen.getByRole('region', { name: 'Correction editor for concern' })
+    expect(screen.getByRole('button', { name: 'Build quote' })).toBeDisabled()
+    expect(editor.closest('[data-correction-target="concern"]')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Cancel correction' }))
+    expect(screen.queryByRole('region', { name: 'Correction editor for concern' })).toBeNull()
+    expect(concernOpener).toHaveFocus()
+  })
+
+  it('arbitrates lifecycle mutation against mounted tools while preserving a typed reason', async () => {
+    const user = userEvent.setup()
+    let resolveLifecycle!: (response: Response) => void
+    const lifecycleRequest = new Promise<Response>((resolve) => { resolveLifecycle = resolve })
+    vi.stubGlobal('fetch', vi.fn((url: string | URL | Request) => (
+      String(url).endsWith('/lifecycle')
+        ? lifecycleRequest
+        : Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
+    )))
+    render(<TicketDetailScreen
+      ticket={ticket()}
+      canBuildQuote
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    await user.click(screen.getAllByText('Cancel repair order')[0])
+    const reason = screen.getByLabelText('Cancellation reason')
+    await user.type(reason, 'Customer needs another week.')
+
+    await user.click(screen.getByRole('button', { name: 'Correct concern' }))
+    expect(screen.getByRole('button', { name: 'Cancel repair order' })).toBeDisabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+    await user.click(screen.getByRole('button', { name: 'Cancel correction' }))
+
+    await user.click(screen.getByRole('button', { name: 'Cancel repair order' }))
+    expect(screen.getByRole('button', { name: 'Correct concern' })).toBeDisabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+
+    resolveLifecycle(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The repair order was not changed.')
+    expect(screen.getByRole('button', { name: 'Correct concern' })).toBeEnabled()
+    expect(reason).toHaveValue('Customer needs another week.')
+  })
+
+  it('atomically seats validated ticket and quote truth without a page refresh', async () => {
+    const user = userEvent.setup()
+    render(<TicketDetailScreen
+      ticket={ticket()}
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct concern' }))
+    await user.click(screen.getByRole('button', { name: 'Apply corrected truth' }))
+
+    const corrected = screen.getByText('Steering wheel clunks over bumps.').closest(
+      '[data-correction-target="concern"]',
+    ) as HTMLElement
+    expect(corrected).toHaveAttribute('data-correction-state', 'confirmed')
+    expect(corrected).toHaveFocus()
+    expect(within(corrected).getByText('Concern corrected.')).toHaveAttribute('role', 'status')
+    expect(within(corrected).getByTestId('correction-signal-rail')).toBeInTheDocument()
+    expect(within(corrected).getByText('Current draft · V1 no longer current')).toBeInTheDocument()
+    expect(screen.getByText('Priced')).toBeInTheDocument()
+    expect(routerRefreshMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps replay and removal truth local while a new no-op receives no detent rail', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<TicketDetailScreen
+      ticket={ticket({ jobs: [
+        job(),
+        job({ id: 'job-2', title: 'Replace front pads', kind: 'repair' }),
+      ] })}
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+
+    await user.click(screen.getByRole('button', { name: 'Correct job 01: Diagnose brake vibration' }))
+    await user.click(screen.getByRole('button', { name: 'Apply replay truth' }))
+    const replayed = screen.getByRole('heading', { name: 'Inspect front suspension' }).closest('li')!
+    expect(replayed).toHaveAttribute('data-correction-state', 'confirmed')
+    expect(within(replayed).getByText('Already saved. The repair order is current.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Correct job 02: Replace front pads' }))
+    await user.click(screen.getByRole('button', { name: 'Apply removal truth' }))
+    const removed = screen.getByRole('heading', { name: 'Replace front pads' }).closest('li')!
+    expect(within(removed).getByText('Removed')).toBeInTheDocument()
+    expect(within(removed).getByText('Removed from active work. It remains in History.')).toBeInTheDocument()
+
+    rerender(<TicketDetailScreen
+      ticket={ticket()}
+      canCorrectTicket
+      currentProfileId="advisor-1"
+      role="advisor"
+    />)
+    await user.click(screen.getByRole('button', { name: 'Correct concern' }))
+    await user.click(screen.getByRole('button', { name: 'Apply no change' }))
+    const unchanged = screen.getByText('Steering wheel shakes under braking from highway speed.').closest(
+      '[data-correction-target="concern"]',
+    ) as HTMLElement
+    expect(within(unchanged).getByText('No change needed')).toBeInTheDocument()
+    expect(within(unchanged).queryByTestId('correction-signal-rail')).toBeNull()
+    expect(unchanged).not.toHaveAttribute('data-correction-state', 'confirmed')
+  })
+
+  it('labels only a validated job_removed correction as Removed after reload', () => {
+    const ordinary = job({ id: 'ordinary', title: 'Customer declined pads', kind: 'repair', workStatus: 'canceled', approvalState: 'declined' })
+    const corrected = job({ id: 'corrected', title: 'Duplicate inspection', kind: 'repair', workStatus: 'canceled' })
+    render(<TicketDetailScreen ticket={ticket({
+      jobs: [ordinary, corrected],
+      activities: [{
+        id: 'activity-removed', jobId: 'corrected', kind: 'ticket_corrected',
+        actorName: 'Avery Advisor', summary: 'Duplicate inspection: Removed from active work. It remains in History.',
+        correctionScope: 'job_removed', createdAt: timestamp,
+      }],
+    })} />)
+
+    expect(screen.getByRole('heading', { name: 'Customer declined pads' }).closest('li'))
+      .toHaveTextContent('Not doing it')
+    expect(screen.getByRole('heading', { name: 'Customer declined pads' }).closest('li'))
+      .not.toHaveTextContent('Removed')
+    expect(screen.getByRole('heading', { name: 'Duplicate inspection' }).closest('li'))
+      .toHaveTextContent('Removed')
+  })
+
+  it('keeps the Removed label when its correction receipt has aged out of recent activity', () => {
+    const corrected = job({
+      id: 'corrected',
+      title: 'Duplicate inspection',
+      kind: 'repair',
+      workStatus: 'canceled',
+    })
+    render(<TicketDetailScreen ticket={ticket({
+      jobs: [corrected],
+      activities: [],
+      correctedRemovedJobIds: ['corrected'],
+    })} />)
+
+    expect(screen.getByRole('heading', { name: 'Duplicate inspection' }).closest('li'))
+      .toHaveTextContent('Removed')
+  })
+
+  it('keeps the correction controls and detent accessible without decorative motion', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'components/screens/ticket-detail.module.css'),
+      'utf8',
+    )
+
+    expect(css).toMatch(/\.correctionAction[\s\S]*min-block-size:\s*44px/)
+    expect(css).toMatch(/\.correctionAction:focus-visible[\s\S]*outline:/)
+    expect(css).toMatch(/\[data-correction-state=['"]confirmed['"]\][\s\S]*200ms var\(--vt-ease-out\)/)
+    expect(css).toMatch(/@keyframes correction-detent[\s\S]*translateY\(-2px\)[\s\S]*opacity:\s*\.92[\s\S]*translateY\(0\)[\s\S]*opacity:\s*1/)
+    expect(css).toMatch(/\.correctionRail[\s\S]*(inline-size|width):\s*2px/)
+    expect(css).toMatch(/scroll-margin/)
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*animation:\s*none[\s\S]*transform:\s*none[\s\S]*transition:\s*none/)
+    expect(css).not.toMatch(/bounce|sparkle|gradient|confetti/i)
   })
 
   it('keeps the quote entry at least 44px with a visible focus treatment', () => {

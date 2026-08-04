@@ -20,6 +20,7 @@ import type {
   SimpleWorkEscalationView,
   SimpleWorkProjectionView,
 } from '@/lib/shop-os/simple-work-ui'
+import type { TicketCorrectionTarget } from '@/lib/shop-os/ticket-correction-draft'
 import { RingOutSection } from './ring-out-section'
 import {
   InlineQuoteWorkspace,
@@ -33,6 +34,10 @@ import { TicketLifecycleControl } from './ticket-lifecycle-control'
 import { TicketPartRequests } from './ticket-part-requests'
 import { InlineWorkWorkspace } from './inline-work-workspace'
 import { CustomerCopy } from './customer-copy'
+import {
+  TicketCorrectionWorkspace,
+  type TicketCorrectionAppliedProjection,
+} from './ticket-correction-workspace'
 import styles from './ticket-detail.module.css'
 
 const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -77,9 +82,13 @@ const APPROVAL_STATE_LABELS: Record<string, string> = {
   deferred: 'Decision deferred',
 }
 
+const IDENTITY_CORRECTION_TARGET = { kind: 'identity' } as const
+const CONCERN_CORRECTION_TARGET = { kind: 'concern' } as const
+
 export function TicketDetailScreen({
-  ticket,
+  ticket: initialTicket,
   canBuildQuote = false,
+  canCorrectTicket = false,
   canCreateVendorAccount = false,
   canManageCannedJobs = false,
   currentProfileId = null,
@@ -95,6 +104,7 @@ export function TicketDetailScreen({
 }: {
   ticket: TicketDetail
   canBuildQuote?: boolean
+  canCorrectTicket?: boolean
   canCreateVendorAccount?: boolean
   canManageCannedJobs?: boolean
   currentProfileId?: string | null
@@ -109,6 +119,12 @@ export function TicketDetailScreen({
   refreshCustomerCopyAction?: (ticketId: string) => Promise<CustomerCopyResult>
 }): React.JSX.Element {
   const router = useRouter()
+  const [correctionTruth, setCorrectionTruth] = useState<{
+    ticket: TicketDetail
+    quote: TicketCorrectionAppliedProjection['quote']
+  } | null>(null)
+  const [confirmedCorrection, setConfirmedCorrection] = useState<ConfirmedCorrection | null>(null)
+  const ticket = correctionTruth?.ticket ?? initialTicket
   const [assignmentOverrides, setAssignmentOverrides] = useState<ReadonlyMap<string, AssignmentOverride>>(
     () => new Map(),
   )
@@ -124,11 +140,19 @@ export function TicketDetailScreen({
   const [customerCopyOpen, setCustomerCopyOpen] = useState(false)
   const [customerCopyStale, setCustomerCopyStale] = useState(false)
   const [activeTool, setActiveTool] = useState<
-    { kind: 'quote' } | { kind: 'work'; jobId: string } | null
+    | { kind: 'quote' }
+    | { kind: 'work'; jobId: string }
+    | { kind: 'correction'; target: TicketCorrectionTarget }
+    | null
   >(null)
+  const [lifecycleMutationActive, setLifecycleMutationActive] = useState(false)
+  const lifecycleMutationActiveRef = useRef(false)
+  const identityTargetRef = useRef<HTMLDivElement>(null)
+  const concernTargetRef = useRef<HTMLElement>(null)
   const jobRefs = useRef(new Map<string, HTMLLIElement>())
   const quoteOpenerRef = useRef<HTMLButtonElement>(null)
   const workOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
+  const correctionOpenerRefs = useRef(new Map<string, HTMLButtonElement>())
   const ringOutRef = useRef<HTMLElement>(null)
   const approvalStateRef = useRef(new Map(
     ticket.jobs.map((job) => [job.id, job.approvalState]),
@@ -141,6 +165,13 @@ export function TicketDetailScreen({
     ? emailHref(ticket.customer.email)
     : null
   const activities = ticket.activities ?? []
+  const correctedRemovedJobIds = new Set(ticket.correctedRemovedJobIds ?? activities.flatMap((activity) => (
+    activity.kind === 'ticket_corrected'
+      && activity.correctionScope === 'job_removed'
+      && activity.jobId
+      ? [activity.jobId]
+      : []
+  )))
   const baseJobs: DisplayJob[] = [
     ...ticket.jobs,
     ...escalatedJobs.map((job) => ({ ...job, assignedTech: null })),
@@ -150,8 +181,11 @@ export function TicketDetailScreen({
     workStatus: workOverrides.get(job.id)?.workStatus
       ?? quoteOverrides.get(job.id)?.workStatus
       ?? assignmentOverrides.get(job.id)?.workStatus
+      ?? correctionTruth?.quote.jobs.find((quoteJob) => quoteJob.id === job.id)?.workStatus
       ?? job.workStatus,
-    approvalState: quoteOverrides.get(job.id)?.approvalState ?? job.approvalState,
+    approvalState: quoteOverrides.get(job.id)?.approvalState
+      ?? correctionTruth?.quote.jobs.find((quoteJob) => quoteJob.id === job.id)?.approval.state
+      ?? job.approvalState,
   }))
   const commands = projectLivingTicketCommands({
     role,
@@ -173,6 +207,11 @@ export function TicketDetailScreen({
     command.kind === 'ring_out' || command.kind === 'close'
   )) ?? null
   const legacyQuoteFallback = !currentProfileId || !role
+  const correctionAvailable = canCorrectTicket
+    && canAssignWork(role)
+    && currentProfileId !== null
+    && ticketStatus === 'open'
+  const toolBlocked = activeTool !== null || lifecycleMutationActive
   const invalidateCustomerCopy = useCallback(() => {
     if (!customerCopy) return
     setCustomerCopyOpen(false)
@@ -203,12 +242,52 @@ export function TicketDetailScreen({
     })
     if (financialStateChanged) invalidateCustomerCopy()
   }, [invalidateCustomerCopy])
+  const openCorrection = useCallback((target: TicketCorrectionTarget) => {
+    if (activeTool !== null || lifecycleMutationActiveRef.current) return
+    setConfirmedCorrection(null)
+    setActiveTool({ kind: 'correction', target })
+  }, [activeTool])
+  const trackLifecycleMutation = useCallback((active: boolean) => {
+    lifecycleMutationActiveRef.current = active
+    setLifecycleMutationActive(active)
+  }, [])
+  const applyCorrection = useCallback((result: TicketCorrectionAppliedProjection) => {
+    setCorrectionTruth({ ticket: result.ticket, quote: result.quote })
+    setAssignmentOverrides(new Map())
+    setQuoteOverrides(new Map())
+    setWorkOverrides(new Map())
+    setEscalatedJobs([])
+    setTicketStatus(result.ticket.status)
+    if (customerCopy) {
+      setCustomerCopyOpen(false)
+      setCustomerCopyStale(true)
+    }
+    setConfirmedCorrection({
+      target: result.target,
+      outcome: result.outcome,
+      invalidatedVersionNumber: result.invalidatedVersionNumber,
+      announcement: result.announcement,
+    })
+    setActiveTool(null)
+    setTimeout(() => {
+      correctionTargetElement(
+        result.target,
+        identityTargetRef.current,
+        concernTargetRef.current,
+        jobRefs.current,
+      )?.focus()
+    }, 0)
+  }, [customerCopy])
   useEffect(() => setTicketStatus(ticket.status), [ticket.status])
   useEffect(() => setRingOutState(ringOut), [ringOut])
   useEffect(() => setCustomerCopyStale(false), [customerCopy])
   useEffect(() => {
     approvalStateRef.current = new Map(ticket.jobs.map((job) => [job.id, job.approvalState]))
   }, [ticket.jobs])
+  useEffect(() => {
+    setCorrectionTruth(null)
+    setConfirmedCorrection(null)
+  }, [initialTicket])
 
   return (
     <main className={`app ${styles.screen}`} data-customer-copy-shell>
@@ -244,8 +323,10 @@ export function TicketDetailScreen({
                 className={styles.quoteAction}
                 aria-expanded={activeTool?.kind === 'quote'}
                 aria-controls={inlineQuoteWorkspaceId(ticket.id)}
-                disabled={activeTool !== null}
-                onClick={() => setActiveTool({ kind: 'quote' })}
+                disabled={toolBlocked}
+                onClick={() => {
+                  if (!lifecycleMutationActiveRef.current) setActiveTool({ kind: 'quote' })
+                }}
               >
                 {quoteCommand.label}
               </button>
@@ -358,68 +439,116 @@ export function TicketDetailScreen({
           />
         )}
 
-        {!ticket.customer || !ticket.vehicle ? (
-          <section
-            className={styles.provisional}
-            aria-labelledby="provisional-title"
-          >
-            <p className={styles.eyebrow}>Missing</p>
-            <h1 id="provisional-title">No customer or vehicle yet</h1>
-            <p>
-              You can price the work now. Sending it, getting the customer&apos;s answer, and closing it stay locked until the customer and vehicle are on here.
-            </p>
-          </section>
-        ) : (
-          <div className={styles.identityGrid}>
-            <section aria-labelledby="customer-heading" className={styles.factSection}>
-              <h2 id="customer-heading">Customer</h2>
-              <p className={styles.factLead}>{ticket.customer.name}</p>
-              <div className={styles.linkStack}>
-                {phoneTarget ? (
-                  <a href={phoneTarget}>{ticket.customer.phone}</a>
-                ) : (
-                  <span>{ticket.customer.phone}</span>
-                )}
-                {ticket.customer.email && (emailTarget ? (
-                  <a href={emailTarget}>{ticket.customer.email}</a>
-                ) : (
-                  <span>{ticket.customer.email}</span>
-                ))}
-              </div>
+        <div
+          ref={identityTargetRef}
+          className={styles.correctionTarget}
+          aria-label="Customer and vehicle correction target"
+          data-correction-target="identity"
+          data-correction-state={correctionDataState(confirmedCorrection, IDENTITY_CORRECTION_TARGET)}
+          tabIndex={-1}
+        >
+          {!ticket.customer || !ticket.vehicle ? (
+            <section
+              className={styles.provisional}
+              aria-labelledby="provisional-title"
+            >
+              <p className={styles.eyebrow}>Missing</p>
+              <h1 id="provisional-title">No customer or vehicle yet</h1>
+              <p>
+                You can price the work now. Sending it, getting the customer&apos;s answer, and closing it stay locked until the customer and vehicle are on here.
+              </p>
             </section>
+          ) : (
+            <div className={styles.identityGrid}>
+              <section aria-labelledby="customer-heading" className={styles.factSection}>
+                <h2 id="customer-heading">Customer</h2>
+                <p className={styles.factLead}>{ticket.customer.name}</p>
+                <div className={styles.linkStack}>
+                  {phoneTarget ? (
+                    <a href={phoneTarget}>{ticket.customer.phone}</a>
+                  ) : (
+                    <span>{ticket.customer.phone}</span>
+                  )}
+                  {ticket.customer.email && (emailTarget ? (
+                    <a href={emailTarget}>{ticket.customer.email}</a>
+                  ) : (
+                    <span>{ticket.customer.email}</span>
+                  ))}
+                </div>
+              </section>
 
-            <section aria-labelledby="vehicle-heading" className={styles.factSection}>
-              <h2 id="vehicle-heading">Vehicle</h2>
-              <p className={styles.factLead}>{vehicleName(ticket.vehicle)}</p>
-              {ticket.vehicle.engine && <p className={styles.secondary}>{ticket.vehicle.engine}</p>}
-              <dl className={styles.dataList}>
-                {ticket.vehicle.vin && (
-                  <>
-                    <dt>VIN</dt>
-                    <dd>{ticket.vehicle.vin}</dd>
-                  </>
-                )}
-                {ticket.vehicle.mileage !== null && (
-                  <>
-                    <dt>Mileage</dt>
-                    <dd>{ticket.vehicle.mileage.toLocaleString('en-US')} mi</dd>
-                  </>
-                )}
-                {ticket.vehicle.plate && (
-                  <>
-                    <dt>Plate</dt>
-                    <dd>{ticket.vehicle.plate}</dd>
-                  </>
-                )}
-              </dl>
-              <Link href={`/vehicles/${ticket.vehicle.id}`} className={styles.textLink}>
-                View vehicle history
-              </Link>
-            </section>
-          </div>
-        )}
+              <section aria-labelledby="vehicle-heading" className={styles.factSection}>
+                <h2 id="vehicle-heading">Vehicle</h2>
+                <p className={styles.factLead}>{vehicleName(ticket.vehicle)}</p>
+                {ticket.vehicle.engine && <p className={styles.secondary}>{ticket.vehicle.engine}</p>}
+                <dl className={styles.dataList}>
+                  {ticket.vehicle.vin && (
+                    <>
+                      <dt>VIN</dt>
+                      <dd>{ticket.vehicle.vin}</dd>
+                    </>
+                  )}
+                  {ticket.vehicle.mileage !== null && (
+                    <>
+                      <dt>Mileage</dt>
+                      <dd>{ticket.vehicle.mileage.toLocaleString('en-US')} mi</dd>
+                    </>
+                  )}
+                  {ticket.vehicle.plate && (
+                    <>
+                      <dt>Plate</dt>
+                      <dd>{ticket.vehicle.plate}</dd>
+                    </>
+                  )}
+                </dl>
+                <Link href={`/vehicles/${ticket.vehicle.id}`} className={styles.textLink}>
+                  View vehicle history
+                </Link>
+              </section>
+            </div>
+          )}
+          {correctionAvailable && (
+            <button
+              ref={(element) => setCorrectionOpenerRef(correctionOpenerRefs.current, IDENTITY_CORRECTION_TARGET, element)}
+              type="button"
+              className={styles.correctionAction}
+              disabled={toolBlocked}
+              aria-expanded={activeTool?.kind === 'correction'
+                && sameCorrectionTarget(activeTool.target, IDENTITY_CORRECTION_TARGET)}
+              onClick={() => openCorrection(IDENTITY_CORRECTION_TARGET)}
+            >
+              {ticket.customer && ticket.vehicle ? 'Correct customer or vehicle' : 'Add customer or vehicle'}
+            </button>
+          )}
+          {activeTool?.kind === 'correction'
+            && sameCorrectionTarget(activeTool.target, IDENTITY_CORRECTION_TARGET)
+            && currentProfileId && (
+              <TicketCorrectionWorkspace
+                actorId={currentProfileId}
+                ticket={ticket}
+                target={IDENTITY_CORRECTION_TARGET}
+                onApplied={applyCorrection}
+                onClose={() => {
+                  setActiveTool(null)
+                  setTimeout(() => correctionOpenerRefs.current.get(
+                    correctionTargetKey(IDENTITY_CORRECTION_TARGET),
+                  )?.focus(), 0)
+                }}
+              />
+            )}
+          <CorrectionConfirmationView
+            confirmation={confirmationFor(confirmedCorrection, IDENTITY_CORRECTION_TARGET)}
+          />
+        </div>
 
-        <section className={styles.concern} aria-labelledby="concern-heading">
+        <section
+          ref={concernTargetRef}
+          className={styles.concern}
+          aria-label="Concern correction target"
+          data-correction-target="concern"
+          data-correction-state={correctionDataState(confirmedCorrection, CONCERN_CORRECTION_TARGET)}
+          tabIndex={-1}
+        >
           <p className={styles.eyebrow}>What brought it in</p>
           <h2 id="concern-heading">{ticket.concern}</h2>
           {(ticket.whenStarted || ticket.howOften) && (
@@ -438,6 +567,38 @@ export function TicketDetailScreen({
               )}
             </dl>
           )}
+          {correctionAvailable && (
+            <button
+              ref={(element) => setCorrectionOpenerRef(correctionOpenerRefs.current, CONCERN_CORRECTION_TARGET, element)}
+              type="button"
+              className={styles.correctionAction}
+              disabled={toolBlocked}
+              aria-expanded={activeTool?.kind === 'correction'
+                && sameCorrectionTarget(activeTool.target, CONCERN_CORRECTION_TARGET)}
+              onClick={() => openCorrection(CONCERN_CORRECTION_TARGET)}
+            >
+              Correct concern
+            </button>
+          )}
+          {activeTool?.kind === 'correction'
+            && sameCorrectionTarget(activeTool.target, CONCERN_CORRECTION_TARGET)
+            && currentProfileId && (
+              <TicketCorrectionWorkspace
+                actorId={currentProfileId}
+                ticket={ticket}
+                target={CONCERN_CORRECTION_TARGET}
+                onApplied={applyCorrection}
+                onClose={() => {
+                  setActiveTool(null)
+                  setTimeout(() => correctionOpenerRefs.current.get(
+                    correctionTargetKey(CONCERN_CORRECTION_TARGET),
+                  )?.focus(), 0)
+                }}
+              />
+            )}
+          <CorrectionConfirmationView
+            confirmation={confirmationFor(confirmedCorrection, CONCERN_CORRECTION_TARGET)}
+          />
         </section>
 
         <section className={styles.jobs} aria-labelledby="jobs-heading">
@@ -450,11 +611,22 @@ export function TicketDetailScreen({
           </div>
 
           <ol className={styles.ledger}>
-            {displayedJobs.map((job, index) => (
-              <li key={job.id} className={styles.job} tabIndex={-1} ref={(element) => {
-                if (element) jobRefs.current.set(job.id, element)
-                else jobRefs.current.delete(job.id)
-              }}>
+            {displayedJobs.map((job, index) => {
+              const correctionTarget = { kind: 'job', jobId: job.id } as const
+              const correctionEligible = correctionAvailable && jobCanBeCorrected(job)
+              return (
+                <li
+                  key={job.id}
+                  className={styles.job}
+                  aria-label={`Job correction target ${String(index + 1).padStart(2, '0')}`}
+                  data-correction-target={`job:${job.id}`}
+                  data-correction-state={correctionDataState(confirmedCorrection, correctionTarget)}
+                  tabIndex={-1}
+                  ref={(element) => {
+                    if (element) jobRefs.current.set(job.id, element)
+                    else jobRefs.current.delete(job.id)
+                  }}
+                >
                 <div className={styles.railMark} aria-hidden="true">
                   <span>{String(index + 1).padStart(2, '0')}</span>
                 </div>
@@ -468,7 +640,9 @@ export function TicketDetailScreen({
                     </div>
                     <div className={styles.stamps}>
                       <span className={styles.stamp} data-state={job.workStatus}>
-                        {formatLabel(WORK_STATUS_LABELS, job.workStatus)}
+                        {correctedRemovedJobIds.has(job.id)
+                          ? 'Removed'
+                          : formatLabel(WORK_STATUS_LABELS, job.workStatus)}
                       </span>
                       <span className={styles.stamp} data-state={job.approvalState}>
                         {formatLabel(APPROVAL_STATE_LABELS, job.approvalState)}
@@ -514,8 +688,12 @@ export function TicketDetailScreen({
                         type="button"
                         className={styles.inlineAction}
                         aria-expanded={activeTool?.kind === 'work' && activeTool.jobId === job.id}
-                      disabled={activeTool !== null}
-                      onClick={() => setActiveTool({ kind: 'work', jobId: job.id })}
+                        disabled={toolBlocked}
+                        onClick={() => {
+                          if (!lifecycleMutationActiveRef.current) {
+                            setActiveTool({ kind: 'work', jobId: job.id })
+                          }
+                        }}
                       >
                         {workCommandFor(allCommands, job.id)?.label}
                       </button>
@@ -527,6 +705,43 @@ export function TicketDetailScreen({
                       assignmentOverrides.get(job.id),
                     )}
                   </div>
+                  {correctionEligible && (
+                    <button
+                      ref={(element) => setCorrectionOpenerRef(
+                        correctionOpenerRefs.current,
+                        correctionTarget,
+                        element,
+                      )}
+                      type="button"
+                      className={styles.correctionAction}
+                      aria-label={`Correct job ${String(index + 1).padStart(2, '0')}: ${job.title}`}
+                      aria-expanded={activeTool?.kind === 'correction'
+                        && sameCorrectionTarget(activeTool.target, correctionTarget)}
+                      disabled={toolBlocked}
+                      onClick={() => openCorrection(correctionTarget)}
+                    >
+                      Correct job
+                    </button>
+                  )}
+                  {activeTool?.kind === 'correction'
+                    && sameCorrectionTarget(activeTool.target, correctionTarget)
+                    && currentProfileId && (
+                      <TicketCorrectionWorkspace
+                        actorId={currentProfileId}
+                        ticket={ticket}
+                        target={correctionTarget}
+                        onApplied={applyCorrection}
+                        onClose={() => {
+                          setActiveTool(null)
+                          setTimeout(() => correctionOpenerRefs.current.get(
+                            correctionTargetKey(correctionTarget),
+                          )?.focus(), 0)
+                        }}
+                      />
+                    )}
+                  <CorrectionConfirmationView
+                    confirmation={confirmationFor(confirmedCorrection, correctionTarget)}
+                  />
                   {activeTool === null && currentProfileId && assignmentCommandFor(allCommands, job.id) && (
                     <TicketAssignmentControl
                       ticketId={ticket.id}
@@ -588,8 +803,9 @@ export function TicketDetailScreen({
                     />
                   )}
                 </div>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ol>
         </section>
 
@@ -597,6 +813,8 @@ export function TicketDetailScreen({
           <TicketLifecycleControl
             ticketId={ticket.id}
             status={ticketStatus as 'open' | 'closed' | 'canceled'}
+            blocked={activeTool !== null}
+            onMutationStateChange={trackLifecycleMutation}
             onApplied={(next) => {
               setTicketStatus(next.status)
               setActiveTool(null)
@@ -647,6 +865,88 @@ export function TicketDetailScreen({
         )}
       </div>
     </main>
+  )
+}
+
+type ConfirmedCorrection = Pick<
+  TicketCorrectionAppliedProjection,
+  'target' | 'outcome' | 'invalidatedVersionNumber' | 'announcement'
+>
+
+function correctionTargetKey(target: TicketCorrectionTarget): string {
+  return target.kind === 'job' ? `job:${target.jobId}` : target.kind
+}
+
+function sameCorrectionTarget(
+  first: TicketCorrectionTarget,
+  second: TicketCorrectionTarget,
+): boolean {
+  return correctionTargetKey(first) === correctionTargetKey(second)
+}
+
+function confirmationFor(
+  confirmation: ConfirmedCorrection | null,
+  target: TicketCorrectionTarget,
+): ConfirmedCorrection | null {
+  return confirmation && sameCorrectionTarget(confirmation.target, target)
+    ? confirmation
+    : null
+}
+
+function correctionDataState(
+  confirmation: ConfirmedCorrection | null,
+  target: TicketCorrectionTarget,
+): 'confirmed' | undefined {
+  const current = confirmationFor(confirmation, target)
+  return current && current.outcome !== 'unchanged' ? 'confirmed' : undefined
+}
+
+function setCorrectionOpenerRef(
+  refs: Map<string, HTMLButtonElement>,
+  target: TicketCorrectionTarget,
+  element: HTMLButtonElement | null,
+): void {
+  const key = correctionTargetKey(target)
+  if (element) refs.set(key, element)
+  else refs.delete(key)
+}
+
+function correctionTargetElement(
+  target: TicketCorrectionTarget,
+  identity: HTMLDivElement | null,
+  concern: HTMLElement | null,
+  jobs: Map<string, HTMLLIElement>,
+): HTMLElement | null {
+  if (target.kind === 'identity') return identity
+  if (target.kind === 'concern') return concern
+  return jobs.get(target.jobId) ?? null
+}
+
+function CorrectionConfirmationView({
+  confirmation,
+}: {
+  confirmation: ConfirmedCorrection | null
+}): React.JSX.Element | null {
+  if (!confirmation) return null
+  const signaled = confirmation.outcome !== 'unchanged'
+  return (
+    <div className={styles.correctionConfirmation}>
+      {signaled && (
+        <span
+          className={styles.correctionRail}
+          data-testid="correction-signal-rail"
+          aria-hidden="true"
+        />
+      )}
+      <p className={styles.correctionStatus} role="status" aria-live="polite">
+        {confirmation.announcement}
+      </p>
+      {confirmation.invalidatedVersionNumber !== null && (
+        <p className={styles.correctionVersion}>
+          Current draft · V{confirmation.invalidatedVersionNumber} no longer current
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -747,7 +1047,15 @@ type DisplayJob = Pick<TicketDetail['jobs'][number],
   | 'sessionId'
   | 'workStatus'
   | 'approvalState'
->
+> & { diagnosticStartState?: string }
+
+function jobCanBeCorrected(job: DisplayJob): boolean {
+  return job.workStatus === 'open'
+    && job.sessionId === null
+    && !(job.kind === 'diagnostic'
+      && (job.diagnosticStartState === 'initializing'
+        || job.diagnosticStartState === 'ambiguous'))
+}
 
 function assigneeLabel(
   job: DisplayJob,

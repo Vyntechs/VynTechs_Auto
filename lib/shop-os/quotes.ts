@@ -512,7 +512,7 @@ export function readApprovedJobPricing(snapshot: unknown, jobId: string): Approv
   }
 }
 
-function isPinnedSimpleWork(
+export function isPinnedSimpleWork(
   job: Pick<typeof ticketJobs.$inferSelect, 'kind' | 'workStatus' | 'sessionId'>,
 ): boolean {
   return (job.kind === 'repair' || job.kind === 'maintenance'
@@ -1440,7 +1440,7 @@ function safeVersionProjection(version: typeof quoteVersions.$inferSelect): Crea
   }
 }
 
-function validatedQuoteSnapshot(
+export function validatedQuoteSnapshot(
   snapshotValue: unknown,
   expectedTicket?: Pick<
     typeof tickets.$inferSelect,

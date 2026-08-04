@@ -6,11 +6,13 @@ import type { CustomerHit, CustomerVehicle, VehicleHit } from '@/lib/intake/sear
 import type { InputShape } from '@/lib/intake/input-shape'
 
 export function DropdownEmpty({
+  dropdownId,
   recents,
   focusedIdx,
   onPickCustomer,
   onCreateNew,
 }: {
+  dropdownId: string
   recents: RecentCustomer[]
   focusedIdx: number | null
   onPickCustomer: (customer: RecentCustomer) => void
@@ -18,7 +20,7 @@ export function DropdownEmpty({
 }) {
   if (recents.length === 0) {
     return (
-      <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+      <div className="pis__dropdown" role="listbox" id={dropdownId}>
         <div className="pis__dropdown-inner">
           <div className="pis__empty-zero">
             No one&apos;s been through the counter yet today.
@@ -40,7 +42,7 @@ export function DropdownEmpty({
   const showSeeMore = recents.length > 5
 
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <GroupHead
           label="Recent · today"
@@ -82,21 +84,18 @@ export function DropdownEmpty({
   )
 }
 
-export function DropdownSearching({
-  elapsedMs,
-  onCreateNew,
-  focusedIdx,
-}: {
-  elapsedMs: number
-  onCreateNew: () => void
-  focusedIdx: number | null
-}) {
+export function DropdownSearching() {
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown">
       <div className="pis__dropdown-inner">
-        <div className="pis__status">
+        <div
+          className="pis__status"
+          role="status"
+          aria-live="polite"
+          aria-label="Searching customers and vehicles"
+        >
           <span className="pis__status__left">
-            <span className="pis__spinner" /> Searching · {elapsedMs} ms
+            <span className="pis__spinner" aria-hidden="true" /> Searching customers and vehicles
           </span>
           <span>—</span>
         </div>
@@ -112,39 +111,58 @@ export function DropdownSearching({
           Holding previous results while we re-fetch…
         </div>
       </div>
-      <CreateRow
-        id="pis-row-create"
-        hint="No need to wait — you can always create new."
-        focused={focusedIdx === 0}
-        onClick={onCreateNew}
-      />
+    </div>
+  )
+}
+
+export function DropdownUnavailable({
+  dropdownId,
+  focusedIdx,
+  onRetry,
+}: {
+  dropdownId: string
+  focusedIdx: number | null
+  onRetry: () => void
+}) {
+  return (
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
+      <div className="pis__dropdown-inner">
+        <div className="pis__status">
+          <span className="pis__status__left">Search unavailable</span>
+          <span>—</span>
+        </div>
+        <div className="pis__unavailable">
+          The search could not confirm whether this customer already exists.
+        </div>
+      </div>
+      <RetryRow focused={focusedIdx === 0} onClick={onRetry} />
     </div>
   )
 }
 
 export function DropdownResults({
+  dropdownId,
   customers,
   vehicles,
   latencyMs,
   focusedIdx,
   onPickCustomer,
   onPickVehicle,
-  onCreateNew,
   highlightTokens,
 }: {
+  dropdownId: string
   customers: CustomerHit[]
   vehicles: VehicleHit[]
   latencyMs: number
   focusedIdx: number | null
   onPickCustomer: (customer: CustomerHit) => void
   onPickVehicle: (vehicle: VehicleHit) => void
-  onCreateNew: () => void
   highlightTokens: string[]
 }) {
   const totalMatches = customers.length + vehicles.length
   let idx = 0
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">
@@ -203,22 +221,18 @@ export function DropdownResults({
           )
         })}
       </div>
-      <CreateRow
-        id="pis-row-create"
-        hint="Not in this list? Create new customer."
-        focused={focusedIdx === totalMatches}
-        onClick={onCreateNew}
-      />
     </div>
   )
 }
 
 export function DropdownNoMatch({
+  dropdownId,
   query,
   shape,
   onCreateNew,
   focusedIdx,
 }: {
+  dropdownId: string
   query: string
   shape: InputShape
   onCreateNew: () => void
@@ -226,7 +240,7 @@ export function DropdownNoMatch({
 }) {
   const hint = routeHint(shape)
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">No match</span>
@@ -263,22 +277,26 @@ export function DropdownNoMatch({
 }
 
 export function DropdownSlow({
+  dropdownId,
   elapsedSec,
-  prev,
+  cached,
   focusedIdx,
-  onCreateNew,
   onPickCustomer,
   onPickVehicle,
+  onRetry,
 }: {
+  dropdownId: string
   elapsedSec: number
-  prev: { customers: CustomerHit[]; vehicles: VehicleHit[] } | null
+  cached: { customers: CustomerHit[]; vehicles: VehicleHit[] } | null
   focusedIdx: number | null
-  onCreateNew: () => void
   onPickCustomer: (customer: CustomerHit) => void
   onPickVehicle: (vehicle: VehicleHit) => void
+  onRetry: () => void
 }) {
+  const cachedCount = cached ? cached.customers.length + cached.vehicles.length : 0
+  let index = 0
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__status">
           <span className="pis__status__left">
@@ -296,49 +314,38 @@ export function DropdownSlow({
             lineHeight: 1.45,
           }}
         >
-          Holding previous matches. You can still create a new customer — or pick one of the
-          cached rows below — we&apos;ll reconcile when the search returns.
+          Search is taking longer than usual. You can retry, or select only a confirmed result
+          for this exact search.
         </div>
-        {prev && (prev.customers.length > 0 || prev.vehicles.length > 0) && (
+        {cached && cachedCount > 0 && (
           <>
             <GroupHead
-              label="Previous matches · old"
-              count={`${prev.customers.length} customer${prev.customers.length === 1 ? '' : 's'} · ${prev.vehicles.length} vehicle${prev.vehicles.length === 1 ? '' : 's'}`}
+              label="Confirmed matches"
+              count={`${cached.customers.length} customer${cached.customers.length === 1 ? '' : 's'} · ${cached.vehicles.length} vehicle${cached.vehicles.length === 1 ? '' : 's'}`}
             />
-            {prev.customers.map((c) => (
-              <Row
-                key={c.id}
-                kind="C"
-                primary={c.name}
-                secondary={c.phone ?? '—'}
-                meta="cached"
-                onClick={() => onPickCustomer(c)}
-              />
-            ))}
-            {prev.vehicles.map((v) => (
-              <Row
-                key={v.id}
-                kind="V"
+            {cached.customers.map((c) => {
+              const rowIndex = index++
+              return <Row key={c.id} id={`pis-row-${rowIndex}`} kind="C" primary={c.name}
+                secondary={c.phone ?? '—'} meta="confirmed" focused={focusedIdx === rowIndex}
+                onClick={() => onPickCustomer(c)} />
+            })}
+            {cached.vehicles.map((v) => {
+              const rowIndex = index++
+              return <Row key={v.id} id={`pis-row-${rowIndex}`} kind="V"
                 primary={`${v.year ?? ''} ${v.make ?? ''} ${v.model ?? ''} · ${v.ownerName}`.trim()}
-                secondary={v.vin ?? '—'}
-                meta="cached"
-                onClick={() => onPickVehicle(v)}
-              />
-            ))}
+                secondary={v.vin ?? '—'} meta="confirmed" focused={focusedIdx === rowIndex}
+                onClick={() => onPickVehicle(v)} />
+            })}
           </>
         )}
       </div>
-      <CreateRow
-        id="pis-row-create"
-        hint="The create-new path is never blocked."
-        focused={focusedIdx === 0}
-        onClick={onCreateNew}
-      />
+      <RetryRow focused={focusedIdx === cachedCount} onClick={onRetry} />
     </div>
   )
 }
 
 export function DropdownWhichVehicle({
+  dropdownId = 'pis-dropdown',
   customerName,
   vehicles,
   focusedIdx,
@@ -346,6 +353,7 @@ export function DropdownWhichVehicle({
   onPickVehicle,
   onCreateNew,
 }: {
+  dropdownId?: string
   customerName: string
   vehicles: CustomerVehicle[]
   focusedIdx: number | null
@@ -354,7 +362,7 @@ export function DropdownWhichVehicle({
   onCreateNew: () => void
 }) {
   return (
-    <div className="pis__dropdown" role="listbox" id="pis-dropdown">
+    <div className="pis__dropdown" role="listbox" id={dropdownId}>
       <div className="pis__dropdown-inner">
         <div className="pis__tier__head">
           <span className="pis__tier__title">
@@ -425,6 +433,21 @@ function highlight(text: string, tokens: string[]): ReactNode {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function RetryRow({ focused, onClick }: { focused: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="option"
+      id="pis-row-retry"
+      aria-selected={focused ? 'true' : 'false'}
+      className={`pis__retry ${focused ? 'pis__row--focused' : ''}`}
+      onClick={onClick}
+    >
+      Retry search
+    </button>
+  )
 }
 
 function routeHint(shape: InputShape): { kind: string; field: string; value: string } | null {

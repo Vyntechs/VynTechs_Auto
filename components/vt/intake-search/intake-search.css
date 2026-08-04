@@ -65,6 +65,8 @@
 .pis__bar--focused .pis__glyph::after { background: var(--vt-signal-500); }
 
 .pis__input {
+  box-sizing: border-box;
+  min-height: 44px;
   background: transparent;
   border: 0;
   padding: 4px 0;
@@ -315,6 +317,31 @@
   display: block;
   margin-top: 2px;
   letter-spacing: -0.005em;
+}
+
+.pis__retry {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 0;
+  border-top: 0.5px solid var(--vt-rule-strong);
+  background: var(--vt-bone-100);
+  color: var(--vt-signal-500);
+  font-family: var(--vt-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.pis__retry:hover { background: var(--vt-bone-200); }
+.pis__unavailable {
+  padding: 20px 18px;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.45;
 }
 
 /* ---------- Empty / Recents ---------- */

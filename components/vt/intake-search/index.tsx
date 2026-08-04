@@ -13,6 +13,7 @@ import {
   DropdownResults,
   DropdownSearching,
   DropdownSlow,
+  DropdownUnavailable,
   DropdownWhichVehicle,
 } from './dropdown'
 import './intake-search.css'
@@ -38,7 +39,7 @@ export function PredictiveIntakeSearch({
   const inputRef = useRef<HTMLInputElement>(null)
   const dropdownId = useId()
 
-  const { state, setQuery } = useIntakeSearch()
+  const { state, setQuery, retry } = useIntakeSearch()
 
   // ⌘K / / opens the search from anywhere on the page.
   useEffect(() => {
@@ -81,14 +82,12 @@ export function PredictiveIntakeSearch({
   // Total row count for keyboard navigation wraparound.
   const rowCount = useMemo(() => {
     if (tier) return tier.vehicles.length + 1
-    if (state.kind === 'matched') return state.customers.length + state.vehicles.length + 1
-    if (
-      state.kind === 'no-match' ||
-      state.kind === 'slow' ||
-      state.kind === 'searching' ||
-      state.kind === 'error'
-    )
-      return 1
+    if (state.kind === 'matched') return state.customers.length + state.vehicles.length
+    if (state.kind === 'slow') {
+      return (state.cached?.customers.length ?? 0) + (state.cached?.vehicles.length ?? 0) + 1
+    }
+    if (state.kind === 'error' || state.kind === 'no-match') return 1
+    if (state.kind === 'searching') return 0
     if (state.kind === 'idle') return Math.min(recentCustomers.length, 5) + 1
     return 1
   }, [state, tier, recentCustomers.length])
@@ -148,25 +147,46 @@ export function PredictiveIntakeSearch({
         setTier(null)
         return
       }
-      if (e.key === 'Enter' && e.shiftKey) {
+      const canCreate = state.kind === 'idle' || state.kind === 'no-match'
+      if (e.key === 'Enter' && e.shiftKey && canCreate) {
         e.preventDefault()
         fireCreateNew()
         return
       }
       if (e.key === 'ArrowDown') {
+        if (rowCount === 0) return
         e.preventDefault()
         setFocusedIdx((cur) => (cur === null ? 0 : (cur + 1) % rowCount))
         return
       }
       if (e.key === 'ArrowUp') {
+        if (rowCount === 0) return
         e.preventDefault()
         setFocusedIdx((cur) => (cur === null ? rowCount - 1 : (cur - 1 + rowCount) % rowCount))
         return
       }
       if (e.key === 'Enter') {
         e.preventDefault()
+        if (state.kind === 'searching') return
+        if (state.kind === 'error') {
+          retry()
+          return
+        }
+        if (state.kind === 'slow') {
+          const customerCount = state.cached?.customers.length ?? 0
+          const vehicleCount = state.cached?.vehicles.length ?? 0
+          if (focusedIdx !== null && focusedIdx < customerCount) {
+            pickCustomer(state.cached!.customers[focusedIdx])
+          } else if (focusedIdx !== null && focusedIdx < customerCount + vehicleCount) {
+            onPickVehicle(state.cached!.vehicles[focusedIdx - customerCount].id)
+            setOpen(false)
+          } else {
+            retry()
+          }
+          return
+        }
         if (focusedIdx === null) {
-          fireCreateNew()
+          if (state.kind === 'idle' || state.kind === 'no-match') fireCreateNew()
           return
         }
         if (tier) {
@@ -190,8 +210,6 @@ export function PredictiveIntakeSearch({
           } else if (focusedIdx < customerCount + state.vehicles.length) {
             onPickVehicle(state.vehicles[focusedIdx - customerCount].id)
             setOpen(false)
-          } else {
-            fireCreateNew()
           }
           return
         }
@@ -203,30 +221,35 @@ export function PredictiveIntakeSearch({
           }
           return
         }
-        fireCreateNew()
+        if (state.kind === 'no-match') fireCreateNew()
       }
     },
-    [open, rowCount, focusedIdx, tier, state, recentCustomers, fireCreateNew, onPickVehicle, onCreateNew, pickCustomer],
+    [open, rowCount, focusedIdx, tier, state, recentCustomers, fireCreateNew, onPickVehicle, onCreateNew, pickCustomer, retry],
   )
 
   const activeDescendantId = useMemo(() => {
     if (focusedIdx === null) return undefined
     if (tier) return focusedIdx >= tier.vehicles.length ? 'pis-row-create' : `pis-row-${focusedIdx}`
     if (state.kind === 'matched') {
-      return focusedIdx >= state.customers.length + state.vehicles.length
-        ? 'pis-row-create'
-        : `pis-row-${focusedIdx}`
+      return focusedIdx < state.customers.length + state.vehicles.length ? `pis-row-${focusedIdx}` : undefined
     }
     if (state.kind === 'idle') {
       return focusedIdx >= Math.min(recentCustomers.length, 5)
         ? 'pis-row-create'
         : `pis-row-${focusedIdx}`
     }
-    return 'pis-row-create'
+    if (state.kind === 'slow') {
+      const cachedCount = (state.cached?.customers.length ?? 0) + (state.cached?.vehicles.length ?? 0)
+      return focusedIdx >= cachedCount ? 'pis-row-retry' : `pis-row-${focusedIdx}`
+    }
+    if (state.kind === 'error') return 'pis-row-retry'
+    if (state.kind === 'no-match') return 'pis-row-create'
+    return undefined
   }, [focusedIdx, tier, state, recentCustomers.length])
 
   const tokens = useMemo(() => value.trim().split(/\s+/).filter((t) => t !== ''), [value])
   const noMatchShape = useMemo(() => detectInputShape(value.trim()), [value])
+  const popupExpanded = open && state.kind !== 'searching'
 
   return (
     <div className="pis">
@@ -236,15 +259,16 @@ export function PredictiveIntakeSearch({
         onChange={onInputChange}
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
-        ariaControls={dropdownId}
-        ariaExpanded={open}
-        activeDescendant={activeDescendantId}
+        ariaControls={popupExpanded ? dropdownId : undefined}
+        ariaExpanded={popupExpanded}
+        activeDescendant={popupExpanded ? activeDescendantId : undefined}
         inputRef={inputRef}
       />
       {open && (
         <>
           {tier ? (
             <DropdownWhichVehicle
+              dropdownId={dropdownId}
               customerName={tier.customer.name}
               vehicles={tier.vehicles}
               focusedIdx={focusedIdx}
@@ -269,31 +293,30 @@ export function PredictiveIntakeSearch({
             />
           ) : state.kind === 'idle' && value.trim() === '' ? (
             <DropdownEmpty
+              dropdownId={dropdownId}
               recents={recentCustomers}
               focusedIdx={focusedIdx}
               onPickCustomer={pickCustomer}
               onCreateNew={fireCreateNew}
             />
           ) : state.kind === 'searching' ? (
-            <DropdownSearching
-              elapsedMs={state.elapsedMs}
-              onCreateNew={fireCreateNew}
-              focusedIdx={focusedIdx}
-            />
+            <DropdownSearching />
           ) : state.kind === 'slow' ? (
             <DropdownSlow
+              dropdownId={dropdownId}
               elapsedSec={state.elapsedSec}
-              prev={state.prev}
+              cached={state.cached}
               focusedIdx={focusedIdx}
-              onCreateNew={fireCreateNew}
               onPickCustomer={pickCustomer}
               onPickVehicle={(v) => {
                 onPickVehicle(v.id)
                 setOpen(false)
               }}
+              onRetry={retry}
             />
           ) : state.kind === 'matched' ? (
             <DropdownResults
+              dropdownId={dropdownId}
               customers={state.customers}
               vehicles={state.vehicles}
               latencyMs={state.latencyMs}
@@ -303,16 +326,18 @@ export function PredictiveIntakeSearch({
                 onPickVehicle(v.id)
                 setOpen(false)
               }}
-              onCreateNew={fireCreateNew}
               highlightTokens={tokens}
             />
-          ) : state.kind === 'no-match' || state.kind === 'error' ? (
+          ) : state.kind === 'no-match' ? (
             <DropdownNoMatch
+              dropdownId={dropdownId}
               query={value}
               shape={noMatchShape}
               focusedIdx={focusedIdx}
               onCreateNew={fireCreateNew}
             />
+          ) : state.kind === 'error' ? (
+            <DropdownUnavailable dropdownId={dropdownId} focusedIdx={focusedIdx} onRetry={retry} />
           ) : null}
         </>
       )}

@@ -52,6 +52,31 @@ describe('Golden browser fault receipts', () => {
     expect(isExpectedProductRefusal(close, 'Uncaught TypeError: broken')).toBe(false)
   })
 
+  it('ignores only the correction route refusing one stale repair-order write', () => {
+    const conflict = 'Failed to load resource: the server responded with a status of 409 (Conflict)'
+    const correction = 'http://127.0.0.1:4181/api/tickets/6f1d2c34-0000-4000-8000-000000000001/corrections'
+
+    expect(isExpectedProductRefusal(correction, conflict)).toBe(true)
+    expect(isExpectedProductRefusal(
+      correction,
+      'Failed to load resource: the server responded with a status of 409 ()',
+    )).toBe(true)
+    expect(isExpectedProductRefusal(
+      correction,
+      'Failed to load resource: the server responded with a status of 4090 (Nonsense)',
+    )).toBe(false)
+    expect(isExpectedProductRefusal(
+      correction,
+      'Failed to load resource: the server responded with a status of 500 (Internal Server Error)',
+    )).toBe(false)
+    expect(isExpectedProductRefusal(
+      `${correction}/history`,
+      conflict,
+    )).toBe(false)
+    expect(isExpectedProductRefusal('', conflict)).toBe(false)
+    expect(isExpectedProductRefusal(correction, 'Uncaught TypeError: broken')).toBe(false)
+  })
+
   it('ignores only the missing Vercel Analytics script on local hosts', () => {
     const missing = 'Failed to load resource: the server responded with a status of 404 (Not Found)'
     const refused = [

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { and, asc, desc, eq, exists, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
@@ -6,6 +7,7 @@ import {
   jobLines,
   jobPartRequests,
   profiles,
+  quoteVersions,
   sessions,
   shops,
   ticketActivity,
@@ -28,7 +30,16 @@ import {
   listReadyToCollectTickets,
   type ReadyToCollectTicket,
 } from '@/lib/shop-os/ready-to-collect'
-import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
+import {
+  appendTicketActivity,
+  isTicketCorrectionReceiptV1,
+} from '@/lib/shop-os/ticket-activity'
+import {
+  invalidateActiveQuoteVersion,
+  isLockUnavailable,
+  validatedQuoteSnapshot,
+} from '@/lib/shop-os/quotes'
+import { formatScaledDecimal, parseScaledDecimal } from '@/lib/shop-os/quote-math'
 
 export type TicketActor = {
   profileId: string
@@ -66,9 +77,10 @@ export type AssignmentTierWarning = {
 export type TicketActivityView = {
   id: string
   jobId: string | null
-  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened'
+  kind: 'work_paused' | 'work_resumed' | 'job_blocked' | 'job_hold_resolved' | 'job_reassigned' | 'job_handed_off' | 'ticket_canceled' | 'ticket_reopened' | 'ticket_corrected'
   actorName: string | null
   summary: string
+  correctionScope?: 'identity' | 'concern' | 'job' | 'job_removed' | null
   createdAt: Date
 }
 
@@ -116,6 +128,7 @@ export type TicketDetail = {
     updatedAt: Date
   }>
   activities?: TicketActivityView[]
+  correctedRemovedJobIds?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -943,6 +956,28 @@ async function loadTicketDetail(
     .orderBy(desc(ticketActivity.createdAt), desc(ticketActivity.id))
     .limit(20)
   const jobTitles = new Map(jobs.map((job) => [job.id, job.title]))
+  const correctedRemovalRows = await db
+    .select({
+      jobId: ticketActivity.jobId,
+      payload: ticketActivity.payload,
+    })
+    .from(ticketActivity)
+    .where(and(
+      eq(ticketActivity.shopId, shopId),
+      eq(ticketActivity.ticketId, ticketId),
+      eq(ticketActivity.kind, 'ticket_corrected'),
+      isNotNull(ticketActivity.jobId),
+      sql`${ticketActivity.payload}->>'scope' = 'job_removed'`,
+    ))
+  const ticketJobIds = new Set(jobs.map((job) => job.id))
+  const correctedRemovedJobIds = [...new Set(correctedRemovalRows.flatMap((activity) => (
+    activity.jobId
+      && ticketJobIds.has(activity.jobId)
+      && isTicketCorrectionReceiptV1(activity.payload, activity.jobId)
+      && activity.payload.scope === 'job_removed'
+      ? [activity.jobId]
+      : []
+  )))]
 
   return {
     id: row.id,
@@ -1007,11 +1042,28 @@ async function loadTicketDetail(
       kind: activity.kind,
       actorName: activity.actorName,
       summary: ticketActivitySummary(activity.kind, activity.payload, activity.jobId ? jobTitles.get(activity.jobId) ?? null : null),
+      correctionScope: ticketActivityCorrectionScope(activity.kind, activity.payload, activity.jobId),
       createdAt: activity.createdAt,
     })),
+    correctedRemovedJobIds,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function ticketActivityCorrectionScope(
+  kind: TicketActivityView['kind'],
+  payload: Record<string, unknown>,
+  jobId: string | null,
+): NonNullable<TicketActivityView['correctionScope']> | null {
+  if (kind !== 'ticket_corrected') return null
+  if ((payload.scope === 'identity' || payload.scope === 'concern') && jobId === null) {
+    return payload.scope
+  }
+  if ((payload.scope === 'job' || payload.scope === 'job_removed') && jobId !== null) {
+    return payload.scope
+  }
+  return null
 }
 
 function ticketActivitySummary(
@@ -1037,6 +1089,17 @@ function ticketActivitySummary(
       ? `${subject}Retired — the customer declined this work.`
       : `Repair order canceled${bounded(payload.reason) ? ` — ${bounded(payload.reason)}` : '.'}`
     case 'ticket_reopened': return 'Repair order reopened.'
+    case 'ticket_corrected': {
+      switch (payload.scope) {
+        case 'identity': return 'Customer or vehicle corrected.'
+        case 'concern': return 'Concern corrected.'
+        case 'job': return jobTitle ? `${subject}Details corrected.` : 'Repair order corrected.'
+        case 'job_removed': return jobTitle
+          ? `${subject}Removed from active work. It remains in History.`
+          : 'Repair order corrected.'
+        default: return 'Repair order corrected.'
+      }
+    }
   }
 }
 
@@ -1260,14 +1323,163 @@ export async function addTicketJob(
 export const SUPPLEMENTAL_DIAGNOSTIC_TITLE = 'Additional diagnostic time'
 const SUPPLEMENTAL_DIAGNOSTIC_TIER = 2
 
+function canonicalSupplementalLaborHours(value: number): number {
+  return Number(formatScaledDecimal(parseScaledDecimal(String(value), 2), 2))
+}
+
+const supplementalLaborHoursSchema = z
+  .number()
+  .positive()
+  .max(9999)
+  .refine((value) => {
+    try {
+      canonicalSupplementalLaborHours(value)
+      return true
+    } catch {
+      return false
+    }
+  })
+  .transform(canonicalSupplementalLaborHours)
+
+const normalizedSupplementalUuidSchema = z.uuid().transform((value) => value.toLowerCase())
+
 const supplementalDiagnosticBodySchema = z
   .object({
+    clientKey: normalizedSupplementalUuidSchema,
     description: z.string().trim().min(1).max(200).optional(),
-    laborHours: z.number().positive().max(9999),
+    laborHours: supplementalLaborHoursSchema,
     priceCents: z.number().int().nonnegative().max(99_999_999),
     confirmBelowTier: z.boolean().optional(),
   })
   .strict()
+
+function supplementalUuid(label: string, parts: string[]): string {
+  const hash = createHash('sha256').update(label)
+  for (const part of parts) hash.update('\0').update(part)
+  const bytes = hash.digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+function supplementalJobId(
+  shopId: string,
+  ticketId: string,
+  profileId: string,
+  clientKey: string,
+): string {
+  return supplementalUuid('shop-os-supplemental-diagnostic-job-v1', [
+    shopId,
+    ticketId,
+    profileId,
+    clientKey,
+  ])
+}
+
+function supplementalLineId(jobId: string): string {
+  return supplementalUuid('shop-os-supplemental-diagnostic-line-v1', [jobId])
+}
+
+export type SupplementalDiagnosticDependencies = {
+  afterTicketLock?: (db: AppDb) => Promise<void>
+  afterLinkLock?: () => Promise<void>
+  captureLockSql?: (statement: string) => void
+}
+
+export type SupplementalDiagnosticResult =
+  | {
+      ok: true
+      confirmation: SupplementalDiagnosticConfirmation
+      ticket: TicketDetail
+    }
+  | {
+      ok: false
+      error: TicketDomainError
+      warning?: AssignmentTierWarning
+      retryable?: boolean
+    }
+
+function supplementalConflict(retryable = false): SupplementalDiagnosticResult {
+  return { ok: false, error: 'conflict', retryable }
+}
+
+export type SupplementalDiagnosticConfirmation = {
+  clientKey: string
+  jobId: string
+  title: string
+  laborHours: number
+  priceCents: number
+}
+
+function supplementalConfirmation(
+  clientKey: string,
+  job: typeof ticketJobs.$inferSelect,
+  line: typeof jobLines.$inferSelect,
+): SupplementalDiagnosticConfirmation {
+  if (line.laborHours === null) throw new Error('supplemental_labor_hours_missing')
+  return {
+    clientKey,
+    jobId: job.id,
+    title: job.title,
+    laborHours: Number(line.laborHours),
+    priceCents: line.priceCents,
+  }
+}
+
+function coherentSupplementalReplayLine(
+  job: typeof ticketJobs.$inferSelect,
+  lines: Array<typeof jobLines.$inferSelect>,
+  expected: {
+    jobId: string
+    lineId: string
+    shopId: string
+    ticketId: string
+    title: string
+    assignedTechId: string | null
+    laborHours: number
+    priceCents: number
+  },
+): typeof jobLines.$inferSelect | null {
+  if (
+    job.id !== expected.jobId
+    || job.shopId !== expected.shopId
+    || job.ticketId !== expected.ticketId
+    || job.title !== expected.title
+    || job.kind !== 'diagnostic'
+    || job.requiredSkillTier !== SUPPLEMENTAL_DIAGNOSTIC_TIER
+    || job.assignedTechId !== expected.assignedTechId
+  ) return null
+  if (lines.length !== 1) return null
+  const [line] = lines
+  return line.id === expected.lineId
+    && line.shopId === expected.shopId
+    && line.jobId === expected.jobId
+    && line.kind === 'labor'
+    && line.description === expected.title
+    && line.sort === 0
+    && Number(line.quantity) === 1
+    && line.priceCents === expected.priceCents
+    && line.taxable === false
+    && Number(line.laborHours) === expected.laborHours
+    && line.laborRateCents === null
+    && line.source === 'manual'
+    && line.partNumber === null
+    && line.brand === null
+    && line.unitCostCents === null
+    && line.coreChargeCents === null
+    && line.fitment === null
+    && line.vendorAccountId === null
+    && line.externalOfferId === null
+    && line.vendorSnapshot === null
+    && line.partStatus === 'proposed'
+    && line.orderedAt === null
+    && line.orderedByProfileId === null
+    && line.receivedAt === null
+    && line.receivedByProfileId === null
+    ? line
+    : null
+}
 
 /**
  * Records customer-approved diagnostic overage as a brand-new open job on an
@@ -1280,89 +1492,249 @@ const supplementalDiagnosticBodySchema = z
 export async function addSupplementalDiagnosticTime(
   db: AppDb,
   input: { actor: TicketActor; ticketId: unknown; body: unknown },
-): Promise<
-  | { ok: true; ticket: TicketDetail }
-  | {
-      ok: false
-      error: TicketDomainError
-      warning?: AssignmentTierWarning
-    }
-> {
+  dependencies: SupplementalDiagnosticDependencies = {},
+): Promise<SupplementalDiagnosticResult> {
   const denied = actorGate(input.actor)
   if (denied) return denied
 
-  const parsedTicketId = z.uuid().safeParse(input.ticketId)
+  const parsedTicketId = normalizedSupplementalUuidSchema.safeParse(input.ticketId)
+  const parsedProfileId = normalizedSupplementalUuidSchema.safeParse(input.actor.profileId)
+  const parsedShopId = normalizedSupplementalUuidSchema.safeParse(input.actor.shopId)
   const parsedBody = supplementalDiagnosticBodySchema.safeParse(input.body)
-  if (!parsedTicketId.success || !parsedBody.success) {
+  if (!parsedTicketId.success || !parsedProfileId.success || !parsedShopId.success || !parsedBody.success) {
     return { ok: false, error: 'invalid_input' }
   }
 
   const title = parsedBody.data.description ?? SUPPLEMENTAL_DIAGNOSTIC_TITLE
-  const shopId = input.actor.shopId as string
-  return db.transaction(async (tx) => {
-    const [lockedTicket] = await tx
-      .select({ id: tickets.id, status: tickets.status })
-      .from(tickets)
-      .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data)))
-      .limit(1)
-      .for('update')
-    if (!lockedTicket) return { ok: false, error: 'not_found' as const }
-    if (lockedTicket.status !== 'open') {
-      return { ok: false, error: 'ticket_not_open' as const }
-    }
-    if (await ticketAtJobLimit(tx as AppDb, { shopId, ticketId: parsedTicketId.data })) {
-      return { ok: false, error: 'job_limit_reached' as const }
-    }
+  const shopId = parsedShopId.data
+  try {
+    return await db.transaction(async (tx) => {
+      const transactionDb = tx as AppDb
+      const ticketLockQuery = transactionDb
+        .select({
+          id: tickets.id,
+          ticketNumber: tickets.ticketNumber,
+          customerId: tickets.customerId,
+          vehicleId: tickets.vehicleId,
+          status: tickets.status,
+        })
+        .from(tickets)
+        .where(and(eq(tickets.shopId, shopId), eq(tickets.id, parsedTicketId.data)))
+        .limit(1)
+        .for('update', { noWait: true })
+      dependencies.captureLockSql?.(ticketLockQuery.toSQL().sql)
+      const [lockedTicket] = await ticketLockQuery
+      if (!lockedTicket) return { ok: false, error: 'not_found' as const }
+      if (lockedTicket.status !== 'open') {
+        return { ok: false, error: 'ticket_not_open' as const }
+      }
+      await dependencies.afterTicketLock?.(transactionDb)
 
-    const [existingDiagnostic] = await tx
-      .select({ assignedTechId: ticketJobs.assignedTechId })
-      .from(ticketJobs)
-      .where(and(
-        eq(ticketJobs.shopId, shopId),
-        eq(ticketJobs.ticketId, parsedTicketId.data),
-        eq(ticketJobs.kind, 'diagnostic'),
-        isNotNull(ticketJobs.assignedTechId),
-      ))
-      .orderBy(asc(ticketJobs.createdAt), asc(ticketJobs.id))
-      .limit(1)
+      const jobLockQuery = transactionDb
+        .select()
+        .from(ticketJobs)
+        .where(and(eq(ticketJobs.shopId, shopId), eq(ticketJobs.ticketId, parsedTicketId.data)))
+        .orderBy(ticketJobs.id)
+        .for('update', { noWait: true })
+      dependencies.captureLockSql?.(jobLockQuery.toSQL().sql)
+      const jobRows = await jobLockQuery
+      let lineRows: Array<typeof jobLines.$inferSelect> = []
+      if (jobRows.length > 0) {
+        const lineLockQuery = transactionDb
+          .select()
+          .from(jobLines)
+          .where(and(
+            eq(jobLines.shopId, shopId),
+            inArray(jobLines.jobId, jobRows.map((job) => job.id)),
+          ))
+          .orderBy(jobLines.id)
+          .for('update', { noWait: true })
+        dependencies.captureLockSql?.(lineLockQuery.toSQL().sql)
+        lineRows = await lineLockQuery
+      }
+      const versionLockQuery = transactionDb
+        .select()
+        .from(quoteVersions)
+        .where(and(
+          eq(quoteVersions.shopId, shopId),
+          eq(quoteVersions.ticketId, parsedTicketId.data),
+          isNull(quoteVersions.supersededAt),
+        ))
+        .orderBy(quoteVersions.id)
+        .for('update', { noWait: true })
+      dependencies.captureLockSql?.(versionLockQuery.toSQL().sql)
+      const activeVersions = await versionLockQuery
 
-    const assignment = await validateAssignment(tx as AppDb, input.actor, {
-      title,
-      kind: 'diagnostic',
-      requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
-      assignedTechId: existingDiagnostic?.assignedTechId ?? null,
-      confirmBelowTier: parsedBody.data.confirmBelowTier,
-    })
-    if (!assignment.ok) return assignment
+      const jobId = supplementalJobId(
+        shopId,
+        parsedTicketId.data,
+        parsedProfileId.data,
+        parsedBody.data.clientKey,
+      )
+      const lineId = supplementalLineId(jobId)
+      const existing = jobRows.find((job) => job.id === jobId)
+      const inheritedAssigneeId = [...jobRows]
+        .filter((job) => job.kind === 'diagnostic' && job.assignedTechId !== null)
+        .sort((left, right) => (
+          left.createdAt.getTime() - right.createdAt.getTime()
+          || left.id.localeCompare(right.id)
+        ))[0]?.assignedTechId ?? null
+      const assigneeIdToValidate = existing ? existing.assignedTechId : inheritedAssigneeId
+      const profileIds = [...new Set([
+        parsedProfileId.data,
+        ...(assigneeIdToValidate ? [assigneeIdToValidate] : []),
+      ])].sort()
+      const profileLockQuery = transactionDb
+        .select({
+          id: profiles.id,
+          shopId: profiles.shopId,
+          role: profiles.role,
+          skillTier: profiles.skillTier,
+          membershipStatus: profiles.membershipStatus,
+          deactivatedAt: profiles.deactivatedAt,
+        })
+        .from(profiles)
+        .where(and(eq(profiles.shopId, shopId), inArray(profiles.id, profileIds)))
+        .orderBy(profiles.id)
+        .for('update', { noWait: true })
+      dependencies.captureLockSql?.(profileLockQuery.toSQL().sql)
+      const lockedProfiles = await profileLockQuery
+      const currentActor = lockedProfiles.find((profile) => profile.id === parsedProfileId.data)
+      if (!currentActor) return { ok: false, error: 'not_found' as const }
+      if (currentActor.membershipStatus !== 'active' || currentActor.deactivatedAt) {
+        return { ok: false, error: 'inactive_profile' as const }
+      }
+      if (!canAssignWork(currentActor.role)) {
+        return { ok: false, error: 'forbidden' as const }
+      }
 
-    const [createdJob] = await tx
-      .insert(ticketJobs)
-      .values({
+      let assignedTechId: string | null = null
+      if (assigneeIdToValidate) {
+        const assignee = lockedProfiles.find((profile) => profile.id === assigneeIdToValidate)
+        if (!assignee
+          || assignee.shopId !== shopId
+          || assignee.membershipStatus !== 'active'
+          || assignee.deactivatedAt
+          || !canCreateTickets(assignee.role)
+          || assignee.skillTier === null
+          || ![1, 2, 3].includes(assignee.skillTier)) {
+          return { ok: false, error: 'invalid_assignee' as const }
+        }
+        const assignedSkillTier = assignee.skillTier as 1 | 2 | 3
+        if (assignee.id === currentActor.id && assignedSkillTier < SUPPLEMENTAL_DIAGNOSTIC_TIER) {
+          return { ok: false, error: 'invalid_assignee' as const }
+        }
+        if (assignedSkillTier < SUPPLEMENTAL_DIAGNOSTIC_TIER
+          && !parsedBody.data.confirmBelowTier) {
+          return {
+            ok: false,
+            error: 'tier_confirmation_required' as const,
+            warning: {
+              code: 'below_required_tier' as const,
+              assignedTechId: assignee.id,
+              assignedSkillTier,
+              requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
+            },
+          }
+        }
+        assignedTechId = assignee.id
+      }
+
+      if (existing) {
+        const replayLine = coherentSupplementalReplayLine(
+          existing,
+          lineRows.filter((line) => line.jobId === jobId),
+          {
+            jobId,
+            lineId,
+            shopId,
+            ticketId: parsedTicketId.data,
+            title,
+            assignedTechId,
+            laborHours: parsedBody.data.laborHours,
+            priceCents: parsedBody.data.priceCents,
+          },
+        )
+        if (!replayLine) return supplementalConflict()
+        const detail = await loadTicketDetail(transactionDb, shopId, parsedTicketId.data)
+        if (!detail) throw new Error('updated_ticket_not_found')
+        return {
+          ok: true as const,
+          confirmation: supplementalConfirmation(parsedBody.data.clientKey, existing, replayLine),
+          ticket: detail,
+        }
+      }
+
+      if (jobRows.length >= MAX_TICKET_JOBS_PER_TICKET) {
+        return { ok: false, error: 'job_limit_reached' as const }
+      }
+      if (activeVersions.length > 1) return supplementalConflict()
+      if (activeVersions[0]) {
+        try {
+          const snapshot = validatedQuoteSnapshot(activeVersions[0].snapshot, lockedTicket)
+          const lockedJobIds = new Set(jobRows.map((job) => job.id))
+          if (snapshot.jobs.some((job) => !lockedJobIds.has(job.id))) {
+            return supplementalConflict()
+          }
+        } catch (error) {
+          if (error instanceof TypeError || error instanceof RangeError) {
+            return supplementalConflict()
+          }
+          throw error
+        }
+      }
+
+      const invalidationFailure = await invalidateActiveQuoteVersion(transactionDb, {
         shopId,
         ticketId: parsedTicketId.data,
-        title,
-        kind: 'diagnostic',
-        requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
-        assignedTechId: assignment.assignedTechId,
-      })
-      .returning()
+        jobIds: jobRows.map((job) => job.id),
+        activeVersions,
+      }, { afterLinkLock: dependencies.afterLinkLock })
+      if (invalidationFailure) {
+        return supplementalConflict(invalidationFailure.retryable === true)
+      }
 
-    const supplementalLine: SafeCannedJobLine = {
-      kind: 'labor',
-      description: title,
-      sort: 0,
-      priceCents: parsedBody.data.priceCents,
-      taxable: false,
-      hours: String(parsedBody.data.laborHours),
-    }
-    await tx.insert(jobLines).values(
-      cannedJobLineInsertValues(shopId, createdJob.id, [supplementalLine]),
-    )
+      const [createdJob] = await transactionDb
+        .insert(ticketJobs)
+        .values({
+          id: jobId,
+          shopId,
+          ticketId: parsedTicketId.data,
+          title,
+          kind: 'diagnostic',
+          requiredSkillTier: SUPPLEMENTAL_DIAGNOSTIC_TIER,
+          assignedTechId,
+        })
+        .returning()
+      if (!createdJob) throw new Error('supplemental_job_not_created')
 
-    const detail = await loadTicketDetail(tx as AppDb, shopId, parsedTicketId.data)
-    if (!detail) throw new Error('updated_ticket_not_found')
-    return { ok: true, ticket: detail }
-  })
+      const supplementalLine: SafeCannedJobLine = {
+        kind: 'labor',
+        description: title,
+        sort: 0,
+        priceCents: parsedBody.data.priceCents,
+        taxable: false,
+        hours: String(parsedBody.data.laborHours),
+      }
+      const [lineValue] = cannedJobLineInsertValues(shopId, createdJob.id, [supplementalLine])
+      const [createdLine] = await transactionDb
+        .insert(jobLines)
+        .values({ ...lineValue, id: lineId })
+        .returning()
+      if (!createdLine) throw new Error('supplemental_line_not_created')
+
+      const detail = await loadTicketDetail(transactionDb, shopId, parsedTicketId.data)
+      if (!detail) throw new Error('updated_ticket_not_found')
+      return {
+        ok: true as const,
+        confirmation: supplementalConfirmation(parsedBody.data.clientKey, createdJob, createdLine),
+        ticket: detail,
+      }
+    })
+  } catch (error) {
+    if (isLockUnavailable(error)) return supplementalConflict(true)
+    throw error
+  }
 }
 
 export type SafeTicketAssignee = NonNullable<TicketDetail['jobs'][number]['assignedTech']>

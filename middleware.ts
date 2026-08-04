@@ -12,13 +12,25 @@ import {
   isCustomerApprovalLinkRoute,
   isDiagnosticsGatedRoute,
   isPaywallExempt,
+  isTicketCorrectionRoute,
 } from '@/lib/auth-access'
 import {
   CUSTOMER_APPROVAL_UNAVAILABLE,
   isCustomerApprovalEnabled,
   isDiagnosticsReleaseEnabled,
+  isTicketCorrectionEnabled,
   OPERATIONAL_MEDIA_UNAVAILABLE,
+  TICKET_CORRECTION_UNAVAILABLE,
 } from '@/lib/release-policy'
+
+function middlewareApiJson(pathname: string, body: unknown, status: number) {
+  return NextResponse.json(body, {
+    status,
+    ...(isTicketCorrectionRoute(pathname)
+      ? { headers: { 'Cache-Control': 'no-store' } }
+      : {}),
+  })
+}
 
 async function refreshSession(req: NextRequest) {
   const res = NextResponse.next({ request: req })
@@ -47,6 +59,12 @@ async function refreshSession(req: NextRequest) {
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname
+  if (isTicketCorrectionRoute(pathname) && !isTicketCorrectionEnabled()) {
+    return NextResponse.json(TICKET_CORRECTION_UNAVAILABLE.body, {
+      status: TICKET_CORRECTION_UNAVAILABLE.status,
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
   if (isCustomerApprovalLinkRoute(pathname) && !isCustomerApprovalEnabled()) {
     return NextResponse.json(CUSTOMER_APPROVAL_UNAVAILABLE.body, {
       status: CUSTOMER_APPROVAL_UNAVAILABLE.status,
@@ -59,6 +77,7 @@ export async function middleware(req: NextRequest) {
     })
   }
   const { res, supabase } = await refreshSession(req)
+  if (isTicketCorrectionRoute(pathname)) res.headers.set('Cache-Control', 'no-store')
   const exempt = isPaywallExempt(pathname)
   const isCurator = pathname.startsWith('/curator')
 
@@ -88,7 +107,7 @@ export async function middleware(req: NextRequest) {
 
   if (!user) {
     if (isApiRoute(pathname)) {
-      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+      return middlewareApiJson(pathname, { error: 'unauthenticated' }, 401)
     }
     const next = encodeURIComponent(pathname)
     return NextResponse.redirect(new URL(`/sign-in?next=${next}`, req.url))
@@ -97,15 +116,16 @@ export async function middleware(req: NextRequest) {
   const access = await checkAccess(db, user.id)
   if (access.kind === 'deactivated') {
     if (isApiRoute(pathname)) {
-      return NextResponse.json({ error: 'deactivated' }, { status: 403 })
+      return middlewareApiJson(pathname, { error: 'deactivated' }, 403)
     }
     return NextResponse.redirect(new URL('/deactivated', req.url))
   }
   if (access.kind === 'paywall') {
     if (isApiRoute(pathname)) {
-      return NextResponse.json(
+      return middlewareApiJson(
+        pathname,
         { error: 'paywall', reason: access.reason },
-        { status: 403 },
+        403,
       )
     }
     return NextResponse.redirect(new URL('/subscribe', req.url))

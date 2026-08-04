@@ -74,6 +74,28 @@
   padding-inline: 12px;
 }
 
+.draftRecovery,
+.draftRecoveryAlert {
+  color: var(--vt-fg-2);
+  font: italic 14px/1.4 var(--vt-font-serif);
+  margin: 12px 32px 0;
+}
+
+.draftRecovery {
+  align-items: center;
+  background: var(--vt-bone-100);
+  border-left: 2px solid var(--vt-signal-500);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.draftRecoveryAlert {
+  border-left: 2px solid var(--vt-risk-high);
+  padding-left: 10px;
+}
+
 .truthStrip {
   border-block: 1px solid var(--vt-rule);
   display: flex;
@@ -229,6 +251,11 @@
 
   .search {
     padding: 16px 18px 0;
+  }
+
+  .draftRecovery,
+  .draftRecoveryAlert {
+    margin-inline: 18px;
   }
 
   .selectedVehicle {

@@ -1,7 +1,41 @@
 import { describe, expect, it } from 'vitest'
 import * as schema from '@/lib/db/schema'
 import { createTestDb } from '@/tests/helpers/db'
-import { appendTicketActivity } from '@/lib/shop-os/ticket-activity'
+import {
+  appendTicketActivity,
+  isTicketCorrectionReceiptV1,
+} from '@/lib/shop-os/ticket-activity'
+import { getTicketDetail, ticketActorFromProfile } from '@/lib/tickets'
+
+const uuid = (suffix: number) =>
+  `00000000-0000-4000-8000-${suffix.toString().padStart(12, '0')}`
+
+async function createCorrectionFixture() {
+  const testDb = await createTestDb()
+  const [shop] = await testDb.db.insert(schema.shops).values({ name: 'Correction Activity Shop' }).returning()
+  const [actor] = await testDb.db.insert(schema.profiles).values({
+    id: uuid(501),
+    userId: uuid(601),
+    shopId: shop.id,
+    fullName: 'Correction Advisor',
+    role: 'advisor',
+  }).returning()
+  const [ticket] = await testDb.db.insert(schema.tickets).values({
+    shopId: shop.id,
+    ticketNumber: 1,
+    source: 'tech_quick',
+    concern: 'Brake squeal',
+    createdByProfileId: actor.id,
+  }).returning()
+  const [job] = await testDb.db.insert(schema.ticketJobs).values({
+    shopId: shop.id,
+    ticketId: ticket.id,
+    title: 'Brake inspection',
+    kind: 'repair',
+    requiredSkillTier: 2,
+  }).returning()
+  return { ...testDb, shop, actor, ticket, job }
+}
 
 describe('ticket activity persistence contract', () => {
   it('exposes a tenant-bound append-only ticket activity table', () => {
@@ -22,6 +56,7 @@ describe('ticket activity persistence contract', () => {
       'job_handed_off',
       'ticket_canceled',
       'ticket_reopened',
+      'ticket_corrected',
     ])
   })
 
@@ -132,6 +167,291 @@ describe('ticket activity persistence contract', () => {
       await close()
     }
   })
+
+  it('records one append-only job-scoped correction receipt for an idempotent request key', async () => {
+    const fixture = await createCorrectionFixture()
+    try {
+      const input = {
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_corrected' as never,
+        requestKey: uuid(502),
+        payload: {
+          v: 1,
+          scope: 'job',
+          intentHash: 'a'.repeat(64),
+          changedFields: ['title'],
+        },
+      }
+
+      await expect(appendTicketActivity(fixture.db, input))
+        .resolves.toEqual({ ok: true, created: true })
+      await expect(appendTicketActivity(fixture.db, input))
+        .resolves.toEqual({ ok: true, created: false })
+      const rows = await fixture.db.select().from(schema.ticketActivity)
+      expect(rows).toEqual([expect.objectContaining({
+        jobId: fixture.job.id,
+        kind: 'ticket_corrected',
+        payload: input.payload,
+      })])
+      await expectAppendOnlyFailure(
+        fixture.db.update(schema.ticketActivity).set({ payload: { changed: true } }),
+      )
+      await expectAppendOnlyFailure(fixture.db.delete(schema.ticketActivity))
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it.each([
+    ['identity', null, {
+      v: 1,
+      scope: 'identity',
+      intentHash: 'd'.repeat(64),
+      changedFields: ['customer_id', 'vehicle_id'],
+      fromCustomerId: uuid(520),
+      toCustomerId: uuid(521),
+      fromVehicleId: uuid(522),
+      toVehicleId: uuid(523),
+    }],
+    ['concern', null, {
+      v: 1,
+      scope: 'concern',
+      intentHash: 'd'.repeat(64),
+      changedFields: ['concern'],
+      invalidatedVersionId: null,
+      invalidatedVersionNumber: null,
+    }],
+    ['job', uuid(524), {
+      v: 1,
+      scope: 'job',
+      intentHash: 'd'.repeat(64),
+      changedFields: ['title', 'kind', 'customer_supplied_parts_note'],
+      fromKind: 'diagnostic',
+      toKind: 'repair',
+      invalidatedVersionId: uuid(525),
+      invalidatedVersionNumber: 2,
+    }],
+    ['job removal', uuid(526), {
+      v: 1,
+      scope: 'job_removed',
+      intentHash: 'd'.repeat(64),
+      changedFields: ['work_status'],
+    }],
+  ])('accepts the exact privacy-minimized %s receipt envelope', (_label, jobId, payload) => {
+    expect(isTicketCorrectionReceiptV1(payload, jobId)).toBe(true)
+  })
+
+  it.each([
+    ['reordered fields', null, {
+      v: 1, scope: 'identity', intentHash: 'd'.repeat(64),
+      changedFields: ['vehicle_id', 'customer_id'],
+      fromCustomerId: uuid(520), toCustomerId: uuid(521),
+      fromVehicleId: uuid(522), toVehicleId: uuid(523),
+    }],
+    ['duplicate fields', uuid(524), {
+      v: 1, scope: 'job', intentHash: 'd'.repeat(64), changedFields: ['title', 'title'],
+    }],
+    ['unchanged identity IDs', null, {
+      v: 1, scope: 'identity', intentHash: 'd'.repeat(64), changedFields: ['customer_id'],
+      fromCustomerId: uuid(520), toCustomerId: uuid(520),
+    }],
+    ['missing kind transition', uuid(524), {
+      v: 1, scope: 'job', intentHash: 'd'.repeat(64), changedFields: ['kind'],
+    }],
+  ])('rejects the non-canonical %s receipt envelope', (_label, jobId, payload) => {
+    expect(isTicketCorrectionReceiptV1(payload, jobId)).toBe(false)
+  })
+
+  it.each([
+    ['a raw free-text key', {
+      jobId: null,
+      payload: {
+        v: 1, scope: 'concern', intentHash: 'c'.repeat(64),
+        changedFields: ['concern'], customerName: 'must never persist',
+      },
+    }],
+    ['a malformed intent hash', {
+      jobId: null,
+      payload: { v: 1, scope: 'concern', intentHash: 'not-a-hash', changedFields: ['concern'] },
+    }],
+    ['a non-canonical changed field', {
+      jobId: null,
+      payload: { v: 1, scope: 'concern', intentHash: 'c'.repeat(64), changedFields: ['title'] },
+    }],
+    ['a scope and job envelope mismatch', {
+      jobId: null,
+      payload: { v: 1, scope: 'job', intentHash: 'c'.repeat(64), changedFields: ['title'] },
+    }],
+    ['an incomplete invalidated-version pair', {
+      jobId: null,
+      payload: {
+        v: 1, scope: 'concern', intentHash: 'c'.repeat(64), changedFields: ['concern'],
+        invalidatedVersionId: uuid(504),
+      },
+    }],
+  ])('rejects %s before querying the immutable correction ledger', async (_label, invalid) => {
+    const fixture = await createCorrectionFixture()
+    try {
+      await expect(appendTicketActivity(fixture.db, {
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: invalid.jobId,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_corrected' as never,
+        requestKey: uuid(505),
+        payload: invalid.payload,
+      })).resolves.toEqual({ ok: false, error: 'conflict' })
+      expect(await fixture.db.select().from(schema.ticketActivity)).toEqual([])
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it.each([
+    ['an unknown kind', { kind: 'future_kind', payload: {} }],
+    ['a non-object payload', { kind: 'ticket_corrected', payload: [] }],
+    ['an oversized payload', { kind: 'ticket_corrected', payload: { value: 'x'.repeat(12_289) } }],
+  ])('rejects %s at the database boundary', async (_label, invalid) => {
+    const fixture = await createCorrectionFixture()
+    try {
+      await expectCheckFailure(fixture.db.insert(schema.ticketActivity).values({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        actorProfileId: fixture.actor.id,
+        kind: invalid.kind as never,
+        requestKey: uuid(503),
+        payload: invalid.payload as never,
+      }))
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('projects only exact correction scopes into safe copy and never exposes raw corrected values', async () => {
+    const fixture = await createCorrectionFixture()
+    try {
+      const secret = 'SECRET-RAW-CUSTOMER-VEHICLE-CONCERN-TITLE'
+      const payloads = [
+        { scope: 'identity', jobId: null },
+        { scope: 'concern', jobId: null },
+        { scope: 'job', jobId: fixture.job.id },
+        { scope: 'job_removed', jobId: fixture.job.id },
+        { scope: ' identity', jobId: null },
+        { scope: { nested: 'concern' }, jobId: null },
+      ] as const
+      await fixture.db.insert(schema.ticketActivity).values(payloads.map((entry, index) => ({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: entry.jobId,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_corrected' as never,
+        requestKey: uuid(510 + index),
+        payload: {
+          v: 1,
+          scope: entry.scope,
+          intentHash: 'b'.repeat(64),
+          changedFields: ['customerName', 'vehicleVin', 'concern', 'title'],
+          customerName: secret,
+          vehicleVin: secret,
+          concern: secret,
+          title: secret,
+        },
+      })))
+      await fixture.db.insert(schema.ticketActivity).values({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_canceled',
+        requestKey: uuid(519),
+        payload: { scope: 'job_removed' },
+      })
+
+      const detail = await getTicketDetail(fixture.db, {
+        actor: ticketActorFromProfile(fixture.actor),
+        ticketId: fixture.ticket.id,
+      })
+      expect(detail.ok).toBe(true)
+      if (!detail.ok) return
+      const summaries = detail.ticket.activities?.map((activity) => activity.summary) ?? []
+      expect(summaries).toEqual(expect.arrayContaining([
+        'Customer or vehicle corrected.',
+        'Concern corrected.',
+        'Brake inspection: Details corrected.',
+        'Brake inspection: Removed from active work. It remains in History.',
+        'Repair order corrected.',
+      ]))
+      expect(summaries.filter((summary) => summary === 'Repair order corrected.')).toHaveLength(2)
+      expect(detail.ticket.activities?.find((activity) => (
+        activity.summary === 'Customer or vehicle corrected.'
+      ))?.correctionScope).toBe('identity')
+      expect(detail.ticket.activities?.find((activity) => (
+        activity.summary === 'Brake inspection: Removed from active work. It remains in History.'
+      ))?.correctionScope).toBe('job_removed')
+      expect(detail.ticket.activities?.filter((activity) => (
+        activity.summary === 'Repair order corrected.'
+      )).every((activity) => activity.correctionScope === null)).toBe(true)
+      const ordinaryCancellation = detail.ticket.activities?.find((activity) => (
+        activity.kind === 'ticket_canceled'
+      ))
+      expect(ordinaryCancellation?.correctionScope).toBeNull()
+      expect(ordinaryCancellation?.summary).toContain('customer declined')
+      expect(ordinaryCancellation?.summary).not.toContain('Removed')
+      expect(JSON.stringify(detail.ticket.activities)).not.toContain(secret)
+    } finally {
+      await fixture.close()
+    }
+  })
+
+  it('retains validated removal provenance beyond the 20-item activity window', async () => {
+    const fixture = await createCorrectionFixture()
+    try {
+      const correctionCreatedAt = new Date('2026-08-03T15:00:00.000Z')
+      await fixture.db.insert(schema.ticketActivity).values({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'ticket_corrected' as never,
+        requestKey: uuid(520),
+        payload: {
+          v: 1,
+          scope: 'job_removed',
+          intentHash: 'c'.repeat(64),
+          changedFields: ['work_status'],
+        },
+        createdAt: correctionCreatedAt,
+      })
+      await fixture.db.insert(schema.ticketActivity).values(Array.from({ length: 21 }, (_, index) => ({
+        shopId: fixture.shop.id,
+        ticketId: fixture.ticket.id,
+        jobId: fixture.job.id,
+        actorProfileId: fixture.actor.id,
+        kind: 'job_reassigned' as const,
+        requestKey: uuid(521 + index),
+        payload: {},
+        createdAt: new Date(correctionCreatedAt.getTime() + (index + 1) * 1_000),
+      })))
+
+      const detail = await getTicketDetail(fixture.db, {
+        actor: ticketActorFromProfile(fixture.actor),
+        ticketId: fixture.ticket.id,
+      })
+
+      expect(detail.ok).toBe(true)
+      if (!detail.ok) return
+      expect(detail.ticket.activities).toHaveLength(20)
+      expect(detail.ticket.activities).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: expect.any(String), correctionScope: 'job_removed' }),
+      ]))
+      expect(detail.ticket.correctedRemovedJobIds).toEqual([fixture.job.id])
+    } finally {
+      await fixture.close()
+    }
+  })
 })
 
 async function expectAppendOnlyFailure(operation: Promise<unknown>): Promise<void> {
@@ -139,6 +459,21 @@ async function expectAppendOnlyFailure(operation: Promise<unknown>): Promise<voi
     let current = error
     for (let depth = 0; current && depth < 5; depth += 1) {
       if (current instanceof Error && current.message.includes('ticket activity is append-only')) {
+        return true
+      }
+      current = typeof current === 'object' && current !== null && 'cause' in current
+        ? current.cause
+        : null
+    }
+    return false
+  })
+}
+
+async function expectCheckFailure(operation: Promise<unknown>): Promise<void> {
+  await expect(operation).rejects.toSatisfy((error: unknown) => {
+    let current = error
+    for (let depth = 0; current && depth < 5; depth += 1) {
+      if (typeof current === 'object' && current !== null && 'code' in current && current.code === '23514') {
         return true
       }
       current = typeof current === 'object' && current !== null && 'cause' in current

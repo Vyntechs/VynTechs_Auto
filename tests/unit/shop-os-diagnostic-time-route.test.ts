@@ -19,10 +19,17 @@ const PROFILE_ID = '00000000-0000-4000-8000-000000000001'
 const USER_ID = '00000000-0000-4000-8000-000000000101'
 const TICKET_ID = '00000000-0000-4000-8000-000000000401'
 const TECH_ID = '00000000-0000-4000-8000-000000000012'
+const CLIENT_KEY = '00000000-0000-4000-8000-000000000701'
+const JOB_ID = '00000000-0000-8000-8000-000000000801'
 
 const profile = { id: PROFILE_ID, userId: USER_ID, role: 'advisor' }
 const authContext = { profile, user: { id: USER_ID, email: 'advisor@shop.test' } }
-const validBody = { description: 'Additional diagnostic time', laborHours: 1.5, priceCents: 28_125 }
+const validBody = {
+  clientKey: CLIENT_KEY,
+  description: 'Additional diagnostic time',
+  laborHours: 1.5,
+  priceCents: 28_125,
+}
 
 const authMock = vi.mocked(requireUserAndProfile)
 const paywallMock = vi.mocked(paywallReject)
@@ -72,19 +79,39 @@ describe('Shop OS supplemental diagnostic-time route', () => {
     expect(domainMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['missing', { description: 'Additional diagnostic time', laborHours: 1, priceCents: 12_000 }],
+    ['malformed', { ...validBody, clientKey: 'not-a-uuid' }],
+  ])('refuses a %s client key before domain access', async (_label, body) => {
+    const response = await POST(request(body), params())
+    expect(response.status).toBe(422)
+    expect(await response.json()).toEqual({ error: 'invalid_input' })
+    expect(domainMock).not.toHaveBeenCalled()
+  })
+
   it('forwards the ticket id and raw body and returns the created ticket', async () => {
+    const confirmation = {
+      clientKey: CLIENT_KEY,
+      jobId: JOB_ID,
+      title: 'Additional diagnostic time',
+      laborHours: 1.5,
+      priceCents: 28_125,
+    }
     domainMock.mockResolvedValue({
       ok: true,
+      confirmation,
       ticket: { id: TICKET_ID, ticketNumber: 7, jobs: [] },
     } as never)
     const response = await POST(request(validBody), params())
     expect(response.status).toBe(201)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(domainMock).toHaveBeenCalledWith({}, expect.objectContaining({
       ticketId: TICKET_ID,
       body: validBody,
     }))
+    expect((domainMock.mock.calls[0][1].body as typeof validBody).clientKey).toBe(CLIENT_KEY)
     const body = await response.json()
-    expect(body).toMatchObject({ ticket: { id: TICKET_ID } })
+    expect(body).toEqual({ confirmation, ticket: { id: TICKET_ID, ticketNumber: 7, jobs: [] } })
   })
 
   it('passes the below-tier warning through with a 409', async () => {
@@ -99,6 +126,17 @@ describe('Shop OS supplemental diagnostic-time route', () => {
       error: 'tier_confirmation_required',
       warning: { code: 'below_required_tier', assignedTechId: TECH_ID, assignedSkillTier: 1, requiredSkillTier: 2 },
     })
+  })
+
+  it('preserves retryable lock contention in the 409 response', async () => {
+    domainMock.mockResolvedValue({
+      ok: false,
+      error: 'conflict',
+      retryable: true,
+    } as never)
+    const response = await POST(request(validBody), params())
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: 'conflict', retryable: true })
   })
 
   it.each([

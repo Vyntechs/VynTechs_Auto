@@ -163,6 +163,57 @@
   border-block: 1px solid var(--vt-rule);
 }
 
+.correctionTarget {
+  position: relative;
+}
+
+.correctionTarget,
+.concern,
+.job {
+  scroll-margin-block: 96px;
+}
+
+.correctionTarget:focus,
+.concern:focus,
+.job:focus {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 5px;
+}
+
+.correctionAction {
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-signal-700);
+  padding: 9px 14px;
+  font: 600 13px/1.2 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.correctionAction:hover {
+  border-color: var(--vt-signal-500);
+}
+
+.correctionAction:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.correctionAction:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.correctionTarget > .correctionAction {
+  display: flex;
+  width: fit-content;
+  margin: 14px 0 0 auto;
+}
+
 .factSection {
   padding: 24px 0;
 }
@@ -290,6 +341,7 @@
 }
 
 .concern {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 0.45fr);
   column-gap: clamp(28px, 6vw, 72px);
@@ -311,6 +363,19 @@
 
 .storyFacts {
   margin-top: 24px;
+}
+
+.concern > .correctionAction {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: start;
+  justify-self: end;
+}
+
+.concern > [role='region'],
+.concern > .correctionConfirmation {
+  grid-column: 1 / -1;
+  margin-top: 18px;
 }
 
 .authorization {
@@ -420,6 +485,7 @@
 }
 
 .jobBody {
+  position: relative;
   min-width: 0;
   border-bottom: 1px solid var(--vt-rule);
   padding: 0 0 26px;
@@ -513,6 +579,62 @@
   color: var(--vt-fg-2);
   font-family: var(--vt-font-sans);
   font-size: 14px;
+}
+
+.jobBody > .correctionAction {
+  margin-top: 10px;
+}
+
+.correctionConfirmation {
+  position: relative;
+  margin-top: 12px;
+  padding: 9px 0 9px 14px;
+}
+
+.correctionRail {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 2px;
+  background: var(--vt-signal-500);
+}
+
+.correctionStatus,
+.correctionVersion {
+  margin: 0;
+  font-family: var(--vt-font-sans);
+  line-height: 1.4;
+}
+
+.correctionStatus {
+  color: var(--vt-fg-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.correctionVersion {
+  margin-top: 3px;
+  color: var(--vt-fg-3);
+  font-family: var(--vt-font-mono);
+  font-size: 11px;
+}
+
+.correctionTarget[data-correction-state='confirmed'],
+.concern[data-correction-state='confirmed'],
+.job[data-correction-state='confirmed'] {
+  animation: correction-detent 200ms var(--vt-ease-out) both;
+}
+
+@keyframes correction-detent {
+  from {
+    transform: translateY(-2px);
+    opacity: .92;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .assignmentControl {
@@ -784,8 +906,15 @@
   .concern > .eyebrow,
   .concern > h2,
   .concern > .storyFacts,
+  .concern > .correctionAction,
   .authorization {
     grid-column: 1;
+  }
+
+  .concern > .correctionAction {
+    grid-row: auto;
+    justify-self: start;
+    margin-top: 14px;
   }
 
   .authorization {
@@ -821,6 +950,16 @@
 
   .assignmentChoices {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .correctionTarget[data-correction-state='confirmed'],
+  .concern[data-correction-state='confirmed'],
+  .job[data-correction-state='confirmed'] {
+    animation: none;
+    transform: none;
+    transition: none;
   }
 }
 

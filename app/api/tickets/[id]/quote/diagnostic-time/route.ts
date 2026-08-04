@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 import { paywallReject } from '@/lib/auth-access'
 import { requireUserAndProfile } from '@/lib/auth'
 import { db } from '@/lib/db/client'
@@ -28,6 +29,12 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
   }
+  const clientKey = body && typeof body === 'object' && !Array.isArray(body)
+    ? z.uuid().safeParse((body as Record<string, unknown>).clientKey)
+    : null
+  if (!clientKey?.success) {
+    return NextResponse.json({ error: 'invalid_input' }, { status: 422 })
+  }
 
   const { id } = await params
   const result = await addSupplementalDiagnosticTime(db, {
@@ -36,11 +43,16 @@ export async function POST(
     body,
   })
   if (!result.ok) {
-    const error = result.warning
-      ? { error: result.error, warning: result.warning }
-      : { error: result.error }
+    const error = {
+      error: result.error,
+      ...(result.warning ? { warning: result.warning } : {}),
+      ...(result.retryable === true ? { retryable: true } : {}),
+    }
     return NextResponse.json(error, { status: ticketDomainStatus(result, 201) })
   }
 
-  return NextResponse.json({ ticket: result.ticket }, { status: 201 })
+  return NextResponse.json({
+    confirmation: result.confirmation,
+    ticket: result.ticket,
+  }, { status: 201, headers: { 'Cache-Control': 'no-store' } })
 }
