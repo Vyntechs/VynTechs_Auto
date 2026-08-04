@@ -268,7 +268,11 @@ export function TodayJobsBoard({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'claim', requestKey }),
+          body: JSON.stringify({
+            action: 'claim',
+            expectedApprovalState: job.approvalState,
+            requestKey,
+          }),
         },
       )
 
@@ -1257,6 +1261,7 @@ function JobRow({
               requiredSkillTier: job.requiredSkillTier,
               hasAssignee: job.assignmentState !== 'unassigned',
               workStatus: job.workStatus,
+              approvalState: job.approvalState,
             }}
             command={{
               kind: mode === 'open' ? 'assign' : 'handoff',

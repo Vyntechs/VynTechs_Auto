@@ -11,6 +11,21 @@ import {
 } from '@/lib/tickets'
 
 const activeWorkStatuses = new Set(['open', 'in_progress', 'blocked'])
+const approvalStates = new Set([
+  'pending_quote', 'quote_ready', 'sent', 'approved', 'declined', 'deferred',
+])
+
+function noStoreJson(body: unknown, status: number) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  })
+}
+
+function noStoreResponse(response: NextResponse) {
+  response.headers.set('Cache-Control', 'no-store')
+  return response
+}
 
 function sameUuid(left: string, right: string) {
   return left.toLowerCase() === right.toLowerCase()
@@ -24,7 +39,11 @@ function assignmentEnvelope(input: {
 }) {
   if (!sameUuid(input.ticket.id, input.ticketId)) return null
   const job = input.ticket.jobs.find((candidate) => sameUuid(candidate.id, input.jobId))
-  if (!job || !activeWorkStatuses.has(job.workStatus)) return null
+  if (
+    !job ||
+    !activeWorkStatuses.has(job.workStatus) ||
+    !approvalStates.has(job.approvalState)
+  ) return null
 
   return {
     ticketId: input.ticketId,
@@ -37,6 +56,8 @@ function assignmentEnvelope(input: {
           ? 'unassigned' as const
           : 'team' as const,
     assignedTechName: job.assignedTech?.fullName ?? null,
+    approvalState: job.approvalState as
+      | 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred',
   }
 }
 
@@ -49,17 +70,17 @@ export async function POST(
     db,
   })
   if (!ctx) {
-    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    return noStoreJson({ error: 'unauthenticated' }, 401)
   }
 
   const denied = await paywallReject(db, ctx.user.id)
-  if (denied) return denied
+  if (denied) return noStoreResponse(denied)
 
   let body: unknown
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 })
+    return noStoreJson({ error: 'invalid_json' }, 400)
   }
 
   const { id, jobId } = await params
@@ -78,7 +99,7 @@ export async function POST(
             currentAssignee: { fullName: result.currentAssignee.fullName },
           }
         : { error: result.error }
-    return NextResponse.json(error, { status: ticketDomainStatus(result, 200) })
+    return noStoreJson(error, ticketDomainStatus(result, 200))
   }
   const assignment = assignmentEnvelope({
     ticket: result.ticket,
@@ -87,7 +108,7 @@ export async function POST(
     actorProfileId: ctx.profile.id,
   })
   if (!assignment) {
-    return NextResponse.json({ error: 'invalid_assignment_result' }, { status: 500 })
+    return noStoreJson({ error: 'invalid_assignment_result' }, 500)
   }
-  return NextResponse.json({ assignment }, { status: 200 })
+  return noStoreJson({ assignment }, 200)
 }

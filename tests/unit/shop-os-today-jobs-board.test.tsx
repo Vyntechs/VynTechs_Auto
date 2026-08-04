@@ -37,6 +37,7 @@ const linkedDiagnostic: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: 'session-41',
   workStatus: 'in_progress',
+  clockedOnSince: null,
   approvalState: 'pending_quote',
   canClaim: false,
   assignmentState: 'mine',
@@ -815,6 +816,7 @@ describe('TodayJobsBoard persisted ledger', () => {
           workStatus: 'open',
           state: 'mine',
           assignedTechName: 'Taylor Tech',
+          approvalState: 'pending_quote',
         },
       }),
     })
@@ -828,7 +830,11 @@ describe('TodayJobsBoard persisted ledger', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'claim', requestKey: ATTEMPT_ONE }),
+        body: JSON.stringify({
+          action: 'claim',
+          expectedApprovalState: 'pending_quote',
+          requestKey: ATTEMPT_ONE,
+        }),
       },
     ))
     expect(screen.getAllByRole('button')).toHaveLength(1)
@@ -860,6 +866,7 @@ describe('TodayJobsBoard persisted ledger', () => {
           workStatus: 'open',
           state: 'mine',
           assignedTechName: 'Taylor Tech',
+          approvalState: 'pending_quote',
         },
       }),
     } as Response)
@@ -1135,6 +1142,7 @@ describe('TodayJobsBoard parts handoff', () => {
           workStatus: 'open',
           state: 'team',
           assignedTechName: 'Avery Tech',
+          approvalState: 'pending_quote',
         },
       }),
     }))

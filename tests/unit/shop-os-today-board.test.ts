@@ -60,6 +60,7 @@ const baseJob: TodayTicketJob = {
   requiredSkillTier: 2,
   sessionId: null,
   workStatus: 'open',
+  clockedOnSince: null,
   approvalState: 'pending_quote',
   canClaim: true,
   assignmentState: 'unassigned',
@@ -136,6 +137,27 @@ describe('Today board projection', () => {
     expect(currentBoard.mine).toEqual([])
   })
 
+  it('keeps confirmed running-clock truth over stale props until newer server truth arrives', () => {
+    const beforeRunning = {
+      ...baseJob,
+      assignmentState: 'mine' as const,
+      canClaim: false,
+      workStatus: 'in_progress' as const,
+    }
+    const running = {
+      ...beforeRunning,
+      clockedOnSince: '2026-08-04T20:00:00.000Z',
+    }
+    const board = projectTodayBoard({
+      myJobs: [beforeRunning],
+      openJobs: [], teamJobs: [], createdJobs: [], partsJobs: [],
+      canDispatchWork: false,
+      overrides: new Map([[baseJob.id, createTodayJobOverride(beforeRunning, running)]]),
+    })
+
+    expect(board.mine).toEqual([running])
+  })
+
   it('moves a losing race to the team, creator recovery, or hidden lane by capability', () => {
     const lostRace = {
       ...baseJob,
@@ -181,6 +203,7 @@ describe('assignment envelope parsing', () => {
         workStatus: 'in_progress',
         state: 'team',
         assignedTechName: '  Avery Tech  ',
+        approvalState: 'approved',
         ignoredPrivateField: 'never merge me',
       },
     }, { ticketId: 'ticket-1', jobId: 'job-1' })).toEqual({
@@ -189,6 +212,7 @@ describe('assignment envelope parsing', () => {
       workStatus: 'in_progress',
       state: 'team',
       assignedTechName: 'Avery Tech',
+      approvalState: 'approved',
     })
   })
 
@@ -196,12 +220,14 @@ describe('assignment envelope parsing', () => {
     null,
     {},
     { assignment: null },
-    { assignment: { ticketId: 'wrong', jobId: 'job-1', workStatus: 'open', state: 'mine', assignedTechName: null } },
-    { assignment: { ticketId: 'ticket-1', jobId: 'wrong', workStatus: 'open', state: 'mine', assignedTechName: null } },
-    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'closed', state: 'mine', assignedTechName: null } },
-    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'foreign', assignedTechName: null } },
-    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'team', assignedTechName: 42 } },
-    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'team', assignedTechName: 'x'.repeat(121) } },
+    { assignment: { ticketId: 'wrong', jobId: 'job-1', workStatus: 'open', state: 'mine', assignedTechName: null, approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'wrong', workStatus: 'open', state: 'mine', assignedTechName: null, approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'closed', state: 'mine', assignedTechName: null, approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'foreign', assignedTechName: null, approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'team', assignedTechName: 42, approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'team', assignedTechName: 'x'.repeat(121), approvalState: 'approved' } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'mine', assignedTechName: null } },
+    { assignment: { ticketId: 'ticket-1', jobId: 'job-1', workStatus: 'open', state: 'mine', assignedTechName: null, approvalState: 'unknown' } },
   ])('fails closed for malformed or mismatched payload %#', (body) => {
     expect(parseAssignmentEnvelope(body, { ticketId: 'ticket-1', jobId: 'job-1' })).toBeNull()
   })
@@ -220,6 +246,7 @@ describe('Today live-feed parsing', () => {
     requiredSkillTier: 2,
     sessionId: null,
     workStatus: 'open',
+    clockedOnSince: null,
     approvalState: 'approved',
     canClaim: true,
     assignmentState: 'unassigned',
@@ -241,6 +268,19 @@ describe('Today live-feed parsing', () => {
     expect(parseTodayJobsResponse({
       todayJobs: {
         myJobs: [], openJobs: [{ ...liveJob, id: 'not-a-uuid' }], createdJobs: [], teamJobs: [], partsJobs: [],
+        readyToCollect: [], linkedSessionIds: [],
+      },
+    })).toBeNull()
+    const { clockedOnSince: _missingClockedOnSince, ...missingClockedOnSince } = liveJob
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [missingClockedOnSince], createdJobs: [], teamJobs: [], partsJobs: [],
+        readyToCollect: [], linkedSessionIds: [],
+      },
+    })).toBeNull()
+    expect(parseTodayJobsResponse({
+      todayJobs: {
+        myJobs: [], openJobs: [{ ...liveJob, clockedOnSince: 'not-a-time' }], createdJobs: [], teamJobs: [], partsJobs: [],
         readyToCollect: [], linkedSessionIds: [],
       },
     })).toBeNull()

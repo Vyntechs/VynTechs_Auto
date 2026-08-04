@@ -996,6 +996,7 @@ describe('TicketDetailScreen', () => {
         workStatus: 'open',
         state: 'team',
         assignedTechName: 'Angel Rivera',
+        approvalState: 'pending_quote',
       },
     }))
     vi.stubGlobal('fetch', fetchMock)
@@ -1040,6 +1041,7 @@ describe('TicketDetailScreen', () => {
         workStatus: 'open',
         state: 'mine',
         assignedTechName: 'Toni Tech',
+        approvalState: 'approved',
       },
     }))
     vi.stubGlobal('fetch', fetchMock)
@@ -1057,7 +1059,9 @@ describe('TicketDetailScreen', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-1/jobs/repair-open/assignment',
-      expect.objectContaining({ body: expect.stringMatching(/^\{"action":"claim","requestKey":"[0-9a-f-]+"\}$/) }),
+      expect.objectContaining({
+        body: expect.stringMatching(/^\{"action":"claim","expectedApprovalState":"approved","requestKey":"[0-9a-f-]+"\}$/),
+      }),
     )
     expect(screen.getByText('Assigned · Toni Tech')).toBeInTheDocument()
     expect(screen.queryByText('Not visible')).toBeNull()

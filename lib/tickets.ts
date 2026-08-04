@@ -363,6 +363,7 @@ export type TodayTicketJob = {
   requiredSkillTier: number
   sessionId: string | null
   workStatus: 'open' | 'in_progress' | 'blocked'
+  clockedOnSince: string | null
   approvalState: 'pending_quote' | 'quote_ready' | 'sent' | 'approved' | 'declined' | 'deferred'
   canClaim: boolean
   assignmentState: 'mine' | 'team' | 'unassigned'
@@ -447,14 +448,18 @@ export async function listTodayTicketJobs(
           isNull(ticketJobs.assignedTechId),
           eq(ticketJobs.workStatus, 'open'),
           lte(ticketJobs.requiredSkillTier, actor.skillTier),
+          inArray(ticketJobs.approvalState, ['pending_quote', 'quote_ready', 'sent', 'approved']),
         )
       : undefined
+  const allUnassignedOpenWork = and(
+    isNull(ticketJobs.assignedTechId),
+    eq(ticketJobs.workStatus, 'open'),
+  )
   const visibleOpenWork = canAssignWork(actor.role)
-    ? and(
-        isNull(ticketJobs.assignedTechId),
-        eq(ticketJobs.workStatus, 'open'),
-      )
-    : claimable
+    ? allUnassignedOpenWork
+    : actor.role === 'tech'
+      ? allUnassignedOpenWork
+      : claimable
   const createdActiveWork = and(
     eq(tickets.createdByProfileId, actor.profileId),
     inArray(ticketJobs.workStatus, ['open', 'in_progress', 'blocked']),
@@ -536,6 +541,7 @@ export async function listTodayTicketJobs(
       persistedSessionId: ticketJobs.sessionId,
       accessibleSessionId: sessions.id,
       workStatus: ticketJobs.workStatus,
+      clockedOnSince: ticketJobs.clockedOnSince,
       approvalState: ticketJobs.approvalState,
       createdByProfileId: tickets.createdByProfileId,
       assignedTechFullName: profiles.fullName,
@@ -596,6 +602,7 @@ export async function listTodayTicketJobs(
         WHEN ${ticketJobs.assignedTechId} IS NOT NULL THEN 2
         ELSE 3
       END`,
+      claimable ? sql`CASE WHEN ${claimable} THEN 0 ELSE 1 END` : sql`1`,
       asc(tickets.ticketNumber),
       asc(ticketJobs.createdAt),
       asc(ticketJobs.id),
@@ -630,10 +637,12 @@ export async function listTodayTicketJobs(
       requiredSkillTier: row.requiredSkillTier,
       sessionId: row.accessibleSessionId,
       workStatus: row.workStatus as TodayTicketJob['workStatus'],
+      clockedOnSince: row.clockedOnSince ? row.clockedOnSince.toISOString() : null,
       approvalState: row.approvalState,
       canClaim:
         row.assignedTechId === null &&
         row.workStatus === 'open' &&
+        ['pending_quote', 'quote_ready', 'sent', 'approved'].includes(row.approvalState) &&
         actor.skillTier !== null &&
         [1, 2, 3].includes(actor.skillTier) &&
         row.requiredSkillTier <= actor.skillTier,
@@ -730,8 +739,14 @@ const ticketJobBodySchema = z
     }
   })
 
+const claimApprovalStateSchema = z.enum(['pending_quote', 'quote_ready', 'sent', 'approved'])
+
 const assignmentBodySchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('claim'), requestKey: z.uuid() }).strict(),
+  z.object({
+    action: z.literal('claim'),
+    requestKey: z.uuid(),
+    expectedApprovalState: claimApprovalStateSchema,
+  }).strict(),
   z.object({ action: z.literal('unclaim'), requestKey: z.uuid() }).strict(),
   z
     .object({
@@ -1755,6 +1770,7 @@ export type TicketJobAssignmentDependencies = {
 type AssignmentContext = {
   ticketStatus: string
   workStatus: string
+  approvalState: typeof ticketJobs.$inferSelect.approvalState
   hasLiveDiagnosticStartLease: boolean
   requiredSkillTier: number
   assignedTechId: string | null
@@ -1773,6 +1789,7 @@ async function loadAssignmentContext(
     .select({
       ticketStatus: tickets.status,
       workStatus: ticketJobs.workStatus,
+      approvalState: ticketJobs.approvalState,
       hasLiveDiagnosticStartLease: sql<boolean>`
         ${ticketJobs.diagnosticStartState} = 'initializing'
         and ${ticketJobs.diagnosticStartLeaseUntil} > now()
@@ -1903,6 +1920,7 @@ type AssignmentReceiptIntent = {
   action: AssignmentBody['action']
   requestedAssignedTechId: string | null
   confirmBelowTier: boolean
+  expectedApprovalState: z.infer<typeof claimApprovalStateSchema> | null
 }
 
 function assignmentReceiptIntent(
@@ -1910,15 +1928,26 @@ function assignmentReceiptIntent(
   actorProfileId: string,
 ): AssignmentReceiptIntent {
   if (body.action === 'claim') {
-    return { action: body.action, requestedAssignedTechId: actorProfileId, confirmBelowTier: false }
+    return {
+      action: body.action,
+      requestedAssignedTechId: actorProfileId,
+      confirmBelowTier: false,
+      expectedApprovalState: body.expectedApprovalState,
+    }
   }
   if (body.action === 'unclaim') {
-    return { action: body.action, requestedAssignedTechId: null, confirmBelowTier: false }
+    return {
+      action: body.action,
+      requestedAssignedTechId: null,
+      confirmBelowTier: false,
+      expectedApprovalState: null,
+    }
   }
   return {
     action: body.action,
     requestedAssignedTechId: body.assignedTechId,
     confirmBelowTier: body.confirmBelowTier === true,
+    expectedApprovalState: null,
   }
 }
 
@@ -1928,9 +1957,14 @@ function receiptMatchesAssignmentIntent(
 ): boolean {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return false
   const record = payload as Record<string, unknown>
+  const recordedExpectedApprovalState = record.expectedApprovalState === undefined
+    && intent.action !== 'claim'
+    ? null
+    : record.expectedApprovalState
   return record.action === intent.action
     && record.requestedAssignedTechId === intent.requestedAssignedTechId
     && record.confirmBelowTier === intent.confirmBelowTier
+    && recordedExpectedApprovalState === intent.expectedApprovalState
 }
 
 async function claimTicketJob(
@@ -1939,6 +1973,7 @@ async function claimTicketJob(
   shopId: string,
   ticketId: string,
   jobId: string,
+  expectedApprovalState: z.infer<typeof claimApprovalStateSchema>,
 ): Promise<TicketJobAssignmentResult> {
   const [claimed] = await db
     .update(ticketJobs)
@@ -1953,6 +1988,7 @@ async function claimTicketJob(
         eq(ticketJobs.ticketId, ticketId),
         eq(ticketJobs.id, jobId),
         eq(ticketJobs.workStatus, 'open'),
+        eq(ticketJobs.approvalState, expectedApprovalState),
         isNull(ticketJobs.assignedTechId),
         sql`exists (
           select 1 from ${tickets}
@@ -1988,6 +2024,9 @@ async function claimTicketJob(
   const assignee = safeCurrentAssignee(context as AssignmentContext)
   if (assignee) {
     return { ok: false, error: 'assignment_conflict', currentAssignee: assignee }
+  }
+  if ((context as AssignmentContext).approvalState !== expectedApprovalState) {
+    return { ok: false, error: 'assignment_conflict' }
   }
   return { ok: false, error: 'invalid_assignee' }
 }
@@ -2216,7 +2255,14 @@ export async function mutateTicketJobAssignment(
 
     const before = await loadAssignmentContext(tx, shopId, parsedTicketId.data, parsedJobId.data)
     const result = body.action === 'claim'
-      ? await claimTicketJob(tx, input.actor, shopId, parsedTicketId.data, parsedJobId.data)
+      ? await claimTicketJob(
+          tx,
+          input.actor,
+          shopId,
+          parsedTicketId.data,
+          parsedJobId.data,
+          body.expectedApprovalState,
+        )
       : body.action === 'unclaim'
         ? await unclaimTicketJob(tx, input.actor, shopId, parsedTicketId.data, parsedJobId.data)
         : await reassignTicketJob(
@@ -2243,6 +2289,7 @@ export async function mutateTicketJobAssignment(
         action: intent.action,
         requestedAssignedTechId: intent.requestedAssignedTechId,
         confirmBelowTier: intent.confirmBelowTier,
+        expectedApprovalState: intent.expectedApprovalState,
         fromAssignedTechId: before.assignedTechId,
         toAssignedTechId: assigned,
       },
