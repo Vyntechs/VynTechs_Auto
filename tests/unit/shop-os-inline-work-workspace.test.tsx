@@ -24,6 +24,7 @@ vi.mock('@/components/screens/simple-work-workspace', () => ({
     embedded: boolean
     onClose: () => void
     onProjection: (work: { status: 'in_progress' }) => void
+    onStale?: () => void
   }) => (
     <section aria-label="Loaded work tool">
       <p>Work loaded {props.initialWorkspace.id}</p>
@@ -31,6 +32,7 @@ vi.mock('@/components/screens/simple-work-workspace', () => ({
       <p>Embedded {String(props.embedded)}</p>
       <button type="button" onClick={props.onClose}>Close work</button>
       <button type="button" onClick={() => props.onProjection({ status: 'in_progress' })}>Publish work state</button>
+      <button type="button" onClick={props.onStale}>Report stale work</button>
     </section>
   ),
 }))
@@ -49,6 +51,7 @@ describe('InlineWorkWorkspace', () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
     const onProjection = vi.fn()
+    const onStale = vi.fn()
     const fetchMock = vi.fn(async () => response({
       workspace,
       partRequests: [{
@@ -64,6 +67,7 @@ describe('InlineWorkWorkspace', () => {
       jobId={JOB}
       onClose={onClose}
       onProjection={onProjection}
+      onStale={onStale}
     />)
 
     expect(await screen.findByText(`Work loaded ${JOB}`)).toBeInTheDocument()
@@ -77,6 +81,8 @@ describe('InlineWorkWorkspace', () => {
     expect(onProjection).toHaveBeenCalledWith({ status: 'in_progress' })
     await user.click(screen.getByRole('button', { name: 'Close work' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Report stale work' }))
+    expect(onStale).toHaveBeenCalledTimes(1)
   })
 
   it('fails closed with the repair-order fallback when work truth is malformed', async () => {
@@ -89,5 +95,24 @@ describe('InlineWorkWorkspace', () => {
       'href',
       `/tickets/${TICKET}/jobs/${JOB}/work`,
     )
+  })
+
+  it('asks Today to refresh when the initial work read says access changed', async () => {
+    const onStale = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(async () => response({ error: 'not_found' }, 404)))
+
+    render(<InlineWorkWorkspace
+      ticket={ticket}
+      jobId={JOB}
+      onClose={vi.fn()}
+      onProjection={vi.fn()}
+      onStale={onStale}
+    />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Work could not be opened here')
+    expect(onStale).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Retry work' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open the full work page' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
   })
 })

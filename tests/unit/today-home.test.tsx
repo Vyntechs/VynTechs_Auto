@@ -309,9 +309,9 @@ describe('TodayHome', () => {
       announcement: 'Already claimed by Winner Tech',
     },
     {
-      label: 'generic winner',
+      label: 'nameless conflict',
       response: { error: 'assignment_conflict' },
-      announcement: 'This job was already claimed',
+      announcement: 'This job changed. Loading current shop truth.',
     },
   ])(
     'keeps the $label race announcement mounted after refreshed jobs become empty',

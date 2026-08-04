@@ -39,6 +39,7 @@ type Props = {
   embedded?: boolean
   onClose?: () => void
   onProjection?: (work: SimpleWorkProjectionView) => void
+  onStale?: () => void
   onEscalation?: (job: SimpleWorkEscalationView) => void
   onInterrupted?: (job: InterruptionJobView) => void
 }
@@ -88,6 +89,7 @@ export function SimpleWorkWorkspace({
   embedded = false,
   onClose,
   onProjection,
+  onStale,
   onEscalation,
   onInterrupted,
 }: Props) {
@@ -96,6 +98,7 @@ export function SimpleWorkWorkspace({
   const [note, setNote] = useState(initialWorkspace.workNotes ?? '')
   const [pending, setPending] = useState<Pending>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [stale, setStale] = useState(false)
   const [concern, setConcern] = useState('')
   const [tier, setTier] = useState<SimpleWorkDraftValues['tier']>('')
   const [createdConcern, setCreatedConcern] = useState(false)
@@ -105,6 +108,7 @@ export function SimpleWorkWorkspace({
   const [holdNote, setHoldNote] = useState('')
   const [draftReady, setDraftReady] = useState(false)
   const escalationAttempt = useRef<EscalationAttempt | null>(null)
+  const approvedScopeHeading = useRef<HTMLHeadingElement>(null)
   const restoredDraftScope = useRef<string | null>(null)
   const basePath = `/api/tickets/${ticket.id}/jobs/${workspace.id}`
   const hasOtherUnsavedDraft = note !== (workspace.workNotes ?? '')
@@ -127,6 +131,11 @@ export function SimpleWorkWorkspace({
   } : null
   const draftScopeKey = draftScope ? simpleWorkDraftStorageKey(draftScope) : null
   const draftRevision = draftScopeKey ? `${draftScopeKey}:${workspace.updatedAt}` : null
+
+  useEffect(() => {
+    if (!embedded || stale || workspace.authorization !== 'approved' || !workspace.approvedScope) return
+    approvedScopeHeading.current?.focus()
+  }, [embedded, stale, workspace.authorization, workspace.id])
 
   useEffect(() => {
     if (!draftScope || !draftScopeKey) {
@@ -220,6 +229,10 @@ export function SimpleWorkWorkspace({
   }
 
   function requestClose(): void {
+    if (stale) {
+      onClose?.()
+      return
+    }
     if (pending !== null || hasUnsavedDraft) {
       setNotice({ kind: 'error', text: 'Finish or clear the draft before closing work.' })
       return
@@ -244,10 +257,34 @@ export function SimpleWorkWorkspace({
 
   function stalePage() {
     if (embedded) {
-      setNotice({ kind: 'error', text: 'This work changed or is no longer assigned to you. The repair order is still open.' })
+      setStale(true)
+      setNotice(null)
+      onStale?.()
       return
     }
     router.replace(`/tickets/${ticket.id}`)
+  }
+
+  if (embedded && stale) {
+    return (
+      <section className={styles.embeddedScreen} aria-label="Work on this job">
+        <div className={styles.content}>
+          <header className={styles.hero}>
+            <div>
+              <p className={styles.eyebrow}>{WORK_KIND_LABEL[workspace.kind]} · assigned work</p>
+              <h1>{workspace.title}</h1>
+            </div>
+            <button className={styles.closeEmbedded} type="button" onClick={requestClose}>Close work</button>
+          </header>
+          <section className={styles.state} aria-labelledby="stale-work-heading">
+            <p className={styles.stateMark}>Refresh required</p>
+            <h2 id="stale-work-heading">Work access changed</h2>
+            <p>This work is no longer safe to change here. Review the current repair order before continuing.</p>
+            <Link className={styles.ticketLink} href={`/tickets/${ticket.id}`}>Review repair order</Link>
+          </section>
+        </div>
+      </section>
+    )
   }
 
   async function refreshWorkspace(): Promise<SimpleWorkWorkspaceView | null> {
@@ -418,7 +455,9 @@ export function SimpleWorkWorkspace({
           {embedded && <button className={styles.closeEmbedded} type="button" onClick={requestClose}>Close work</button>}
         </header>
 
-        {workspace.approvedScope && <ApprovedScope scope={workspace.approvedScope} />}
+        {workspace.approvedScope && (
+          <ApprovedScope scope={workspace.approvedScope} headingRef={approvedScopeHeading} />
+        )}
 
         {workspace.workStatus === 'done' ? (
           <section className={styles.state} aria-labelledby="work-complete">
@@ -561,12 +600,18 @@ export function SimpleWorkWorkspace({
   )
 }
 
-function ApprovedScope({ scope }: { scope: NonNullable<SimpleWorkWorkspaceView['approvedScope']> }) {
+function ApprovedScope({
+  scope,
+  headingRef,
+}: {
+  scope: NonNullable<SimpleWorkWorkspaceView['approvedScope']>
+  headingRef?: React.RefObject<HTMLHeadingElement | null>
+}) {
   return (
     <section className={styles.approvedScope} aria-labelledby="approved-scope-heading">
       <div>
         <p className={styles.eyebrow}>{scope.authorizationPurpose === 'diagnosis' ? 'Diagnostic authorization' : 'Approved scope'}</p>
-        <h2 id="approved-scope-heading">Exactly what is approved</h2>
+        <h2 id="approved-scope-heading" ref={headingRef} tabIndex={-1}>Exactly what is approved</h2>
       </div>
       <ul>
         {scope.lines.map((line, index) => (

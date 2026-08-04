@@ -61,6 +61,21 @@ type DiagnosticStartBody = {
   warning?: unknown
 }
 
+type ClaimApprovalState = Extract<
+  TodayTicketJob['approvalState'],
+  'pending_quote' | 'quote_ready' | 'sent' | 'approved'
+>
+
+type ClaimAttempt = {
+  requestKey: string
+  expectedApprovalState: ClaimApprovalState
+}
+
+type TodayRefreshOptions = {
+  allowWhileWorkspace?: boolean
+  discardOverrideJobId?: string
+}
+
 const duplicateCostWarning =
   'This diagnostic may already have used a paid provider call. Starting again could create a duplicate cost.'
 const uuidPattern =
@@ -152,7 +167,7 @@ export function TodayJobsBoard({
   } | null>(null)
   const claimButtons = useRef(new Map<string, HTMLButtonElement>())
   const diagnosticButtons = useRef(new Map<string, HTMLButtonElement>())
-  const claimAttempts = useRef(new Map<string, string>())
+  const claimAttempts = useRef(new Map<string, ClaimAttempt>())
   useEffect(() => {
     setServerJobs({
       myJobs,
@@ -174,7 +189,9 @@ export function TodayJobsBoard({
       || activeRingOutTicketId !== null
   }, [activeQuoteJob, activeWorkJob, activeRingOutTicketId])
 
-  const refreshTodayJobs = useCallback(async () => {
+  const refreshTodayJobs = useCallback(async (
+    options: TodayRefreshOptions = {},
+  ): Promise<boolean> => {
     try {
       const response = await fetch('/api/today/jobs', {
         headers: { accept: 'application/json' },
@@ -182,7 +199,16 @@ export function TodayJobsBoard({
       })
       const body: unknown = await response.json().catch(() => null)
       const fresh = response.ok ? parseTodayJobsResponse(body) : null
-      if (!fresh || activeWorkspaceRef.current) return
+      if (!fresh || (activeWorkspaceRef.current && !options.allowWhileWorkspace)) return false
+      const discardOverrideJobId = options.discardOverrideJobId
+      if (discardOverrideJobId) {
+        setJobOverrides((current) => {
+          if (!current.has(discardOverrideJobId)) return current
+          const next = new Map(current)
+          next.delete(discardOverrideJobId)
+          return next
+        })
+      }
       setServerJobs(fresh)
       // Fresh server truth supersedes the local echo of a payment or closure;
       // another advisor may have collected against the same repair order.
@@ -196,11 +222,20 @@ export function TodayJobsBoard({
         }
         return next
       })
+      return true
     } catch {
       // The displayed server truth remains useful when a background refresh
       // misses. Do not interrupt a technician with a transient network toast.
+      return false
     }
   }, [])
+
+  const refreshStaleWorkTruth = useCallback((jobId: string) => {
+    void refreshTodayJobs({
+      allowWhileWorkspace: true,
+      discardOverrideJobId: jobId,
+    })
+  }, [refreshTodayJobs])
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -261,8 +296,12 @@ export function TodayJobsBoard({
 
   async function claim(job: TodayTicketJob) {
     if (pendingJobId) return
-    const requestKey = claimAttempts.current.get(job.id) ?? crypto.randomUUID()
-    claimAttempts.current.set(job.id, requestKey)
+    if (!['pending_quote', 'quote_ready', 'sent', 'approved'].includes(job.approvalState)) return
+    const attempt = claimAttempts.current.get(job.id) ?? {
+      requestKey: crypto.randomUUID(),
+      expectedApprovalState: job.approvalState as ClaimApprovalState,
+    }
+    claimAttempts.current.set(job.id, attempt)
     let returnFocusToBoard = false
     let returnFocusToRow = false
 
@@ -277,8 +316,8 @@ export function TodayJobsBoard({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             action: 'claim',
-            expectedApprovalState: job.approvalState,
-            requestKey,
+            expectedApprovalState: attempt.expectedApprovalState,
+            requestKey: attempt.requestKey,
           }),
         },
       )
@@ -292,6 +331,7 @@ export function TodayJobsBoard({
         if (!assignment) {
           applyJobTruth(job, { ...job, canClaim: false })
           setClaimSafetyBlocks((current) => new Set(current).add(job.id))
+          claimAttempts.current.delete(job.id)
           setAnnouncement({
             kind: 'error',
             text: `Repair order ${job.ticketNumber} changed, but this screen couldn't safely catch up. Open the repair order.`,
@@ -302,6 +342,7 @@ export function TodayJobsBoard({
         const updatedJob: TodayTicketJob = {
           ...job,
           workStatus: assignment.workStatus,
+          approvalState: assignment.approvalState,
           assignmentState: assignment.state,
           assignedTechName: assignment.assignedTechName,
           canClaim: false,
@@ -315,6 +356,17 @@ export function TodayJobsBoard({
             : `Repair order ${job.ticketNumber} assignment updated.`,
         })
         const lane = placeTodayJob(updatedJob, canDispatchWork)
+        if (assignment.state === 'mine'
+          && assignment.approvalState === 'approved'
+          && job.customerName !== null
+          && job.vehicle !== null
+          && canUseManualWork({
+            kind: job.kind,
+            sessionId: job.sessionId,
+            diagnosticsEntitled,
+          })) {
+          setActiveWorkJob(updatedJob)
+        }
         returnFocusToBoard = lane === 'hidden'
         returnFocusToRow = lane !== 'hidden'
         return
@@ -339,22 +391,28 @@ export function TodayJobsBoard({
         const safeWinner = trimmedWinner.length > 0 && trimmedWinner.length <= 120
           ? trimmedWinner
           : null
-        const updatedJob: TodayTicketJob = {
-          ...job,
-          assignmentState: 'team',
-          assignedTechName: safeWinner,
-          canClaim: false,
+        claimAttempts.current.delete(job.id)
+        if (safeWinner) {
+          const updatedJob: TodayTicketJob = {
+            ...job,
+            assignmentState: 'team',
+            assignedTechName: safeWinner,
+            canClaim: false,
+          }
+          applyJobTruth(job, updatedJob)
+          setAnnouncement({ kind: 'status', text: `Already claimed by ${safeWinner}.` })
+          const lane = placeTodayJob(updatedJob, canDispatchWork)
+          returnFocusToBoard = lane === 'hidden'
+          returnFocusToRow = lane !== 'hidden'
+          return
         }
-        applyJobTruth(job, updatedJob)
-        setAnnouncement({
-          kind: 'status',
-          text: safeWinner
-            ? `Already claimed by ${safeWinner}.`
-            : 'This job was already claimed.',
-        })
-        const lane = placeTodayJob(updatedJob, canDispatchWork)
-        returnFocusToBoard = lane === 'hidden'
-        returnFocusToRow = lane !== 'hidden'
+        setAnnouncement({ kind: 'status', text: 'This job changed. Loading current shop truth.' })
+        const refreshed = await refreshTodayJobs()
+        if (!refreshed) {
+          applyJobTruth(job, { ...job, canClaim: false })
+          setClaimSafetyBlocks((current) => new Set(current).add(job.id))
+        }
+        returnFocusToBoard = true
         return
       }
 
@@ -486,18 +544,26 @@ export function TodayJobsBoard({
     // making the confirmation disappear mid-task.
     if (work.status === 'open' || work.status === 'in_progress') {
       const workStatus: TodayTicketJob['workStatus'] = work.status
-      setServerJobs((current) => {
-        const update = (candidate: TodayTicketJob) => candidate.id === job.id
-          ? { ...candidate, workStatus }
-          : candidate
-        return {
-          ...current,
-          myJobs: current.myJobs.map(update),
-          openJobs: current.openJobs.map(update),
-          teamJobs: current.teamJobs.map(update),
-          createdJobs: current.createdJobs.map(update),
-          partsJobs: current.partsJobs.map(update),
+      setJobOverrides((current) => {
+        const next = new Map(current)
+        const existing = next.get(job.id)
+        if (existing) {
+          next.set(job.id, {
+            before: existing.before,
+            after: {
+              ...existing.after,
+              workStatus,
+              clockedOnSince: work.clockedOnSince,
+            },
+          })
+          return next
         }
+        next.set(job.id, createTodayJobOverride(job, {
+          ...job,
+          workStatus,
+          clockedOnSince: work.clockedOnSince,
+        }))
+        return next
       })
     }
   }
@@ -706,6 +772,7 @@ export function TodayJobsBoard({
     onOpenWork: setActiveWorkJob,
     onCloseWork: closeWork,
     onWorkProjection: applyWorkProjection,
+    onWorkStale: refreshStaleWorkTruth,
     onInterrupted: applyInterruptedWork,
     onResolveHold: applyResolvedHold,
   }
@@ -1012,6 +1079,7 @@ function JobSection({
   onOpenWork,
   onCloseWork,
   onWorkProjection,
+  onWorkStale,
   onInterrupted,
   onResolveHold,
 }: {
@@ -1054,6 +1122,7 @@ function JobSection({
   onOpenWork?: (job: TodayTicketJob) => void
   onCloseWork?: (job: TodayTicketJob) => void
   onWorkProjection?: (job: TodayTicketJob, work: SimpleWorkProjectionView) => void
+  onWorkStale?: (jobId: string) => void
   onInterrupted?: (job: TodayTicketJob, interrupted: InterruptionJobView) => void
   onResolveHold?: (job: TodayTicketJob, resolved: InterruptionJobView) => void
 }) {
@@ -1065,7 +1134,11 @@ function JobSection({
       </div>
       <div className={styles.ledger}>
         {jobs.map((job) => (
-          <div key={job.id} className={styles.jobSlot}>
+          <div
+            key={job.id}
+            className={styles.jobSlot}
+            data-work-open={activeWorkJobId === job.id ? 'true' : undefined}
+          >
             <JobRow
               job={job}
               mode={mode}
@@ -1127,6 +1200,7 @@ function JobSection({
                   }}
                   jobId={job.id}
                   onProjection={(work) => onWorkProjection?.(job, work)}
+                  onStale={() => onWorkStale?.(job.id)}
                   onInterrupted={(interrupted) => onInterrupted?.(job, interrupted)}
                   onClose={() => onCloseWork?.(job)}
                 />
