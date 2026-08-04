@@ -29,7 +29,9 @@ function builder(
       canRecordCustomerApproval: canApprove,
       ...(canCreateCustomerApprovalLink ? { canCreateCustomerApprovalLink: true } : {}),
     },
-    activeVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, jobs: [{ jobId: JOB, subtotalCents: 84217 }] },
+    activeVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, contentFingerprint: 'a'.repeat(64), jobs: [{ jobId: JOB, subtotalCents: 84217 }] },
+    lastPreparedVersion: { id: VERSION, versionNumber: 3, totalCents: 91638, contentFingerprint: 'a'.repeat(64), state: 'current' },
+    draftCommitment: null,
   }
 }
 
@@ -167,8 +169,10 @@ describe('Shop OS exact-version approval UI', () => {
       id: NEWER_VERSION,
       versionNumber: 4,
       totalCents: 92_500,
+      contentFingerprint: 'b'.repeat(64),
       jobs: [{ jobId: JOB, subtotalCents: 85_000 }],
     }
+    newer.lastPreparedVersion = { id: NEWER_VERSION, versionNumber: 4, totalCents: 92_500, contentFingerprint: 'b'.repeat(64), state: 'current' }
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -436,7 +440,8 @@ describe('Shop OS exact-version approval UI', () => {
 
   it('refreshes an exact retry on a newer version without labeling the attempted version', async () => {
     const newer = builder(true, { state: 'approved', quoteVersionId: NEWER_VERSION })
-    newer.activeVersion = { id: NEWER_VERSION, versionNumber: 4, totalCents: 92500, jobs: [{ jobId: JOB, subtotalCents: 85000 }] }
+    newer.activeVersion = { id: NEWER_VERSION, versionNumber: 4, totalCents: 92500, contentFingerprint: 'b'.repeat(64), jobs: [{ jobId: JOB, subtotalCents: 85000 }] }
+    newer.lastPreparedVersion = { id: NEWER_VERSION, versionNumber: 4, totalCents: 92500, contentFingerprint: 'b'.repeat(64), state: 'current' }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ changed: false, event: { id: '00000000-0000-4000-8000-000000000501', kind: 'approved', quoteVersionId: NEWER_VERSION, jobId: JOB, approvedVia: 'in_person' }, projection: { approvalState: 'approved', approvedQuoteVersionId: NEWER_VERSION } }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ builder: newer }) })

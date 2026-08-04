@@ -88,6 +88,8 @@ function line(overrides: Partial<BuilderLine> = {}): BuilderLine {
     fitment: 'Front axle', laborHours: null, laborRateCents: null,
     source: 'manual', mutable: true,
     ...overrides,
+    lineFingerprint: overrides.lineFingerprint
+      ?? ((overrides.source ?? 'manual') === 'manual' ? 'a'.repeat(64) : null),
   }
 }
 
@@ -102,10 +104,21 @@ const activeVersion = (versionNumber = 3) => ({
   id: VERSION_ID,
   versionNumber,
   totalCents: 32_281,
+  contentFingerprint: 'b'.repeat(64),
   jobs: [{ jobId: JOB_ID, subtotalCents: 31_250 }],
 })
 
 function builder(overrides: Partial<Builder> = {}): Builder {
+  const selectedActiveVersion = overrides.activeVersion === undefined ? activeVersion() : overrides.activeVersion
+  const selectedLastPreparedVersion = overrides.lastPreparedVersion === undefined
+    ? selectedActiveVersion && {
+      id: selectedActiveVersion.id,
+      versionNumber: selectedActiveVersion.versionNumber,
+      totalCents: selectedActiveVersion.totalCents,
+      contentFingerprint: selectedActiveVersion.contentFingerprint,
+      state: 'current' as const,
+    }
+    : overrides.lastPreparedVersion
   return {
     ticket: { id: TICKET_ID, status: 'open', reconciled: true },
     configuration: {
@@ -130,8 +143,10 @@ function builder(overrides: Partial<Builder> = {}): Builder {
       ],
     }],
     capabilities: { canRecordCustomerApproval: true },
-    activeVersion: activeVersion(),
     ...overrides,
+    activeVersion: selectedActiveVersion,
+    lastPreparedVersion: selectedLastPreparedVersion,
+    draftCommitment: overrides.draftCommitment ?? null,
   }
 }
 

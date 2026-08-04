@@ -188,6 +188,7 @@ export type QuoteBuilderResult =
             laborHours: string | null
             source: 'manual' | 'vendor_offer'
             mutable: boolean
+            lineFingerprint: string | null
           }
         >
       }>
@@ -199,7 +200,22 @@ export type QuoteBuilderResult =
         id: string
         versionNumber: number
         totalCents: number
+        contentFingerprint: string
         jobs: Array<{ jobId: string; subtotalCents: number }>
+      } | null
+      lastPreparedVersion: {
+        id: string
+        versionNumber: number
+        totalCents: number
+        contentFingerprint: string
+        state: 'current' | 'superseded'
+      } | null
+      draftCommitment: {
+        algorithm: 'quote-draft-v1-sha256'
+        fingerprint: string
+        totalCents: number
+        jobCount: number
+        lineCount: number
       } | null
     }
   }
@@ -586,6 +602,7 @@ function safeBuilderLine(
     laborHours: string | null
     source: 'manual' | 'vendor_offer'
     mutable: boolean
+    lineFingerprint: string | null
   } {
   const safe = safeManualDraftLine(line)
   const quantity = canonicalStoredDecimal(line.quantity, 3)
@@ -598,6 +615,7 @@ function safeBuilderLine(
       laborHours: null,
       source: 'vendor_offer',
       mutable: false,
+      lineFingerprint: null,
     }
   }
   if (!isMutableManualLine(line)) throw new TypeError('persisted manual line is invalid')
@@ -607,6 +625,7 @@ function safeBuilderLine(
     laborHours: line.laborHours === null ? null : canonicalStoredDecimal(line.laborHours, 2),
     source: 'manual',
     mutable: true,
+    lineFingerprint: manualDraftLineFingerprint(line),
   }
 }
 
@@ -674,13 +693,13 @@ export async function getQuoteBuilder(
       if (eligibleJobs.length > 500) {
         return { ok: false as const, error: 'conflict' as const, retryable: false }
       }
-      const eligibleJobIds = eligibleJobs.map((job) => job.id)
-      const lines = eligibleJobIds.length === 0 ? [] : await transactionDb
+      const allJobIds = allJobs.map((job) => job.id)
+      const lines = allJobIds.length === 0 ? [] : await transactionDb
         .select()
         .from(jobLines)
         .where(and(
           eq(jobLines.shopId, actor.shopId as string),
-          inArray(jobLines.jobId, eligibleJobIds),
+          inArray(jobLines.jobId, allJobIds),
         ))
         .orderBy(jobLines.sort, jobLines.createdAt, jobLines.id)
       const diagnosticSessionIds = [...new Set(eligibleJobs
@@ -782,24 +801,31 @@ export async function getQuoteBuilder(
           ) return 'ordinary_locked_tree' as const
           return 'unavailable' as const
         }
+        const validatedVersions = versions.map((version) => {
+          if (!Number.isInteger(version.versionNumber) || version.versionNumber < 1
+            || version.versionNumber > MAX_POSTGRES_INTEGER) {
+            throw new RangeError('quote version number is unsafe')
+          }
+          const snapshot = validatedHistoricalQuoteSnapshot(version.snapshot, ticket)
+          return { version, snapshot, contentFingerprint: quoteSnapshotFingerprint(snapshot) }
+        })
         const activeVersion = activeVersions[0]
         let activeVersionProjection: Extract<QuoteBuilderResult, { ok: true }>['builder']['activeVersion'] = null
         let activeSnapshot: QuoteSnapshotV1 | null = null
         let activeSnapshotJobIds = new Set<string>()
         if (activeVersion) {
-          const snapshot = validatedQuoteSnapshot(activeVersion.snapshot, ticket)
+          const validatedActive = validatedVersions.find(({ version }) => version.id === activeVersion.id)
+          if (!validatedActive) throw new TypeError('active quote version is missing')
+          const { snapshot, contentFingerprint } = validatedActive
           const visibleJobIds = new Set(eligibleJobs.map((job) => job.id))
           if (snapshot.jobs.some((job) => !visibleJobIds.has(job.id))) {
             throw new TypeError('active quote snapshot contains a hidden job')
-          }
-          if (!Number.isInteger(activeVersion.versionNumber) || activeVersion.versionNumber < 1
-            || activeVersion.versionNumber > MAX_POSTGRES_INTEGER) {
-            throw new RangeError('active quote version number is unsafe')
           }
           activeVersionProjection = {
             id: safeUuid(activeVersion.id),
             versionNumber: activeVersion.versionNumber,
             totalCents: snapshot.totals.totalCents,
+            contentFingerprint,
             jobs: snapshot.jobs.map((job) => ({
               jobId: job.id,
               subtotalCents: job.totals.subtotalCents,
@@ -808,6 +834,46 @@ export async function getQuoteBuilder(
           activeSnapshotJobIds = new Set(snapshot.jobs.map((job) => job.id))
           activeSnapshot = snapshot
         }
+        const latestPrepared = validatedVersions.reduce<typeof validatedVersions[number] | null>(
+          (latest, candidate) => latest === null || candidate.version.versionNumber > latest.version.versionNumber
+            ? candidate : latest,
+          null,
+        )
+        if (activeVersionProjection && (!latestPrepared || latestPrepared.version.id !== activeVersionProjection.id)) {
+          throw new TypeError('active quote version is not the latest prepared version')
+        }
+        if (!activeVersionProjection && latestPrepared?.version.supersededAt === null) {
+          throw new TypeError('current prepared version is missing from the active projection')
+        }
+        const lastPreparedVersion = latestPrepared === null ? null : {
+          id: safeUuid(latestPrepared.version.id),
+          versionNumber: latestPrepared.version.versionNumber,
+          totalCents: latestPrepared.snapshot.totals.totalCents,
+          contentFingerprint: latestPrepared.contentFingerprint,
+          state: latestPrepared.version.supersededAt === null ? 'current' as const : 'superseded' as const,
+        }
+        const hasVersionableLines = allJobs.some((job) => job.workStatus !== 'canceled'
+          && !isPinnedSimpleWork(job) && lines.some((line) => line.jobId === job.id))
+        const draftCommitment = ticket.customerId === null || ticket.vehicleId === null
+          || shop.taxRateBps === null || !hasVersionableLines
+          ? null
+          : (() => {
+            const snapshot = buildQuoteSnapshot({
+              ticket,
+              shop: { id: actor.shopId as string, laborRateCents: shop.laborRateCents, taxRateBps: shop.taxRateBps },
+              jobs: allJobs,
+              lines,
+              versions: [],
+              actorId: actor.id,
+            })
+            return {
+              algorithm: 'quote-draft-v1-sha256' as const,
+              fingerprint: quoteSnapshotFingerprint(snapshot),
+              totalCents: snapshot.totals.totalCents,
+              jobCount: snapshot.jobs.length,
+              lineCount: snapshot.jobs.reduce((count, job) => count + job.lines.length, 0),
+            }
+          })()
         return {
           ok: true as const,
           builder: {
@@ -852,6 +918,8 @@ export async function getQuoteBuilder(
                 canRecordCustomerApproval(actor.role) && isCustomerApprovalEnabled(),
             },
             activeVersion: activeVersionProjection,
+            lastPreparedVersion,
+            draftCommitment,
           },
         }
       } catch (error) {
@@ -1289,6 +1357,47 @@ function requireBoundedJson(value: unknown, maxBytes: number): void {
   }
 }
 
+function fingerprint(namespace: string, value: unknown): string {
+  return createHash('sha256')
+    .update(namespace)
+    .update(JSON.stringify(canonicalizeJson(value)))
+    .digest('hex')
+}
+
+/** Opaque binding to the exact validated customer-facing quote snapshot. */
+export function quoteSnapshotFingerprint(snapshot: QuoteSnapshotV1): string {
+  return fingerprint('shop-os-quote-draft-v1\0', validatedQuoteSnapshot(snapshot))
+}
+
+/** Opaque compare-and-swap token for a mutable persisted manual line. */
+export function manualDraftLineFingerprint(line: typeof jobLines.$inferSelect): string {
+  if (!isMutableManualLine(line)) throw new TypeError('line is not a mutable manual draft line')
+  if (!(line.updatedAt instanceof Date) || Number.isNaN(line.updatedAt.getTime())) {
+    throw new TypeError('line revision is invalid')
+  }
+  return fingerprint('shop-os-manual-line-v1\0', {
+    shopId: safeUuid(line.shopId),
+    jobId: safeUuid(line.jobId),
+    lineId: safeUuid(line.id),
+    updatedAt: line.updatedAt.toISOString(),
+    kind: line.kind,
+    description: line.description,
+    sort: line.sort,
+    quantity: line.quantity,
+    priceCents: line.priceCents,
+    taxable: line.taxable,
+    partNumber: line.partNumber,
+    brand: line.brand,
+    unitCostCents: line.unitCostCents,
+    coreChargeCents: line.coreChargeCents,
+    fitment: line.fitment,
+    laborHours: line.laborHours,
+    laborRateCents: line.laborRateCents,
+    source: line.source,
+    partStatus: line.partStatus,
+  })
+}
+
 function canonicalStoredDecimal(value: number, scale: number): string {
   if (!Number.isFinite(value)) throw new RangeError('persisted decimal is unsafe')
   return formatScaledDecimal(parseScaledDecimal(String(value), scale), scale)
@@ -1531,6 +1640,17 @@ export function validatedQuoteSnapshot(
     || snapshot.totals.taxCents !== ticketTotals.taxCents
     || snapshot.totals.totalCents !== ticketTotals.totalCents) {
     throw new TypeError('quote snapshot ticket totals are invalid')
+  }
+  return snapshot
+}
+
+function validatedHistoricalQuoteSnapshot(
+  snapshotValue: unknown,
+  ticket: Pick<typeof tickets.$inferSelect, 'id' | 'ticketNumber'>,
+): QuoteSnapshotV1 {
+  const snapshot = validatedQuoteSnapshot(snapshotValue)
+  if (snapshot.ticket.id !== ticket.id || snapshot.ticket.number !== ticket.ticketNumber) {
+    throw new TypeError('historical quote snapshot ticket does not match')
   }
   return snapshot
 }

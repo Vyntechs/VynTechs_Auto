@@ -31,10 +31,13 @@ describe('quote preparation readiness', () => {
         sort: 0, quantity: '1', priceCents: 10_000, taxable: false,
         partNumber: null, brand: null, coreChargeCents: null, fitment: null,
         laborHours: '1', laborRateCents: null, source: 'manual', mutable: true,
+        lineFingerprint: 'a'.repeat(64),
       }],
     }],
     capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
+    lastPreparedVersion: null,
+    draftCommitment: null,
   })!
 
   it('allows explicitly priced persisted labor without a global labor rate', () => {
@@ -78,8 +81,12 @@ describe('quote preparation readiness', () => {
       ...readyBuilder,
       activeVersion: {
         id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
-        totalCents: 10_825,
+        totalCents: 10_825, contentFingerprint: 'a'.repeat(64),
         jobs: [{ jobId: '00000000-0000-4000-8000-000000000201', subtotalCents: 10_000 }],
+      },
+      lastPreparedVersion: {
+        id: '00000000-0000-4000-8000-000000000401', versionNumber: 4,
+        totalCents: 10_825, contentFingerprint: 'a'.repeat(64), state: 'current' as const,
       },
     }
     expect(getQuotePreparationState({
@@ -215,6 +222,7 @@ describe('quote builder refresh projection validation', () => {
         priceCents: 500, taxable: true, partNumber: null, brand: null,
         coreChargeCents: null, fitment: null, laborHours: null, laborRateCents: null,
         source: 'manual', mutable: true,
+        lineFingerprint: 'a'.repeat(64),
       }],
     }],
     capabilities: {
@@ -222,6 +230,8 @@ describe('quote builder refresh projection validation', () => {
       canCreateCustomerApprovalLink: false,
     },
     activeVersion: null,
+    lastPreparedVersion: null,
+    draftCommitment: null,
   }
 
   it('accepts the complete exact safe projection', () => {
@@ -233,6 +243,27 @@ describe('quote builder refresh projection validation', () => {
     expect(parseQuoteBuilderProjection(unavailable)).toEqual(unavailable)
   })
 
+  it('requires exact canonical commitment and line-revision truth', () => {
+    const committed = {
+      ...valid,
+      draftCommitment: {
+        algorithm: 'quote-draft-v1-sha256', fingerprint: 'a'.repeat(64), totalCents: 500,
+        jobCount: 1, lineCount: 1,
+      },
+      lastPreparedVersion: null,
+      jobs: [{
+        ...valid.jobs[0],
+        lines: [{ ...valid.jobs[0].lines[0], lineFingerprint: 'b'.repeat(64) }],
+      }],
+      activeVersion: null,
+    }
+    expect(parseQuoteBuilderProjection(committed)).toEqual(committed)
+    expect(parseQuoteBuilderProjection({
+      ...committed,
+      jobs: [{ ...committed.jobs[0], lines: [{ ...committed.jobs[0].lines[0], lineFingerprint: 'B'.repeat(64) }] }],
+    })).toBeNull()
+  })
+
   it('accepts only immutable customer-safe sourced parts', () => {
     const sourced = {
       ...valid.jobs[0].lines[0],
@@ -241,6 +272,7 @@ describe('quote builder refresh projection validation', () => {
       priceCents: 12_000,
       source: 'vendor_offer',
       mutable: false,
+      lineFingerprint: null,
     }
     const projection = { ...valid, jobs: [{ ...valid.jobs[0], lines: [sourced] }] }
     expect(parseQuoteBuilderProjection(projection)).toEqual(projection)

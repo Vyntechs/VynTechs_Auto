@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getQuoteBuilder, type QuoteActor } from '@/lib/shop-os/quotes'
+import { getQuoteBuilder, quoteSnapshotFingerprint, type QuoteActor } from '@/lib/shop-os/quotes'
 import {
   customers, jobLines, profiles, quoteVersions, sessionEvents, sessions, shops, ticketJobs, tickets,
   vehicles, vendorAccounts,
@@ -108,7 +108,7 @@ describe('Shop OS quote builder read model', () => {
 
   it('returns only row-18-safe configuration, eligible jobs, and manual line fields', async () => {
     const result = await getQuoteBuilder(db, { actor, ticketId })
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       builder: {
         ticket: { id: ticketId, status: 'open', reconciled: false },
@@ -150,6 +150,41 @@ describe('Shop OS quote builder read model', () => {
     expect(serialized).not.toContain('estimate-42')
     expect(serialized).not.toContain('lastEditedByProfileId')
     expect(serialized).not.toContain('customerId')
+  })
+
+  it('projects canonical draft and mutable-line commitments from the exact persisted quote truth', async () => {
+    await db.update(tickets).set({ customerId: uuid(10), vehicleId: uuid(11) }).where(eq(tickets.id, ticketId))
+    const result = await getQuoteBuilder(db, { actor, ticketId })
+    expect(result).toMatchObject({
+      ok: true,
+      builder: {
+        draftCommitment: {
+          algorithm: 'quote-draft-v1-sha256',
+          fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+          totalCents: 28_686,
+          jobCount: 1,
+          lineCount: 2,
+        },
+        lastPreparedVersion: null,
+        jobs: [{ lines: [
+          { id: uuid(40), lineFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) },
+          { id: uuid(41), lineFingerprint: null },
+        ] }],
+      },
+    })
+    const snapshot = {
+      schemaVersion: 1,
+      ticket: { id: ticketId, number: 7, customerId: uuid(10), vehicleId: uuid(11), laborRateCents: 15_000, taxRateBps: 825 },
+      jobs: [{
+        id: uuid(30), title: 'Front brakes', kind: 'repair', customerStory: null, storyMeta: null,
+        lines: [{ id: uuid(40), kind: 'fee', description: 'Shop supplies', quantity: '1', priceCents: 500,
+          taxable: false, partNumber: null, brand: null, coreChargeCents: null, fitment: null,
+          laborHours: null, laborRateCents: null, source: 'manual', vendorContext: null }],
+        attachments: [], totals: { subtotalCents: 500, taxableSubtotalCents: 0 },
+      }],
+      totals: { subtotalCents: 500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 500 },
+    }
+    expect(quoteSnapshotFingerprint(snapshot as never)).toBe(quoteSnapshotFingerprint(snapshot as never))
   })
 
   it('fails closed instead of hiding malformed sourced truth', async () => {
@@ -422,22 +457,22 @@ describe('Shop OS quote builder read model', () => {
       totals: { subtotalCents: 12_500, taxableSubtotalCents: 12_500, taxCents: 1_031, totalCents: 13_531 },
     }
     await db.insert(quoteVersions).values([
-      { id: uuid(50), shopId, ticketId, versionNumber: 1, snapshot, createdByProfileId: uuid(1) },
-      { id: uuid(51), shopId, ticketId, versionNumber: 2, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
+      { id: uuid(50), shopId, ticketId, versionNumber: 1, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
+      { id: uuid(51), shopId, ticketId, versionNumber: 2, snapshot, createdByProfileId: uuid(1) },
     ])
-    await db.update(ticketJobs).set({ approvalState: 'approved', approvedQuoteVersionId: uuid(50) }).where(eq(ticketJobs.id, uuid(30)))
+    await db.update(ticketJobs).set({ approvalState: 'approved', approvedQuoteVersionId: uuid(51) }).where(eq(ticketJobs.id, uuid(30)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
-      ok: true, builder: { jobs: [{ approval: { state: 'approved', quoteVersionId: uuid(50) } }] },
+      ok: true, builder: { jobs: [{ approval: { state: 'approved', quoteVersionId: uuid(51) } }] },
     })
-    await db.update(ticketJobs).set({ approvedQuoteVersionId: uuid(51) }).where(eq(ticketJobs.id, uuid(30)))
+    await db.update(ticketJobs).set({ approvedQuoteVersionId: uuid(50) }).where(eq(ticketJobs.id, uuid(30)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
       ok: false, error: 'conflict', retryable: false,
     })
-    await db.update(ticketJobs).set({ approvedQuoteVersionId: uuid(50) }).where(eq(ticketJobs.id, uuid(30)))
+    await db.update(ticketJobs).set({ approvedQuoteVersionId: uuid(51) }).where(eq(ticketJobs.id, uuid(30)))
     await db.execute(sql`alter table quote_versions disable trigger all`)
     await db.update(quoteVersions).set({
       snapshot: { ...snapshot, jobs: [{ ...snapshot.jobs[0], id: uuid(31), lines: [{ ...snapshot.jobs[0].lines[0], id: uuid(41) }] }] },
-    }).where(eq(quoteVersions.id, uuid(50)))
+    }).where(eq(quoteVersions.id, uuid(51)))
     await db.execute(sql`alter table quote_versions enable trigger all`)
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
       ok: false, error: 'conflict', retryable: false,

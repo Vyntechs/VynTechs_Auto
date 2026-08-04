@@ -105,6 +105,7 @@ const builder = {
     partsMarkupBps: null, laborRateConfigured: true, taxRateConfigured: true,
   },
   jobs: [], capabilities: { canRecordCustomerApproval: true }, activeVersion: null,
+  lastPreparedVersion: null, draftCommitment: null,
 } satisfies QuoteBuilder
 const props = () => ({ params: Promise.resolve({ id: ticketId }) })
 
