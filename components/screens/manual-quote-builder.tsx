@@ -15,6 +15,7 @@ import {
   parseQuoteDecisionResponse,
   parsePreparedVersionResponse,
   summarizeQuoteMoney,
+  type DraftCommitment,
   type ManualLineFormValues,
   type ManualLineKind,
 } from '@/lib/shop-os/quote-builder-ui'
@@ -43,6 +44,7 @@ import {
 import { AddDiagnosticTime } from './add-diagnostic-time'
 import { AddRepairJob } from './add-repair-job'
 import { ManualPartSourcing } from './manual-part-sourcing'
+import { QuoteCommitmentPanel } from './quote-commitment-panel'
 import styles from './manual-quote-builder.module.css'
 
 type QuoteBuilder = Extract<QuoteBuilderResult, { ok: true }>['builder']
@@ -130,6 +132,7 @@ export function ManualQuoteBuilder({
   const currentRef = useRef(builder)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
+  const [prepareConfirmation, setPrepareConfirmation] = useState<PrepareConfirmation | null>(null)
   const [error, setError] = useState<{
     message: string
     refresh: boolean
@@ -415,7 +418,7 @@ export function ManualQuoteBuilder({
     builder: current,
     totals,
     editorOpen: editor !== null || sourcingJob !== null,
-    modalOpen: modal !== null,
+    modalOpen: modal !== null || prepareConfirmation !== null,
     busy,
   })
   // Findings that exist must be reviewed before the quote goes out. Findings
@@ -612,7 +615,12 @@ export function ManualQuoteBuilder({
     nextFocus?: string,
     closeEditor = false,
     nested = false,
-    expectedVersion?: { id: string; versionNumber: number },
+    expectedVersion?: {
+      id?: string
+      versionNumber?: number
+      contentFingerprint: string
+      totalCents: number
+    },
     expectedAppliedJob?: {
       id: string
       title: string
@@ -642,8 +650,12 @@ export function ManualQuoteBuilder({
         return false
       }
       if (expectedVersion && (
-        refreshed.activeVersion?.id !== expectedVersion.id
-        || refreshed.activeVersion.versionNumber !== expectedVersion.versionNumber
+        !refreshed.activeVersion
+        || (expectedVersion.id !== undefined && refreshed.activeVersion.id !== expectedVersion.id)
+        || (expectedVersion.versionNumber !== undefined
+          && refreshed.activeVersion.versionNumber !== expectedVersion.versionNumber)
+        || refreshed.activeVersion.contentFingerprint !== expectedVersion.contentFingerprint
+        || refreshed.activeVersion.totalCents !== expectedVersion.totalCents
       )) {
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return false
@@ -694,6 +706,12 @@ export function ManualQuoteBuilder({
       const editorLineStillExists = editor?.mode !== 'edit' || refreshed.jobs.some((job) =>
         job.id === editor.jobId && job.lines.some((line) => line.id === editor.line?.id))
       if (closeEditor || !editorLineStillExists) setEditor(null)
+      else if (editor?.mode === 'edit' && editor.line) {
+        const refreshedLine = refreshed.jobs
+          .find((job) => job.id === editor.jobId)?.lines
+          .find((line) => line.id === editor.line?.id)
+        if (refreshedLine) setEditor((active) => active ? { ...active, line: refreshedLine } : null)
+      }
       if (nextFocus) setFocusTarget(nextFocus)
       return true
     } catch {
@@ -740,7 +758,7 @@ export function ManualQuoteBuilder({
     const url = editor.mode === 'create' ? base : `${base}/${editor.line?.id}`
     const body = editor.mode === 'create'
       ? { clientKey: editor.clientKey, line }
-      : line
+      : { expectedLineFingerprint: editor.line?.lineFingerprint, line }
     if (!beginOperation('line')) return
     setError(null)
     try {
@@ -751,6 +769,16 @@ export function ManualQuoteBuilder({
       })
       const result = await readJson(response)
       if (!response.ok) {
+        if (response.status === 409 && editor.mode === 'edit') {
+          const refreshed = await refreshQuote(undefined, false, true)
+          if (refreshed) {
+            setError({
+              message: 'This line changed elsewhere. Your typed changes are still here.',
+              refresh: false,
+            })
+          }
+          return
+        }
         applyFailure(response.status, result)
         return
       }
@@ -781,11 +809,25 @@ export function ManualQuoteBuilder({
     try {
       const response = await fetch(
         `/api/tickets/${ticket.id}/quote/jobs/${removeTarget.jobId}/lines/${removeTarget.line.id}`,
-        { method: 'DELETE', headers: { accept: 'application/json' } },
+        {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ expectedLineFingerprint: removeTarget.line.lineFingerprint }),
+        },
       )
       const body = await readJson(response)
       if (!response.ok) {
         closeModal()
+        if (response.status === 409) {
+          const refreshed = await refreshQuote(`line:${removeTarget.line.id}`, false, true)
+          if (refreshed) {
+            setError({
+              message: 'This line changed elsewhere. Review the updated line before removing it.',
+              refresh: false,
+            })
+          }
+          return
+        }
         applyFailure(response.status, body)
         return
       }
@@ -851,21 +893,49 @@ export function ManualQuoteBuilder({
     if (refreshed) setPendingSourcedRemoval(null)
   }
 
+  function openPrepare(invoker: HTMLButtonElement): void {
+    if (preparation.kind !== 'ready' || !current.draftCommitment || inFlightRef.current) return
+    setError(null)
+    setPrepareConfirmation({
+      kind: 'prepare', commitment: { ...current.draftCommitment }, invoker,
+    })
+  }
+
+  function cancelPrepare(): void {
+    if (!prepareConfirmation || inFlightRef.current) return
+    setPrepareConfirmation(null)
+    setFocusTarget('prepare-action')
+  }
+
   async function prepareQuote(): Promise<void> {
-    if (preparation.kind !== 'ready' || !beginOperation('prepare')) return
+    if (!prepareConfirmation || !beginOperation('prepare')) return
+    const pending = prepareConfirmation
     setError(null)
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/quote/versions`, {
         method: 'POST',
-        headers: { accept: 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ expectedDraftFingerprint: pending.commitment.fingerprint }),
       })
       const body = await readJson(response)
       if (!response.ok) {
+        if (response.status === 409) {
+          const refreshed = await refreshQuote('quote-commitment', false, true)
+          setPrepareConfirmation(null)
+          if (refreshed) {
+            setError({
+              message: 'The quote changed elsewhere. Review the updated quote before preparing again.',
+              refresh: false,
+            })
+          }
+          return
+        }
         applyFailure(response.status, body)
         return
       }
       const prepared = parsePreparedVersionResponse(response.status, body)
       if (!prepared) {
+        setPrepareConfirmation(null)
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
         return
       }
@@ -873,14 +943,35 @@ export function ManualQuoteBuilder({
       // first authorization strip, rather than leaving it on a passive status
       // message below a long mobile quote workspace.
       const firstDecisionJob = current.jobs.find((job) => job.workStatus === 'open')
-      await refreshQuote(
+      const settled = await refreshQuote(
         firstDecisionJob ? `decision:${firstDecisionJob.id}` : 'prepared',
         false,
         true,
-        prepared.version,
+        {
+          ...prepared.version,
+          contentFingerprint: pending.commitment.fingerprint,
+          totalCents: pending.commitment.totalCents,
+        },
       )
+      if (settled) {
+        setPrepareConfirmation(null)
+        setConfirmedTarget('prepared')
+      }
     } catch {
-      setError({ message: 'Connection interrupted. Retry with the same details.', refresh: false })
+      const settled = await refreshQuote(
+        'prepared', false, true,
+        {
+          contentFingerprint: pending.commitment.fingerprint,
+          totalCents: pending.commitment.totalCents,
+        },
+      )
+      if (settled) {
+        setPrepareConfirmation(null)
+        setConfirmedTarget('prepared')
+      } else {
+        setPrepareConfirmation(null)
+        setError({ message: 'Preparation could not be confirmed. Review the current quote before retrying.', refresh: true })
+      }
     } finally {
       endOperation()
     }
@@ -1471,112 +1562,70 @@ export function ManualQuoteBuilder({
           )}
         </section>
 
-        <aside className={styles.tape} aria-label="Quote totals">
-          <p className={styles.eyebrow}>Live quote tape</p>
-          <h2>{current.activeVersion ? 'Prepared quote' : 'Current draft'}</h2>
-          {!current.activeVersion && (!totals.ok ? (
-            <div className={styles.blocked}>
-              <strong>Totals unavailable</strong>
-              <p>Stored quote money could not be totaled safely. Review the quote data.</p>
-            </div>
-          ) : (
-            <dl className={styles.totalList}>
-              <div>
-                <dt>Subtotal</dt>
-                <dd className={styles.money}>{formatMoneyCents(totals.subtotalCents)}</dd>
-              </div>
-              <div>
-                <dt>Taxable subtotal</dt>
-                <dd className={styles.money}>{formatMoneyCents(totals.taxableSubtotalCents)}</dd>
-              </div>
-              {totals.taxConfigured ? (
+        <QuoteCommitmentPanel
+          builder={current}
+          totals={totals}
+          preparation={preparation}
+          editorDirty={editor?.dirty === true}
+          preparing={operation === 'prepare'}
+          confirmation={prepareConfirmation?.commitment ?? null}
+          preparedFocusRef={(element) => {
+            if (element) focusRefs.current.set('prepared', element)
+            else focusRefs.current.delete('prepared')
+          }}
+          headingFocusRef={(element) => {
+            if (element) focusRefs.current.set('quote-commitment', element)
+            else focusRefs.current.delete('quote-commitment')
+          }}
+          prepareActionRef={(element) => {
+            if (element) focusRefs.current.set('prepare-action', element)
+            else focusRefs.current.delete('prepare-action')
+          }}
+          onOpenPrepare={openPrepare}
+          onCancelPrepare={cancelPrepare}
+          onConfirmPrepare={() => { void prepareQuote() }}
+          railStatic={current.activeVersion !== null || editor !== null || sourcingJob !== null
+            || modal !== null || decision !== null || error !== null}
+          settled={confirmedTarget === 'prepared'}
+          preparedActions={current.activeVersion ? <>
+            {approvalLinkEligible && (
+              <section className={styles.approvalLink} aria-label="Customer approval link">
                 <div>
-                  <dt>Tax</dt>
-                  <dd className={styles.money}>{formatMoneyCents(totals.taxCents)}</dd>
+                  <strong>Customer link</strong>
+                  <p>Copy the exact prepared quote. Waiting begins only when this secure link is opened.</p>
+                  {approvalLinkStatus && (
+                    <p className={styles.approvalLinkStatus} role="status" aria-label="Customer link update" aria-live="polite">
+                      {approvalLinkStatus}
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <div className={styles.unavailable}>
-                  <dt>Tax — Not configured</dt>
-                  <dd>—</dd>
-                </div>
-              )}
-              <div className={styles.grandTotal}>
-                <dt>Total</dt>
-                <dd className={totals.totalCents === null ? undefined : styles.money}>
-                  {totals.totalCents === null
-                    ? 'Total unavailable'
-                    : formatMoneyCents(totals.totalCents)}
-                </dd>
-              </div>
-            </dl>
-          ))}
-          {!current.activeVersion && <p className={styles.version}>No prepared version</p>}
-          {preparation.kind === 'prepared' ? (
-            <div className={styles.preparedState}>
-              <p role="status" aria-live="polite" tabIndex={-1} ref={(element) => {
-                if (element) focusRefs.current.set('prepared', element)
-                else focusRefs.current.delete('prepared')
-              }}>Prepared version V{preparation.version.versionNumber}</p>
-              {approvalLinkEligible && (
-                <section className={styles.approvalLink} aria-label="Customer approval link">
-                  <div>
-                    <strong>Customer link</strong>
-                    <p>Copy the exact prepared quote. Waiting begins only when this secure link is opened.</p>
-                    {approvalLinkStatus && (
-                      <p className={styles.approvalLinkStatus} role="status" aria-label="Customer link update" aria-live="polite">
-                        {approvalLinkStatus}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void copyCustomerApprovalLink()}
-                  >
-                    {operation === 'approval-link' ? 'Securing…'
-                      : approvalLinkCopied ? 'Replace customer link'
-                        : 'Copy customer link'}
-                  </button>
-                </section>
-              )}
-              {current.activeVersion?.jobs.map((versionJob) => {
-                const job = current.jobs.find((candidate) => candidate.id === versionJob.jobId)
-                return job ? (
-                  <AuthorizationStrip
-                    key={job.id}
-                    job={job}
-                    versionNumber={current.activeVersion!.versionNumber}
-                    jobSubtotalCents={versionJob.subtotalCents}
-                    totalCents={current.activeVersion!.totalCents}
-                    canDecide={current.capabilities.canRecordCustomerApproval}
-                    immediateVerdict={decisionVerdicts[job.id]}
-                    focusRef={(element) => {
-                      if (element) focusRefs.current.set(`decision:${job.id}`, element)
-                      else focusRefs.current.delete(`decision:${job.id}`)
-                    }}
-                    onDecision={(kind, invoker) => openDecision(job, kind, invoker)}
-                  />
-                ) : null
-              })}
-            </div>
-          ) : (
-            <div className={styles.prepareState}>
-              {preparation.kind === 'blocked' && (
-                <ul>
-                  {preparation.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                </ul>
-              )}
-              <button
-                type="button"
-                className={styles.prepareAction}
-                disabled={preparation.kind !== 'ready'}
-                onClick={prepareQuote}
-              >
-                {operation === 'prepare' ? 'Preparing…' : 'Prepare quote'}
-              </button>
-            </div>
-          )}
-        </aside>
+                <button type="button" disabled={busy} onClick={() => void copyCustomerApprovalLink()}>
+                  {operation === 'approval-link' ? 'Securing…'
+                    : approvalLinkCopied ? 'Replace customer link' : 'Copy customer link'}
+                </button>
+              </section>
+            )}
+            {current.activeVersion.jobs.map((versionJob) => {
+              const job = current.jobs.find((candidate) => candidate.id === versionJob.jobId)
+              return job ? (
+                <AuthorizationStrip
+                  key={job.id}
+                  job={job}
+                  versionNumber={current.activeVersion!.versionNumber}
+                  jobSubtotalCents={versionJob.subtotalCents}
+                  totalCents={current.activeVersion!.totalCents}
+                  canDecide={current.capabilities.canRecordCustomerApproval}
+                  immediateVerdict={decisionVerdicts[job.id]}
+                  focusRef={(element) => {
+                    if (element) focusRefs.current.set(`decision:${job.id}`, element)
+                    else focusRefs.current.delete(`decision:${job.id}`)
+                  }}
+                  onDecision={(kind, invoker) => openDecision(job, kind, invoker)}
+                />
+              ) : null
+            })}
+          </> : undefined}
+        />
       </div>
 
       {error && (
@@ -1689,6 +1738,11 @@ export function ManualQuoteBuilder({
 
 type BuilderLine = QuoteBuilder['jobs'][number]['lines'][number]
 type BuilderJob = QuoteBuilder['jobs'][number]
+type PrepareConfirmation = {
+  kind: 'prepare'
+  commitment: DraftCommitment
+  invoker: HTMLButtonElement
+}
 type DecisionState = {
   jobId: string
   title: string
@@ -2034,7 +2088,7 @@ function LineEditor({
       </label>
       <div className={styles.editorActions}>
         <button type="button" className={styles.lineAction} disabled={busy} onClick={onCancel}>Cancel</button>
-        <button type="submit" className={styles.lineAction} disabled={busy}>{busy ? 'Saving…' : 'Save line'}</button>
+        <button type="submit" className={styles.primaryAction} data-primary-action="true" disabled={busy}>{busy ? 'Saving…' : 'Save line'}</button>
       </div>
     </form>
   )

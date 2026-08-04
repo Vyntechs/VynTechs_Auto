@@ -37,7 +37,10 @@ describe('quote preparation readiness', () => {
     capabilities: { canRecordCustomerApproval: false },
     activeVersion: null,
     lastPreparedVersion: null,
-    draftCommitment: null,
+    draftCommitment: {
+      algorithm: 'quote-draft-v1-sha256', fingerprint: 'd'.repeat(64),
+      totalCents: 10_000, jobCount: 1, lineCount: 1,
+    },
   })!
 
   it('allows explicitly priced persisted labor without a global labor rate', () => {
@@ -47,6 +50,14 @@ describe('quote preparation readiness', () => {
       totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
       editorOpen: false, modalOpen: false, busy: false,
     })).toEqual({ kind: 'ready', reasons: [] })
+  })
+
+  it('fails closed when the server has not projected an exact draft commitment', () => {
+    expect(getQuotePreparationState({
+      builder: { ...readyBuilder, draftCommitment: null },
+      totals: summarizeQuoteMoney(readyBuilder.jobs[0].lines, 825),
+      editorOpen: false, modalOpen: false, busy: false,
+    })).toEqual({ kind: 'blocked', reasons: ['Refresh quote commitment.'] })
   })
 
   it('accepts an explicit server-projected customer-link capability', () => {
@@ -71,7 +82,7 @@ describe('quote preparation readiness', () => {
       totals: { ok: false }, editorOpen: true, modalOpen: true, busy: true,
     })).toEqual({ kind: 'blocked', reasons: [
       'Add customer and vehicle.', 'Configure a tax rate in shop settings.', 'Add at least one quote line.',
-      'Review stored quote amounts.', 'Finish or cancel the open line editor.',
+      'Review stored quote amounts.', 'Refresh quote commitment.', 'Finish or cancel the open line editor.',
       'Finish the open confirmation.', 'Wait for the current quote update.',
     ] })
   })

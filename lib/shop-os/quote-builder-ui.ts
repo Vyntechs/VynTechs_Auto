@@ -13,7 +13,8 @@ import {
 } from '@/lib/shop-os/customer-story-contracts'
 
 const MAX_SAFE_CENTS = BigInt(Number.MAX_SAFE_INTEGER)
-type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder']
+export type QuoteBuilderProjection = Extract<QuoteBuilderResult, { ok: true }>['builder']
+export type DraftCommitment = NonNullable<QuoteBuilderProjection['draftCommitment']>
 
 const safeMoneySchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const uuidSchema = z.uuid().transform((value) => value.toLowerCase())
@@ -456,6 +457,15 @@ export function getQuotePreparationState(input: {
     reasons.push('Add at least one quote line.')
   }
   if (!input.totals.ok) reasons.push('Review stored quote amounts.')
+  const projectedLineCount = input.builder.jobs.reduce((count, job) => count + job.lines.length, 0)
+  if (!input.builder.draftCommitment
+    || !input.totals.ok
+    || input.totals.totalCents === null
+    || input.builder.draftCommitment.totalCents !== input.totals.totalCents
+    || input.builder.draftCommitment.jobCount !== input.builder.jobs.length
+    || input.builder.draftCommitment.lineCount !== projectedLineCount) {
+    reasons.push('Refresh quote commitment.')
+  }
   if (input.editorOpen) reasons.push('Finish or cancel the open line editor.')
   if (input.modalOpen) reasons.push('Finish the open confirmation.')
   if (input.busy) reasons.push('Wait for the current quote update.')
