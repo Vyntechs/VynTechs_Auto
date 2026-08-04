@@ -457,12 +457,13 @@ export function getQuotePreparationState(input: {
     reasons.push('Add at least one quote line.')
   }
   if (!input.totals.ok) reasons.push('Review stored quote amounts.')
-  const projectedLineCount = input.builder.jobs.reduce((count, job) => count + job.lines.length, 0)
+  const versionableJobs = input.builder.jobs.filter((job) => job.lines.length > 0)
+  const projectedLineCount = versionableJobs.reduce((count, job) => count + job.lines.length, 0)
   if (!input.builder.draftCommitment
     || !input.totals.ok
     || input.totals.totalCents === null
     || input.builder.draftCommitment.totalCents !== input.totals.totalCents
-    || input.builder.draftCommitment.jobCount !== input.builder.jobs.length
+    || input.builder.draftCommitment.jobCount !== versionableJobs.length
     || input.builder.draftCommitment.lineCount !== projectedLineCount) {
     reasons.push('Refresh quote commitment.')
   }

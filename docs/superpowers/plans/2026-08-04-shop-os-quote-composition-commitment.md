@@ -16,6 +16,8 @@
 
 **Implementation proof note (2026-08-04):** Tasks 1–3 are committed. Task 4's focused gate is green: 275 tests, TypeScript, diff integrity, and four production-component browser cases at phone and desktop widths. The browser proof found two product defects before convergence: a fixed phone rail could cover an add-line control, and a failed refresh after malformed success could remove the only safe recovery action. Both now have regression tests and pass the four-case proof. The full exact-head release gate and linked PR remain open.
 
+**Consolidated review note (2026-08-04):** Static, security, and runtime reviewers inspected clean candidate `d41bebd`. The one repair wave fixed every Important finding: active customer/vehicle truth again uses strict validation while superseded history stays readable; an open Prepare plate freezes other quote mutations; a concurrently removed edited line preserves typed fields as an explicit idempotent new-line save; versionable job counts ignore unpriced work; the harness refuses active Buzz/Nostr auth secrets; and browser proof now checks prepared focus plus intermediate 44px controls. It also repaired the stale story-review regression file. The repaired focused gate is 9 files / 290 tests, TypeScript, diff integrity, and 4/4 browser cases. Focused re-review and the complete exact-head gate remain open.
+
 ## Global constraints
 
 - One implementation owner executes Tasks 1–3 in order. Task reviewers inspect each committed task before the next task starts. Static, security, and runtime reviewers may run in parallel only after the integrated implementation is ready.
@@ -416,11 +418,12 @@ node node_modules/vitest/vitest.mjs run \
 node_modules/.bin/tsc --noEmit --pretty false
 git diff --check
 env -u DATABASE_URL -u DATABASE_URL_DIRECT -u SUPABASE_SERVICE_ROLE_KEY -u VERCEL_ENV \
+  -u BUZZ_AUTH_TAG -u BUZZ_PRIVATE_KEY -u NOSTR_PRIVATE_KEY \
   PLAYWRIGHT_USE_SYSTEM_CHROME=1 \
   corepack pnpm@10.18.3 exec playwright test --config playwright.quote-composition-commitment.config.ts
 ```
 
-- [ ] **Step 4: Commit proof and establish a clean candidate head**
+- [x] **Step 4: Commit proof and establish a clean candidate head**
 
 ```bash
 git config user.name
@@ -442,7 +445,7 @@ git rev-parse HEAD
 node scripts/test-shards.mjs
 node_modules/.bin/tsc --noEmit --pretty false
 corepack pnpm@10.18.3 build
-env -u DATABASE_URL -u DATABASE_URL_DIRECT -u SUPABASE_SERVICE_ROLE_KEY -u VERCEL_ENV PLAYWRIGHT_USE_SYSTEM_CHROME=1 corepack pnpm@10.18.3 exec playwright test --config playwright.quote-composition-commitment.config.ts
+env -u DATABASE_URL -u DATABASE_URL_DIRECT -u SUPABASE_SERVICE_ROLE_KEY -u VERCEL_ENV -u BUZZ_AUTH_TAG -u BUZZ_PRIVATE_KEY -u NOSTR_PRIVATE_KEY PLAYWRIGHT_USE_SYSTEM_CHROME=1 corepack pnpm@10.18.3 exec playwright test --config playwright.quote-composition-commitment.config.ts
 git diff --check
 git status --porcelain
 git rev-parse HEAD

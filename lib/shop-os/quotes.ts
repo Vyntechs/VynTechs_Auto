@@ -817,7 +817,12 @@ export async function getQuoteBuilder(
         if (activeVersion) {
           const validatedActive = validatedVersions.find(({ version }) => version.id === activeVersion.id)
           if (!validatedActive) throw new TypeError('active quote version is missing')
-          const { snapshot, contentFingerprint } = validatedActive
+          // Historical versions survive later identity correction, but active
+          // customer authority must still match the ticket's current bound
+          // customer and vehicle. Never reuse the relaxed historical check for
+          // the one version the product presents as current and actionable.
+          const snapshot = validatedQuoteSnapshot(validatedActive.snapshot, ticket)
+          const contentFingerprint = quoteSnapshotFingerprint(snapshot)
           const visibleJobIds = new Set(eligibleJobs.map((job) => job.id))
           if (snapshot.jobs.some((job) => !visibleJobIds.has(job.id))) {
             throw new TypeError('active quote snapshot contains a hidden job')

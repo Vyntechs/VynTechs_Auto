@@ -1905,20 +1905,40 @@ describe('ManualQuoteBuilder line mutations', () => {
     expect(screen.getByText('Front pad set')).toBeInTheDocument()
   })
 
-  it('closes an edit when refreshed server truth no longer contains its line', async () => {
+  it('preserves a stale edit as an explicit new line when server truth removed its original', async () => {
     const withoutLine = builder({
+      activeVersion: null,
       jobs: [{ ...builder().jobs[0], lines: builder().jobs[0].lines.slice(1) }],
     })
-    vi.spyOn(globalThis, 'fetch')
+    const restored = builder({
+      activeVersion: null,
+      jobs: [{
+        ...withoutLine.jobs[0],
+        lines: [
+          ...withoutLine.jobs[0].lines,
+          line({ id: NEW_LINE_ID, description: 'Locally edited', lineFingerprint: 'e'.repeat(64) }),
+        ],
+      }],
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(409, { error: 'conflict', retryable: true }))
       .mockResolvedValueOnce(response(200, { builder: withoutLine }))
+      .mockResolvedValueOnce(response(201, { changed: true, line: { id: NEW_LINE_ID } }))
+      .mockResolvedValueOnce(response(200, { builder: restored }))
     render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edit Front pad set' }))
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Locally edited' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     await screen.findByText('This line changed elsewhere. Your typed changes are still here.')
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Edit part line' })).toBeNull())
+    expect(screen.getByRole('heading', { name: 'Add part line' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Description')).toHaveValue('Locally edited')
     expect(screen.queryByText('Front pad set')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    expect(await screen.findByText('Locally edited')).toBeInTheDocument()
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+      line: { description: 'Locally edited' },
+    })
   })
 
   it('uses labeled decimal keyboards, 44px controls, and never renders hidden quote controls', () => {
@@ -2041,6 +2061,21 @@ describe('ManualQuoteBuilder preparation', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('makes the frozen Prepare plate the sole quote-mutation boundary', () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    const ledger = screen.getByRole('region', { name: 'Jobs on this quote' })
+    expect(ledger).toHaveAttribute('inert')
+    expect(screen.getAllByTestId('quote-background')[0].querySelectorAll('[data-primary-action="true"]'))
+      .toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Add part' }))
+    expect(screen.queryByRole('heading', { name: 'Add part line' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Prepare this exact quote?' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it.each([
     [201, { changed: false, version: { id: VERSION_ID, versionNumber: 1 } }],
     [200, { changed: false, version: { id: 'bad', versionNumber: 1 } }],
@@ -2068,6 +2103,7 @@ describe('ManualQuoteBuilder preparation', () => {
     await screen.findByText('Review the visible fields, then refresh and retry.')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+    expect(screen.getByRole('heading', { name: 'Prepared V4' })).toHaveFocus()
   })
 
   it('keeps explicit refresh available after a failed malformed-success recovery', async () => {
@@ -2090,6 +2126,7 @@ describe('ManualQuoteBuilder preparation', () => {
     const retry = screen.getByRole('button', { name: 'Refresh quote' })
     fireEvent.click(retry)
     expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+    expect(screen.getByRole('heading', { name: 'Prepared V4' })).toHaveFocus()
   })
 
   it('rejects refreshed truth that does not contain the exact prepared version', async () => {

@@ -43,6 +43,9 @@ describe('quote composition commitment proof harness safety', () => {
     'NEXT_PUBLIC_SUPABASE_URL',
     'NEXT_PUBLIC_SUPABASE_ANON_KEY',
     'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+    'BUZZ_AUTH_TAG',
+    'BUZZ_PRIVATE_KEY',
+    'NOSTR_PRIVATE_KEY',
   ])('rejects presence of %s without reading or echoing its value', (name) => {
     const sentinel = 'must-not-appear-in-error'
     let message = ''

@@ -445,8 +445,10 @@ test('real Quote Bench finishes, corrects, and prepares exact V1/V2 truth', asyn
   expect(fixture.ledger).toHaveLength(beforePrepare)
   await expect(page.getByRole('heading', { name: 'Prepare this exact quote?' })).toBeFocused()
   await expect(page.getByText('Customer will see $322.81')).toBeVisible()
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'V1 commitment plate')
   await page.getByRole('button', { name: 'Prepare $322.81' }).click()
   await expect(page.getByRole('heading', { name: 'Prepared V1' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Authorization for Replace front brakes' })).toBeFocused()
 
   await page.getByRole('button', { name: 'Edit Front pad set' }).click()
   await page.getByLabel('Description', { exact: true }).fill('Front pads and hardware')
@@ -460,8 +462,10 @@ test('real Quote Bench finishes, corrects, and prepares exact V1/V2 truth', asyn
 
   await page.getByRole('button', { name: 'Prepare quote' }).click()
   await expect(page.getByText('Customer will see $322.81')).toBeVisible()
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'V2 commitment plate')
   await page.getByRole('button', { name: 'Prepare $322.81' }).click()
   await expect(page.getByRole('heading', { name: 'Prepared V2' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Authorization for Replace front brakes' })).toBeFocused()
   const tape = page.getByRole('complementary', { name: 'Quote totals' })
   await expect(tape).toHaveAttribute('data-settled', 'true')
   await expect(tape).toHaveCSS('animation-duration', '0.2s')
@@ -517,6 +521,7 @@ test('real Quote Bench recovers interrupted, stale, malformed, and late-success 
   await expect(page.getByText('Locally edited pads', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Remove Locally edited pads' }).click()
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'line removal confirmation')
   await page.getByRole('button', { name: 'Confirm remove' }).click()
   await expect(page.getByText('This line changed elsewhere. Review the updated line before removing it.')).toBeVisible()
   await page.getByRole('button', { name: 'Remove Server-retained pads' }).click()
@@ -526,18 +531,21 @@ test('real Quote Bench recovers interrupted, stale, malformed, and late-success 
   await addLine(page, 'fee', { description: 'Shop supplies', price: '5.00' })
   const staleTotal = total(fixture.lines).totalCents
   await page.getByRole('button', { name: 'Prepare quote' }).click()
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'stale commitment plate')
   await page.getByRole('button', { name: `Prepare $${(staleTotal / 100).toFixed(2)}` }).click()
   await expect(page.getByText('The quote changed elsewhere. Review the updated quote before preparing again.')).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Prepare this exact quote?' })).toHaveCount(0)
 
   const currentTotal = total(fixture.lines).totalCents
   await page.getByRole('button', { name: 'Prepare quote' }).click()
+  await expectVisibleInteractiveTargetsAtLeast44(page, 'recovery commitment plate')
   await page.getByRole('button', { name: `Prepare $${(currentTotal / 100).toFixed(2)}` }).click()
   await expect(page.getByText('Review the visible fields, then refresh and retry.')).toBeVisible()
   await page.getByRole('button', { name: 'Refresh quote' }).click()
   await expect(page.getByRole('button', { name: 'Refresh quote' })).toBeVisible()
   await page.getByRole('button', { name: 'Refresh quote' }).click()
   await expect(page.getByRole('heading', { name: 'Prepared V1' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Prepared V1' })).toBeFocused()
   expect(fixture.versionPosts).toBe(2)
 
   const tape = page.getByRole('complementary', { name: 'Quote totals' })

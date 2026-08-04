@@ -358,7 +358,7 @@ describe('Shop OS quote builder read model', () => {
       totals: { subtotalCents: 500, taxableSubtotalCents: 0, taxCents: 0, totalCents: 500 },
     }
     await db.insert(quoteVersions).values([
-      { id: uuid(99), shopId, ticketId, versionNumber: 9, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
+      { id: uuid(99), shopId, ticketId, versionNumber: 9, snapshot, createdByProfileId: uuid(1) },
       { id: uuid(51), shopId, ticketId, versionNumber: 8, snapshot, createdByProfileId: uuid(1), supersededAt: new Date() },
     ])
     await db.insert(customers).values({ id: uuid(12), shopId, name: 'New customer', phone: '5550001212' })
@@ -366,6 +366,11 @@ describe('Shop OS quote builder read model', () => {
     await db.update(tickets).set({ customerId: uuid(12), vehicleId: uuid(13) }).where(eq(tickets.id, ticketId))
     await db.update(ticketJobs).set({ title: 'Current brake work' }).where(eq(ticketJobs.id, uuid(30)))
 
+    await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toEqual({
+      ok: false, error: 'conflict', retryable: false,
+    })
+    await db.update(quoteVersions).set({ supersededAt: new Date() })
+      .where(eq(quoteVersions.id, uuid(99)))
     await expect(getQuoteBuilder(db, { actor, ticketId })).resolves.toMatchObject({
       ok: true,
       builder: {

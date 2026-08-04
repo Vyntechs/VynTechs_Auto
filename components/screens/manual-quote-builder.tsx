@@ -464,7 +464,7 @@ export function ManualQuoteBuilder({
   }
 
   function requestEditor(target: EditorTarget, invoker: HTMLElement): void {
-    if (inFlightRef.current || modal || sourcingJobId) return
+    if (inFlightRef.current || modal || sourcingJobId || prepareConfirmation) return
     if (editor?.dirty) {
       setModal({ kind: 'discard', target, invoker })
       return
@@ -475,7 +475,7 @@ export function ManualQuoteBuilder({
   }
 
   function requestEmbeddedClose(invoker: HTMLElement): void {
-    if (inFlightRef.current || modal || sourcingJobId) return
+    if (inFlightRef.current || modal || sourcingJobId || prepareConfirmation) return
     if (editor?.dirty) {
       setModal({ kind: 'discard-close', target: editor, invoker })
       return
@@ -722,14 +722,28 @@ export function ManualQuoteBuilder({
         setConfirmedTarget('prepared')
       }
       setError(null)
-      const editorLineStillExists = editor?.mode !== 'edit' || refreshed.jobs.some((job) =>
-        job.id === editor.jobId && job.lines.some((line) => line.id === editor.line?.id))
-      if (closeEditor || !editorLineStillExists) setEditor(null)
+      if (closeEditor) setEditor(null)
       else if (editor?.mode === 'edit' && editor.line) {
         const refreshedLine = refreshed.jobs
           .find((job) => job.id === editor.jobId)?.lines
           .find((line) => line.id === editor.line?.id)
         if (refreshedLine) setEditor((active) => active ? { ...active, line: refreshedLine } : null)
+        else if (expectedRecovery?.kind === 'line-edit'
+          && refreshed.jobs.some((job) => job.id === editor.jobId)) {
+          // The server removed the line after this advisor began editing it.
+          // Preserve every typed field, but make the next explicit save a new
+          // idempotent create instead of retrying an edit that can never land.
+          setEditor((active) => active?.mode === 'edit' ? {
+            mode: 'create',
+            jobId: active.jobId,
+            kind: active.kind,
+            values: active.values,
+            dirty: active.dirty,
+            laborChanged: active.laborChanged,
+            clientKey: crypto.randomUUID(),
+            invokerKey: `add:${active.jobId}:${active.kind}`,
+          } : active)
+        } else setEditor(null)
       }
       if (nextFocus) setFocusTarget(nextFocus)
       return true
@@ -952,7 +966,8 @@ export function ManualQuoteBuilder({
   }
 
   async function prepareQuote(): Promise<void> {
-    if (!prepareConfirmation || conflictRecovery !== null || !beginOperation('prepare')) return
+    if (!prepareConfirmation || editor !== null || sourcingJob !== null || modal !== null
+      || conflictRecovery !== null || !beginOperation('prepare')) return
     const pending = prepareConfirmation
     setError(null)
     try {
@@ -1373,7 +1388,11 @@ export function ManualQuoteBuilder({
       )}
 
       <div className={styles.workspace}>
-        <section className={styles.ledger} aria-labelledby="quote-jobs-heading">
+        <section
+          className={styles.ledger}
+          aria-labelledby="quote-jobs-heading"
+          inert={prepareConfirmation !== null ? true : undefined}
+        >
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.eyebrow}>On this repair order</p>
@@ -1743,7 +1762,7 @@ export function ManualQuoteBuilder({
                   ? recoverSourcedRemoval(pendingSourcedRemoval)
                   : conflictRecovery
                     ? recoverConflict()
-                    : refreshQuote()}
+                    : refreshQuote('quote-commitment')}
             >
               {error.reloadPage ? 'Refresh canned jobs' : 'Refresh quote'}
             </button>
