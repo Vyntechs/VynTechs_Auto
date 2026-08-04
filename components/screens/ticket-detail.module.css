@@ -619,7 +619,9 @@
   font-size: 11px;
 }
 
-[data-correction-state='confirmed'] {
+.correctionTarget[data-correction-state='confirmed'],
+.concern[data-correction-state='confirmed'],
+.job[data-correction-state='confirmed'] {
   animation: correction-detent 200ms var(--vt-ease-out) both;
 }
 
@@ -952,7 +954,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-correction-state='confirmed'] {
+  .correctionTarget[data-correction-state='confirmed'],
+  .concern[data-correction-state='confirmed'],
+  .job[data-correction-state='confirmed'] {
     animation: none;
     transform: none;
     transition: none;
