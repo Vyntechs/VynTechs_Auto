@@ -292,3 +292,9 @@ Stop and return for a new decision if implementation requires a migration, a new
 ## Approval gate
 
 Brandon approves or adjusts this written design before implementation planning or code begins. Approval authorizes source work only. It does not authorize migration `0050`/`0051`, Customer Approval activation, Ticket Correction activation, preview/production data mutation, merge, or deployment.
+
+## Source implementation evidence — 2026-08-04
+
+Brandon approved the design in Buzz event `3798f271ca8882267144fc5c8071e39a269aea86f64c65e330ea680c616d4526`. The source candidate implements the contract without a page, schema, migration, dependency, provider, permission, activation, or production-data change.
+
+The split proof keeps its evidence boundary explicit: PGlite/domain tests prove tenant scope, exact V1/V2 money, immutable history, link expiry, concurrency convergence, and zero mutation on stale fingerprints; the loopback browser harness proves only production React/CSS interaction and accessibility. Its four phone/desktop cases found and repaired a fixed-rail occlusion and a stranded failed-refresh recovery before final convergence. The exact-head full suite, build, review, and linked PR remain the release gate.

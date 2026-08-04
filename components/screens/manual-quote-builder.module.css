@@ -1222,7 +1222,7 @@
 
   .workspace {
     grid-template-columns: 1fr;
-    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
 
   .tape {
@@ -1232,6 +1232,10 @@
   .tape[data-rail-static='false'] {
     position: fixed;
     z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(112px, auto);
+    align-items: center;
+    gap: 8px;
     right: max(18px, env(safe-area-inset-right));
     bottom: 0;
     left: max(18px, env(safe-area-inset-left));
@@ -1242,15 +1246,41 @@
   }
 
   .tape[data-rail-static='false'] > .eyebrow,
-  .tape[data-rail-static='false'] .compactDetail {
+  .tape[data-rail-static='false'] .compactDetail,
+  .tape[data-rail-static='false'] .version {
     display: none;
   }
 
+  .tape[data-rail-static='false'] h2,
   .tape[data-rail-static='false'] .totalList,
   .tape[data-rail-static='false'] .prepareState {
-    margin-top: 10px;
+    margin: 0;
     border-top: 0;
     padding-top: 0;
+  }
+
+  .tape[data-rail-static='false'] h2 {
+    overflow-wrap: anywhere;
+    font-size: 18px;
+  }
+
+  .tape[data-rail-static='false'] .totalList > div {
+    display: none;
+  }
+
+  .tape[data-rail-static='false'] .totalList > .grandTotal {
+    display: block;
+    border: 0;
+    padding: 0;
+  }
+
+  .tape[data-rail-static='false'] .grandTotal dt {
+    display: none;
+  }
+
+  .tape[data-rail-static='false'] .prepareAction {
+    min-width: 112px;
+    padding: 0 12px;
   }
 
   .workspace:has(.editor, .storyEditor, input:focus, textarea:focus, select:focus) .tape {

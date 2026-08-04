@@ -646,7 +646,10 @@ export function ManualQuoteBuilder({
       })
       const body = await readJson(response)
       if (!response.ok) {
-        applyFailure(response.status, body, expectedSourcedLine?.state === 'absent')
+        // A quote refresh is itself the recovery boundary. If that read fails,
+        // keep the same explicit recovery action available instead of leaving
+        // the advisor stranded behind unverified server truth.
+        applyFailure(response.status, body, true)
         return false
       }
       const refreshed = body && typeof body === 'object' && 'builder' in body
@@ -735,7 +738,7 @@ export function ManualQuoteBuilder({
         message: expectedRecovery
           ? conflictRecoveryMessage(expectedRecovery)
           : 'Connection interrupted. Retry with the same details.',
-        refresh: expectedRecovery !== undefined || expectedSourcedLine?.state === 'absent',
+        refresh: true,
         focusRefresh: expectedRecovery !== undefined,
       })
       return false
@@ -1676,7 +1679,13 @@ export function ManualQuoteBuilder({
           onOpenPrepare={openPrepare}
           onCancelPrepare={cancelPrepare}
           onConfirmPrepare={() => { void prepareQuote() }}
-          railStatic={editor !== null || sourcingJob !== null || modal !== null || decision !== null}
+          railStatic={editor !== null
+            || sourcingJob !== null
+            || modal !== null
+            || decision !== null
+            || current.activeVersion !== null
+            || current.lastPreparedVersion !== null
+            || preparation.kind === 'blocked'}
           settled={confirmedTarget === 'prepared'}
           preparedActions={current.activeVersion ? <>
             {approvalLinkEligible && (

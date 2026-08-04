@@ -604,8 +604,9 @@ describe('ManualQuoteBuilder', () => {
     expect(css).toMatch(/\.identity span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/)
     expect(css).toMatch(/\.line:focus,[\s\S]*\.preparedState:focus\s*\{[^}]*outline:/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.tape\[data-rail-static='false'\]\s*\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-bottom\)/)
-    expect(css).toMatch(/\.tape\[data-rail-static='false'\]\s+\.compactDetail\s*\{[^}]*display:\s*none/)
-    expect(css).not.toMatch(/\.tape\[data-rail-static='false'\][^{]*\.version\s*\{[^}]*display:\s*none/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\]\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\][^{]*\.compactDetail,[\s\S]*?\{[^}]*display:\s*none/)
+    expect(css).toMatch(/\.tape\[data-rail-static='false'\][^{]*\.version\s*\{[^}]*display:\s*none/)
     expect(css).not.toMatch(/\.tape\[data-rail-static='false'\][^{]*\.historicalTotal\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/@media\s*\(max-width:\s*800px\)[\s\S]*\.workspace:has\([^}]*input:focus[^}]*\)\s+\.tape\s*\{[^}]*position:\s*static/)
     expect(css).toMatch(/@media\s*\(max-width:\s*600px\)[\s\S]*\.error\s*\{[^}]*position:\s*static/)
@@ -618,10 +619,10 @@ describe('ManualQuoteBuilder', () => {
     expect(ledger.compareDocumentPosition(tape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('keeps prepared and revised phone rail truth compact until an editor owns the action', () => {
+  it('fixes only a fresh actionable draft and keeps blocked or historical truth in flow', () => {
     const prepared = render(<ManualQuoteBuilder ticket={ticket} builder={builder()} />)
     let tape = screen.getByRole('complementary', { name: 'Quote totals' })
-    expect(tape).toHaveAttribute('data-rail-static', 'false')
+    expect(tape).toHaveAttribute('data-rail-static', 'true')
     expect(within(tape).getByRole('heading', { name: 'Prepared V3' })).toBeInTheDocument()
     expect(within(tape).getAllByText('$322.81').length).toBeGreaterThan(0)
     prepared.unmount()
@@ -633,15 +634,23 @@ describe('ManualQuoteBuilder', () => {
         contentFingerprint: 'b'.repeat(64), state: 'superseded',
       },
     })
-    render(<ManualQuoteBuilder ticket={ticket} builder={revisedBuilder} />)
+    const revised = render(<ManualQuoteBuilder ticket={ticket} builder={revisedBuilder} />)
     tape = screen.getByRole('complementary', { name: 'Quote totals' })
-    expect(tape).toHaveAttribute('data-rail-static', 'false')
+    expect(tape).toHaveAttribute('data-rail-static', 'true')
     expect(within(tape).getByText('V3 no longer current')).toBeInTheDocument()
     expect(within(tape).getByText('Last prepared total')).toBeInTheDocument()
     expect(within(tape).getByText('$300.00')).toBeInTheDocument()
     expect(within(tape).getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+    revised.unmount()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Front pad set' }))
+    revisedBuilder.activeVersion = null
+    revisedBuilder.lastPreparedVersion = null
+    const fresh = render(<ManualQuoteBuilder ticket={ticket} builder={revisedBuilder} />)
+    tape = screen.getByRole('complementary', { name: 'Quote totals' })
+    expect(tape).toHaveAttribute('data-rail-static', 'false')
+    expect(within(tape).getByRole('button', { name: 'Prepare quote' })).toBeEnabled()
+
+    fireEvent.click(fresh.getByRole('button', { name: 'Edit Front pad set' }))
     expect(tape).toHaveAttribute('data-rail-static', 'true')
   })
 })
@@ -2058,6 +2067,28 @@ describe('ManualQuoteBuilder preparation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
     await screen.findByText('Review the visible fields, then refresh and retry.')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh quote' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
+  })
+
+  it('keeps explicit refresh available after a failed malformed-success recovery', async () => {
+    const active = activeVersion(4)
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(201, {
+        changed: true,
+        version: { id: VERSION_ID, versionNumber: 4 },
+        extra: true,
+      }))
+      .mockResolvedValueOnce(response(503, { error: 'unavailable' }))
+      .mockResolvedValueOnce(response(200, { builder: ready({ activeVersion: active }) }))
+    render(<ManualQuoteBuilder ticket={ticket} builder={ready()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare quote' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare $322.81' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh quote' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh quote' })).toBeEnabled())
+    const retry = screen.getByRole('button', { name: 'Refresh quote' })
+    fireEvent.click(retry)
     expect(await screen.findByRole('status')).toHaveTextContent('Prepared V4')
   })
 

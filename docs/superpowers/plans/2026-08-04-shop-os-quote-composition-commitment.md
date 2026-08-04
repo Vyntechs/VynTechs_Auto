@@ -14,6 +14,8 @@
 
 **Baseline note:** Exact clean main `9dc3845` ran all eight shards with 4,208 passing tests and one focus assertion failure in the existing manual quote-builder suite; that exact assertion passed immediately in a one-worker isolated rerun. This is not accepted as a green baseline receipt. The final branch must pass the complete eight-shard gate.
 
+**Implementation proof note (2026-08-04):** Tasks 1–3 are committed. Task 4's focused gate is green: 275 tests, TypeScript, diff integrity, and four production-component browser cases at phone and desktop widths. The browser proof found two product defects before convergence: a fixed phone rail could cover an add-line control, and a failed refresh after malformed success could remove the only safe recovery action. Both now have regression tests and pass the four-case proof. The full exact-head release gate and linked PR remain open.
+
 ## Global constraints
 
 - One implementation owner executes Tasks 1–3 in order. Task reviewers inspect each committed task before the next task starts. Static, security, and runtime reviewers may run in parallel only after the integrated implementation is ready.
@@ -78,7 +80,7 @@ type LastPreparedVersion = {
 }
 ```
 
-- [ ] **Step 1: Write RED server-projection tests**
+- [x] **Step 1: Write RED server-projection tests**
 
 Add literal-behavior tests that prove:
 
@@ -95,11 +97,11 @@ Add literal-behavior tests that prove:
 
 The production changes these tests catch are: accidental raw-JSON hashing, UUID-based latest selection, historical/current type confusion, unbound totals, and omission of line revision from stale-write detection.
 
-- [ ] **Step 2: Write RED strict client-parser tests**
+- [x] **Step 2: Write RED strict client-parser tests**
 
 Extend the full builder fixture with all new required fields. Accept exact 64-hex fingerprints and the literal algorithm. Reject uppercase/short/non-hex fingerprints, a mutable manual line with null fingerprint, a sourced line with a fingerprint, a current last version that disagrees with `activeVersion`, a superseded last version while `activeVersion` is present, unsafe totals/counts, missing keys, and extra keys.
 
-- [ ] **Step 3: Prove RED**
+- [x] **Step 3: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-builder-ui.test.ts --maxWorkers=1
@@ -107,7 +109,7 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts
 
 Expected: new projection fields and parser assertions fail because the current builder exposes only `activeVersion` and no fingerprints.
 
-- [ ] **Step 4: Implement canonical fingerprint helpers**
+- [x] **Step 4: Implement canonical fingerprint helpers**
 
 Use `canonicalizeJson` before hashing. `quoteSnapshotFingerprint` validates the full `QuoteSnapshotV1` first, hashes the exact canonical snapshot identity, and never hashes a client object. `manualDraftLineFingerprint` hashes a strict allowlisted object containing the line/shop/job binding IDs, exact persisted `updatedAt` ISO value, and every editable persisted line field. It excludes internal vendor secrets and non-editable unrelated rows.
 
@@ -120,17 +122,17 @@ const fingerprint = (namespace: string, value: unknown) => createHash('sha256')
   .digest('hex')
 ```
 
-- [ ] **Step 5: Extend the authenticated builder projection**
+- [x] **Step 5: Extend the authenticated builder projection**
 
 Build the current canonical draft snapshot from the same validated source rows used by version creation. If it is not versionable, return `draftCommitment: null` rather than a partial commitment. Project the last prepared version from maximum validated version number. Keep current and last projections separate and enforce their relationship before returning.
 
 Do not duplicate the snapshot builder. Extract or reuse a pure `buildQuoteSnapshot` path that both the read projection and locked version writer call with the same canonical inputs.
 
-- [ ] **Step 6: Extend the strict client parser**
+- [x] **Step 6: Extend the strict client parser**
 
 Add one reusable lowercase 64-hex schema and cross-field refinements matching the server invariants. Do not default missing concurrency fields. Any old or partial payload must return `null` so the mounted loader shows truthful unavailable/retry state.
 
-- [ ] **Step 7: Prove GREEN and commit**
+- [x] **Step 7: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-builder-ui.test.ts tests/unit/shop-os-quote-versions.test.ts --maxWorkers=2
@@ -216,21 +218,21 @@ const prepareSchema = z.strictObject({
 })
 ```
 
-- [ ] **Step 1: Write RED stale-line domain tests**
+- [x] **Step 1: Write RED stale-line domain tests**
 
 Use two independent authorized actors/connections where supported. Prove current-fingerprint PUT and DELETE work; stale PUT cannot restore an older description or price; stale DELETE cannot remove a newer line; malformed fingerprints fail before transaction work; the comparison happens against the locked row before semantic no-op evaluation; conflicts leave the line, active version, job approvals, and actionable link byte-for-byte unchanged; successful real mutations still invalidate atomically; exact create-key replay remains unchanged.
 
 The production changes these tests catch are: lost updates, stale no-op acceptance, and partial invalidation before CAS.
 
-- [ ] **Step 2: Write RED preparation domain tests**
+- [x] **Step 2: Write RED preparation domain tests**
 
 Prove an exact current draft fingerprint creates V1; exact retry returns the same active version with `changed: false`; a line change between displayed commitment and transaction lock returns conflict with zero version/job/link writes; same total with different composition still conflicts; concurrent identical Prepare converges on one version; concurrent different Prepare produces one version plus one conflict; malformed fingerprint fails before transaction work.
 
-- [ ] **Step 3: Write RED route-contract tests**
+- [x] **Step 3: Write RED route-contract tests**
 
 Exercise real route handlers with complete auth mocks. Assert strict content type/body/status/no-store behavior, exact fingerprint pass-through, current success status 201, idempotent status 200, retryable conflict propagation, and no domain call for 400/415/422 requests. DELETE must carry JSON; a query parameter or header fingerprint is refused.
 
-- [ ] **Step 4: Prove RED**
+- [x] **Step 4: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-versions.test.ts tests/unit/shop-os-quote-routes.test.ts --maxWorkers=1
@@ -238,19 +240,19 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts
 
 Expected: stale-write and strict-request assertions fail because current line writes and Prepare carry no concurrency token.
 
-- [ ] **Step 5: Enforce line CAS under the existing lock order**
+- [x] **Step 5: Enforce line CAS under the existing lock order**
 
 Parse lowercase 64-hex before loading the actor. Inside `runMutation`, calculate the fingerprint from the locked mutable row and compare before no-op, update, delete, or invalidation. Return conflict without mutation on mismatch. Keep delete idempotent only when the row is already absent and the supplied fingerprint was syntactically valid; never claim an existing changed row is absent.
 
-- [ ] **Step 6: Bind Prepare to locked canonical truth**
+- [x] **Step 6: Bind Prepare to locked canonical truth**
 
 After `lockVersionContext` and canonical snapshot construction, calculate the server fingerprint and compare it to `expectedDraftFingerprint` before active-version replay, invalidation, or insert. Exact active content remains idempotent only when the supplied fingerprint matches that same content.
 
-- [ ] **Step 7: Tighten both routes**
+- [x] **Step 7: Tighten both routes**
 
 Use a small route-local `noStoreJson` helper following `app/api/tickets/[id]/corrections/route.ts`. Require normalized `application/json`, parse once, validate strict Zod objects, and pass only validated fields to the domain. Do not add a new endpoint, middleware rule, rate bucket, feature flag, or permission branch.
 
-- [ ] **Step 8: Prove GREEN and commit**
+- [x] **Step 8: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-builder.test.ts tests/unit/shop-os-quote-versions.test.ts tests/unit/shop-os-quote-routes.test.ts tests/unit/shop-os-manual-quote-builder.test.tsx --maxWorkers=2
@@ -307,7 +309,7 @@ export type QuoteCommitmentPanelProps = {
 export function QuoteCommitmentPanel(props: QuoteCommitmentPanelProps): ReactNode
 ```
 
-- [ ] **Step 1: Write RED pure panel/state tests**
+- [x] **Step 1: Write RED pure panel/state tests**
 
 Render the real panel in each state and prove the exact visible truth and one filled primary action:
 
@@ -322,7 +324,7 @@ Render the real panel in each state and prove the exact visible truth and one fi
 
 The production changes these tests catch are: historical version becoming actionable, unsaved local intent labeled durable, first-tap POST, and multiple filled primaries.
 
-- [ ] **Step 2: Write RED mounted interaction tests**
+- [x] **Step 2: Write RED mounted interaction tests**
 
 Prove:
 
@@ -336,7 +338,7 @@ Prove:
 - a durable correction displays `Vn no longer current` from refreshed server projection across remount, not React memory;
 - the existing create key, source-part recovery, approval-link authority, authorization strips, draft recovery, and focus restoration remain intact.
 
-- [ ] **Step 3: Prove RED**
+- [x] **Step 3: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-commitment-panel.test.tsx tests/unit/shop-os-manual-quote-builder.test.tsx tests/unit/shop-os-quote-builder-ui.test.ts --maxWorkers=1
@@ -344,19 +346,19 @@ node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-commitment-pane
 
 Expected: component import/state assertions fail and first-tap Prepare still POSTs immediately.
 
-- [ ] **Step 4: Extract the focused presentational panel**
+- [x] **Step 4: Extract the focused presentational panel**
 
 Move only quote-tape, commitment, and phone-rail markup out of the 2,200-line builder. Keep fetches and state transitions in `ManualQuoteBuilder`. Use semantic headings, `dl` totals, a dialog/confirmation focus boundary consistent with existing confirmation patterns, polite status for durable settle, assertive error only when action is required, and no toast-only truth.
 
-- [ ] **Step 5: Wire exact request and recovery state**
+- [x] **Step 5: Wire exact request and recovery state**
 
 Freeze the displayed `DraftCommitment` when confirmation opens. Send it once on explicit confirm. On success, require the refreshed active version ID/number/fingerprint/total to match the confirmed response and commitment before settling. On stale line or Prepare conflict, retain local input where applicable, refresh, name the conflict without blaming connection or user, and rotate only the stale confirmation/fingerprint—not an unrelated create request key.
 
-- [ ] **Step 6: Implement the Quote Bench visual contract**
+- [x] **Step 6: Implement the Quote Bench visual contract**
 
 Replace the generic `bay-pulse` for commitment truth with a quote-specific 2px signal rail and a 200ms `translateY(-2px)` tape detent. Use existing tokens only. On phone, the fixed rail contains the current state, exact total, and one action; it becomes static whenever an editor, story tool, sourcing surface, confirmation, focused field, or software keyboard could be obscured. Reduced motion removes movement and transition while preserving identical words, rail, focus, and announcement.
 
-- [ ] **Step 7: Prove GREEN and commit**
+- [x] **Step 7: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/shop-os-quote-commitment-panel.test.tsx tests/unit/shop-os-manual-quote-builder.test.tsx tests/unit/shop-os-quote-builder-ui.test.ts tests/unit/shop-os-inline-quote-workspace.test.tsx tests/unit/shop-os-quote-routes.test.ts --maxWorkers=2
@@ -383,13 +385,13 @@ git commit -m "feat: make quote preparation deliberate" --trailer "Co-authored-b
 - Modify: `docs/superpowers/specs/2026-08-04-shop-os-quote-composition-commitment-design.md`
 - Modify: `docs/superpowers/plans/2026-08-04-shop-os-quote-composition-commitment.md`
 
-- [ ] **Step 1: Add the split persistence/browser proof**
+- [x] **Step 1: Add the split persistence/browser proof**
 
 Use the existing ticket-building-correction harness safety and receipt patterns without importing its scenario. Domain/PGlite tests prove tenant authorization, exact money, immutable V1/V2, link invalidation, line CAS, Prepare CAS, and zero duplicate versions. A localhost-only harness mounts the production Quote Bench and uses deterministic stateful HTTP fixtures to prove rendered interaction only.
 
 The harness exits before startup unless the base URL is loopback, all database/auth secrets are absent, and `VERCEL_ENV` is not production. It never imports `scripts/shop-os-golden-browser.mjs`, reads `.env.local`, contacts Supabase, or implies deterministic harness state is database persistence.
 
-- [ ] **Step 2: Prove four browser cases**
+- [x] **Step 2: Prove four browser cases**
 
 At 390×844 and 1440×900, run exactly two journeys:
 
@@ -398,7 +400,7 @@ At 390×844 and 1440×900, run exactly two journeys:
 
 For every case assert the exact request ledger, no unexpected external request/browser error, correct focus, 44px targets, no horizontal overflow, software-keyboard/safe-area non-occlusion, zero serious/critical Axe findings, normal/reduced-motion equivalence, and preserved phone/desktop screenshots before any rerun.
 
-- [ ] **Step 3: Prove focused integration and browser GREEN**
+- [x] **Step 3: Prove focused integration and browser GREEN**
 
 ```bash
 node node_modules/vitest/vitest.mjs run \
