@@ -754,6 +754,10 @@
   padding-top: 16px;
 }
 
+.preparedActions {
+  margin-top: 16px;
+}
+
 .prepareState ul {
   margin: 0 0 14px;
   padding-left: 18px;
@@ -1238,8 +1242,7 @@
   }
 
   .tape[data-rail-static='false'] > .eyebrow,
-  .tape[data-rail-static='false'] .totalList > div:not(.grandTotal),
-  .tape[data-rail-static='false'] .version {
+  .tape[data-rail-static='false'] .compactDetail {
     display: none;
   }
 

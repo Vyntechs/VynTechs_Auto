@@ -20,7 +20,7 @@ export type QuoteCommitmentPanelProps = {
   preparedFocusRef: (element: HTMLParagraphElement | null) => void
   headingFocusRef?: (element: HTMLHeadingElement | null) => void
   prepareActionRef?: (element: HTMLButtonElement | null) => void
-  onOpenPrepare: (invoker: HTMLButtonElement) => void
+  onOpenPrepare: () => void
   onCancelPrepare: () => void
   onConfirmPrepare: () => void
   preparedActions?: ReactNode
@@ -90,7 +90,7 @@ export function QuoteCommitmentPanel({
             >
               Prepared V{activeVersion.versionNumber} · exact customer total
             </p>
-            {preparedActions}
+            {preparedActions && <div className={styles.preparedActions}>{preparedActions}</div>}
           </div>
         </>
       ) : (
@@ -102,21 +102,21 @@ export function QuoteCommitmentPanel({
             </div>
           ) : (
             <dl className={styles.totalList}>
-              <div>
+              <div className={styles.compactDetail}>
                 <dt>Subtotal</dt>
                 <dd className={styles.money}>{formatMoneyCents(totals.subtotalCents)}</dd>
               </div>
-              <div>
+              <div className={styles.compactDetail}>
                 <dt>Taxable subtotal</dt>
                 <dd className={styles.money}>{formatMoneyCents(totals.taxableSubtotalCents)}</dd>
               </div>
               {totals.taxConfigured ? (
-                <div>
+                <div className={styles.compactDetail}>
                   <dt>Tax</dt>
                   <dd className={styles.money}>{formatMoneyCents(totals.taxCents)}</dd>
                 </div>
               ) : (
-                <div className={styles.unavailable}>
+                <div className={`${styles.unavailable} ${styles.compactDetail}`}>
                   <dt>Tax — Not configured</dt>
                   <dd>—</dd>
                 </div>
@@ -182,7 +182,7 @@ export function QuoteCommitmentPanel({
                 className={styles.prepareAction}
                 data-primary-action="true"
                 ref={prepareActionRef}
-                onClick={(event) => onOpenPrepare(event.currentTarget)}
+                onClick={onOpenPrepare}
               >
                 Prepare quote
               </button>

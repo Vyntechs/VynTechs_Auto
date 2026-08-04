@@ -133,9 +133,11 @@ export function ManualQuoteBuilder({
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [prepareConfirmation, setPrepareConfirmation] = useState<PrepareConfirmation | null>(null)
+  const [conflictRecovery, setConflictRecovery] = useState<ConflictRecovery | null>(null)
   const [error, setError] = useState<{
     message: string
     refresh: boolean
+    focusRefresh?: boolean
     reloadPage?: boolean
   } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -375,10 +377,10 @@ export function ManualQuoteBuilder({
     }
   }, [current, focusTarget])
   useEffect(() => {
-    if (error?.refresh && pendingSourcedRemoval) {
+    if (error?.refresh && (error.focusRefresh || pendingSourcedRemoval) && !busy) {
       queueMicrotask(() => recoveryRefreshRef.current?.focus())
     }
-  }, [error, pendingSourcedRemoval])
+  }, [busy, error, pendingSourcedRemoval])
   useEffect(() => {
     // When a line editor opens (not on every keystroke), bring it into view and
     // focus its first field. On mobile the editor renders far below the tapped
@@ -419,7 +421,7 @@ export function ManualQuoteBuilder({
     totals,
     editorOpen: editor !== null || sourcingJob !== null,
     modalOpen: modal !== null || prepareConfirmation !== null,
-    busy,
+    busy: busy || conflictRecovery !== null,
   })
   // Findings that exist must be reviewed before the quote goes out. Findings
   // that do not exist yet do not block it: a hand-written diagnostic job with
@@ -507,11 +509,15 @@ export function ManualQuoteBuilder({
   function cancelEditor(): void {
     if (inFlightRef.current || !editor) return
     const invokerKey = editor.invokerKey
+    const recoveringStaleEdit = conflictRecovery?.kind === 'line-edit'
     clearStoredEditorDraft()
     setEditor(null)
-    setError(null)
+    if (!recoveringStaleEdit) setError(null)
     setStatusMessage('Draft cleared')
-    setTimeout(() => focusRefs.current.get(invokerKey)?.focus(), 0)
+    setTimeout(() => {
+      if (recoveringStaleEdit) recoveryRefreshRef.current?.focus()
+      else focusRefs.current.get(invokerKey)?.focus()
+    }, 0)
   }
 
   function updateValue<K extends keyof ManualLineFormValues>(
@@ -630,6 +636,7 @@ export function ManualQuoteBuilder({
     expectedSourcedLine?:
       | { line: SafeSourcedQuoteLine; state: 'present' }
       | { jobId: string; lineId: string; state: 'absent' },
+    expectedRecovery?: ConflictRecovery,
   ): Promise<boolean> {
     const ownsOperation = !nested
     if (ownsOperation && !beginOperation('refresh')) return false
@@ -647,6 +654,10 @@ export function ManualQuoteBuilder({
         : null
       if (!refreshed || refreshed.ticket.id !== ticket.id.toLowerCase()) {
         setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+        return false
+      }
+      if (expectedRecovery && !conflictRecoveryResolved(refreshed, expectedRecovery)) {
+        setError({ message: conflictRecoveryMessage(expectedRecovery), refresh: true, focusRefresh: true })
         return false
       }
       if (expectedVersion && (
@@ -702,6 +713,11 @@ export function ManualQuoteBuilder({
         }
       }
       setCurrent(refreshed)
+      if (expectedRecovery) setConflictRecovery(null)
+      if (expectedRecovery?.kind === 'prepare-interrupted'
+        && interruptedPreparationSettled(refreshed, expectedRecovery.commitment)) {
+        setConfirmedTarget('prepared')
+      }
       setError(null)
       const editorLineStillExists = editor?.mode !== 'edit' || refreshed.jobs.some((job) =>
         job.id === editor.jobId && job.lines.some((line) => line.id === editor.line?.id))
@@ -716,8 +732,11 @@ export function ManualQuoteBuilder({
       return true
     } catch {
       setError({
-        message: 'Connection interrupted. Retry with the same details.',
-        refresh: expectedSourcedLine?.state === 'absent',
+        message: expectedRecovery
+          ? conflictRecoveryMessage(expectedRecovery)
+          : 'Connection interrupted. Retry with the same details.',
+        refresh: expectedRecovery !== undefined || expectedSourcedLine?.state === 'absent',
+        focusRefresh: expectedRecovery !== undefined,
       })
       return false
     } finally {
@@ -727,7 +746,7 @@ export function ManualQuoteBuilder({
 
   async function submitEditor(event: React.FormEvent): Promise<void> {
     event.preventDefault()
-    if (!editor || inFlightRef.current) return
+    if (!editor || inFlightRef.current || conflictRecovery !== null) return
     let line: Record<string, unknown>
     try {
       const laborRate = editor.mode === 'edit' && editor.line?.kind === 'labor'
@@ -770,7 +789,16 @@ export function ManualQuoteBuilder({
       const result = await readJson(response)
       if (!response.ok) {
         if (response.status === 409 && editor.mode === 'edit') {
-          const refreshed = await refreshQuote(undefined, false, true)
+          const fingerprint = editor.line?.lineFingerprint
+          if (!editor.line || !fingerprint) {
+            setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+            return
+          }
+          const recovery: ConflictRecovery = {
+            kind: 'line-edit', lineId: editor.line.id, staleFingerprint: fingerprint,
+          }
+          setConflictRecovery(recovery)
+          const refreshed = await refreshQuote(undefined, false, true, undefined, undefined, undefined, recovery)
           if (refreshed) {
             setError({
               message: 'This line changed elsewhere. Your typed changes are still here.',
@@ -803,7 +831,7 @@ export function ManualQuoteBuilder({
   }
 
   async function confirmRemove(): Promise<void> {
-    if (modal?.kind !== 'remove' || !beginOperation('remove')) return
+    if (modal?.kind !== 'remove' || conflictRecovery !== null || !beginOperation('remove')) return
     const removeTarget = modal.target
     setError(null)
     try {
@@ -819,7 +847,19 @@ export function ManualQuoteBuilder({
       if (!response.ok) {
         closeModal()
         if (response.status === 409) {
-          const refreshed = await refreshQuote(`line:${removeTarget.line.id}`, false, true)
+          const fingerprint = removeTarget.line.lineFingerprint
+          if (!fingerprint) {
+            setError({ message: 'Review the visible fields, then refresh and retry.', refresh: true })
+            return
+          }
+          const recovery: ConflictRecovery = {
+            kind: 'line-remove', lineId: removeTarget.line.id, staleFingerprint: fingerprint,
+          }
+          setConflictRecovery(recovery)
+          const refreshed = await refreshQuote(
+            `line:${removeTarget.line.id}`, false, true,
+            undefined, undefined, undefined, recovery,
+          )
           if (refreshed) {
             setError({
               message: 'This line changed elsewhere. Review the updated line before removing it.',
@@ -893,11 +933,12 @@ export function ManualQuoteBuilder({
     if (refreshed) setPendingSourcedRemoval(null)
   }
 
-  function openPrepare(invoker: HTMLButtonElement): void {
-    if (preparation.kind !== 'ready' || !current.draftCommitment || inFlightRef.current) return
+  function openPrepare(): void {
+    if (preparation.kind !== 'ready' || !current.draftCommitment
+      || inFlightRef.current || conflictRecovery !== null) return
     setError(null)
     setPrepareConfirmation({
-      kind: 'prepare', commitment: { ...current.draftCommitment }, invoker,
+      kind: 'prepare', commitment: { ...current.draftCommitment },
     })
   }
 
@@ -908,7 +949,7 @@ export function ManualQuoteBuilder({
   }
 
   async function prepareQuote(): Promise<void> {
-    if (!prepareConfirmation || !beginOperation('prepare')) return
+    if (!prepareConfirmation || conflictRecovery !== null || !beginOperation('prepare')) return
     const pending = prepareConfirmation
     setError(null)
     try {
@@ -920,7 +961,14 @@ export function ManualQuoteBuilder({
       const body = await readJson(response)
       if (!response.ok) {
         if (response.status === 409) {
-          const refreshed = await refreshQuote('quote-commitment', false, true)
+          const recovery: ConflictRecovery = {
+            kind: 'prepare-conflict', staleFingerprint: pending.commitment.fingerprint,
+          }
+          setConflictRecovery(recovery)
+          const refreshed = await refreshQuote(
+            'quote-commitment', false, true,
+            undefined, undefined, undefined, recovery,
+          )
           setPrepareConfirmation(null)
           if (refreshed) {
             setError({
@@ -956,6 +1004,15 @@ export function ManualQuoteBuilder({
       if (settled) {
         setPrepareConfirmation(null)
         setConfirmedTarget('prepared')
+      } else {
+        setPrepareConfirmation(null)
+        const recovery: ConflictRecovery = {
+          kind: 'prepare-settlement',
+          commitment: pending.commitment,
+          version: prepared.version,
+        }
+        setConflictRecovery(recovery)
+        setError({ message: conflictRecoveryMessage(recovery), refresh: true, focusRefresh: true })
       }
     } catch {
       const settled = await refreshQuote(
@@ -970,10 +1027,44 @@ export function ManualQuoteBuilder({
         setConfirmedTarget('prepared')
       } else {
         setPrepareConfirmation(null)
-        setError({ message: 'Preparation could not be confirmed. Review the current quote before retrying.', refresh: true })
+        const recovery: ConflictRecovery = {
+          kind: 'prepare-interrupted', commitment: pending.commitment,
+        }
+        setConflictRecovery(recovery)
+        setError({
+          message: conflictRecoveryMessage(recovery),
+          refresh: true,
+          focusRefresh: true,
+        })
       }
     } finally {
       endOperation()
+    }
+  }
+
+  async function recoverConflict(): Promise<void> {
+    const recovery = conflictRecovery
+    if (!recovery) {
+      await refreshQuote()
+      return
+    }
+    const nextFocus = recovery.kind === 'line-edit' || recovery.kind === 'line-remove'
+      ? `line:${recovery.lineId}`
+      : 'quote-commitment'
+    const refreshed = await refreshQuote(
+      nextFocus, false, false,
+      undefined, undefined, undefined, recovery,
+    )
+    if (!refreshed) return
+    if (recovery.kind === 'line-edit') {
+      setError({ message: 'This line changed elsewhere. Your typed changes are still here.', refresh: false })
+    } else if (recovery.kind === 'line-remove') {
+      setError({ message: 'This line changed elsewhere. Review the updated line before removing it.', refresh: false })
+    } else if (recovery.kind === 'prepare-conflict') {
+      setError({
+        message: 'The quote changed elsewhere. Review the updated quote before preparing again.',
+        refresh: false,
+      })
     }
   }
 
@@ -1424,7 +1515,7 @@ export function ManualQuoteBuilder({
                               <button
                                 type="button"
                                 className={styles.lineAction}
-                                disabled={busy}
+                                disabled={busy || conflictRecovery !== null}
                                 ref={(element) => {
                                   const key = `edit:${line.id}`
                                   if (element) focusRefs.current.set(key, element)
@@ -1440,7 +1531,7 @@ export function ManualQuoteBuilder({
                               <button
                                 type="button"
                                 className={styles.lineAction}
-                                disabled={busy}
+                                disabled={busy || conflictRecovery !== null}
                                 onClick={(event) => {
                                   if (!inFlightRef.current && !modal) {
                                     setModal({
@@ -1537,6 +1628,7 @@ export function ManualQuoteBuilder({
                         editor={editor}
                         laborRateCents={current.configuration.laborRateCents}
                         busy={busy}
+                        saveBlocked={conflictRecovery?.kind === 'line-edit'}
                         firstInputRef={editorFirstInputRef}
                         onChange={updateValue}
                         onCancel={cancelEditor}
@@ -1584,8 +1676,7 @@ export function ManualQuoteBuilder({
           onOpenPrepare={openPrepare}
           onCancelPrepare={cancelPrepare}
           onConfirmPrepare={() => { void prepareQuote() }}
-          railStatic={current.activeVersion !== null || editor !== null || sourcingJob !== null
-            || modal !== null || decision !== null || error !== null}
+          railStatic={editor !== null || sourcingJob !== null || modal !== null || decision !== null}
           settled={confirmedTarget === 'prepared'}
           preparedActions={current.activeVersion ? <>
             {approvalLinkEligible && (
@@ -1636,12 +1727,14 @@ export function ManualQuoteBuilder({
               type="button"
               className={styles.lineAction}
               disabled={busy}
-              ref={pendingSourcedRemoval ? recoveryRefreshRef : undefined}
+              ref={recoveryRefreshRef}
               onClick={() => error.reloadPage
                 ? reloadCannedPage()
                 : pendingSourcedRemoval
                   ? recoverSourcedRemoval(pendingSourcedRemoval)
-                  : refreshQuote()}
+                  : conflictRecovery
+                    ? recoverConflict()
+                    : refreshQuote()}
             >
               {error.reloadPage ? 'Refresh canned jobs' : 'Refresh quote'}
             </button>
@@ -1741,7 +1834,70 @@ type BuilderJob = QuoteBuilder['jobs'][number]
 type PrepareConfirmation = {
   kind: 'prepare'
   commitment: DraftCommitment
-  invoker: HTMLButtonElement
+}
+type ConflictRecovery =
+  | { kind: 'line-edit' | 'line-remove'; lineId: string; staleFingerprint: string }
+  | { kind: 'prepare-conflict'; staleFingerprint: string }
+  | { kind: 'prepare-interrupted'; commitment: DraftCommitment }
+  | {
+    kind: 'prepare-settlement'
+    commitment: DraftCommitment
+    version: { id: string; versionNumber: number }
+  }
+
+function conflictRecoveryResolved(builder: QuoteBuilder, recovery: ConflictRecovery): boolean {
+  if (recovery.kind === 'line-edit') {
+    const line = builder.jobs.flatMap((job) => job.lines)
+      .find((candidate) => candidate.id === recovery.lineId)
+    return line === undefined || line.lineFingerprint !== recovery.staleFingerprint
+  }
+  if (recovery.kind === 'line-remove') {
+    const line = builder.jobs.flatMap((job) => job.lines)
+      .find((candidate) => candidate.id === recovery.lineId)
+    return line === undefined || line.lineFingerprint !== recovery.staleFingerprint
+  }
+  if (recovery.kind === 'prepare-conflict') {
+    return builder.activeVersion !== null
+      || (builder.draftCommitment !== null
+        && builder.draftCommitment.fingerprint !== recovery.staleFingerprint)
+  }
+  if (recovery.kind === 'prepare-interrupted') {
+    if (builder.activeVersion) return true
+    return builder.draftCommitment !== null
+      && builder.draftCommitment.fingerprint !== recovery.commitment.fingerprint
+  }
+  if (recovery.kind !== 'prepare-settlement') return false
+  const activeVersion = builder.activeVersion
+  return activeVersion !== null
+    && activeVersion.id === recovery.version.id
+    && activeVersion.versionNumber === recovery.version.versionNumber
+    && activeVersion.contentFingerprint === recovery.commitment.fingerprint
+    && activeVersion.totalCents === recovery.commitment.totalCents
+}
+
+function interruptedPreparationSettled(
+  builder: QuoteBuilder,
+  commitment: DraftCommitment,
+): boolean {
+  return builder.activeVersion !== null
+    && builder.activeVersion.contentFingerprint === commitment.fingerprint
+    && builder.activeVersion.totalCents === commitment.totalCents
+}
+
+function conflictRecoveryMessage(recovery: ConflictRecovery): string {
+  if (recovery.kind === 'line-edit') {
+    return 'This line changed elsewhere. Refresh the quote before saving again.'
+  }
+  if (recovery.kind === 'line-remove') {
+    return 'This line changed elsewhere. Refresh the quote before removing it again.'
+  }
+  if (recovery.kind === 'prepare-conflict') {
+    return 'The quote changed elsewhere. Refresh the quote before preparing again.'
+  }
+  if (recovery.kind === 'prepare-interrupted') {
+    return 'Preparation could not be confirmed. Review the current quote before retrying.'
+  }
+  return 'Preparation could not be confirmed. Refresh the quote to review current server truth.'
 }
 type DecisionState = {
   jobId: string
@@ -2017,6 +2173,7 @@ function LineEditor({
   editor,
   laborRateCents,
   busy,
+  saveBlocked,
   firstInputRef,
   onChange,
   onCancel,
@@ -2026,6 +2183,7 @@ function LineEditor({
   editor: EditorState
   laborRateCents: number | null
   busy: boolean
+  saveBlocked: boolean
   firstInputRef: React.RefObject<HTMLInputElement | null>
   onChange: <K extends keyof ManualLineFormValues>(key: K, value: ManualLineFormValues[K]) => void
   onCancel: () => void
@@ -2088,7 +2246,7 @@ function LineEditor({
       </label>
       <div className={styles.editorActions}>
         <button type="button" className={styles.lineAction} disabled={busy} onClick={onCancel}>Cancel</button>
-        <button type="submit" className={styles.primaryAction} data-primary-action="true" disabled={busy}>{busy ? 'Saving…' : 'Save line'}</button>
+        <button type="submit" className={styles.primaryAction} data-primary-action="true" disabled={busy || saveBlocked}>{busy ? 'Saving…' : 'Save line'}</button>
       </div>
     </form>
   )

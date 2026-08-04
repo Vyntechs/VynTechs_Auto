@@ -95,6 +95,7 @@ describe('QuoteCommitmentPanel', () => {
   it('shows exact never-prepared draft truth with one filled action', () => {
     renderPanel()
 
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).toHaveAttribute('data-rail-static', 'false')
     expect(screen.getByRole('heading', { name: 'Current draft' })).toBeInTheDocument()
     expect(screen.getByText('Customer has not received this')).toBeInTheDocument()
     expect(screen.getByText('$108.25')).toBeInTheDocument()
@@ -111,6 +112,7 @@ describe('QuoteCommitmentPanel', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Prepared V3' })).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).toHaveAttribute('data-rail-static', 'false')
     expect(screen.getByText('$108.25')).toBeInTheDocument()
     expect(screen.queryByText(/Current draft|Customer has not received/i)).toBeNull()
     expect(screen.getByRole('button', { name: 'Copy V3 customer link' })).toBeInTheDocument()
@@ -148,6 +150,15 @@ describe('QuoteCommitmentPanel', () => {
     expect(screen.getByText('Last prepared total')).toBeInTheDocument()
     expect(screen.getByText('$90.00')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /V3 customer/i })).toBeNull()
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).toHaveAttribute('data-rail-static', 'false')
+  })
+
+  it('keeps the phone rail static only while an occluding surface owns the action', () => {
+    const { rerender, props } = renderPanel({ railStatic: true })
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).toHaveAttribute('data-rail-static', 'true')
+
+    rerender(<QuoteCommitmentPanel {...props} railStatic={false} confirmation={COMMITMENT} />)
+    expect(screen.getByRole('complementary', { name: 'Quote totals' })).toHaveAttribute('data-rail-static', 'true')
   })
 
   it('restates frozen composition before explicit preparation', () => {
