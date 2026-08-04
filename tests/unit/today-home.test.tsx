@@ -205,11 +205,8 @@ describe('TodayHome', () => {
       />,
     )
 
-    expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
-      'href',
-      '/tickets/ticket-open',
-    )
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.getByText('Requires C-tech')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
   })
 
   it('turns the same Today surface into a dispatch board without adding a page', () => {
@@ -351,7 +348,7 @@ describe('TodayHome', () => {
         />,
       )
 
-      fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
       await waitFor(() => {
         expect(screen.getByRole('status')).toHaveTextContent(announcement)
       })

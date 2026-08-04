@@ -86,6 +86,7 @@ async function seedTicket(golden: Golden, options: { secondJob?: boolean; priced
     jobs: freshJobs.map((job) => ({
       ...ticket.jobs[0],
       ...job,
+      clockedOnSince: job.clockedOnSince?.toISOString() ?? null,
       assignedTech: null,
     })),
   }

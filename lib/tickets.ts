@@ -119,6 +119,7 @@ export type TicketDetail = {
     } | null
     sessionId: string | null
     workStatus: string
+    clockedOnSince?: string | null
     approvalState: string
     customerSuppliedPartsNote: string | null
     workNotes: string | null
@@ -940,6 +941,7 @@ async function loadTicketDetail(
       assignedTechSkillTier: profiles.skillTier,
       sessionId: ticketJobs.sessionId,
       workStatus: ticketJobs.workStatus,
+      clockedOnSince: ticketJobs.clockedOnSince,
       approvalState: ticketJobs.approvalState,
       customerSuppliedPartsNote: ticketJobs.customerSuppliedPartsNote,
       workNotes: ticketJobs.workNotes,
@@ -1043,6 +1045,7 @@ async function loadTicketDetail(
           : null,
       sessionId: job.sessionId,
       workStatus: job.workStatus,
+      clockedOnSince: job.clockedOnSince ? job.clockedOnSince.toISOString() : null,
       approvalState: job.approvalState,
       customerSuppliedPartsNote: job.customerSuppliedPartsNote,
       workNotes: job.workNotes,

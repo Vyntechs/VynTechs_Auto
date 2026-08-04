@@ -187,7 +187,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       'href',
       '/tickets/ticket-44',
     )
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
   })
 
@@ -264,13 +264,14 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(
       <TodayJobsBoard
-        myJobs={[maintenance]}
+        myJobs={[{ ...maintenance, approvalState: 'approved' }]}
         openJobs={[]}
+        role="tech"
         currentProfileId="profile-1"
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open work' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review & clock on' }))
 
     expect(screen.getByLabelText('Work on this job')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Opening assigned work…')
@@ -306,6 +307,7 @@ describe('TodayJobsBoard persisted ledger', () => {
           approvalState: 'approved',
         }]}
         openJobs={[]}
+        role="tech"
         currentProfileId="profile-1"
       />,
     )
@@ -319,7 +321,79 @@ describe('TodayJobsBoard persisted ledger', () => {
       '/api/tickets/ticket-44/jobs/job-maintenance/interruption',
       expect.objectContaining({ method: 'POST' }),
     )
-    expect(screen.getByRole('button', { name: 'Open work' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeEnabled()
+  })
+
+  it('shows technician waiting truth without exposing price-building', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[maintenance]}
+        openJobs={[]}
+        canBuildQuote
+        role="tech"
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+  })
+
+  it('keeps blocked technician work in repair-order recovery without exposing price-building', () => {
+    render(
+      <TodayJobsBoard
+        myJobs={[{ ...maintenance, workStatus: 'blocked' }]}
+        openJobs={[]}
+        canBuildQuote
+        role="tech"
+        currentProfileId="profile-1"
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'Review blocked work' })).toHaveAttribute(
+      'href',
+      '/tickets/ticket-44',
+    )
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+  })
+
+  it('shows below-tier and customer-outcome truth without fake claim controls', () => {
+    render(<TodayJobsBoard myJobs={[]} openJobs={[
+      { ...availableDiagnostic, id: 'below-tier', requiredSkillTier: 3, canClaim: false },
+      { ...availableDiagnostic, id: 'deferred', ticketId: 'ticket-46', approvalState: 'deferred', canClaim: false },
+      { ...availableDiagnostic, id: 'declined', ticketId: 'ticket-47', approvalState: 'declined', canClaim: false },
+    ]} />)
+
+    expect(screen.getByText('Requires A-tech')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for customer')).toBeInTheDocument()
+    expect(screen.getByText('Customer declined')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
+  })
+
+  it('shows persisted running and paused clock truth without active-second math', () => {
+    render(<TodayJobsBoard myJobs={[
+      {
+        ...maintenance,
+        id: 'running',
+        title: 'Running work',
+        approvalState: 'approved',
+        workStatus: 'in_progress',
+        clockedOnSince: '2026-08-04T20:00:00.000Z',
+      },
+      {
+        ...maintenance,
+        id: 'paused',
+        title: 'Paused work',
+        approvalState: 'approved',
+        workStatus: 'in_progress',
+        clockedOnSince: null,
+      },
+    ]} openJobs={[]} role="tech" currentProfileId="profile-1" />)
+
+    expect(screen.getByText('Running work').closest('article')).toHaveTextContent('Clock running since')
+    expect(screen.getByText('Paused work').closest('article')).toHaveTextContent('Clock paused')
+    expect(screen.queryByText(/seconds|payroll/i)).toBeNull()
   })
 
   it('fails closed when an open-queue row is not actually open', () => {
@@ -335,7 +409,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
       'href',
       '/tickets/ticket-42',
@@ -823,7 +897,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets/ticket-42/jobs/job-unlinked/assignment',
@@ -848,7 +922,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    const claim = screen.getByRole('button', { name: 'Claim job' })
+    const claim = screen.getByRole('button', { name: 'Claim work' })
     fireEvent.click(claim)
 
     expect(await screen.findByRole('status')).toHaveTextContent('Claiming repair order 42')
@@ -900,7 +974,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    const claims = screen.getAllByRole('button', { name: 'Claim job' })
+    const claims = screen.getAllByRole('button', { name: 'Claim work' })
     fireEvent.click(claims[0])
 
     await screen.findByRole('status')
@@ -958,7 +1032,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     }))
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('This job was already claimed')
     expect(screen.queryByRole('article')).toBeNull()
@@ -981,7 +1055,7 @@ describe('TodayJobsBoard persisted ledger', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     expect(await screen.findByRole('heading', { name: 'Created by me' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View ticket' })).toHaveAttribute(
@@ -1007,13 +1081,13 @@ describe('TodayJobsBoard persisted ledger', () => {
     }))
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Claim job' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Claim work' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Repair order 42 changed, but this screen couldn't safely catch up. Open the repair order.",
     )
     expect(screen.getByRole('article', { name: 'Repair order 42: Confirm charging fault' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Claim job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Claim work' })).toBeNull()
     expect(screen.getByRole('link', { name: 'View ticket' })).toBeInTheDocument()
     expect(refreshMock).not.toHaveBeenCalled()
   })
@@ -1022,7 +1096,7 @@ describe('TodayJobsBoard persisted ledger', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network detail must stay private')))
     render(<TodayJobsBoard myJobs={[]} openJobs={[availableDiagnostic]} />)
 
-    const claim = screen.getByRole('button', { name: 'Claim job' })
+    const claim = screen.getByRole('button', { name: 'Claim work' })
     claim.focus()
     fireEvent.click(claim)
 

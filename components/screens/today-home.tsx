@@ -27,6 +27,7 @@ type Props = {
   canCreateTickets?: boolean
   canDispatchWork?: boolean
   canBuildQuote?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   todayJobs?: TodayTicketJobs
@@ -44,6 +45,7 @@ export function TodayHome({
   canCreateTickets = false,
   canDispatchWork = false,
   canBuildQuote = false,
+  role = '',
   currentProfileId,
   team = [],
   todayJobs = {
@@ -168,6 +170,7 @@ export function TodayHome({
           readyToCollect={todayJobs.readyToCollect}
           canDispatchWork={canDispatchWork}
           canBuildQuote={canBuildQuote}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           hasMore={todayJobs.hasMore}

@@ -3,10 +3,12 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { LocalizedTimestamp } from '@/components/vt/localized-timestamp'
 import type { TodayTicketJob, TodayTicketJobs } from '@/lib/tickets'
 import type { TeamMember } from '@/lib/intake/team'
 import { canUseManualWork } from '@/lib/shop-os/manual-work-policy'
 import { formatAttentionClock } from '@/lib/shop-os/attention-clock'
+import { projectTechnicianJobReadiness } from '@/lib/shop-os/living-ticket'
 import {
   createTodayJobOverride,
   parseAssignmentEnvelope,
@@ -39,6 +41,7 @@ type Props = {
   readyToCollect?: ReadyToCollectTicket[]
   canDispatchWork?: boolean
   canBuildQuote?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   hasMore?: boolean
@@ -102,6 +105,7 @@ export function TodayJobsBoard({
   readyToCollect = emptyReadyToCollect,
   canDispatchWork = false,
   canBuildQuote = false,
+  role = '',
   currentProfileId,
   team = emptyTeam,
   hasMore = false,
@@ -117,6 +121,9 @@ export function TodayJobsBoard({
   const [announcement, setAnnouncement] = useState<Announcement | null>(null)
   const [jobOverrides, setJobOverrides] = useState<Map<string, TodayJobOverride>>(
     () => new Map(),
+  )
+  const [claimSafetyBlocks, setClaimSafetyBlocks] = useState<Set<string>>(
+    () => new Set(),
   )
   const [serverJobs, setServerJobs] = useState<TodayTicketJobs>(() => ({
     myJobs,
@@ -284,6 +291,7 @@ export function TodayJobsBoard({
         })
         if (!assignment) {
           applyJobTruth(job, { ...job, canClaim: false })
+          setClaimSafetyBlocks((current) => new Set(current).add(job.id))
           setAnnouncement({
             kind: 'error',
             text: `Repair order ${job.ticketNumber} changed, but this screen couldn't safely catch up. Open the repair order.`,
@@ -403,10 +411,12 @@ export function TodayJobsBoard({
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) {
     const updatedJob: TodayTicketJob = {
       ...job,
       workStatus: assignment.workStatus,
+      approvalState: assignment.approvalState,
       assignmentState: assignment.state,
       assignedTechName: assignment.assignedTechName,
       canClaim: false,
@@ -747,6 +757,7 @@ export function TodayJobsBoard({
             else diagnosticButtons.current.delete(jobId)
           }}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -764,12 +775,14 @@ export function TodayJobsBoard({
           attentionNow={attentionNow}
           pendingJobId={pendingJobId}
           claimsDisabled={pendingJobId !== null}
+          claimSafetyBlocks={claimSafetyBlocks}
           onClaim={claim}
           setClaimButton={(jobId, element) => {
             if (element) claimButtons.current.set(jobId, element)
             else claimButtons.current.delete(jobId)
           }}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -786,6 +799,7 @@ export function TodayJobsBoard({
           mode="team"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -802,6 +816,7 @@ export function TodayJobsBoard({
           mode="created"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -818,6 +833,7 @@ export function TodayJobsBoard({
           mode="parts"
           attentionNow={attentionNow}
           canDispatchWork={canDispatchWork}
+          role={role}
           currentProfileId={currentProfileId}
           team={team}
           onAssignment={applyAssignment}
@@ -968,6 +984,7 @@ function JobSection({
   attentionNow,
   pendingJobId = null,
   claimsDisabled = false,
+  claimSafetyBlocks = new Set(),
   onClaim,
   setClaimButton,
   pendingDiagnosticJobId = null,
@@ -979,6 +996,7 @@ function JobSection({
   onCheckDiagnostic,
   setDiagnosticButton,
   canDispatchWork = false,
+  role = '',
   currentProfileId,
   team = [],
   onAssignment,
@@ -1003,6 +1021,7 @@ function JobSection({
   attentionNow: number | null
   pendingJobId?: string | null
   claimsDisabled?: boolean
+  claimSafetyBlocks?: ReadonlySet<string>
   onClaim?: (job: TodayTicketJob) => void
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   pendingDiagnosticJobId?: string | null
@@ -1014,12 +1033,14 @@ function JobSection({
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
   canDispatchWork?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   onAssignment?: (job: TodayTicketJob, assignment: {
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) => void
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
@@ -1051,6 +1072,7 @@ function JobSection({
               attentionNow={attentionNow}
               pending={pendingJobId === job.id}
               claimDisabled={claimsDisabled}
+              claimSafetyBlocked={claimSafetyBlocks.has(job.id)}
               onClaim={onClaim}
               setClaimButton={setClaimButton}
               diagnosticPending={pendingDiagnosticJobId === job.id}
@@ -1064,6 +1086,7 @@ function JobSection({
               onCheckDiagnostic={onCheckDiagnostic}
               setDiagnosticButton={setDiagnosticButton}
               canDispatchWork={canDispatchWork}
+              role={role}
               currentProfileId={currentProfileId}
               team={team}
               onAssignment={onAssignment}
@@ -1122,6 +1145,7 @@ function JobRow({
   attentionNow,
   pending,
   claimDisabled,
+  claimSafetyBlocked,
   onClaim,
   setClaimButton,
   diagnosticPending,
@@ -1133,6 +1157,7 @@ function JobRow({
   onCheckDiagnostic,
   setDiagnosticButton,
   canDispatchWork,
+  role,
   currentProfileId,
   team,
   onAssignment,
@@ -1150,6 +1175,7 @@ function JobRow({
   attentionNow: number | null
   pending: boolean
   claimDisabled: boolean
+  claimSafetyBlocked: boolean
   onClaim?: (job: TodayTicketJob) => void
   setClaimButton?: (jobId: string, element: HTMLButtonElement | null) => void
   diagnosticPending: boolean
@@ -1161,12 +1187,14 @@ function JobRow({
   onCheckDiagnostic?: (job: TodayTicketJob) => void
   setDiagnosticButton?: (jobId: string, element: HTMLButtonElement | null) => void
   canDispatchWork?: boolean
+  role?: string
   currentProfileId?: string
   team?: TeamMember[]
   onAssignment?: (job: TodayTicketJob, assignment: {
     workStatus: TodayTicketJob['workStatus']
     state: TodayTicketJob['assignmentState']
     assignedTechName: string | null
+    approvalState: TodayTicketJob['approvalState']
   }) => void
   onAssignmentConflict?: (job: TodayTicketJob, assignedTechName: string) => void
   onResolvePart?: (job: TodayTicketJob) => void
@@ -1189,6 +1217,26 @@ function JobRow({
       sessionId: job.sessionId,
       diagnosticsEntitled: diagnosticsEntitled ?? true,
     })
+  const readiness = (
+    mode === 'open' && !canDispatchWork
+    || mode === 'mine' && role === 'tech'
+  )
+    ? projectTechnicianJobReadiness({
+        assignmentState: job.assignmentState,
+        approvalState: job.approvalState,
+        workStatus: job.workStatus,
+        canClaim: job.canClaim,
+        requiredSkillTier: job.requiredSkillTier,
+        clockedOnSince: job.clockedOnSince,
+      })
+    : null
+  const readOnlyReadiness = readiness && [
+    'below_tier',
+    'waiting_quote',
+    'waiting_advisor',
+    'waiting_customer',
+    'declined',
+  ].includes(readiness.state)
 
   return (
     <article
@@ -1227,6 +1275,14 @@ function JobRow({
           <span data-decision={DECIDED.has(job.approvalState) ? job.approvalState : undefined}>
             {approvalLabel[job.approvalState]}
           </span>
+          {readiness?.state === 'running' && (
+            <span data-readiness="running">
+              {readiness.label} <LocalizedTimestamp value={readiness.clockedOnSince} kind="time" />
+            </span>
+          )}
+          {readiness?.state === 'paused' && (
+            <span data-readiness="paused">{readiness.label}</span>
+          )}
           {(mode === 'team' || mode === 'created') && job.assignedTechName && (
             <span>{job.assignedTechName}</span>
           )}
@@ -1238,7 +1294,8 @@ function JobRow({
         </div>
       </div>
       <div className={styles.action}>
-        {mode === 'open' && job.workStatus === 'open' && job.canClaim
+        {mode === 'open' && job.workStatus === 'open'
+          && (readiness?.state === 'claimable' || (canDispatchWork && !currentProfileId && job.canClaim))
           && (!canDispatchWork || !currentProfileId) ? (
           <button
             ref={(element) => setClaimButton?.(job.id, element)}
@@ -1247,7 +1304,7 @@ function JobRow({
             disabled={claimDisabled}
             onClick={() => onClaim?.(job)}
           >
-            {pending ? 'Claiming…' : 'Claim job'}
+            {pending ? 'Claiming…' : readiness?.label ?? 'Claim work'}
           </button>
         ) : canDispatchWork && currentProfileId && (
           mode === 'open' || (mode === 'team' && (
@@ -1273,6 +1330,17 @@ function JobRow({
             onApplied={(assignment) => onAssignment?.(job, assignment)}
             onConflict={({ assignedTechName }) => onAssignmentConflict?.(job, assignedTechName)}
           />
+        ) : mode === 'open' && claimSafetyBlocked ? (
+          <Link
+            href={`/tickets/${job.ticketId}`}
+            className={`${styles.control} ${styles.secondary}`}
+          >
+            View ticket
+          </Link>
+        ) : mode === 'open' && readOnlyReadiness ? (
+          <span className={`${styles.control} ${styles.secondary}`} data-readiness={readiness.state}>
+            {readiness.label}
+          </span>
         ) : mode === 'open' ? (
           <Link
             href={`/tickets/${job.ticketId}`}
@@ -1309,7 +1377,12 @@ function JobRow({
             className={`${styles.control} ${styles.claim}`}
             onApplied={(resolved) => onResolveHold?.(job, resolved)}
           />
-        ) : canBuildQuote && (mode === 'mine' || mode === 'created' || mode === 'team')
+        ) : readOnlyReadiness ? (
+          <span className={`${styles.control} ${styles.secondary}`} data-readiness={readiness.state}>
+            {readiness.label}
+          </span>
+        ) : role !== 'tech' && canBuildQuote
+          && (mode === 'mine' || mode === 'created' || mode === 'team')
           && job.approvalState === 'pending_quote' && job.concern ? (
           <button
             type="button"
@@ -1332,6 +1405,8 @@ function JobRow({
             inPlace={mode === 'mine' && Boolean(currentProfileId)}
             disabled={commandBusy}
             onOpen={onOpenWork}
+            label={readiness?.state === 'review' ? readiness.label : undefined}
+            requiresApproval={role === 'tech'}
           />
         ) : job.kind === 'diagnostic' ? (
           <DiagnosticAction
@@ -1351,6 +1426,7 @@ function JobRow({
             inPlace={mode === 'mine' && Boolean(currentProfileId)}
             disabled={commandBusy}
             onOpen={onOpenWork}
+            requiresApproval={role === 'tech'}
           />
         )}
       </div>
@@ -1363,16 +1439,21 @@ function SimpleWorkAction({
   inPlace = false,
   disabled = false,
   onOpen,
+  label,
+  requiresApproval = false,
 }: {
   job: TodayTicketJob
   inPlace?: boolean
   disabled?: boolean
   onOpen?: (job: TodayTicketJob) => void
+  label?: string
+  requiresApproval?: boolean
 }) {
   const identityComplete = job.customerName !== null && job.vehicle !== null
   // Declined work is not the tech's to open — the counter has to retire it first.
   const workAvailable = identityComplete && job.workStatus !== 'blocked'
-    && job.approvalState !== 'declined' && job.sessionId === null
+    && job.approvalState !== 'declined'
+    && (!requiresApproval || job.approvalState === 'approved') && job.sessionId === null
   if (workAvailable && inPlace && onOpen) {
     return (
       <button
@@ -1381,7 +1462,7 @@ function SimpleWorkAction({
         disabled={disabled}
         onClick={() => onOpen(job)}
       >
-        {job.workStatus === 'in_progress' ? 'Continue work' : 'Open work'}
+        {job.workStatus === 'in_progress' ? 'Continue work' : label ?? 'Open work'}
       </button>
     )
   }

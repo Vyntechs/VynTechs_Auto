@@ -858,9 +858,9 @@ describe('TicketDetailScreen', () => {
     />)
 
     expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Start work' }))
+    await user.click(screen.getByRole('button', { name: 'Review & clock on' }))
     expect(screen.getByRole('region', { name: 'Inline work workspace' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Start work' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeDisabled()
     expect(screen.getByText('Steering wheel shakes under braking from highway speed.')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Publish found concern' }))
@@ -869,7 +869,7 @@ describe('TicketDetailScreen', () => {
 
     await user.click(screen.getByRole('button', { name: 'Publish work state' }))
     expect(screen.getByText('Finished')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^(Start|Continue) work$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Review & clock on|Continue work)$/ })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Close work' }))
     expect(screen.queryByRole('region', { name: 'Inline work workspace' })).toBeNull()
@@ -938,7 +938,7 @@ describe('TicketDetailScreen', () => {
       })] })}
     />)
 
-    expect(screen.getByRole('button', { name: 'Start work' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review & clock on' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /diagnosis/i })).toBeNull()
   })
 
@@ -955,7 +955,7 @@ describe('TicketDetailScreen', () => {
       diagnosticsEntitled
       ticket={ticket({ jobs: [diagnostic] })}
     />)
-    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
 
     rerender(<TicketDetailScreen
       role="tech"
@@ -964,7 +964,59 @@ describe('TicketDetailScreen', () => {
       diagnosticsEntitled={false}
       ticket={ticket({ jobs: [{ ...diagnostic, sessionId: 'session-1' }] })}
     />)
-    expect(screen.queryByRole('button', { name: 'Start work' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & clock on' })).toBeNull()
+  })
+
+  it('keeps an assigned technician in the waiting handoff instead of price-building', () => {
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      ticket={ticket({ jobs: [job({
+        id: 'repair-open',
+        kind: 'repair',
+        requiredSkillTier: 2,
+        assignedTechId: 'tech-1',
+        approvalState: 'pending_quote',
+      })] })}
+    />)
+
+    expect(screen.getByText('Waiting for quote')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Build quote' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Open work' })).toBeNull()
+  })
+
+  it('shows the same persisted running and paused truth on repair-order job rows', () => {
+    render(<TicketDetailScreen
+      role="tech"
+      skillTier={2}
+      currentProfileId="tech-1"
+      ticket={ticket({ jobs: [
+        job({
+          id: 'running',
+          title: 'Running work',
+          kind: 'repair',
+          requiredSkillTier: 2,
+          assignedTechId: 'tech-1',
+          approvalState: 'approved',
+          workStatus: 'in_progress',
+          clockedOnSince: '2026-08-04T20:00:00.000Z',
+        }),
+        job({
+          id: 'paused',
+          title: 'Paused work',
+          kind: 'repair',
+          requiredSkillTier: 2,
+          assignedTechId: 'tech-1',
+          approvalState: 'approved',
+          workStatus: 'in_progress',
+          clockedOnSince: null,
+        }),
+      ] })}
+    />)
+
+    expect(screen.getByText('Running work').closest('li')).toHaveTextContent('Clock running since')
+    expect(screen.getByText('Paused work').closest('li')).toHaveTextContent('Clock paused')
   })
 
   it('exposes no dead simple-work link when customer or vehicle identity is incomplete', () => {
