@@ -523,31 +523,32 @@ Expected: mounted receipt/Today settlement, TypeScript, and diff checks pass.
 **Owner:** Inline implementation lane
 
 **Files:**
-- Modify: `tests/e2e/technician-handoff-harness/app/page.tsx`
-- Modify: `tests/e2e/technician-handoff-harness/app/harness-client.tsx`
-- Modify only as required by the changed component contract: `tests/e2e/technician-handoff-harness/app/api/tickets/[id]/jobs/[jobId]/work/route.ts`
+- Modify: `tests/e2e/technician-handoff-harness/main.tsx`
+- Modify only as required by proof isolation: `tests/e2e/technician-handoff-harness/safety.mjs`
 - Modify: `tests/e2e/technician-handoff-proof.spec.ts`
+- Modify only as required by retained evidence: `tests/e2e/golden-browser-receipts.ts`
+- Modify only as required by hermetic project orchestration: `scripts/shop-os-golden-browser.mjs`
 - Create: `docs/strategy/SHOP_OS_TECHNICIAN_WORK_CORE_TEST_REPORT.md`
 
-- [ ] **Step 1: Expand the hermetic harness**
+- [x] **Step 1: Expand the hermetic harness**
 
 Exercise real Today and Work components with deterministic in-process route state. Cover timer-off Start/Complete, optional detail atomic completion, timer-on start/pause/resume, running timer after preference off, detail survival across clock response/reload, ambiguous response reconciliation, concurrent detail conflict, completion receipt, and in-place Today settlement. Keep all network inside the harness origin.
 
-- [ ] **Step 2: Prove phone and desktop journeys**
+- [x] **Step 2: Prove phone and desktop journeys**
 
 Run at 390×844 and 1440×900. For each viewport prove the primary journeys, 44×44px targets, visible focus, no horizontal overflow, no serious Axe finding, no uncaught browser error, no failed request, and no outside-origin network.
 
 ```bash
-node scripts/run-technician-handoff-proof.mjs
+PLAYWRIGHT_USE_SYSTEM_CHROME=1 GOLDEN_QA_RETAIN_EVIDENCE=1 node scripts/shop-os-golden-browser.mjs test --suite technician-handoff
 ```
 
 Expected: every named Work Rail journey passes and screenshots are retained under the existing proof-output convention.
 
-- [ ] **Step 3: Write the evidence report**
+- [x] **Step 3: Write the evidence report**
 
 Record exact HEAD, commands, viewport/journey matrix, screenshots, accessibility/network/browser-fault results, and honest skipped items. State explicitly that no production database, migration apply, merge, deployment, or repair-order data was touched.
 
-- [ ] **Step 4: Commit browser proof**
+- [x] **Step 4: Commit browser proof**
 
 ```bash
 git diff --check
