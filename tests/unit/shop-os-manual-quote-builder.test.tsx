@@ -397,6 +397,43 @@ describe('ManualQuoteBuilder', () => {
     expect(screen.getByRole('button', { name: 'Add fee' })).toHaveFocus()
   })
 
+  it('clears stale editor state whenever fresh job authority is read-only', async () => {
+    const user = userEvent.setup()
+    const key = quoteEditorDraftKey(ACTOR_ID, TICKET_ID)
+    const view = render(<ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Add fee' }))
+    await user.type(screen.getByLabelText('Description'), 'Stale environmental fee')
+    expect(sessionStorage.getItem(key)).toContain('Stale environmental fee')
+
+    view.unmount()
+    const readOnly = builder({
+      jobs: builder().jobs.map((job) => ({ ...job, canEdit: false })),
+    })
+    const readOnlyView = render(
+      <ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={readOnly} />,
+    )
+
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
+    expect(screen.queryByRole('form', { name: 'Add fee line' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save line' })).toBeNull()
+
+    readOnlyView.unmount()
+    const editableView = render(
+      <ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={builder()} />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Add fee' }))
+    await user.type(screen.getByLabelText('Description'), 'Authority changed fee')
+    expect(sessionStorage.getItem(key)).toContain('Authority changed fee')
+
+    editableView.rerender(
+      <ManualQuoteBuilder actorId={ACTOR_ID} ticket={ticket} builder={readOnly} />,
+    )
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
+    expect(screen.queryByRole('form', { name: 'Add fee line' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save line' })).toBeNull()
+  })
+
   it('recovers an unsaved labor line on a client-key-derived repair order', async () => {
     const user = userEvent.setup()
     const derivedTicket = { ...ticket, id: DERIVED_TICKET_ID }

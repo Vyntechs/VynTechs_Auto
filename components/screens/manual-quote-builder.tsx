@@ -214,7 +214,7 @@ export function ManualQuoteBuilder({
     const line = draft.lineId
       ? job?.lines.find((candidate) => candidate.id === draft.lineId)
       : undefined
-    if (!job || (draft.mode === 'edit' && (
+    if (!job || !job.canEdit || (draft.mode === 'edit' && (
       !line || !line.mutable || line.kind !== draft.kind
     ))) {
       sessionStorage.removeItem(key)
@@ -259,6 +259,16 @@ export function ManualQuoteBuilder({
       setStatusMessage('Draft remains open, but reload protection is unavailable')
     }
   }, [actorId, editor, ticket.id])
+  useEffect(() => {
+    if (!actorId || !editor
+      || current.jobs.some((job) => job.id === editor.jobId && job.canEdit)) return
+    setEditor(null)
+    try {
+      sessionStorage.removeItem(quoteEditorDraftKey(actorId, ticket.id))
+    } catch {
+      // The unauthorized editor is already closed; unavailable storage needs no recovery.
+    }
+  }, [actorId, current.jobs, editor, ticket.id])
   useEffect(() => {
     if (!editor?.dirty) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1655,7 +1665,7 @@ export function ManualQuoteBuilder({
                         </button>
                       )}
                     </div>}
-                    {editor?.jobId === job.id && (
+                    {job.canEdit && editor?.jobId === job.id && (
                       <LineEditor
                         id={quoteEditorId(job.id)}
                         editor={editor}
