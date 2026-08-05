@@ -333,6 +333,20 @@ describe('ManualQuoteBuilder', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('focuses the owning job when an embedded ticket builder supplies focusJobId', async () => {
+    const first = builder({ activeVersion: null }).jobs[0]
+    const second = { ...first, id: SECOND_JOB_ID, title: 'Replace rear brakes' }
+    render(<ManualQuoteBuilder
+      ticket={ticket}
+      builder={builder({ activeVersion: null, jobs: [first, second] })}
+      embedded
+      focusJobId={SECOND_JOB_ID}
+    />)
+
+    const row = screen.getByRole('heading', { name: 'Replace rear brakes' }).closest('li')!
+    await waitFor(() => expect(row).toHaveFocus())
+  })
+
   it('requires an explicit discard before closing an unsaved embedded line', async () => {
     const onClose = vi.fn()
     render(<ManualQuoteBuilder

@@ -106,6 +106,7 @@ export function ManualQuoteBuilder({
   vendorCatalogAvailable = false,
   canCreateVendorAccount = false,
   embedded = false,
+  focusJobId = null,
   onClose,
   onProjection,
   onReloadCatalog,
@@ -119,6 +120,7 @@ export function ManualQuoteBuilder({
   vendorCatalogAvailable?: boolean
   canCreateVendorAccount?: boolean
   embedded?: boolean
+  focusJobId?: string | null
   onClose?: () => void
   onProjection?: (jobs: Array<{
     id: string
@@ -158,6 +160,7 @@ export function ManualQuoteBuilder({
   } | null>(null)
   const [decisionVerdicts, setDecisionVerdicts] = useState<Record<string, string>>({})
   const focusRefs = useRef(new Map<string, HTMLElement>())
+  const mountedFocusJobRef = useRef<string | null>(null)
   const inFlightRef = useRef(false)
   const approvalRefreshInFlightRef = useRef(false)
   const approvalRefreshQueuedRef = useRef(false)
@@ -189,6 +192,13 @@ export function ManualQuoteBuilder({
 
   useEffect(() => setCurrent(builder), [builder])
   useEffect(() => { currentRef.current = current }, [current])
+  useEffect(() => {
+    if (!embedded || !focusJobId
+      || mountedFocusJobRef.current === focusJobId
+      || !current.jobs.some((job) => job.id === focusJobId)) return
+    mountedFocusJobRef.current = focusJobId
+    setFocusTarget(`job:${focusJobId}`)
+  }, [current.jobs, embedded, focusJobId])
   useEffect(() => {
     approvalLinkRef.current = null
     setApprovalLinkStatus('')

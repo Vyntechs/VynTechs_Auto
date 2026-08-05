@@ -96,7 +96,9 @@
    the negative block margin pulls it back onto the identity block. */
 .actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 10px;
   margin-block: calc(-1 * clamp(14px, 2.5vw, 30px));
 }
 
@@ -133,11 +135,62 @@
   cursor: pointer;
 }
 
-.actions > * + * {
-  margin-left: 10px;
+.moreAction {
+  min-block-size: 44px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-fg-2);
+  padding: 0 16px;
+  font: 600 14px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.commandGroup {
+  position: relative;
+}
+
+.commandChoices {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: calc(100% + 8px);
+  inset-inline-end: 0;
+  inline-size: min(320px, calc(100vw - 40px));
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--vt-rule-strong);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-bone-50);
+  box-shadow: var(--vt-lift-2);
+  padding: 10px;
+}
+
+.commandChoices button {
+  min-block-size: 44px;
+  border: 1px solid var(--vt-rule);
+  border-radius: var(--vt-radius-2);
+  background: transparent;
+  color: var(--vt-fg-1);
+  padding: 10px 12px;
+  font: 600 13px/1.3 var(--vt-font-sans);
+  text-align: start;
+  cursor: pointer;
+}
+
+.customerCopyError {
+  margin: -20px 0 0;
+  color: var(--vt-status-declined);
+  font: 600 13px/1.45 var(--vt-font-sans);
+  text-align: end;
 }
 
 .customerCopyAction:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.moreAction:focus-visible,
+.commandChoices button:focus-visible {
   outline: 2px solid var(--vt-focus-ring);
   outline-offset: 3px;
 }
@@ -764,6 +817,29 @@
   padding: 10px 16px;
   font: 600 13px/1 var(--vt-font-sans);
   cursor: pointer;
+}
+
+.inlinePrimaryAction {
+  min-block-size: 44px;
+  border: 1px solid var(--vt-signal-600);
+  border-radius: var(--vt-radius-2);
+  background: var(--vt-signal-600);
+  color: var(--vt-bone-50);
+  padding: 10px 16px;
+  font: 650 13px/1 var(--vt-font-sans);
+  cursor: pointer;
+}
+
+.inlinePrimaryAction:focus-visible {
+  outline: 2px solid var(--vt-focus-ring);
+  outline-offset: 3px;
+}
+
+.inlinePrimaryAction:disabled,
+.moreAction:disabled,
+.customerCopyAction:disabled {
+  cursor: default;
+  opacity: .55;
 }
 
 .inlineAction:focus-visible,

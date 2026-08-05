@@ -43,6 +43,7 @@ vi.mock('@/lib/shop-os/parts-sourcing-ui', () => ({
 vi.mock('@/components/screens/manual-quote-builder', () => ({
   ManualQuoteBuilder: (props: {
     actorId: string
+    focusJobId?: string | null
     builder: typeof quoteBuilder
     cannedJobs: unknown[]
     cannedCatalogAvailable: boolean
@@ -58,6 +59,7 @@ vi.mock('@/components/screens/manual-quote-builder', () => ({
       <p>Vendors {String(props.vendorCatalogAvailable)} · {props.vendorAccounts.length}</p>
       <p>Embedded {String(props.embedded)}</p>
       <p>Actor {props.actorId}</p>
+      <p>Focus job {props.focusJobId ?? 'none'}</p>
       <button type="button" onClick={props.onClose}>Close quote</button>
       <button type="button" onClick={() => props.onProjection([{ id: 'job-1' }])}>Publish quote state</button>
     </section>
@@ -96,6 +98,7 @@ describe('InlineQuoteWorkspace', () => {
 
     render(<InlineQuoteWorkspace
       actorId={ACTOR_ID}
+      focusJobId="job-1"
       ticket={ticket}
       canCreateVendorAccount
       onClose={onClose}
@@ -107,6 +110,7 @@ describe('InlineQuoteWorkspace', () => {
     expect(screen.getByText('Vendors true · 1')).toBeInTheDocument()
     expect(screen.getByText('Embedded true')).toBeInTheDocument()
     expect(screen.getByText(`Actor ${ACTOR_ID}`)).toBeInTheDocument()
+    expect(screen.getByText('Focus job job-1')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(3)
 
     await user.click(screen.getByRole('button', { name: 'Publish quote state' }))
