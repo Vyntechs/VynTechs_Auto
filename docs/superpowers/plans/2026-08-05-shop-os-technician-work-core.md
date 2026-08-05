@@ -256,15 +256,15 @@ Track time on my jobs
 Personal job-time reference. Not payroll or performance tracking.
 ```
 
-- [ ] **Step 1: Write RED My Account tests**
+- [x] **Step 1: Write RED My Account tests**
 
 Prove the control appears only for a persisted wrenching tier; default-off truth is visible; changing the checkbox is local until deliberate Save; a successful POST settles to returned server truth; timeout, invalid envelope, 409, or 5xx triggers exact GET reconciliation; the UI never says saved until the server confirms; office-only users see no timer control.
 
-- [ ] **Step 2: Write RED Team tests**
+- [x] **Step 2: Write RED Team tests**
 
 Prove an owner sees a row-level timer control only for eligible people; owner-techs are included; advisors/parts/office-only people are excluded; no role-wide switch exists; an unsaved role/tier edit disables the timer preference with a specific save-first explanation; successful/ambiguous writes settle to exact returned/GET truth without disturbing role or tier edits.
 
-- [ ] **Step 3: Prove RED**
+- [x] **Step 3: Prove RED**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/account-section.test.tsx tests/unit/team-section.test.tsx --maxWorkers=1
@@ -272,15 +272,15 @@ node node_modules/vitest/vitest.mjs run tests/unit/account-section.test.tsx test
 
 Expected: preference props and controls are absent.
 
-- [ ] **Step 4: Pass server truth from both pages**
+- [x] **Step 4: Pass server truth from both pages**
 
 Select `skillTier` and `jobTimerEnabled` from the trusted profile in My Account. Include `jobTimerEnabled` in the bounded Team member projection. Derive wrenching eligibility from the persisted tier only.
 
-- [ ] **Step 5: Implement deliberate controls and truthful recovery**
+- [x] **Step 5: Implement deliberate controls and truthful recovery**
 
 Use one small preference block, no dashboard card. POST only after Save. On an ambiguous response, GET the exact current preference and set both displayed and baseline values from that response. Keep a running timer concern out of these settings surfaces; Work is responsible for showing an already-running clock after the preference changes.
 
-- [ ] **Step 6: Prove GREEN and commit**
+- [x] **Step 6: Prove GREEN and commit**
 
 ```bash
 node node_modules/vitest/vitest.mjs run tests/unit/account-section.test.tsx tests/unit/team-section.test.tsx --maxWorkers=1

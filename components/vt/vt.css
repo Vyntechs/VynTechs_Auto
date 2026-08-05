@@ -1524,6 +1524,81 @@
   }
 }
 
+/* ====== Settings / personal job-time preference ======
+   This is deliberately a quiet preference row, not a management metric card. */
+
+.vt-job-timer-preference {
+  display: grid;
+  gap: 8px;
+}
+
+.vt-job-timer-preference__choice,
+.vt-team-timer-preference__choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  color: var(--vt-fg);
+  font-family: var(--vt-font-serif);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.vt-job-timer-preference__choice input,
+.vt-team-timer-preference__choice input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--vt-fg);
+  flex: 0 0 auto;
+}
+
+.vt-job-timer-preference__choice:has(input:disabled),
+.vt-team-timer-preference__choice:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.vt-job-timer-preference__marker {
+  margin-left: auto;
+  font-family: var(--vt-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vt-fg-3);
+  white-space: nowrap;
+}
+
+.vt-job-timer-preference__help,
+.vt-team-timer-preference__help {
+  margin: 0;
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vt-fg-3);
+}
+
+.vt-job-timer-preference__actions,
+.vt-team-timer-preference__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vt-job-timer-preference__actions .btn,
+.vt-team-timer-preference__actions .btn {
+  min-height: 40px;
+}
+
+.vt-job-timer-preference__restored {
+  font-family: var(--vt-font-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--vt-fg-2);
+}
+
 /* ====== Settings / Team section ======
    Members list: stacked cards at <768px (avoiding the curator-page mobile
    failure pattern of wide tables without responsive treatment), table-like
@@ -1593,6 +1668,11 @@
   align-items: center;
   gap: 8px;
 }
+.vt-team-member-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
 .vt-team-row__summary {
   font-family: var(--vt-font-mono);
   font-size: 11px;
@@ -1612,6 +1692,27 @@
   font: inherit;
 }
 .vt-team-row__controls .btn { min-height: 40px; }
+
+.vt-team-timer-preference {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--vt-rule);
+}
+
+.vt-team-timer-preference__choice {
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.vt-team-timer-preference__actions {
+  margin-top: 3px;
+}
+
+.vt-team-timer-preference__actions .btn {
+  min-height: 36px;
+  font-size: 12px;
+}
 
 .vt-team-invite-grid {
   display: grid;
@@ -1674,6 +1775,11 @@
   }
   .vt-team-row__controls,
   .vt-team-row__summary { align-items: stretch; flex-direction: column; }
+  .vt-team-timer-preference__choice { min-height: 44px; }
+  .vt-team-timer-preference__actions .btn {
+    min-height: 44px;
+    width: 100%;
+  }
   .vt-team-invite-grid { grid-template-columns: 1fr; }
 }
 

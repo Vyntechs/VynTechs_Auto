@@ -2,7 +2,12 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { AppDb } from '@/lib/db/queries'
 import { profiles } from '@/lib/db/schema'
-import { canManageTeam } from '@/lib/shop-os/capabilities'
+import {
+  canManageTeam,
+  isWrenchingSkillTier,
+} from '@/lib/shop-os/capabilities'
+
+export { isWrenchingSkillTier } from '@/lib/shop-os/capabilities'
 
 export type JobTimerPreferenceActor = {
   profileId: string
@@ -25,10 +30,6 @@ export function jobTimerPreferenceStatus(result: JobTimerPreferenceResult): numb
   if (result.error === 'not_found') return 404
   if (result.error === 'no_shop') return 409
   return 403
-}
-
-export function isWrenchingSkillTier(value: unknown): value is 1 | 2 | 3 {
-  return value === 1 || value === 2 || value === 3
 }
 
 const profileIdSchema = z.string().uuid()

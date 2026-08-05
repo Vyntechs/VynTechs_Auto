@@ -40,6 +40,7 @@ export default async function SettingsTeamPage() {
       skillTier: profiles.skillTier,
       membershipStatus: profiles.membershipStatus,
       deactivatedAt: profiles.deactivatedAt,
+      jobTimerEnabled: profiles.jobTimerEnabled,
     })
     .from(profiles)
     .where(eq(profiles.shopId, ctx.profile.shopId))
@@ -55,6 +56,7 @@ export default async function SettingsTeamPage() {
     skillTier: r.skillTier,
     membershipStatus: r.membershipStatus,
     deactivated: r.deactivatedAt !== null,
+    jobTimerEnabled: r.jobTimerEnabled,
   }))
   const selfIdx = members.findIndex((m) => m.userId === ctx.user.id)
   if (selfIdx > 0) {

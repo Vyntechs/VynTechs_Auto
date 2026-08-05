@@ -6,6 +6,10 @@ export function isShopRole(role: unknown): role is ShopRole {
   return typeof role === 'string' && SHOP_ROLES.includes(role as ShopRole)
 }
 
+export function isWrenchingSkillTier(value: unknown): value is 1 | 2 | 3 {
+  return value === 1 || value === 2 || value === 3
+}
+
 export function canCreateTickets(role: string | null | undefined): boolean {
   return isShopRole(role)
 }

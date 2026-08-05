@@ -2,7 +2,12 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Module } from './module'
-import { SHOP_ROLES, type ShopRole } from '@/lib/shop-os/capabilities'
+import {
+  isWrenchingSkillTier,
+  SHOP_ROLES,
+  type ShopRole,
+} from '@/lib/shop-os/capabilities'
+import { readJobTimerPreference } from '@/lib/shop-os/job-timer-preference-client'
 
 export type TeamMemberRow = {
   userId: string
@@ -12,6 +17,7 @@ export type TeamMemberRow = {
   skillTier: number | null
   membershipStatus: string
   deactivated: boolean
+  jobTimerEnabled: boolean
 }
 
 type Props = {
@@ -30,6 +36,11 @@ type InviteState =
   | { kind: 'idle' }
   | { kind: 'sending' }
   | { kind: 'sent'; email: string }
+  | { kind: 'error'; message: string }
+
+type TimerSaveResult =
+  | { kind: 'saved'; enabled: boolean }
+  | { kind: 'restored'; enabled: boolean }
   | { kind: 'error'; message: string }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -127,6 +138,66 @@ export function TeamSection({ members, currentUserId }: Props) {
     }
   }
 
+  async function saveTimerPreference(
+    member: TeamMemberRow,
+    requested: boolean,
+  ): Promise<TimerSaveResult> {
+    try {
+      const response = await fetch('/api/team/job-timer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          profileId: member.profileId,
+          enabled: requested,
+        }),
+      })
+      const preference = response.ok
+        ? await readJobTimerPreference(response, member.profileId)
+        : null
+      if (preference) {
+        startTransition(() => router.refresh())
+        return {
+          kind: preference.enabled === requested ? 'saved' : 'restored',
+          enabled: preference.enabled,
+        }
+      }
+      if (response.status !== 409 && response.status < 500 && !response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string
+        }
+        return { kind: 'error', message: humanizeTimerError(body.error) }
+      }
+    } catch {
+      // The write may have landed. Read exact server truth before reporting it.
+    }
+
+    try {
+      const response = await fetch(
+        `/api/team/job-timer?profileId=${encodeURIComponent(member.profileId)}`,
+        { method: 'GET', cache: 'no-store' },
+      )
+      const preference = response.ok
+        ? await readJobTimerPreference(response, member.profileId)
+        : null
+      if (!preference) {
+        return {
+          kind: 'error',
+          message: 'Could not confirm the current setting. Try again.',
+        }
+      }
+      startTransition(() => router.refresh())
+      return {
+        kind: preference.enabled === requested ? 'saved' : 'restored',
+        enabled: preference.enabled,
+      }
+    } catch {
+      return {
+        kind: 'error',
+        message: 'Could not confirm the current setting. Try again.',
+      }
+    }
+  }
+
   return (
     <>
       <Module num="01" label="Members">
@@ -174,6 +245,9 @@ export function TeamSection({ members, currentUserId }: Props) {
                         'save',
                         member.userId,
                       )
+                    }
+                    onSaveTimer={(enabled) =>
+                      saveTimerPreference(member, enabled)
                     }
                   />
                 )}
@@ -298,48 +372,133 @@ function MemberEditor({
   isLastOwner,
   busy,
   onSave,
+  onSaveTimer,
 }: {
   member: TeamMemberRow
   name: string
   isLastOwner: boolean
   busy: boolean
   onSave: (role: ShopRole, skillTier: number | null) => void
+  onSaveTimer: (enabled: boolean) => Promise<TimerSaveResult>
 }) {
   const [role, setRole] = useState(member.role as ShopRole)
   const [skillTier, setSkillTier] = useState(member.skillTier)
+  const [timerEnabled, setTimerEnabled] = useState(member.jobTimerEnabled)
+  const [savedTimerEnabled, setSavedTimerEnabled] = useState(
+    member.jobTimerEnabled,
+  )
+  const [timerState, setTimerState] = useState<
+    'idle' | 'saving' | 'saved' | 'restored' | 'error'
+  >('idle')
+  const [timerError, setTimerError] = useState<string | null>(null)
   const dirty = role !== member.role || skillTier !== member.skillTier
   const removesLastOwner = isLastOwner && role !== 'owner'
+  const timerDirty = timerEnabled !== savedTimerEnabled
+  const canTrackTimer =
+    member.membershipStatus === 'active' &&
+    !member.deactivated &&
+    isWrenchingSkillTier(member.skillTier)
+
+  async function saveTimer() {
+    if (!timerDirty || dirty || timerState === 'saving') return
+    setTimerState('saving')
+    setTimerError(null)
+    const result = await onSaveTimer(timerEnabled)
+    if (result.kind === 'error') {
+      setTimerError(result.message)
+      setTimerState('error')
+      return
+    }
+    setTimerEnabled(result.enabled)
+    setSavedTimerEnabled(result.enabled)
+    setTimerState(result.kind)
+  }
 
   return (
-    <div className="vt-team-row__controls">
-      <select
-        aria-label={`Role for ${name}`}
-        value={role}
-        disabled={busy}
-        onChange={(event) => setRole(event.target.value as ShopRole)}
-      >
-        {SHOP_ROLES.map((option) => (
-          <option key={option} value={option}>
-            {ROLE_LABELS[option]}
-          </option>
-        ))}
-      </select>
-      <TierSelect
-        ariaLabel={`Skill tier for ${name}`}
-        value={skillTier}
-        disabled={busy}
-        onChange={setSkillTier}
-      />
-      <button
-        type="button"
-        className="btn btn-ghost"
-        aria-label={`Save ${name}`}
-        disabled={busy || !dirty || removesLastOwner}
-        title={removesLastOwner ? 'Promote another Owner first.' : undefined}
-        onClick={() => onSave(role, skillTier)}
-      >
-        {busy ? 'Saving…' : 'Save'}
-      </button>
+    <div className="vt-team-member-editor">
+      <div className="vt-team-row__controls">
+        <select
+          aria-label={`Role for ${name}`}
+          value={role}
+          disabled={busy}
+          onChange={(event) => setRole(event.target.value as ShopRole)}
+        >
+          {SHOP_ROLES.map((option) => (
+            <option key={option} value={option}>
+              {ROLE_LABELS[option]}
+            </option>
+          ))}
+        </select>
+        <TierSelect
+          ariaLabel={`Skill tier for ${name}`}
+          value={skillTier}
+          disabled={busy}
+          onChange={setSkillTier}
+        />
+        <button
+          type="button"
+          className="btn btn-ghost"
+          aria-label={`Save ${name}`}
+          disabled={busy || !dirty || removesLastOwner}
+          title={removesLastOwner ? 'Promote another Owner first.' : undefined}
+          onClick={() => onSave(role, skillTier)}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      {canTrackTimer && (
+        <div className="vt-team-timer-preference">
+          <label className="vt-team-timer-preference__choice">
+            <input
+              type="checkbox"
+              aria-label={`Track time on ${name}'s jobs`}
+              checked={timerEnabled}
+              disabled={busy || dirty || timerState === 'saving'}
+              onChange={(event) => {
+                setTimerEnabled(event.target.checked)
+                setTimerState('idle')
+                setTimerError(null)
+              }}
+            />
+            <span>Track time on jobs</span>
+            <span className="vt-job-timer-preference__marker">Personal tool</span>
+          </label>
+          <p className="vt-team-timer-preference__help">
+            {dirty
+              ? 'Save role and skill tier before changing time tracking.'
+              : 'Personal job-time reference. Not payroll or performance tracking.'}
+          </p>
+          <div className="vt-team-timer-preference__actions">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              aria-label={`Save time tracking for ${name}`}
+              disabled={
+                busy || dirty || !timerDirty || timerState === 'saving'
+              }
+              onClick={saveTimer}
+            >
+              {timerState === 'saving' ? 'Saving…' : 'Save time tracking'}
+            </button>
+            {timerState === 'saved' && (
+              <span role="status" className="vt-team-success">
+                Saved
+              </span>
+            )}
+            {timerState === 'restored' && (
+              <span role="status" className="vt-job-timer-preference__restored">
+                The change did not land. Current setting restored.
+              </span>
+            )}
+            {timerState === 'error' && timerError && (
+              <span role="alert" className="vt-team-error">
+                {timerError}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -413,4 +572,15 @@ function humanizeInviteError(code: string | undefined): string {
   if (code === 'paywall') return 'Subscription required to invite teammates.'
   if (code === 'unauthenticated') return 'Please sign in again.'
   return 'Could not send the invite. Try again.'
+}
+
+function humanizeTimerError(code: string | undefined): string {
+  if (code === 'ineligible') return 'Time tracking is available only for people who wrench.'
+  if (code === 'membership_pending') return 'That teammate must accept the invite first.'
+  if (code === 'deactivated') return 'That teammate is no longer active.'
+  if (code === 'not_found') return 'That teammate is no longer in the shop.'
+  if (code === 'forbidden') return 'Only Owners can change this setting.'
+  if (code === 'paywall') return 'Subscription required to save changes.'
+  if (code === 'unauthenticated') return 'Please sign in again.'
+  return 'Could not save the setting. Try again.'
 }
